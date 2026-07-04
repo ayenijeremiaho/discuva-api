@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrayerRosterService } from './prayer-roster.service';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { PrayerMeeting } from '../entity/prayer-meeting.entity';
 import { PrayerRosterEntry } from '../entity/prayer-roster-entry.entity';
 import { PrayerScheduleRule } from '../entity/prayer-schedule-rule.entity';
@@ -129,6 +130,10 @@ describe('PrayerRosterService', () => {
         { provide: getRepositoryToken(WorkerProfile), useValue: mockWorkerRepo },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: getRepositoryToken(DepartmentLead), useValue: mockDeptLeadRepo },
+        {
+          provide: PushNotificationService,
+          useValue: { dispatchToWorkerProfileIds: jest.fn(), dispatchToMemberIds: jest.fn() },
+        },
       ],
     }).compile();
     service = module.get<PrayerRosterService>(PrayerRosterService);

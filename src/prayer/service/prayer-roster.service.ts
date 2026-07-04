@@ -23,6 +23,7 @@ import {
 import { ManualAssignDto, ReschedulePrayerEntryDto } from '../dto/prayer.dto';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { DepartmentLeadTypeEnum } from '../../department/enums/department-lead-type.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 interface AssignContext {
   meetings: PrayerMeeting[];
@@ -54,6 +55,7 @@ export class PrayerRosterService {
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(DepartmentLead)
     private readonly deptLeadRepo: Repository<DepartmentLead>,
+    private readonly pushService: PushNotificationService,
   ) {}
 
   async autoAssign(
@@ -61,7 +63,9 @@ export class PrayerRosterService {
     month: number,
     year: number,
   ): Promise<{ assigned: number; unassignable: string[] }> {
-    const program = await this.programRepo.findOne({ where: { id: programId } });
+    const program = await this.programRepo.findOne({
+      where: { id: programId },
+    });
     if (!program) throw new NotFoundException('Prayer program not found.');
     if (program.audience === PrayerAudience.MEMBERS) {
       throw new BadRequestException(
@@ -70,7 +74,12 @@ export class PrayerRosterService {
     }
 
     const meetings = await this.meetingRepo.find({
-      where: { month, year, status: PrayerMeetingStatus.SCHEDULED, program: { id: programId } },
+      where: {
+        month,
+        year,
+        status: PrayerMeetingStatus.SCHEDULED,
+        program: { id: programId },
+      },
       relations: ['dayConfig', 'rosterEntries', 'rosterEntries.workerProfile'],
       order: { date: 'ASC' },
     });
@@ -129,12 +138,19 @@ export class PrayerRosterService {
 
     // Re-fetch meetings with updated capacities
     const freshMeetings = await this.meetingRepo.find({
-      where: { month, year, status: PrayerMeetingStatus.SCHEDULED, program: { id: programId } },
+      where: {
+        month,
+        year,
+        status: PrayerMeetingStatus.SCHEDULED,
+        program: { id: programId },
+      },
       relations: ['dayConfig'],
       order: { date: 'ASC' },
     });
 
-    const capacities = new Map(freshMeetings.map((m) => [m.id, m.currentCapacity]));
+    const capacities = new Map(
+      freshMeetings.map((m) => [m.id, m.currentCapacity]),
+    );
     const leaderCounts = new Map<string, number>();
     for (const entry of existingEntries) {
       const mid = entry.meeting.id;
@@ -190,6 +206,22 @@ export class PrayerRosterService {
       }
     }
 
+    if (ctx.newEntries.length) {
+      const assignedWorkerIds = [
+        ...new Set(
+          ctx.newEntries
+            .filter((e) => e.workerProfile)
+            .map((e) => (e.workerProfile as WorkerProfile).id),
+        ),
+      ];
+      this.pushService.dispatchToWorkerProfileIds(assignedWorkerIds, {
+        idempotencyKey: `prayer-auto-assign:${programId}:${month}:${year}`,
+        title: 'Prayer Schedule Updated',
+        body: 'Your prayer schedule for the month has been set.',
+        url: '/prayer',
+      });
+    }
+
     return { assigned: ctx.newEntries.length, unassignable };
   }
 
@@ -207,7 +239,8 @@ export class PrayerRosterService {
       where: { id: dto.meetingId, program: { id: programId } },
       relations: ['dayConfig', 'program'],
     });
-    if (!meeting) throw new NotFoundException('Meeting not found in this program.');
+    if (!meeting)
+      throw new NotFoundException('Meeting not found in this program.');
     if (meeting.currentCapacity >= meeting.dayConfig.maxCapacity) {
       throw new BadRequestException('This meeting is at full capacity.');
     }
@@ -224,7 +257,8 @@ export class PrayerRosterService {
       workerProfile = await this.workerRepo.findOne({
         where: { id: dto.workerProfileId },
       });
-      if (!workerProfile) throw new NotFoundException('Worker profile not found.');
+      if (!workerProfile)
+        throw new NotFoundException('Worker profile not found.');
 
       const existing = await this.rosterRepo.findOne({
         where: {
@@ -233,7 +267,10 @@ export class PrayerRosterService {
           status: PrayerRosterStatus.SCHEDULED,
         },
       });
-      if (existing) throw new ConflictException('Worker is already assigned to this meeting.');
+      if (existing)
+        throw new ConflictException(
+          'Worker is already assigned to this meeting.',
+        );
     }
 
     if (dto.memberId) {
@@ -252,7 +289,10 @@ export class PrayerRosterService {
           status: PrayerRosterStatus.SCHEDULED,
         },
       });
-      if (existing) throw new ConflictException('Member is already assigned to this meeting.');
+      if (existing)
+        throw new ConflictException(
+          'Member is already assigned to this meeting.',
+        );
     }
 
     const entry = await this.rosterRepo.save(
@@ -267,13 +307,29 @@ export class PrayerRosterService {
     meeting.currentCapacity += 1;
     await this.meetingRepo.save(meeting);
 
+    if (workerProfile) {
+      this.pushService.dispatchToWorkerProfileIds([workerProfile.id], {
+        idempotencyKey: `prayer-manual-assign:${entry.id}`,
+        title: 'Prayer Assignment',
+        body: `You have been assigned to a prayer meeting on ${meeting.date}.`,
+        url: '/prayer',
+      });
+    } else if (member) {
+      this.pushService.dispatchToMemberIds([member.id], {
+        idempotencyKey: `prayer-manual-assign:${entry.id}`,
+        title: 'Prayer Assignment',
+        body: `You have been assigned to a prayer meeting on ${meeting.date}.`,
+        url: '/prayer',
+      });
+    }
+
     return entry;
   }
 
   async removeEntry(entryId: string): Promise<void> {
     const entry = await this.rosterRepo.findOne({
       where: { id: entryId },
-      relations: ['meeting'],
+      relations: ['meeting', 'workerProfile', 'member'],
     });
     if (!entry) throw new NotFoundException('Roster entry not found.');
     if (entry.assignmentType === PrayerAssignmentType.FIXED) {
@@ -293,6 +349,22 @@ export class PrayerRosterService {
     if (meeting && meeting.currentCapacity > 0) {
       meeting.currentCapacity -= 1;
       await this.meetingRepo.save(meeting);
+    }
+
+    if (entry.workerProfile) {
+      this.pushService.dispatchToWorkerProfileIds([entry.workerProfile.id], {
+        idempotencyKey: `prayer-removed:${entryId}`,
+        title: 'Prayer Assignment Removed',
+        body: 'Your prayer assignment has been removed.',
+        url: '/prayer',
+      });
+    } else if (entry.member) {
+      this.pushService.dispatchToMemberIds([entry.member.id], {
+        idempotencyKey: `prayer-removed:${entryId}`,
+        title: 'Prayer Assignment Removed',
+        body: 'Your prayer assignment has been removed.',
+        url: '/prayer',
+      });
     }
   }
 
@@ -383,6 +455,22 @@ export class PrayerRosterService {
       await this.meetingRepo.save(oldMeeting);
     }
 
+    if (entry.workerProfile) {
+      this.pushService.dispatchToWorkerProfileIds([entry.workerProfile.id], {
+        idempotencyKey: `prayer-reschedule:${saved.id}`,
+        title: 'Prayer Rescheduled',
+        body: `Your prayer meeting has been rescheduled to ${newMeeting.date}.`,
+        url: '/prayer',
+      });
+    } else if (entry.member) {
+      this.pushService.dispatchToMemberIds([entry.member.id], {
+        idempotencyKey: `prayer-reschedule:${saved.id}`,
+        title: 'Prayer Rescheduled',
+        body: `Your prayer meeting has been rescheduled to ${newMeeting.date}.`,
+        url: '/prayer',
+      });
+    }
+
     return saved;
   }
 
@@ -436,8 +524,8 @@ export class PrayerRosterService {
     }
 
     for (const meeting of meetings) {
-      const leaderCount = meeting.rosterEntries.filter((e) =>
-        e.workerProfile && leadMap.has(e.workerProfile.id),
+      const leaderCount = meeting.rosterEntries.filter(
+        (e) => e.workerProfile && leadMap.has(e.workerProfile.id),
       ).length;
       if (leaderCount < minLeaders) {
         issues.push(

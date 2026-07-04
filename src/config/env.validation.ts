@@ -114,6 +114,10 @@ export const envValidationSchema = Joi.object({
 
   EMAIL_SERVICE: Joi.string().default('gmail'),
 
+  VAPID_PUBLIC_KEY: Joi.string().required(),
+  VAPID_PRIVATE_KEY: Joi.string().required(),
+  VAPID_SUBJECT: Joi.string().uri().required(),
+
   EMAIL_ATTENDANCE_CHECKIN_ENABLED: Joi.boolean().default(true),
   EMAIL_BIRTHDAY_ENABLED: Joi.boolean().default(true),
   EMAIL_EVENT_REMINDER_ENABLED: Joi.boolean().default(true),

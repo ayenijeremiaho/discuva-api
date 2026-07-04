@@ -17,6 +17,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberSessionService } from './member-session.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { ConfigService } from '@nestjs/config';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
@@ -46,6 +47,7 @@ export class MemberService {
     private readonly auditLogService: AuditLogService,
     private readonly sessionService: MemberSessionService,
     private readonly configService: ConfigService,
+    private readonly pushService: PushNotificationService,
   ) {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -513,6 +515,7 @@ export class MemberService {
       this.sessionService.updateLogout(memberId, SessionSurface.MEMBER),
       this.sessionService.updateLogout(memberId, SessionSurface.ADMIN),
     ]);
+    this.pushService.unsubscribe(memberId);
     this.logger.log(
       `Device lock purged for member ${memberId} by actor ${actorId}`,
     );

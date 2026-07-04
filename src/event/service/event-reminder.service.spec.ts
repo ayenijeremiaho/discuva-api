@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { EventReminderService } from './event-reminder.service';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EventReminder } from '../entity/event-reminder.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { Member } from '../../member/entity/member.entity';
@@ -112,6 +113,10 @@ describe('EventReminderService', () => {
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: PushNotificationService,
+          useValue: { dispatchToMemberIds: jest.fn() },
+        },
       ],
     }).compile();
 

@@ -17,6 +17,7 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
 import { SessionSurface } from '../enum/session-surface.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
@@ -24,6 +25,8 @@ const mockUtilityService = {
 };
 
 const mockAuditLogService = { log: jest.fn() };
+
+const mockPushService = { unsubscribe: jest.fn() };
 
 const mockOtpQb = {
   delete: jest.fn().mockReturnThis(),
@@ -127,6 +130,7 @@ describe('AuthService', () => {
           provide: getRepositoryToken(DepartmentLead),
           useValue: mockDepartmentLeadRepo,
         },
+        { provide: PushNotificationService, useValue: mockPushService },
       ],
     }).compile();
 
@@ -384,6 +388,7 @@ describe('AuthService', () => {
         service.logout('no-session-member', SessionSurface.ADMIN),
       ).resolves.toBeUndefined();
     });
+
   });
 
   describe('validateRefreshToken', () => {
@@ -511,6 +516,31 @@ describe('AuthService', () => {
 
       expect(mockOtpQb.execute).not.toHaveBeenCalled();
       expect(mockCacheService.releaseLock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('verifyDeviceReset', () => {
+    it('unsubscribes push subscription after device is swapped', async () => {
+      const member = { id: 'member-1', firstname: 'Test', email: 'test@test.com' };
+      const record = {
+        memberId: 'member-1',
+        newDeviceId: 'new-device-id',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      };
+      mockMemberService.findByEmail.mockResolvedValue(member);
+      mockDeviceResetOtpRepository.findOne.mockResolvedValue(record);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      jest.spyOn(UtilityService, 'capitalizeFirstLetter').mockReturnValue('Test');
+      mockDeviceResetOtpRepository.save.mockResolvedValue(record);
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+      mockMemberService.setDeviceId.mockResolvedValue(undefined);
+      mockUtilityService.sendEmailWithTemplate.mockResolvedValue(undefined);
+
+      await service.verifyDeviceReset('test@test.com', '123456');
+
+      expect(mockPushService.unsubscribe).toHaveBeenCalledWith('member-1');
     });
   });
 });

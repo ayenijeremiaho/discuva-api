@@ -25,6 +25,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 @Injectable()
 export class EventReminderService {
@@ -44,6 +45,7 @@ export class EventReminderService {
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
     private readonly config: ConfigService,
+    private readonly pushService: PushNotificationService,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
   }
@@ -198,7 +200,11 @@ export class EventReminderService {
     });
     await this.announcementRepo.save(announcement);
 
-    const recipients = await this.getRecipientEmails(reminder);
+    const [recipients, recipientIds] = await Promise.all([
+      this.getRecipientEmails(reminder),
+      this.getRecipientMemberIds(reminder),
+    ]);
+
     if (recipients.length > 0) {
       this.utilityService.sendEmailWithTemplate(
         recipients as [string],
@@ -215,6 +221,15 @@ export class EventReminderService {
         undefined,
         EmailCategory.EVENT_REMINDER,
       );
+    }
+
+    if (recipientIds.length > 0) {
+      this.pushService.dispatchToMemberIds(recipientIds, {
+        idempotencyKey: `event-reminder:${reminder.id}`,
+        title,
+        body: `${slot.name} begins in ${label}. Please make your way and check in on time.`,
+        url: '/events',
+      });
     }
 
     reminder.lastSentAt = now;
@@ -251,6 +266,37 @@ export class EventReminderService {
 
     const members = await qb.getMany();
     return members.map((m) => m.email);
+  }
+
+  private async getRecipientMemberIds(
+    reminder: EventReminder,
+  ): Promise<string[]> {
+    const qb = this.memberRepo
+      .createQueryBuilder('m')
+      .select('m.id')
+      .where('m.status = :status', { status: MemberStatusEnum.ACTIVE });
+
+    if (reminder.audience === AnnouncementAudienceEnum.WORKERS_ONLY) {
+      qb.innerJoin('m.workerProfile', 'wp')
+        .andWhere('wp.status = :wpStatus', {
+          wpStatus: WorkerStatusEnum.ACTIVE,
+        })
+        .andWhere('m.role = :role', { role: MemberRoleEnum.WORKER });
+    } else if (
+      reminder.audience === AnnouncementAudienceEnum.DEPARTMENT &&
+      reminder.department
+    ) {
+      qb.innerJoin('m.workerProfile', 'wp')
+        .andWhere('wp.status = :wpStatus', {
+          wpStatus: WorkerStatusEnum.ACTIVE,
+        })
+        .andWhere('wp.departmentId = :deptId', {
+          deptId: reminder.department.id,
+        });
+    }
+
+    const members = await qb.getMany();
+    return members.map((m) => m.id);
   }
 
   private async getOrThrow(id: string): Promise<EventReminder> {

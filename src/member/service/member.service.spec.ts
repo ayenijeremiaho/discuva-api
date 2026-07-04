@@ -19,6 +19,7 @@ import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
@@ -56,6 +57,8 @@ const mockSessionService = { updateLogout: jest.fn() };
 
 const mockConfigService = { get: jest.fn() };
 
+const mockPushService = { unsubscribe: jest.fn() };
+
 function mockCredentialsQb(member: object) {
   const qb = {
     addSelect: jest.fn().mockReturnThis(),
@@ -88,6 +91,7 @@ describe('MemberService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: MemberSessionService, useValue: mockSessionService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PushNotificationService, useValue: mockPushService },
       ],
     }).compile();
 
@@ -507,6 +511,20 @@ describe('MemberService', () => {
         where: { id: 'member-1' },
         relations: ['workerProfile'],
       });
+    });
+  });
+
+  describe('purgeDevice', () => {
+    it('clears deviceId, logs out all surfaces, and unsubscribes push', async () => {
+      mockMemberRepo.update.mockResolvedValue(undefined);
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+
+      await service.purgeDevice('member-1', 'admin-1');
+
+      expect(mockMemberRepo.update).toHaveBeenCalledWith('member-1', { deviceId: null });
+      expect(mockSessionService.updateLogout).toHaveBeenCalledWith('member-1', SessionSurface.MEMBER);
+      expect(mockSessionService.updateLogout).toHaveBeenCalledWith('member-1', SessionSurface.ADMIN);
+      expect(mockPushService.unsubscribe).toHaveBeenCalledWith('member-1');
     });
   });
 });

@@ -27,6 +27,8 @@ import {
   OpenSelectionWindowDto,
   SelfSelectPrayerSlotDto,
 } from '../dto/prayer.dto';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 
 @Injectable()
 export class PrayerMeetingService {
@@ -48,13 +50,16 @@ export class PrayerMeetingService {
     @InjectRepository(PrayerScheduleRule)
     private readonly ruleRepo: Repository<PrayerScheduleRule>,
     private readonly dataSource: DataSource,
+    private readonly pushService: PushNotificationService,
   ) {}
 
   async generateMonthlyMeetings(
     programId: string,
     dto: GenerateMonthlyMeetingsDto,
   ): Promise<PrayerMeeting[]> {
-    const program = await this.programRepo.findOne({ where: { id: programId } });
+    const program = await this.programRepo.findOne({
+      where: { id: programId },
+    });
     if (!program) throw new NotFoundException('Prayer program not found.');
 
     const existing = await this.meetingRepo.findOne({
@@ -128,6 +133,20 @@ export class PrayerMeetingService {
       },
       { selectionStatus: PrayerWindowStatus.OPEN },
     );
+
+    const workers = await this.workerRepo.find({
+      where: { status: WorkerStatusEnum.ACTIVE },
+      select: ['id'],
+    });
+    this.pushService.dispatchToWorkerProfileIds(
+      workers.map((w) => w.id),
+      {
+        idempotencyKey: `prayer-window-open:${programId}:${dto.month}:${dto.year}`,
+        title: 'Prayer Selection Open',
+        body: 'You can now select your prayer slots for the upcoming month.',
+        url: '/prayer',
+      },
+    );
   }
 
   async closeSelectionWindow(
@@ -166,7 +185,9 @@ export class PrayerMeetingService {
     workerProfileId: string,
     dto: SelfSelectPrayerSlotDto,
   ): Promise<PrayerRosterEntry> {
-    const program = await this.programRepo.findOne({ where: { id: programId } });
+    const program = await this.programRepo.findOne({
+      where: { id: programId },
+    });
     if (!program) throw new NotFoundException('Prayer program not found.');
     if (program.audience === PrayerAudience.MEMBERS) {
       throw new BadRequestException(
@@ -191,7 +212,9 @@ export class PrayerMeetingService {
         .getOne();
       if (!meeting) throw new NotFoundException('Prayer meeting not found.');
       if (meeting.program.id !== programId) {
-        throw new BadRequestException('Meeting does not belong to this program.');
+        throw new BadRequestException(
+          'Meeting does not belong to this program.',
+        );
       }
       if (meeting.selectionStatus !== PrayerWindowStatus.OPEN) {
         throw new BadRequestException(
@@ -222,7 +245,11 @@ export class PrayerMeetingService {
       const existingCount = await manager.count(PrayerRosterEntry, {
         where: {
           workerProfile: { id: workerProfileId },
-          meeting: { month: meeting.month, year: meeting.year, program: { id: programId } as any },
+          meeting: {
+            month: meeting.month,
+            year: meeting.year,
+            program: { id: programId } as any,
+          },
           status: PrayerRosterStatus.SCHEDULED,
         },
       });
@@ -310,7 +337,10 @@ export class PrayerMeetingService {
     canSubmit: boolean;
     entries: PrayerRosterEntry[];
   }> {
-    const required = await this.getRequiredFrequency(programId, workerProfileId);
+    const required = await this.getRequiredFrequency(
+      programId,
+      workerProfileId,
+    );
     const entries = await this.rosterRepo.find({
       where: {
         workerProfile: { id: workerProfileId },

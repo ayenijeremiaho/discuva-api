@@ -1865,6 +1865,38 @@ Queries `prayer_roster_entries` where the meeting date is 2 days or 1 day away a
 
 ---
 
+### Push Notification Module
+
+Delivers Web Push notifications to members and workers via the standard Web Push protocol (VAPID). Backed by the `web-push` npm package and a dedicated Bull queue (`push-notifications`).
+
+**Key flows:**
+- **Subscribe (once, on first device registration):** After `POST /auth/login` registers the device for the first time (`deviceId` transitions from `null`), the PWA service worker calls `pushManager.subscribe()` and POSTs the result to `POST /v1/notifications/subscribe`. This is a one-time setup per device — not called on every login. Calling subscribe again replaces the existing row.
+- **Subscription lifecycle:** The subscription persists through logouts. Push notifications are delivered via the browser service worker and fire even when the member is **not logged in**. The subscription is removed only in these cases:
+  - **Admin device purge** (`DELETE /admin/members/:id/device`): backend deletes the subscription automatically. The frontend must re-subscribe after the member's next login on the new device.
+  - **OTP device reset** (`POST /auth/device-reset/verify`): backend deletes the subscription automatically. The frontend must re-subscribe after the member's next login on the new device.
+  - **Explicit opt-out:** member calls `DELETE /v1/notifications/subscribe`.
+  - **Stale subscription:** push service returns `410 Gone` or `404` — processor deletes it automatically, no retry.
+- `PushNotificationService.dispatchToMemberIds(memberIds, payload)` finds subscriptions and enqueues one Bull job per subscriber with a stable `jobId` (`push:{memberId}:{idempotencyKey}`) for deduplication.
+- `PushNotificationService.dispatchToWorkerProfileIds(workerProfileIds, payload)` resolves worker profile IDs to member IDs via a single SQL query, then delegates to `dispatchToMemberIds`.
+- `PushNotificationProcessor` processes each job: checks a Redis idempotency key (`notif:sent:{memberId}:{idempotencyKey}`, 24 h TTL) before sending. On `410 Gone` or `404` from the push service, the stale subscription is deleted — no retry. Any other error is re-thrown for Bull to retry (3 attempts, exponential backoff).
+
+**Trigger points:**
+
+| Event | Who is notified |
+|---|---|
+| Selection window opened (`openSelectionWindow`) | All active workers |
+| Auto-assign completes (`autoAssign`) | Each newly assigned worker |
+| Manual assignment (`manualAssign`) | The assigned worker or member |
+| Entry removed (`removeEntry`) | The affected worker or member |
+| Entry rescheduled (`reschedule`) | The affected worker or member |
+| Prayer reminder — 2 days before (`PrayerReminderScheduler`) | The assigned worker (alongside email) |
+| Prayer reminder — day of (`PrayerReminderScheduler`) | The assigned worker (alongside email) |
+| Service/event reminder (`EventReminderService`) | All eligible members per audience scope (alongside email) |
+
+**Entity:** `push_subscriptions` — `id`, `member_id` (unique FK → members), `endpoint`, `p256dh`, `auth`, `created_at`, `updated_at`.
+
+**Environment variables required:** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (see §10).
+
 ### Facility Rental Module
 
 Manages bookable facility slots (halls, rooms, etc.) for members and workers, with tier-based discounts, add-ons, and payment tracking.
@@ -2272,6 +2304,9 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /facility-rental/bookings/:id                              | JwtAuthGuard                                                  | Get own booking detail (returns 404 if belongs to another member)                                             |
 | PATCH  | /facility-rental/bookings/:id/cancel                       | JwtAuthGuard                                                  | Cancel own booking (only PENDING or CONFIRMED)                                                                |
 
+| POST   | /notifications/subscribe                                   | JwtAuthGuard                                                  | Register a Web Push subscription. Called **once** after first device registration (`deviceId` transitions from `null`). Also called after re-registering on a new device following an admin purge or OTP device reset. Body: `endpoint`, `p256dh`, `auth`. Returns 204. |
+| DELETE | /notifications/subscribe                                   | JwtAuthGuard                                                  | Explicit opt-out: removes the Web Push subscription. **Not called on normal logout** — subscription persists so the service worker can deliver notifications while the member is logged out. Returns 204. |
+
 | POST   | /admin/assets                                              | AdminGuard (ASSET_MANAGEMENT_WRITE) + Module: asset_management | Create a new asset. `tagNumber` auto-generated (`AST-{YEAR}-{NNNN}`) if not provided. Optional: `serialNumber`, `manufacturer`, `model`, `warrantyExpiry`, `vendorName`, `vendorContact`, `departmentId`. Returns `409` if tag already exists. |
 | GET    | /admin/assets?page=&limit=&status=&category=&maintenanceEnabled=&departmentId= | AdminGuard (ASSET_MANAGEMENT_READ) + Module: asset_management | Paginated asset list. Filterable by status, category (case-insensitive), maintenanceEnabled, and departmentId. Each record includes `maintenanceSchedule` and `department`. |
 | GET    | /admin/assets/checkouts?page=&limit=                       | AdminGuard (ASSET_MANAGEMENT_READ) + Module: asset_management | All currently active checkouts across all assets (returnedAt IS NULL), newest first. |
@@ -2603,6 +2638,16 @@ Used for finance request attachments and payment proofs.
 | `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | Global hard ceiling for all file uploads (bytes). Registered via `MulterModule` in `AppModule`; individual endpoints may enforce a stricter limit. |
 | `TITHE_PROOF_EXPIRY_DAYS`    | `90`           | Days after which a tithe payment proof is purged from Cloudinary and DB    |
 | `ASSET_OVERDUE_NOTIFICATION_DAYS` | `1,3,7`   | Comma-separated day thresholds for overdue checkout reminders. Leave empty to disable. |
+
+### Web Push (VAPID)
+
+Generate keys once with `npx web-push generate-vapid-keys` and store permanently.
+
+| Variable            | Default        | Description                                                                 |
+|---------------------|----------------|-----------------------------------------------------------------------------|
+| `VAPID_PUBLIC_KEY`  | — *(required)* | VAPID public key — also exposed to the PWA frontend as `NEXT_PUBLIC_VAPID_PUBLIC_KEY` |
+| `VAPID_PRIVATE_KEY` | — *(required)* | VAPID private key — backend only, never exposed to clients                  |
+| `VAPID_SUBJECT`     | — *(required)* | VAPID subject — must be a `mailto:` or `https://` URI (e.g. `mailto:admin@example.com`) |
 
 ### App URLs (embedded in emails)
 

@@ -6,6 +6,7 @@ import { PrayerRosterEntry } from '../entity/prayer-roster-entry.entity';
 import { PrayerMeetingStatus, PrayerRosterStatus } from '../enum/prayer.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 @Injectable()
 export class PrayerReminderScheduler {
@@ -15,6 +16,7 @@ export class PrayerReminderScheduler {
     @InjectRepository(PrayerRosterEntry)
     private readonly rosterRepo: Repository<PrayerRosterEntry>,
     private readonly utilityService: UtilityService,
+    private readonly pushService: PushNotificationService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM)
@@ -117,6 +119,13 @@ export class PrayerReminderScheduler {
       undefined,
       EmailCategory.PRAYER_REMINDER,
     );
+
+    this.pushService.dispatchToMemberIds([member.id], {
+      idempotencyKey: `prayer-reminder-${type}:${entry.id}`,
+      title: subject,
+      body: `Your prayer meeting is on ${entry.meeting.date} at ${dayConfig.startTime}.`,
+      url: '/prayer',
+    });
   }
 
   private toDateStr(date: Date): string {

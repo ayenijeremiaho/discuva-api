@@ -38,6 +38,7 @@ import { SignupDto } from '../../member/dto/signup.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { Member } from '../../member/entity/member.entity';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 @Injectable()
 export class AuthService {
@@ -70,6 +71,7 @@ export class AuthService {
     private readonly deviceResetOtpRepository: Repository<DeviceResetOtp>,
     @InjectRepository(DepartmentLead)
     private readonly departmentLeadRepo: Repository<DepartmentLead>,
+    private readonly pushService: PushNotificationService,
   ) {
     this.otpTtlSeconds = this.configService.get<number>('OTP_TTL_SECONDS');
     this.otpMaxAttempts = this.configService.get<number>(
@@ -529,6 +531,7 @@ export class AuthService {
       this.sessionService.updateLogout(member.id, SessionSurface.MEMBER),
       this.sessionService.updateLogout(member.id, SessionSurface.ADMIN),
     ]);
+    this.pushService.unsubscribe(member.id);
 
     this.clearDeviceResetRateLimit(email);
     this.logger.log(`Device successfully reset for member ${member.id}`);

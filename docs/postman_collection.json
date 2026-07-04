@@ -17924,6 +17924,89 @@
       ]
     },
     {
+      "name": "Push Notifications",
+      "item": [
+        {
+          "name": "Subscribe",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"https://fcm.googleapis.com/fcm/send/example-endpoint\",\n  \"p256dh\": \"BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM\",\n  \"auth\": \"tBHItJI5svbpez7KI4CCXg\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notifications/subscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "subscribe"
+              ]
+            },
+            "description": "Register a Web Push subscription for the authenticated member or worker.\n\n**When to call:** Once, after the first successful login that registers the device (`deviceId` transitions from null). Do NOT call on every login \u2014 the subscription persists through logouts and the service worker delivers notifications even when the member is not logged in.\n\n**Re-subscribe required after:**\n- Admin device purge (`DELETE /admin/members/:id/device`) \u2014 backend deletes the subscription automatically; frontend must re-subscribe after the member's next login.\n- OTP device reset (`POST /auth/device-reset/verify`) \u2014 backend deletes the subscription automatically; frontend must re-subscribe after the member's next login on the new device.\n\nCalling this endpoint again replaces any existing subscription for the member (idempotent). Returns 204 No Content."
+          },
+          "response": [
+            {
+              "name": "Subscribe - Success",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            },
+            {
+              "name": "Subscribe - Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Unsubscribe",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/subscribe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "subscribe"
+              ]
+            },
+            "description": "Explicit opt-out: removes the Web Push subscription for the authenticated member or worker.\n\n**Do NOT call this on normal logout.** The subscription must persist through logouts so the browser service worker can deliver push notifications while the member is not logged in.\n\nCall this only when the member intentionally disables push notifications (e.g. a settings toggle in the app).\n\nReturns 204 No Content."
+          },
+          "response": [
+            {
+              "name": "Unsubscribe - Success",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            },
+            {
+              "name": "Unsubscribe - Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Facility Rental",
       "item": [
         {

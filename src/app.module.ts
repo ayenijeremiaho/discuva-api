@@ -40,6 +40,7 @@ import { AssetManagementModule } from './asset-management/asset-management.modul
 import { FinanceModule } from './finance/finance.module';
 import { PrayerModule } from './prayer/prayer.module';
 import { FacilityRentalModule } from './facility-rental/facility-rental.module';
+import { PushNotificationModule } from './push-notification/push-notification.module';
 
 @Module({
   imports: [
@@ -161,6 +162,7 @@ import { FacilityRentalModule } from './facility-rental/facility-rental.module';
     FinanceModule,
     PrayerModule,
     FacilityRentalModule,
+    PushNotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: AppThrottlerGuard }],
