@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -50,6 +53,25 @@ export class JournalEntryController {
     @CurrentAdmin() admin: Admin,
   ) {
     return this.journalEntryService.approve(id, admin);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_APPROVE)
+  @Patch(':id/reject')
+  reject(@Param('id', ParseUUIDPipe) id: string) {
+    return this.journalEntryService.reject(id);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_WRITE)
+  @Patch(':id/resubmit')
+  resubmit(@Param('id', ParseUUIDPipe) id: string) {
+    return this.journalEntryService.resubmit(id);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_WRITE)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete(':id')
+  deleteDraft(@Param('id', ParseUUIDPipe) id: string) {
+    return this.journalEntryService.deleteDraft(id);
   }
 
   @RequiresPermission(AdminPermission.FINANCE_APPROVE)

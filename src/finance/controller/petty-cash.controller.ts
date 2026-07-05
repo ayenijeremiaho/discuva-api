@@ -51,6 +51,16 @@ export class PettyCashController {
   }
 
   @RequiresPermission(AdminPermission.FINANCE_APPROVE)
+  @Patch(':id/reject')
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApprovePettyCashDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.pettyCashService.reject(id, dto.notes, admin);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_APPROVE)
   @Patch(':id/approve')
   approve(
     @Param('id', ParseUUIDPipe) id: string,

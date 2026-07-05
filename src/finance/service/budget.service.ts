@@ -2,7 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Budget } from '../entity/budget.entity';
-import { BudgetQueryDto, CreateBudgetDto } from '../dto/budget.dto';
+import { BudgetQueryDto, CreateBudgetDto, UpdateBudgetDto } from '../dto/budget.dto';
 import { Admin } from '../../admin/entity/admin.entity';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -69,11 +69,31 @@ export class BudgetService {
     return budget;
   }
 
+  async update(id: string, dto: UpdateBudgetDto): Promise<Budget> {
+    const budget = await this.findOne(id);
+    if (dto.name !== undefined) budget.name = dto.name;
+    if (dto.amount !== undefined) budget.amount = dto.amount;
+    if (dto.startDate !== undefined) budget.startDate = dto.startDate;
+    if (dto.endDate !== undefined) budget.endDate = dto.endDate;
+    return this.budgetRepo.save(budget);
+  }
+
   async deactivate(id: string, admin: Admin): Promise<Budget> {
     const budget = await this.findOne(id);
     budget.isActive = false;
     const saved = await this.budgetRepo.save(budget);
     this.auditLogService.log('BUDGET_DEACTIVATED', {
+      actorId: admin.id,
+      targetId: saved.id,
+    });
+    return saved;
+  }
+
+  async reactivate(id: string, admin: Admin): Promise<Budget> {
+    const budget = await this.findOne(id);
+    budget.isActive = true;
+    const saved = await this.budgetRepo.save(budget);
+    this.auditLogService.log('BUDGET_REACTIVATED', {
       actorId: admin.id,
       targetId: saved.id,
     });

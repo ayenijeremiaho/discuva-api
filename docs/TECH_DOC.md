@@ -1553,7 +1553,7 @@ Full double-entry accounting system for the church. All financial data is fund-s
 |---|---|
 | **Fund** | RESTRICTED or UNRESTRICTED pool of money. Every account, offering, budget, and pledge belongs to a fund. |
 | **AccountingPeriod** | A calendar month (year + month). Entries can only be posted to OPEN periods. Closing a period is irreversible by design (only admins with `FINANCE_RECONCILE` can close or reopen). |
-| **Chart of Accounts** | `finance_accounts` table. Each account has a type (ASSET / LIABILITY / INCOME / EXPENSE), subtype, normal balance (DEBIT or CREDIT), and an optional fund assignment. |
+| **Chart of Accounts** | `finance_accounts` table. Each account has an optional unique `code` (e.g. `1001`), a type (ASSET / LIABILITY / INCOME / EXPENSE), subtype, normal balance (DEBIT or CREDIT), and an optional fund assignment. `code` is nullable but unique when provided — 409 if a duplicate code is submitted. |
 | **JournalEntry** | The root transaction record. Must be BALANCED (sum of debits = sum of credits) before posting. Created as `PENDING_APPROVAL`; a separate admin with `FINANCE_APPROVE` (who is not the creator — segregation of duties) approves and posts it. |
 | **JournalEntryLine** | One debit or credit line on a journal entry. Linked to an account. |
 | **JournalEntryLink** | Polymorphic association table attaching a journal entry to members, departments, service events, or external payees. Stored as a separate table to preserve FK integrity and allow multiple associations per transaction. |

@@ -14425,7 +14425,7 @@
             "description": "FINANCE_WRITE. type: ASSET|LIABILITY|INCOME|EXPENSE. subtype: BANK|CASH|PETTY_CASH|OFFERING|TITHE|SALARY|UTILITIES|REMITTANCE|EQUIPMENT|OTHER. normalBalance: DEBIT|CREDIT.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Main Bank Account\",\n  \"type\": \"ASSET\",\n  \"subtype\": \"BANK\",\n  \"normalBalance\": \"DEBIT\",\n  \"fundId\": \"{{fundId}}\",\n  \"bankName\": \"GTBank\",\n  \"accountNumber\": \"0123456789\"\n}",
+              "raw": "{\n  \"code\": \"1001\",\n  \"name\": \"Main Bank Account\",\n  \"type\": \"ASSET\",\n  \"subtype\": \"BANK\",\n  \"normalBalance\": \"DEBIT\",\n  \"fundId\": \"{{fundId}}\",\n  \"bankName\": \"GTBank\",\n  \"accountNumber\": \"0123456789\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14535,7 +14535,7 @@
             "description": "FINANCE_WRITE.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Primary Bank Account\",\n  \"isActive\": true\n}",
+              "raw": "{\n  \"code\": \"1001\",\n  \"name\": \"Primary Bank Account\",\n  \"isActive\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"

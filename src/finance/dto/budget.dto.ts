@@ -11,6 +11,7 @@ import {
   IsUUID,
   Min,
 } from 'class-validator';
+import { PartialType, PickType } from '@nestjs/mapped-types';
 import { Type } from 'class-transformer';
 import { BudgetPeriod } from '../enum/finance.enum';
 
@@ -39,6 +40,10 @@ export class CreateBudgetDto {
   @IsDateString()
   endDate: string;
 }
+
+export class UpdateBudgetDto extends PartialType(
+  PickType(CreateBudgetDto, ['name', 'amount', 'startDate', 'endDate'] as const),
+) {}
 
 export class BudgetQueryDto {
   @IsOptional()

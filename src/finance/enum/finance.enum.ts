@@ -118,6 +118,7 @@ export enum RecurringFrequency {
 export enum PettyCashReplenishmentStatus {
   PENDING = 'PENDING',
   APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
   POSTED = 'POSTED',
 }
 

@@ -32,7 +32,18 @@ export class AccountService {
         `An account named '${dto.name}' already exists.`,
       );
 
+    if (dto.code) {
+      const codeConflict = await this.accountRepo.findOne({
+        where: { code: dto.code },
+      });
+      if (codeConflict)
+        throw new ConflictException(
+          `Account code '${dto.code}' is already in use.`,
+        );
+    }
+
     const account = this.accountRepo.create({
+      code: dto.code ?? null,
       name: dto.name,
       type: dto.type,
       subtype: dto.subtype,
@@ -90,8 +101,20 @@ export class AccountService {
         'Cannot deactivate an account with a non-zero balance.',
       );
     }
+    if (dto.code && dto.code !== account.code) {
+      const codeConflict = await this.accountRepo.findOne({
+        where: { code: dto.code },
+      });
+      if (codeConflict)
+        throw new ConflictException(
+          `Account code '${dto.code}' is already in use.`,
+        );
+    }
+
     Object.assign(account, {
+      code: dto.code ?? account.code,
       name: dto.name ?? account.name,
+      subtype: dto.subtype ?? account.subtype,
       fund: dto.fundId ? ({ id: dto.fundId } as any) : account.fund,
       description: dto.description ?? account.description,
       bankName: dto.bankName ?? account.bankName,

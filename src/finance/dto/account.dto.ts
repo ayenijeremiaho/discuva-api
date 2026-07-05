@@ -16,6 +16,11 @@ import {
 } from '../enum/finance.enum';
 
 export class CreateAccountDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  code?: string;
+
   @IsString()
   @IsNotEmpty()
   name: string;
@@ -56,7 +61,16 @@ export class UpdateAccountDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  code?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
   name?: string;
+
+  @IsOptional()
+  @IsEnum(AccountSubtype)
+  subtype?: AccountSubtype;
 
   @IsOptional()
   @IsUUID()

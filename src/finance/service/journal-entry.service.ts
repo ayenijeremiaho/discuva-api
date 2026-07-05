@@ -153,10 +153,16 @@ export class JournalEntryService {
 
   async approve(id: string, admin: Admin): Promise<JournalEntry> {
     return this.dataSource.transaction(async (manager) => {
+      const locked = await manager
+        .createQueryBuilder(JournalEntry, 'je')
+        .where('je.id = :id', { id })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!locked) throw new NotFoundException('Journal entry not found.');
+
       const entry = await manager.findOne(JournalEntry, {
         where: { id },
         relations: ['lines', 'lines.account', 'accountingPeriod', 'createdBy'],
-        lock: { mode: 'pessimistic_write' },
       });
       if (!entry) throw new NotFoundException('Journal entry not found.');
       if (entry.status !== JournalEntryStatus.PENDING_APPROVAL)
@@ -212,10 +218,16 @@ export class JournalEntryService {
 
   async void(id: string, admin: Admin): Promise<JournalEntry> {
     return this.dataSource.transaction(async (manager) => {
+      const locked = await manager
+        .createQueryBuilder(JournalEntry, 'je')
+        .where('je.id = :id', { id })
+        .setLock('pessimistic_write')
+        .getOne();
+      if (!locked) throw new NotFoundException('Journal entry not found.');
+
       const entry = await manager.findOne(JournalEntry, {
         where: { id },
         relations: ['lines', 'lines.account', 'accountingPeriod'],
-        lock: { mode: 'pessimistic_write' },
       });
       if (!entry) throw new NotFoundException('Journal entry not found.');
       if (entry.status === JournalEntryStatus.VOIDED)
@@ -298,6 +310,32 @@ export class JournalEntryService {
     });
   }
 
+  async reject(id: string): Promise<JournalEntry> {
+    const entry = await this.entryRepo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Journal entry not found.');
+    if (entry.status !== JournalEntryStatus.PENDING_APPROVAL)
+      throw new BadRequestException('Only pending entries can be declined.');
+    entry.status = JournalEntryStatus.DRAFT;
+    return this.entryRepo.save(entry);
+  }
+
+  async resubmit(id: string): Promise<JournalEntry> {
+    const entry = await this.entryRepo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Journal entry not found.');
+    if (entry.status !== JournalEntryStatus.DRAFT)
+      throw new BadRequestException('Only draft entries can be resubmitted.');
+    entry.status = JournalEntryStatus.PENDING_APPROVAL;
+    return this.entryRepo.save(entry);
+  }
+
+  async deleteDraft(id: string): Promise<void> {
+    const entry = await this.entryRepo.findOne({ where: { id } });
+    if (!entry) throw new NotFoundException('Journal entry not found.');
+    if (entry.status !== JournalEntryStatus.DRAFT)
+      throw new BadRequestException('Only draft entries can be deleted.');
+    await this.entryRepo.remove(entry);
+  }
+
   async findAll(
     query: JournalEntryQuery,
   ): Promise<PaginationResponseDto<JournalEntry>> {
@@ -312,8 +350,11 @@ export class JournalEntryService {
     } = query;
     const qb = this.entryRepo
       .createQueryBuilder('je')
+      .leftJoinAndSelect('je.lines', 'lines')
       .leftJoinAndSelect('je.createdBy', 'createdBy')
+      .leftJoinAndSelect('createdBy.member', 'createdByMember')
       .leftJoinAndSelect('je.approvedBy', 'approvedBy')
+      .leftJoinAndSelect('approvedBy.member', 'approvedByMember')
       .leftJoinAndSelect('je.accountingPeriod', 'period')
       .orderBy('je.date', 'DESC')
       .addOrderBy('je.createdAt', 'DESC')
@@ -349,7 +390,9 @@ export class JournalEntryService {
         'links.externalPayee',
         'accountingPeriod',
         'createdBy',
+        'createdBy.member',
         'approvedBy',
+        'approvedBy.member',
       ],
     });
     if (!entry) throw new NotFoundException('Journal entry not found.');

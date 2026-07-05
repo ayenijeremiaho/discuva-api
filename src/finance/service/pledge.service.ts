@@ -52,9 +52,34 @@ export class PledgeService {
   }
 
   async findAllCampaigns(): Promise<PledgeCampaign[]> {
-    return this.campaignRepo.find({
-      relations: ['fund', 'createdBy'],
-      order: { startDate: 'DESC' },
+    const { entities, raw } = await this.campaignRepo
+      .createQueryBuilder('c')
+      .leftJoinAndSelect('c.fund', 'fund')
+      .addSelect(
+        (sub) =>
+          sub
+            .select('COALESCE(SUM(p.total_amount), 0)')
+            .from('finance_pledges', 'p')
+            .where('p.campaign_id = c.id')
+            .andWhere("p.status != 'CANCELLED'"),
+        'totalPledged',
+      )
+      .addSelect(
+        (sub) =>
+          sub
+            .select('COUNT(p.id)')
+            .from('finance_pledges', 'p')
+            .where('p.campaign_id = c.id')
+            .andWhere("p.status != 'CANCELLED'"),
+        'pledgeCount',
+      )
+      .orderBy('c.start_date', 'DESC')
+      .getRawAndEntities();
+
+    return entities.map((entity, i) => {
+      (entity as any).totalPledged = Number(raw[i]?.totalPledged ?? 0);
+      (entity as any).pledgeCount = Number(raw[i]?.pledgeCount ?? 0);
+      return entity;
     });
   }
 
@@ -68,9 +93,12 @@ export class PledgeService {
   }
 
   async createPledge(dto: CreatePledgeDto, admin: Admin): Promise<Pledge> {
+    if (!dto.memberId && !dto.guestName)
+      throw new BadRequestException('Either memberId or guestName is required.');
     await this.findOneCampaign(dto.campaignId);
     const pledge = this.pledgeRepo.create({
-      member: { id: dto.memberId } as any,
+      member: dto.memberId ? ({ id: dto.memberId } as any) : null,
+      guestName: dto.guestName ?? null,
       campaign: { id: dto.campaignId } as any,
       totalAmount: dto.totalAmount,
       frequency: dto.frequency,
@@ -81,7 +109,7 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
-      metadata: { memberId: dto.memberId, campaignId: dto.campaignId },
+      metadata: { memberId: dto.memberId, guestName: dto.guestName, campaignId: dto.campaignId },
     });
     return saved;
   }

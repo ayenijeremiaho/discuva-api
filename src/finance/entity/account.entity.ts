@@ -18,6 +18,9 @@ export class Account extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ type: 'varchar', nullable: true, unique: true })
+  code: string | null;
+
   @Column({ type: 'varchar' })
   name: string;
 

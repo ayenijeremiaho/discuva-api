@@ -64,7 +64,7 @@ export class PettyCashService {
     limit = 20,
   ): Promise<PaginationResponseDto<PettyCashReplenishment>> {
     const [data, totalCount] = await this.replenishmentRepo.findAndCount({
-      relations: ['fromAccount', 'toCashAccount', 'requestedBy', 'approvedBy'],
+      relations: ['fromAccount', 'toCashAccount', 'requestedBy', 'requestedBy.member', 'approvedBy', 'approvedBy.member'],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -81,10 +81,30 @@ export class PettyCashService {
   async findOne(id: string): Promise<PettyCashReplenishment> {
     const r = await this.replenishmentRepo.findOne({
       where: { id },
-      relations: ['fromAccount', 'toCashAccount', 'requestedBy', 'approvedBy'],
+      relations: ['fromAccount', 'toCashAccount', 'requestedBy', 'requestedBy.member', 'approvedBy', 'approvedBy.member'],
     });
     if (!r) throw new NotFoundException('Petty cash replenishment not found.');
     return r;
+  }
+
+  async reject(
+    id: string,
+    notes: string | undefined,
+    admin: Admin,
+  ): Promise<PettyCashReplenishment> {
+    const r = await this.findOne(id);
+    if (r.status !== PettyCashReplenishmentStatus.PENDING)
+      throw new BadRequestException(
+        'Only pending replenishments can be rejected.',
+      );
+    r.status = PettyCashReplenishmentStatus.REJECTED;
+    if (notes) r.notes = notes;
+    const saved = await this.replenishmentRepo.save(r);
+    this.auditLogService.log('PETTY_CASH_REJECTED', {
+      actorId: admin.id,
+      targetId: saved.id,
+    });
+    return saved;
   }
 
   async approve(

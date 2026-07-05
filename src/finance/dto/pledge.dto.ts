@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { PledgeFrequency, PledgeStatus } from '../enum/finance.enum';
@@ -38,8 +39,14 @@ export class CreatePledgeCampaignDto {
 }
 
 export class CreatePledgeDto {
+  @ValidateIf((o) => !o.guestName)
   @IsUUID()
-  memberId: string;
+  memberId?: string;
+
+  @ValidateIf((o) => !o.memberId)
+  @IsString()
+  @IsNotEmpty()
+  guestName?: string;
 
   @IsUUID()
   campaignId: string;

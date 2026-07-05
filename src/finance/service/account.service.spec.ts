@@ -34,6 +34,7 @@ const mockQb = {
 const mockAuditLogService = { log: jest.fn() };
 
 const baseCreateDto = {
+  code: '1001',
   name: 'Main Bank',
   type: AccountType.ASSET,
   subtype: AccountSubtype.BANK,
@@ -77,6 +78,15 @@ describe('AccountService', () => {
         ConflictException,
       );
     });
+
+    it('throws ConflictException when code is already in use', async () => {
+      mockAccountRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'a-2' });
+      await expect(service.create(baseCreateDto, mockAdmin)).rejects.toThrow(
+        ConflictException,
+      );
+    });
   });
 
   describe('findOne', () => {
@@ -107,6 +117,7 @@ describe('AccountService', () => {
         id: 'a-1',
         currentBalance: 0,
         isActive: true,
+        code: '1001',
         name: 'Main Bank',
         fund: null,
         description: null,

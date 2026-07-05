@@ -15,9 +15,12 @@ export class Pledge extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => Member, { nullable: false, onDelete: 'RESTRICT' })
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'member_id' })
-  member: Member;
+  member: Member | null;
+
+  @Column({ type: 'varchar', nullable: true, name: 'guest_name' })
+  guestName: string | null;
 
   @ManyToOne(() => PledgeCampaign, { nullable: false, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'campaign_id' })

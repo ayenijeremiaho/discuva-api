@@ -15,7 +15,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { BudgetService } from '../service/budget.service';
-import { BudgetQueryDto, CreateBudgetDto } from '../dto/budget.dto';
+import { BudgetQueryDto, CreateBudgetDto, UpdateBudgetDto } from '../dto/budget.dto';
 
 @UseGuards(AdminGuard)
 @Controller('admin/finance/budgets')
@@ -47,5 +47,23 @@ export class BudgetController {
     @CurrentAdmin() admin: Admin,
   ) {
     return this.budgetService.deactivate(id, admin);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_WRITE)
+  @Patch(':id/reactivate')
+  reactivate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.budgetService.reactivate(id, admin);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_WRITE)
+  @Patch(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBudgetDto,
+  ) {
+    return this.budgetService.update(id, dto);
   }
 }
