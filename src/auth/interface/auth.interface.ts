@@ -5,6 +5,7 @@ export interface JwtPayload {
   sub: string;
   role: MemberRoleEnum;
   aud: SessionSurface;
+  jti: string;
 }
 
 export interface JwtResponse {
@@ -21,4 +22,6 @@ export interface MemberAuth {
   requiresPasswordChange: boolean;
   surface: SessionSurface;
   workerProfileId?: string;
+  jti?: string;
+  tokenExp?: number;
 }

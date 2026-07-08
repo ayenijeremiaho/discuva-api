@@ -71,7 +71,12 @@ export class IncidentReportService {
     if (imageFiles?.length) {
       const uploads = await Promise.all(
         imageFiles.map((f) =>
-          this.cloudinaryService.uploadBuffer(f.buffer, 'incident-images'),
+          this.cloudinaryService.uploadBuffer(
+            f.buffer,
+            'incident-images',
+            undefined,
+            f.mimetype,
+          ),
         ),
       );
       imageUrls = uploads.map((u) => u.secureUrl);
@@ -124,12 +129,19 @@ export class IncidentReportService {
   async findAll(
     page: number,
     limit: number,
-    filters: { status?: IncidentStatus; dateFrom?: string; dateTo?: string } = {},
+    filters: {
+      status?: IncidentStatus;
+      dateFrom?: string;
+      dateTo?: string;
+    } = {},
   ): Promise<PaginationResponseDto<IncidentReport>> {
     const where: any = {};
     if (filters.status) where.status = filters.status;
     if (filters.dateFrom && filters.dateTo) {
-      where.createdAt = Between(new Date(filters.dateFrom), new Date(`${filters.dateTo}T23:59:59.999Z`));
+      where.createdAt = Between(
+        new Date(filters.dateFrom),
+        new Date(`${filters.dateTo}T23:59:59.999Z`),
+      );
     } else if (filters.dateFrom) {
       where.createdAt = MoreThanOrEqual(new Date(filters.dateFrom));
     } else if (filters.dateTo) {

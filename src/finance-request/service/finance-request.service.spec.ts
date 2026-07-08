@@ -297,6 +297,7 @@ describe('FinanceRequestService', () => {
       const file = {
         buffer: Buffer.from('test'),
         originalname: 'budget.pdf',
+        mimetype: 'application/pdf',
       } as Express.Multer.File;
 
       await service.createRequest(dto, mockUser, file);
@@ -305,6 +306,7 @@ describe('FinanceRequestService', () => {
         file.buffer,
         'finance-requests',
         expect.stringContaining('member-1'),
+        'application/pdf',
       );
     });
 
@@ -632,6 +634,7 @@ describe('FinanceRequestService', () => {
     const file = {
       buffer: Buffer.from('proof'),
       originalname: 'proof.jpg',
+      mimetype: 'image/jpeg',
     } as Express.Multer.File;
 
     it('should throw BadRequestException when request is not APPROVED', async () => {
@@ -671,6 +674,7 @@ describe('FinanceRequestService', () => {
         file.buffer,
         'finance-proofs',
         expect.stringContaining('req-1'),
+        'image/jpeg',
       );
       expect(mockRequestRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({

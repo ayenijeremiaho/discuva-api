@@ -42,7 +42,12 @@ export class CreateBudgetDto {
 }
 
 export class UpdateBudgetDto extends PartialType(
-  PickType(CreateBudgetDto, ['name', 'amount', 'startDate', 'endDate'] as const),
+  PickType(CreateBudgetDto, [
+    'name',
+    'amount',
+    'startDate',
+    'endDate',
+  ] as const),
 ) {}
 
 export class BudgetQueryDto {

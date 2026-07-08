@@ -331,10 +331,6 @@ export class DepartmentService {
   }
 
   async getDepartmentSummary(user: MemberAuth): Promise<DepartmentSummary> {
-    let deptId: string;
-    let myLeadRole: DepartmentSummary['myLeadRole'];
-    let departmentName: string;
-
     const lead = await this.leadRepository.findOne({
       where: { workerProfile: { member: { id: user.id } } },
       relations: ['department'],
@@ -343,9 +339,9 @@ export class DepartmentService {
       throw new ForbiddenException(
         'You must be a department lead to perform this action.',
       );
-    deptId = lead.department.id;
-    departmentName = lead.department.name;
-    myLeadRole =
+    const deptId = lead.department.id;
+    const departmentName = lead.department.name;
+    const myLeadRole =
       lead.leadType === DepartmentLeadTypeEnum.HOD ? 'head' : 'assistant';
 
     const today = new Date();

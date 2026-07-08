@@ -1,4 +1,4 @@
-import { CreateDateColumn, UpdateDateColumn, } from 'typeorm';
+import { CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 /**
  * Base entity class that provides common fields (createdAt, updatedAt)

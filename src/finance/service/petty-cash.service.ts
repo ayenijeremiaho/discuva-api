@@ -64,7 +64,14 @@ export class PettyCashService {
     limit = 20,
   ): Promise<PaginationResponseDto<PettyCashReplenishment>> {
     const [data, totalCount] = await this.replenishmentRepo.findAndCount({
-      relations: ['fromAccount', 'toCashAccount', 'requestedBy', 'requestedBy.member', 'approvedBy', 'approvedBy.member'],
+      relations: [
+        'fromAccount',
+        'toCashAccount',
+        'requestedBy',
+        'requestedBy.member',
+        'approvedBy',
+        'approvedBy.member',
+      ],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -81,7 +88,14 @@ export class PettyCashService {
   async findOne(id: string): Promise<PettyCashReplenishment> {
     const r = await this.replenishmentRepo.findOne({
       where: { id },
-      relations: ['fromAccount', 'toCashAccount', 'requestedBy', 'requestedBy.member', 'approvedBy', 'approvedBy.member'],
+      relations: [
+        'fromAccount',
+        'toCashAccount',
+        'requestedBy',
+        'requestedBy.member',
+        'approvedBy',
+        'approvedBy.member',
+      ],
     });
     if (!r) throw new NotFoundException('Petty cash replenishment not found.');
     return r;

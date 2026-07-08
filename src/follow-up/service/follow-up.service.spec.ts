@@ -546,7 +546,9 @@ describe('FollowUpService', () => {
       });
       const result = await service.inviteFirstTimerToMembership('ft-1');
       expect(result).toEqual({ queued: false });
-      expect(mockEmailQueueService.queueEmailWithTemplate).not.toHaveBeenCalled();
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
     });
 
     it('queues invite email and sets inviteSentAt on first send', async () => {
@@ -558,7 +560,10 @@ describe('FollowUpService', () => {
         inviteSentAt: null,
       };
       mockFirstTimerRepo.findOne.mockResolvedValue(ft);
-      mockFirstTimerRepo.save.mockResolvedValue({ ...ft, inviteSentAt: new Date() });
+      mockFirstTimerRepo.save.mockResolvedValue({
+        ...ft,
+        inviteSentAt: new Date(),
+      });
 
       const result = await service.inviteFirstTimerToMembership('ft-1');
       expect(result).toEqual({ queued: true });
@@ -597,14 +602,19 @@ describe('FollowUpService', () => {
       const result = await service.markConverted('ft-1');
       expect(result.convertedAt).toBeInstanceOf(Date);
       expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ convertedAt: expect.any(Date), convertedMember: null }),
+        expect.objectContaining({
+          convertedAt: expect.any(Date),
+          convertedMember: null,
+        }),
       );
     });
 
     it('links convertedMember when memberId is provided', async () => {
       const ft = { id: 'ft-1', convertedAt: null, convertedMember: null };
       mockFirstTimerRepo.findOne.mockResolvedValue(ft);
-      mockFirstTimerRepo.save.mockImplementation((v: any) => Promise.resolve(v));
+      mockFirstTimerRepo.save.mockImplementation((v: any) =>
+        Promise.resolve(v),
+      );
 
       await service.markConverted('ft-1', 'member-99');
       expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
@@ -619,7 +629,9 @@ describe('FollowUpService', () => {
     it('throws NotFoundException when task not found', async () => {
       mockTaskRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.adminUpdateTask('task-x', { status: FollowUpTaskStatusEnum.COMPLETED }),
+        service.adminUpdateTask('task-x', {
+          status: FollowUpTaskStatusEnum.COMPLETED,
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -674,7 +686,10 @@ describe('FollowUpService', () => {
       };
       mockTaskRepo.findOne.mockResolvedValue(task);
       mockTaskRepo.save.mockImplementation((v: any) => Promise.resolve(v));
-      mockNoteRepo.create.mockReturnValue({ content: 'Admin note', addedBy: null });
+      mockNoteRepo.create.mockReturnValue({
+        content: 'Admin note',
+        addedBy: null,
+      });
       mockNoteRepo.save.mockResolvedValue({});
 
       await service.adminUpdateTask('task-1', { noteContent: 'Admin note' });
@@ -813,7 +828,9 @@ describe('FollowUpService', () => {
       );
 
       expect(mockNoteRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ contactMethod: ContactMethodEnum.PHONE_CALL }),
+        expect.objectContaining({
+          contactMethod: ContactMethodEnum.PHONE_CALL,
+        }),
       );
     });
 
@@ -889,7 +906,11 @@ describe('FollowUpService', () => {
       };
       mockTaskRepo.findOne.mockResolvedValue(task);
       mockTaskRepo.save.mockResolvedValue(task);
-      const note = { id: 'note-1', content: 'Met in person', contactMethod: ContactMethodEnum.IN_PERSON };
+      const note = {
+        id: 'note-1',
+        content: 'Met in person',
+        contactMethod: ContactMethodEnum.IN_PERSON,
+      };
       mockNoteRepo.create.mockReturnValue(note);
       mockNoteRepo.save.mockResolvedValue(note);
 
@@ -910,7 +931,11 @@ describe('FollowUpService', () => {
 
     it('saves note with null contactMethod when omitted', async () => {
       mockWorkerProfileRepo.findOne.mockResolvedValue(followUpProfile);
-      const task = { id: 'task-1', lastActivityAt: new Date(0), assignedTo: followUpProfile };
+      const task = {
+        id: 'task-1',
+        lastActivityAt: new Date(0),
+        assignedTo: followUpProfile,
+      };
       mockTaskRepo.findOne.mockResolvedValue(task);
       mockTaskRepo.save.mockResolvedValue(task);
       mockNoteRepo.create.mockImplementation((v: any) => v);
@@ -930,15 +955,20 @@ describe('FollowUpService', () => {
     it('throws NotFoundException when first-timer not found', async () => {
       mockFirstTimerRepo.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.logReturnVisit('ft-x', {}),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.logReturnVisit('ft-x', {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('creates a visit with provided eventId and notes', async () => {
       const ft = { id: 'ft-1' };
       mockFirstTimerRepo.findOne.mockResolvedValue(ft);
-      const visit = { id: 'v-1', visitedAt: '2026-06-30', notes: 'Came back!', event: { id: 'evt-1' } };
+      const visit = {
+        id: 'v-1',
+        visitedAt: '2026-06-30',
+        notes: 'Came back!',
+        event: { id: 'evt-1' },
+      };
       mockVisitRepo.create.mockReturnValue(visit);
       mockVisitRepo.save.mockResolvedValue(visit);
 
@@ -976,17 +1006,38 @@ describe('FollowUpService', () => {
   describe('getFirstTimerPipeline', () => {
     it('returns zeroed counts when no first-timers exist', async () => {
       mockDataSource.query = jest.fn().mockResolvedValue([
-        { total: '0', converted: '0', invited: '0', returned: '0', contacted: '0', untouched: '0' },
+        {
+          total: '0',
+          converted: '0',
+          invited: '0',
+          returned: '0',
+          contacted: '0',
+          untouched: '0',
+        },
       ]);
 
       const result = await service.getFirstTimerPipeline();
 
-      expect(result).toEqual({ total: 0, converted: 0, invited: 0, returned: 0, contacted: 0, untouched: 0 });
+      expect(result).toEqual({
+        total: 0,
+        converted: 0,
+        invited: 0,
+        returned: 0,
+        contacted: 0,
+        untouched: 0,
+      });
     });
 
     it('maps string counts to numbers correctly', async () => {
       mockDataSource.query = jest.fn().mockResolvedValue([
-        { total: '20', converted: '5', invited: '3', returned: '4', contacted: '6', untouched: '2' },
+        {
+          total: '20',
+          converted: '5',
+          invited: '3',
+          returned: '4',
+          contacted: '6',
+          untouched: '2',
+        },
       ]);
 
       const result = await service.getFirstTimerPipeline();
@@ -998,7 +1049,14 @@ describe('FollowUpService', () => {
 
     it('passes from/to params to SQL', async () => {
       const queryFn = jest.fn().mockResolvedValue([
-        { total: '0', converted: '0', invited: '0', returned: '0', contacted: '0', untouched: '0' },
+        {
+          total: '0',
+          converted: '0',
+          invited: '0',
+          returned: '0',
+          contacted: '0',
+          untouched: '0',
+        },
       ]);
       mockDataSource.query = queryFn;
 
@@ -1014,12 +1072,16 @@ describe('FollowUpService', () => {
 
   describe('getStaleTasks', () => {
     it('throws BadRequestException when page < 1', async () => {
-      await expect(service.getStaleTasks(7, 0, 20)).rejects.toThrow(BadRequestException);
+      await expect(service.getStaleTasks(7, 0, 20)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('queries tasks with open status and lastActivityAt before cutoff', async () => {
       const qb = { ...qbMock };
-      Object.keys(qb).forEach((k) => ((qb as any)[k] = jest.fn().mockReturnThis()));
+      Object.keys(qb).forEach(
+        (k) => ((qb as any)[k] = jest.fn().mockReturnThis()),
+      );
       qb.getManyAndCount = jest.fn().mockResolvedValue([[], 0]);
       mockTaskRepo.createQueryBuilder.mockReturnValue(qb);
 
@@ -1038,9 +1100,15 @@ describe('FollowUpService', () => {
     });
 
     it('returns paginated stale tasks', async () => {
-      const staleTask = { id: 'task-1', status: FollowUpTaskStatusEnum.PENDING, lastActivityAt: new Date(0) };
+      const staleTask = {
+        id: 'task-1',
+        status: FollowUpTaskStatusEnum.PENDING,
+        lastActivityAt: new Date(0),
+      };
       const qb = { ...qbMock };
-      Object.keys(qb).forEach((k) => ((qb as any)[k] = jest.fn().mockReturnThis()));
+      Object.keys(qb).forEach(
+        (k) => ((qb as any)[k] = jest.fn().mockReturnThis()),
+      );
       qb.getManyAndCount = jest.fn().mockResolvedValue([[staleTask], 1]);
       mockTaskRepo.createQueryBuilder.mockReturnValue(qb);
 

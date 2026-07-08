@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -14,6 +15,7 @@ export class FirstTimerVisit extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_first_timer_visits_first_timer_id')
   @ManyToOne(() => FirstTimer, (ft) => ft.visits, {
     nullable: false,
     onDelete: 'CASCADE',
@@ -21,6 +23,7 @@ export class FirstTimerVisit extends BaseEntity {
   @JoinColumn({ name: 'first_timer_id' })
   firstTimer: FirstTimer;
 
+  @Index('IDX_first_timer_visits_event_id')
   @ManyToOne(() => Event, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'event_id' })
   event: Event | null;

@@ -185,7 +185,10 @@ describe('ChildrenChurchService', () => {
           useValue: mockWorkerProfileRepo,
         },
         { provide: UtilityService, useValue: mockUtilityService },
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('Test App') } },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('Test App') },
+        },
       ],
     }).compile();
 

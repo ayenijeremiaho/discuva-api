@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -15,6 +16,7 @@ export class JournalEntryLine extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_journal_entry_lines_entry_id')
   @ManyToOne(() => JournalEntry, (entry) => entry.lines, {
     nullable: false,
     onDelete: 'CASCADE',
@@ -22,6 +24,7 @@ export class JournalEntryLine extends BaseEntity {
   @JoinColumn({ name: 'journal_entry_id' })
   journalEntry: JournalEntry;
 
+  @Index('IDX_journal_entry_lines_account_id')
   @ManyToOne(() => Account, { nullable: false, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'account_id' })
   account: Account;

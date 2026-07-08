@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -38,7 +39,29 @@ export class FinanceWorkerController {
   }
 
   @Post('requests')
-  @UseInterceptors(FileInterceptor('attachment'))
+  @UseInterceptors(
+    FileInterceptor('attachment', {
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const allowed = [
+          'application/pdf',
+          'image/jpeg',
+          'image/png',
+          'image/webp',
+        ];
+        if (allowed.includes(file.mimetype)) {
+          cb(null, true);
+        } else {
+          cb(
+            new BadRequestException(
+              'Only PDF and image files (JPEG, PNG, WebP) are allowed.',
+            ),
+            false,
+          );
+        }
+      },
+    }),
+  )
   async createRequest(
     @Body() dto: CreateFinanceRequestDto,
     @CurrentUser() user: MemberAuth,

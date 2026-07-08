@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { RentalBookingService } from './rental-booking.service';
 import { RentalBooking } from '../entity/rental-booking.entity';
 import { RentalBookingAddon } from '../entity/rental-booking-addon.entity';
@@ -50,16 +54,40 @@ describe('RentalBookingService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RentalBookingService,
-        { provide: getRepositoryToken(RentalBooking), useValue: mockBookingRepo },
-        { provide: getRepositoryToken(RentalBookingAddon), useValue: mockBookingAddonRepo },
-        { provide: getRepositoryToken(RentalPayment), useValue: mockPaymentRepo },
-        { provide: getRepositoryToken(RentalFacility), useValue: mockFacilityRepo },
-        { provide: getRepositoryToken(RentalPricingTier), useValue: mockTierRepo },
+        {
+          provide: getRepositoryToken(RentalBooking),
+          useValue: mockBookingRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalBookingAddon),
+          useValue: mockBookingAddonRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalPayment),
+          useValue: mockPaymentRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalFacility),
+          useValue: mockFacilityRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalPricingTier),
+          useValue: mockTierRepo,
+        },
         { provide: getRepositoryToken(RentalAddon), useValue: mockAddonRepo },
-        { provide: getRepositoryToken(RentalCalendarBlock), useValue: mockBlockRepo },
+        {
+          provide: getRepositoryToken(RentalCalendarBlock),
+          useValue: mockBlockRepo,
+        },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
-        { provide: getRepositoryToken(DepartmentLead), useValue: mockDeptLeadRepo },
-        { provide: getRepositoryToken(WorkerProfile), useValue: mockWorkerRepo },
+        {
+          provide: getRepositoryToken(DepartmentLead),
+          useValue: mockDeptLeadRepo,
+        },
+        {
+          provide: getRepositoryToken(WorkerProfile),
+          useValue: mockWorkerRepo,
+        },
       ],
     }).compile();
     service = module.get<RentalBookingService>(RentalBookingService);
@@ -98,23 +126,19 @@ describe('RentalBookingService', () => {
         memberCategory: RentalMemberCategory.MEMBER,
         isActive: true,
       } as any;
-      const result = service.computePricing(
-        50000,
-        [],
-        tier,
-        { type: RentalDiscountType.FLAT, value: 5000 },
-      );
+      const result = service.computePricing(50000, [], tier, {
+        type: RentalDiscountType.FLAT,
+        value: 5000,
+      });
       expect(result.serviceFee).toBe(45000);
       expect(result.discountSource).toBe(RentalDiscountSource.OVERRIDE);
     });
 
     it('does not discount below zero on flat discount', () => {
-      const result = service.computePricing(
-        1000,
-        [],
-        null,
-        { type: RentalDiscountType.FLAT, value: 99999 },
-      );
+      const result = service.computePricing(1000, [], null, {
+        type: RentalDiscountType.FLAT,
+        value: 99999,
+      });
       expect(result.serviceFee).toBe(0);
     });
   });
@@ -132,7 +156,11 @@ describe('RentalBookingService', () => {
     });
 
     it('throws when end is before start', async () => {
-      mockFacilityRepo.findOne.mockResolvedValue({ id: 'fac-1', basePrice: 50000, isActive: true });
+      mockFacilityRepo.findOne.mockResolvedValue({
+        id: 'fac-1',
+        basePrice: 50000,
+        isActive: true,
+      });
       mockMemberRepo.findOneBy.mockResolvedValue({ id: 'mem-1' });
       mockBookingRepo.createQueryBuilder.mockReturnValue(makeQb(null));
       mockBlockRepo.createQueryBuilder.mockReturnValue(makeQb(null));
@@ -146,9 +174,15 @@ describe('RentalBookingService', () => {
     });
 
     it('throws on overlapping booking', async () => {
-      mockFacilityRepo.findOne.mockResolvedValue({ id: 'fac-1', basePrice: 50000, isActive: true });
+      mockFacilityRepo.findOne.mockResolvedValue({
+        id: 'fac-1',
+        basePrice: 50000,
+        isActive: true,
+      });
       mockMemberRepo.findOneBy.mockResolvedValue({ id: 'mem-1' });
-      mockBookingRepo.createQueryBuilder.mockReturnValue(makeQb({ id: 'existing' }));
+      mockBookingRepo.createQueryBuilder.mockReturnValue(
+        makeQb({ id: 'existing' }),
+      );
       await expect(
         service.createBooking('mem-1', {
           facilityId: 'fac-1',

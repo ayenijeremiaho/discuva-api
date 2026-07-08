@@ -42,6 +42,8 @@ const mockCacheService = {
   incr: jest.fn().mockResolvedValue(1),
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
+  blacklistJti: jest.fn().mockResolvedValue(undefined),
+  isJtiBlacklisted: jest.fn().mockResolvedValue(false),
 };
 
 const mockOtpRepository = {
@@ -82,6 +84,7 @@ const mockSessionService = {
   updateLogout: jest.fn(),
   updateLogin: jest.fn(),
   getHashedRefreshToken: jest.fn(),
+  getSession: jest.fn(),
 };
 
 const mockJwtService = {
@@ -272,11 +275,13 @@ describe('AuthService', () => {
         'device-abc',
       );
 
-      expect(mockJwtService.signAsync).toHaveBeenCalledWith({
-        sub: 'worker-id',
-        role: MemberRoleEnum.WORKER,
-        aud: SessionSurface.MEMBER,
-      });
+      expect(mockJwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sub: 'worker-id',
+          role: MemberRoleEnum.WORKER,
+          aud: SessionSurface.MEMBER,
+        }),
+      );
     });
 
     it('should throw ForbiddenException when a different device is already registered', async () => {
@@ -324,7 +329,7 @@ describe('AuthService', () => {
   });
 
   describe('adminLogin', () => {
-    it('should throw ForbiddenException when member has no admin record', async () => {
+    it('should throw UnauthorizedException when member has no admin record', async () => {
       mockAdminService.findByMemberId.mockResolvedValue(null);
 
       await expect(
@@ -334,7 +339,7 @@ describe('AuthService', () => {
           requiresPasswordChange: false,
           surface: SessionSurface.MEMBER,
         }),
-      ).rejects.toThrow(ForbiddenException);
+      ).rejects.toThrow(UnauthorizedException);
     });
 
     it('should return tokens when member is an active admin', async () => {
@@ -365,7 +370,7 @@ describe('AuthService', () => {
     it('should call sessionService.updateLogout with memberId and surface', async () => {
       mockSessionService.updateLogout.mockResolvedValue(undefined);
 
-      await service.logout('member-1', SessionSurface.MEMBER);
+      await service.logout('member-1', SessionSurface.MEMBER, 'test-jti', 3600);
 
       expect(mockSessionService.updateLogout).toHaveBeenCalledWith(
         'member-1',
@@ -373,11 +378,22 @@ describe('AuthService', () => {
       );
     });
 
+    it('should blacklist the jti on logout', async () => {
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+
+      await service.logout('member-1', SessionSurface.MEMBER, 'test-jti', 3600);
+
+      expect(mockCacheService.blacklistJti).toHaveBeenCalledWith(
+        'test-jti',
+        3600,
+      );
+    });
+
     it('should complete without error when session exists', async () => {
       mockSessionService.updateLogout.mockResolvedValue(undefined);
 
       await expect(
-        service.logout('member-1', SessionSurface.MEMBER),
+        service.logout('member-1', SessionSurface.MEMBER, 'test-jti', 3600),
       ).resolves.toBeUndefined();
     });
 
@@ -385,15 +401,24 @@ describe('AuthService', () => {
       mockSessionService.updateLogout.mockResolvedValue(undefined);
 
       await expect(
-        service.logout('no-session-member', SessionSurface.ADMIN),
+        service.logout(
+          'no-session-member',
+          SessionSurface.ADMIN,
+          'test-jti',
+          0,
+        ),
       ).resolves.toBeUndefined();
     });
-
   });
 
   describe('validateRefreshToken', () => {
+    const freshSession = (hash: string) => ({
+      hashedRefreshToken: hash,
+      createdAt: new Date(),
+    });
+
     it('should throw UnauthorizedException if no session found', async () => {
-      mockSessionService.getHashedRefreshToken.mockResolvedValue(null);
+      mockSessionService.getSession.mockResolvedValue(null);
 
       await expect(
         service.validateRefreshToken(
@@ -405,8 +430,8 @@ describe('AuthService', () => {
     });
 
     it('should throw UnauthorizedException if refresh token is invalid', async () => {
-      mockSessionService.getHashedRefreshToken.mockResolvedValue(
-        'hashed_valid_token',
+      mockSessionService.getSession.mockResolvedValue(
+        freshSession('hashed_valid_token'),
       );
       jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
 
@@ -420,8 +445,8 @@ describe('AuthService', () => {
     });
 
     it('should return MemberAuth on success', async () => {
-      mockSessionService.getHashedRefreshToken.mockResolvedValue(
-        'hashed_refresh',
+      mockSessionService.getSession.mockResolvedValue(
+        freshSession('hashed_refresh'),
       );
       jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
       mockMemberService.getById.mockResolvedValue({
@@ -445,6 +470,59 @@ describe('AuthService', () => {
         surface: SessionSurface.MEMBER,
       });
     });
+
+    it('should throw and clear the session when the session exceeds SESSION_MAX_AGE_DAYS', async () => {
+      const thirtyOneDaysAgo = new Date(Date.now() - 31 * 86_400_000);
+      mockSessionService.getSession.mockResolvedValue({
+        hashedRefreshToken: 'some-hash',
+        createdAt: thirtyOneDaysAgo,
+      });
+      mockConfigService.get.mockImplementation((key: string) => {
+        if (key === 'SESSION_MAX_AGE_DAYS') return 30;
+        return undefined;
+      });
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+
+      await expect(
+        service.validateRefreshToken(
+          'member-1',
+          'any-token',
+          SessionSurface.MEMBER,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockSessionService.updateLogout).toHaveBeenCalledWith(
+        'member-1',
+        SessionSurface.MEMBER,
+      );
+    });
+
+    it('should not reject a session within SESSION_MAX_AGE_DAYS', async () => {
+      const twentyDaysAgo = new Date(Date.now() - 20 * 86_400_000);
+      mockSessionService.getSession.mockResolvedValue({
+        hashedRefreshToken: 'valid-hash',
+        createdAt: twentyDaysAgo,
+      });
+      mockConfigService.get.mockImplementation((key: string) => {
+        if (key === 'SESSION_MAX_AGE_DAYS') return 30;
+        return undefined;
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+      });
+
+      await expect(
+        service.validateRefreshToken(
+          'member-1',
+          'valid-refresh-token',
+          SessionSurface.MEMBER,
+        ),
+      ).resolves.toBeDefined();
+    });
   });
 
   describe('validateAccessToken', () => {
@@ -452,7 +530,23 @@ describe('AuthService', () => {
       mockSessionService.getHashedRefreshToken.mockResolvedValue(null);
 
       await expect(
-        service.validateAccessToken('member-1', SessionSurface.MEMBER),
+        service.validateAccessToken(
+          'member-1',
+          SessionSurface.MEMBER,
+          'test-jti',
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('should throw UnauthorizedException if jti is blacklisted', async () => {
+      mockCacheService.isJtiBlacklisted.mockResolvedValueOnce(true);
+
+      await expect(
+        service.validateAccessToken(
+          'member-1',
+          SessionSurface.MEMBER,
+          'revoked-jti',
+        ),
       ).rejects.toThrow(UnauthorizedException);
     });
 
@@ -470,6 +564,7 @@ describe('AuthService', () => {
       const result = await service.validateAccessToken(
         'member-1',
         SessionSurface.MEMBER,
+        'test-jti',
       );
 
       expect(result).toEqual({
@@ -488,7 +583,11 @@ describe('AuthService', () => {
         status: MemberStatusEnum.ACTIVE,
       });
 
-      await service.validateAccessToken('member-1', SessionSurface.MEMBER);
+      await service.validateAccessToken(
+        'member-1',
+        SessionSurface.MEMBER,
+        'test-jti',
+      );
 
       expect(mockMemberService.getById).toHaveBeenCalledWith(
         'member-1',
@@ -519,9 +618,140 @@ describe('AuthService', () => {
     });
   });
 
+  describe('token rotation', () => {
+    it('stores the outgoing refresh hash in cache when a previous session exists', async () => {
+      mockSessionService.getHashedRefreshToken.mockResolvedValue('old-hash');
+      mockJwtService.signAsync.mockResolvedValue('new-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('new-hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      await service.login(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        'device-abc',
+      );
+
+      expect(mockCacheService.set).toHaveBeenCalledWith(
+        expect.stringContaining('rt_rotated'),
+        'old-hash',
+        expect.any(Number),
+      );
+    });
+
+    it('skips rotation cache when no previous session exists (first login)', async () => {
+      mockSessionService.getHashedRefreshToken.mockResolvedValue(null);
+      mockJwtService.signAsync.mockResolvedValue('first-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('first-hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      await service.login(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        'device-abc',
+      );
+
+      expect(mockCacheService.set).not.toHaveBeenCalledWith(
+        expect.stringContaining('rt_rotated'),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('validateRefreshToken — reuse detection', () => {
+    const freshSession = (hash: string) => ({
+      hashedRefreshToken: hash,
+      createdAt: new Date(),
+    });
+
+    it('detects reuse of a rotated token, invalidates the session, and sends a security alert', async () => {
+      mockSessionService.getSession.mockResolvedValue(
+        freshSession('current-hash'),
+      );
+      jest
+        .spyOn(UtilityService, 'verifyHashedValue')
+        .mockResolvedValueOnce(false) // does not match current hash
+        .mockResolvedValueOnce(true); // matches rotated hash → reuse
+      mockCacheService.get.mockResolvedValueOnce('rotated-hash');
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'test@test.com',
+      });
+
+      await expect(
+        service.validateRefreshToken(
+          'member-1',
+          'stolen-old-token',
+          SessionSurface.ADMIN,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockSessionService.updateLogout).toHaveBeenCalledWith(
+        'member-1',
+        SessionSurface.ADMIN,
+      );
+      expect(mockCacheService.del).toHaveBeenCalled();
+    });
+
+    it('does not invalidate session for a generic invalid token (no rotated hash in cache)', async () => {
+      mockSessionService.getSession.mockResolvedValue(
+        freshSession('current-hash'),
+      );
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+      mockCacheService.get.mockResolvedValueOnce(null);
+
+      await expect(
+        service.validateRefreshToken(
+          'member-1',
+          'random-garbage-token',
+          SessionSurface.MEMBER,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockSessionService.updateLogout).not.toHaveBeenCalled();
+    });
+
+    it('does not invalidate session when rotated hash is present but does not match', async () => {
+      mockSessionService.getSession.mockResolvedValue(
+        freshSession('current-hash'),
+      );
+      jest
+        .spyOn(UtilityService, 'verifyHashedValue')
+        .mockResolvedValueOnce(false) // does not match current hash
+        .mockResolvedValueOnce(false); // does not match rotated hash either
+      mockCacheService.get.mockResolvedValueOnce('rotated-hash');
+
+      await expect(
+        service.validateRefreshToken(
+          'member-1',
+          'unrelated-token',
+          SessionSurface.MEMBER,
+        ),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockSessionService.updateLogout).not.toHaveBeenCalled();
+    });
+  });
+
   describe('verifyDeviceReset', () => {
     it('unsubscribes push subscription after device is swapped', async () => {
-      const member = { id: 'member-1', firstname: 'Test', email: 'test@test.com' };
+      const member = {
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'test@test.com',
+      };
       const record = {
         memberId: 'member-1',
         newDeviceId: 'new-device-id',
@@ -532,7 +762,9 @@ describe('AuthService', () => {
       mockMemberService.findByEmail.mockResolvedValue(member);
       mockDeviceResetOtpRepository.findOne.mockResolvedValue(record);
       jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
-      jest.spyOn(UtilityService, 'capitalizeFirstLetter').mockReturnValue('Test');
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Test');
       mockDeviceResetOtpRepository.save.mockResolvedValue(record);
       mockSessionService.updateLogout.mockResolvedValue(undefined);
       mockMemberService.setDeviceId.mockResolvedValue(undefined);

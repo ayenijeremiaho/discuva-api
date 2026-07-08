@@ -28,7 +28,10 @@ describe('RequestLeaveService', () => {
         { provide: DepartmentService, useValue: {} },
         { provide: UtilityService, useValue: {} },
         { provide: AuditLogService, useValue: { log: jest.fn() } },
-        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('Test App') } },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue('Test App') },
+        },
       ],
     }).compile();
 

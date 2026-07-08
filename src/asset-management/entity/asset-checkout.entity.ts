@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -16,6 +17,7 @@ export class AssetCheckout {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_asset_checkouts_asset_id')
   @ManyToOne(() => Asset, (asset) => asset.checkouts, {
     nullable: false,
     onDelete: 'RESTRICT',

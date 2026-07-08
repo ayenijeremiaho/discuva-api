@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -15,6 +16,7 @@ export class ReconciliationRow extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_reconciliation_rows_job_id')
   @ManyToOne(() => BulkUploadJob, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'job_id' })
   job: BulkUploadJob;

@@ -62,7 +62,12 @@ export class RequestLeaveController {
     @Query('limit') limit = 10,
     @Query('status') status?: LeaveStatusEnum,
   ) {
-    return this.requestLeaveService.getMyLeaveHistory(req.user, +page, +limit, status);
+    return this.requestLeaveService.getMyLeaveHistory(
+      req.user,
+      +page,
+      +limit,
+      status,
+    );
   }
 
   @UseGuards(AdminGuard)

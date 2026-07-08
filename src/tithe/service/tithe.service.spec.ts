@@ -1,3 +1,4 @@
+import ExcelJS from 'exceljs';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
@@ -237,7 +238,6 @@ describe('TitheService', () => {
       rows: Record<string, any>[],
       headers?: string[],
     ) => {
-      const ExcelJS = require('exceljs');
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet('Sheet1');
       const cols = headers ?? [
@@ -702,6 +702,7 @@ describe('TitheService', () => {
       buffer: Buffer.from('proof'),
       originalname: 'proof.jpg',
       size: 1024,
+      mimetype: 'image/jpeg',
     };
     const uploadResult = {
       secureUrl: 'https://cdn.example.com/proof.jpg',
@@ -714,6 +715,7 @@ describe('TitheService', () => {
         buffer: Buffer.alloc(1),
         originalname: 'big.pdf',
         size: 6 * 1024 * 1024,
+        mimetype: 'application/pdf',
       };
 
       await expect(service.submitProof(mockUser, dto, bigFile)).rejects.toThrow(
@@ -747,6 +749,7 @@ describe('TitheService', () => {
         file.buffer,
         'tithe-proofs',
         expect.stringContaining('member-1'),
+        'image/jpeg',
       );
       expect(mockProofRepo.save).toHaveBeenCalled();
       expect(mockAuditLogService.log).toHaveBeenCalledWith(

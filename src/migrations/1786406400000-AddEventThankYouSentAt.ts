@@ -8,8 +8,6 @@ export class AddEventThankYouSentAt1786406400000 implements MigrationInterface {
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `ALTER TABLE events DROP COLUMN thank_you_sent_at`,
-    );
+    await queryRunner.query(`ALTER TABLE events DROP COLUMN thank_you_sent_at`);
   }
 }

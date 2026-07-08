@@ -58,13 +58,20 @@ export class MemberSessionService {
     }
   }
 
+  async getSession(
+    memberId: string,
+    surface: SessionSurface,
+  ): Promise<MemberSession | null> {
+    return this.sessionRepository.findOne({
+      where: { member: { id: memberId }, surface },
+    });
+  }
+
   async getHashedRefreshToken(
     memberId: string,
     surface: SessionSurface,
   ): Promise<string | null> {
-    const session = await this.sessionRepository.findOne({
-      where: { member: { id: memberId }, surface },
-    });
+    const session = await this.getSession(memberId, surface);
     return session?.hashedRefreshToken ?? null;
   }
 }

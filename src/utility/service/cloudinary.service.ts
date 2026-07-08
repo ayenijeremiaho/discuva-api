@@ -46,17 +46,26 @@ export class CloudinaryService implements OnModuleInit {
     this.logger.log('Cloudinary configured');
   }
 
+  private resolveResourceType(mimeType?: string): 'image' | 'video' | 'raw' {
+    if (!mimeType) return 'raw';
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.startsWith('video/')) return 'video';
+    return 'raw';
+  }
+
   async uploadBuffer(
     buffer: Buffer,
     folder: CloudinaryFolder,
     filename?: string,
+    mimeType?: string,
   ): Promise<CloudinaryUploadResult> {
+    const resourceType = this.resolveResourceType(mimeType);
     return new Promise((resolve, reject) => {
       const publicId = filename
         ? `${folder}/${filename}`
         : `${folder}/${Date.now()}`;
       const stream = cloudinary.uploader.upload_stream(
-        { folder, public_id: publicId, resource_type: 'auto' },
+        { folder, public_id: publicId, resource_type: resourceType },
         (error, result: UploadApiResponse) => {
           if (error) {
             this.logger.error(`Cloudinary upload failed: ${error.message}`);

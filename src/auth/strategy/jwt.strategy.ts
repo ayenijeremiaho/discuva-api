@@ -19,7 +19,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: JwtPayload) {
-    return this.authService.validateAccessToken(payload.sub, payload.aud);
+  async validate(payload: JwtPayload & { exp: number }) {
+    const user = await this.authService.validateAccessToken(
+      payload.sub,
+      payload.aud,
+      payload.jti,
+    );
+    return { ...user, jti: payload.jti, tokenExp: payload.exp };
   }
 }

@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -37,10 +38,12 @@ export class FollowUpTask extends BaseEntity {
   @JoinColumn({ name: 'first_timer_id' })
   firstTimer: FirstTimer | null;
 
+  @Index('IDX_follow_up_tasks_member_id')
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'member_id' })
   member: Member | null;
 
+  @Index('IDX_follow_up_tasks_event_id')
   @ManyToOne(() => Event, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'event_id' })
   event: Event | null;

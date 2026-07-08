@@ -8,8 +8,6 @@ export class AddAuditLogTargetName1786665600000 implements MigrationInterface {
   }
 
   async down(runner: QueryRunner): Promise<void> {
-    await runner.query(
-      `ALTER TABLE "audit_logs" DROP COLUMN "target_name"`,
-    );
+    await runner.query(`ALTER TABLE "audit_logs" DROP COLUMN "target_name"`);
   }
 }

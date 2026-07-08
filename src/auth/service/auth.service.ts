@@ -12,7 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService, ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
-import { randomInt } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Cron } from '@nestjs/schedule';
@@ -219,7 +219,7 @@ export class AuthService {
       this.logger.warn(
         `Admin login rejected — no admin record for member ${user.id}`,
       );
-      throw new ForbiddenException('You do not have admin portal access.');
+      throw new UnauthorizedException('Invalid credentials.');
     }
 
     const tokens = await this.generateTokens(
@@ -242,8 +242,14 @@ export class AuthService {
     );
   }
 
-  async logout(memberId: string, surface: SessionSurface): Promise<void> {
+  async logout(
+    memberId: string,
+    surface: SessionSurface,
+    jti: string,
+    remainingTtl: number,
+  ): Promise<void> {
     await this.sessionService.updateLogout(memberId, surface);
+    await this.cacheService.blacklistJti(jti, remainingTtl);
     this.auditLogService.log('MEMBER_LOGOUT', { targetId: memberId });
   }
 
@@ -252,23 +258,50 @@ export class AuthService {
     refreshToken: string,
     surface: SessionSurface,
   ): Promise<MemberAuth> {
-    const hashed = await this.sessionService.getHashedRefreshToken(
-      memberId,
-      surface,
-    );
-    if (!hashed)
+    const session = await this.sessionService.getSession(memberId, surface);
+    if (!session?.hashedRefreshToken)
       throw new UnauthorizedException(
         'Your session has expired. Please log in again.',
       );
 
+    const maxAgeDays =
+      this.configService.get<number>('SESSION_MAX_AGE_DAYS') ?? 30;
+    if (Date.now() - session.createdAt.getTime() > maxAgeDays * 86_400_000) {
+      await this.sessionService.updateLogout(memberId, surface);
+      throw new UnauthorizedException(
+        'Your session has expired. Please log in again.',
+      );
+    }
+
     const isValid = await UtilityService.verifyHashedValue(
       refreshToken,
-      hashed,
+      session.hashedRefreshToken,
     );
-    if (!isValid)
+    if (!isValid) {
+      // Detect reuse of a previously rotated token — indicates credential theft
+      const rotatedKey = this.cacheService.key(
+        'rt_rotated',
+        `${memberId}:${surface}`,
+      );
+      const rotatedHash = await this.cacheService.get<string>(rotatedKey);
+      if (rotatedHash) {
+        const isReused = await UtilityService.verifyHashedValue(
+          refreshToken,
+          rotatedHash,
+        );
+        if (isReused) {
+          this.logger.warn(
+            `Refresh token reuse detected for member ${memberId} — session invalidated`,
+          );
+          await this.sessionService.updateLogout(memberId, surface);
+          this.cacheService.del(rotatedKey);
+          this.sendSessionSecurityAlert(memberId, surface);
+        }
+      }
       throw new UnauthorizedException(
         'Your session is invalid. Please log in again.',
       );
+    }
 
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
@@ -304,7 +337,14 @@ export class AuthService {
   async validateAccessToken(
     memberId: string,
     surface: SessionSurface,
+    jti: string,
   ): Promise<MemberAuth> {
+    if (await this.cacheService.isJtiBlacklisted(jti)) {
+      throw new UnauthorizedException(
+        'Your session has been revoked. Please log in again.',
+      );
+    }
+
     const hashed = await this.sessionService.getHashedRefreshToken(
       memberId,
       surface,
@@ -654,11 +694,19 @@ export class AuthService {
     requiresPasswordChange: boolean,
     surface: SessionSurface,
   ): Promise<JwtResponse> {
-    const payload: JwtPayload = { sub: memberId, role, aud: surface };
+    const payload: JwtPayload = {
+      sub: memberId,
+      role,
+      aud: surface,
+      jti: randomUUID(),
+    };
 
-    const [access_token, refresh_token] = await Promise.all([
-      this.jwtService.signAsync(payload),
-      this.jwtService.signAsync(payload, this.jwtRefreshConfig),
+    const [[access_token, refresh_token], currentHash] = await Promise.all([
+      Promise.all([
+        this.jwtService.signAsync(payload),
+        this.jwtService.signAsync(payload, this.jwtRefreshConfig),
+      ]),
+      this.sessionService.getHashedRefreshToken(memberId, surface),
     ]);
 
     const hashedRefreshToken = await UtilityService.hashValue(refresh_token);
@@ -668,6 +716,19 @@ export class AuthService {
       surface,
     );
 
+    // Keep the outgoing hash in Redis so a reused rotated token can be detected
+    if (currentHash) {
+      const rotatedKey = this.cacheService.key(
+        'rt_rotated',
+        `${memberId}:${surface}`,
+      );
+      this.cacheService.set(
+        rotatedKey,
+        currentHash,
+        this.getRefreshExpirySeconds(),
+      );
+    }
+
     return {
       token_type: 'Bearer',
       expires_in: this.getTokenExpirySeconds(),
@@ -675,6 +736,43 @@ export class AuthService {
       refresh_token,
       requires_password_change: requiresPasswordChange,
     };
+  }
+
+  private sendSessionSecurityAlert(
+    memberId: string,
+    surface: SessionSurface,
+  ): void {
+    this.memberService
+      .getById(memberId)
+      .then((member) => {
+        const name = UtilityService.capitalizeFirstLetter(member.firstname);
+        const loginUrl =
+          surface === SessionSurface.ADMIN
+            ? this.configService.get<string>('ADMIN_LOGIN_URL')
+            : this.configService.get<string>('LOGIN_URL');
+        this.utilityService.sendEmailWithTemplate(
+          member.email,
+          `${name}, Security Alert — Your ${this.productName} Session Was Signed Out`,
+          'session-security-alert',
+          { name, loginUrl },
+        );
+      })
+      .catch((err) => {
+        this.logger.error(
+          `Failed to send session security alert for member ${memberId}`,
+          err,
+        );
+      });
+  }
+
+  private getRefreshExpirySeconds(): number {
+    const expiry = this.jwtRefreshConfig.expiresIn as string;
+    if (!expiry) return 7 * 86400;
+    const match = /^(\d+)([smhd])$/i.exec(expiry);
+    if (!match) return 7 * 86400;
+    const value = Number.parseInt(match[1], 10);
+    const units: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+    return value * (units[match[2].toLowerCase()] ?? 0);
   }
 
   private getTokenExpirySeconds(): number {

@@ -18,7 +18,13 @@ export class RefreshJwtStrategy extends PassportStrategy(
     private readonly authService: AuthService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      // Cookie takes priority (admin web); Bearer header is the fallback (mobile)
+      jwtFromRequest: (req: Request) => {
+        if (req.cookies?.refresh_token) {
+          return req.cookies.refresh_token;
+        }
+        return ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+      },
       secretOrKey: refreshJwtConfiguration.secret,
       ignoreExpiration: false,
       passReqToCallback: true,
@@ -26,10 +32,10 @@ export class RefreshJwtStrategy extends PassportStrategy(
   }
 
   async validate(request: Request, payload: JwtPayload) {
-    const refreshToken = request
-      .get('Authorization')
-      .replace('Bearer ', '')
-      .trim();
+    const refreshToken =
+      request.cookies?.refresh_token ??
+      request.get('Authorization')?.replace('Bearer ', '').trim() ??
+      '';
     return this.authService.validateRefreshToken(
       payload.sub,
       refreshToken,

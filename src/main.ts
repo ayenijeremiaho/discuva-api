@@ -1,17 +1,46 @@
 import { NestFactory } from '@nestjs/core';
-import { IoAdapter } from '@nestjs/platform-socket.io';
 import { AppModule } from './app.module';
+import { RedisIoAdapter } from './utility/adapters/redis-io.adapter';
 import { Logger } from 'nestjs-pino';
 import { INestApplication, VersioningType } from '@nestjs/common';
 import { HttpExceptionFilter } from './utility/filters/http-exception.filter';
 import { TransformInterceptor } from './utility/interceptors/transform.interceptor';
 import { TrimValidationPipe } from './utility/pipes/trim-validation.pipe';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import { createBullBoard } from '@bull-board/api';
+import { BullAdapter } from '@bull-board/api/bullAdapter';
+import { ExpressAdapter as BullBoardExpressAdapter } from '@bull-board/express';
+import { getQueueToken } from '@nestjs/bull';
+import { Queue } from 'bull';
+import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  app.use(helmet());
-  app.useWebSocketAdapter(new IoAdapter(app));
+  mountBullBoard(app);
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+  app.use(cookieParser());
+  app.useWebSocketAdapter(
+    new RedisIoAdapter(app, {
+      host: process.env.REDIS_HOST ?? 'localhost',
+      port: Number.parseInt(process.env.REDIS_PORT ?? '6379'),
+      password: process.env.REDIS_PASSWORD || undefined,
+      db: Number.parseInt(process.env.REDIS_DB ?? '0'),
+    }),
+  );
   app.enableCors(corsOptions());
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   registerNestLogger(app);
@@ -44,7 +73,7 @@ function registerGlobalInterceptors(app: INestApplication) {
 }
 
 function corsOptions() {
-  const origins = process.env.CORS_ORIGINS?.split(',');
+  const origins = process.env.CORS_ORIGINS?.split(',').map((o) => o.trim());
   return {
     origin: origins,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
@@ -54,3 +83,50 @@ function corsOptions() {
 }
 
 bootstrap();
+
+function mountBullBoard(app: INestApplication) {
+  const user = process.env.BULL_BOARD_USER;
+  const password = process.env.BULL_BOARD_PASSWORD;
+  if (!user || !password) return;
+
+  const serverAdapter = new BullBoardExpressAdapter();
+  serverAdapter.setBasePath('/queues');
+
+  createBullBoard({
+    queues: [
+      new BullAdapter(app.get<Queue>(getQueueToken('email'))),
+      new BullAdapter(app.get<Queue>(getQueueToken('push-notifications'))),
+      new BullAdapter(app.get<Queue>(getQueueToken('follow-up'))),
+      new BullAdapter(app.get<Queue>(getQueueToken('tithe'))),
+      new BullAdapter(app.get<Queue>(getQueueToken('finance-reconciliation'))),
+      new BullAdapter(app.get<Queue>(getQueueToken('audit-log'))),
+    ],
+    serverAdapter,
+  });
+
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.use(
+    '/queues',
+    bullBasicAuth(user, password),
+    serverAdapter.getRouter(),
+  );
+}
+
+function bullBasicAuth(user: string, password: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const auth = req.headers['authorization'];
+    if (!auth?.startsWith('Basic ')) {
+      res.setHeader('WWW-Authenticate', 'Basic realm="Bull Board"');
+      return res.status(401).send('Authentication required');
+    }
+    const decoded = Buffer.from(auth.slice(6), 'base64').toString();
+    const colonIdx = decoded.indexOf(':');
+    const u = decoded.slice(0, colonIdx);
+    const p = decoded.slice(colonIdx + 1);
+    if (u !== user || p !== password) {
+      res.setHeader('WWW-Authenticate', 'Basic realm="Bull Board"');
+      return res.status(401).send('Invalid credentials');
+    }
+    next();
+  };
+}

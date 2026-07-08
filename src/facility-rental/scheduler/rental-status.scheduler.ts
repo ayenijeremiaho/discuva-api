@@ -31,7 +31,9 @@ export class RentalStatusScheduler {
         toInProgress.map((b) => b.id),
         { status: RentalBookingStatus.IN_PROGRESS },
       );
-      this.logger.log(`Transitioned ${toInProgress.length} booking(s) to IN_PROGRESS`);
+      this.logger.log(
+        `Transitioned ${toInProgress.length} booking(s) to IN_PROGRESS`,
+      );
     }
 
     const toCompleted = await this.bookingRepo.find({
@@ -46,7 +48,9 @@ export class RentalStatusScheduler {
         toCompleted.map((b) => b.id),
         { status: RentalBookingStatus.COMPLETED },
       );
-      this.logger.log(`Transitioned ${toCompleted.length} booking(s) to COMPLETED`);
+      this.logger.log(
+        `Transitioned ${toCompleted.length} booking(s) to COMPLETED`,
+      );
     }
   }
 }

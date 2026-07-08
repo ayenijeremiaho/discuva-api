@@ -154,7 +154,9 @@ export class FollowUpScheduler {
   async notifyInactiveTasks(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(STALE_LOCK, 270);
     if (!acquired) {
-      this.logger.debug('Stale task check skipped — another instance holds the lock');
+      this.logger.debug(
+        'Stale task check skipped — another instance holds the lock',
+      );
       return;
     }
     try {
@@ -179,7 +181,9 @@ export class FollowUpScheduler {
       return;
     }
 
-    this.logger.log(`Found ${count} follow-up task(s) inactive for ${this.staleDays}+ day(s)`);
+    this.logger.log(
+      `Found ${count} follow-up task(s) inactive for ${this.staleDays}+ day(s)`,
+    );
 
     const admins = await this.adminRepo
       .createQueryBuilder('a')

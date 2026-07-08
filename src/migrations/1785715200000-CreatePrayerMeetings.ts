@@ -18,8 +18,12 @@ export class CreatePrayerMeetings1785715200000 implements MigrationInterface {
         CONSTRAINT "FK_prayer_meeting_day_config" FOREIGN KEY ("day_config_id") REFERENCES "prayer_day_configs"("id") ON DELETE RESTRICT
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_prayer_meeting_date" ON "prayer_meetings" ("date")`);
-    await queryRunner.query(`CREATE INDEX "IDX_prayer_meeting_month_year" ON "prayer_meetings" ("month", "year")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_prayer_meeting_date" ON "prayer_meetings" ("date")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_prayer_meeting_month_year" ON "prayer_meetings" ("month", "year")`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

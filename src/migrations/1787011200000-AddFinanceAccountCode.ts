@@ -13,9 +13,7 @@ export class AddFinanceAccountCode1787011200000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `DROP INDEX IF EXISTS "idx_finance_accounts_code"`,
-    );
+    await queryRunner.query(`DROP INDEX IF EXISTS "idx_finance_accounts_code"`);
     await queryRunner.query(
       `ALTER TABLE "finance_accounts" DROP COLUMN "code"`,
     );

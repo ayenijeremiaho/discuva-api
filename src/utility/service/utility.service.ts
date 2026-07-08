@@ -108,7 +108,14 @@ export class UtilityService {
     cc?: string | [string],
     category?: EmailCategory,
   ): void {
-    this.emailQueueService.queueEmail(to, subject, body, cc, undefined, category);
+    this.emailQueueService.queueEmail(
+      to,
+      subject,
+      body,
+      cc,
+      undefined,
+      category,
+    );
   }
 
   public sendEmailWithTemplate(

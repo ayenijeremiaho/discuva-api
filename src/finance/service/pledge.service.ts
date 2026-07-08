@@ -94,7 +94,9 @@ export class PledgeService {
 
   async createPledge(dto: CreatePledgeDto, admin: Admin): Promise<Pledge> {
     if (!dto.memberId && !dto.guestName)
-      throw new BadRequestException('Either memberId or guestName is required.');
+      throw new BadRequestException(
+        'Either memberId or guestName is required.',
+      );
     await this.findOneCampaign(dto.campaignId);
     const pledge = this.pledgeRepo.create({
       member: dto.memberId ? ({ id: dto.memberId } as any) : null,
@@ -109,7 +111,11 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
-      metadata: { memberId: dto.memberId, guestName: dto.guestName, campaignId: dto.campaignId },
+      metadata: {
+        memberId: dto.memberId,
+        guestName: dto.guestName,
+        campaignId: dto.campaignId,
+      },
     });
     return saved;
   }

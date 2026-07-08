@@ -17,7 +17,11 @@ import {
 } from '../enum/rental.enum';
 
 const mockBookingRepo = { find: jest.fn(), save: jest.fn() };
-const mockPaymentRepo = { findOne: jest.fn(), save: jest.fn(), update: jest.fn() };
+const mockPaymentRepo = {
+  findOne: jest.fn(),
+  save: jest.fn(),
+  update: jest.fn(),
+};
 const mockBookingAddonRepo = { find: jest.fn() };
 const mockTierRepo = { findOne: jest.fn() };
 const mockAddonRepo = {};
@@ -35,10 +39,22 @@ describe('RentalAdminService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RentalAdminService,
-        { provide: getRepositoryToken(RentalBooking), useValue: mockBookingRepo },
-        { provide: getRepositoryToken(RentalPayment), useValue: mockPaymentRepo },
-        { provide: getRepositoryToken(RentalBookingAddon), useValue: mockBookingAddonRepo },
-        { provide: getRepositoryToken(RentalPricingTier), useValue: mockTierRepo },
+        {
+          provide: getRepositoryToken(RentalBooking),
+          useValue: mockBookingRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalPayment),
+          useValue: mockPaymentRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalBookingAddon),
+          useValue: mockBookingAddonRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalPricingTier),
+          useValue: mockTierRepo,
+        },
         { provide: getRepositoryToken(RentalAddon), useValue: mockAddonRepo },
         { provide: RentalBookingService, useValue: mockBookingService },
       ],
@@ -54,13 +70,22 @@ describe('RentalAdminService', () => {
         id: 'b-1',
         status: RentalBookingStatus.CONFIRMED,
       });
-      await expect(service.confirmBooking('b-1', {})).rejects.toThrow(BadRequestException);
+      await expect(service.confirmBooking('b-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('confirms a pending booking', async () => {
-      const booking = { id: 'b-1', status: RentalBookingStatus.PENDING, notes: null };
+      const booking = {
+        id: 'b-1',
+        status: RentalBookingStatus.PENDING,
+        notes: null,
+      };
       mockBookingService.getBookingById.mockResolvedValue(booking);
-      mockBookingRepo.save.mockResolvedValue({ ...booking, status: RentalBookingStatus.CONFIRMED });
+      mockBookingRepo.save.mockResolvedValue({
+        ...booking,
+        status: RentalBookingStatus.CONFIRMED,
+      });
       const result = await service.confirmBooking('b-1', {});
       expect(result.status).toBe(RentalBookingStatus.CONFIRMED);
     });
@@ -69,7 +94,9 @@ describe('RentalAdminService', () => {
   describe('markPaymentPaid', () => {
     it('throws if payment not found', async () => {
       mockPaymentRepo.findOne.mockResolvedValue(null);
-      await expect(service.markPaymentPaid('pay-1', {})).rejects.toThrow(NotFoundException);
+      await expect(service.markPaymentPaid('pay-1', {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws if already paid', async () => {
@@ -78,7 +105,9 @@ describe('RentalAdminService', () => {
         status: RentalPaymentStatus.PAID,
         type: RentalPaymentType.SERVICE_FEE,
       });
-      await expect(service.markPaymentPaid('pay-1', {})).rejects.toThrow(BadRequestException);
+      await expect(service.markPaymentPaid('pay-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('marks payment as paid', async () => {
@@ -88,8 +117,13 @@ describe('RentalAdminService', () => {
         type: RentalPaymentType.SERVICE_FEE,
       };
       mockPaymentRepo.findOne.mockResolvedValue(payment);
-      mockPaymentRepo.save.mockResolvedValue({ ...payment, status: RentalPaymentStatus.PAID });
-      const result = await service.markPaymentPaid('pay-1', { reference: 'TXN123' });
+      mockPaymentRepo.save.mockResolvedValue({
+        ...payment,
+        status: RentalPaymentStatus.PAID,
+      });
+      const result = await service.markPaymentPaid('pay-1', {
+        reference: 'TXN123',
+      });
       expect(result.status).toBe(RentalPaymentStatus.PAID);
     });
   });
@@ -101,7 +135,9 @@ describe('RentalAdminService', () => {
         type: RentalPaymentType.SERVICE_FEE,
         status: RentalPaymentStatus.PAID,
       });
-      await expect(service.markCautionRefunded('pay-1')).rejects.toThrow(BadRequestException);
+      await expect(service.markCautionRefunded('pay-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws if caution not yet paid', async () => {
@@ -110,7 +146,9 @@ describe('RentalAdminService', () => {
         type: RentalPaymentType.CAUTION,
         status: RentalPaymentStatus.PENDING,
       });
-      await expect(service.markCautionRefunded('pay-1')).rejects.toThrow(BadRequestException);
+      await expect(service.markCautionRefunded('pay-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 

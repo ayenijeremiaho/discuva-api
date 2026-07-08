@@ -457,10 +457,9 @@ export class TitheService {
 
     if (search) {
       const s = `%${search.toLowerCase()}%`;
-      qb.andWhere(
-        '(LOWER(u.rawEmail) LIKE :s OR LOWER(u.reference) LIKE :s)',
-        { s },
-      );
+      qb.andWhere('(LOWER(u.rawEmail) LIKE :s OR LOWER(u.reference) LIKE :s)', {
+        s,
+      });
     }
 
     const [data, total] = await qb.getManyAndCount();
@@ -678,7 +677,12 @@ export class TitheService {
   async submitProof(
     user: MemberAuth,
     dto: SubmitTitheProofDto,
-    file: { buffer: Buffer; originalname: string; size: number },
+    file: {
+      buffer: Buffer;
+      originalname: string;
+      size: number;
+      mimetype: string;
+    },
   ): Promise<TithePaymentProof> {
     if (file.size > TITHE_PROOF_MAX_BYTES) {
       throw new BadRequestException(
@@ -696,6 +700,7 @@ export class TitheService {
       file.buffer,
       'tithe-proofs',
       `${user.id}-${Date.now()}`,
+      file.mimetype,
     );
 
     const expiresAt = new Date();

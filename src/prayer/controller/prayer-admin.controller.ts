@@ -184,7 +184,11 @@ export class PrayerAdminController {
     @Query('month') month: string,
     @Query('year') year: string,
   ) {
-    return this.rosterService.autoAssign(programId, Number(month), Number(year));
+    return this.rosterService.autoAssign(
+      programId,
+      Number(month),
+      Number(year),
+    );
   }
 
   @Post('roster/manual-assign')
@@ -203,7 +207,11 @@ export class PrayerAdminController {
     @Query('month') month: string,
     @Query('year') year: string,
   ) {
-    return this.rosterService.validateRoster(programId, Number(month), Number(year));
+    return this.rosterService.validateRoster(
+      programId,
+      Number(month),
+      Number(year),
+    );
   }
 
   @Get('roster/:month/:year')
@@ -213,7 +221,11 @@ export class PrayerAdminController {
     @Param('year') year: string,
     @Query('programId') programId: string,
   ) {
-    return this.meetingService.getMonthlyRoster(programId, Number(month), Number(year));
+    return this.meetingService.getMonthlyRoster(
+      programId,
+      Number(month),
+      Number(year),
+    );
   }
 
   @Patch('roster/entries/:id/reschedule')

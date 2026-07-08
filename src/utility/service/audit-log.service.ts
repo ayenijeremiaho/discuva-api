@@ -1,10 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bull';
 import { AuditLog } from '../entity/audit-log.entity';
-import { Member } from '../../member/entity/member.entity';
 import { PaginationResponseDto } from '../dto/pagination-response.dto';
 import { UtilityService } from './utility.service';
+import {
+  AUDIT_LOG_QUEUE,
+  AUDIT_LOG_WRITE_JOB,
+} from '../processor/audit-log.processor';
 
 export type AuditAction =
   // Auth & identity
@@ -152,23 +157,21 @@ export class AuditLogService {
   constructor(
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
+    @InjectQueue(AUDIT_LOG_QUEUE) private readonly auditQueue: Queue,
   ) {}
 
   log(action: AuditAction, context: AuditContext = {}): void {
     this.logger.log({ action, ...context });
-
-    this.auditLogRepository
-      .save({
-        action,
-        actor: context.actorId ? ({ id: context.actorId } as Member) : null,
-        targetId: context.targetId ?? null,
-        targetEmail: context.targetEmail ?? null,
-        targetName: context.targetName ?? null,
-        metadata: context.metadata ?? null,
-      })
-      .catch((err) =>
-        this.logger.error(`Failed to persist audit log: ${action}`, err),
-      );
+    this.auditQueue.add(
+      AUDIT_LOG_WRITE_JOB,
+      { action, context },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2_000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
   }
 
   async findAll(

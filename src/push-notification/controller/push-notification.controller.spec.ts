@@ -16,13 +16,17 @@ describe('PushNotificationController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PushNotificationController],
-      providers: [{ provide: PushNotificationService, useValue: mockPushService }],
+      providers: [
+        { provide: PushNotificationService, useValue: mockPushService },
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
       .compile();
 
-    controller = module.get<PushNotificationController>(PushNotificationController);
+    controller = module.get<PushNotificationController>(
+      PushNotificationController,
+    );
   });
 
   it('should be defined', () => {

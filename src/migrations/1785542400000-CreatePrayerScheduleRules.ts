@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreatePrayerScheduleRules1785542400000 implements MigrationInterface {
+export class CreatePrayerScheduleRules1785542400000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE "prayer_schedule_rules" (

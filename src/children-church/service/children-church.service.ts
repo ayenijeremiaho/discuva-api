@@ -609,7 +609,12 @@ export class ChildrenChurchService {
       skip: (page - 1) * limit,
       take: limit,
     });
-    return UtilityService.createPaginationResponse(checkIns, page, limit, total);
+    return UtilityService.createPaginationResponse(
+      checkIns,
+      page,
+      limit,
+      total,
+    );
   }
 
   async getChildCheckInHistory(
@@ -685,7 +690,12 @@ export class ChildrenChurchService {
       skip: (page - 1) * limit,
       take: limit,
     });
-    return UtilityService.createPaginationResponse(data, page, limit, totalCount);
+    return UtilityService.createPaginationResponse(
+      data,
+      page,
+      limit,
+      totalCount,
+    );
   }
 
   // ─── Authorization Helpers ────────────────────────────────────────────────

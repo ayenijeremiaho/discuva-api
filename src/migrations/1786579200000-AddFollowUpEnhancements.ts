@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddFollowUpEnhancements1786579200000 implements MigrationInterface {
+export class AddFollowUpEnhancements1786579200000
+  implements MigrationInterface
+{
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `ALTER TABLE follow_up_notes ADD COLUMN contact_method VARCHAR`,

@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -18,6 +19,7 @@ export class Offering extends BaseEntity {
   @Column({ type: 'uuid', nullable: true, name: 'service_event_id' })
   serviceEventId: string | null;
 
+  @Index('IDX_offerings_fund_id')
   @ManyToOne(() => Fund, { nullable: false, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'fund_id' })
   fund: Fund;

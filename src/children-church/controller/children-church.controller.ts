@@ -251,9 +251,7 @@ export class ChildrenChurchController {
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.CHILDREN_CHURCH_READ)
   @Get('admin/checkin/active')
-  async getActiveCheckInsAdmin(
-    @Query('classGroupId') classGroupId?: string,
-  ) {
+  async getActiveCheckInsAdmin(@Query('classGroupId') classGroupId?: string) {
     return this.childrenChurchService.getActiveCheckInsAdmin(classGroupId);
   }
 

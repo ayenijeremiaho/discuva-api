@@ -521,9 +521,17 @@ describe('MemberService', () => {
 
       await service.purgeDevice('member-1', 'admin-1');
 
-      expect(mockMemberRepo.update).toHaveBeenCalledWith('member-1', { deviceId: null });
-      expect(mockSessionService.updateLogout).toHaveBeenCalledWith('member-1', SessionSurface.MEMBER);
-      expect(mockSessionService.updateLogout).toHaveBeenCalledWith('member-1', SessionSurface.ADMIN);
+      expect(mockMemberRepo.update).toHaveBeenCalledWith('member-1', {
+        deviceId: null,
+      });
+      expect(mockSessionService.updateLogout).toHaveBeenCalledWith(
+        'member-1',
+        SessionSurface.MEMBER,
+      );
+      expect(mockSessionService.updateLogout).toHaveBeenCalledWith(
+        'member-1',
+        SessionSurface.ADMIN,
+      );
       expect(mockPushService.unsubscribe).toHaveBeenCalledWith('member-1');
     });
   });

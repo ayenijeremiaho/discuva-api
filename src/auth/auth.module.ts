@@ -22,7 +22,11 @@ import { UtilityModule } from '../utility/utility.module';
   imports: [
     MemberModule,
     UtilityModule,
-    TypeOrmModule.forFeature([PasswordResetOtp, DeviceResetOtp, DepartmentLead]),
+    TypeOrmModule.forFeature([
+      PasswordResetOtp,
+      DeviceResetOtp,
+      DepartmentLead,
+    ]),
     JwtModule.registerAsync(jwtConfig.asProvider()),
     ConfigModule.forFeature(jwtConfig),
     ConfigModule.forFeature(refreshJwtConfig),

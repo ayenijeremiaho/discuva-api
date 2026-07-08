@@ -19,12 +19,17 @@ export class WorkerProfile extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @OneToOne(() => Member, (member) => member.workerProfile)
+  @OneToOne(() => Member, (member) => member.workerProfile, {
+    onDelete: 'RESTRICT',
+  })
   @JoinColumn({ name: 'member_id' })
   member: Member;
 
   @Index()
-  @ManyToOne(() => Department, (department) => department.id)
+  @ManyToOne(() => Department, (department) => department.id, {
+    nullable: false,
+    onDelete: 'RESTRICT',
+  })
   @JoinColumn({ name: 'department_id' })
   department: Department;
 

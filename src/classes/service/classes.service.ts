@@ -81,15 +81,15 @@ export class ClassesService {
   async deleteClass(id: string): Promise<void> {
     const churchClass = await this.getClassOrThrow(id);
 
-    const activeEnrollments = await this.enrollmentRepo.count({
-      where: { churchClass: { id }, status: EnrollmentStatusEnum.IN_PROGRESS },
+    const totalEnrollments = await this.enrollmentRepo.count({
+      where: { churchClass: { id } },
     });
-    if (activeEnrollments > 0) {
+    if (totalEnrollments > 0) {
       this.logger.warn(
-        `Delete of class "${churchClass.name}" blocked — ${activeEnrollments} active enrollment(s)`,
+        `Delete of class "${churchClass.name}" blocked — ${totalEnrollments} enrollment record(s) exist`,
       );
       throw new BadRequestException(
-        `Cannot delete this class — ${activeEnrollments} member(s) are currently enrolled. Complete or cancel their enrolments first.`,
+        `Cannot delete this class — it has ${totalEnrollments} enrolment record(s). Classes with enrolment history cannot be deleted.`,
       );
     }
 
@@ -139,7 +139,9 @@ export class ClassesService {
       .update(ClassEnrollment)
       .set({ status: EnrollmentStatusEnum.COMPLETED, completedAt: now })
       .where('church_class_id = :id', { id })
-      .andWhere('status = :status', { status: EnrollmentStatusEnum.IN_PROGRESS })
+      .andWhere('status = :status', {
+        status: EnrollmentStatusEnum.IN_PROGRESS,
+      })
       .execute();
 
     churchClass.status = ChurchClassStatusEnum.CLOSED;

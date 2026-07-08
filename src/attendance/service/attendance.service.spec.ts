@@ -792,7 +792,9 @@ describe('AttendanceService', () => {
     });
 
     it('should throw BadRequestException if page < 1', async () => {
-      await expect(service.getAllHistory(0)).rejects.toThrow(BadRequestException);
+      await expect(service.getAllHistory(0)).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should apply memberId filter when provided', async () => {
@@ -826,7 +828,16 @@ describe('AttendanceService', () => {
         totalPages: 1,
       });
 
-      await service.getAllHistory(1, 10, undefined, undefined, undefined, undefined, undefined, 'john');
+      await service.getAllHistory(
+        1,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'john',
+      );
 
       expect(qb.andWhere).toHaveBeenCalledWith(
         '(member.firstname ILIKE :search OR member.lastname ILIKE :search OR member.email ILIKE :search)',
@@ -866,7 +877,16 @@ describe('AttendanceService', () => {
         totalPages: 1,
       });
 
-      await service.getAllHistory(1, 10, undefined, undefined, undefined, undefined, undefined, 'doe');
+      await service.getAllHistory(
+        1,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'doe',
+      );
 
       const ilikeCall = (qb.andWhere as jest.Mock).mock.calls.find(
         (call) => typeof call[0] === 'string' && call[0].includes('ILIKE'),
@@ -1108,7 +1128,13 @@ describe('AttendanceService', () => {
           : Promise.resolve([{ total: '1' }]);
       });
 
-      const result = await service.getAtRiskMembers(3, undefined, undefined, 1, 20);
+      const result = await service.getAtRiskMembers(
+        3,
+        undefined,
+        undefined,
+        1,
+        20,
+      );
       expect(mockDataSource.query).toHaveBeenCalledTimes(2);
       expect(result.data).toHaveLength(1);
       expect(result.data[0]).toMatchObject({
@@ -1131,7 +1157,13 @@ describe('AttendanceService', () => {
           : Promise.resolve([{ total: '0' }]);
       });
 
-      const result = await service.getAtRiskMembers(3, undefined, undefined, 1, 20);
+      const result = await service.getAtRiskMembers(
+        3,
+        undefined,
+        undefined,
+        1,
+        20,
+      );
       expect(result.data).toHaveLength(0);
       expect(result.totalCount).toBe(0);
     });
@@ -1167,7 +1199,13 @@ describe('AttendanceService', () => {
           : Promise.resolve([{ total: '1' }]);
       });
 
-      const result = await service.getAtRiskMembers(3, undefined, undefined, 1, 20);
+      const result = await service.getAtRiskMembers(
+        3,
+        undefined,
+        undefined,
+        1,
+        20,
+      );
       expect(result.data[0].lastSeenAt).toBeNull();
       expect(result.data[0].hasOpenFollowUpTask).toBe(false);
     });

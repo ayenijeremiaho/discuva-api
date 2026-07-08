@@ -27,7 +27,10 @@ export class PrayerWorkerController {
 
   @Get('programs')
   listPrograms(@Query('name') name?: string) {
-    return this.configService.listPrograms([PrayerAudience.WORKERS, PrayerAudience.ALL], name);
+    return this.configService.listPrograms(
+      [PrayerAudience.WORKERS, PrayerAudience.ALL],
+      name,
+    );
   }
 
   @Get('available')

@@ -1,6 +1,6 @@
-import { Injectable } from "@nestjs/common";
-import DOMPurify from "dompurify";
-import { JSDOM } from "jsdom";
+import { Injectable } from '@nestjs/common';
+import DOMPurify from 'dompurify';
+import { JSDOM } from 'jsdom';
 
 /**
  * Sanitization service for XSS prevention.

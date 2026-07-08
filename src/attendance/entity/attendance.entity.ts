@@ -39,6 +39,7 @@ export class Attendance extends BaseEntity {
   event: Event;
 
   // Which slot they physically walked into. Null for absence and online records.
+  @Index('IDX_attendances_service_slot_id')
   @ManyToOne(() => ServiceSlot, (slot) => slot.attendances, {
     nullable: true,
     onDelete: 'SET NULL',

@@ -44,8 +44,14 @@ describe('PushNotificationService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PushNotificationService,
-        { provide: getRepositoryToken(PushSubscription), useValue: mockSubRepo },
-        { provide: getRepositoryToken(WorkerProfile), useValue: mockWorkerRepo },
+        {
+          provide: getRepositoryToken(PushSubscription),
+          useValue: mockSubRepo,
+        },
+        {
+          provide: getRepositoryToken(WorkerProfile),
+          useValue: mockWorkerRepo,
+        },
         { provide: getQueueToken('push-notifications'), useValue: mockQueue },
         { provide: ConfigService, useValue: mockConfig },
       ],
@@ -69,7 +75,11 @@ describe('PushNotificationService', () => {
 
   describe('subscribe', () => {
     it('deletes existing subscription then saves new one', async () => {
-      const dto = { endpoint: 'https://push.example.com/sub', p256dh: 'key', auth: 'auth' };
+      const dto = {
+        endpoint: 'https://push.example.com/sub',
+        p256dh: 'key',
+        auth: 'auth',
+      };
       await service.subscribe('member-1', dto);
       expect(mockSubRepo.delete).toHaveBeenCalledWith({ memberId: 'member-1' });
       expect(mockSubRepo.save).toHaveBeenCalled();
@@ -85,13 +95,23 @@ describe('PushNotificationService', () => {
 
   describe('dispatchToMemberIds', () => {
     it('does nothing when memberIds is empty', async () => {
-      await service.dispatchToMemberIds([], { idempotencyKey: 'k', title: 't', body: 'b', url: '/u' });
+      await service.dispatchToMemberIds([], {
+        idempotencyKey: 'k',
+        title: 't',
+        body: 'b',
+        url: '/u',
+      });
       expect(mockSubRepo.find).not.toHaveBeenCalled();
     });
 
     it('enqueues one job per subscription found', async () => {
       mockSubRepo.find.mockResolvedValueOnce([
-        { memberId: 'member-1', endpoint: 'https://ep', p256dh: 'k', auth: 'a' },
+        {
+          memberId: 'member-1',
+          endpoint: 'https://ep',
+          p256dh: 'k',
+          auth: 'a',
+        },
       ]);
       await service.dispatchToMemberIds(['member-1'], {
         idempotencyKey: 'prayer-test:1',
@@ -120,7 +140,12 @@ describe('PushNotificationService', () => {
 
   describe('dispatchToWorkerProfileIds', () => {
     it('does nothing when workerProfileIds is empty', async () => {
-      await service.dispatchToWorkerProfileIds([], { idempotencyKey: 'k', title: 't', body: 'b', url: '/' });
+      await service.dispatchToWorkerProfileIds([], {
+        idempotencyKey: 'k',
+        title: 't',
+        body: 'b',
+        url: '/',
+      });
       expect(mockWorkerRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
@@ -131,7 +156,12 @@ describe('PushNotificationService', () => {
         getRawMany: jest.fn().mockResolvedValue([{ memberId: 'member-1' }]),
       });
       mockSubRepo.find.mockResolvedValueOnce([
-        { memberId: 'member-1', endpoint: 'https://ep', p256dh: 'k', auth: 'a' },
+        {
+          memberId: 'member-1',
+          endpoint: 'https://ep',
+          p256dh: 'k',
+          auth: 'a',
+        },
       ]);
       await service.dispatchToWorkerProfileIds(['wp-1'], {
         idempotencyKey: 'prayer-auto-assign:prog:1:2026',

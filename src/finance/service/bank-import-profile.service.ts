@@ -78,7 +78,7 @@ export class BankImportProfileService {
   async update(
     id: string,
     dto: UpdateBankImportProfileDto,
-    admin: Admin,
+    _admin: Admin,
   ): Promise<BankImportProfile> {
     const profile = await this.findOne(id);
     if (dto.amountConvention)

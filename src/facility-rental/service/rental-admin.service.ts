@@ -72,7 +72,10 @@ export class RentalAdminService {
     return saved;
   }
 
-  async rejectBooking(id: string, dto: RejectBookingDto): Promise<RentalBooking> {
+  async rejectBooking(
+    id: string,
+    dto: RejectBookingDto,
+  ): Promise<RentalBooking> {
     const booking = await this.bookingService.getBookingById(id);
     if (booking.status !== RentalBookingStatus.PENDING) {
       throw new BadRequestException('Only pending bookings can be rejected');

@@ -139,10 +139,14 @@ export class MemberService {
     });
     profile.member = member;
 
-    await this.workerProfileRepository.save(profile);
-    await this.memberRepository.update(memberId, {
-      role: MemberRoleEnum.WORKER,
-    });
+    await this.memberRepository.manager.transaction(
+      async (transactionalEntityManager) => {
+        await transactionalEntityManager.save(profile);
+        await transactionalEntityManager.update(Member, memberId, {
+          role: MemberRoleEnum.WORKER,
+        });
+      },
+    );
 
     this.logger.log(
       `Member ${memberId} promoted to worker in department ${dto.departmentId}`,
@@ -607,6 +611,8 @@ export class MemberService {
     return UtilityService.createPaginationResponse(members, page, limit, total);
   }
 
+  // Batch-only: used exclusively by the attendance scheduler to build push-notification lists.
+  // Never call from a request-scoped context — no take/limit is intentional.
   async getMembersNotCheckedInForEvent(eventId: string): Promise<Member[]> {
     return this.memberRepository
       .createQueryBuilder('member')
@@ -622,6 +628,8 @@ export class MemberService {
       .getMany();
   }
 
+  // Batch-only: used exclusively by the attendance scheduler to build push-notification lists.
+  // Never call from a request-scoped context — no take/limit is intentional.
   async getWorkersNotCheckedInForEvent(eventId: string): Promise<Member[]> {
     return this.memberRepository
       .createQueryBuilder('member')

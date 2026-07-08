@@ -47,10 +47,19 @@ describe('RentalConfigService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RentalConfigService,
-        { provide: getRepositoryToken(RentalFacility), useValue: mockFacilityRepo },
-        { provide: getRepositoryToken(RentalPricingTier), useValue: mockTierRepo },
+        {
+          provide: getRepositoryToken(RentalFacility),
+          useValue: mockFacilityRepo,
+        },
+        {
+          provide: getRepositoryToken(RentalPricingTier),
+          useValue: mockTierRepo,
+        },
         { provide: getRepositoryToken(RentalAddon), useValue: mockAddonRepo },
-        { provide: getRepositoryToken(RentalCalendarBlock), useValue: mockBlockRepo },
+        {
+          provide: getRepositoryToken(RentalCalendarBlock),
+          useValue: mockBlockRepo,
+        },
         { provide: getRepositoryToken(Asset), useValue: mockAssetRepo },
       ],
     }).compile();
@@ -72,7 +81,10 @@ describe('RentalConfigService', () => {
       const facility = { id: 'fac-1', name: 'Hall A', basePrice: 50000 };
       mockFacilityRepo.create.mockReturnValue(facility);
       mockFacilityRepo.save.mockResolvedValue(facility);
-      const result = await service.createFacility({ name: 'Hall A', basePrice: 50000 });
+      const result = await service.createFacility({
+        name: 'Hall A',
+        basePrice: 50000,
+      });
       expect(result).toEqual(facility);
     });
   });
@@ -80,7 +92,10 @@ describe('RentalConfigService', () => {
   describe('upsertPricingTier', () => {
     it('creates new tier if none exists', async () => {
       mockTierRepo.findOne.mockResolvedValue(null);
-      const tier = { id: 'tier-1', memberCategory: RentalMemberCategory.WORKER };
+      const tier = {
+        id: 'tier-1',
+        memberCategory: RentalMemberCategory.WORKER,
+      };
       mockTierRepo.create.mockReturnValue(tier);
       mockTierRepo.save.mockResolvedValue(tier);
       const result = await service.upsertPricingTier({
@@ -92,7 +107,11 @@ describe('RentalConfigService', () => {
     });
 
     it('updates existing tier', async () => {
-      const existing = { id: 'tier-1', memberCategory: RentalMemberCategory.WORKER, discountValue: 10 };
+      const existing = {
+        id: 'tier-1',
+        memberCategory: RentalMemberCategory.WORKER,
+        discountValue: 10,
+      };
       mockTierRepo.findOne.mockResolvedValue(existing);
       mockTierRepo.save.mockResolvedValue({ ...existing, discountValue: 20 });
       const result = await service.upsertPricingTier({
@@ -107,7 +126,9 @@ describe('RentalConfigService', () => {
   describe('getFacilityById', () => {
     it('throws if not found', async () => {
       mockFacilityRepo.findOneBy.mockResolvedValue(null);
-      await expect(service.getFacilityById('bad-id')).rejects.toThrow(NotFoundException);
+      await expect(service.getFacilityById('bad-id')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

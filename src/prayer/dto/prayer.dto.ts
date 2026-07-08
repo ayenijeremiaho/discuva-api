@@ -11,7 +11,11 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import { PrayerAudience, PrayerDayMode, PrayerRuleType } from '../enum/prayer.enum';
+import {
+  PrayerAudience,
+  PrayerDayMode,
+  PrayerRuleType,
+} from '../enum/prayer.enum';
 import { DepartmentLeadTypeEnum } from '../../department/enums/department-lead-type.enum';
 
 export class CreatePrayerProgramDto {

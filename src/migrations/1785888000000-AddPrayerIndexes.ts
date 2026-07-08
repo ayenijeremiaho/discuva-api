@@ -20,13 +20,9 @@ export class AddPrayerIndexes1785888000000 implements MigrationInterface {
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `DROP INDEX "IDX_prayer_meetings_selectionStatus"`,
-    );
+    await queryRunner.query(`DROP INDEX "IDX_prayer_meetings_selectionStatus"`);
     await queryRunner.query(`DROP INDEX "IDX_prayer_meetings_status"`);
-    await queryRunner.query(
-      `DROP INDEX "IDX_prayer_roster_entries_status"`,
-    );
+    await queryRunner.query(`DROP INDEX "IDX_prayer_roster_entries_status"`);
     await queryRunner.query(
       `DROP INDEX "IDX_prayer_roster_entries_reminderDaySent"`,
     );

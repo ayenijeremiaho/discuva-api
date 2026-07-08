@@ -36,7 +36,12 @@ import { UtilityModule } from '../utility/utility.module';
     ]),
     UtilityModule,
   ],
-  providers: [RentalConfigService, RentalBookingService, RentalAdminService, RentalStatusScheduler],
+  providers: [
+    RentalConfigService,
+    RentalBookingService,
+    RentalAdminService,
+    RentalStatusScheduler,
+  ],
   controllers: [RentalAdminController, RentalMemberController],
   exports: [RentalBookingService, RentalConfigService],
 })

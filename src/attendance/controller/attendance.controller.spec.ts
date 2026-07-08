@@ -26,7 +26,9 @@ describe('AttendanceController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AttendanceController],
-      providers: [{ provide: AttendanceService, useValue: mockAttendanceService }],
+      providers: [
+        { provide: AttendanceService, useValue: mockAttendanceService },
+      ],
     })
       .overrideGuard(AdminGuard)
       .useValue({ canActivate: () => true })
@@ -45,7 +47,10 @@ describe('AttendanceController', () => {
 
   describe('getAllHistory', () => {
     it('should call service with default pagination when no query params given', async () => {
-      mockAttendanceService.getAllHistory.mockResolvedValue({ data: [], totalCount: 0 });
+      mockAttendanceService.getAllHistory.mockResolvedValue({
+        data: [],
+        totalCount: 0,
+      });
 
       await controller.getAllHistory({
         page: 1,
@@ -53,12 +58,22 @@ describe('AttendanceController', () => {
       } as any);
 
       expect(mockAttendanceService.getAllHistory).toHaveBeenCalledWith(
-        1, 10, undefined, undefined, undefined, undefined, undefined, undefined,
+        1,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
       );
     });
 
     it('should pass search param to service', async () => {
-      mockAttendanceService.getAllHistory.mockResolvedValue({ data: [], totalCount: 0 });
+      mockAttendanceService.getAllHistory.mockResolvedValue({
+        data: [],
+        totalCount: 0,
+      });
 
       await controller.getAllHistory({
         page: 1,
@@ -67,12 +82,22 @@ describe('AttendanceController', () => {
       } as any);
 
       expect(mockAttendanceService.getAllHistory).toHaveBeenCalledWith(
-        1, 10, undefined, undefined, undefined, undefined, undefined, 'john',
+        1,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'john',
       );
     });
 
     it('should pass all filters through to service', async () => {
-      mockAttendanceService.getAllHistory.mockResolvedValue({ data: [], totalCount: 0 });
+      mockAttendanceService.getAllHistory.mockResolvedValue({
+        data: [],
+        totalCount: 0,
+      });
 
       await controller.getAllHistory({
         page: 2,
@@ -86,12 +111,22 @@ describe('AttendanceController', () => {
       } as any);
 
       expect(mockAttendanceService.getAllHistory).toHaveBeenCalledWith(
-        2, 20, 'member-1', 'slot-1', AttendanceStatusEnum.PRESENT, '2026-01-01', '2026-06-30', 'doe',
+        2,
+        20,
+        'member-1',
+        'slot-1',
+        AttendanceStatusEnum.PRESENT,
+        '2026-01-01',
+        '2026-06-30',
+        'doe',
       );
     });
 
     it('should pass undefined search when not provided in query', async () => {
-      mockAttendanceService.getAllHistory.mockResolvedValue({ data: [], totalCount: 0 });
+      mockAttendanceService.getAllHistory.mockResolvedValue({
+        data: [],
+        totalCount: 0,
+      });
 
       await controller.getAllHistory({
         page: 1,

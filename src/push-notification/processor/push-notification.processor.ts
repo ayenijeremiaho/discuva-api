@@ -30,13 +30,19 @@ export class PushNotificationProcessor {
     try {
       await webPush.sendNotification(
         { endpoint, keys: { p256dh, auth } },
-        JSON.stringify({ title: payload.title, body: payload.body, url: payload.url }),
+        JSON.stringify({
+          title: payload.title,
+          body: payload.body,
+          url: payload.url,
+        }),
       );
       this.cacheService.set(idempotencyKey, '1', 86_400);
     } catch (err: any) {
       if (err?.statusCode === 410 || err?.statusCode === 404) {
         await this.subRepo.delete({ memberId });
-        this.logger.warn(`Removed stale push subscription for member ${memberId}`);
+        this.logger.warn(
+          `Removed stale push subscription for member ${memberId}`,
+        );
         return;
       }
       throw err;

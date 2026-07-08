@@ -326,7 +326,7 @@ export class AttendanceService {
       });
     if (search)
       qb.andWhere(
-        "(member.firstname ILIKE :search OR member.lastname ILIKE :search OR member.email ILIKE :search)",
+        '(member.firstname ILIKE :search OR member.lastname ILIKE :search OR member.email ILIKE :search)',
         { search: `%${search}%` },
       );
 
@@ -1158,7 +1158,9 @@ export class AttendanceService {
          GROUP BY m.id
          HAVING COUNT(a.id) >= $2
        ) sub`,
-      from && to ? [AttendanceStatusEnum.ABSENT, minAbsences, from, to] : [AttendanceStatusEnum.ABSENT, minAbsences],
+      from && to
+        ? [AttendanceStatusEnum.ABSENT, minAbsences, from, to]
+        : [AttendanceStatusEnum.ABSENT, minAbsences],
     );
 
     const total = Number(countRows[0]?.total ?? 0);

@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -7,10 +7,9 @@ import { AdminRoleService } from '../service/admin-role.service';
 import { Member } from '../../member/entity/member.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
-import { UtilityService } from '../../utility/service/utility.service';
 
 @Injectable()
-export class DefaultAdminSeed implements OnApplicationBootstrap {
+export class DefaultAdminSeed {
   private readonly logger = new Logger(DefaultAdminSeed.name);
 
   constructor(
@@ -22,52 +21,48 @@ export class DefaultAdminSeed implements OnApplicationBootstrap {
     private readonly configService: ConfigService,
   ) {}
 
-  async onApplicationBootstrap(): Promise<void> {
+  async run(): Promise<void> {
     const adminEmail = this.configService.get<string>('DEFAULT_ADMIN_EMAIL');
-    const adminPassword = this.configService.get<string>(
-      'DEFAULT_ADMIN_PASSWORD',
+    const passwordHash = this.configService.get<string>(
+      'DEFAULT_ADMIN_PASSWORD_HASH',
     );
 
-    if (!adminEmail || !adminPassword) {
+    if (!adminEmail || !passwordHash) {
       this.logger.warn(
-        'DEFAULT_ADMIN_EMAIL or DEFAULT_ADMIN_PASSWORD not set — skipping admin seed',
+        'DEFAULT_ADMIN_EMAIL or DEFAULT_ADMIN_PASSWORD_HASH not set — skipping admin seed',
       );
       return;
     }
 
-    const memberExists = await this.memberRepository.existsBy({
-      email: adminEmail,
-    });
-    if (memberExists) {
-      const member = await this.memberRepository.findOneBy({
-        email: adminEmail,
-      });
-      const adminExists = await this.adminRepository.existsBy({
-        member: { id: member.id },
-      });
-      if (adminExists) {
-        this.logger.log('Default admin already seeded — skipping');
-        return;
-      }
+    if (!passwordHash.startsWith('$argon2')) {
+      this.logger.error(
+        'DEFAULT_ADMIN_PASSWORD_HASH does not look like a valid argon2 hash — aborting seed',
+      );
+      return;
+    }
+
+    const anyAdminExists = await this.adminRepository.existsBy({});
+    if (anyAdminExists) {
+      this.logger.log('Admin records already exist — skipping seed');
+      return;
     }
 
     const superAdminRole = await this.adminRoleService.findOrCreateSuperAdmin();
 
     let member = await this.memberRepository.findOneBy({ email: adminEmail });
     if (!member) {
-      const password = await UtilityService.hashValue(adminPassword);
       member = await this.memberRepository.save(
         this.memberRepository.create({
           firstname: 'Admin',
           lastname: 'User',
           email: adminEmail,
-          password,
+          password: passwordHash,
           role: MemberRoleEnum.MEMBER,
           status: MemberStatusEnum.ACTIVE,
           changedPassword: false,
         }),
       );
-      this.logger.log(`Default admin member created: ${adminEmail}`);
+      this.logger.log('Default admin member created');
     }
 
     await this.adminRepository.save(
@@ -78,6 +73,6 @@ export class DefaultAdminSeed implements OnApplicationBootstrap {
       }),
     );
 
-    this.logger.log(`Default admin seeded with SuperAdmin role: ${adminEmail}`);
+    this.logger.log('Default admin seeded with SuperAdmin role');
   }
 }

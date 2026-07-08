@@ -14,14 +14,8 @@ export class AddFollowUpTaskIndexes1786752000000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(
-      `DROP INDEX "IDX_follow_up_tasks_type"`,
-    );
-    await queryRunner.query(
-      `DROP INDEX "IDX_follow_up_tasks_assigned_to_id"`,
-    );
-    await queryRunner.query(
-      `DROP INDEX "IDX_follow_up_tasks_status"`,
-    );
+    await queryRunner.query(`DROP INDEX "IDX_follow_up_tasks_type"`);
+    await queryRunner.query(`DROP INDEX "IDX_follow_up_tasks_assigned_to_id"`);
+    await queryRunner.query(`DROP INDEX "IDX_follow_up_tasks_status"`);
   }
 }

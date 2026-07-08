@@ -120,11 +120,17 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async incr(key: string, ttlSeconds: number): Promise<number> {
-    const count = await this.redis.incr(key);
-    if (count === 1) {
-      await this.redis.expire(key, ttlSeconds);
-    }
-    return count;
+    // Lua script makes INCR + EXPIRE atomic — prevents a key with no TTL
+    // if the process crashes between the two commands.
+    const result = await this.redis.eval(
+      `local n = redis.call('INCR', KEYS[1])
+       if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+       return n`,
+      1,
+      key,
+      ttlSeconds,
+    );
+    return result as number;
   }
 
   async del(key: string): Promise<number> {
@@ -137,6 +143,16 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
 
   async has(key: string): Promise<boolean> {
     return (await this.redis.exists(key)) > 0;
+  }
+
+  async blacklistJti(jti: string, ttlSeconds: number): Promise<void> {
+    if (ttlSeconds > 0) {
+      await this.redis.set(this.key('jti_bl', jti), '1', 'EX', ttlSeconds);
+    }
+  }
+
+  async isJtiBlacklisted(jti: string): Promise<boolean> {
+    return (await this.redis.exists(this.key('jti_bl', jti))) === 1;
   }
 
   async getTTL(key: string): Promise<number | undefined> {

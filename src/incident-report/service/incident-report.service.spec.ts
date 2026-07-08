@@ -59,7 +59,8 @@ const mockAuditLogService = {
 
 const mockCloudinaryService = {
   uploadBuffer: jest.fn().mockResolvedValue({
-    secureUrl: 'https://res.cloudinary.com/test/image/upload/v1/incident-images/img.jpg',
+    secureUrl:
+      'https://res.cloudinary.com/test/image/upload/v1/incident-images/img.jpg',
     publicId: 'incident-images/img',
     resourceType: 'image',
   }),
@@ -137,16 +138,40 @@ describe('IncidentReportService', () => {
 
     it('uploads image files to cloudinary and stores urls', async () => {
       const dto = { title: 'Broken window', description: 'Cracked glass' };
-      const fakeFile = { buffer: Buffer.from('img'), mimetype: 'image/jpeg' } as Express.Multer.File;
-      const created = { id: 'uuid-1', ...dto, images: null, isAnonymous: false, location: null, reporter: { id: 'member-1' } };
+      const fakeFile = {
+        buffer: Buffer.from('img'),
+        mimetype: 'image/jpeg',
+      } as Express.Multer.File;
+      const created = {
+        id: 'uuid-1',
+        ...dto,
+        images: null,
+        isAnonymous: false,
+        location: null,
+        reporter: { id: 'member-1' },
+      };
       mockReportRepo.create.mockReturnValue(created);
-      mockReportRepo.save.mockResolvedValue({ ...created, images: ['https://res.cloudinary.com/test/image/upload/v1/incident-images/img.jpg'] });
+      mockReportRepo.save.mockResolvedValue({
+        ...created,
+        images: [
+          'https://res.cloudinary.com/test/image/upload/v1/incident-images/img.jpg',
+        ],
+      });
 
       await service.create(dto, 'member-1', [fakeFile]);
 
-      expect(mockCloudinaryService.uploadBuffer).toHaveBeenCalledWith(fakeFile.buffer, 'incident-images');
+      expect(mockCloudinaryService.uploadBuffer).toHaveBeenCalledWith(
+        fakeFile.buffer,
+        'incident-images',
+        undefined,
+        'image/jpeg',
+      );
       expect(mockReportRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ images: ['https://res.cloudinary.com/test/image/upload/v1/incident-images/img.jpg'] }),
+        expect.objectContaining({
+          images: [
+            'https://res.cloudinary.com/test/image/upload/v1/incident-images/img.jpg',
+          ],
+        }),
       );
     });
 
@@ -230,7 +255,9 @@ describe('IncidentReportService', () => {
       await service.findAll(1, 20, { status: IncidentStatus.OPEN });
 
       expect(mockReportRepo.findAndCount).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ status: IncidentStatus.OPEN }) }),
+        expect.objectContaining({
+          where: expect.objectContaining({ status: IncidentStatus.OPEN }),
+        }),
       );
     });
 

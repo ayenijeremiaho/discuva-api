@@ -89,7 +89,13 @@ export class FollowUpAdminController {
     @Query('type') type?: FollowUpTaskTypeEnum,
     @Query('search') search?: string,
   ) {
-    return this.followUpService.getAllTasks(+page, +limit, status, type, search);
+    return this.followUpService.getAllTasks(
+      +page,
+      +limit,
+      status,
+      type,
+      search,
+    );
   }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)

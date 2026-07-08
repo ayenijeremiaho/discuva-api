@@ -144,7 +144,10 @@ describe('ChildrenChurchController', () => {
   });
 
   it('getCheckInsBySlot — passes slotId with default pagination', async () => {
-    mockChildrenChurchService.getCheckInsBySlot.mockResolvedValue({ data: [], meta: {} });
+    mockChildrenChurchService.getCheckInsBySlot.mockResolvedValue({
+      data: [],
+      meta: {},
+    });
 
     await controller.getCheckInsBySlot('slot-1', 1, 20);
 

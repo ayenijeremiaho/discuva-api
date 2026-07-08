@@ -367,7 +367,7 @@
                 "admin-login"
               ]
             },
-            "description": "Admin portal login (web). Validates credentials AND verifies the caller has an active Admin record. Returns 403 if the member has no admin access. No device lock \u2014 this route is web-first."
+            "description": "Admin portal login (web). Validates credentials AND verifies the caller has an active Admin record. Returns 403 if the member has no admin access. No device lock \u2014 this route is web-first.\n\nThe refresh token is NOT returned in the response body. It is set as an httpOnly cookie (name: `refresh_token`, path: `/v1/auth/refresh`) so that JavaScript on the page cannot read it. The cookie is sent automatically by the browser on subsequent refresh calls."
           },
           "response": [
             {
@@ -398,10 +398,6 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{refreshToken}}"
               }
             ],
             "auth": {
@@ -417,7 +413,7 @@
                 "refresh"
               ]
             },
-            "description": "Exchange a refresh token for a new access token. Pass the refresh token in the Authorization header."
+            "description": "Exchange a refresh token for a new access token. Each call rotates the token \u2014 the old one is immediately invalidated.\n\n**Admin web surface:** The refresh token cookie is sent automatically by the browser (no Authorization header needed). A new httpOnly cookie is set in the response. The response body does NOT contain `refresh_token`.\n\n**Mobile (MEMBER/WORKER surface):** Send the refresh token in the `Authorization: Bearer <token>` header. The new refresh token is returned in the response body.\n\nIf a previously-rotated token is reused, the server detects credential theft, invalidates the session, and returns 401."
           },
           "response": [
             {
@@ -448,7 +444,7 @@
                 "logout"
               ]
             },
-            "description": "Invalidate current session. Returns 204 No Content."
+            "description": "Invalidate the current session. Returns 204 No Content.\n\nSurface-scoped: only the session matching the caller's access token (`aud` claim) is cleared. For the ADMIN surface, the httpOnly refresh token cookie is also cleared."
           },
           "response": [
             {

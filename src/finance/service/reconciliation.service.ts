@@ -167,7 +167,7 @@ export class ReconciliationService {
   async confirmRow(
     rowId: string,
     dto: ConfirmReconciliationRowDto,
-    admin: Admin,
+    _admin: Admin,
   ): Promise<ReconciliationRow> {
     const row = await this.rowRepo.findOne({
       where: { id: rowId },
@@ -222,7 +222,7 @@ export class ReconciliationService {
   async skipRow(
     rowId: string,
     dto: SkipReconciliationRowDto,
-    admin: Admin,
+    _admin: Admin,
   ): Promise<ReconciliationRow> {
     const row = await this.rowRepo.findOne({ where: { id: rowId } });
     if (!row) throw new NotFoundException('Reconciliation row not found.');

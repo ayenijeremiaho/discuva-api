@@ -15,6 +15,7 @@ import { UtilityController } from './controller/utility.controller';
 import { AuditLogController } from './controller/audit-log.controller';
 import { EmailLogController } from './controller/email-log.controller';
 import { EmailProcessor } from './processor/email.processor';
+import { AuditLogProcessor } from './processor/audit-log.processor';
 import { CloudinaryService } from './service/cloudinary.service';
 import { PdfService } from './service/pdf.service';
 import { ExcelService } from './service/excel.service';
@@ -28,6 +29,7 @@ import { IEmailProvider } from './email-provider/email-provider.interface';
     ConfigModule,
     TypeOrmModule.forFeature([AuditLog, EmailLog]),
     BullModule.registerQueue({ name: 'email' }),
+    BullModule.registerQueue({ name: 'audit-log' }),
   ],
   providers: [
     {
@@ -47,6 +49,7 @@ import { IEmailProvider } from './email-provider/email-provider.interface';
     AuditLogService,
     EmailLogService,
     EmailProcessor,
+    AuditLogProcessor,
     CloudinaryService,
     PdfService,
     ExcelService,

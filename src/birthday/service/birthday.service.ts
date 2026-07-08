@@ -132,8 +132,19 @@ export class BirthdayService implements OnApplicationBootstrap {
       .getMany();
   }
 
-  async getUpcomingBirthdays(days: number = 7): Promise<
-    Pick<Member, 'id' | 'firstname' | 'lastname' | 'email' | 'phoneNumber' | 'birthMonth' | 'birthDay'>[]
+  async getUpcomingBirthdays(
+    days: number = 7,
+  ): Promise<
+    Pick<
+      Member,
+      | 'id'
+      | 'firstname'
+      | 'lastname'
+      | 'email'
+      | 'phoneNumber'
+      | 'birthMonth'
+      | 'birthDay'
+    >[]
   > {
     const today = new Date();
 
@@ -157,8 +168,13 @@ export class BirthdayService implements OnApplicationBootstrap {
     return this.memberRepository
       .createQueryBuilder('m')
       .select([
-        'm.id', 'm.firstname', 'm.lastname', 'm.email',
-        'm.phoneNumber', 'm.birthMonth', 'm.birthDay',
+        'm.id',
+        'm.firstname',
+        'm.lastname',
+        'm.email',
+        'm.phoneNumber',
+        'm.birthMonth',
+        'm.birthDay',
       ])
       .where(`(${conditions})`, params)
       .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })

@@ -1,6 +1,8 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreatePrayerRosterEntries1785801600000 implements MigrationInterface {
+export class CreatePrayerRosterEntries1785801600000
+  implements MigrationInterface
+{
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE "prayer_roster_entries" (
@@ -20,8 +22,12 @@ export class CreatePrayerRosterEntries1785801600000 implements MigrationInterfac
         CONSTRAINT "FK_prayer_roster_rescheduled_from" FOREIGN KEY ("rescheduled_from_id") REFERENCES "prayer_roster_entries"("id") ON DELETE SET NULL
       )
     `);
-    await queryRunner.query(`CREATE INDEX "IDX_prayer_roster_worker" ON "prayer_roster_entries" ("worker_profile_id")`);
-    await queryRunner.query(`CREATE INDEX "IDX_prayer_roster_meeting" ON "prayer_roster_entries" ("meeting_id")`);
+    await queryRunner.query(
+      `CREATE INDEX "IDX_prayer_roster_worker" ON "prayer_roster_entries" ("worker_profile_id")`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_prayer_roster_meeting" ON "prayer_roster_entries" ("meeting_id")`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

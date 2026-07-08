@@ -123,16 +123,37 @@ describe('PrayerRosterService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PrayerRosterService,
-        { provide: getRepositoryToken(PrayerMeeting), useValue: mockMeetingRepo },
-        { provide: getRepositoryToken(PrayerRosterEntry), useValue: mockRosterRepo },
-        { provide: getRepositoryToken(PrayerScheduleRule), useValue: mockRuleRepo },
-        { provide: getRepositoryToken(PrayerProgram), useValue: mockProgramRepo },
-        { provide: getRepositoryToken(WorkerProfile), useValue: mockWorkerRepo },
+        {
+          provide: getRepositoryToken(PrayerMeeting),
+          useValue: mockMeetingRepo,
+        },
+        {
+          provide: getRepositoryToken(PrayerRosterEntry),
+          useValue: mockRosterRepo,
+        },
+        {
+          provide: getRepositoryToken(PrayerScheduleRule),
+          useValue: mockRuleRepo,
+        },
+        {
+          provide: getRepositoryToken(PrayerProgram),
+          useValue: mockProgramRepo,
+        },
+        {
+          provide: getRepositoryToken(WorkerProfile),
+          useValue: mockWorkerRepo,
+        },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
-        { provide: getRepositoryToken(DepartmentLead), useValue: mockDeptLeadRepo },
+        {
+          provide: getRepositoryToken(DepartmentLead),
+          useValue: mockDeptLeadRepo,
+        },
         {
           provide: PushNotificationService,
-          useValue: { dispatchToWorkerProfileIds: jest.fn(), dispatchToMemberIds: jest.fn() },
+          useValue: {
+            dispatchToWorkerProfileIds: jest.fn(),
+            dispatchToMemberIds: jest.fn(),
+          },
         },
       ],
     }).compile();
@@ -175,7 +196,9 @@ describe('PrayerRosterService', () => {
     });
 
     it('throws BadRequestException for MEMBERS-only programs', async () => {
-      mockProgramRepo.findOne.mockResolvedValue(makeProgram(PrayerAudience.MEMBERS));
+      mockProgramRepo.findOne.mockResolvedValue(
+        makeProgram(PrayerAudience.MEMBERS),
+      );
       await expect(service.autoAssign(PROGRAM_ID, 7, 2026)).rejects.toThrow(
         BadRequestException,
       );
@@ -202,9 +225,12 @@ describe('PrayerRosterService', () => {
     it('assigns HODs exactly twice across two meetings', async () => {
       const hod = makeWorker('hod1');
       const meetings = [makeMeeting('m1'), makeMeeting('m2')];
-      setupAutoAssign(meetings, [], [hod], [
-        { workerProfile: hod, leadType: DepartmentLeadTypeEnum.HOD },
-      ]);
+      setupAutoAssign(
+        meetings,
+        [],
+        [hod],
+        [{ workerProfile: hod, leadType: DepartmentLeadTypeEnum.HOD }],
+      );
 
       const result = await service.autoAssign(PROGRAM_ID, 7, 2026);
       expect(result.assigned).toBe(2);
@@ -227,9 +253,12 @@ describe('PrayerRosterService', () => {
     it('does not assign a worker to the same meeting twice', async () => {
       const worker = makeWorker('hod1');
       const meeting = makeMeeting('m1');
-      setupAutoAssign([meeting], [], [worker], [
-        { workerProfile: worker, leadType: DepartmentLeadTypeEnum.HOD },
-      ]);
+      setupAutoAssign(
+        [meeting],
+        [],
+        [worker],
+        [{ workerProfile: worker, leadType: DepartmentLeadTypeEnum.HOD }],
+      );
 
       const result = await service.autoAssign(PROGRAM_ID, 7, 2026);
       const savedEntries: any[] = mockRosterRepo.save.mock.calls[0]?.[0] ?? [];
@@ -252,7 +281,9 @@ describe('PrayerRosterService', () => {
     it('clears existing AUTO_ASSIGNED entries before re-running (idempotency)', async () => {
       const worker = makeWorker('w1');
       const meeting = makeMeeting('m1');
-      const existingAuto = [{ id: 'old-entry', workerProfile: worker, meeting }];
+      const existingAuto = [
+        { id: 'old-entry', workerProfile: worker, meeting },
+      ];
 
       mockProgramRepo.findOne.mockResolvedValue(makeProgram());
       // 1st find: meetings with rosterEntries
@@ -285,7 +316,10 @@ describe('PrayerRosterService', () => {
     it('throws NotFoundException when meeting not found', async () => {
       mockMeetingRepo.findOne = jest.fn().mockResolvedValue(null);
       await expect(
-        service.manualAssign(PROGRAM_ID, { meetingId: 'm1', workerProfileId: 'w1' }),
+        service.manualAssign(PROGRAM_ID, {
+          meetingId: 'm1',
+          workerProfileId: 'w1',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -295,7 +329,12 @@ describe('PrayerRosterService', () => {
       mockMeetingRepo.findOne = jest.fn().mockResolvedValue(meeting);
       mockWorkerRepo.findOne = jest.fn().mockResolvedValue(worker);
       mockRosterRepo.findOne = jest.fn().mockResolvedValue(null);
-      const entry = { id: 'e1', workerProfile: worker, meeting, assignmentType: PrayerAssignmentType.MANUAL };
+      const entry = {
+        id: 'e1',
+        workerProfile: worker,
+        meeting,
+        assignmentType: PrayerAssignmentType.MANUAL,
+      };
       mockRosterRepo.create = jest.fn().mockReturnValue(entry);
       mockRosterRepo.save = jest.fn().mockResolvedValue(entry);
       mockMeetingRepo.save = jest.fn().mockResolvedValue(meeting);
@@ -314,7 +353,9 @@ describe('PrayerRosterService', () => {
   describe('removeEntry', () => {
     it('throws NotFoundException when entry not found', async () => {
       mockRosterRepo.findOne = jest.fn().mockResolvedValue(null);
-      await expect(service.removeEntry('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.removeEntry('missing')).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws BadRequestException for FIXED entries', async () => {
@@ -324,7 +365,9 @@ describe('PrayerRosterService', () => {
         status: PrayerRosterStatus.SCHEDULED,
         meeting: makeMeeting('m1'),
       });
-      await expect(service.removeEntry('e1')).rejects.toThrow(BadRequestException);
+      await expect(service.removeEntry('e1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('deletes the entry and decrements meeting capacity', async () => {

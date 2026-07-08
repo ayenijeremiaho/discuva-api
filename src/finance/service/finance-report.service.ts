@@ -344,7 +344,11 @@ export class FinanceReportService {
       )
       .reduce((s, r) => s + Number(r.total), 0);
 
-    const actualsRows: { budgetId: string; entryType: string; total: string }[] =
+    const actualsRows: {
+      budgetId: string;
+      entryType: string;
+      total: string;
+    }[] =
       activeBudgets.length === 0
         ? []
         : await this.lineRepo
@@ -363,7 +367,11 @@ export class FinanceReportService {
             .addSelect('l.entryType', 'entryType')
             .addSelect('SUM(l.amount)', 'total')
             .groupBy('b.id, l.entryType')
-            .getRawMany<{ budgetId: string; entryType: string; total: string }>();
+            .getRawMany<{
+              budgetId: string;
+              entryType: string;
+              total: string;
+            }>();
 
     const actualsMap = new Map<string, { debit: number; credit: number }>();
     for (const row of actualsRows) {

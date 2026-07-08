@@ -18,7 +18,6 @@ import { AdminUpdateFollowUpTaskDto } from '../dto/admin-update-follow-up-task.d
 import { BulkUpdateTasksDto } from '../dto/bulk-update-tasks.dto';
 import { ReassignTaskDto } from '../dto/reassign-task.dto';
 import {
-  ContactMethodEnum,
   FirstTimerSourceEnum,
   FollowUpOutcomeEnum,
   FollowUpTaskStatusEnum,
@@ -127,7 +126,7 @@ export class FollowUpService {
       });
     if (search) {
       qb.andWhere(
-        "(LOWER(ft.firstname) LIKE :search OR LOWER(ft.lastname) LIKE :search OR ft.phone LIKE :search OR LOWER(ft.email) LIKE :search)",
+        '(LOWER(ft.firstname) LIKE :search OR LOWER(ft.lastname) LIKE :search OR ft.phone LIKE :search OR LOWER(ft.email) LIKE :search)',
         { search: `%${search.toLowerCase()}%` },
       );
     }
@@ -194,7 +193,7 @@ export class FollowUpService {
     if (type) qb.andWhere('task.type = :type', { type });
     if (search) {
       qb.andWhere(
-        "(LOWER(ft.firstname) LIKE :search OR LOWER(ft.lastname) LIKE :search)",
+        '(LOWER(ft.firstname) LIKE :search OR LOWER(ft.lastname) LIKE :search)',
         { search: `%${search.toLowerCase()}%` },
       );
     }
@@ -255,7 +254,7 @@ export class FollowUpService {
     const [task, targetProfile] = await Promise.all([
       this.taskRepo.findOne({
         where: { id: taskId },
-        relations: ['assignedTo'],
+        relations: ['assignedTo', 'firstTimer', 'member'],
       }),
       this.workerProfileRepo.findOne({
         where: { id: dto.workerProfileId },
@@ -281,15 +280,24 @@ export class FollowUpService {
     this.cacheService.flushNamespace('follow-up:report');
 
     if (targetProfile.member?.email) {
+      const contact = task.firstTimer ?? task.member;
+      const contactName = contact
+        ? `${contact.firstname} ${contact.lastname}`
+        : 'Unknown';
+      const contactPhone =
+        (task.firstTimer?.phone ?? task.member?.phoneNumber) ||
+        'See app for details';
+      const contactEmail = task.firstTimer?.email ?? task.member?.email ?? null;
+
       this.emailQueueService.queueEmailWithTemplate(
         targetProfile.member.email,
         `Follow-Up Task Reassigned to You — ${this.churchName}`,
         'follow-up-task-assigned',
         {
           workerName: targetProfile.member.firstname,
-          firstTimerName: 'Reassigned task',
-          phone: 'See app for details',
-          email: null,
+          firstTimerName: contactName,
+          phone: contactPhone,
+          email: contactEmail,
           dueDate: task.dueDate
             ? new Date(task.dueDate).toDateString()
             : 'Not set',
@@ -731,7 +739,10 @@ export class FollowUpService {
   async inviteFirstTimerToMembership(id: string): Promise<{ queued: boolean }> {
     const ft = await this.firstTimerRepo.findOne({ where: { id } });
     if (!ft) throw new NotFoundException('First-timer not found');
-    if (!ft.email) throw new BadRequestException('This first-timer has no email address on record');
+    if (!ft.email)
+      throw new BadRequestException(
+        'This first-timer has no email address on record',
+      );
     if (ft.inviteSentAt) return { queued: false };
     this.emailQueueService.queueEmailWithTemplate(
       ft.email,
@@ -786,7 +797,9 @@ export class FollowUpService {
     task.lastActivityAt = new Date();
 
     const saved = await this.taskRepo.save(task);
-    this.logger.log(`Task ${taskId} updated by admin (status: ${saved.status})`);
+    this.logger.log(
+      `Task ${taskId} updated by admin (status: ${saved.status})`,
+    );
 
     if (dto.noteContent) {
       await this.noteRepo.save(
@@ -818,7 +831,8 @@ export class FollowUpService {
     const task = await this.taskRepo.findOne({
       where: { id: taskId, assignedTo: { id: profile.id } },
     });
-    if (!task) throw new NotFoundException('Task not found or not assigned to you');
+    if (!task)
+      throw new NotFoundException('Task not found or not assigned to you');
 
     const note = await this.noteRepo.save(
       this.noteRepo.create({
@@ -839,7 +853,9 @@ export class FollowUpService {
     firstTimerId: string,
     dto: LogVisitDto,
   ): Promise<FirstTimerVisit> {
-    const ft = await this.firstTimerRepo.findOne({ where: { id: firstTimerId } });
+    const ft = await this.firstTimerRepo.findOne({
+      where: { id: firstTimerId },
+    });
     if (!ft) throw new NotFoundException('First-timer not found');
 
     const visit = await this.visitRepo.save(

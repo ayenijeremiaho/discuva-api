@@ -6,8 +6,11 @@ import {
   HttpStatus,
   Post,
   Request,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { AuthService } from '../service/auth.service';
 import { Public } from '../decorator/public.decorator';
@@ -15,6 +18,7 @@ import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check
 import { LocalAuthGuard } from '../guard/local-auth.guard';
 import { RefreshJwtAuthGuard } from '../guard/refresh-jwt-auth.guard';
 import { JwtResponse } from '../interface/auth.interface';
+import { SessionSurface } from '../enum/session-surface.enum';
 import { SignupDto } from '../../member/dto/signup.dto';
 import { ChangePasswordDto } from '../../member/dto/change-password.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
@@ -26,9 +30,15 @@ import {
 import { plainToInstance } from 'class-transformer';
 import { MemberDto } from '../../member/dto/member.dto';
 
+const REFRESH_COOKIE_NAME = 'refresh_token';
+const REFRESH_COOKIE_PATH = '/v1/auth/refresh';
+
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -55,8 +65,15 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(LocalAuthGuard)
   @Post('admin-login')
-  async adminLogin(@Request() req: any): Promise<JwtResponse> {
-    return this.authService.adminLogin(req.user);
+  async adminLogin(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<Omit<JwtResponse, 'refresh_token'>> {
+    const { refresh_token, ...body } = await this.authService.adminLogin(
+      req.user,
+    );
+    this.setRefreshCookie(res, refresh_token ?? '');
+    return body;
   }
 
   @SkipPasswordChangeCheck()
@@ -64,20 +81,46 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @UseGuards(RefreshJwtAuthGuard)
   @Post('refresh')
-  async refresh(@Request() req: any): Promise<JwtResponse> {
-    return this.authService.refreshToken(req.user);
+  async refresh(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<JwtResponse> {
+    const tokens = await this.authService.refreshToken(req.user);
+    if (req.user.surface === SessionSurface.ADMIN) {
+      const { refresh_token, ...body } = tokens;
+      this.setRefreshCookie(res, refresh_token ?? '');
+      return body;
+    }
+    return tokens;
   }
 
   @SkipPasswordChangeCheck()
   @HttpCode(HttpStatus.NO_CONTENT)
   @Post('logout')
-  async logout(@Request() req: any): Promise<void> {
-    await this.authService.logout(req.user.id, req.user.surface);
+  async logout(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    if (req.user.surface === SessionSurface.ADMIN) {
+      this.clearRefreshCookie(res);
+    }
+    const remainingTtl = Math.max(
+      0,
+      (req.user.tokenExp ?? 0) - Math.floor(Date.now() / 1000),
+    );
+    await this.authService.logout(
+      req.user.id,
+      req.user.surface,
+      req.user.jti ?? '',
+      remainingTtl,
+    );
   }
 
   @SkipPasswordChangeCheck()
   @Get('me')
-  async getProfile(@Request() req: any): Promise<MemberDto & { isHod: boolean }> {
+  async getProfile(
+    @Request() req: any,
+  ): Promise<MemberDto & { isHod: boolean }> {
     const { member, isHod } = await this.authService.getProfile(req.user.id);
     const dto = plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
@@ -147,5 +190,41 @@ export class AuthController {
       message:
         'Device updated successfully. You can now log in from your new device.',
     };
+  }
+
+  private setRefreshCookie(res: Response, token: string): void {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    const expiry =
+      this.configService.get<string>('REFRESH_JWT_EXPIRY_IN') ?? '7d';
+    const match = /^(\d+)([smhd])$/i.exec(expiry);
+    const units: Record<string, number> = {
+      s: 1_000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+    };
+    const maxAge = match
+      ? Number.parseInt(match[1], 10) * (units[match[2].toLowerCase()] ?? 0)
+      : 7 * 86_400_000;
+
+    res.cookie(REFRESH_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: REFRESH_COOKIE_PATH,
+      maxAge,
+    });
+  }
+
+  private clearRefreshCookie(res: Response): void {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    res.clearCookie(REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+      path: REFRESH_COOKIE_PATH,
+    });
   }
 }

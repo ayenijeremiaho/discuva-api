@@ -199,7 +199,7 @@ One record per member per **event**. Workers and members both receive one attend
 | id            | UUID                 | PK                                                                |
 | member        | Member               | ManyToOne, CASCADE on delete                                      |
 | event         | Event                | ManyToOne, CASCADE on delete — the event being attended           |
-| serviceSlot   | ServiceSlot          | ManyToOne, nullable, SET NULL on delete — which slot they entered |
+| serviceSlot   | ServiceSlot          | ManyToOne, nullable, SET NULL on delete — which slot they entered. Indexed. |
 | status        | AttendanceStatusEnum | PRESENT \| LATE \| ABSENT \| ON_LEAVE \| ATTENDED_ONLINE          |
 | checkinTime   | timestamptz          | Null for cron-created ABSENT/ON_LEAVE records                     |
 | roleAtCheckin | MemberRoleEnum       | Snapshot of role at check-in time                                 |
@@ -244,8 +244,7 @@ Joins a WorkerProfile to a Department as head or assistant lead.
 | facilitator         | ManyToOne → Member (nullable)                                  |
 | startDate / endDate | date strings                                                   |
 
-**Delete guard:** Deleting a class is blocked if any member is currently enrolled with status `IN_PROGRESS`. Complete or
-cancel all active enrolments first.
+**Delete guard:** Deleting a class is blocked if any enrolment record exists (any status — IN_PROGRESS, COMPLETED, or CANCELLED). This preserves historical enrolment data. A class with enrolment history cannot be deleted.
 
 ### ClassEnrollment
 
@@ -334,6 +333,8 @@ Immutable record of every admin write action.
 
 **Indexes:** `action`, `actor` (FK column `actorId`), `targetId`, `createdAt`.
 
+**Write path:** `AuditLogService.log()` enqueues a job on the `audit-log` Bull queue (fire-and-forget, 3 attempts, exponential backoff). `AuditLogProcessor` handles the actual DB write asynchronously. Failed writes are retained in Redis (`removeOnFail: false`) and visible in Bull Board.
+
 **Actor traceability:** The `actor` relation is a real FK to the `members` table. When building an audit log API, load
 the relation (`relations: ['actor']`) to access actor name and email. If the member account is deleted, `actor` is set
 to `null` but the log record and all other fields are preserved.
@@ -406,8 +407,9 @@ A permanent Sunday School class. Members are assigned indefinitely (no graduatio
 | description | string         | Optional                                          |
 | teacher     | Member \| null | ManyToOne, nullable — the appointed class teacher |
 
-**Delete guard:** Deleting a Sunday School class is blocked if any members are assigned to it or any sessions have
-been recorded for it. Remove all members and sessions before deleting.
+**Delete guard (class):** Blocked if any members are assigned or any sessions have been recorded. Remove all members and sessions before deleting.
+
+**Delete guard (session):** Blocked if any attendance records exist for the session. Sessions with attendance cannot be deleted — this prevents silent cascade-deletion of historical attendance data.
 
 ### SundaySchoolMember
 
@@ -578,14 +580,16 @@ A confirmed tithe payment matched to a member.
 | Field       | Type    | Notes                                  |
 |-------------|---------|----------------------------------------|
 | id          | UUID    | PK                                     |
-| member      | Member  | ManyToOne                              |
-| batch       | TitheUploadBatch | ManyToOne                    |
+| member      | Member  | ManyToOne. Indexed.                              |
+| batch       | TitheUploadBatch | ManyToOne. Indexed.                |
 | amount      | decimal (12,2)  |                               |
 | paymentDate | date    |                                        |
 | reference   | string \| null | Optional bank reference        |
 | bankName    | string \| null | Sender's bank from the CSV column — not the destination account |
 
 **Duplicate detection:** `(memberId, paymentDate, amount)` — if all three match an existing record, the row is flagged as a dispute instead. The destination bank account is inherited from the batch's `titheAccount`.
+
+**Indexes:** `member_id`, `batch_id` (single-column). Composite `IDX_tithe_records_member_payment` on `(member_id, payment_date)` for member giving history range queries.
 
 ### TitheUnmatchedRecord
 
@@ -715,8 +719,8 @@ A task assigned to a follow-up team worker to engage a first-timer or online non
 | type         | FollowUpTaskTypeEnum    | FIRST_TIMER \| ONLINE_NO_RESPONSE \| MANUAL                                            |
 | status       | FollowUpTaskStatusEnum  | PENDING \| IN_PROGRESS \| COMPLETED \| UNREACHABLE                                     |
 | firstTimer   | FirstTimer \| null      | OneToOne, CASCADE on delete — set when type=FIRST_TIMER                                |
-| member       | Member \| null          | ManyToOne, SET NULL on delete — set when type=ONLINE_NO_RESPONSE                       |
-| event        | Event \| null           | ManyToOne, SET NULL on delete — event context                                          |
+| member       | Member \| null          | ManyToOne, SET NULL on delete — set when type=ONLINE_NO_RESPONSE. Indexed.             |
+| event        | Event \| null           | ManyToOne, SET NULL on delete — event context. Indexed.                                |
 | assignedTo   | WorkerProfile           | ManyToOne, RESTRICT on delete — must be a FOLLOW_UP department worker                  |
 | outcome      | FollowUpOutcomeEnum \| null | JOINED \| DECLINED \| NO_ANSWER \| PRAYED_WITH                                     |
 | outcomeNotes | text \| null            |                                                                                        |
@@ -733,7 +737,7 @@ A note added by the assigned worker during follow-up interactions.
 | Field    | Type            | Notes                              |
 |----------|-----------------|------------------------------------|
 | id       | UUID            | PK                                 |
-| task     | FollowUpTask    | ManyToOne, CASCADE on delete       |
+| task     | FollowUpTask    | ManyToOne, CASCADE on delete. Indexed. |
 | addedBy       | WorkerProfile \| null | ManyToOne, SET NULL on delete                                    |
 | content       | text                  |                                                                  |
 | contactMethod | ContactMethodEnum \| null | PHONE_CALL \| WHATSAPP \| IN_PERSON \| SMS \| EMAIL — optional |
@@ -745,8 +749,8 @@ Records each return visit a first-timer makes before or after converting.
 | Field     | Type              | Notes                                           |
 |-----------|-------------------|-------------------------------------------------|
 | id        | UUID              | PK                                              |
-| firstTimer | FirstTimer       | ManyToOne, CASCADE on delete                    |
-| event     | Event \| null     | ManyToOne, SET NULL on delete — event attended  |
+| firstTimer | FirstTimer       | ManyToOne, CASCADE on delete. Indexed.          |
+| event     | Event \| null     | ManyToOne, SET NULL on delete — event attended. Indexed. |
 | visitedAt | date              | YYYY-MM-DD — date of the visit                  |
 | notes     | text \| null      | Optional observation from the admin             |
 
@@ -1134,9 +1138,35 @@ There is no `ADMIN` role in the JWT. Admin portal access is determined at the ro
 
 ### Token Lifecycle
 
-1. **Login** → receives `access_token` + `refresh_token` + `requires_password_change`. A surface-scoped session row is created (or updated) with a hashed refresh token. If `requires_password_change` is `true`, the client must redirect the user to `POST /auth/change-password` before allowing any other action.
-2. **Access token expires** → call `POST /auth/refresh` with the refresh token in the `Authorization: Bearer` header. The refresh token carries `aud` and renews the same-surface session.
-3. **Logout** → clears only the session row for the caller's surface (`aud` from the token). The other surface's session is unaffected. The access token becomes invalid on the next request (`validateAccessToken` finds no session for that surface).
+Refresh token delivery and transport differ by surface:
+
+| Surface | Refresh token on login | Refresh on `POST /auth/refresh` | Logout |
+|---|---|---|---|
+| **ADMIN** (web portal) | Set as `httpOnly; SameSite` cookie on `/v1/auth/refresh` path only — **not** in the response body | Cookie sent automatically by browser; new cookie set in response | Cookie cleared |
+| **MEMBER / WORKER** (mobile) | Returned in response body (`refresh_token`) | Sent in `Authorization: Bearer` header | Session row cleared |
+
+1. **Login** → receives `access_token` + `requires_password_change` (and `refresh_token` in body for mobile only). A surface-scoped session row is created (or updated) with a hashed refresh token. If `requires_password_change` is `true`, the client must redirect the user to `POST /auth/change-password` before allowing any other action.
+2. **Access token expires** → call `POST /auth/refresh`. Admin web clients rely on the httpOnly cookie (sent automatically); mobile clients send the refresh token in the `Authorization: Bearer` header. The refresh token carries `aud` and renews the same-surface session.
+3. **Logout** → clears the session row for the caller's surface. For the ADMIN surface the httpOnly cookie is also cleared. The other surface's session is unaffected.
+
+### Refresh Token Rotation & Reuse Detection
+
+Every call to `POST /auth/refresh` performs a full rotation:
+
+- A **new** refresh token is issued and its hash replaces the previous one in `member_sessions`.
+- The **previous** hash is stored in Redis under `rt_rotated:{memberId}:{surface}` for the duration of the refresh token's TTL.
+- If an already-rotated token is presented (i.e. the hash matches the Redis entry but not the current session hash), the server detects **credential reuse**, immediately invalidates the entire session for that surface, and returns HTTP 401. This limits the blast radius of a stolen refresh token to a single use.
+- On reuse detection the member receives a `session-security-alert` email advising them to change their password if the sign-out was unexpected.
+
+### Absolute Session Lifetime
+
+Each session row in `member_sessions` carries a `createdAt` timestamp set at first login and never updated on subsequent rotations. On every refresh request, `validateRefreshToken` checks:
+
+```
+Date.now() - session.createdAt > SESSION_MAX_AGE_DAYS × 86 400 000 ms
+```
+
+If the threshold is exceeded the session is invalidated and HTTP 401 is returned, forcing a fresh login regardless of how recently the token was rotated. `SESSION_MAX_AGE_DAYS` defaults to 30 and is configurable via environment variable.
 
 ### Temporary Password Flow
 
@@ -1390,6 +1420,8 @@ required.
 
 Shared infrastructure used across the entire application.
 
+**Bull Board (queue dashboard):** Mounted at `GET /queues` on the NestJS HTTP server. Provides a standalone web UI showing all six queues (`email`, `push-notifications`, `follow-up`, `tithe`, `finance-reconciliation`, `audit-log`) with pending/active/completed/failed job counts and per-job retry controls. Protected by HTTP Basic Auth (`BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` env vars). If either env var is absent the dashboard is not mounted. Registered before Helmet so the `/queues` path is exempt from the strict Content Security Policy.
+
 **Email queue (`EmailQueueService` + `EmailProcessor`):** All outbound email goes through a Bull queue backed by Redis. `EmailQueueService.queueEmailWithTemplate()` compiles the HTML template using **Handlebars** and adds a job to the `email` queue. The active email provider is resolved at startup from `EMAIL_PROVIDER` and injected via `EMAIL_PROVIDER_TOKEN`. Two providers are available: `GmailProvider` (Nodemailer/SMTP) and `ResendProvider` (Resend SDK). Bull handles retries automatically — 5 attempts, 5-second fixed backoff. On success or permanent failure, a row is written to `email_logs` with the `provider` field set to whichever provider processed the job.
 
 **Email category gating:** `queueEmail*` methods accept an optional `category?: EmailCategory` argument. If no category is supplied the email always sends (used for security-critical auth emails: OTP, password reset, account locked, etc.). Optional categories are gated by boolean config flags (`EMAIL_*_ENABLED`); setting a flag to `false` suppresses that category without touching any call sites. Current categories:
@@ -1555,10 +1587,10 @@ Full double-entry accounting system for the church. All financial data is fund-s
 | **AccountingPeriod** | A calendar month (year + month). Entries can only be posted to OPEN periods. Closing a period is irreversible by design (only admins with `FINANCE_RECONCILE` can close or reopen). |
 | **Chart of Accounts** | `finance_accounts` table. Each account has an optional unique `code` (e.g. `1001`), a type (ASSET / LIABILITY / INCOME / EXPENSE), subtype, normal balance (DEBIT or CREDIT), and an optional fund assignment. `code` is nullable but unique when provided — 409 if a duplicate code is submitted. |
 | **JournalEntry** | The root transaction record. Must be BALANCED (sum of debits = sum of credits) before posting. Created as `PENDING_APPROVAL`; a separate admin with `FINANCE_APPROVE` (who is not the creator — segregation of duties) approves and posts it. |
-| **JournalEntryLine** | One debit or credit line on a journal entry. Linked to an account. |
+| **JournalEntryLine** | One debit or credit line on a journal entry. Linked to an account. `journal_entry_id` and `account_id` are both indexed. |
 | **JournalEntryLink** | Polymorphic association table attaching a journal entry to members, departments, service events, or external payees. Stored as a separate table to preserve FK integrity and allow multiple associations per transaction. |
 | **ExternalPayee** | Tracks global church remittances, vendors, utilities, contractors, government bodies. |
-| **Offering** | Records Sunday cash + expected transfer amounts. Reconciled separately by finance team. |
+| **Offering** | Records Sunday cash + expected transfer amounts. Reconciled separately by finance team. `fund_id` is indexed. |
 | **Budget** | Scoped to an account + fund. Actuals computed at query time from posted entries. |
 | **PledgeCampaign / Pledge** | Campaign-level targets and per-member pledge commitments. |
 | **RecurringEntry** | Template for entries that repeat weekly / monthly / quarterly. A daily scheduler generates draft entries for due recurring templates. |
@@ -1862,6 +1894,17 @@ Queries `prayer_roster_entries` where the meeting date is 2 days or 1 day away a
 - `1785888000000-AddPrayerIndexes` *(indexes on `reminder_two_day_sent`, `reminder_day_sent`, `status` on roster entries; `status`, `selection_status` on meetings)*
 - `1785974400000-PrayerColumnsToSnakeCase` *(renames all prayer table columns from camelCase SQL names to snake_case for TypeORM SnakeNamingStrategy compatibility)*
 - `1786233600000-AddPrayerPrograms` *(creates `prayer_programs` table; adds `program_id` FK to day configs, rules, meetings; adds `member_id` to roster entries; makes `worker_profile_id` nullable; backfills with a default "Prayer Program" row)*
+- `1786320000000-AddFirstTimerConversionFields`
+- `1786406400000-AddEventThankYouSentAt`
+- `1786492800000-AddFirstTimerVisits`
+- `1786579200000-AddFollowUpEnhancements`
+- `1786665600000-AddAuditLogTargetName`
+- `1786752000000-AddFollowUpTaskIndexes` *(indexes on `assigned_to_id`, `status`, `type` on `follow_up_tasks`)*
+- `1786838400000-AddEmailLogProvider`
+- `1786924800000-AddPushSubscriptions`
+- `1787011200000-AddFinanceAccountCode`
+- `1787097600000-AddPledgeGuestName`
+- `1787184000000-AddMissingFkIndexes` *(13 FK indexes across high-traffic tables: `attendances.service_slot_id`, `follow_up_tasks.(member_id, event_id)`, `first_timer_visits.(first_timer_id, event_id)`, `follow_up_notes.task_id`, `finance_journal_entry_lines.(journal_entry_id, account_id)`, `finance_offerings.fund_id`, `finance_reconciliation_rows.job_id`, `tithe_records.(batch_id)`, composite `tithe_records(member_id, payment_date)`, `asset_checkouts.asset_id`)*
 
 ---
 
@@ -1965,6 +2008,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - Client event `joinSession({ sessionCode })` → joins room `session:{sessionCode}`
 - Client event `leaveSession({ sessionCode })` → leaves room
 - Server event `session:state` → `{ anchor: SessionAnchor, session: Partial<ServiceSession> }`
+- **Redis adapter:** `@socket.io/redis-adapter` (`RedisIoAdapter`) is used instead of the default in-memory adapter. Events broadcast on one backend instance are forwarded to all other instances via Redis pub/sub, making horizontal scaling safe.
 
 **Routes prefix:** `/service-programme`, `/service-session`
 
@@ -2506,6 +2550,7 @@ loaded correctly before use.
 | `JWT_EXPIRY_IN`         | `1h`                         | Access token expiry (e.g. `1h`, `15m`, `7d`) |
 | `REFRESH_JWT_SECRET`    | — *(required, min 32 chars)* | Refresh token signing secret                 |
 | `REFRESH_JWT_EXPIRY_IN` | `7d`                         | Refresh token expiry                         |
+| `SESSION_MAX_AGE_DAYS`  | `30`                         | Absolute session lifetime in days — refresh rejected after this regardless of rotation |
 
 ### Email
 
@@ -2658,6 +2703,13 @@ Generate keys once with `npx web-push generate-vapid-keys` and store permanently
 | `SUPPORT_FORM_URL`            | Support contact form URL                                                                    |
 | `EXPLAINER_VIDEO_ANDROID_URL` | Android onboarding video URL                                                                |
 | `EXPLAINER_VIDEO_IOS_URL`     | iOS onboarding video URL                                                                    |
+
+### Bull Board (optional)
+
+| Variable             | Default | Description                                                                                        |
+|----------------------|---------|----------------------------------------------------------------------------------------------------|
+| `BULL_BOARD_USER`    | —       | Username for the Bull Board queue dashboard at `/queues`. If unset, dashboard is not mounted.      |
+| `BULL_BOARD_PASSWORD`| —       | Password for the Bull Board queue dashboard. Required alongside `BULL_BOARD_USER`.                 |
 
 ---
 

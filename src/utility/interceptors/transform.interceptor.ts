@@ -27,7 +27,8 @@ export class TransformInterceptor<T>
         const responseData = data ?? {};
         const message = this.getDefaultMessage(statusCode);
         const finalMessage = responseData.message || message;
-        const statusOverride = typeof responseData.status === 'number' ? responseData.status : null;
+        const statusOverride =
+          typeof responseData.status === 'number' ? responseData.status : null;
         const finalStatus = statusOverride ?? statusCode;
 
         if (responseData) {

@@ -58,7 +58,9 @@ export class RentalConfigService {
     const facility = await this.getFacilityById(id);
     if (dto.name && dto.name !== facility.name) {
       if (await this.facilityRepo.exists({ where: { name: dto.name } })) {
-        throw new BadRequestException('A facility with this name already exists');
+        throw new BadRequestException(
+          'A facility with this name already exists',
+        );
       }
     }
     Object.assign(facility, dto);
@@ -117,7 +119,10 @@ export class RentalConfigService {
     return saved;
   }
 
-  async updateAddon(id: string, dto: UpdateRentalAddonDto): Promise<RentalAddon> {
+  async updateAddon(
+    id: string,
+    dto: UpdateRentalAddonDto,
+  ): Promise<RentalAddon> {
     const addon = await this.getAddonById(id);
     if (dto.assetId !== undefined) {
       addon.asset = dto.assetId

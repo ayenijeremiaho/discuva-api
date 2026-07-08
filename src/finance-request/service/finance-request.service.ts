@@ -121,6 +121,7 @@ export class FinanceRequestService {
         attachment.buffer,
         'finance-requests',
         `${user.id}-${Date.now()}`,
+        attachment.mimetype,
       );
       attachmentUrl = uploaded.secureUrl;
       attachmentPublicId = uploaded.publicId;
@@ -367,6 +368,7 @@ export class FinanceRequestService {
       file.buffer,
       'finance-proofs',
       `${id}-proof-${Date.now()}`,
+      file.mimetype,
     );
 
     request.proofUrl = uploaded.secureUrl;

@@ -13,6 +13,7 @@ import { TitheSource } from '../../finance/enum/finance.enum';
 import { MemberVirtualAccount } from '../../finance/entity/member-virtual-account.entity';
 
 @Entity({ name: 'tithe_records' })
+@Index('IDX_tithe_records_member_payment', ['member', 'paymentDate'])
 export class TitheRecord extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -22,6 +23,7 @@ export class TitheRecord extends BaseEntity {
   @JoinColumn({ name: 'member_id' })
   member: Member;
 
+  @Index('IDX_tithe_records_batch_id')
   @ManyToOne(() => TitheUploadBatch, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'batch_id' })
   batch: TitheUploadBatch | null;

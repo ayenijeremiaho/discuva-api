@@ -97,8 +97,9 @@ export const envValidationSchema = Joi.object({
   TITHE_PROOF_EXPIRY_DAYS: Joi.number().default(90),
   MAX_FILE_UPLOAD_BYTES: Joi.number().default(5 * 1024 * 1024),
 
-  DEFAULT_ADMIN_EMAIL: Joi.string().email().required(),
-  DEFAULT_ADMIN_PASSWORD: Joi.string().required(),
+  SESSION_MAX_AGE_DAYS: Joi.number().integer().min(1).default(30),
+  DEFAULT_ADMIN_EMAIL: Joi.string().email().optional(),
+  DEFAULT_ADMIN_PASSWORD_HASH: Joi.string().optional(),
   DEFAULT_VENUE_ADDRESS: Joi.string().default(
     '62 Igi Olugbin Street, Bariga. Lagos, Nigeria',
   ),
@@ -130,4 +131,7 @@ export const envValidationSchema = Joi.object({
   EMAIL_INCIDENT_REPORT_ENABLED: Joi.boolean().default(true),
   EMAIL_CHILDREN_CHURCH_ENABLED: Joi.boolean().default(true),
   EMAIL_LOGIN_ALERT_ENABLED: Joi.boolean().default(true),
+
+  BULL_BOARD_USER: Joi.string().optional(),
+  BULL_BOARD_PASSWORD: Joi.string().optional(),
 }).options({ allowUnknown: true });

@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -15,6 +16,7 @@ export class FollowUpNote extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_follow_up_notes_task_id')
   @ManyToOne(() => FollowUpTask, (task) => task.notes, {
     nullable: false,
     onDelete: 'CASCADE',
