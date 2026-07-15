@@ -48,4 +48,7 @@ export class ServiceProgrammeSlot extends BaseEntity {
 
   @Column({ name: 'allocated_minutes', type: 'int' })
   allocatedMinutes: number;
+
+  @Column({ name: 'reminder_sent_at', type: 'timestamptz', nullable: true })
+  reminderSentAt: Date | null;
 }

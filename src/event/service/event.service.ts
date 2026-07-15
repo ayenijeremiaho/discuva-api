@@ -45,22 +45,12 @@ export class EventService {
   ) {}
 
   async create(dto: CreateEventDto, actorId: string): Promise<Event | Event[]> {
-    const eventDate = new Date(dto.eventDate);
-    if (Number.isNaN(eventDate.getTime()))
-      throw new BadRequestException('Invalid eventDate');
-
-    const endDate = dto.endDate ? new Date(dto.endDate) : new Date(eventDate);
-    if (Number.isNaN(endDate.getTime()))
-      throw new BadRequestException('Invalid endDate');
-    if (endDate < eventDate)
-      throw new BadRequestException('endDate must not be before eventDate');
-
     if (dto.isRecurring) {
       if (!dto.recurrence)
         throw new BadRequestException(
           'Recurrence details required for recurring events',
         );
-      const result = await this.createRecurring(dto, eventDate, endDate);
+      const result = await this.createRecurring(dto);
       this.auditLogService.log('EVENT_CREATED', {
         actorId,
         metadata: { name: dto.name, isRecurring: true, count: result.length },
@@ -68,11 +58,11 @@ export class EventService {
       return result;
     }
 
-    const result = await this.createSingle(dto, eventDate, endDate);
+    const result = await this.createSingle(dto);
     this.auditLogService.log('EVENT_CREATED', {
       actorId,
       targetId: result.id,
-      metadata: { name: result.name, eventDate: dto.eventDate },
+      metadata: { name: result.name, eventDate: result.eventDate },
     });
     return result;
   }
@@ -87,29 +77,13 @@ export class EventService {
     if (dto.name) event.name = dto.name;
     if (dto.description !== undefined) event.description = dto.description;
 
-    if (dto.eventDate) {
-      const d = new Date(dto.eventDate);
-      if (Number.isNaN(d.getTime()))
-        throw new BadRequestException('Invalid eventDate');
-      event.eventDate = d;
-    }
-
-    if (dto.endDate) {
-      const d = new Date(dto.endDate);
-      if (Number.isNaN(d.getTime()))
-        throw new BadRequestException('Invalid endDate');
-      if (d < event.eventDate)
-        throw new BadRequestException('endDate must not be before eventDate');
-      event.endDate = d;
-    }
-
     if (dto.serviceSlots?.length) {
       await this.slotRepository.delete({ event: { id } });
-      event.serviceSlots = await this.buildSlots(
-        dto.serviceSlots,
-        event.eventDate,
-        event.endDate,
-      );
+      const slots = await this.buildSlots(dto.serviceSlots);
+      event.serviceSlots = slots;
+      const { eventDate, endDate } = this.deriveDateRange(slots);
+      event.eventDate = eventDate;
+      event.endDate = endDate;
     }
 
     if (dto.onlineAttendanceEnabled !== undefined)
@@ -306,12 +280,9 @@ export class EventService {
     };
   }
 
-  private async createSingle(
-    dto: CreateEventDto,
-    eventDate: Date,
-    endDate: Date,
-  ): Promise<Event> {
-    const slots = await this.buildSlots(dto.serviceSlots, eventDate, endDate);
+  private async createSingle(dto: CreateEventDto): Promise<Event> {
+    const slots = await this.buildSlots(dto.serviceSlots);
+    const { eventDate, endDate } = this.deriveDateRange(slots);
     const event = this.eventRepository.create({
       name: dto.name,
       description: dto.description,
@@ -323,14 +294,15 @@ export class EventService {
     return this.eventRepository.save(event);
   }
 
-  private async createRecurring(
-    dto: CreateEventDto,
-    firstDate: Date,
-    endDate: Date,
-  ): Promise<Event[]> {
+  private async createRecurring(dto: CreateEventDto): Promise<Event[]> {
     const recurrenceEndDate = new Date(dto.recurrence.recurrenceEndDate);
     if (Number.isNaN(recurrenceEndDate.getTime()))
       throw new BadRequestException('Invalid recurrenceEndDate');
+
+    const baseSlots = await this.buildSlots(dto.serviceSlots);
+    const firstDate = this.truncateToUtcDate(
+      new Date(Math.min(...baseSlots.map((s) => s.startTime.getTime()))),
+    );
 
     const oneYearLater = new Date(firstDate);
     oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
@@ -340,18 +312,12 @@ export class EventService {
       );
     }
 
-    // For recurring events, endDate is the offset from eventDate (e.g. same day or +1 day)
-    const endDateOffsetMs = endDate.getTime() - firstDate.getTime();
-
     const recurringEventId = uuidv4();
     const events: Event[] = [];
     let currentDate = firstDate;
 
     while (currentDate <= recurrenceEndDate) {
       const dateOffsetMs = currentDate.getTime() - firstDate.getTime();
-      const occurrenceEndDate = new Date(
-        currentDate.getTime() + endDateOffsetMs,
-      );
       const adjustedSlotDtos = dto.serviceSlots.map((s) => ({
         ...s,
         startTime: new Date(
@@ -361,16 +327,13 @@ export class EventService {
           new Date(s.endTime).getTime() + dateOffsetMs,
         ).toISOString(),
       }));
-      const slots = await this.buildSlots(
-        adjustedSlotDtos,
-        currentDate,
-        occurrenceEndDate,
-      );
+      const slots = await this.buildSlots(adjustedSlotDtos);
+      const { eventDate, endDate } = this.deriveDateRange(slots);
       const event = this.eventRepository.create({
         name: dto.name,
         description: dto.description,
-        eventDate: new Date(currentDate),
-        endDate: occurrenceEndDate,
+        eventDate,
+        endDate,
         recurringEventId,
         onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
       });
@@ -386,39 +349,47 @@ export class EventService {
     return this.eventRepository.save(events);
   }
 
+  /** Event.eventDate/endDate are derived from the slots, not entered independently. */
+  private deriveDateRange(slots: ServiceSlot[]): {
+    eventDate: Date;
+    endDate: Date;
+  } {
+    return {
+      eventDate: this.truncateToUtcDate(
+        new Date(Math.min(...slots.map((s) => s.startTime.getTime()))),
+      ),
+      endDate: this.truncateToUtcDate(
+        new Date(Math.max(...slots.map((s) => s.endTime.getTime()))),
+      ),
+    };
+  }
+
+  // Event.eventDate/endDate are plain `date` columns and must be UTC-midnight
+  // truncated regardless of server timezone — date-fns' startOfDay truncates
+  // in local time, which would silently shift the date on non-UTC servers.
+  private truncateToUtcDate(date: Date): Date {
+    return new Date(
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+    );
+  }
+
   private async buildSlots(
     slotDtos: CreateServiceSlotDto[],
-    eventDate: Date,
-    endDate: Date,
   ): Promise<ServiceSlot[]> {
     const slots = await Promise.all(
       slotDtos.map((dto) => this.buildSlotFromDto(dto)),
     );
-    this.validateSlotSequence(slots, eventDate, endDate);
+    this.validateSlotSequence(slots);
     return slots;
   }
 
-  private validateSlotSequence(
-    slots: ServiceSlot[],
-    eventDate: Date,
-    endDate: Date,
-  ): void {
+  private validateSlotSequence(slots: ServiceSlot[]): void {
     // Sort by startTime ascending so validation is order-independent in the DTO
     slots.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
 
-    const dayStart = new Date(eventDate);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(endDate);
-    dayEnd.setHours(23, 59, 59, 999);
-
-    for (let i = 0; i < slots.length; i++) {
+    for (let i = 1; i < slots.length; i++) {
       const slot = slots[i];
-      if (slot.startTime < dayStart || slot.endTime > dayEnd) {
-        throw new BadRequestException(
-          `Slot "${slot.name}" times must fall within the event date range (${eventDate.toISOString().slice(0, 10)} – ${endDate.toISOString().slice(0, 10)})`,
-        );
-      }
-      if (i > 0 && slot.startTime < slots[i - 1].endTime) {
+      if (slot.startTime < slots[i - 1].endTime) {
         throw new BadRequestException(
           `Slot "${slot.name}" overlaps with "${slots[i - 1].name}". Each slot must start after the previous one ends.`,
         );

@@ -62,3 +62,4 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 /.run
 /tsconfig.tsbuildinfo
 /tsconfig.build.tsbuildinfo
+/.next/

@@ -17,14 +17,35 @@ import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enu
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PdfService } from '../../utility/service/pdf.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+
+const mockProgrammeQueryBuilder = {
+  leftJoinAndSelect: jest.fn().mockReturnThis(),
+  loadRelationCountAndMap: jest.fn().mockReturnThis(),
+  orderBy: jest.fn().mockReturnThis(),
+  skip: jest.fn().mockReturnThis(),
+  take: jest.fn().mockReturnThis(),
+  getManyAndCount: jest.fn(),
+};
 
 const mockProgrammeRepo = {
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
+  find: jest.fn(),
   findAndCount: jest.fn(),
   remove: jest.fn(),
   update: jest.fn(),
+  createQueryBuilder: jest.fn(() => mockProgrammeQueryBuilder),
+};
+
+const mockSlotConflictQueryBuilder = {
+  innerJoinAndSelect: jest.fn().mockReturnThis(),
+  leftJoinAndSelect: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  getOne: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockSlotRepo = {
@@ -32,6 +53,7 @@ const mockSlotRepo = {
   save: jest.fn(),
   findOne: jest.fn(),
   remove: jest.fn(),
+  createQueryBuilder: jest.fn(() => mockSlotConflictQueryBuilder),
 };
 
 const mockTemplateRepo = {
@@ -44,6 +66,7 @@ const mockTemplateRepo = {
 
 const mockServiceSlotRepo = {
   findOne: jest.fn(),
+  find: jest.fn(),
 };
 
 const mockMemberRepo = {
@@ -56,6 +79,11 @@ const mockDataSource = {
 
 const mockPdfService = {
   generateProgrammeDraft: jest.fn().mockResolvedValue(Buffer.from('')),
+};
+
+const mockEmailQueueService = {
+  queueEmailWithTemplate: jest.fn().mockResolvedValue('job-1'),
+  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
 };
 
 const mockAdmin = {
@@ -115,6 +143,7 @@ describe('ServiceProgrammeService', () => {
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: PdfService, useValue: mockPdfService },
+        { provide: EmailQueueService, useValue: mockEmailQueueService },
       ],
     }).compile();
 
@@ -124,34 +153,138 @@ describe('ServiceProgrammeService', () => {
   // ── create ───────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('creates a programme for a valid service slot', async () => {
-      mockServiceSlotRepo.findOne.mockResolvedValue(mockServiceSlot);
-      mockProgrammeRepo.findOne.mockResolvedValue(null);
+    it('creates a programme for a single service slot', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+      mockProgrammeRepo.find.mockResolvedValue([]); // no existing conflicts
       mockProgrammeRepo.create.mockReturnValue(draftProgramme);
       mockProgrammeRepo.save.mockResolvedValue(draftProgramme);
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme); // reload via findOne(saved.id)
 
       const result = await service.create(
-        { serviceSlotId: 'slot-1', saveAsTemplate: false },
+        {
+          programmes: [{ serviceSlotId: 'slot-1' }],
+          saveAsTemplate: false,
+        },
         mockAdmin,
       );
 
-      expect(result).toEqual(draftProgramme);
+      expect(result).toMatchObject({ id: draftProgramme.id });
       expect(mockProgrammeRepo.save).toHaveBeenCalledWith(draftProgramme);
     });
 
-    it('throws NotFoundException when service slot does not exist', async () => {
-      mockServiceSlotRepo.findOne.mockResolvedValue(null);
+    it('throws NotFoundException when a service slot does not exist', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([]); // requested 1, found 0
       await expect(
-        service.create({ serviceSlotId: 'slot-x' }, mockAdmin),
+        service.create(
+          { programmes: [{ serviceSlotId: 'slot-x' }] },
+          mockAdmin,
+        ),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('throws ConflictException when programme already exists for the slot', async () => {
-      mockServiceSlotRepo.findOne.mockResolvedValue(mockServiceSlot);
-      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+    it('throws ConflictException when a programme already exists for a selected slot', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+      mockProgrammeRepo.find.mockResolvedValue([draftProgramme]);
       await expect(
-        service.create({ serviceSlotId: 'slot-1' }, mockAdmin),
+        service.create(
+          { programmes: [{ serviceSlotId: 'slot-1' }] },
+          mockAdmin,
+        ),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('creates the full order-of-service in one call when slots are provided', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+      mockProgrammeRepo.find.mockResolvedValue([]);
+      mockProgrammeRepo.create.mockReturnValue(draftProgramme);
+      mockProgrammeRepo.save.mockResolvedValue(draftProgramme);
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      mockMemberRepo.findOne.mockResolvedValue(null);
+      mockSlotRepo.create.mockImplementation((d) => d);
+      mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+      await service.create(
+        {
+          programmes: [
+            {
+              serviceSlotId: 'slot-1',
+              slots: [
+                { type: ServiceSlotTypeEnum.WORSHIP, allocatedMinutes: 20 },
+                { type: ServiceSlotTypeEnum.SPEAKER, allocatedMinutes: 40 },
+              ],
+            },
+          ],
+        },
+        mockAdmin,
+      );
+
+      expect(mockSlotRepo.create).toHaveBeenCalledTimes(2);
+      expect(mockSlotRepo.create).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({ position: 0 }),
+      );
+      expect(mockSlotRepo.create).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ position: 1 }),
+      );
+    });
+
+    it('creates one programme per selected slot, each with its own independent slots, and returns an array when multiple are given', async () => {
+      const secondSlot = { id: 'slot-2', name: 'Second Service' };
+      const secondProgramme = {
+        ...draftProgramme,
+        id: 'prog-2',
+        serviceSlot: secondSlot,
+      };
+
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot, secondSlot]);
+      mockProgrammeRepo.find.mockResolvedValue([]);
+      mockProgrammeRepo.create
+        .mockReturnValueOnce(draftProgramme)
+        .mockReturnValueOnce(secondProgramme);
+      mockProgrammeRepo.save
+        .mockResolvedValueOnce(draftProgramme)
+        .mockResolvedValueOnce(secondProgramme);
+      mockProgrammeRepo.findOne
+        .mockResolvedValueOnce(draftProgramme)
+        .mockResolvedValueOnce(secondProgramme);
+      mockMemberRepo.findOne.mockResolvedValue(null);
+      mockSlotRepo.create.mockImplementation((d) => d);
+      mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+      const result = await service.create(
+        {
+          programmes: [
+            {
+              serviceSlotId: 'slot-1',
+              slots: [
+                { type: ServiceSlotTypeEnum.WORSHIP, allocatedMinutes: 20 },
+              ],
+            },
+            { serviceSlotId: 'slot-2' }, // no items — independent from slot-1
+          ],
+        },
+        mockAdmin,
+      );
+
+      expect(Array.isArray(result)).toBe(true);
+      expect((result as (typeof draftProgramme)[]).map((p) => p.id)).toEqual([
+        'prog-1',
+        'prog-2',
+      ]);
+      // Only slot-1's programme got an item created for it.
+      expect(mockSlotRepo.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('lists the affected slot names in the conflict message', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+      mockProgrammeRepo.find.mockResolvedValue([draftProgramme]);
+      await expect(
+        service.create(
+          { programmes: [{ serviceSlotId: 'slot-1' }] },
+          mockAdmin,
+        ),
+      ).rejects.toThrow('First Service');
     });
   });
 
@@ -159,10 +292,27 @@ describe('ServiceProgrammeService', () => {
 
   describe('findAll', () => {
     it('returns paginated list', async () => {
-      mockProgrammeRepo.findAndCount.mockResolvedValue([[draftProgramme], 1]);
+      mockProgrammeQueryBuilder.getManyAndCount.mockResolvedValue([
+        [{ ...draftProgramme, slotCount: 2 }],
+        1,
+      ]);
       const result = await service.findAll(1, 20);
       expect(UtilityService.createPaginationResponse).toHaveBeenCalledWith(
-        [draftProgramme],
+        [
+          {
+            ...draftProgramme,
+            slotCount: 2,
+            serviceSlotId: 'slot-1',
+            serviceSlotName: 'First Service',
+            event: null,
+            serviceSlotDetail: {
+              id: 'slot-1',
+              name: 'First Service',
+              startTime: undefined,
+              endTime: undefined,
+            },
+          },
+        ],
         1,
         20,
         1,
@@ -181,7 +331,82 @@ describe('ServiceProgrammeService', () => {
     it('returns programme when found', async () => {
       mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
       const result = await service.findOne('prog-1');
-      expect(result).toEqual(draftProgramme);
+      expect(result).toEqual({
+        ...draftProgramme,
+        serviceSlotId: 'slot-1',
+        serviceSlotName: 'First Service',
+        slotCount: 0,
+        event: null,
+        serviceSlotDetail: {
+          id: 'slot-1',
+          name: 'First Service',
+          startTime: undefined,
+          endTime: undefined,
+        },
+      });
+    });
+
+    it('surfaces the parent event and service slot time range for grouping', async () => {
+      const timedProgramme = {
+        ...draftProgramme,
+        serviceSlot: {
+          id: 'slot-1',
+          name: 'First Service',
+          startTime: new Date('2026-07-19T08:00:00.000Z'),
+          endTime: new Date('2026-07-19T10:00:00.000Z'),
+          event: {
+            id: 'event-1',
+            name: 'Sunday Gathering',
+            eventDate: new Date('2026-07-19'),
+          },
+        },
+      };
+      mockProgrammeRepo.findOne.mockResolvedValue(timedProgramme);
+      const result = await service.findOne('prog-1');
+      expect(result.event).toEqual({
+        id: 'event-1',
+        name: 'Sunday Gathering',
+        eventDate: new Date('2026-07-19'),
+      });
+      expect(result.serviceSlotDetail).toEqual({
+        id: 'slot-1',
+        name: 'First Service',
+        startTime: new Date('2026-07-19T08:00:00.000Z'),
+        endTime: new Date('2026-07-19T10:00:00.000Z'),
+      });
+    });
+
+    it('flattens assigned member/backup member names onto each slot', async () => {
+      const programmeWithSlots = {
+        ...draftProgramme,
+        slots: [
+          {
+            id: 'slot-a',
+            member: { id: 'member-1', firstname: 'Ada', lastname: 'Obi' },
+            backupMember: {
+              id: 'member-2',
+              firstname: 'Ben',
+              lastname: 'Uche',
+            },
+          },
+          {
+            id: 'slot-b',
+            member: null,
+            backupMember: null,
+          },
+        ],
+      };
+      mockProgrammeRepo.findOne.mockResolvedValue(programmeWithSlots);
+      const result = await service.findOne('prog-1');
+      expect(result.slots[0]).toEqual(
+        expect.objectContaining({
+          memberName: 'Ada Obi',
+          backupMemberName: 'Ben Uche',
+        }),
+      );
+      expect(result.slots[1]).toEqual(
+        expect.objectContaining({ memberName: null, backupMemberName: null }),
+      );
     });
 
     it('throws NotFoundException when programme not found', async () => {
@@ -257,6 +482,31 @@ describe('ServiceProgrammeService', () => {
       expect(result.position).toBe(2);
     });
 
+    it('flattens the assigned member name onto the returned slot', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        lastname: 'Obi',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      const created = {
+        id: 'new-slot',
+        position: 0,
+        member: assignedMember,
+        ...dto,
+      };
+      mockSlotRepo.create.mockReturnValue(created);
+      mockSlotRepo.save.mockResolvedValue(created);
+
+      const result = await service.addSlot('prog-1', {
+        ...dto,
+        memberId: 'member-1',
+      });
+      expect(result.memberName).toBe('Ada Obi');
+    });
+
     it('sets position to 0 when programme has no slots', async () => {
       mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
       const created = { id: 'new-slot', position: 0, ...dto };
@@ -288,6 +538,260 @@ describe('ServiceProgrammeService', () => {
       mockMemberRepo.findOne.mockResolvedValue(null);
       await expect(
         service.addSlot('prog-1', { ...dto, memberId: 'member-x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('emails the assigned member when they have an email address', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      const created = { id: 'new-slot', position: 0, ...dto };
+      mockSlotRepo.create.mockReturnValue(created);
+      mockSlotRepo.save.mockResolvedValue(created);
+
+      await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
+
+      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
+        'ada@example.com',
+        expect.any(String),
+        'service-slot-assigned',
+        expect.objectContaining({ memberName: 'Ada' }),
+        undefined,
+        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      );
+    });
+
+    it('attaches an .ics calendar invite when the service slot has a start/end time', async () => {
+      const timedProgramme = {
+        ...draftProgramme,
+        serviceSlot: {
+          ...mockServiceSlot,
+          startTime: new Date('2026-08-02T09:00:00.000Z'),
+          endTime: new Date('2026-08-02T11:00:00.000Z'),
+        },
+      };
+      mockProgrammeRepo.findOne.mockResolvedValue(timedProgramme);
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      const created = { id: 'new-slot', position: 0, ...dto };
+      mockSlotRepo.create.mockReturnValue(created);
+      mockSlotRepo.save.mockResolvedValue(created);
+
+      await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
+
+      expect(
+        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        'ada@example.com',
+        expect.any(String),
+        'service-slot-assigned',
+        expect.objectContaining({ memberName: 'Ada' }),
+        [expect.objectContaining({ filename: 'service-slot.ics' })],
+        undefined,
+        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      );
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not email when the assigned member has no email', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Ada',
+        email: null,
+      });
+      const created = { id: 'new-slot', position: 0, ...dto };
+      mockSlotRepo.create.mockReturnValue(created);
+      mockSlotRepo.save.mockResolvedValue(created);
+
+      await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('returns a conflictWarning when the member has an overlapping slot elsewhere', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        lastname: 'Lovelace',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      const created = { id: 'new-slot', position: 0, ...dto };
+      mockSlotRepo.create.mockReturnValue(created);
+      mockSlotRepo.save.mockResolvedValue(created);
+      mockSlotConflictQueryBuilder.getOne.mockResolvedValueOnce({
+        id: 'other-slot',
+        programme: {
+          serviceSlot: { name: 'Second Service', event: { name: 'Sunday' } },
+        },
+      });
+
+      const result = await service.addSlot('prog-1', {
+        ...dto,
+        memberId: 'member-1',
+      });
+      expect(result.conflictWarning).toContain('Ada Lovelace');
+      expect(result.conflictWarning).toContain('Sunday');
+    });
+
+    it('does not set conflictWarning when there is no overlapping slot', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      const created = { id: 'new-slot', position: 0, ...dto };
+      mockSlotRepo.create.mockReturnValue(created);
+      mockSlotRepo.save.mockResolvedValue(created);
+
+      const result = await service.addSlot('prog-1', {
+        ...dto,
+        memberId: 'member-1',
+      });
+      expect(result.conflictWarning).toBeUndefined();
+    });
+  });
+
+  // ── updateSlot ───────────────────────────────────────────────────────────
+
+  describe('updateSlot', () => {
+    const baseSlot = {
+      id: 'slot-1',
+      type: ServiceSlotTypeEnum.SPEAKER,
+      topic: 'Opening',
+      allocatedMinutes: 15,
+      member: null,
+      backupMember: null,
+      programme: draftProgramme,
+    };
+
+    it('emails the newly assigned member', async () => {
+      mockSlotRepo.findOne.mockResolvedValue({ ...baseSlot });
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      mockSlotRepo.save.mockImplementation((s) => Promise.resolve(s));
+
+      await service.updateSlot('prog-1', 'slot-1', { memberId: 'member-1' });
+
+      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
+        'ada@example.com',
+        expect.any(String),
+        'service-slot-assigned',
+        expect.objectContaining({ memberName: 'Ada' }),
+        undefined,
+        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      );
+    });
+
+    it('does not re-email when the member is unchanged', async () => {
+      const existingMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockSlotRepo.findOne.mockResolvedValue({
+        ...baseSlot,
+        member: existingMember,
+      });
+      mockSlotRepo.save.mockImplementation((s) => Promise.resolve(s));
+
+      await service.updateSlot('prog-1', 'slot-1', { topic: 'Updated Topic' });
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('does not email when the slot is cleared to no member', async () => {
+      const existingMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockSlotRepo.findOne.mockResolvedValue({
+        ...baseSlot,
+        member: existingMember,
+      });
+      mockSlotRepo.save.mockImplementation((s) => Promise.resolve(s));
+
+      await service.updateSlot('prog-1', 'slot-1', { memberId: null });
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('returns a conflictWarning when the newly assigned member overlaps another slot', async () => {
+      mockSlotRepo.findOne.mockResolvedValue({ ...baseSlot });
+      const assignedMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        lastname: 'Lovelace',
+        email: 'ada@example.com',
+      };
+      mockMemberRepo.findOne.mockResolvedValue(assignedMember);
+      mockSlotRepo.save.mockImplementation((s) => Promise.resolve(s));
+      mockSlotConflictQueryBuilder.getOne.mockResolvedValueOnce({
+        id: 'other-slot',
+        programme: { serviceSlot: { name: 'Second Service', event: null } },
+      });
+
+      const result = await service.updateSlot('prog-1', 'slot-1', {
+        memberId: 'member-1',
+      });
+      expect(result.conflictWarning).toContain('Ada Lovelace');
+    });
+
+    it('does not check for conflicts when the member is unchanged', async () => {
+      const existingMember = {
+        id: 'member-1',
+        firstname: 'Ada',
+        email: 'ada@example.com',
+      };
+      mockSlotRepo.findOne.mockResolvedValue({
+        ...baseSlot,
+        member: existingMember,
+      });
+      mockSlotRepo.save.mockImplementation((s) => Promise.resolve(s));
+
+      const result = await service.updateSlot('prog-1', 'slot-1', {
+        topic: 'Updated Topic',
+      });
+      expect(mockSlotRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(result.conflictWarning).toBeUndefined();
+    });
+
+    it('throws BadRequestException when programme is not DRAFT', async () => {
+      mockSlotRepo.findOne.mockResolvedValue({
+        ...baseSlot,
+        programme: liveProgramme,
+      });
+      await expect(
+        service.updateSlot('prog-2', 'slot-1', { topic: 'x' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException when slot not found', async () => {
+      mockSlotRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.updateSlot('prog-1', 'slot-x', { topic: 'x' }),
       ).rejects.toThrow(NotFoundException);
     });
   });

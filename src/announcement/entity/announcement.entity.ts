@@ -8,6 +8,7 @@ import {
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 import { Member } from '../../member/entity/member.entity';
 import { Department } from '../../department/entity/department.entity';
+import { Group } from '../../group/entity/group.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 
 @Entity('announcements')
@@ -35,6 +36,10 @@ export class Announcement extends BaseEntity {
   @Index()
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   targetMember: Member | null;
+
+  @Index()
+  @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
+  group: Group | null;
 
   @Index()
   @Column({ type: 'timestamptz', nullable: true })

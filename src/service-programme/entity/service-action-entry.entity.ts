@@ -35,4 +35,9 @@ export class ServiceActionEntry extends BaseEntity {
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'performed_by_member_id' })
   performedByMember: Member | null;
+
+  // Free-text name for a named public-link actor (via ServiceSessionAccessGrant) —
+  // distinct from performedByMember, which only applies to real Member/Worker actors.
+  @Column({ name: 'actor_label', nullable: true })
+  actorLabel: string | null;
 }

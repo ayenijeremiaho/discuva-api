@@ -79,6 +79,10 @@ export const envValidationSchema = Joi.object({
   TIMEZONE: Joi.string().default('Africa/Lagos'),
 
   ONLINE_CHECKIN_WINDOW_HOURS: Joi.number().default(3),
+  SERVICE_SLOT_CAUTION_THRESHOLD_RATIO: Joi.number()
+    .min(0)
+    .max(1)
+    .default(0.25),
   FOLLOW_UP_DUE_DAYS: Joi.number().default(3),
   FOLLOW_UP_STALE_DAYS: Joi.number().default(7),
   ENFORCE_DISTANCE_CHECK: Joi.boolean().default(false),

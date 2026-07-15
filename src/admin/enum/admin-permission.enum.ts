@@ -15,6 +15,8 @@ export enum AdminPermission {
   CLASSES_WRITE = 'classes:write',
   ANNOUNCEMENTS_READ = 'announcements:read',
   ANNOUNCEMENTS_WRITE = 'announcements:write',
+  GROUPS_READ = 'groups:read',
+  GROUPS_WRITE = 'groups:write',
   NOTES_READ = 'notes:read',
   NOTES_WRITE = 'notes:write',
   DASHBOARD_READ = 'dashboard:read',
@@ -67,6 +69,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.CLASSES_WRITE]: 'Manage Church Classes',
   [AdminPermission.ANNOUNCEMENTS_READ]: 'View Announcements',
   [AdminPermission.ANNOUNCEMENTS_WRITE]: 'Manage Announcements',
+  [AdminPermission.GROUPS_READ]: 'View Groups',
+  [AdminPermission.GROUPS_WRITE]: 'Manage Groups',
   [AdminPermission.NOTES_READ]: 'View Notes',
   [AdminPermission.NOTES_WRITE]: 'Manage Notes',
   [AdminPermission.DASHBOARD_READ]: 'View Dashboard',
@@ -132,6 +136,9 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View all announcements sent to members or workers',
   [AdminPermission.ANNOUNCEMENTS_WRITE]:
     'Create and publish announcements to members or workers',
+  [AdminPermission.GROUPS_READ]: 'View groups and their member rosters',
+  [AdminPermission.GROUPS_WRITE]:
+    'Create and manage groups, and add or remove members individually or in bulk',
   [AdminPermission.NOTES_READ]:
     'View pastoral notes and member interaction records',
   [AdminPermission.NOTES_WRITE]: 'Create and assign pastoral notes to members',
@@ -280,6 +287,8 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
   buildGroup('Announcements', [
     AdminPermission.ANNOUNCEMENTS_READ,
     AdminPermission.ANNOUNCEMENTS_WRITE,
+    AdminPermission.GROUPS_READ,
+    AdminPermission.GROUPS_WRITE,
   ]),
   buildGroup('Notes & Follow-Up', [
     AdminPermission.NOTES_READ,

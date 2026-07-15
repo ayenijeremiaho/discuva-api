@@ -153,12 +153,8 @@ export class PdfService {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [
-        ['#', 'Type', 'Topic / Speaker', 'Allocated', 'Actual', 'Overrun'],
-      ],
+      head: [['#', 'Topic', 'Speaker', 'Allocated', 'Actual', 'Overrun']],
       body: report.slots.map((slot) => {
-        const speaker =
-          [slot.topic, slot.speakerName].filter(Boolean).join(' · ') || '—';
         let overrun = '—';
         if (slot.overrunSeconds != null) {
           const mins = Math.round(slot.overrunSeconds / 60);
@@ -166,8 +162,8 @@ export class PdfService {
         }
         return [
           String(slot.position + 1),
-          slot.type,
-          speaker,
+          this.slotTopicLabel(slot),
+          slot.speakerName ?? '—',
           slot.allocatedMinutes == null ? '—' : `${slot.allocatedMinutes} min`,
           slot.actualSeconds == null
             ? '—'
@@ -178,8 +174,8 @@ export class PdfService {
 
       columnStyles: {
         0: { cellWidth: 10 },
-        1: { cellWidth: 22 },
-        2: { cellWidth: 68 },
+        1: { cellWidth: 52 },
+        2: { cellWidth: 38 },
         3: { cellWidth: 22 },
         4: { cellWidth: 22 },
         5: { cellWidth: 30 },
@@ -225,7 +221,7 @@ export class PdfService {
         margin: { left: MARGIN, right: MARGIN },
         head: [['Slot', 'Reason', 'Duration']],
         body: report.pauses.map((p) => [
-          `Slot ${p.slotPosition + 1}`,
+          this.pauseSlotLabel(p.slotPosition, report.slots),
           p.reason.replaceAll('_', ' '),
           p.durationSeconds == null
             ? 'ongoing'
@@ -248,14 +244,15 @@ export class PdfService {
     }
 
     const finalY = (doc as any).lastAutoTable.finalY;
-    const afterFinal = finalY + 6;
+    const cursorY = this.drawAnalysisSection(doc, finalY + 8, report);
+
     const summaryY =
-      afterFinal + 14 > 277
+      cursorY + 14 > 277
         ? (() => {
             doc.addPage();
             return MARGIN;
           })()
-        : afterFinal;
+        : cursorY;
     this.drawTimeSummaryBand(doc, summaryY, report);
 
     this.drawPageFooter(doc);
@@ -512,12 +509,8 @@ export class PdfService {
       autoTable(doc, {
         startY: y,
         margin: { left: MARGIN, right: MARGIN },
-        head: [
-          ['#', 'Type', 'Topic / Speaker', 'Allocated', 'Actual', 'Overrun'],
-        ],
+        head: [['#', 'Topic', 'Speaker', 'Allocated', 'Actual', 'Overrun']],
         body: r.slots.map((slot) => {
-          const speaker =
-            [slot.topic, slot.speakerName].filter(Boolean).join(' · ') || '—';
           let overrun = '—';
           if (slot.overrunSeconds != null) {
             const mins = Math.round(slot.overrunSeconds / 60);
@@ -525,8 +518,8 @@ export class PdfService {
           }
           return [
             String(slot.position + 1),
-            slot.type,
-            speaker,
+            this.slotTopicLabel(slot),
+            slot.speakerName ?? '—',
             slot.allocatedMinutes == null
               ? '—'
               : `${slot.allocatedMinutes} min`,
@@ -538,8 +531,8 @@ export class PdfService {
         }),
         columnStyles: {
           0: { cellWidth: 10 },
-          1: { cellWidth: 22 },
-          2: { cellWidth: 68 },
+          1: { cellWidth: 52 },
+          2: { cellWidth: 38 },
           3: { cellWidth: 22 },
           4: { cellWidth: 22 },
           5: { cellWidth: 30 },
@@ -584,7 +577,7 @@ export class PdfService {
           margin: { left: MARGIN, right: MARGIN },
           head: [['Slot', 'Reason', 'Duration']],
           body: r.pauses.map((p) => [
-            `Slot ${p.slotPosition + 1}`,
+            this.pauseSlotLabel(p.slotPosition, r.slots),
             p.reason.replaceAll('_', ' '),
             p.durationSeconds == null
               ? 'ongoing'
@@ -735,7 +728,7 @@ export class PdfService {
 
     const tableBody = allRows.map(({ serviceName, slot }, idx) => {
       const speaker = slot.speakerName ?? '—';
-      const topicSlot = `${serviceName}: ${slot.topic || slot.type}`;
+      const topicSlot = `${serviceName}: ${this.slotTopicLabel(slot)}`;
       const allocated = `${String(slot.allocatedMinutes).padStart(2, '0')}:00`;
       const actual =
         slot.actualSeconds != null ? this.fmtSecsMM(slot.actualSeconds) : '—';
@@ -835,6 +828,30 @@ export class PdfService {
       return 'On Time';
     }
     return status;
+  }
+
+  // Human-readable fallback for a slot's type (e.g. "Praise & Worship",
+  // "Offering") — used whenever a slot has no topic set, so rows without a
+  // topic are still individually identifiable rather than all showing "—".
+  private slotTypeLabel(type: string): string {
+    return (
+      ServiceSlotTypeLabels[type as keyof typeof ServiceSlotTypeLabels] ?? type
+    );
+  }
+
+  private slotTopicLabel(slot: SessionSlotReport): string {
+    return slot.topic || this.slotTypeLabel(slot.type);
+  }
+
+  // Pause entries only store the slot's bare position (see ServicePauseEntry),
+  // so the Pause Log table needs to resolve that back to the slot's own
+  // topic/type label — otherwise it reads as an unexplained "Slot 3".
+  private pauseSlotLabel(
+    slotPosition: number,
+    slots: SessionSlotReport[],
+  ): string {
+    const slot = slots.find((s) => s.position === slotPosition);
+    return slot ? this.slotTopicLabel(slot) : `Slot ${slotPosition + 1}`;
   }
 
   // ─── Programme draft ─────────────────────────────────────────────────────
@@ -1003,7 +1020,7 @@ export class PdfService {
 
       const row: any[] = [
         String(i + 1),
-        s.topic || (ServiceSlotTypeLabels[s.type] ?? s.type),
+        s.topic || this.slotTypeLabel(s.type),
         rowStart,
         this.fmtDuration(mins),
         rowEnd,
@@ -1277,6 +1294,110 @@ export class PdfService {
     if (minutes > 0) return `+${minutes} min`;
     if (minutes < 0) return `${minutes} min`;
     return 'On time';
+  }
+
+  private drawAnalysisSection(
+    doc: jsPDF,
+    y: number,
+    report: SessionReport,
+  ): number {
+    const lines = this.buildSessionAnalysisLines(report);
+    if (lines.length === 0) return y;
+
+    let cursorY = y;
+    if (cursorY + 6 + lines.length * 9 > 270) {
+      doc.addPage();
+      cursorY = MARGIN;
+    }
+
+    doc
+      .setFont('helvetica', 'bold')
+      .setFontSize(11)
+      .setTextColor(DARK)
+      .text('Analysis', MARGIN, cursorY);
+    cursorY += 6;
+
+    doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(DARK);
+    for (const line of lines) {
+      const wrapped = doc.splitTextToSize(`•  ${line}`, CONTENT_W);
+      doc.text(wrapped, MARGIN, cursorY);
+      cursorY += wrapped.length * 4.5 + 2;
+    }
+
+    return cursorY + 4;
+  }
+
+  // Derived, presentation-only insights from data already on SessionReport —
+  // deliberately not part of the JSON report contract, since these are
+  // narrative summaries for the printed page, not additional API fields.
+  private buildSessionAnalysisLines(report: SessionReport): string[] {
+    const completed = report.slots.filter(
+      (s) => s.status === ServiceSessionSlotStatusEnum.COMPLETED,
+    );
+    const skippedCount = report.slots.filter(
+      (s) => s.status === ServiceSessionSlotStatusEnum.SKIPPED,
+    ).length;
+
+    return [
+      this.buildTimingAdherenceLine(completed, report.slotVarianceMinutes),
+      this.buildSkippedSlotsLine(skippedCount),
+      this.buildWorstOverrunLine(completed),
+      this.buildPauseSummaryLine(report),
+    ].filter((line): line is string => line != null);
+  }
+
+  private buildTimingAdherenceLine(
+    completed: SessionSlotReport[],
+    slotVarianceMinutes: number | null,
+  ): string | null {
+    if (completed.length === 0) return null;
+
+    const overCount = completed.filter(
+      (s) => (s.overrunSeconds ?? 0) > 30,
+    ).length;
+    const underCount = completed.filter(
+      (s) => (s.overrunSeconds ?? 0) < -30,
+    ).length;
+    const onTimeCount = completed.length - overCount - underCount;
+    const detail =
+      overCount > 0 || underCount > 0
+        ? ` (${overCount} ran over, ${underCount} finished early), for a combined variance of ${this.fmtVariance(slotVarianceMinutes ?? 0)}.`
+        : '.';
+    return `${onTimeCount} of ${completed.length} completed slots finished within their allocated time${detail}`;
+  }
+
+  private buildSkippedSlotsLine(skippedCount: number): string | null {
+    if (skippedCount === 0) return null;
+    const plural = skippedCount === 1 ? '' : 's';
+    const verb = skippedCount === 1 ? 'was' : 'were';
+    return `${skippedCount} slot${plural} never started and ${verb} marked skipped when the session ended.`;
+  }
+
+  private buildWorstOverrunLine(completed: SessionSlotReport[]): string | null {
+    const worstOverrun = [...completed]
+      .filter((s) => (s.overrunSeconds ?? 0) > 0)
+      .sort((a, b) => (b.overrunSeconds ?? 0) - (a.overrunSeconds ?? 0))[0];
+    if (!worstOverrun) return null;
+
+    const mins = Math.round((worstOverrun.overrunSeconds ?? 0) / 60);
+    return `Biggest overrun: "${worstOverrun.topic ?? worstOverrun.type}" ran ${mins} min over its allocation.`;
+  }
+
+  private buildPauseSummaryLine(report: SessionReport): string | null {
+    if (report.pauseCount === 0) return null;
+
+    const reasonCounts = new Map<string, number>();
+    for (const p of report.pauses) {
+      reasonCounts.set(p.reason, (reasonCounts.get(p.reason) ?? 0) + 1);
+    }
+    const topReason = [...reasonCounts.entries()].sort(
+      (a, b) => b[1] - a[1],
+    )[0]?.[0];
+    const pauseMins = Math.round(report.totalPauseDurationSeconds / 60);
+    const reasonSuffix = topReason
+      ? `, most often for ${topReason.replaceAll('_', ' ').toLowerCase()}.`
+      : '.';
+    return `Paused ${report.pauseCount} time${report.pauseCount === 1 ? '' : 's'} for a total of ${pauseMins} min${reasonSuffix}`;
   }
 
   private drawTimeSummaryBand(

@@ -5,12 +5,14 @@ import { AnnouncementService } from './service/announcement.service';
 import { AnnouncementController } from './controller/announcement.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
+import { GroupModule } from '../group/group.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Announcement]),
     MemberModule,
     UtilityModule,
+    GroupModule,
   ],
   providers: [AnnouncementService],
   controllers: [AnnouncementController],

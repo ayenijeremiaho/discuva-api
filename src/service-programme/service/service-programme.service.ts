@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { ServiceProgramme } from '../entity/service-programme.entity';
 import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import {
@@ -23,9 +23,31 @@ import { CreateServiceProgrammeSlotDto } from '../dto/create-service-programme-s
 import { UpdateServiceProgrammeSlotDto } from '../dto/update-service-programme-slot.dto';
 import { ReorderProgrammeSlotsDto } from '../dto/reorder-programme-slots.dto';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
+import { ServiceSlotTypeLabels } from '../enum/service-slot-type.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PdfService } from '../../utility/service/pdf.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { buildServiceSlotIcs } from '../util/ics-builder';
+import {
+  withMemberNames,
+  withMemberNamesList,
+  ServiceProgrammeSlotWithNames,
+} from '../util/slot-display';
+
+export type ServiceProgrammeWithSummary = ServiceProgramme & {
+  serviceSlotId?: string;
+  serviceSlotName?: string;
+  slotCount: number;
+  event?: { id: string; name: string; eventDate: Date } | null;
+  serviceSlotDetail?: {
+    id: string;
+    name: string;
+    startTime: Date;
+    endTime: Date;
+  } | null;
+};
 
 @Injectable()
 export class ServiceProgrammeService {
@@ -42,6 +64,7 @@ export class ServiceProgrammeService {
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
     private readonly pdfService: PdfService,
+    private readonly emailQueueService: EmailQueueService,
   ) {}
 
   private readonly logger = new Logger(ServiceProgrammeService.name);
@@ -49,30 +72,53 @@ export class ServiceProgrammeService {
   async create(
     dto: CreateServiceProgrammeDto,
     admin: Admin,
-  ): Promise<ServiceProgramme> {
-    const serviceSlot = await this.serviceSlotRepo.findOne({
-      where: { id: dto.serviceSlotId },
-    });
-    if (!serviceSlot) throw new NotFoundException('Service slot not found');
+  ): Promise<ServiceProgrammeWithSummary | ServiceProgrammeWithSummary[]> {
+    const serviceSlotIds = dto.programmes.map((p) => p.serviceSlotId);
 
-    const existing = await this.programmeRepo.findOne({
-      where: { serviceSlot: { id: dto.serviceSlotId } },
+    const serviceSlots = await this.serviceSlotRepo.find({
+      where: { id: In(serviceSlotIds) },
+      relations: ['event'],
     });
-    if (existing)
-      throw new ConflictException(
-        'A programme already exists for this service slot',
+    if (serviceSlots.length !== serviceSlotIds.length) {
+      throw new NotFoundException('One or more service slots not found');
+    }
+    const serviceSlotById = new Map(serviceSlots.map((s) => [s.id, s]));
+
+    const existing = await this.programmeRepo.find({
+      where: { serviceSlot: { id: In(serviceSlotIds) } },
+      relations: ['serviceSlot'],
+    });
+    if (existing.length > 0) {
+      const names = existing.map((p) => p.serviceSlot.name).join(', ');
+      throw new ConflictException(`A programme already exists for: ${names}`);
+    }
+
+    const results: ServiceProgrammeWithSummary[] = [];
+    for (const item of dto.programmes) {
+      const serviceSlot = serviceSlotById.get(item.serviceSlotId);
+      const programme = this.programmeRepo.create({
+        serviceSlot,
+        saveAsTemplate: dto.saveAsTemplate ?? false,
+        createdByAdmin: admin,
+      });
+      const saved = await this.programmeRepo.save(programme);
+      this.logger.log(
+        `Programme ${saved.id} created for slot ${item.serviceSlotId} by admin ${admin.id}`,
       );
 
-    const programme = this.programmeRepo.create({
-      serviceSlot,
-      saveAsTemplate: dto.saveAsTemplate ?? false,
-      createdByAdmin: admin,
-    });
-    const saved = await this.programmeRepo.save(programme);
-    this.logger.log(
-      `Programme ${saved.id} created for slot ${dto.serviceSlotId} by admin ${admin.id}`,
-    );
-    return saved;
+      if (item.slots?.length) {
+        for (const [position, slotDto] of item.slots.entries()) {
+          await this.createSlotForProgramme(saved, slotDto, position);
+        }
+        this.logger.log(
+          `${item.slots.length} slot(s) added to programme ${saved.id} at creation`,
+        );
+      }
+
+      results.push(await this.findOne(saved.id));
+    }
+
+    return results.length === 1 ? results[0] : results;
   }
 
   async findAll(
@@ -81,21 +127,32 @@ export class ServiceProgrammeService {
   ): Promise<PaginationResponseDto<ServiceProgramme>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
-    const [data, total] = await this.programmeRepo.findAndCount({
-      relations: [
-        'serviceSlot',
-        'serviceSlot.event',
-        'createdByAdmin',
-        'createdByAdmin.member',
-      ],
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-    return UtilityService.createPaginationResponse(data, page, limit, total);
+    const [data, total] = await this.programmeRepo
+      .createQueryBuilder('programme')
+      .leftJoinAndSelect('programme.serviceSlot', 'serviceSlot')
+      .leftJoinAndSelect('serviceSlot.event', 'event')
+      .leftJoinAndSelect('programme.createdByAdmin', 'createdByAdmin')
+      .leftJoinAndSelect('createdByAdmin.member', 'member')
+      .loadRelationCountAndMap('programme.slotCount', 'programme.slots')
+      .orderBy('programme.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return UtilityService.createPaginationResponse(
+      data.map((p) =>
+        this.withServiceSlotSummary(
+          p,
+          (p as unknown as { slotCount: number }).slotCount,
+        ),
+      ),
+      page,
+      limit,
+      total,
+    );
   }
 
-  async findOne(id: string): Promise<ServiceProgramme> {
+  async findOne(id: string): Promise<ServiceProgrammeWithSummary> {
     const programme = await this.programmeRepo.findOne({
       where: { id },
       relations: [
@@ -110,7 +167,46 @@ export class ServiceProgrammeService {
       order: { slots: { position: 'ASC' } },
     });
     if (!programme) throw new NotFoundException('Programme not found');
-    return programme;
+    return this.withServiceSlotSummary(programme);
+  }
+
+  // `serviceSlot` is a relation object; the admin frontend renders flat
+  // serviceSlotId/serviceSlotName/slotCount fields, so derive them here.
+  // `event`/`serviceSlotTime` are also surfaced structurally (not just baked
+  // into the serviceSlotName string) so the frontend can group programmes by
+  // their parent event instead of treating every slot as unrelated.
+  private withServiceSlotSummary(
+    programme: ServiceProgramme,
+    slotCount?: number,
+  ): ServiceProgrammeWithSummary {
+    return {
+      ...programme,
+      serviceSlotId: programme.serviceSlot?.id,
+      serviceSlotName: programme.serviceSlot
+        ? [programme.serviceSlot.event?.name, programme.serviceSlot.name]
+            .filter(Boolean)
+            .join(' — ')
+        : undefined,
+      slotCount: slotCount ?? programme.slots?.length ?? 0,
+      event: programme.serviceSlot?.event
+        ? {
+            id: programme.serviceSlot.event.id,
+            name: programme.serviceSlot.event.name,
+            eventDate: programme.serviceSlot.event.eventDate,
+          }
+        : null,
+      serviceSlotDetail: programme.serviceSlot
+        ? {
+            id: programme.serviceSlot.id,
+            name: programme.serviceSlot.name,
+            startTime: programme.serviceSlot.startTime,
+            endTime: programme.serviceSlot.endTime,
+          }
+        : null,
+      slots: programme.slots
+        ? withMemberNamesList(programme.slots)
+        : programme.slots,
+    };
   }
 
   async update(
@@ -138,10 +234,10 @@ export class ServiceProgrammeService {
   async addSlot(
     programmeId: string,
     dto: CreateServiceProgrammeSlotDto,
-  ): Promise<ServiceProgrammeSlot> {
+  ): Promise<ServiceProgrammeSlotWithNames & { conflictWarning?: string }> {
     const programme = await this.programmeRepo.findOne({
       where: { id: programmeId },
-      relations: ['slots'],
+      relations: ['slots', 'serviceSlot', 'serviceSlot.event'],
     });
     if (!programme) throw new NotFoundException('Programme not found');
     if (programme.status !== ServiceProgrammeStatusEnum.DRAFT) {
@@ -155,6 +251,17 @@ export class ServiceProgrammeService {
         ? Math.max(...programme.slots.map((s) => s.position)) + 1
         : 0;
 
+    return this.createSlotForProgramme(programme, dto, nextPosition);
+  }
+
+  // Shared by addSlot() (one item, appended to an existing draft) and
+  // create() (the full order-of-service, batched at creation time) so both
+  // paths resolve members/notify/conflict-check identically.
+  private async createSlotForProgramme(
+    programme: ServiceProgramme,
+    dto: CreateServiceProgrammeSlotDto,
+    position: number,
+  ): Promise<ServiceProgrammeSlotWithNames & { conflictWarning?: string }> {
     const member = dto.memberId
       ? await this.memberRepo.findOne({ where: { id: dto.memberId } })
       : null;
@@ -169,7 +276,7 @@ export class ServiceProgrammeService {
 
     const slot = this.slotRepo.create({
       programme,
-      position: nextPosition,
+      position,
       type: dto.type,
       topic: dto.topic ?? null,
       member: member ?? null,
@@ -180,19 +287,33 @@ export class ServiceProgrammeService {
     });
     const saved = await this.slotRepo.save(slot);
     this.logger.log(
-      `Slot added to programme ${programmeId} at position ${nextPosition}`,
+      `Slot added to programme ${programme.id} at position ${position}`,
     );
-    return saved;
+
+    if (member) this.notifySlotAssignment(member, programme, saved);
+
+    const conflictWarning = member
+      ? await this.findMemberConflictWarning(member, programme)
+      : undefined;
+
+    const result = withMemberNames(saved);
+    return conflictWarning ? { ...result, conflictWarning } : result;
   }
 
   async updateSlot(
     programmeId: string,
     slotId: string,
     dto: UpdateServiceProgrammeSlotDto,
-  ): Promise<ServiceProgrammeSlot> {
+  ): Promise<ServiceProgrammeSlotWithNames & { conflictWarning?: string }> {
     const slot = await this.slotRepo.findOne({
       where: { id: slotId, programme: { id: programmeId } },
-      relations: ['programme', 'member', 'backupMember'],
+      relations: [
+        'programme',
+        'programme.serviceSlot',
+        'programme.serviceSlot.event',
+        'member',
+        'backupMember',
+      ],
     });
     if (!slot) throw new NotFoundException('Slot not found');
     if (slot.programme.status !== ServiceProgrammeStatusEnum.DRAFT) {
@@ -200,6 +321,8 @@ export class ServiceProgrammeService {
         'Slots can only be edited on DRAFT programmes',
       );
     }
+
+    const previousMemberId = slot.member?.id ?? null;
 
     if (dto.memberId !== undefined) {
       slot.member = dto.memberId
@@ -212,6 +335,32 @@ export class ServiceProgrammeService {
         : null;
     }
 
+    this.applySlotFields(slot, dto);
+
+    const saved = await this.slotRepo.save(slot);
+    this.logger.log(`Slot ${slotId} updated on programme ${programmeId}`);
+
+    const isNewAssignment =
+      dto.memberId !== undefined &&
+      saved.member &&
+      saved.member.id !== previousMemberId;
+
+    if (isNewAssignment) {
+      this.notifySlotAssignment(saved.member, slot.programme, saved);
+    }
+
+    const conflictWarning = isNewAssignment
+      ? await this.findMemberConflictWarning(saved.member, slot.programme)
+      : undefined;
+
+    const result = withMemberNames(saved);
+    return conflictWarning ? { ...result, conflictWarning } : result;
+  }
+
+  private applySlotFields(
+    slot: ServiceProgrammeSlot,
+    dto: UpdateServiceProgrammeSlotDto,
+  ): void {
     if (dto.type !== undefined) slot.type = dto.type;
     if (dto.topic !== undefined) slot.topic = dto.topic ?? null;
     if (dto.guestName !== undefined) slot.guestName = dto.guestName ?? null;
@@ -219,10 +368,101 @@ export class ServiceProgrammeService {
       slot.backupGuestName = dto.backupGuestName ?? null;
     if (dto.allocatedMinutes !== undefined)
       slot.allocatedMinutes = dto.allocatedMinutes;
+  }
 
-    const saved = await this.slotRepo.save(slot);
-    this.logger.log(`Slot ${slotId} updated on programme ${programmeId}`);
-    return saved;
+  // Non-blocking check: does this member already have a slot in a different
+  // programme whose service time overlaps this one? Same-programme double
+  // duty (e.g. worship lead + offering) is intentionally not flagged.
+  private async findMemberConflictWarning(
+    member: Member,
+    programme: ServiceProgramme,
+  ): Promise<string | undefined> {
+    if (!programme.serviceSlot) return undefined;
+
+    const conflict = await this.slotRepo
+      .createQueryBuilder('slot')
+      .innerJoinAndSelect('slot.programme', 'conflictProgramme')
+      .innerJoinAndSelect(
+        'conflictProgramme.serviceSlot',
+        'conflictServiceSlot',
+      )
+      .leftJoinAndSelect('conflictServiceSlot.event', 'conflictEvent')
+      .where('slot.member_id = :memberId', { memberId: member.id })
+      .andWhere('conflictProgramme.id != :programmeId', {
+        programmeId: programme.id,
+      })
+      .andWhere('conflictServiceSlot.start_time < :endTime', {
+        endTime: programme.serviceSlot.endTime,
+      })
+      .andWhere('conflictServiceSlot.end_time > :startTime', {
+        startTime: programme.serviceSlot.startTime,
+      })
+      .getOne();
+
+    if (!conflict) return undefined;
+
+    const conflictSlotName = [
+      conflict.programme?.serviceSlot?.event?.name,
+      conflict.programme?.serviceSlot?.name,
+    ]
+      .filter(Boolean)
+      .join(' — ');
+    const suffix = conflictSlotName ? `: ${conflictSlotName}` : '';
+    return `${member.firstname} ${member.lastname} is already assigned to an overlapping service${suffix}.`;
+  }
+
+  // Fire-and-forget notification when a member is assigned a service-programme
+  // slot. Guests (guestName, no member record) have no email to notify.
+  private notifySlotAssignment(
+    member: Member,
+    programme: ServiceProgramme,
+    slot: ServiceProgrammeSlot,
+  ): void {
+    if (!member.email) return;
+
+    const serviceSlotName = programme.serviceSlot
+      ? [programme.serviceSlot.event?.name, programme.serviceSlot.name]
+          .filter(Boolean)
+          .join(' — ')
+      : 'the service';
+
+    const subject = `You've Been Added to the Programme: ${serviceSlotName}`;
+    const templateData = {
+      memberName: member.firstname,
+      serviceSlotName,
+      slotType: ServiceSlotTypeLabels[slot.type] ?? slot.type,
+      topic: slot.topic ?? '',
+      allocatedMinutes: slot.allocatedMinutes,
+    };
+
+    if (programme.serviceSlot?.startTime && programme.serviceSlot?.endTime) {
+      const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
+      const ics = buildServiceSlotIcs({
+        uid: slot.id,
+        startTime: programme.serviceSlot.startTime,
+        endTime: programme.serviceSlot.endTime,
+        summary: `${templateData.slotType}${topicSuffix} — ${serviceSlotName}`,
+        description: `You're assigned to ${templateData.slotType} for ${serviceSlotName}.`,
+      });
+      this.emailQueueService.queueEmailWithTemplateAndAttachments(
+        member.email,
+        subject,
+        'service-slot-assigned',
+        templateData,
+        [{ filename: 'service-slot.ics', content: ics }],
+        undefined,
+        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      );
+    } else {
+      this.emailQueueService.queueEmailWithTemplate(
+        member.email,
+        subject,
+        'service-slot-assigned',
+        templateData,
+        undefined,
+        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      );
+    }
   }
 
   async reorderSlots(

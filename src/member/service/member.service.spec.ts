@@ -231,14 +231,20 @@ describe('MemberService', () => {
         role: MemberRoleEnum.WORKER,
         workerProfile,
       };
+      const mockTxManager = {
+        save: jest.fn().mockResolvedValue(workerProfile),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      };
 
       mockMemberRepo.findOne
         .mockResolvedValueOnce(member)
         .mockResolvedValueOnce(updatedMember);
       mockDepartmentRepo.findOneBy.mockResolvedValue(department);
       mockWorkerProfileRepo.create.mockReturnValue(workerProfile);
-      mockWorkerProfileRepo.save.mockResolvedValue(workerProfile);
-      mockMemberRepo.update.mockResolvedValue({ affected: 1 });
+      mockMemberRepo.manager.transaction.mockImplementation(
+        async (cb: (em: typeof mockTxManager) => Promise<void>) =>
+          cb(mockTxManager),
+      );
       jest
         .spyOn(UtilityService, 'capitalizeFirstLetter')
         .mockReturnValue('Jane');
@@ -249,8 +255,8 @@ describe('MemberService', () => {
         'actor-1',
       );
 
-      expect(mockWorkerProfileRepo.save).toHaveBeenCalled();
-      expect(mockMemberRepo.update).toHaveBeenCalledWith('member-1', {
+      expect(mockTxManager.save).toHaveBeenCalledWith(workerProfile);
+      expect(mockTxManager.update).toHaveBeenCalledWith(Member, 'member-1', {
         role: MemberRoleEnum.WORKER,
       });
       expect(result.role).toBe(MemberRoleEnum.WORKER);

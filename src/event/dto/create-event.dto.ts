@@ -39,13 +39,6 @@ export class CreateEventDto {
   @IsString()
   description?: string;
 
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'eventDate must be YYYY-MM-DD' })
-  eventDate: string;
-
-  @IsOptional()
-  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'endDate must be YYYY-MM-DD' })
-  endDate?: string;
-
   @IsArray()
   @ArrayMinSize(1, { message: 'At least one service slot is required' })
   @ValidateNested({ each: true })

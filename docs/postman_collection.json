@@ -4589,6 +4589,460 @@
       ]
     },
     {
+      "name": "Groups",
+      "item": [
+        {
+          "name": "Create Group (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Call Leaders\",\n  \"description\": \"Leads the weekly prayer call\"\n}"
+            },
+            "description": "Create a group (name unique, description optional). AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\"data\": {\"id\": \"g-uuid\", \"name\": \"Call Leaders\", \"description\": \"Leads the weekly prayer call\", \"memberCount\": 0}}"
+            }
+          ]
+        },
+        {
+          "name": "Get All Groups (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups"
+              ]
+            },
+            "description": "List all groups with memberCount. No pagination \u2014 reference data, mirrors the Departments policy. AdminGuard + GROUPS_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": [{\"id\": \"g-uuid\", \"name\": \"Call Leaders\", \"description\": null, \"memberCount\": 12}]}"
+            }
+          ]
+        },
+        {
+          "name": "Get Group Lookup (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/lookup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                "lookup"
+              ]
+            },
+            "description": "Minimal {id, name}[] list for populating a group picker. Gated on ANNOUNCEMENTS_WRITE instead of GROUPS_READ/WRITE \u2014 lets any admin who can create a GROUP announcement select a group without needing separate group-management access. Registered before ':id' so it isn't swallowed as a param."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": [{\"id\": \"g-uuid\", \"name\": \"Call Leaders\"}]}"
+            }
+          ]
+        },
+        {
+          "name": "Get Group by ID (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "description": "Get one group with memberCount. AdminGuard + GROUPS_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"id\": \"g-uuid\", \"name\": \"Call Leaders\", \"description\": null, \"memberCount\": 12}}"
+            }
+          ]
+        },
+        {
+          "name": "Update Group (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Call Leaders (Updated)\",\n  \"description\": \"Updated description\"\n}"
+            },
+            "description": "Rename / update description. AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"id\": \"g-uuid\", \"name\": \"Call Leaders (Updated)\", \"description\": \"Updated description\"}}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Group (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "description": "Delete a group \u2014 cascades to its group_members rows. AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"success\": true}}"
+            }
+          ]
+        },
+        {
+          "name": "Get Group Members (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id",
+                "members"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "description": "Paginated member roster. AdminGuard + GROUPS_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"data\": [{\"id\": \"gm-uuid\", \"member\": {\"id\": \"m-uuid\", \"firstname\": \"Ada\", \"lastname\": \"Obi\", \"email\": \"ada@example.com\", \"role\": \"MEMBER\"}, \"createdAt\": \"2026-06-01T00:00:00.000Z\"}], \"page\": 1, \"limit\": 20, \"totalCount\": 1, \"totalPages\": 1}}"
+            }
+          ]
+        },
+        {
+          "name": "Add Member to Group (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id",
+                "members"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\"\n}"
+            },
+            "description": "Add a single member. AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\"data\": {\"id\": \"gm-uuid\", \"group\": \"g-uuid\", \"member\": \"m-uuid\"}}"
+            }
+          ]
+        },
+        {
+          "name": "Bulk Add Members to Group (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members/bulk-add",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id",
+                "members",
+                "bulk-add"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberIds\": [\n    \"m-uuid-1\",\n    \"m-uuid-2\"\n  ]\n}"
+            },
+            "description": "Add multiple members at once; returns {added, skipped} \u2014 duplicates are skipped, not errored. AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"added\": 2, \"skipped\": 0}}"
+            }
+          ]
+        },
+        {
+          "name": "Remove Member from Group (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members/:memberId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id",
+                "members",
+                ":memberId"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                },
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "Remove a single member. AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"success\": true}}"
+            }
+          ]
+        },
+        {
+          "name": "Bulk Remove Members from Group (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members/bulk-remove",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "groups",
+                ":id",
+                "members",
+                "bulk-remove"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{id}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberIds\": [\n    \"m-uuid-1\",\n    \"m-uuid-2\"\n  ]\n}"
+            },
+            "description": "Remove multiple members at once; returns {removed}. AdminGuard + GROUPS_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\"data\": {\"removed\": 2}}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Notes",
       "description": "Pastoral records for milestone events: child namings, child dedications, and marriages. Admin-only CRUD.\n\n**Access:** Admin-only for all operations.\n\n**Note types:** `child_naming` | `child_dedication` | `marriage`\n\nEach type has its own fields (e.g. child_naming has childName + familyName + dateOfBirth; marriage has husbandName + wifeName + weddingDate). Use `GET /notes/:type` to list by type. Analytics summaries are available via the Notes Analytics folder.",
       "item": [
@@ -11329,9 +11783,9 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"serviceSlotId\": \"{{serviceSlotId}}\",\n  \"saveAsTemplate\": false\n}"
+                  "raw": "{\n  \"programmes\": [\n    {\n      \"serviceSlotId\": \"{{serviceSlotId}}\",\n      \"slots\": [\n        {\n          \"type\": \"SPEAKER\",\n          \"topic\": \"Opening Prayer\",\n          \"allocatedMinutes\": 5\n        },\n        {\n          \"type\": \"WORSHIP\",\n          \"topic\": \"Praise & Worship\",\n          \"allocatedMinutes\": 20\n        }\n      ]\n    }\n  ],\n  \"saveAsTemplate\": false\n}"
                 },
-                "description": "Create a service programme linked to a service slot. One programme per slot \u2014 409 if one already exists. AdminGuard."
+                "description": "Create a programme for one or more service slots in one call \u2014 body is { programmes: [{ serviceSlotId, slots? }], saveAsTemplate? } (programmes min 1). One programme per slot still, but a multi-service Sunday (First + Second Service under the same event) can be programmed in a single request instead of one round trip per slot. Each entry\u2019s slots (order-of-service items) is independent \u2014 sibling slots are not required to match. Response is a single programme object when programmes has one entry, or an array when it has multiple. 409 (naming the affected slots) if any selected slot already has a programme \u2014 nothing is created if so. Omitting an entry\u2019s slots still creates that programme as an empty draft. AdminGuard + SERVICE_PROGRAMME_WRITE."
               },
               "response": [
                 {
@@ -12396,6 +12850,99 @@
                   "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Session already ended\"\n}"
                 }
               ]
+            },
+            {
+              "name": "Adjust Time",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/adjust-time",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "adjust-time"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"deltaSeconds\": -60\n}"
+                },
+                "description": "Nudge the running/paused slot's remaining time. Positive = give the current slot more time; negative = take time away. Range -3600..3600. Broadcasts updated state over the socket."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"anchor\": {\"currentSlotPosition\": 2, \"slotStartedAt\": 1718000000000, \"slotBaseSeconds\": 0, \"status\": \"LIVE\", \"isPaused\": false, \"pausedAt\": null}, \"session\": {\"sessionCode\": \"SVC-ABC123\", \"status\": \"LIVE\"}}"
+                }
+              ]
+            },
+            {
+              "name": "Reorder Live Slots",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/slots/reorder",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "slots",
+                    "reorder"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slots\": [\n    {\n      \"id\": \"slot-uuid-1\"\n    },\n    {\n      \"id\": \"slot-uuid-2\"\n    }\n  ]\n}"
+                },
+                "description": "Reorder the upcoming (not-yet-reached) slots mid-session. Body must be exactly the set of slot IDs positioned after the current slot \u2014 rejects on count mismatch or unknown ID. Broadcasts updated state over the socket."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": [{\"id\": \"slot-uuid-1\", \"position\": 3}, {\"id\": \"slot-uuid-2\", \"position\": 4}]}"
+                }
+              ]
             }
           ]
         },
@@ -12774,6 +13321,711 @@
                   "status": "Not Found",
                   "code": 404,
                   "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Event not found\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Get Share Links (Admin)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/share-links",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "share-links"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Returns the session's shareToken for building the public Programme Manager link (?token=). JwtAuthGuard \u2014 caller must be able to control the session."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\"sessionCode\": \"SVC-ABC123\", \"shareToken\": \"3f9c1a2b-...uuid\"}}"
+                }
+              ]
+            },
+            {
+              "name": "Rotate Share Token (Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/rotate-share-token",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "rotate-share-token"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Invalidate the current share token and generate a new one \u2014 revokes the public link for everyone who had it, without ending the session. JwtAuthGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\"sessionCode\": \"SVC-ABC123\", \"shareToken\": \"new-uuid-token\"}}"
+                }
+              ]
+            },
+            {
+              "name": "Create Access Grant (Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/access-grants",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "access-grants"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Bola Adeyemi\",\n  \"replaceExisting\": false\n}"
+                },
+                "description": "Generate a named, individually-revocable PIN grant for the public Programme Manager link. 409 if a non-revoked grant already exists for this name unless replaceExisting=true. Returns the one-time PIN (only shown here \u2014 not retrievable again)."
+              },
+              "response": [
+                {
+                  "name": "201 Created",
+                  "status": "Created",
+                  "code": 201,
+                  "body": "{\"data\": {\"id\": \"grant-uuid\", \"name\": \"Bola Adeyemi\", \"pin\": \"482913\", \"createdAt\": \"2026-06-15T08:00:00.000Z\"}}"
+                },
+                {
+                  "name": "409 Conflict",
+                  "status": "Conflict",
+                  "code": 409,
+                  "body": "{\"statusCode\": 409, \"message\": \"An active access grant already exists for this name\"}"
+                }
+              ]
+            },
+            {
+              "name": "List Access Grants (Admin)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/access-grants",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "access-grants"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "List all access grants issued for this session (active and revoked), newest first. JwtAuthGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": [{\"id\": \"grant-uuid\", \"name\": \"Bola Adeyemi\", \"revokedAt\": null, \"createdAt\": \"2026-06-15T08:00:00.000Z\"}]}"
+                }
+              ]
+            },
+            {
+              "name": "Revoke Access Grant (Admin)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/access-grants/:grantId/revoke",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "access-grants",
+                    ":grantId",
+                    "revoke"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    },
+                    {
+                      "key": "grantId",
+                      "value": "{{grantId}}"
+                    }
+                  ]
+                },
+                "description": "Revoke a named PIN grant immediately \u2014 that person's Programme Manager session stops working on their next action, without affecting anyone else's grant or the share link itself. JwtAuthGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\"id\": \"grant-uuid\", \"revokedAt\": \"2026-06-15T09:00:00.000Z\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Sign In (Public)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/access?token={{shareToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "access"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Bola Adeyemi\",\n  \"pin\": \"482913\"\n}"
+                },
+                "description": "Verify a named access grant's PIN. Returns a grantToken used as ?grantToken= on every subsequent pm/* control call. Public + ShareTokenGuard (requires ?token=)."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\"grantToken\": \"grant-token-uuid\", \"name\": \"Bola Adeyemi\"}}"
+                },
+                {
+                  "name": "403 Forbidden",
+                  "status": "Forbidden",
+                  "code": 403,
+                  "body": "{\"statusCode\": 403, \"message\": \"Invalid name or PIN\"}"
+                }
+              ]
+            },
+            {
+              "name": "PM Advance (Public)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/advance?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "advance"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Public Programme Manager equivalent of Advance \u2014 Public + ShareTokenGuard + NamedAccessGuard. Action log records the grant's name as actor."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"anchor\": {\"currentSlotPosition\": 2, \"slotStartedAt\": 1718000000000, \"slotBaseSeconds\": 0, \"status\": \"LIVE\", \"isPaused\": false, \"pausedAt\": null}, \"session\": {\"sessionCode\": \"SVC-ABC123\", \"status\": \"LIVE\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Rewind (Public)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/rewind?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "rewind"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Public Programme Manager equivalent of Rewind \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"anchor\": {\"currentSlotPosition\": 2, \"slotStartedAt\": 1718000000000, \"slotBaseSeconds\": 0, \"status\": \"LIVE\", \"isPaused\": false, \"pausedAt\": null}, \"session\": {\"sessionCode\": \"SVC-ABC123\", \"status\": \"LIVE\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Pause (Public)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/pause?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "pause"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"TECHNICAL_ISSUE\"\n}"
+                },
+                "description": "Public Programme Manager equivalent of Pause Session \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"anchor\": {\"currentSlotPosition\": 2, \"slotStartedAt\": 1718000000000, \"slotBaseSeconds\": 0, \"status\": \"LIVE\", \"isPaused\": false, \"pausedAt\": null}, \"session\": {\"sessionCode\": \"SVC-ABC123\", \"status\": \"LIVE\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Resume (Public)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/resume?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "resume"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Public Programme Manager equivalent of Resume Session \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"anchor\": {\"currentSlotPosition\": 2, \"slotStartedAt\": 1718000000000, \"slotBaseSeconds\": 0, \"status\": \"LIVE\", \"isPaused\": false, \"pausedAt\": null}, \"session\": {\"sessionCode\": \"SVC-ABC123\", \"status\": \"LIVE\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Adjust Time (Public)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/adjust-time?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "adjust-time"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"deltaSeconds\": -60\n}"
+                },
+                "description": "Public Programme Manager equivalent of Adjust Time \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"anchor\": {\"currentSlotPosition\": 2, \"slotStartedAt\": 1718000000000, \"slotBaseSeconds\": 0, \"status\": \"LIVE\", \"isPaused\": false, \"pausedAt\": null}, \"session\": {\"sessionCode\": \"SVC-ABC123\", \"status\": \"LIVE\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Reorder Live Slots (Public)",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/slots/reorder?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "slots",
+                    "reorder"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"slots\": [\n    {\n      \"id\": \"slot-uuid-1\"\n    },\n    {\n      \"id\": \"slot-uuid-2\"\n    }\n  ]\n}"
+                },
+                "description": "Public Programme Manager equivalent of Reorder Live Slots \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": [{\"id\": \"slot-uuid-1\", \"position\": 3}]}"
+                }
+              ]
+            },
+            {
+              "name": "PM Override Slot (Public)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/slots/:position/override?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "slots",
+                    ":position",
+                    "override"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    },
+                    {
+                      "key": "position",
+                      "value": "{{position}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"overriddenTopic\": \"Updated Topic\",\n  \"adjustedAllocatedMinutes\": 15\n}"
+                },
+                "description": "Public Programme Manager equivalent of Override Slot \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\"position\": 2, \"overriddenTopic\": \"Updated Topic\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM End Session (Public)",
+              "request": {
+                "method": "POST",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/end?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "end"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Public Programme Manager equivalent of End Session \u2014 Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\"status\": \"COMPLETED\"}}"
+                }
+              ]
+            },
+            {
+              "name": "PM Download Session Report (PDF) (Public)",
+              "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/report/pdf?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "report",
+                    "pdf"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Same session report PDF as the admin route, reachable from the public Programme Manager link once the session has ended. Public + ShareTokenGuard + NamedAccessGuard."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "<binary PDF>"
                 }
               ]
             }

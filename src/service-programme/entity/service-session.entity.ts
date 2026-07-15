@@ -13,6 +13,7 @@ import { ServiceSessionStatusEnum } from '../enum/service-session-status.enum';
 import { ServiceSessionSlot } from './service-session-slot.entity';
 import { ServicePauseEntry } from './service-pause-entry.entity';
 import { ServiceActionEntry } from './service-action-entry.entity';
+import { ServiceSessionAccessGrant } from './service-session-access-grant.entity';
 
 @Entity({ name: 'service_sessions' })
 export class ServiceSession extends BaseEntity {
@@ -47,4 +48,7 @@ export class ServiceSession extends BaseEntity {
 
   @OneToMany(() => ServiceActionEntry, (entry) => entry.session)
   actionEntries: ServiceActionEntry[];
+
+  @OneToMany(() => ServiceSessionAccessGrant, (grant) => grant.session)
+  accessGrants: ServiceSessionAccessGrant[];
 }

@@ -11,7 +11,7 @@ export enum ServiceSlotTypeEnum {
 
 export const ServiceSlotTypeLabels: Record<ServiceSlotTypeEnum, string> = {
   [ServiceSlotTypeEnum.SPEAKER]: 'Speaker',
-  [ServiceSlotTypeEnum.WORSHIP]: 'Worship',
+  [ServiceSlotTypeEnum.WORSHIP]: 'Praise & Worship',
   [ServiceSlotTypeEnum.PRAYER]: 'Prayer',
   [ServiceSlotTypeEnum.OFFERING]: 'Offering',
   [ServiceSlotTypeEnum.ANNOUNCEMENT]: 'Announcement',

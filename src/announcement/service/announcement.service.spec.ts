@@ -8,6 +8,8 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SanitizationService } from '../../utility/service/sanitization.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { GroupService } from '../../group/service/group.service';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 jest.mock('../../utility/service/sanitization.service', () => ({
   SanitizationService: jest.fn().mockImplementation(() => ({
@@ -36,6 +38,14 @@ const makeQb = () => ({
 
 const mockAuditLogService = { log: jest.fn() };
 
+const mockGroupService = {
+  getMemberIdsForGroup: jest.fn().mockResolvedValue([]),
+};
+
+const mockPushNotificationService = {
+  dispatchToMemberIds: jest.fn().mockResolvedValue(undefined),
+};
+
 const mockAnnouncementRepo = {
   findOne: jest.fn(),
   findAndCount: jest.fn(),
@@ -60,6 +70,11 @@ describe('AnnouncementService', () => {
         },
         { provide: SanitizationService, useValue: mockSanitizationService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: GroupService, useValue: mockGroupService },
+        {
+          provide: PushNotificationService,
+          useValue: mockPushNotificationService,
+        },
       ],
     }).compile();
 
@@ -296,8 +311,89 @@ describe('AnnouncementService', () => {
 
       expect(mockAnnouncementRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'ann-1' },
-        relations: ['author', 'department', 'targetMember'],
+        relations: ['author', 'department', 'targetMember', 'group'],
       });
+    });
+  });
+
+  describe('GROUP audience', () => {
+    it('should throw BadRequestException if audience is GROUP but no groupId provided', async () => {
+      await expect(
+        service.create(
+          {
+            title: 'Group Announcement',
+            body: 'For call leaders',
+            audience: AnnouncementAudienceEnum.GROUP,
+          } as any,
+          'author-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should save announcement with group set and dispatch a push notification to group members', async () => {
+      const announcement = {
+        id: 'ann-1',
+        title: 'Call Leaders Meeting',
+        body: 'Meeting moved to 6pm',
+        audience: AnnouncementAudienceEnum.GROUP,
+        group: { id: 'group-1' },
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockGroupService.getMemberIdsForGroup.mockResolvedValue([
+        'member-1',
+        'member-2',
+      ]);
+
+      await service.create(
+        {
+          title: 'Call Leaders Meeting',
+          body: 'Meeting moved to 6pm',
+          audience: AnnouncementAudienceEnum.GROUP,
+          groupId: 'group-1',
+        } as any,
+        'author-1',
+      );
+
+      expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ group: { id: 'group-1' } }),
+      );
+      await new Promise(process.nextTick);
+      expect(mockGroupService.getMemberIdsForGroup).toHaveBeenCalledWith(
+        'group-1',
+      );
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).toHaveBeenCalledWith(
+        ['member-1', 'member-2'],
+        expect.objectContaining({
+          idempotencyKey: 'ann-1',
+          title: 'Call Leaders Meeting',
+          url: '/announcements',
+        }),
+      );
+    });
+
+    it('should not dispatch a push notification for non-GROUP audiences', async () => {
+      const announcement = {
+        id: 'ann-2',
+        title: 'General',
+        body: 'Hello',
+        audience: AnnouncementAudienceEnum.ALL,
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+
+      await service.create(
+        { title: 'General', body: 'Hello' } as any,
+        'author-1',
+      );
+
+      await new Promise(process.nextTick);
+      expect(mockGroupService.getMemberIdsForGroup).not.toHaveBeenCalled();
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).not.toHaveBeenCalled();
     });
   });
 });

@@ -138,6 +138,8 @@ export class EmailQueueService {
       [EmailCategory.INCIDENT_REPORT]: 'EMAIL_INCIDENT_REPORT_ENABLED',
       [EmailCategory.CHILDREN_CHURCH]: 'EMAIL_CHILDREN_CHURCH_ENABLED',
       [EmailCategory.LOGIN_ALERT]: 'EMAIL_LOGIN_ALERT_ENABLED',
+      [EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT]:
+        'EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED',
     };
     return this.config.get<boolean>(flagMap[category]) !== false;
   }

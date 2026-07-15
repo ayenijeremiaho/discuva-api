@@ -1,16 +1,20 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { ConfigService } from '@nestjs/config';
 import { DataSource, Repository } from 'typeorm';
+import { randomUUID, randomInt } from 'node:crypto';
 import { ServiceSession } from '../entity/service-session.entity';
 import { ServiceSessionSlot } from '../entity/service-session-slot.entity';
 import { ServicePauseEntry } from '../entity/service-pause-entry.entity';
 import { ServiceActionEntry } from '../entity/service-action-entry.entity';
+import { ServiceSessionAccessGrant } from '../entity/service-session-access-grant.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { Member } from '../../member/entity/member.entity';
 import { ServiceProgrammeService } from './service-programme.service';
@@ -22,11 +26,19 @@ import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
+import { Admin } from '../../admin/entity/admin.entity';
+import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PdfService } from '../../utility/service/pdf.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
+import { UtilityService } from '../../utility/service/utility.service';
+import {
+  withMemberNamesList,
+  withEffectiveSessionSlots,
+  EffectiveSessionSlot,
+} from '../util/slot-display';
 
 export interface SessionAnchor {
   currentSlotPosition: number;
@@ -35,6 +47,13 @@ export interface SessionAnchor {
   status: ServiceSessionStatusEnum;
   isPaused: boolean;
   pausedAt: number | null;
+}
+
+export interface SessionStatePayload {
+  anchor: SessionAnchor;
+  session: ServiceSession;
+  effectiveSlots: EffectiveSessionSlot[];
+  cautionThresholdRatio: number;
 }
 
 export interface SessionSlotReport {
@@ -148,16 +167,21 @@ export class ServiceSessionService {
     private readonly pauseEntryRepo: Repository<ServicePauseEntry>,
     @InjectRepository(ServiceActionEntry)
     private readonly actionEntryRepo: Repository<ServiceActionEntry>,
+    @InjectRepository(ServiceSessionAccessGrant)
+    private readonly accessGrantRepo: Repository<ServiceSessionAccessGrant>,
     @InjectRepository(WorkerProfile)
     private readonly workerProfileRepo: Repository<WorkerProfile>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(Admin)
+    private readonly adminRepo: Repository<Admin>,
+    private readonly configService: ConfigService,
   ) {}
 
   private readonly logger = new Logger(ServiceSessionService.name);
 
   async start(programmeId: string, memberId: string): Promise<ServiceSession> {
-    await this.assertAdminDeptWorker(memberId);
+    await this.assertCanControlSession(memberId);
 
     const programme =
       await this.programmeSvc.assertProgrammeIsDraft(programmeId);
@@ -216,6 +240,13 @@ export class ServiceSessionService {
       SESSION_TTL_LIVE,
     );
 
+    const shareToken = randomUUID();
+    this.cacheService.set(
+      this.shareKey(sessionCode),
+      shareToken,
+      SESSION_TTL_LIVE,
+    );
+
     await this.logAction(
       session.id,
       ServiceActionRoleEnum.WORKER,
@@ -227,8 +258,276 @@ export class ServiceSessionService {
     return session;
   }
 
-  async advance(sessionCode: string, memberId: string): Promise<SessionAnchor> {
-    await this.assertAdminDeptWorker(memberId);
+  async getShareLinks(
+    sessionCode: string,
+    memberId: string,
+  ): Promise<{ sessionCode: string; shareToken: string }> {
+    await this.assertCanControlSession(memberId);
+    await this.getAnchorOrThrow(sessionCode);
+
+    let shareToken = await this.cacheService.get<string>(
+      this.shareKey(sessionCode),
+    );
+    if (!shareToken) {
+      // Self-heal: a session whose share token was never written (a race with
+      // the fire-and-forget set() in start(), a transient Redis hiccup, or a
+      // session still live from before this feature existed) would otherwise
+      // 404 here forever even though the session itself is perfectly live.
+      shareToken = randomUUID();
+      await this.cacheService.set(
+        this.shareKey(sessionCode),
+        shareToken,
+        SESSION_TTL_LIVE,
+      );
+    }
+
+    return { sessionCode, shareToken };
+  }
+
+  async rotateShareToken(
+    sessionCode: string,
+    memberId: string,
+  ): Promise<{ sessionCode: string; shareToken: string }> {
+    await this.assertCanControlSession(memberId);
+    const session = await this.getSessionOrThrow(sessionCode);
+
+    const shareToken = randomUUID();
+    this.cacheService.set(
+      this.shareKey(sessionCode),
+      shareToken,
+      SESSION_TTL_LIVE,
+    );
+
+    await this.logAction(
+      session.id,
+      ServiceActionRoleEnum.WORKER,
+      'SHARE_TOKEN_ROTATED',
+      null,
+      memberId,
+    );
+
+    return { sessionCode, shareToken };
+  }
+
+  async verifyShareToken(sessionCode: string, token: string): Promise<void> {
+    const shareToken = await this.cacheService.get<string>(
+      this.shareKey(sessionCode),
+    );
+    if (!shareToken || shareToken !== token) {
+      throw new ForbiddenException('Invalid or expired share link');
+    }
+  }
+
+  // Named, individually-revocable access to the public Programme Manager
+  // link — layered on top of the shareToken (which only gates "has the
+  // link at all"). An admin/worker grants a name a short PIN; whoever uses
+  // it identifies themselves once and every subsequent action is logged
+  // under their name instead of the generic PUBLIC_LINK actor.
+  async generateAccessGrant(
+    sessionCode: string,
+    name: string,
+    memberId: string,
+    replaceExisting = false,
+  ): Promise<{ id: string; name: string; pin: string }> {
+    await this.assertCanControlSession(memberId);
+    const session = await this.getSessionOrThrow(sessionCode);
+
+    // Two active grants sharing a name make sign-in ambiguous — name+PIN
+    // would match whichever row the lookup happens to find first, so a
+    // correct PIN for the second grant could be rejected. Flag the clash
+    // instead of silently creating an ambiguous duplicate; the caller can
+    // confirm replaceExisting to revoke the old one and issue a fresh PIN.
+    const normalized = name.trim().toLowerCase();
+    const existingGrants = await this.accessGrantRepo.find({
+      where: { session: { id: session.id } },
+    });
+    const existing = existingGrants.find(
+      (g) => !g.revokedAt && g.name.trim().toLowerCase() === normalized,
+    );
+
+    if (existing && !replaceExisting) {
+      throw new ConflictException(
+        `An active access grant for "${existing.name}" already exists`,
+      );
+    }
+    if (existing && replaceExisting) {
+      existing.revokedAt = new Date();
+      await this.accessGrantRepo.save(existing);
+      await this.logAction(
+        session.id,
+        ServiceActionRoleEnum.WORKER,
+        'ACCESS_GRANT_REPLACED',
+        `name:${existing.name}`,
+        memberId,
+      );
+    }
+
+    const pin = randomInt(100000, 1000000).toString();
+    const pinHash = await UtilityService.hashValue(pin);
+
+    let grant: ServiceSessionAccessGrant;
+    try {
+      grant = await this.accessGrantRepo.save(
+        this.accessGrantRepo.create({
+          session,
+          name,
+          pinHash,
+          grantedByMember: { id: memberId } as Member,
+          revokedAt: null,
+          lastUsedAt: null,
+        }),
+      );
+    } catch (err: unknown) {
+      // Safety net for the race where two identical requests land between
+      // the check above and this insert — the DB's partial unique index
+      // catches what the pre-check couldn't.
+      if ((err as { code?: string })?.code === '23505') {
+        throw new ConflictException(
+          `An active access grant for "${name}" already exists`,
+        );
+      }
+      throw err;
+    }
+
+    await this.logAction(
+      session.id,
+      ServiceActionRoleEnum.WORKER,
+      'ACCESS_GRANT_CREATED',
+      `name:${name}`,
+      memberId,
+    );
+
+    // The PIN only ever exists in plaintext here — it is never stored or
+    // retrievable again, only its argon2 hash.
+    return { id: grant.id, name: grant.name, pin };
+  }
+
+  async listAccessGrants(
+    sessionCode: string,
+    memberId: string,
+  ): Promise<
+    {
+      id: string;
+      name: string;
+      createdAt: Date;
+      revokedAt: Date | null;
+      lastUsedAt: Date | null;
+    }[]
+  > {
+    await this.assertCanControlSession(memberId);
+    const session = await this.getSessionOrThrow(sessionCode);
+    const grants = await this.accessGrantRepo.find({
+      where: { session: { id: session.id } },
+      order: { createdAt: 'ASC' },
+    });
+
+    return grants.map((g) => ({
+      id: g.id,
+      name: g.name,
+      createdAt: g.createdAt,
+      revokedAt: g.revokedAt,
+      lastUsedAt: g.lastUsedAt,
+    }));
+  }
+
+  async revokeAccessGrant(
+    sessionCode: string,
+    grantId: string,
+    memberId: string,
+  ): Promise<void> {
+    await this.assertCanControlSession(memberId);
+    const session = await this.getSessionOrThrow(sessionCode);
+    const grant = await this.accessGrantRepo.findOne({
+      where: { id: grantId, session: { id: session.id } },
+    });
+    if (!grant) throw new NotFoundException('Access grant not found');
+
+    grant.revokedAt = new Date();
+    await this.accessGrantRepo.save(grant);
+
+    await this.logAction(
+      session.id,
+      ServiceActionRoleEnum.WORKER,
+      'ACCESS_GRANT_REVOKED',
+      `name:${grant.name}`,
+      memberId,
+    );
+  }
+
+  async verifyAccessGrant(
+    sessionCode: string,
+    name: string,
+    pin: string,
+  ): Promise<{ grantToken: string; name: string }> {
+    await this.getAnchorOrThrow(sessionCode);
+    const session = await this.getSessionOrThrow(sessionCode);
+
+    const grants = await this.accessGrantRepo.find({
+      where: { session: { id: session.id } },
+    });
+    const normalized = name.trim().toLowerCase();
+    const grant = grants.find(
+      (g) => !g.revokedAt && g.name.trim().toLowerCase() === normalized,
+    );
+    // Deliberately vague on failure — don't reveal whether the name or the
+    // PIN was the part that didn't match.
+    if (!grant) throw new ForbiddenException('Invalid name or PIN');
+    const valid = await UtilityService.verifyHashedValue(pin, grant.pinHash);
+    if (!valid) throw new ForbiddenException('Invalid name or PIN');
+
+    const grantToken = randomUUID();
+    await this.cacheService.set(
+      this.grantKey(sessionCode, grantToken),
+      { grantId: grant.id, name: grant.name },
+      SESSION_TTL_LIVE,
+    );
+
+    grant.lastUsedAt = new Date();
+    await this.accessGrantRepo.save(grant);
+
+    return { grantToken, name: grant.name };
+  }
+
+  async resolveGrantToken(
+    sessionCode: string,
+    grantToken: string | undefined,
+  ): Promise<{ grantId: string; name: string }> {
+    if (!grantToken) {
+      throw new ForbiddenException(
+        'Missing Programme Manager access credentials',
+      );
+    }
+    const cached = await this.cacheService.get<{
+      grantId: string;
+      name: string;
+    }>(this.grantKey(sessionCode, grantToken));
+    if (!cached) {
+      throw new ForbiddenException(
+        'Access expired or not recognized — please sign in again',
+      );
+    }
+
+    const grant = await this.accessGrantRepo.findOne({
+      where: { id: cached.grantId },
+    });
+    if (!grant || grant.revokedAt) {
+      throw new ForbiddenException('Access has been revoked');
+    }
+
+    void this.accessGrantRepo.update(
+      { id: grant.id },
+      { lastUsedAt: new Date() },
+    );
+
+    return { grantId: grant.id, name: grant.name };
+  }
+
+  async advance(
+    sessionCode: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<SessionAnchor> {
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const anchor = await this.getAnchorOrThrow(sessionCode);
     const session = await this.getSessionOrThrow(sessionCode);
@@ -285,17 +584,24 @@ export class ServiceSessionService {
     );
     await this.logAction(
       session.id,
-      ServiceActionRoleEnum.WORKER,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
       'ADVANCE_SLOT',
       `position:${nextPosition}`,
       memberId,
+      actorLabel,
     );
 
     return newAnchor;
   }
 
-  async rewind(sessionCode: string, memberId: string): Promise<SessionAnchor> {
-    await this.assertAdminDeptWorker(memberId);
+  async rewind(
+    sessionCode: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<SessionAnchor> {
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const anchor = await this.getAnchorOrThrow(sessionCode);
     const session = await this.getSessionOrThrow(sessionCode);
@@ -305,6 +611,22 @@ export class ServiceSessionService {
     }
 
     const now = Date.now();
+    const prevPosition = anchor.currentSlotPosition - 1;
+
+    // Rewind nulls out completedAt/actualSeconds on both slots it touches —
+    // capture what's about to be destroyed so it's recoverable from the
+    // action log instead of being lost with no trace.
+    const [currentSlotBefore, prevSlotBefore] = await Promise.all([
+      this.sessionSlotRepo.findOne({
+        where: {
+          session: { id: session.id },
+          position: anchor.currentSlotPosition,
+        },
+      }),
+      this.sessionSlotRepo.findOne({
+        where: { session: { id: session.id }, position: prevPosition },
+      }),
+    ]);
 
     await this.sessionSlotRepo.update(
       { session: { id: session.id }, position: anchor.currentSlotPosition },
@@ -316,7 +638,6 @@ export class ServiceSessionService {
       },
     );
 
-    const prevPosition = anchor.currentSlotPosition - 1;
     await this.sessionSlotRepo.update(
       { session: { id: session.id }, position: prevPosition },
       {
@@ -340,12 +661,31 @@ export class ServiceSessionService {
       newAnchor,
       SESSION_TTL_LIVE,
     );
+    const restoreDetail = {
+      currentSlot: currentSlotBefore && {
+        position: currentSlotBefore.position,
+        status: currentSlotBefore.status,
+        startedAt: currentSlotBefore.startedAt,
+        completedAt: currentSlotBefore.completedAt,
+        actualSeconds: currentSlotBefore.actualSeconds,
+      },
+      prevSlot: prevSlotBefore && {
+        position: prevSlotBefore.position,
+        status: prevSlotBefore.status,
+        startedAt: prevSlotBefore.startedAt,
+        completedAt: prevSlotBefore.completedAt,
+        actualSeconds: prevSlotBefore.actualSeconds,
+      },
+    };
     await this.logAction(
       session.id,
-      ServiceActionRoleEnum.WORKER,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
       'REWIND_SLOT',
-      `position:${prevPosition}`,
+      `position:${prevPosition}:restoredFrom:${JSON.stringify(restoreDetail)}`,
       memberId,
+      actorLabel,
     );
 
     return newAnchor;
@@ -354,9 +694,10 @@ export class ServiceSessionService {
   async pause(
     sessionCode: string,
     dto: PauseSessionDto,
-    memberId: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
   ): Promise<SessionAnchor> {
-    await this.assertAdminDeptWorker(memberId);
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const anchor = await this.getAnchorOrThrow(sessionCode);
     if (anchor.isPaused)
@@ -387,17 +728,24 @@ export class ServiceSessionService {
     );
     await this.logAction(
       session.id,
-      ServiceActionRoleEnum.WORKER,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
       'PAUSE',
       dto.reason,
       memberId,
+      actorLabel,
     );
 
     return newAnchor;
   }
 
-  async resume(sessionCode: string, memberId: string): Promise<SessionAnchor> {
-    await this.assertAdminDeptWorker(memberId);
+  async resume(
+    sessionCode: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<SessionAnchor> {
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const anchor = await this.getAnchorOrThrow(sessionCode);
     if (!anchor.isPaused || !anchor.pausedAt)
@@ -430,10 +778,51 @@ export class ServiceSessionService {
     );
     await this.logAction(
       session.id,
-      ServiceActionRoleEnum.WORKER,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
       'RESUME',
       null,
       memberId,
+      actorLabel,
+    );
+
+    return newAnchor;
+  }
+
+  async adjustTime(
+    sessionCode: string,
+    deltaSeconds: number,
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<SessionAnchor> {
+    if (memberId) await this.assertCanControlSession(memberId);
+
+    const anchor = await this.getAnchorOrThrow(sessionCode);
+    const session = await this.getSessionOrThrow(sessionCode);
+    const now = Date.now();
+
+    const elapsed = this.calcElapsed(anchor, now);
+    const newElapsed = Math.max(0, elapsed - deltaSeconds);
+
+    const newAnchor: SessionAnchor = anchor.isPaused
+      ? { ...anchor, slotBaseSeconds: newElapsed }
+      : { ...anchor, slotStartedAt: now, slotBaseSeconds: newElapsed };
+
+    this.cacheService.set(
+      this.anchorKey(sessionCode),
+      newAnchor,
+      SESSION_TTL_LIVE,
+    );
+    await this.logAction(
+      session.id,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
+      'TIME_ADJUSTED',
+      `position:${anchor.currentSlotPosition}:delta:${deltaSeconds}`,
+      memberId,
+      actorLabel,
     );
 
     return newAnchor;
@@ -443,9 +832,10 @@ export class ServiceSessionService {
     sessionCode: string,
     position: number,
     dto: RuntimeOverrideDto,
-    memberId: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
   ): Promise<ServiceSessionSlot> {
-    await this.assertAdminDeptWorker(memberId);
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const session = await this.getSessionOrThrow(sessionCode);
     const sessionSlot = await this.sessionSlotRepo.findOne({
@@ -472,17 +862,77 @@ export class ServiceSessionService {
     const saved = await this.sessionSlotRepo.save(sessionSlot);
     await this.logAction(
       session.id,
-      ServiceActionRoleEnum.WORKER,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
       'SLOT_OVERRIDE',
       `position:${position}`,
       memberId,
+      actorLabel,
     );
 
     return saved;
   }
 
-  async end(sessionCode: string, memberId: string): Promise<ServiceSession> {
-    await this.assertAdminDeptWorker(memberId);
+  async reorderLiveSlots(
+    sessionCode: string,
+    orderedIds: string[],
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<ServiceSessionSlot[]> {
+    if (memberId) await this.assertCanControlSession(memberId);
+
+    const anchor = await this.getAnchorOrThrow(sessionCode);
+    const session = await this.getSessionOrThrow(sessionCode);
+
+    const allSlots = await this.sessionSlotRepo.find({
+      where: { session: { id: session.id } },
+      order: { position: 'ASC' },
+    });
+
+    const pendingSlots = allSlots.filter(
+      (s) => s.position > anchor.currentSlotPosition,
+    );
+    const pendingMap = new Map(pendingSlots.map((s) => [s.id, s]));
+    if (
+      orderedIds.some((id) => !pendingMap.has(id)) ||
+      orderedIds.length !== pendingSlots.length
+    ) {
+      throw new BadRequestException(
+        'Slot list must contain exactly the upcoming (not-yet-started) slot IDs',
+      );
+    }
+
+    const updated = orderedIds.map((id, index) => {
+      const slot = pendingMap.get(id);
+      slot.position = anchor.currentSlotPosition + 1 + index;
+      return slot;
+    });
+
+    const saved = await this.dataSource.transaction((manager) =>
+      manager.save(ServiceSessionSlot, updated),
+    );
+
+    await this.logAction(
+      session.id,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
+      'SLOTS_REORDERED',
+      `positions:${anchor.currentSlotPosition + 1}-${allSlots.length - 1}`,
+      memberId,
+      actorLabel,
+    );
+
+    return saved;
+  }
+
+  async end(
+    sessionCode: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<ServiceSession> {
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const anchor = await this.getAnchorOrThrow(sessionCode);
     const session = await this.getSessionOrThrow(sessionCode, [
@@ -520,6 +970,16 @@ export class ServiceSessionService {
           endedAt: new Date(now),
         },
       );
+      // If the session ends while still paused, the open ServicePauseEntry
+      // (resumedAt: null) would otherwise stay open forever — buildSessionReport
+      // treats any unresolved pause as contributing zero duration, silently
+      // dropping that entire pause interval from the report's total.
+      await manager
+        .createQueryBuilder()
+        .update(ServicePauseEntry)
+        .set({ resumedAt: new Date(now) })
+        .where('session_id = :sid AND resumed_at IS NULL', { sid: session.id })
+        .execute();
     });
 
     await this.programmeSvc.setProgrammeStatus(
@@ -543,10 +1003,13 @@ export class ServiceSessionService {
 
     await this.logAction(
       session.id,
-      ServiceActionRoleEnum.WORKER,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
       'SESSION_ENDED',
       null,
       memberId,
+      actorLabel,
     );
 
     this.dispatchSessionReportEmail(
@@ -558,15 +1021,17 @@ export class ServiceSessionService {
     return this.sessionRepo.findOne({ where: { id: session.id } });
   }
 
-  async getState(
-    sessionCode: string,
-  ): Promise<{ anchor: SessionAnchor; session: ServiceSession }> {
+  async getState(sessionCode: string): Promise<SessionStatePayload> {
     const session = await this.getSessionOrThrow(sessionCode, [
       'programme',
       'programme.slots',
       'programme.slots.member',
       'programme.slots.backupMember',
       'sessionSlots',
+      'sessionSlots.programmeSlot',
+      'sessionSlots.programmeSlot.member',
+      'sessionSlots.programmeSlot.backupMember',
+      'sessionSlots.overriddenMember',
     ]);
 
     let anchor = await this.cacheService.get<SessionAnchor>(
@@ -576,7 +1041,46 @@ export class ServiceSessionService {
       anchor = await this.reconstructAnchorFromDb(session);
     }
 
-    return { anchor, session };
+    if (session.programme?.slots) {
+      session.programme.slots = withMemberNamesList(session.programme.slots);
+    }
+
+    return {
+      anchor,
+      session,
+      effectiveSlots: session.sessionSlots
+        ? withEffectiveSessionSlots(session.sessionSlots)
+        : [],
+      cautionThresholdRatio: this.configService.get<number>(
+        'SERVICE_SLOT_CAUTION_THRESHOLD_RATIO',
+        0.25,
+      ),
+    };
+  }
+
+  async getActiveSessions(): Promise<
+    { sessionCode: string; serviceSlotName: string; startedAt: Date }[]
+  > {
+    const sessions = await this.sessionRepo.find({
+      where: { status: ServiceSessionStatusEnum.LIVE },
+      relations: [
+        'programme',
+        'programme.serviceSlot',
+        'programme.serviceSlot.event',
+      ],
+      order: { startedAt: 'ASC' },
+    });
+
+    return sessions.map((session) => ({
+      sessionCode: session.sessionCode,
+      serviceSlotName: [
+        session.programme?.serviceSlot?.event?.name,
+        session.programme?.serviceSlot?.name,
+      ]
+        .filter(Boolean)
+        .join(' — '),
+      startedAt: session.startedAt,
+    }));
   }
 
   async getSlotForSpeaker(
@@ -648,6 +1152,66 @@ export class ServiceSessionService {
   async getReportPdf(sessionCode: string): Promise<Buffer> {
     const report = await this.getFormattedReport(sessionCode);
     return this.pdfService.generateSessionReport(report);
+  }
+
+  async getActionLogCsv(sessionCode: string): Promise<string> {
+    const session = await this.getSessionOrThrow(sessionCode);
+    const entries = await this.actionEntryRepo.find({
+      where: { session: { id: session.id } },
+      relations: ['performedByMember'],
+      order: { createdAt: 'ASC' },
+    });
+
+    const escapeCsv = (value: string): string =>
+      /[",\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+
+    const header = ['Timestamp', 'Actor Role', 'Actor', 'Action', 'Detail'];
+    const rows = entries.map((e) => [
+      e.createdAt.toISOString(),
+      e.actorRole,
+      e.performedByMember
+        ? `${e.performedByMember.firstname} ${e.performedByMember.lastname}`
+        : (e.actorLabel ?? ''),
+      e.action,
+      e.detail ?? '',
+    ]);
+
+    return [header, ...rows]
+      .map((row) => row.map(escapeCsv).join(','))
+      .join('\n');
+  }
+
+  async getActionLog(
+    sessionCode: string,
+    memberId: string,
+    limit = 10,
+  ): Promise<
+    {
+      createdAt: Date;
+      actorRole: ServiceActionRoleEnum;
+      actorName: string | null;
+      action: string;
+      detail: string | null;
+    }[]
+  > {
+    await this.assertCanControlSession(memberId);
+    const session = await this.getSessionOrThrow(sessionCode);
+    const entries = await this.actionEntryRepo.find({
+      where: { session: { id: session.id } },
+      relations: ['performedByMember'],
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+
+    return entries.map((e) => ({
+      createdAt: e.createdAt,
+      actorRole: e.actorRole,
+      actorName: e.performedByMember
+        ? `${e.performedByMember.firstname} ${e.performedByMember.lastname}`
+        : e.actorLabel,
+      action: e.action,
+      detail: e.detail,
+    }));
   }
 
   async getFullEventReportPdf(eventId: string): Promise<Buffer> {
@@ -811,7 +1375,7 @@ export class ServiceSessionService {
     eventId: string,
     memberId: string,
   ): Promise<Buffer> {
-    await this.assertAdminDeptWorker(memberId);
+    await this.assertIsAdminDeptWorker(memberId);
     return this.getEventSummaryReportPdf(eventId);
   }
 
@@ -1035,23 +1599,51 @@ export class ServiceSessionService {
     };
   }
 
-  private async assertAdminDeptWorker(
-    memberId: string,
-  ): Promise<WorkerProfile> {
+  // Session control (start, advance/rewind/pause/..., managing share links
+  // and named PM access grants) is restricted to Admins holding
+  // SERVICE_PROGRAMME_WRITE. Admin-department workers no longer get an
+  // authenticated control path here — like anyone else, they use the public
+  // Programme Manager link with a named PIN grant instead, so every control
+  // action is attributable to a specific named person regardless of whether
+  // they're staff or an external collaborator.
+  private async assertCanControlSession(memberId: string): Promise<void> {
+    const admin = await this.adminRepo.findOne({
+      where: { member: { id: memberId }, isActive: true },
+      relations: ['adminRole'],
+    });
+    if (
+      admin?.adminRole.permissions.includes(
+        AdminPermission.SERVICE_PROGRAMME_WRITE,
+      )
+    ) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      'Only admins with service programme access can perform this action',
+    );
+  }
+
+  // Separate from assertCanControlSession — this gates only the mobile
+  // worker-facing event summary PDF download, a read-only report unrelated
+  // to live-session control, so it keeps its own department-based rule
+  // rather than sharing (and being narrowed by) the control-access check.
+  private async assertIsAdminDeptWorker(memberId: string): Promise<void> {
     const profile = await this.workerProfileRepo.findOne({
       where: { member: { id: memberId } },
       relations: ['department', 'secondaryDepartment'],
     });
     if (
-      !profile ||
-      (profile.department?.key !== DepartmentKeyEnum.ADMIN &&
-        profile.secondaryDepartment?.key !== DepartmentKeyEnum.ADMIN)
+      profile &&
+      (profile.department?.key === DepartmentKeyEnum.ADMIN ||
+        profile.secondaryDepartment?.key === DepartmentKeyEnum.ADMIN)
     ) {
-      throw new ForbiddenException(
-        'Only Admin department workers can perform this action',
-      );
+      return;
     }
-    return profile;
+
+    throw new ForbiddenException(
+      'Only Admin department workers can perform this action',
+    );
   }
 
   private async getAnchorOrThrow(sessionCode: string): Promise<SessionAnchor> {
@@ -1109,6 +1701,14 @@ export class ServiceSessionService {
     return this.cacheService.key('session', sessionCode, 'anchor');
   }
 
+  private shareKey(sessionCode: string): string {
+    return this.cacheService.key('session', sessionCode, 'share');
+  }
+
+  private grantKey(sessionCode: string, grantToken: string): string {
+    return this.cacheService.key('session-grant', sessionCode, grantToken);
+  }
+
   private generateSessionCode(): string {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     const suffix = Array.from(
@@ -1123,15 +1723,19 @@ export class ServiceSessionService {
     role: ServiceActionRoleEnum,
     action: string,
     detail: string | null,
-    memberId: string,
+    memberId: string | null,
+    actorLabel: string | null = null,
   ): Promise<void> {
-    const member = await this.memberRepo.findOne({ where: { id: memberId } });
+    const member = memberId
+      ? await this.memberRepo.findOne({ where: { id: memberId } })
+      : null;
     const entry = this.actionEntryRepo.create({
       session: { id: sessionId } as ServiceSession,
       actorRole: role,
       action,
       detail,
-      performedByMember: member ?? null,
+      performedByMember: member,
+      actorLabel,
     });
     await this.actionEntryRepo.save(entry);
   }

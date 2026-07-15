@@ -78,16 +78,22 @@ describe('EventService', () => {
   });
 
   describe('create', () => {
-    it('should throw BadRequestException for an invalid eventDate', async () => {
+    it('should throw BadRequestException for an invalid slot startTime', async () => {
       await expect(
         service.create(
-          { name: 'Test', eventDate: 'not-a-date', isRecurring: false } as any,
+          {
+            name: 'Test',
+            isRecurring: false,
+            serviceSlots: [
+              { startTime: 'not-a-date', endTime: '2025-06-01T11:00:00.000Z' },
+            ],
+          } as any,
           'actor-1',
         ),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should create a single event with explicit service slots', async () => {
+    it('should create a single event and derive eventDate/endDate from the slots', async () => {
       const slotDto = {
         name: 'First Service',
         startTime: '2025-06-01T09:00:00.000Z',
@@ -106,22 +112,27 @@ describe('EventService', () => {
       };
 
       mockSlotRepo.create.mockReturnValue(slotObj);
-      mockEventRepo.create.mockReturnValue({
-        name: 'Sunday Service',
+      mockEventRepo.create.mockImplementation((data) => ({
+        ...data,
         serviceSlots: [],
-      });
+      }));
       mockEventRepo.save.mockResolvedValue(savedEvent);
 
       const result = await service.create(
         {
           name: 'Sunday Service',
-          eventDate: '2025-06-01',
           isRecurring: false,
           serviceSlots: [slotDto],
         } as any,
         'actor-1',
       );
 
+      expect(mockEventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventDate: new Date('2025-06-01T00:00:00.000Z'),
+          endDate: new Date('2025-06-01T00:00:00.000Z'),
+        }),
+      );
       expect(mockEventRepo.save).toHaveBeenCalled();
       expect(result).toMatchObject({ id: 'event-1' });
     });
@@ -131,7 +142,6 @@ describe('EventService', () => {
         service.create(
           {
             name: 'Weekly Service',
-            eventDate: '2025-06-01',
             isRecurring: true,
             recurrence: undefined,
           } as any,
@@ -164,7 +174,6 @@ describe('EventService', () => {
       const result = await service.create(
         {
           name: 'Weekly Service',
-          eventDate: '2025-06-01',
           isRecurring: true,
           recurrence: {
             recurrenceEndDate: '2025-06-22',
@@ -186,40 +195,7 @@ describe('EventService', () => {
     });
 
     it('should throw BadRequestException when recurrence end date is more than 1 year away', async () => {
-      await expect(
-        service.create(
-          {
-            name: 'Long Recurring Service',
-            eventDate: '2025-06-01',
-            isRecurring: true,
-            recurrence: {
-              recurrenceEndDate: '2027-06-01',
-              recurrencePattern: 'weekly',
-              recurrenceInterval: 1,
-            },
-          } as any,
-          'actor-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('should throw BadRequestException when endDate is before eventDate', async () => {
-      await expect(
-        service.create(
-          {
-            name: 'Bad Range',
-            eventDate: '2025-06-05',
-            endDate: '2025-06-01',
-            isRecurring: false,
-            serviceSlots: [],
-          } as any,
-          'actor-1',
-        ),
-      ).rejects.toThrow('endDate must not be before eventDate');
-    });
-
-    it('should throw BadRequestException when slot times fall outside event date range', async () => {
-      mockSlotRepo.create.mockImplementation((d) => ({
+      mockSlotRepo.create.mockImplementation((d: any) => ({
         ...d,
         startTime: new Date(d.startTime),
         endTime: new Date(d.endTime),
@@ -228,15 +204,17 @@ describe('EventService', () => {
       await expect(
         service.create(
           {
-            name: 'Out of Bounds',
-            eventDate: '2025-06-01',
-            endDate: '2025-06-01',
-            isRecurring: false,
+            name: 'Long Recurring Service',
+            isRecurring: true,
+            recurrence: {
+              recurrenceEndDate: '2027-06-01',
+              recurrencePattern: 'weekly',
+              recurrenceInterval: 1,
+            },
             serviceSlots: [
               {
-                name: 'Late Night',
-                startTime: '2025-06-02T00:30:00.000Z',
-                endTime: '2025-06-02T02:00:00.000Z',
+                startTime: '2025-06-01T09:00:00.000Z',
+                endTime: '2025-06-01T11:00:00.000Z',
               },
             ],
           } as any,
@@ -256,7 +234,6 @@ describe('EventService', () => {
         service.create(
           {
             name: 'Overlapping',
-            eventDate: '2025-06-01',
             isRecurring: false,
             serviceSlots: [
               {
@@ -295,7 +272,6 @@ describe('EventService', () => {
         service.create(
           {
             name: 'Back to Back',
-            eventDate: '2025-06-01',
             isRecurring: false,
             serviceSlots: [
               {
