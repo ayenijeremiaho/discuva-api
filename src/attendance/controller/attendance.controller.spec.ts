@@ -9,6 +9,7 @@ import { AttendanceStatusEnum } from '../enums/check-in.enum';
 const mockAttendanceService = {
   getAllHistory: jest.fn(),
   getMyHistory: jest.fn(),
+  getMyAttendanceSummary: jest.fn(),
   checkin: jest.fn(),
   correctAttendance: jest.fn(),
   getSlotSummary: jest.fn(),
@@ -43,6 +44,29 @@ describe('AttendanceController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('getMySummary', () => {
+    it('passes the authenticated member id and role to the service', async () => {
+      const summary = {
+        totalCount: 10,
+        presentCount: 9,
+        attendanceRatePercentage: 90,
+        lastCheckedInDate: null,
+        attendanceStreak: 3,
+      };
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(summary);
+
+      const result = await controller.getMySummary({
+        user: { id: 'member-1', role: 'MEMBER' },
+      } as any);
+
+      expect(mockAttendanceService.getMyAttendanceSummary).toHaveBeenCalledWith(
+        'member-1',
+        'MEMBER',
+      );
+      expect(result).toEqual(summary);
+    });
   });
 
   describe('getAllHistory', () => {

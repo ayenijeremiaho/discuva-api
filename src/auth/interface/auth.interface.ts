@@ -24,4 +24,7 @@ export interface MemberAuth {
   workerProfileId?: string;
   jti?: string;
   tokenExp?: number;
+  // Set only when a refresh request replayed a just-rotated token within the
+  // reuse grace window — refreshToken() returns this instead of rotating again.
+  replayedTokens?: JwtResponse;
 }

@@ -73,25 +73,25 @@ export class PushNotificationService implements OnModuleInit {
     const subscriptions = await this.subRepo.find({
       where: { memberId: In(memberIds) },
     });
-    for (const sub of subscriptions) {
-      const jobId = `push:${sub.memberId}:${payload.idempotencyKey}`;
-      await this.queue.add(
-        'send',
-        {
+    if (!subscriptions.length) return;
+    await this.queue.addBulk(
+      subscriptions.map((sub) => ({
+        name: 'send',
+        data: {
           memberId: sub.memberId,
           endpoint: sub.endpoint,
           p256dh: sub.p256dh,
           auth: sub.auth,
           payload,
         },
-        {
-          jobId,
+        opts: {
+          jobId: `push:${sub.memberId}:${payload.idempotencyKey}`,
           attempts: 3,
           backoff: { type: 'exponential', delay: 5_000 },
           removeOnComplete: true,
           removeOnFail: false,
         },
-      );
-    }
+      })),
+    );
   }
 }

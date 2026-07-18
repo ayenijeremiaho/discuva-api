@@ -56,6 +56,21 @@ export interface SessionStatePayload {
   cautionThresholdRatio: number;
 }
 
+export interface MyLiveSlotStatus {
+  sessionCode: string;
+  sessionStatus: ServiceSessionStatusEnum;
+  myRole: 'PRIMARY' | 'BACKUP';
+  myPosition: number;
+  myType: string;
+  myTopic: string | null;
+  currentPosition: number;
+  isMyTurnNow: boolean;
+  hasPassed: boolean;
+  // null when it's already my turn, or my slot has already passed
+  estimatedSecondsUntilMyTurn: number | null;
+  runningOrder: EffectiveSessionSlot[];
+}
+
 export interface SessionSlotReport {
   position: number;
   type: string;
@@ -147,6 +162,31 @@ export interface AnalyticsResult {
   topSpeakers: TopSpeaker[];
 }
 
+export interface MyServiceHistoryEntry {
+  eventName: string | null;
+  serviceSlotName: string;
+  sessionDate: Date;
+  type: string;
+  topic: string | null;
+  allocatedMinutes: number;
+  actualSeconds: number | null;
+}
+
+export interface MyServiceHistoryResult {
+  totalSlots: number;
+  totalActualSeconds: number;
+  bySlotType: Array<{
+    type: string;
+    count: number;
+    totalActualSeconds: number;
+  }>;
+  entries: MyServiceHistoryEntry[];
+  page: number;
+  limit: number;
+  totalCount: number;
+  totalPages: number;
+}
+
 const SESSION_TTL_LIVE = 86400 * 2;
 const SESSION_TTL_COMPLETED = 86400 * 2;
 const ANALYTICS_TTL = 1800;
@@ -179,6 +219,33 @@ export class ServiceSessionService {
   ) {}
 
   private readonly logger = new Logger(ServiceSessionService.name);
+
+  // Bulk-start every DRAFT programme under an event in one call, so a
+  // 6-service Sunday is one "Start Service" action instead of 6 separate
+  // "Start Session" clicks. Deliberately reuses start() as-is per sub-service
+  // (own session, own anchor, own share token) rather than introducing a
+  // parent "EventSession" concept — sub-services still run and are
+  // controlled independently, this just removes the repetitive click.
+  async startEvent(
+    eventId: string,
+    memberId: string,
+  ): Promise<ServiceSession[]> {
+    await this.assertCanControlSession(memberId);
+
+    const programmes =
+      await this.programmeSvc.findStartableDraftProgrammesForEvent(eventId);
+    if (!programmes.length) {
+      throw new BadRequestException(
+        'No draft programmes with slots are ready to start for this event',
+      );
+    }
+
+    const sessions: ServiceSession[] = [];
+    for (const programme of programmes) {
+      sessions.push(await this.start(programme.id, memberId));
+    }
+    return sessions;
+  }
 
   async start(programmeId: string, memberId: string): Promise<ServiceSession> {
     await this.assertCanControlSession(memberId);
@@ -1058,6 +1125,78 @@ export class ServiceSessionService {
     };
   }
 
+  // Personalized view for a member/worker with a slot in this session — "am I
+  // up now, and if not, roughly how long until I am." Builds on getState()
+  // rather than re-querying, so it stays consistent with whatever the
+  // presentation/audience views are showing at the same moment.
+  async getMyLiveStatus(
+    sessionCode: string,
+    memberId: string,
+  ): Promise<MyLiveSlotStatus> {
+    const { session, anchor } = await this.getState(sessionCode);
+    const sessionSlots = session.sessionSlots ?? [];
+
+    const myPrimarySlot = sessionSlots.find(
+      (s) =>
+        s.programmeSlot.member?.id === memberId ||
+        s.overriddenMember?.id === memberId,
+    );
+    const myBackupSlot = sessionSlots.find(
+      (s) => s.programmeSlot.backupMember?.id === memberId,
+    );
+    const mySlot = myPrimarySlot ?? myBackupSlot;
+    if (!mySlot) {
+      throw new NotFoundException("You don't have a slot in this session");
+    }
+    const myRole: 'PRIMARY' | 'BACKUP' = myPrimarySlot ? 'PRIMARY' : 'BACKUP';
+
+    const currentPosition = anchor.currentSlotPosition;
+    const isMyTurnNow = mySlot.position === currentPosition;
+    const hasPassed =
+      mySlot.position < currentPosition ||
+      mySlot.status === ServiceSessionSlotStatusEnum.COMPLETED;
+
+    let estimatedSecondsUntilMyTurn: number | null = null;
+    if (!isMyTurnNow && !hasPassed) {
+      const currentSlot = sessionSlots.find(
+        (s) => s.position === currentPosition,
+      );
+      if (currentSlot) {
+        const currentAllocatedSeconds =
+          (currentSlot.adjustedAllocatedMinutes ??
+            currentSlot.programmeSlot.allocatedMinutes) * 60;
+        const elapsed = this.calcElapsed(anchor, Date.now());
+        const remainingCurrent = Math.max(0, currentAllocatedSeconds - elapsed);
+
+        const between = sessionSlots.filter(
+          (s) => s.position > currentPosition && s.position < mySlot.position,
+        );
+        const betweenSeconds = between.reduce(
+          (sum, s) =>
+            sum +
+            (s.adjustedAllocatedMinutes ?? s.programmeSlot.allocatedMinutes) *
+              60,
+          0,
+        );
+        estimatedSecondsUntilMyTurn = remainingCurrent + betweenSeconds;
+      }
+    }
+
+    return {
+      sessionCode,
+      sessionStatus: session.status,
+      myRole,
+      myPosition: mySlot.position,
+      myType: mySlot.programmeSlot.type,
+      myTopic: mySlot.overriddenTopic ?? mySlot.programmeSlot.topic,
+      currentPosition,
+      isMyTurnNow,
+      hasPassed,
+      estimatedSecondsUntilMyTurn,
+      runningOrder: withEffectiveSessionSlots(sessionSlots),
+    };
+  }
+
   async getActiveSessions(): Promise<
     { sessionCode: string; serviceSlotName: string; startedAt: Date }[]
   > {
@@ -1470,24 +1609,48 @@ export class ServiceSessionService {
     from?: string,
     to?: string,
     serviceSlotName?: string,
+    memberId?: string,
+    slotType?: string,
   ): Promise<AnalyticsResult> {
-    const key = `session:analytics:${from ?? 'all'}:${to ?? 'all'}:${serviceSlotName ?? 'all'}`;
+    // An unbounded call (no from/to) previously scanned every COMPLETED
+    // session ever recorded through a 6-way join — default to a bounded
+    // lookback window instead of the full history when the caller doesn't
+    // specify one. Computed here (not in fetchAnalytics) so the cache key
+    // reflects the actual bounded range being queried.
+    const effectiveFrom = from ?? this.defaultAnalyticsFrom();
+    const key = `session:analytics:${effectiveFrom}:${to ?? 'all'}:${serviceSlotName ?? 'all'}:${memberId ?? 'all'}:${slotType ?? 'all'}`;
     return this.cacheService.getOrSet(
       key,
-      () => this.fetchAnalytics(from, to, serviceSlotName),
+      () =>
+        this.fetchAnalytics(
+          effectiveFrom,
+          to,
+          serviceSlotName,
+          memberId,
+          slotType,
+        ),
       ANALYTICS_TTL,
     );
   }
 
+  private defaultAnalyticsFrom(): string {
+    const d = new Date();
+    d.setDate(d.getDate() - 180);
+    return d.toISOString().slice(0, 10);
+  }
+
   private async fetchAnalytics(
-    from?: string,
+    from: string,
     to?: string,
     serviceSlotName?: string,
+    memberId?: string,
+    slotType?: string,
   ): Promise<AnalyticsResult> {
     const qb = this.sessionRepo
       .createQueryBuilder('session')
       .innerJoinAndSelect('session.programme', 'programme')
       .innerJoinAndSelect('programme.serviceSlot', 'serviceSlot')
+      .leftJoinAndSelect('serviceSlot.event', 'event')
       .leftJoinAndSelect('session.sessionSlots', 'sessionSlots')
       .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
       .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
@@ -1497,13 +1660,29 @@ export class ServiceSessionService {
         status: ServiceSessionStatusEnum.COMPLETED,
       });
 
-    if (from)
-      qb.andWhere('session.startedAt >= :from', { from: new Date(from) });
+    qb.andWhere('session.startedAt >= :from', { from: new Date(from) });
     if (to) qb.andWhere('session.startedAt <= :to', { to: new Date(to) });
     if (serviceSlotName)
-      qb.andWhere('serviceSlot.name ILIKE :name', {
+      // Matches either the sub-service label ("First Service") or the
+      // parent event's name ("Sunday Service") — an admin searching by
+      // "what they call the service" shouldn't need to know which of the
+      // two levels the name actually lives on.
+      qb.andWhere('(serviceSlot.name ILIKE :name OR event.name ILIKE :name)', {
         name: `%${serviceSlotName}%`,
       });
+    if (memberId)
+      // Session-level: only sessions this member actually appeared in
+      // (as originally assigned, or as whoever stepped in on the day) —
+      // "their history across services", not every service that happened
+      // to run in the date range.
+      qb.andWhere(
+        `session.id IN (
+          SELECT ss.session_id FROM service_session_slots ss
+          INNER JOIN service_programme_slots ps ON ps.id = ss.programme_slot_id
+          WHERE ps.member_id = :memberId OR ss.overridden_member_id = :memberId
+        )`,
+        { memberId },
+      );
     qb.orderBy('session.startedAt', 'DESC');
 
     const sessions = await qb.getMany();
@@ -1536,6 +1715,17 @@ export class ServiceSessionService {
 
       let overrunSlots = 0;
       for (const slot of slots) {
+        // Type/speaker breakdown tables only ever reflect the requested
+        // slice — "just Offering segments", or "just this person's slots"
+        // — while completionRate/duration below stay session-wide, since
+        // those describe the whole service regardless of which slice of
+        // it you're looking at.
+        if (slotType && slot.programmeSlot?.type !== slotType) continue;
+        if (memberId) {
+          const slotMemberId =
+            slot.overriddenMember?.id ?? slot.programmeSlot?.member?.id;
+          if (slotMemberId !== memberId) continue;
+        }
         if (this.accumulateSlotStats(slot, slotTypeMap, speakerMap))
           overrunSlots++;
       }
@@ -1596,6 +1786,95 @@ export class ServiceSessionService {
       slotTypeStats,
       sessions: sessionSummaries,
       topSpeakers,
+    };
+  }
+
+  // A member/worker's own "what have I done, and how much time did I use"
+  // view — same effective-speaker rule as the memberId scoping in
+  // fetchAnalytics (override takes precedence, else the draft-assigned
+  // member; a listed backup who never actually went on gets no entry here),
+  // so the two stay consistent about what counts as "their" contribution.
+  async getMyServiceHistory(
+    memberId: string,
+    page = 1,
+    limit = 10,
+  ): Promise<MyServiceHistoryResult> {
+    const sessions = await this.sessionRepo
+      .createQueryBuilder('session')
+      .innerJoinAndSelect('session.programme', 'programme')
+      .innerJoinAndSelect('programme.serviceSlot', 'serviceSlot')
+      .leftJoinAndSelect('serviceSlot.event', 'event')
+      .leftJoinAndSelect('session.sessionSlots', 'sessionSlots')
+      .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
+      .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
+      .leftJoinAndSelect('programmeSlot.member', 'member')
+      .where('session.status = :status', {
+        status: ServiceSessionStatusEnum.COMPLETED,
+      })
+      .andWhere(
+        `session.id IN (
+          SELECT ss.session_id FROM service_session_slots ss
+          INNER JOIN service_programme_slots ps ON ps.id = ss.programme_slot_id
+          WHERE ps.member_id = :memberId OR ss.overridden_member_id = :memberId
+        )`,
+        { memberId },
+      )
+      .orderBy('session.startedAt', 'DESC')
+      .getMany();
+
+    const entries: MyServiceHistoryEntry[] = [];
+    const bySlotTypeMap = new Map<
+      string,
+      { count: number; totalActualSeconds: number }
+    >();
+
+    for (const session of sessions) {
+      for (const slot of session.sessionSlots ?? []) {
+        const effectiveMemberId =
+          slot.overriddenMember?.id ?? slot.programmeSlot?.member?.id;
+        if (effectiveMemberId !== memberId) continue;
+
+        entries.push({
+          eventName: session.programme.serviceSlot.event?.name ?? null,
+          serviceSlotName: session.programme.serviceSlot.name,
+          sessionDate: session.startedAt,
+          type: slot.programmeSlot.type,
+          topic: slot.overriddenTopic ?? slot.programmeSlot.topic,
+          allocatedMinutes:
+            slot.adjustedAllocatedMinutes ??
+            slot.programmeSlot.allocatedMinutes,
+          actualSeconds: slot.actualSeconds,
+        });
+
+        const existing = bySlotTypeMap.get(slot.programmeSlot.type) ?? {
+          count: 0,
+          totalActualSeconds: 0,
+        };
+        existing.count += 1;
+        existing.totalActualSeconds += slot.actualSeconds ?? 0;
+        bySlotTypeMap.set(slot.programmeSlot.type, existing);
+      }
+    }
+
+    const totalCount = entries.length;
+    const totalActualSeconds = entries.reduce(
+      (sum, e) => sum + (e.actualSeconds ?? 0),
+      0,
+    );
+    const start = (page - 1) * limit;
+
+    return {
+      totalSlots: totalCount,
+      totalActualSeconds,
+      bySlotType: Array.from(bySlotTypeMap.entries()).map(([type, v]) => ({
+        type,
+        ...v,
+      })),
+      entries: entries.slice(start, start + limit),
+      page,
+      limit,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
     };
   }
 

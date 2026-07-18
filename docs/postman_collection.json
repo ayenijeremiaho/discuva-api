@@ -204,6 +204,11 @@
       "key": "firstTimerId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "importJobId",
+      "value": "",
+      "type": "string"
     }
   ],
   "auth": {
@@ -533,6 +538,112 @@
           ]
         },
         {
+          "name": "Request Email Change",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newEmail\": \"new.email@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/email-change/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "email-change",
+                "request"
+              ]
+            },
+            "description": "Requires an authenticated session (JwtAuthGuard, member or worker). Sends a 6-digit OTP to the NEW email address to prove the caller controls it. Rate-limited the same way as forgot-password. Returns 409 if newEmail is already in use by another member."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"message\": \"A verification code has been sent to new.email@example.com.\" }"
+            },
+            {
+              "name": "409 Email Already In Use",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{ \"statusCode\": 409, \"message\": \"This email address is already in use.\" }"
+            },
+            {
+              "name": "429 Rate Limited",
+              "status": "Too Many Requests",
+              "code": 429,
+              "body": "{ \"statusCode\": 429, \"message\": \"Too many password reset requests. Please try again in 15 minutes.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Confirm Email Change",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"otp\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/email-change/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "email-change",
+                "confirm"
+              ]
+            },
+            "description": "Requires an authenticated session (JwtAuthGuard). Verifies the OTP against the caller's most recent unused email-change request, re-checks that newEmail is still unclaimed (409 on a race), updates member.email, and emails a confirmation to the new address."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"message\": \"Your email address has been updated successfully.\" }"
+            },
+            {
+              "name": "400 Invalid/Expired OTP",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"This verification code is invalid or has expired. Please request a new one.\" }"
+            },
+            {
+              "name": "409 Email Already In Use",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{ \"statusCode\": 409, \"message\": \"This email address is already in use.\" }"
+            }
+          ]
+        },
+        {
           "name": "Forgot Password",
           "request": {
             "method": "POST",
@@ -835,6 +946,52 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"changedPassword\": true,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Software Engineer\",\n    \"yearJoinedWorkforce\": \"2022\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"department\": { \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\", \"name\": \"Sunday School\", \"key\": \"SUNDAY_SCHOOL\" },\n    \"secondaryDepartment\": null\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"gender\": \"MALE\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"maritalStatus\": \"MARRIED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me"
+              ]
+            },
+            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional. Deliberately excludes email (use /auth/email-change/*) and the admin-only church-record fields (dateJoinedChurch, yearBornAgain, yearBaptized, baptizedWithHolyGhost)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"MEMBER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\"\n}"
+            },
+            {
+              "name": "400 Validation Error",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": [\"phoneNumber must be 7\u201320 digits, optionally prefixed with +\"] }"
             }
           ]
         },
@@ -1213,6 +1370,319 @@
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Member not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Assign Pastor",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"LEAD\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/pastor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "pastor"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "AdminGuard (MEMBERS_WRITE) \u2014 same permission as promote-to-worker, no separate permission was introduced. Assigns a pastoral designation to the member. type: LEAD | PARISH | ASSOCIATE. Returns 409 if the member is already a pastor."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"pastorType\": \"LEAD\"\n}"
+            },
+            {
+              "name": "409 Already A Pastor",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{ \"statusCode\": 409, \"message\": \"This member is already a pastor.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Update Pastor Type",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"ASSOCIATE\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/pastor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "pastor"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "AdminGuard (MEMBERS_WRITE). Changes an existing pastor's type. type: LEAD | PARISH | ASSOCIATE. Returns 404 if the member is not currently a pastor."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"pastorType\": \"ASSOCIATE\"\n}"
+            },
+            {
+              "name": "404 Not A Pastor",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"This member is not a pastor.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Remove Pastor",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/pastor",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "pastor"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "AdminGuard (MEMBERS_WRITE). Removes the pastoral designation from the member. Returns 404 if the member is not currently a pastor. Returns 204 No Content on success."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            },
+            {
+              "name": "404 Not A Pastor",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"This member is not a pastor.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Bulk Import (Admin)",
+          "item": [
+            {
+              "name": "Download Import Template",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/members/bulk-import/template",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "members",
+                    "bulk-import",
+                    "template"
+                  ]
+                },
+                "description": "AdminGuard (MEMBERS_WRITE). Streams a .xlsx template with the expected columns: First Name*, Last Name*, Email*, Phone Number, Gender (MALE/FEMALE), Birth Day (1-31), Birth Month (1-12), Birth Year, Marital Status (SINGLE/MARRIED/DIVORCED/WIDOWED), Year Born Again, Year Baptized, Baptized With Holy Ghost (TRUE/FALSE), Date Joined Church (YYYY-MM-DD), Department (optional \u2014 creates the row as a Worker), Profession, Year Joined Workforce."
+              },
+              "response": [
+                {
+                  "name": "200 OK (binary xlsx)",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "<binary spreadsheetml.sheet content, Content-Disposition: attachment; filename=\"member-import-template.xlsx\">"
+                }
+              ]
+            },
+            {
+              "name": "Preview Import",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "formdata",
+                  "formdata": [
+                    {
+                      "key": "file",
+                      "type": "file",
+                      "src": "",
+                      "description": "Excel .xlsx file matching the bulk-import template, max 5MB."
+                    }
+                  ]
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/members/bulk-import/preview",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "members",
+                    "bulk-import",
+                    "preview"
+                  ]
+                },
+                "description": "AdminGuard (MEMBERS_WRITE). Parses and validates every row (SignupDto rules, duplicate email within the file, email already in DB, unknown department name lookup \u2014 all case-insensitive on department). Persists a MemberImportJob + MemberImportRow[] (status READY_FOR_REVIEW) and returns { ...job, rows }. Nothing is created in the members table at this step."
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "exec": [
+                      "const res = pm.response.json();",
+                      "if (res.id) pm.collectionVariables.set('importJobId', res.id);"
+                    ],
+                    "type": "text/javascript"
+                  }
+                }
+              ],
+              "response": [
+                {
+                  "name": "201 Created",
+                  "status": "Created",
+                  "code": 201,
+                  "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"originalFilename\": \"members.xlsx\",\n  \"status\": \"READY_FOR_REVIEW\",\n  \"totalRows\": 3,\n  \"validRows\": 2,\n  \"createdCount\": 0,\n  \"failedCommitCount\": 0,\n  \"rows\": [\n    {\n      \"id\": \"f6a7b8c9-0d1e-2f3a-4b5c-6d7e8f9a0b1c\",\n      \"rowNumber\": 2,\n      \"data\": { \"firstname\": \"Jane\", \"lastname\": \"Doe\", \"email\": \"jane.doe@example.com\" },\n      \"errors\": [],\n      \"status\": \"PENDING\"\n    },\n    {\n      \"id\": \"a7b8c9d0-1e2f-3a4b-5c6d-7e8f9a0b1c2d\",\n      \"rowNumber\": 3,\n      \"data\": { \"firstname\": \"\", \"lastname\": \"Smith\", \"email\": \"jane.doe@example.com\" },\n      \"errors\": [\"firstname should not be empty\", \"Duplicate email in file \u2014 also used on row 2\"],\n      \"status\": \"PENDING\"\n    }\n  ]\n}"
+                },
+                {
+                  "name": "400 Bad Template",
+                  "status": "Bad Request",
+                  "code": 400,
+                  "body": "{ \"statusCode\": 400, \"message\": \"The uploaded file does not match the expected template \u2014 download a fresh template and try again.\" }"
+                }
+              ]
+            },
+            {
+              "name": "Get Import Job",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/members/bulk-import/{{importJobId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "members",
+                    "bulk-import",
+                    "{{importJobId}}"
+                  ],
+                  "variable": [
+                    {
+                      "key": "importJobId",
+                      "value": "{{importJobId}}"
+                    }
+                  ]
+                },
+                "description": "AdminGuard (MEMBERS_WRITE). Refetch a previously-previewed import job and its rows (e.g. to re-check validation results before committing)."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"status\": \"READY_FOR_REVIEW\",\n  \"totalRows\": 3,\n  \"validRows\": 2,\n  \"rows\": [ /* MemberImportRow[] */ ]\n}"
+                },
+                {
+                  "name": "404 Not Found",
+                  "status": "Not Found",
+                  "code": 404,
+                  "body": "{ \"statusCode\": 404, \"message\": \"Import job not found\" }"
+                }
+              ]
+            },
+            {
+              "name": "Commit Import",
+              "request": {
+                "method": "POST",
+                "url": {
+                  "raw": "{{baseUrl}}/members/bulk-import/{{importJobId}}/commit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "members",
+                    "bulk-import",
+                    "{{importJobId}}",
+                    "commit"
+                  ],
+                  "variable": [
+                    {
+                      "key": "importJobId",
+                      "value": "{{importJobId}}"
+                    }
+                  ]
+                },
+                "description": "AdminGuard (MEMBERS_WRITE). Creates a Member (+ WorkerProfile if the row's department column was filled) for every row with zero validation errors from preview; re-checks email uniqueness and department lookup per row to guard against a race since preview. Generates a random temp password per member and emails it via the welcome-member template. Returns { createdCount, failedRows: [{ rowNumber, reason }] }. A job can only be committed once \u2014 400 if already COMMITTED."
+              },
+              "response": [
+                {
+                  "name": "201 Created",
+                  "status": "Created",
+                  "code": 201,
+                  "body": "{ \"createdCount\": 2, \"failedRows\": [] }"
+                },
+                {
+                  "name": "400 Already Committed",
+                  "status": "Bad Request",
+                  "code": 400,
+                  "body": "{ \"statusCode\": 400, \"message\": \"This import has already been committed.\" }"
+                }
+              ]
             }
           ]
         }
@@ -1921,6 +2391,32 @@
           ]
         },
         {
+          "name": "My Attendance Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/attendances/my-summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "my-summary"
+              ]
+            },
+            "description": "Lifetime attendance rate and check-in streak for the calling member, computed in SQL over their full history (not just a page of records). Returns { totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }. ON_LEAVE records are excluded from the rate; PRESENT/LATE/ATTENDED_ONLINE all count as attended."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"totalCount\": 120,\n  \"presentCount\": 108,\n  \"attendanceRatePercentage\": 90,\n  \"lastCheckedInDate\": \"2026-07-13T09:02:00.000Z\",\n  \"attendanceStreak\": 6\n}"
+            }
+          ]
+        },
+        {
           "name": "All Attendance History (Admin)",
           "request": {
             "method": "GET",
@@ -2541,9 +3037,9 @@
           "name": "Get All Events",
           "request": {
             "method": "GET",
-            "description": "Any authenticated user. Returns paginated events, optionally filtered by date range. Use `?upcoming=true` to get only future events (eventDate >= today).",
+            "description": "Any authenticated user. Returns paginated events, optionally filtered by date range. Use `?upcoming=true` to get only future events (eventDate >= today). Optional `search` filters by event name (case-insensitive substring match).",
             "url": {
-              "raw": "{{baseUrl}}/events?page=1&limit=10&orderBy=eventDate&order=DESC&from=&to=&upcoming=",
+              "raw": "{{baseUrl}}/events?page=1&limit=10&orderBy=eventDate&order=DESC&from=&to=&upcoming=&search=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2586,6 +3082,11 @@
                   "value": "true",
                   "description": "true \u2014 return only future events (eventDate >= today)",
                   "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Case-insensitive match on event name"
                 }
               ]
             }
@@ -4167,7 +4668,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Church Picnic \u2014 July 20th\",\n  \"body\": \"Join us for our annual church picnic at Tarkwa Bay Beach. Bring your family!\",\n  \"audience\": \"ALL\",\n  \"publishedAt\": \"2026-07-10T08:00:00.000Z\",\n  \"expiresAt\": \"2026-07-21T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"title\": \"Church Picnic \u2014 July 20th\",\n  \"body\": \"Join us for our annual church picnic at Tarkwa Bay Beach. Bring your family!\",\n  \"audience\": \"ALL\",\n  \"publishedAt\": \"2026-07-10T08:00:00.000Z\",\n  \"expiresAt\": \"2026-07-21T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4183,7 +4684,7 @@
                 "announcements"
               ]
             },
-            "description": "audience: ALL | WORKERS_ONLY | DEPARTMENT | INDIVIDUAL. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. publishedAt defaults to now if omitted."
+            "description": "audience: ALL | WORKERS_ONLY | DEPARTMENT | INDIVIDUAL. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. publishedAt defaults to now if omitted. sendViaSms (optional, requires the caller's admin role to hold SMS_SEND \u2014 403 otherwise) triggers an SMS to every resolved recipient's phone number; smsBody is required whenever sendViaSms=true and is deliberately separate from body since SMS is billed per segment (see SMS Module)."
           },
           "event": [
             {
@@ -4209,6 +4710,52 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Invalid announcement data\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Send SMS Broadcast (No Announcement)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"audience\": \"ALL\",\n  \"message\": \"Reminder: Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/announcements/sms-broadcast",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                "sms-broadcast"
+              ]
+            },
+            "description": "Sends an SMS to the resolved audience without creating an announcement \u2014 no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. If audience=GROUP, groupId (UUID) is required. Returns { sentCount } \u2014 sentCount: 0 (not an error) if the resolved audience has no members with a phone number on file."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"sentCount\": 42\n}"
+            },
+            {
+              "name": "403 Forbidden",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Missing required permission: sms:send\"\n}"
             }
           ]
         },
@@ -4379,7 +4926,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Updated Title\",\n  \"expiresAt\": \"2026-08-01T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"title\": \"Updated Title\",\n  \"expiresAt\": \"2026-08-01T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Reminder: updated details for this event \u2014 check the app.\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4401,7 +4948,8 @@
                   "value": "{{announcementId}}"
                 }
               ]
-            }
+            },
+            "description": "sendViaSms/smsBody follow the same rules as create (SMS_SEND permission required, smsBody required when sendViaSms=true). SMS is only (re-)sent on the transition into sendViaSms=true \u2014 re-saving an already-SMS'd announcement (e.g. editing its title afterward) does not re-text everyone."
           },
           "response": [
             {
@@ -4583,6 +5131,105 @@
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Announcement not found\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "SMS (Admin)",
+      "item": [
+        {
+          "name": "Get SMS Balance",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/admin/sms/balance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sms",
+                "balance"
+              ]
+            },
+            "description": "AdminGuard (SMS_READ). Returns the current SMS provider balance (Termii by default)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"balance\": 15234.5, \"currency\": \"NGN\" }"
+            }
+          ]
+        },
+        {
+          "name": "Get SMS Segment Count",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Join us for our annual church picnic this Saturday at Tarkwa Bay Beach!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/sms/segment-count",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sms",
+                "segment-count"
+              ]
+            },
+            "description": "AdminGuard (SMS_READ). Calculates billing segments for a message without sending it. Encoding is \"plain\" (GSM-7, 160 chars/segment) unless the message contains a non-ASCII character or one of the Termii-documented special characters that force UCS-2/unicode encoding (; ^ { } \\ [ ~ ] | \u20ac ' \"), in which case it is \"unicode\" (70 chars/segment)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"segments\": 1, \"encoding\": \"plain\", \"characterCount\": 73 }"
+            }
+          ]
+        },
+        {
+          "name": "Get SMS Logs (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sms/logs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sms",
+                "logs"
+              ]
+            },
+            "description": "Live passthrough to the SMS provider's message history (Termii) \u2014 not stored locally, not paginated/filtered server-side. Returns an array of { messageId, recipient, message, status, type, sentAt, sender? }."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"messageId\": \"abc123\",\n    \"recipient\": \"+2348012345678\",\n    \"message\": \"Reminder: service starts at 9am\",\n    \"status\": \"Delivered\",\n    \"type\": \"generic\",\n    \"sentAt\": \"2026-07-18 10:00:00\",\n    \"sender\": \"YourChurch\"\n  }\n]"
             }
           ]
         }
@@ -4951,6 +5598,104 @@
           ]
         },
         {
+          "name": "Add Phone Entries to Group (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": [\n    { \"phoneNumber\": \"+2348012345678\", \"label\": \"Jane Doe\" },\n    { \"phoneNumber\": \"+2348098765432\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members/phone",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "groups",
+                ":id",
+                "members",
+                "phone"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Adds phone-only entries to a group \u2014 for people with no Member account (e.g. first-timers), label is optional. Returns { added, skipped }; duplicate phone numbers within the group are skipped, not errored."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"added\": 1,\n  \"skipped\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Add First-Timers to Group by Date Range (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dateFrom\": \"2026-07-01T00:00:00.000Z\",\n  \"dateTo\": \"2026-07-31T23:59:59.000Z\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/members/first-timers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "groups",
+                ":id",
+                "members",
+                "first-timers"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Bulk-imports every FirstTimer captured within the given date range (filtered by createdAt) as phone-only group entries (label = their name). Only first-timers with a phone number on file are imported. Returns { added, skipped }."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"added\": 12,\n  \"skipped\": 3\n}"
+            }
+          ]
+        },
+        {
           "name": "Remove Member from Group (Admin)",
           "request": {
             "method": "DELETE",
@@ -5037,6 +5782,94 @@
               "status": "OK",
               "code": 200,
               "body": "{\"data\": {\"removed\": 2}}"
+            }
+          ]
+        },
+        {
+          "name": "Remove Group Entry by ID (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/entries/:entryId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "groups",
+                ":id",
+                "entries",
+                ":entryId"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                },
+                {
+                  "key": "entryId",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Removes a single roster entry by its own GroupMember row id \u2014 works for both real members and phone-only entries, unlike the member-id-keyed remove route which can only address real members."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Bulk Remove Group Entries (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryIds\": [\"{{groupMemberEntryId1}}\", \"{{groupMemberEntryId2}}\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/entries/bulk-remove",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "groups",
+                ":id",
+                "entries",
+                "bulk-remove"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Removes multiple roster entries at once by their own GroupMember row ids \u2014 works for both real members and phone-only entries. Returns { removed }."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"removed\": 2\n}"
             }
           ]
         }
@@ -8281,14 +9114,14 @@
                 "today"
               ]
             },
-            "description": "Any authenticated member (JwtAuthGuard). Returns a list of active members whose birthDay and birthMonth match today's date. Used by the mobile app to surface birthday celebrants."
+            "description": "Any authenticated member (JwtAuthGuard). Returns active members whose birthDay and birthMonth match today, plus alreadyWishedByMe (computed from the caller's own sent wishes this year). Deliberately omits email/phoneNumber for this member-facing endpoint \u2014 role/departmentName/pastorType disambiguate same-named celebrants instead, without exposing personal contact info."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"id\": \"b4e3f2c1-8d6e-5f4a-9b7c-2d3e4f5a6b1c\",\n    \"firstname\": \"Jane\",\n    \"lastname\": \"Smith\",\n    \"birthDay\": 17,\n    \"birthMonth\": 6,\n    \"birthYear\": 1992\n  }\n]"
+              "body": "[\n  {\n    \"id\": \"b4e3f2c1-8d6e-5f4a-9b7c-2d3e4f5a6b1c\",\n    \"firstname\": \"Jane\",\n    \"lastname\": \"Smith\",\n    \"birthDay\": 17,\n    \"birthMonth\": 6,\n    \"birthYear\": 1992,\n    \"role\": \"WORKER\",\n    \"departmentName\": \"Worship\",\n    \"pastorType\": null,\n    \"alreadyWishedByMe\": false\n  }\n]"
             }
           ]
         },
@@ -9920,7 +10753,7 @@
     },
     {
       "name": "Tithes (Member)",
-      "description": "Member-facing tithe features: view active bank accounts to pay into, see your own tithe history, submit a payment proof, and download a statement PDF.\n\n**Access:** JwtAuthGuard \u2014 any authenticated member or worker.\n\n**Typical flow:**\n1. `GET /tithes/accounts` \u2014 see active bank accounts and select where you paid\n2. `POST /tithes/proof` \u2014 upload receipt image/PDF (multipart) with amount, date, account, optional reference\n3. `GET /tithes/proof` \u2014 track the status of your submitted proofs (PENDING \u2192 CONFIRMED or DECLINED)\n4. `GET /tithes/me` \u2014 view your confirmed tithe history\n5. `POST /tithes/me/download` \u2014 request a PDF statement emailed to you",
+      "description": "Member-facing tithe features: view active bank accounts to pay into, see your own tithe history, submit a payment proof, and email yourself a statement PDF.\n\n**Access:** JwtAuthGuard \u2014 any authenticated member or worker.\n\n**Typical flow:**\n1. `GET /tithes/accounts` \u2014 see active bank accounts and select where you paid\n2. `POST /tithes/proof` \u2014 upload receipt image/PDF (multipart) with amount, date, account, optional reference\n3. `GET /tithes/proof` \u2014 track the status of your submitted proofs (PENDING \u2192 CONFIRMED or DECLINED)\n4. `GET /tithes/me` \u2014 view your confirmed tithe history\n5. `POST /tithes/me/statement/send` \u2014 request a PDF statement emailed to you",
       "item": [
         {
           "name": "List Active Tithe Accounts",
@@ -10017,14 +10850,16 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/tithes/me/download?fromMonth=2026-01&toMonth=2026-06",
+              "raw": "{{baseUrl}}/v1/tithes/me/statement/send?fromMonth=2026-01&toMonth=2026-06",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
+                "v1",
                 "tithes",
                 "me",
-                "download"
+                "statement",
+                "send"
               ],
               "query": [
                 {
@@ -10048,7 +10883,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"message\": \"Tithe statement sent to your email\"\n}"
+              "body": "{\n  \"message\": \"Your tithe statement has been emailed to john.doe@example.com.\",\n  \"recordCount\": 6\n}"
             },
             {
               "name": "401 Unauthorized",
@@ -12566,6 +13401,51 @@
               ]
             },
             {
+              "name": "Start Event Sessions (Bulk)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/event/:eventId/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    "event",
+                    ":eventId",
+                    "start"
+                  ],
+                  "variable": [
+                    {
+                      "key": "eventId",
+                      "value": "{{eventId}}"
+                    }
+                  ]
+                },
+                "description": "Bulk-start every DRAFT programme with slots under the event in one call (e.g. First + Second Service on the same Sunday) instead of starting each sub-service individually. Returns an array of sessions, one per started programme. 404 if the event has no service slots; 400 if none of its programmes are startable."
+              },
+              "response": [
+                {
+                  "name": "201 Created",
+                  "status": "Created",
+                  "code": 201,
+                  "body": "[\n  {\n    \"id\": \"sess-uuid-1\",\n    \"sessionCode\": \"SVC-ABC123\",\n    \"status\": \"LIVE\",\n    \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n    \"endedAt\": null\n  },\n  {\n    \"id\": \"sess-uuid-2\",\n    \"sessionCode\": \"SVC-DEF456\",\n    \"status\": \"LIVE\",\n    \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n    \"endedAt\": null\n  }\n]"
+                },
+                {
+                  "name": "400 Bad Request",
+                  "status": "Bad Request",
+                  "code": 400,
+                  "body": "{\n  \"statusCode\": 400,\n  \"message\": \"No draft programmes with slots are ready to start for this event\"\n}"
+                }
+              ]
+            },
+            {
               "name": "Advance (Next Slot)",
               "request": {
                 "method": "POST",
@@ -13028,6 +13908,50 @@
               ]
             },
             {
+              "name": "Get My Live Status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/my-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "my-status"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Any authenticated member/worker who has a primary or backup slot in this LIVE session. Returns their role, position, whether it's currently their turn, whether they've already gone, an estimated seconds-until-their-turn, and the full running order. 404 if the caller has no slot in this session."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\n  \"sessionCode\": \"SVC-ABC123\",\n  \"sessionStatus\": \"LIVE\",\n  \"myRole\": \"PRIMARY\",\n  \"myPosition\": 4,\n  \"myType\": \"SPEAKER\",\n  \"myTopic\": \"Faith in Action\",\n  \"currentPosition\": 2,\n  \"isMyTurnNow\": false,\n  \"hasPassed\": false,\n  \"estimatedSecondsUntilMyTurn\": 900,\n  \"runningOrder\": []\n}}"
+                },
+                {
+                  "name": "404 Not Found",
+                  "status": "Not Found",
+                  "code": 404,
+                  "body": "{\n  \"statusCode\": 404,\n  \"message\": \"You don't have a slot in this session\"\n}"
+                }
+              ]
+            },
+            {
               "name": "Get Session Report",
               "request": {
                 "method": "GET",
@@ -13111,10 +14035,22 @@
                       "value": "",
                       "disabled": true,
                       "description": "Partial match on service slot name"
+                    },
+                    {
+                      "key": "memberId",
+                      "value": "",
+                      "disabled": true,
+                      "description": "Restrict to sessions this member appeared in (as originally assigned, or as whoever stepped in on the day)"
+                    },
+                    {
+                      "key": "slotType",
+                      "value": "",
+                      "disabled": true,
+                      "description": "Restrict the slot-type/top-speaker breakdown to one type, e.g. SPEAKER, WORSHIP, OFFERING"
                     }
                   ]
                 },
-                "description": "Admin only. Returns overrun stats, avg slot times per type, per-session breakdown, and top speakers across COMPLETED sessions."
+                "description": "Admin only. Returns overrun stats, avg slot times per type, per-session breakdown, and top speakers across COMPLETED sessions. serviceSlotName matches either the sub-service name or its parent event name; memberId and slotType narrow the slot-type/speaker breakdown (memberId also restricts which sessions are returned)."
               },
               "response": [
                 {
@@ -13128,6 +14064,47 @@
                   "status": "Forbidden",
                   "code": 403,
                   "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Forbidden\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Get My Service History",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/my-history?page=1&limit=10",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    "my-history"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "10"
+                    }
+                  ]
+                },
+                "description": "Any authenticated member/worker. Paginated list of the caller's own COMPLETED-session slots, with a summary (totalSlots, totalActualSeconds) and a per-slot-type breakdown computed over the full history, not just the current page. Only credits the effective speaker of a slot (an overriding member, or the originally assigned member if never overridden) \u2014 a backup who never went on gets no credit."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": {\n  \"totalSlots\": 12,\n  \"totalActualSeconds\": 14400,\n  \"bySlotType\": [\n    {\"type\": \"SPEAKER\", \"count\": 8, \"totalActualSeconds\": 12000},\n    {\"type\": \"WORSHIP\", \"count\": 4, \"totalActualSeconds\": 2400}\n  ],\n  \"entries\": [\n    {\n      \"eventName\": \"Sunday Service\",\n      \"serviceSlotName\": \"First Service\",\n      \"sessionDate\": \"2026-07-05T08:00:00.000Z\",\n      \"type\": \"SPEAKER\",\n      \"topic\": \"Faith in Action\",\n      \"allocatedMinutes\": 45,\n      \"actualSeconds\": 2580\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 10,\n  \"totalCount\": 12,\n  \"totalPages\": 2\n}}"
                 }
               ]
             },
@@ -13321,6 +14298,38 @@
                   "status": "Not Found",
                   "code": 404,
                   "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Event not found\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Get My Upcoming Assignments",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{member_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/service-programme/my-assignments",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-programme",
+                    "my-assignments"
+                  ]
+                },
+                "description": "The calling member/worker's own upcoming service-programme slots \u2014 as primary or backup \u2014 across every DRAFT/LIVE programme, ordered by service start time. Excludes COMPLETED programmes and anything already in the past. Any authenticated member can call this (no admin permission or WORKER role required); used by the member-facing app's home screen to show \u201cWhat am I doing this Sunday.\u201d"
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "[\n  {\n    \"slotId\": \"uuid\",\n    \"programmeId\": \"uuid\",\n    \"eventName\": \"Sunday Service\",\n    \"serviceSlotName\": \"First Service\",\n    \"startTime\": \"2026-07-19T08:00:00.000Z\",\n    \"endTime\": \"2026-07-19T10:00:00.000Z\",\n    \"type\": \"SPEAKER\",\n    \"topic\": \"Faith in Action\",\n    \"allocatedMinutes\": 30,\n    \"isBackup\": false,\n    \"programmeStatus\": \"DRAFT\"\n  }\n]"
                 }
               ]
             },
@@ -13531,6 +14540,83 @@
                   "status": "OK",
                   "code": 200,
                   "body": "{\"data\": {\"id\": \"grant-uuid\", \"revokedAt\": \"2026-06-15T09:00:00.000Z\"}}"
+                }
+              ]
+            },
+            {
+              "name": "Get Action Log",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/action-log",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "action-log"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Returns the 10 most recent ServiceActionEntry rows (newest first) as JSON \u2014 powers the \"Recent Activity\" feed on the Live Session Dashboard. Same access tier as the control actions (JwtAuthGuard + assertCanControlSession), not admin-only, since it's operational context rather than a compliance artifact."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\"data\": [{\"createdAt\": \"2026-06-15T09:12:00.000Z\", \"actorRole\": \"ADMIN\", \"actorName\": \"Bola Adeyemi\", \"action\": \"ADVANCE\", \"detail\": \"position:3\"}]}"
+                }
+              ]
+            },
+            {
+              "name": "Download Action Log (CSV) (Admin)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{adminToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/action-log/csv",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-session",
+                    ":sessionCode",
+                    "action-log",
+                    "csv"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Admin only (AdminGuard + SERVICE_PROGRAMME_READ). Downloads the full ServiceActionEntry audit trail for a session as a CSV file (Timestamp, Actor Role, Actor, Action, Detail) \u2014 a compliance export distinct from the 10-row JSON feed above."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "<CSV file: Timestamp,Actor Role,Actor,Action,Detail>"
                 }
               ]
             },
@@ -14035,7 +15121,7 @@
     },
     {
       "name": "Service Headcount",
-      "description": "Manual headcount recording per service slot \u2014 tracks congregation by demographic group (male adults, female adults, teenagers, children, mobile church, and custom groups).\n\n**Access:** Admin-department workers (primary or secondary department `key: ADMIN`) or AdminGuard.\n\n**Key concepts:**\n- One headcount record per service slot. A second `POST` for the same slot returns 409.\n- Corrections are allowed at any time via `PATCH /v1/service-headcount/:id` (partial update).\n- `customGroups` is a flexible JSON map for additional demographic splits.\n- `GET /v1/service-headcount/trends` returns weekly/monthly aggregates for admin reporting.\n\n**Typical flow:**\n1. After service: ushers count attendees per demographic group\n2. Worker or admin: `POST /v1/service-headcount` with slot ID and counts\n3. If recount differs: `PATCH /v1/service-headcount/:id` with corrected values and updated notes",
+      "description": "Manual headcount recording per service slot \u2014 tracks congregation by demographic group (male adults, female adults, teenagers, children, mobile church, and custom groups).\n\n**Access:** Admin-department workers (primary or secondary department `key: ADMIN`) or AdminGuard.\n\n**Key concepts:**\n- One headcount record per service slot (unique constraint on `service_slot_id`). Recording again for the same slot edits that row in place instead of creating a duplicate or returning a conflict \u2014 there is no separate correction endpoint; re-recording *is* the correction.\n- `customGroups` is a flexible JSON map for additional demographic splits.\n- `GET /v1/service-headcount/trends` returns weekly/monthly aggregates for admin reporting.\n- `GET /v1/service-headcount/event/:eventId/summary` returns every sub-service under an event with its headcount (or null) plus the aggregate total \u2014 the primary admin view (\"By Event\" tab).\n\n**Typical flow:**\n1. After service: ushers count attendees per demographic group\n2. Worker or admin: `POST /v1/service-headcount` with slot ID and counts\n3. If a recount is needed: `POST /v1/service-headcount` again for the same slot \u2014 it updates the existing record rather than creating a new one",
       "item": [
         {
           "name": "Record Headcount",
@@ -14064,7 +15150,7 @@
               "mode": "raw",
               "raw": "{\n  \"serviceSlotId\": \"{{service_slot_id}}\",\n  \"maleAdults\": 120,\n  \"femaleAdults\": 150,\n  \"teenagers\": 45,\n  \"children\": 30,\n  \"mobileChurch\": 20,\n  \"customGroups\": {},\n  \"notes\": \"First service count\"\n}"
             },
-            "description": "Record attendance headcount for a service slot. All demographic count fields are optional (default 0). `customGroups` is a flexible JSON object for extra splits (e.g. {\"visitors\": 12}). 409 if a headcount already exists for this slot \u2014 use PATCH to correct. Requires Admin-dept worker or AdminGuard."
+            "description": "Record attendance headcount for a service slot. All demographic count fields are optional (default 0). `customGroups` is a flexible JSON object for extra splits (e.g. {\"visitors\": 12}). Upsert: if a headcount already exists for this slot, this edits it in place instead of creating a duplicate or erroring \u2014 there is no separate PATCH/correct endpoint. Requires Admin-dept worker or AdminGuard."
           },
           "response": [
             {
@@ -14078,57 +15164,6 @@
               "status": "Conflict",
               "code": 409,
               "body": "{ \"statusCode\": 409, \"message\": \"A headcount record already exists for this service slot\" }"
-            }
-          ]
-        },
-        {
-          "name": "Correct Headcount",
-          "request": {
-            "method": "PATCH",
-            "description": "Correct any demographic count or notes on an existing headcount record. All fields are optional \u2014 only send the fields that changed. The total is recalculated automatically.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "Authorization",
-                "value": "Bearer {{admin_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/service-headcount/:id",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "service-headcount",
-                ":id"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "{{headcount_id}}"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"maleAdults\": 125,\n  \"notes\": \"Corrected after recount\"\n}"
-            }
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"d2e3f4a5-6b7c-8d9e-0f1a-2b3c4d5e6f7a\",\n  \"serviceSlot\": {\n    \"id\": \"e5f6a7b8-4c5d-6e7f-8a9b-0c1d2e3f4a5b\",\n    \"name\": \"First Service\"\n  },\n  \"event\": {\n    \"id\": \"d4e5f6a7-3b4c-5d6e-7f8a-9b0c1d2e3f4a\",\n    \"date\": \"2026-06-15\"\n  },\n  \"adults\": 312,\n  \"children\": 87,\n  \"total\": 399,\n  \"recordedBy\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\"\n  },\n  \"recordedAt\": \"2026-06-15T10:30:00.000Z\"\n}"
-            },
-            {
-              "name": "404 Not Found",
-              "status": "Not Found",
-              "code": 404,
-              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Headcount record not found\"\n}"
             }
           ]
         },
@@ -14248,6 +15283,51 @@
               "status": "Unauthorized",
               "code": 401,
               "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Event Headcount Summary",
+          "request": {
+            "method": "GET",
+            "description": "The service-level view for a multi-service Sunday: every sub-service (ServiceSlot) under the event ordered by start time, each with its headcount if recorded (null otherwise), plus an aggregate total across whichever sub-services have been recorded so far.",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/service-headcount/event/:eventId/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-headcount",
+                "event",
+                ":eventId",
+                "summary"
+              ],
+              "variable": [
+                {
+                  "key": "eventId",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"eventId\": \"uuid\",\n  \"eventName\": \"Sunday Service\",\n  \"slotCount\": 2,\n  \"recordedCount\": 1,\n  \"serviceSlots\": [\n    {\n      \"serviceSlotId\": \"uuid\",\n      \"serviceSlotName\": \"First Service\",\n      \"startTime\": \"2026-07-19T08:00:00.000Z\",\n      \"headcount\": {\n        \"id\": \"uuid\",\n        \"maleAdults\": 45,\n        \"femaleAdults\": 55,\n        \"teenagers\": 10,\n        \"children\": 8,\n        \"mobileChurch\": 2,\n        \"customGroups\": {},\n        \"notes\": null,\n        \"total\": 120\n      }\n    },\n    {\n      \"serviceSlotId\": \"uuid\",\n      \"serviceSlotName\": \"Second Service\",\n      \"startTime\": \"2026-07-19T10:00:00.000Z\",\n      \"headcount\": null\n    }\n  ],\n  \"total\": {\n    \"maleAdults\": 45,\n    \"femaleAdults\": 55,\n    \"teenagers\": 10,\n    \"children\": 8,\n    \"mobileChurch\": 2,\n    \"customGroups\": {},\n    \"total\": 120\n  }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Event not found or has no service slots\"\n}"
             }
           ]
         },
@@ -16541,6 +17621,51 @@
           ]
         },
         {
+          "name": "Deactivate/reactivate pledge campaign",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/pledges/campaigns/{{campaignId}}/active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "pledges",
+                "campaigns",
+                "{{campaignId}}",
+                "active"
+              ]
+            },
+            "description": "FINANCE_WRITE. The only way to edit a campaign after creation. Deactivating only removes it from GET /finance/pledge-campaigns for members \u2014 existing pledges under it are untouched.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"name\": \"New Sanctuary Building Fund\",\n  \"targetAmount\": 50000000.0,\n  \"startDate\": \"2026-01-01\",\n  \"endDate\": \"2026-12-31\",\n  \"description\": \"Campaign to raise funds for the new church building\",\n  \"isActive\": false,\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-17T09:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
           "name": "Create pledge",
           "request": {
             "method": "POST",
@@ -16656,6 +17781,117 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"id\": \"plg1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"member\": {\n    \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\",\n    \"email\": \"john.doe@example.com\",\n    \"phoneNumber\": \"+2348012345678\",\n    \"role\": \"WORKER\",\n    \"status\": \"ACTIVE\",\n    \"gender\": \"MALE\",\n    \"birthDay\": 15,\n    \"birthMonth\": 3,\n    \"birthYear\": 1990,\n    \"maritalStatus\": \"MARRIED\",\n    \"changedPassword\": true,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"campaign\": {\n    \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"New Sanctuary Building Fund\",\n    \"fund\": {\n      \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n      \"name\": \"General Fund\",\n      \"type\": \"UNRESTRICTED\",\n      \"description\": \"Main operating fund for church activities\",\n      \"isActive\": true,\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"targetAmount\": 50000000.0,\n    \"startDate\": \"2026-01-01\",\n    \"endDate\": \"2026-12-31\",\n    \"description\": \"Campaign to raise funds for the new church building\",\n    \"isActive\": true,\n    \"createdBy\": {\n      \"id\": \"adm1\",\n      \"email\": \"admin@church.org\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"totalAmount\": 500000.0,\n  \"frequency\": \"MONTHLY\",\n  \"startDate\": \"2026-02-01\",\n  \"status\": \"COMPLETED\",\n  \"notes\": \"Committed to monthly payment of 41,667\",\n  \"createdAt\": \"2026-02-01T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List pledge contributions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/pledges/contributions?status=PENDING",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "pledges",
+                "contributions"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "PENDING"
+                }
+              ]
+            },
+            "description": "FINANCE_READ. Paginated review queue of member-submitted pledge payment claims. Filterable by status, pledgeId, campaignId."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"pc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"amount\": 41667.0,\n      \"paymentDate\": \"2026-07-01\",\n      \"reference\": \"TXN123456\",\n      \"status\": \"PENDING\",\n      \"reviewedBy\": null,\n      \"reviewedAt\": null,\n      \"financeNote\": null,\n      \"submittedBy\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"pledge\": {\n        \"id\": \"plg1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"totalAmount\": 500000.0,\n        \"member\": {\n          \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n          \"firstname\": \"John\",\n          \"lastname\": \"Doe\"\n        },\n        \"campaign\": {\n          \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n          \"name\": \"New Sanctuary Building Fund\"\n        }\n      },\n      \"createdAt\": \"2026-07-01T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-01T08:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Confirm pledge contribution",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/pledges/contributions/{{contributionId}}/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "pledges",
+                "contributions",
+                "{{contributionId}}",
+                "confirm"
+              ]
+            },
+            "description": "FINANCE_WRITE. Confirms a pending contribution claim, emails the member, and auto-completes the pledge if this pushes its confirmed total to the full pledged amount."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"pc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"amount\": 41667.0,\n  \"paymentDate\": \"2026-07-01\",\n  \"reference\": \"TXN123456\",\n  \"status\": \"CONFIRMED\",\n  \"reviewedBy\": {\n    \"id\": \"adm1\",\n    \"email\": \"admin@church.org\"\n  },\n  \"reviewedAt\": \"2026-07-02T09:00:00.000Z\",\n  \"financeNote\": null,\n  \"createdAt\": \"2026-07-01T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T09:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Decline pledge contribution",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/pledges/contributions/{{contributionId}}/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "pledges",
+                "contributions",
+                "{{contributionId}}",
+                "decline"
+              ]
+            },
+            "description": "FINANCE_WRITE. financeNote is required.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"financeNote\": \"No matching bank transfer found for this reference.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"pc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"amount\": 41667.0,\n  \"paymentDate\": \"2026-07-01\",\n  \"reference\": \"TXN123456\",\n  \"status\": \"DECLINED\",\n  \"reviewedBy\": {\n    \"id\": \"adm1\",\n    \"email\": \"admin@church.org\"\n  },\n  \"reviewedAt\": \"2026-07-02T09:00:00.000Z\",\n  \"financeNote\": \"No matching bank transfer found for this reference.\",\n  \"createdAt\": \"2026-07-01T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T09:00:00.000Z\"\n}"
             }
           ]
         },
@@ -17839,6 +19075,38 @@
       "name": "Finance Module (Member)",
       "item": [
         {
+          "name": "List Active Pledge Campaigns",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/finance/pledge-campaigns",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "finance",
+                "pledge-campaigns"
+              ]
+            },
+            "description": "Active, non-lapsed pledge campaigns a member can pledge against (isActive=true AND endDate >= today). Member-safe subset \u2014 no createdBy. Not paginated."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"New Sanctuary Building Fund\",\n    \"fundName\": \"General Fund\",\n    \"targetAmount\": 50000000.0,\n    \"totalPledged\": 12500000.0,\n    \"startDate\": \"2026-01-01\",\n    \"endDate\": \"2026-12-31\",\n    \"description\": \"Campaign to raise funds for the new church building\"\n  }\n]"
+            }
+          ]
+        },
+        {
           "name": "Make Pledge (Self-Service)",
           "request": {
             "method": "POST",
@@ -17913,7 +19181,90 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"id\": \"plg1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"member\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\",\n      \"email\": \"john.doe@example.com\",\n      \"phoneNumber\": \"+2348012345678\",\n      \"role\": \"WORKER\",\n      \"status\": \"ACTIVE\",\n      \"gender\": \"MALE\",\n      \"birthDay\": 15,\n      \"birthMonth\": 3,\n      \"birthYear\": 1990,\n      \"maritalStatus\": \"MARRIED\",\n      \"changedPassword\": true,\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"campaign\": {\n      \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"New Sanctuary Building Fund\",\n      \"fund\": {\n        \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n        \"name\": \"General Fund\",\n        \"type\": \"UNRESTRICTED\",\n        \"description\": \"Main operating fund for church activities\",\n        \"isActive\": true,\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"targetAmount\": 50000000.0,\n      \"startDate\": \"2026-01-01\",\n      \"endDate\": \"2026-12-31\",\n      \"description\": \"Campaign to raise funds for the new church building\",\n      \"isActive\": true,\n      \"createdBy\": {\n        \"id\": \"adm1\",\n        \"email\": \"admin@church.org\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"totalAmount\": 500000.0,\n    \"frequency\": \"MONTHLY\",\n    \"startDate\": \"2026-02-01\",\n    \"status\": \"ACTIVE\",\n    \"notes\": \"Committed to monthly payment of 41,667\",\n    \"createdAt\": \"2026-02-01T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
+              "body": "[\n  {\n    \"id\": \"plg1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"member\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\",\n      \"email\": \"john.doe@example.com\",\n      \"phoneNumber\": \"+2348012345678\",\n      \"role\": \"WORKER\",\n      \"status\": \"ACTIVE\",\n      \"gender\": \"MALE\",\n      \"birthDay\": 15,\n      \"birthMonth\": 3,\n      \"birthYear\": 1990,\n      \"maritalStatus\": \"MARRIED\",\n      \"changedPassword\": true,\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"campaign\": {\n      \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"New Sanctuary Building Fund\",\n      \"fund\": {\n        \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n        \"name\": \"General Fund\",\n        \"type\": \"UNRESTRICTED\",\n        \"description\": \"Main operating fund for church activities\",\n        \"isActive\": true,\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"targetAmount\": 50000000.0,\n      \"startDate\": \"2026-01-01\",\n      \"endDate\": \"2026-12-31\",\n      \"description\": \"Campaign to raise funds for the new church building\",\n      \"isActive\": true,\n      \"createdBy\": {\n        \"id\": \"adm1\",\n        \"email\": \"admin@church.org\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"totalAmount\": 500000.0,\n    \"frequency\": \"MONTHLY\",\n    \"startDate\": \"2026-02-01\",\n    \"status\": \"ACTIVE\",\n    \"amountPaid\": 41667.0,\n    \"notes\": \"Committed to monthly payment of 41,667\",\n    \"createdAt\": \"2026-02-01T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Log Pledge Payment (Self-Service)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/finance/me/pledges/{{pledgeId}}/contributions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "finance",
+                "me",
+                "pledges",
+                "{{pledgeId}}",
+                "contributions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 41667,\n  \"paymentDate\": \"2026-07-01\",\n  \"reference\": \"TXN123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Member logs a payment claim toward their own pledge. 403s if the pledge belongs to someone else; 400s if the pledge isn't ACTIVE. Starts PENDING until finance confirms or declines it."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"pc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"amount\": 41667.0,\n  \"paymentDate\": \"2026-07-01\",\n  \"reference\": \"TXN123456\",\n  \"status\": \"PENDING\",\n  \"reviewedBy\": null,\n  \"reviewedAt\": null,\n  \"financeNote\": null,\n  \"createdAt\": \"2026-07-01T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-01T08:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List My Pledge Payment Claims",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/finance/me/pledges/{{pledgeId}}/contributions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "finance",
+                "me",
+                "pledges",
+                "{{pledgeId}}",
+                "contributions"
+              ]
+            },
+            "description": "List the payment claims (PENDING/CONFIRMED/DECLINED) the authenticated member has logged against one of their own pledges."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"pc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"amount\": 41667.0,\n    \"paymentDate\": \"2026-07-01\",\n    \"reference\": \"TXN123456\",\n    \"status\": \"CONFIRMED\",\n    \"reviewedAt\": \"2026-07-02T09:00:00.000Z\",\n    \"financeNote\": null,\n    \"createdAt\": \"2026-07-01T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T09:00:00.000Z\"\n  }\n]"
             }
           ]
         },
@@ -17977,14 +19328,20 @@
                 "send"
               ]
             },
-            "description": "Triggers the annual giving statement email for the previous year. Available regardless of ANNUAL_GIVING_STATEMENT_ENABLED flag."
+            "description": "Triggers the annual giving statement email for the previous year. Available regardless of ANNUAL_GIVING_STATEMENT_ENABLED flag. Sums directly from TitheRecord + CONFIRMED PledgeContribution (not finance_journal_entry_links)."
           },
           "response": [
             {
-              "name": "200 OK",
+              "name": "200 OK \u2014 giving found",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"message\": \"Your annual giving statement for 2026 has been sent to john.doe@example.com\"\n}"
+              "body": "{\n  \"sent\": true,\n  \"year\": 2025,\n  \"total\": 465000.0,\n  \"message\": \"Your 2025 giving statement has been emailed to john.doe@example.com.\"\n}"
+            },
+            {
+              "name": "200 OK \u2014 nothing to send",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"sent\": false,\n  \"year\": 2025,\n  \"total\": 0,\n  \"message\": \"You have no recorded giving for 2025 yet.\"\n}"
             }
           ]
         }

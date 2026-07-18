@@ -32,6 +32,7 @@ describe('PushNotificationService', () => {
 
   const mockQueue = {
     add: jest.fn().mockResolvedValue(undefined),
+    addBulk: jest.fn().mockResolvedValue(undefined),
   };
 
   const mockConfig = {
@@ -104,7 +105,7 @@ describe('PushNotificationService', () => {
       expect(mockSubRepo.find).not.toHaveBeenCalled();
     });
 
-    it('enqueues one job per subscription found', async () => {
+    it('enqueues all subscriptions in a single bulk call', async () => {
       mockSubRepo.find.mockResolvedValueOnce([
         {
           memberId: 'member-1',
@@ -112,18 +113,37 @@ describe('PushNotificationService', () => {
           p256dh: 'k',
           auth: 'a',
         },
+        {
+          memberId: 'member-2',
+          endpoint: 'https://ep2',
+          p256dh: 'k2',
+          auth: 'a2',
+        },
       ]);
-      await service.dispatchToMemberIds(['member-1'], {
+      await service.dispatchToMemberIds(['member-1', 'member-2'], {
         idempotencyKey: 'prayer-test:1',
         title: 'Test',
         body: 'Body',
         url: '/prayer',
       });
-      expect(mockQueue.add).toHaveBeenCalledWith(
-        'send',
-        expect.objectContaining({ memberId: 'member-1' }),
-        expect.objectContaining({ jobId: 'push:member-1:prayer-test:1' }),
-      );
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          name: 'send',
+          data: expect.objectContaining({ memberId: 'member-1' }),
+          opts: expect.objectContaining({
+            jobId: 'push:member-1:prayer-test:1',
+          }),
+        }),
+        expect.objectContaining({
+          name: 'send',
+          data: expect.objectContaining({ memberId: 'member-2' }),
+          opts: expect.objectContaining({
+            jobId: 'push:member-2:prayer-test:1',
+          }),
+        }),
+      ]);
+      expect(mockQueue.add).not.toHaveBeenCalled();
     });
 
     it('skips members without a subscription', async () => {
@@ -134,7 +154,7 @@ describe('PushNotificationService', () => {
         body: 'b',
         url: '/',
       });
-      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
     });
   });
 
@@ -169,7 +189,7 @@ describe('PushNotificationService', () => {
         body: 'B',
         url: '/prayer',
       });
-      expect(mockQueue.add).toHaveBeenCalledTimes(1);
+      expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
     });
   });
 });

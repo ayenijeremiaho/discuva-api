@@ -54,6 +54,22 @@ export class ServiceSessionController {
     return session;
   }
 
+  @Post('event/:eventId/start')
+  @UseGuards(JwtAuthGuard)
+  async startEvent(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    const sessions = await this.sessionSvc.startEvent(eventId, user.id);
+    for (const session of sessions) {
+      this.gateway.broadcastState(
+        session.sessionCode,
+        await this.sessionSvc.getState(session.sessionCode),
+      );
+    }
+    return sessions;
+  }
+
   @Post(':sessionCode/advance')
   @UseGuards(JwtAuthGuard)
   async advance(
@@ -358,8 +374,30 @@ export class ServiceSessionController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('serviceSlotName') serviceSlotName?: string,
+    @Query('memberId') memberId?: string,
+    @Query('slotType') slotType?: string,
   ) {
-    return this.sessionSvc.getAnalytics(from, to, serviceSlotName);
+    return this.sessionSvc.getAnalytics(
+      from,
+      to,
+      serviceSlotName,
+      memberId,
+      slotType,
+    );
+  }
+
+  @Get('my-history')
+  @UseGuards(JwtAuthGuard)
+  getMyServiceHistory(
+    @CurrentUser() user: MemberAuth,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.sessionSvc.getMyServiceHistory(
+      user.id,
+      page ? +page : undefined,
+      limit ? +limit : undefined,
+    );
   }
 
   @Get(':sessionCode/state')
@@ -377,6 +415,16 @@ export class ServiceSessionController {
     @Param('position', ParseIntPipe) position: number,
   ) {
     return this.sessionSvc.getSlotForSpeaker(sessionCode, position);
+  }
+
+  @Get(':sessionCode/my-status')
+  @UseGuards(JwtAuthGuard)
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  getMyLiveStatus(
+    @Param('sessionCode') sessionCode: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.sessionSvc.getMyLiveStatus(sessionCode, user.id);
   }
 
   @Get(':sessionCode/share-links')

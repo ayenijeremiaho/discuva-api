@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -36,6 +37,11 @@ export class CreatePledgeCampaignDto {
   @IsOptional()
   @IsString()
   description?: string;
+}
+
+export class UpdateCampaignActiveDto {
+  @IsBoolean()
+  isActive: boolean;
 }
 
 export class CreatePledgeDto {

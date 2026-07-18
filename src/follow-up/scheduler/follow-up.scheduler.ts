@@ -10,6 +10,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 const OPEN_STATUSES = [
   FollowUpTaskStatusEnum.PENDING,
@@ -37,7 +38,7 @@ export class FollowUpScheduler {
     this.staleDays = this.configService.get<number>('FOLLOW_UP_STALE_DAYS', 7);
   }
 
-  @Cron('0 8 * * *')
+  @Cron('0 8 * * *', { timeZone: CHURCH_TIMEZONE })
   async escalateOverdueTasks(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(ESCALATION_LOCK, 270);
     if (!acquired) {
@@ -150,7 +151,7 @@ export class FollowUpScheduler {
     );
   }
 
-  @Cron('0 9 * * *')
+  @Cron('0 9 * * *', { timeZone: CHURCH_TIMEZONE })
   async notifyInactiveTasks(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(STALE_LOCK, 270);
     if (!acquired) {

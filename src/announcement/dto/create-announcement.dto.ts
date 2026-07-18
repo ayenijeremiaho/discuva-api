@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEnum,
   IsISO8601,
   IsNotEmpty,
@@ -41,6 +42,20 @@ export class CreateAnnouncementDto {
   @IsOptional()
   @IsISO8601()
   expiresAt?: string;
+
+  // Requires the SMS_SEND admin permission — checked in the service, not
+  // here, since a DTO can't inspect the caller's permission set.
+  @IsOptional()
+  @IsBoolean()
+  sendViaSms?: boolean;
+
+  // Deliberately separate from `body` — required whenever sendViaSms is
+  // true, since SMS is billed per segment and the full announcement body
+  // is often too long to send as-is.
+  @ValidateIf((o) => o.sendViaSms === true)
+  @IsNotEmpty()
+  @IsString()
+  smsBody?: string;
 }
 
 export class UpdateAnnouncementDto {
@@ -75,4 +90,13 @@ export class UpdateAnnouncementDto {
   @IsOptional()
   @IsISO8601()
   expiresAt?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  sendViaSms?: boolean;
+
+  @ValidateIf((o) => o.sendViaSms === true)
+  @IsNotEmpty()
+  @IsString()
+  smsBody?: string;
 }

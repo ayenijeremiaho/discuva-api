@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -28,9 +29,11 @@ import {
   JwtResponse,
   MemberAuth,
 } from '../interface/auth.interface';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { SessionSurface } from '../enum/session-surface.enum';
 import { PasswordResetOtp } from '../entity/password-reset-otp.entity';
 import { DeviceResetOtp } from '../entity/device-reset-otp.entity';
+import { EmailChangeOtp } from '../entity/email-change-otp.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
 import { ChangePasswordDto } from '../../member/dto/change-password.dto';
@@ -40,9 +43,18 @@ import { Member } from '../../member/entity/member.entity';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
+interface RotatedRefreshEntry {
+  hash: string;
+  response: JwtResponse;
+  rotatedAt: number;
+}
+
 @Injectable()
 export class AuthService {
   private static readonly OTP_PURGE_LOCK = 'lock:otp-purge';
+  // Window in which reuse of a just-rotated refresh token is treated as a
+  // benign concurrent-request race (e.g. two tabs) rather than theft.
+  private static readonly REFRESH_REUSE_GRACE_MS = 10_000;
   private readonly logger = new Logger(AuthService.name);
   private readonly otpTtlSeconds: number;
   private readonly otpMaxAttempts: number;
@@ -69,6 +81,8 @@ export class AuthService {
     private readonly otpRepository: Repository<PasswordResetOtp>,
     @InjectRepository(DeviceResetOtp)
     private readonly deviceResetOtpRepository: Repository<DeviceResetOtp>,
+    @InjectRepository(EmailChangeOtp)
+    private readonly emailChangeOtpRepository: Repository<EmailChangeOtp>,
     @InjectRepository(DepartmentLead)
     private readonly departmentLeadRepo: Repository<DepartmentLead>,
     private readonly pushService: PushNotificationService,
@@ -169,14 +183,17 @@ export class AuthService {
   async login(user: MemberAuth, deviceId: string): Promise<JwtResponse> {
     if (!deviceId) throw new BadRequestException('deviceId is required');
 
-    const member = await this.memberService.getById(user.id);
+    // deviceId is `select: false` on the entity — getById() would silently
+    // return undefined here, making this check a no-op. getByIdWithCredentials
+    // explicitly selects it (as it does for password, for the same reason).
+    const member = await this.memberService.getByIdWithCredentials(user.id);
 
     if (member.deviceId && member.deviceId !== deviceId) {
       this.logger.warn(
         `Device mismatch for member ${user.id} — login rejected`,
       );
       throw new ForbiddenException(
-        'This account is already registered on another device. Contact an admin to reset your device access.',
+        'This account is already registered on another device. Use "Reset Device Access" on the sign-in screen if this is your device now.',
       );
     }
 
@@ -234,6 +251,7 @@ export class AuthService {
   }
 
   async refreshToken(user: MemberAuth): Promise<JwtResponse> {
+    if (user.replayedTokens) return user.replayedTokens;
     return this.generateTokens(
       user.id,
       user.role,
@@ -266,7 +284,7 @@ export class AuthService {
 
     const maxAgeDays =
       this.configService.get<number>('SESSION_MAX_AGE_DAYS') ?? 30;
-    if (Date.now() - session.createdAt.getTime() > maxAgeDays * 86_400_000) {
+    if (Date.now() - session.lastLogin.getTime() > maxAgeDays * 86_400_000) {
       await this.sessionService.updateLogout(memberId, surface);
       throw new UnauthorizedException(
         'Your session has expired. Please log in again.',
@@ -277,31 +295,11 @@ export class AuthService {
       refreshToken,
       session.hashedRefreshToken,
     );
-    if (!isValid) {
-      // Detect reuse of a previously rotated token — indicates credential theft
-      const rotatedKey = this.cacheService.key(
-        'rt_rotated',
-        `${memberId}:${surface}`,
-      );
-      const rotatedHash = await this.cacheService.get<string>(rotatedKey);
-      if (rotatedHash) {
-        const isReused = await UtilityService.verifyHashedValue(
-          refreshToken,
-          rotatedHash,
-        );
-        if (isReused) {
-          this.logger.warn(
-            `Refresh token reuse detected for member ${memberId} — session invalidated`,
-          );
-          await this.sessionService.updateLogout(memberId, surface);
-          this.cacheService.del(rotatedKey);
-          this.sendSessionSecurityAlert(memberId, surface);
-        }
-      }
-      throw new UnauthorizedException(
-        'Your session is invalid. Please log in again.',
-      );
-    }
+    // Detect reuse of a previously rotated token — indicates credential theft,
+    // unless it falls within the grace window (a benign concurrent-request race).
+    const replayedTokens = isValid
+      ? undefined
+      : await this.handleRotatedTokenCheck(memberId, surface, refreshToken);
 
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
@@ -331,7 +329,50 @@ export class AuthService {
       role: member.role,
       requiresPasswordChange: !member.changedPassword,
       surface,
+      replayedTokens,
     };
+  }
+
+  /**
+   * Called when the presented refresh token doesn't match the current session
+   * hash. Either resolves to the tokens already issued by a just-completed
+   * rotation (benign race, within the grace window) or throws — invalidating
+   * the session and alerting the member first if the token was actually reused.
+   */
+  private async handleRotatedTokenCheck(
+    memberId: string,
+    surface: SessionSurface,
+    refreshToken: string,
+  ): Promise<JwtResponse> {
+    const rotatedKey = this.cacheService.key(
+      'rt_rotated',
+      `${memberId}:${surface}`,
+    );
+    const rotated =
+      await this.cacheService.get<RotatedRefreshEntry>(rotatedKey);
+    const isReused = rotated
+      ? await UtilityService.verifyHashedValue(refreshToken, rotated.hash)
+      : false;
+
+    if (
+      isReused &&
+      rotated &&
+      Date.now() - rotated.rotatedAt <= AuthService.REFRESH_REUSE_GRACE_MS
+    ) {
+      return rotated.response;
+    }
+
+    if (isReused) {
+      this.logger.warn(
+        `Refresh token reuse detected for member ${memberId} — session invalidated`,
+      );
+      await this.sessionService.updateLogout(memberId, surface);
+      this.cacheService.del(rotatedKey);
+      this.sendSessionSecurityAlert(memberId, surface);
+    }
+    throw new UnauthorizedException(
+      'Your session is invalid. Please log in again.',
+    );
   }
 
   async validateAccessToken(
@@ -392,6 +433,7 @@ export class AuthService {
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
+      'pastor',
     ]);
     let isHod = false;
     if (member.workerProfile?.id) {
@@ -592,7 +634,104 @@ export class AuthService {
     );
   }
 
-  @Cron('0 2 * * *')
+  async requestEmailChange(memberId: string, newEmail: string): Promise<void> {
+    await this.checkOtpRateLimit(memberId);
+
+    const existing = await this.memberService.findByEmail(newEmail);
+    if (existing) {
+      throw new ConflictException('This email address is already in use.');
+    }
+
+    const member = await this.memberService.getById(memberId);
+
+    await this.emailChangeOtpRepository.delete({
+      memberId,
+      usedAt: IsNull(),
+    });
+
+    const otp = this.generateOtp();
+    const otpHash = await UtilityService.hashValue(otp);
+    const expiresAt = new Date(Date.now() + this.otpTtlSeconds * 1000);
+
+    await this.emailChangeOtpRepository.save(
+      this.emailChangeOtpRepository.create({
+        memberId,
+        otpHash,
+        newEmail,
+        expiresAt,
+        usedAt: null,
+      }),
+    );
+
+    this.auditLogService.log('EMAIL_CHANGE_REQUESTED', {
+      targetId: memberId,
+      targetEmail: newEmail,
+    });
+
+    const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    this.utilityService.sendEmailWithTemplate(
+      newEmail,
+      `${firstName}, Confirm Your New Email Address`,
+      'email-change-otp',
+      {
+        name: firstName,
+        otp,
+        expiresMinutes: Math.floor(this.otpTtlSeconds / 60).toString(),
+      },
+    );
+  }
+
+  async confirmEmailChange(memberId: string, otp: string): Promise<void> {
+    const record = await this.emailChangeOtpRepository.findOne({
+      where: { memberId, usedAt: IsNull() },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!record || record.expiresAt < new Date()) {
+      throw new BadRequestException(
+        'This verification code is invalid or has expired. Please request a new one.',
+      );
+    }
+
+    const isValid = await UtilityService.verifyHashedValue(otp, record.otpHash);
+    if (!isValid) {
+      throw new BadRequestException(
+        'This verification code is invalid or has expired. Please request a new one.',
+      );
+    }
+
+    const stillAvailable = await this.memberService.findByEmail(
+      record.newEmail,
+    );
+    if (stillAvailable) {
+      throw new ConflictException('This email address is already in use.');
+    }
+
+    record.usedAt = new Date();
+    await this.emailChangeOtpRepository.save(record);
+
+    await this.memberService.updateEmail(memberId, record.newEmail);
+
+    this.logger.log(`Email changed for member ${memberId}`);
+    this.auditLogService.log('EMAIL_CHANGE_COMPLETED', {
+      targetId: memberId,
+      targetEmail: record.newEmail,
+    });
+
+    const member = await this.memberService.getById(memberId);
+    const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    this.utilityService.sendEmailWithTemplate(
+      record.newEmail,
+      `${firstName}, Your Email Address Has Been Updated`,
+      'email-changed-confirmation',
+      {
+        name: firstName,
+        login_url: this.configService.get<string>('LOGIN_URL'),
+      },
+    );
+  }
+
+  @Cron('0 2 * * *', { timeZone: CHURCH_TIMEZONE })
   async purgeExpiredOtps(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(
       AuthService.OTP_PURGE_LOCK,
@@ -716,26 +855,31 @@ export class AuthService {
       surface,
     );
 
-    // Keep the outgoing hash in Redis so a reused rotated token can be detected
-    if (currentHash) {
-      const rotatedKey = this.cacheService.key(
-        'rt_rotated',
-        `${memberId}:${surface}`,
-      );
-      this.cacheService.set(
-        rotatedKey,
-        currentHash,
-        this.getRefreshExpirySeconds(),
-      );
-    }
-
-    return {
+    const tokens: JwtResponse = {
       token_type: 'Bearer',
       expires_in: this.getTokenExpirySeconds(),
       access_token,
       refresh_token,
       requires_password_change: requiresPasswordChange,
     };
+
+    // Keep the outgoing hash (and the tokens just issued) in Redis so a
+    // reused rotated token can either be replayed (within the grace window)
+    // or flagged as reuse (outside it) — see handleRotatedTokenCheck.
+    if (currentHash) {
+      const rotatedKey = this.cacheService.key(
+        'rt_rotated',
+        `${memberId}:${surface}`,
+      );
+      const entry: RotatedRefreshEntry = {
+        hash: currentHash,
+        response: tokens,
+        rotatedAt: Date.now(),
+      };
+      this.cacheService.set(rotatedKey, entry, this.getRefreshExpirySeconds());
+    }
+
+    return tokens;
   }
 
   private sendSessionSecurityAlert(

@@ -39,7 +39,11 @@ const makeQb = () => ({
   leftJoin: jest.fn().mockReturnThis(),
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
+  update: jest.fn().mockReturnThis(),
+  set: jest.fn().mockReturnThis(),
+  execute: jest.fn(),
   getRawOne: jest.fn(),
+  getRawMany: jest.fn(),
 });
 
 const mockDepartmentRepo = {
@@ -66,6 +70,7 @@ const mockWorkerProfileRepo = {
   findAndCount: jest.fn(),
   exists: jest.fn(),
   count: jest.fn(),
+  createQueryBuilder: jest.fn(),
 };
 
 const mockLeaveRepo = {
@@ -521,6 +526,71 @@ describe('DepartmentService', () => {
         service.delete('dept-1', 'actor-1'),
       ).resolves.toBeUndefined();
       expect(mockDepartmentRepo.delete).toHaveBeenCalledWith('dept-1');
+    });
+  });
+
+  describe('bulkAssignDepartment', () => {
+    it('updates only members with an existing worker profile, in one batched query', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'dept-1',
+        name: 'Media',
+      });
+      const selectQb = makeQb();
+      selectQb.getRawMany.mockResolvedValue([{ memberId: 'm-1' }]);
+      const updateQb = makeQb();
+      updateQb.execute.mockResolvedValue({ affected: 1 });
+      mockWorkerProfileRepo.createQueryBuilder
+        .mockReturnValueOnce(selectQb)
+        .mockReturnValueOnce(updateQb);
+
+      const result = await service.bulkAssignDepartment(
+        'dept-1',
+        { memberIds: ['m-1', 'm-2'] },
+        'actor-1',
+      );
+
+      expect(result).toEqual({ updated: 1, skipped: 1 });
+      expect(updateQb.set).toHaveBeenCalledWith({
+        department: { id: 'dept-1' },
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'BULK_DEPARTMENT_ASSIGNED',
+        expect.objectContaining({
+          targetId: 'dept-1',
+          metadata: expect.objectContaining({ updated: 1, skipped: 1 }),
+        }),
+      );
+    });
+
+    it('skips the bulk UPDATE entirely when no member has a worker profile', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'dept-1',
+        name: 'Media',
+      });
+      const selectQb = makeQb();
+      selectQb.getRawMany.mockResolvedValue([]);
+      mockWorkerProfileRepo.createQueryBuilder.mockReturnValue(selectQb);
+
+      const result = await service.bulkAssignDepartment(
+        'dept-1',
+        { memberIds: ['m-1', 'm-2'] },
+        'actor-1',
+      );
+
+      expect(result).toEqual({ updated: 0, skipped: 2 });
+      expect(mockWorkerProfileRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+    });
+
+    it('throws NotFoundException if the department does not exist', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.bulkAssignDepartment(
+          'missing-dept',
+          { memberIds: ['m-1'] },
+          'actor-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

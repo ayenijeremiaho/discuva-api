@@ -1,8 +1,9 @@
-import { Expose, Type } from 'class-transformer';
+import { Expose, Transform, Type } from 'class-transformer';
 import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
+import { PastorTypeEnum } from '../enums/pastor-type.enum';
 import { WorkerProfileDto } from './worker-profile.dto';
 
 export class MemberDto {
@@ -60,6 +61,10 @@ export class MemberDto {
   @Expose()
   @Type(() => WorkerProfileDto)
   workerProfile: WorkerProfileDto;
+
+  @Expose()
+  @Transform(({ obj }) => obj.pastor?.type ?? null)
+  pastorType: PastorTypeEnum | null;
 
   @Expose()
   createdAt: Date;

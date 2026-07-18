@@ -138,4 +138,8 @@ export const envValidationSchema = Joi.object({
 
   BULL_BOARD_USER: Joi.string().optional(),
   BULL_BOARD_PASSWORD: Joi.string().optional(),
+
+  TERMII_API_KEY: Joi.string().optional(),
+  TERMII_SENDER_ID: Joi.string().optional(),
+  TERMII_BASE_URL: Joi.string().uri().default('https://api.ng.termii.com'),
 }).options({ allowUnknown: true });

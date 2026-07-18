@@ -15,6 +15,7 @@ import {
   CreateAnnouncementDto,
   UpdateAnnouncementDto,
 } from '../dto/create-announcement.dto';
+import { SendSmsBroadcastDto } from '../dto/send-sms-broadcast.dto';
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
@@ -22,6 +23,8 @@ import { MemberAuth } from '../../auth/interface/auth.interface';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
 
 @UseGuards(JwtAuthGuard)
 @Controller('announcements')
@@ -29,10 +32,24 @@ export class AnnouncementController {
   constructor(private readonly announcementService: AnnouncementService) {}
 
   @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.SMS_SEND)
+  @Post('sms-broadcast')
+  sendSmsBroadcast(
+    @Body() dto: SendSmsBroadcastDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.announcementService.sendSmsBroadcast(dto, user.id);
+  }
+
+  @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.ANNOUNCEMENTS_WRITE)
   @Post()
-  create(@Body() dto: CreateAnnouncementDto, @CurrentUser() user: MemberAuth) {
-    return this.announcementService.create(dto, user.id);
+  create(
+    @Body() dto: CreateAnnouncementDto,
+    @CurrentUser() user: MemberAuth,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.announcementService.create(dto, user.id, admin);
   }
 
   @UseGuards(AdminGuard)
@@ -42,8 +59,9 @@ export class AnnouncementController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAnnouncementDto,
     @CurrentUser() user: MemberAuth,
+    @CurrentAdmin() admin: Admin,
   ) {
-    return this.announcementService.update(id, dto, user.id);
+    return this.announcementService.update(id, dto, user.id, admin);
   }
 
   @UseGuards(AdminGuard)

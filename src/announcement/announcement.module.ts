@@ -6,6 +6,7 @@ import { AnnouncementController } from './controller/announcement.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
 import { GroupModule } from '../group/group.module';
+import { SmsModule } from '../sms/sms.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { GroupModule } from '../group/group.module';
     MemberModule,
     UtilityModule,
     GroupModule,
+    SmsModule,
   ],
   providers: [AnnouncementService],
   controllers: [AnnouncementController],

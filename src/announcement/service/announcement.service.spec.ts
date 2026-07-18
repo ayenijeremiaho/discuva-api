@@ -1,6 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AnnouncementService } from './announcement.service';
 import { Announcement } from '../entity/announcement.entity';
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
@@ -10,6 +14,15 @@ import { SanitizationService } from '../../utility/service/sanitization.service'
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { GroupService } from '../../group/service/group.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { SmsService } from '../../sms/service/sms.service';
+import { Member } from '../../member/entity/member.entity';
+import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+
+const noSmsAdmin = { id: 'admin-1', adminRole: { permissions: [] } } as any;
+const smsAdmin = {
+  id: 'admin-1',
+  adminRole: { permissions: [AdminPermission.SMS_SEND] },
+} as any;
 
 jest.mock('../../utility/service/sanitization.service', () => ({
   SanitizationService: jest.fn().mockImplementation(() => ({
@@ -40,6 +53,7 @@ const mockAuditLogService = { log: jest.fn() };
 
 const mockGroupService = {
   getMemberIdsForGroup: jest.fn().mockResolvedValue([]),
+  getPhoneOnlyNumbersForGroup: jest.fn().mockResolvedValue([]),
 };
 
 const mockPushNotificationService = {
@@ -55,6 +69,22 @@ const mockAnnouncementRepo = {
   createQueryBuilder: jest.fn(),
 };
 
+const mockMemberQb = {
+  leftJoin: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  getMany: jest.fn().mockResolvedValue([]),
+};
+
+const mockMemberRepo = {
+  createQueryBuilder: jest.fn().mockReturnValue(mockMemberQb),
+  find: jest.fn().mockResolvedValue([]),
+};
+
+const mockSmsService = {
+  send: jest.fn().mockResolvedValue([]),
+};
+
 describe('AnnouncementService', () => {
   let service: AnnouncementService;
 
@@ -68,6 +98,7 @@ describe('AnnouncementService', () => {
           provide: getRepositoryToken(Announcement),
           useValue: mockAnnouncementRepo,
         },
+        { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: SanitizationService, useValue: mockSanitizationService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: GroupService, useValue: mockGroupService },
@@ -75,6 +106,7 @@ describe('AnnouncementService', () => {
           provide: PushNotificationService,
           useValue: mockPushNotificationService,
         },
+        { provide: SmsService, useValue: mockSmsService },
       ],
     }).compile();
 
@@ -91,6 +123,7 @@ describe('AnnouncementService', () => {
             audience: AnnouncementAudienceEnum.DEPARTMENT,
           } as any,
           'author-1',
+          noSmsAdmin,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -110,6 +143,7 @@ describe('AnnouncementService', () => {
       await service.create(
         { title: 'General Announcement', body: 'Hello everyone' } as any,
         'author-1',
+        noSmsAdmin,
       );
 
       const createCall = mockAnnouncementRepo.create.mock.calls[0][0];
@@ -138,6 +172,7 @@ describe('AnnouncementService', () => {
           departmentId: 'dept-1',
         } as any,
         'author-1',
+        noSmsAdmin,
       );
 
       expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
@@ -163,6 +198,7 @@ describe('AnnouncementService', () => {
           publishedAt: publishDate,
         } as any,
         'author-1',
+        noSmsAdmin,
       );
 
       expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
@@ -326,6 +362,7 @@ describe('AnnouncementService', () => {
             audience: AnnouncementAudienceEnum.GROUP,
           } as any,
           'author-1',
+          noSmsAdmin,
         ),
       ).rejects.toThrow(BadRequestException);
     });
@@ -353,6 +390,7 @@ describe('AnnouncementService', () => {
           groupId: 'group-1',
         } as any,
         'author-1',
+        noSmsAdmin,
       );
 
       expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
@@ -387,6 +425,7 @@ describe('AnnouncementService', () => {
       await service.create(
         { title: 'General', body: 'Hello' } as any,
         'author-1',
+        noSmsAdmin,
       );
 
       await new Promise(process.nextTick);
@@ -394,6 +433,229 @@ describe('AnnouncementService', () => {
       expect(
         mockPushNotificationService.dispatchToMemberIds,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendViaSms', () => {
+    it('rejects sendViaSms=true when the admin lacks SMS_SEND', async () => {
+      await expect(
+        service.create(
+          { title: 'T', body: 'B', sendViaSms: true } as any,
+          'author-1',
+          noSmsAdmin,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('dispatches SMS to resolved phone numbers using the dedicated smsBody', async () => {
+      const announcement = {
+        id: 'ann-1',
+        title: 'T',
+        body: 'B'.repeat(500),
+        audience: AnnouncementAudienceEnum.ALL,
+        sendViaSms: true,
+        smsBody: 'Short SMS text',
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockMemberQb.getMany.mockResolvedValue([
+        { phoneNumber: '+1' },
+        { phoneNumber: null },
+        { phoneNumber: '+2' },
+      ]);
+
+      await service.create(
+        {
+          title: 'T',
+          body: 'B'.repeat(500),
+          sendViaSms: true,
+          smsBody: 'Short SMS text',
+        } as any,
+        'author-1',
+        smsAdmin,
+      );
+
+      expect(mockSmsService.send).toHaveBeenCalledWith(
+        ['+1', '+2'],
+        'Short SMS text',
+      );
+    });
+
+    it('does not dispatch SMS when sendViaSms is false', async () => {
+      const announcement = {
+        id: 'ann-1',
+        title: 'T',
+        body: 'B',
+        audience: AnnouncementAudienceEnum.ALL,
+        sendViaSms: false,
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+
+      await service.create(
+        { title: 'T', body: 'B' } as any,
+        'author-1',
+        noSmsAdmin,
+      );
+
+      expect(mockSmsService.send).not.toHaveBeenCalled();
+    });
+
+    it('swallows an SMS dispatch failure instead of failing announcement creation', async () => {
+      const announcement = {
+        id: 'ann-1',
+        title: 'T',
+        body: 'B',
+        audience: AnnouncementAudienceEnum.ALL,
+        sendViaSms: true,
+        smsBody: 'Short SMS text',
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockMemberQb.getMany.mockResolvedValue([{ phoneNumber: '+1' }]);
+      mockSmsService.send.mockRejectedValueOnce(new Error('provider down'));
+
+      await expect(
+        service.create(
+          {
+            title: 'T',
+            body: 'B',
+            sendViaSms: true,
+            smsBody: 'Short SMS text',
+          } as any,
+          'author-1',
+          smsAdmin,
+        ),
+      ).resolves.toMatchObject({ id: 'ann-1' });
+    });
+  });
+
+  describe('sendSmsBroadcast', () => {
+    it('rejects DEPARTMENT audience without a departmentId', async () => {
+      await expect(
+        service.sendSmsBroadcast(
+          {
+            audience: AnnouncementAudienceEnum.DEPARTMENT,
+            message: 'Hi',
+          } as any,
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects INDIVIDUAL audience without a targetMemberId', async () => {
+      await expect(
+        service.sendSmsBroadcast(
+          {
+            audience: AnnouncementAudienceEnum.INDIVIDUAL,
+            message: 'Hi',
+          } as any,
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects GROUP audience without a groupId', async () => {
+      await expect(
+        service.sendSmsBroadcast(
+          { audience: AnnouncementAudienceEnum.GROUP, message: 'Hi' } as any,
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('sends SMS to resolved phone numbers and logs the audit entry without creating an announcement', async () => {
+      mockMemberQb.getMany.mockResolvedValue([
+        { phoneNumber: '+1' },
+        { phoneNumber: null },
+        { phoneNumber: '+2' },
+      ]);
+
+      const result = await service.sendSmsBroadcast(
+        {
+          audience: AnnouncementAudienceEnum.ALL,
+          message: 'Reminder: service starts at 9am',
+        } as any,
+        'admin-1',
+      );
+
+      expect(mockSmsService.send).toHaveBeenCalledWith(
+        ['+1', '+2'],
+        'Reminder: service starts at 9am',
+      );
+      expect(mockAnnouncementRepo.save).not.toHaveBeenCalled();
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'SMS_BROADCAST_SENT',
+        expect.objectContaining({
+          actorId: 'admin-1',
+          metadata: { audience: AnnouncementAudienceEnum.ALL, count: 2 },
+        }),
+      );
+      expect(result).toEqual({ sentCount: 2 });
+    });
+
+    it('returns sentCount 0 and does not call the SMS provider when no recipients resolve', async () => {
+      mockMemberQb.getMany.mockResolvedValue([]);
+
+      const result = await service.sendSmsBroadcast(
+        { audience: AnnouncementAudienceEnum.ALL, message: 'Hi' } as any,
+        'admin-1',
+      );
+
+      expect(mockSmsService.send).not.toHaveBeenCalled();
+      expect(result).toEqual({ sentCount: 0 });
+    });
+
+    it('unions member-derived phones with phone-only group entries and dedupes', async () => {
+      mockGroupService.getMemberIdsForGroup.mockResolvedValue(['member-1']);
+      mockMemberRepo.find.mockResolvedValue([
+        { phoneNumber: '+1' },
+        { phoneNumber: '+2' },
+      ]);
+      mockGroupService.getPhoneOnlyNumbersForGroup.mockResolvedValue([
+        '+2',
+        '+3',
+      ]);
+
+      const result = await service.sendSmsBroadcast(
+        {
+          audience: AnnouncementAudienceEnum.GROUP,
+          groupId: 'group-1',
+          message: 'Welcome back!',
+        } as any,
+        'admin-1',
+      );
+
+      expect(mockGroupService.getPhoneOnlyNumbersForGroup).toHaveBeenCalledWith(
+        'group-1',
+      );
+      expect(mockSmsService.send).toHaveBeenCalledWith(
+        expect.arrayContaining(['+1', '+2', '+3']),
+        'Welcome back!',
+      );
+      expect(mockSmsService.send.mock.calls[0][0]).toHaveLength(3);
+      expect(result).toEqual({ sentCount: 3 });
+    });
+
+    it('reaches phone-only entries even when the group has no real Members', async () => {
+      mockGroupService.getMemberIdsForGroup.mockResolvedValue([]);
+      mockGroupService.getPhoneOnlyNumbersForGroup.mockResolvedValue(['+9']);
+
+      const result = await service.sendSmsBroadcast(
+        {
+          audience: AnnouncementAudienceEnum.GROUP,
+          groupId: 'group-1',
+          message: 'Hi first-timer',
+        } as any,
+        'admin-1',
+      );
+
+      expect(mockMemberRepo.find).not.toHaveBeenCalled();
+      expect(mockSmsService.send).toHaveBeenCalledWith(
+        ['+9'],
+        'Hi first-timer',
+      );
+      expect(result).toEqual({ sentCount: 1 });
     });
   });
 });

@@ -12,6 +12,7 @@ import { Offering } from './entity/offering.entity';
 import { Budget } from './entity/budget.entity';
 import { PledgeCampaign } from './entity/pledge-campaign.entity';
 import { Pledge } from './entity/pledge.entity';
+import { PledgeContribution } from './entity/pledge-contribution.entity';
 import { RecurringEntry } from './entity/recurring-entry.entity';
 import { PettyCashReplenishment } from './entity/petty-cash-replenishment.entity';
 import { BulkUploadJob } from './entity/bulk-upload-job.entity';
@@ -73,6 +74,7 @@ import { AdminModule } from '../admin/admin.module';
       Budget,
       PledgeCampaign,
       Pledge,
+      PledgeContribution,
       RecurringEntry,
       PettyCashReplenishment,
       BulkUploadJob,

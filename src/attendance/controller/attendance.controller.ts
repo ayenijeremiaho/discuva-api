@@ -53,6 +53,15 @@ export class AttendanceController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('my-summary')
+  async getMySummary(@Request() req: any) {
+    return this.attendanceService.getMyAttendanceSummary(
+      req.user.id,
+      req.user.role,
+    );
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Get('my-history')
   async getMyHistory(
     @Request() req: any,

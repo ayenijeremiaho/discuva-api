@@ -7,7 +7,7 @@ import {
   OnApplicationBootstrap,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { BirthdayWish } from '../entity/birthday-wish.entity';
 import { Member } from '../../member/entity/member.entity';
@@ -18,7 +18,23 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { SanitizationService } from '../../utility/service/sanitization.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { MemberRoleEnum } from '../../member/enums/member-role.enum';
+import { PastorTypeEnum } from '../../member/enums/pastor-type.enum';
+
+export interface BirthdayCelebrant {
+  id: string;
+  firstname: string;
+  lastname: string;
+  birthMonth: number;
+  birthDay: number;
+  birthYear: number | null;
+  role: MemberRoleEnum;
+  departmentName: string | null;
+  pastorType: PastorTypeEnum | null;
+  alreadyWishedByMe: boolean;
+}
 
 @Injectable()
 export class BirthdayService implements OnApplicationBootstrap {
@@ -62,7 +78,7 @@ export class BirthdayService implements OnApplicationBootstrap {
     }
   }
 
-  @Cron('0 6 * * *')
+  @Cron('0 6 * * *', { timeZone: CHURCH_TIMEZONE })
   async triggerBirthdayGreetings(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(
       BirthdayService.LOCK_KEY,
@@ -119,17 +135,49 @@ export class BirthdayService implements OnApplicationBootstrap {
     }
   }
 
-  async getTodaysBirthdays(): Promise<
-    Pick<Member, 'id' | 'firstname' | 'lastname'>[]
-  > {
+  async getTodaysBirthdays(
+    currentMemberId?: string,
+  ): Promise<BirthdayCelebrant[]> {
     const today = new Date();
-    return this.memberRepository
-      .createQueryBuilder('m')
-      .select(['m.id', 'm.firstname', 'm.lastname'])
-      .where('m.birthMonth = :month', { month: today.getMonth() + 1 })
-      .andWhere('m.birthDay = :day', { day: today.getDate() })
-      .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })
-      .getMany();
+    const members = await this.memberRepository.find({
+      where: {
+        birthMonth: today.getMonth() + 1,
+        birthDay: today.getDate(),
+        status: MemberStatusEnum.ACTIVE,
+      },
+      relations: ['workerProfile', 'workerProfile.department', 'pastor'],
+    });
+
+    if (members.length === 0) return [];
+
+    let wishedIds = new Set<string>();
+    if (currentMemberId) {
+      const wishes = await this.wishRepository.find({
+        where: {
+          sender: { id: currentMemberId },
+          year: today.getFullYear(),
+          recipient: { id: In(members.map((m) => m.id)) },
+        },
+        relations: ['recipient'],
+      });
+      wishedIds = new Set(wishes.map((w) => w.recipient.id));
+    }
+
+    // Deliberately omits email/phoneNumber from this member-facing response —
+    // role/department/pastor type disambiguate same-named celebrants without
+    // exposing personal contact info to other members.
+    return members.map((m) => ({
+      id: m.id,
+      firstname: m.firstname,
+      lastname: m.lastname,
+      birthMonth: m.birthMonth,
+      birthDay: m.birthDay,
+      birthYear: m.birthYear,
+      role: m.role,
+      departmentName: m.workerProfile?.department?.name ?? null,
+      pastorType: m.pastor?.type ?? null,
+      alreadyWishedByMe: wishedIds.has(m.id),
+    }));
   }
 
   async getUpcomingBirthdays(
@@ -144,6 +192,7 @@ export class BirthdayService implements OnApplicationBootstrap {
       | 'phoneNumber'
       | 'birthMonth'
       | 'birthDay'
+      | 'birthYear'
     >[]
   > {
     const today = new Date();
@@ -175,6 +224,7 @@ export class BirthdayService implements OnApplicationBootstrap {
         'm.phoneNumber',
         'm.birthMonth',
         'm.birthDay',
+        'm.birthYear',
       ])
       .where(`(${conditions})`, params)
       .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })

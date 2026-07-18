@@ -155,7 +155,7 @@
 </head>
 
 <body>
-<span class="preheader">You've been added to the order of service for {{ serviceSlotName }}.</span>
+<span class="preheader">{{#if isBackup}}You're the backup for {{ serviceSlotName }}.{{else}}You've been added to the order of service for {{ serviceSlotName }}.{{/if}}</span>
 <table class="email-wrapper" width="100%" cellpadding="0" cellspacing="0" role="presentation">
   <tr>
     <td align="center">
@@ -174,8 +174,8 @@
               <tr>
                 <td class="content-cell">
                   <div>
-                    <h1>You're on the Programme, {{ memberName }}!</h1>
-                    <p>You've been added to the order of service for <strong>{{ serviceSlotName }}</strong>.</p>
+                    <h1>{{#if isBackup}}You're the Backup, {{ memberName }}!{{else}}You're on the Programme, {{ memberName }}!{{/if}}</h1>
+                    <p>{{#if isBackup}}You've been added as the <strong>backup</strong> for <strong>{{ serviceSlotName }}</strong> — please be ready to step in if the primary assignee is unavailable.{{else}}You've been added to the order of service for <strong>{{ serviceSlotName }}</strong>.{{/if}}</p>
 
                     <p
                       style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">
@@ -184,6 +184,20 @@
                       <tr>
                         <td class="attributes_content">
                           <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            {{#if serviceDate}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Date:</strong> {{ serviceDate }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            {{#if serviceTime}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Time:</strong> {{ serviceTime }}
+                              </td>
+                            </tr>
+                            {{/if}}
                             <tr>
                               <td class="attributes_item">
                                 <strong>Type:</strong> {{ slotType }}

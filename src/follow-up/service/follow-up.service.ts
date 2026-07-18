@@ -33,6 +33,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
 
 const REPORT_CACHE_TTL = 300;
 
@@ -51,6 +52,7 @@ export class FollowUpService {
     private readonly configService: ConfigService,
     private readonly cacheService: CacheService,
     private readonly emailQueueService: EmailQueueService,
+    private readonly auditLogService: AuditLogService,
     @InjectRepository(FirstTimer)
     private readonly firstTimerRepo: Repository<FirstTimer>,
     @InjectRepository(FollowUpTask)
@@ -751,7 +753,6 @@ export class FollowUpService {
       {
         firstname: ft.firstname,
         lastname: ft.lastname,
-        churchName: this.churchName,
       },
       undefined,
       EmailCategory.FOLLOW_UP,

@@ -7,6 +7,7 @@ import { JournalEntry } from '../entity/journal-entry.entity';
 import { JournalEntryLine } from '../entity/journal-entry-line.entity';
 import { AccountingPeriod } from '../entity/accounting-period.entity';
 import { CacheService } from '../../utility/service/cache.service';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import {
   AccountingPeriodStatus,
   JournalEntrySource,
@@ -31,7 +32,7 @@ export class RecurringEntryScheduler {
     private readonly cacheService: CacheService,
   ) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
   async generateDueEntries(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(
       RecurringEntryScheduler.LOCK_KEY,

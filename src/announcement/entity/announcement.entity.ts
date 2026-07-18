@@ -48,4 +48,13 @@ export class Announcement extends BaseEntity {
   @Index()
   @Column({ type: 'timestamptz', nullable: true })
   expiresAt: Date | null;
+
+  @Column({ default: false })
+  sendViaSms: boolean;
+
+  // Deliberately separate from `body` — the announcement body is often
+  // long-form and meant for in-app reading, whereas SMS is billed per
+  // segment, so admins compose a distinct, short message for it.
+  @Column({ type: 'text', nullable: true })
+  smsBody: string | null;
 }

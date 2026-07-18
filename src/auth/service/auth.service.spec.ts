@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -12,6 +17,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { PasswordResetOtp } from '../entity/password-reset-otp.entity';
 import { DeviceResetOtp } from '../entity/device-reset-otp.entity';
+import { EmailChangeOtp } from '../entity/email-change-otp.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
@@ -61,6 +67,13 @@ const mockDeviceResetOtpRepository = {
   delete: jest.fn(),
 };
 
+const mockEmailChangeOtpRepository = {
+  findOne: jest.fn(),
+  save: jest.fn(),
+  create: jest.fn(),
+  delete: jest.fn(),
+};
+
 const mockDepartmentLeadRepo = { exists: jest.fn().mockResolvedValue(false) };
 
 const mockAdminService = {
@@ -75,9 +88,19 @@ const mockMemberService = {
     email: 'test@test.com',
     deviceId: null,
   }),
+  // deviceId is `select: false` on the entity — login() must use this method
+  // (which explicitly selects it, like it does for password) rather than
+  // getById(), which would silently return deviceId: undefined.
+  getByIdWithCredentials: jest.fn().mockResolvedValue({
+    id: 'member-1',
+    firstname: 'Test',
+    email: 'test@test.com',
+    deviceId: null,
+  }),
   signup: jest.fn(),
   changePassword: jest.fn(),
   setDeviceId: jest.fn().mockResolvedValue(undefined),
+  updateEmail: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockSessionService = {
@@ -128,6 +151,10 @@ describe('AuthService', () => {
         {
           provide: getRepositoryToken(DeviceResetOtp),
           useValue: mockDeviceResetOtpRepository,
+        },
+        {
+          provide: getRepositoryToken(EmailChangeOtp),
+          useValue: mockEmailChangeOtpRepository,
         },
         {
           provide: getRepositoryToken(DepartmentLead),
@@ -285,7 +312,7 @@ describe('AuthService', () => {
     });
 
     it('should throw ForbiddenException when a different device is already registered', async () => {
-      mockMemberService.getById.mockResolvedValueOnce({
+      mockMemberService.getByIdWithCredentials.mockResolvedValueOnce({
         id: 'member-1',
         firstname: 'Test',
         email: 'test@test.com',
@@ -325,6 +352,28 @@ describe('AuthService', () => {
         'member-1',
         'first-device',
       );
+    });
+
+    it('uses getByIdWithCredentials (not getById) to read the member — deviceId is select:false and getById() would silently return undefined', async () => {
+      mockJwtService.signAsync.mockResolvedValue('token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      await service.login(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        'some-device',
+      );
+
+      expect(mockMemberService.getByIdWithCredentials).toHaveBeenCalledWith(
+        'member-1',
+      );
+      expect(mockMemberService.getById).not.toHaveBeenCalled();
     });
   });
 
@@ -414,7 +463,7 @@ describe('AuthService', () => {
   describe('validateRefreshToken', () => {
     const freshSession = (hash: string) => ({
       hashedRefreshToken: hash,
-      createdAt: new Date(),
+      lastLogin: new Date(),
     });
 
     it('should throw UnauthorizedException if no session found', async () => {
@@ -471,11 +520,11 @@ describe('AuthService', () => {
       });
     });
 
-    it('should throw and clear the session when the session exceeds SESSION_MAX_AGE_DAYS', async () => {
+    it('should throw and clear the session when the session exceeds SESSION_MAX_AGE_DAYS since last login', async () => {
       const thirtyOneDaysAgo = new Date(Date.now() - 31 * 86_400_000);
       mockSessionService.getSession.mockResolvedValue({
         hashedRefreshToken: 'some-hash',
-        createdAt: thirtyOneDaysAgo,
+        lastLogin: thirtyOneDaysAgo,
       });
       mockConfigService.get.mockImplementation((key: string) => {
         if (key === 'SESSION_MAX_AGE_DAYS') return 30;
@@ -497,11 +546,11 @@ describe('AuthService', () => {
       );
     });
 
-    it('should not reject a session within SESSION_MAX_AGE_DAYS', async () => {
+    it('should not reject a session within SESSION_MAX_AGE_DAYS of last login', async () => {
       const twentyDaysAgo = new Date(Date.now() - 20 * 86_400_000);
       mockSessionService.getSession.mockResolvedValue({
         hashedRefreshToken: 'valid-hash',
-        createdAt: twentyDaysAgo,
+        lastLogin: twentyDaysAgo,
       });
       mockConfigService.get.mockImplementation((key: string) => {
         if (key === 'SESSION_MAX_AGE_DAYS') return 30;
@@ -522,6 +571,42 @@ describe('AuthService', () => {
           SessionSurface.MEMBER,
         ),
       ).resolves.toBeDefined();
+    });
+
+    it('should not reject a session whose row is old but whose last login is recent (reused session row)', async () => {
+      // Regression test: MemberSessionService.updateLogin() upserts the same
+      // row across logins — only `lastLogin` moves forward, `createdAt` stays
+      // fixed at first-ever login. The max-age check must anchor on `lastLogin`
+      // or every login past a stale row's 30-day mark would be rejected on
+      // the very next refresh, regardless of how recently the member logged in.
+      const fortyDaysAgo = new Date(Date.now() - 40 * 86_400_000);
+      const today = new Date();
+      mockSessionService.getSession.mockResolvedValue({
+        hashedRefreshToken: 'valid-hash',
+        createdAt: fortyDaysAgo,
+        lastLogin: today,
+      });
+      mockConfigService.get.mockImplementation((key: string) => {
+        if (key === 'SESSION_MAX_AGE_DAYS') return 30;
+        return undefined;
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+      });
+
+      await expect(
+        service.validateRefreshToken(
+          'member-1',
+          'valid-refresh-token',
+          SessionSurface.MEMBER,
+        ),
+      ).resolves.toBeDefined();
+
+      expect(mockSessionService.updateLogout).not.toHaveBeenCalled();
     });
   });
 
@@ -638,7 +723,10 @@ describe('AuthService', () => {
 
       expect(mockCacheService.set).toHaveBeenCalledWith(
         expect.stringContaining('rt_rotated'),
-        'old-hash',
+        expect.objectContaining({
+          hash: 'old-hash',
+          rotatedAt: expect.any(Number),
+        }),
         expect.any(Number),
       );
     });
@@ -668,13 +756,53 @@ describe('AuthService', () => {
     });
   });
 
+  describe('refreshToken', () => {
+    it('returns the replayed tokens as-is without rotating again when present', async () => {
+      const replayed = {
+        access_token: 'already-issued-access-token',
+        refresh_token: 'already-issued-refresh-token',
+        expires_in: 300,
+        token_type: 'Bearer',
+        requires_password_change: false,
+      };
+
+      const result = await service.refreshToken({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        requiresPasswordChange: false,
+        surface: SessionSurface.MEMBER,
+        replayedTokens: replayed,
+      });
+
+      expect(result).toBe(replayed);
+      expect(mockSessionService.updateLogin).not.toHaveBeenCalled();
+    });
+
+    it('rotates and generates new tokens when no replayed tokens are present', async () => {
+      mockSessionService.getHashedRefreshToken.mockResolvedValue(null);
+      mockJwtService.signAsync.mockResolvedValue('new-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('new-hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      await service.refreshToken({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        requiresPasswordChange: false,
+        surface: SessionSurface.MEMBER,
+      });
+
+      expect(mockSessionService.updateLogin).toHaveBeenCalled();
+    });
+  });
+
   describe('validateRefreshToken — reuse detection', () => {
     const freshSession = (hash: string) => ({
       hashedRefreshToken: hash,
-      createdAt: new Date(),
+      lastLogin: new Date(),
     });
 
-    it('detects reuse of a rotated token, invalidates the session, and sends a security alert', async () => {
+    it('detects reuse of a rotated token outside the grace window, invalidates the session, and sends a security alert', async () => {
       mockSessionService.getSession.mockResolvedValue(
         freshSession('current-hash'),
       );
@@ -682,7 +810,11 @@ describe('AuthService', () => {
         .spyOn(UtilityService, 'verifyHashedValue')
         .mockResolvedValueOnce(false) // does not match current hash
         .mockResolvedValueOnce(true); // matches rotated hash → reuse
-      mockCacheService.get.mockResolvedValueOnce('rotated-hash');
+      mockCacheService.get.mockResolvedValueOnce({
+        hash: 'rotated-hash',
+        response: { access_token: 'stale' },
+        rotatedAt: Date.now() - 60_000, // well outside the 10s grace window
+      });
       mockSessionService.updateLogout.mockResolvedValue(undefined);
       mockMemberService.getById.mockResolvedValue({
         id: 'member-1',
@@ -703,6 +835,44 @@ describe('AuthService', () => {
         SessionSurface.ADMIN,
       );
       expect(mockCacheService.del).toHaveBeenCalled();
+    });
+
+    it('replays the already-issued tokens when the rotated token is reused within the grace window', async () => {
+      mockSessionService.getSession.mockResolvedValue(
+        freshSession('current-hash'),
+      );
+      jest
+        .spyOn(UtilityService, 'verifyHashedValue')
+        .mockResolvedValueOnce(false) // does not match current hash
+        .mockResolvedValueOnce(true); // matches rotated hash → benign race
+      const cachedResponse = {
+        access_token: 'already-issued-access-token',
+        refresh_token: 'already-issued-refresh-token',
+        expires_in: 300,
+        token_type: 'Bearer',
+        requires_password_change: false,
+      };
+      mockCacheService.get.mockResolvedValueOnce({
+        hash: 'rotated-hash',
+        response: cachedResponse,
+        rotatedAt: Date.now() - 2_000, // 2s ago — within the 10s grace window
+      });
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+      });
+
+      const result = await service.validateRefreshToken(
+        'member-1',
+        'just-rotated-token',
+        SessionSurface.ADMIN,
+      );
+
+      expect(result.replayedTokens).toEqual(cachedResponse);
+      expect(mockSessionService.updateLogout).not.toHaveBeenCalled();
+      expect(mockCacheService.del).not.toHaveBeenCalled();
     });
 
     it('does not invalidate session for a generic invalid token (no rotated hash in cache)', async () => {
@@ -731,7 +901,11 @@ describe('AuthService', () => {
         .spyOn(UtilityService, 'verifyHashedValue')
         .mockResolvedValueOnce(false) // does not match current hash
         .mockResolvedValueOnce(false); // does not match rotated hash either
-      mockCacheService.get.mockResolvedValueOnce('rotated-hash');
+      mockCacheService.get.mockResolvedValueOnce({
+        hash: 'rotated-hash',
+        response: { access_token: 'irrelevant' },
+        rotatedAt: Date.now(),
+      });
 
       await expect(
         service.validateRefreshToken(
@@ -773,6 +947,110 @@ describe('AuthService', () => {
       await service.verifyDeviceReset('test@test.com', '123456');
 
       expect(mockPushService.unsubscribe).toHaveBeenCalledWith('member-1');
+    });
+  });
+
+  describe('requestEmailChange', () => {
+    it('rejects when the new email is already in use by another member', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({ id: 'other-member' });
+
+      await expect(
+        service.requestEmailChange('member-1', 'taken@test.com'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('issues an OTP to the new email address when it is free', async () => {
+      mockMemberService.findByEmail.mockResolvedValue(null);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'old@test.com',
+      });
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed-otp');
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Test');
+      mockEmailChangeOtpRepository.create.mockImplementation((v) => v);
+      mockEmailChangeOtpRepository.save.mockResolvedValue({});
+
+      await service.requestEmailChange('member-1', 'new@test.com');
+
+      expect(mockEmailChangeOtpRepository.delete).toHaveBeenCalledWith(
+        expect.objectContaining({ memberId: 'member-1' }),
+      );
+      expect(mockEmailChangeOtpRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          memberId: 'member-1',
+          newEmail: 'new@test.com',
+        }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'new@test.com',
+        expect.any(String),
+        'email-change-otp',
+        expect.any(Object),
+      );
+    });
+  });
+
+  describe('confirmEmailChange', () => {
+    it('rejects an invalid or expired code', async () => {
+      mockEmailChangeOtpRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.confirmEmailChange('member-1', '123456'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects if the new email was taken between request and confirm', async () => {
+      mockEmailChangeOtpRepository.findOne.mockResolvedValue({
+        memberId: 'member-1',
+        newEmail: 'new@test.com',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      mockMemberService.findByEmail.mockResolvedValue({ id: 'someone-else' });
+
+      await expect(
+        service.confirmEmailChange('member-1', '123456'),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('updates the member email and sends a confirmation on success', async () => {
+      const record = {
+        memberId: 'member-1',
+        newEmail: 'new@test.com',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      };
+      mockEmailChangeOtpRepository.findOne.mockResolvedValue(record);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Test');
+      mockMemberService.findByEmail.mockResolvedValue(null);
+      mockEmailChangeOtpRepository.save.mockResolvedValue(record);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'new@test.com',
+      });
+
+      await service.confirmEmailChange('member-1', '123456');
+
+      expect(mockMemberService.updateEmail).toHaveBeenCalledWith(
+        'member-1',
+        'new@test.com',
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'new@test.com',
+        expect.any(String),
+        'email-changed-confirmation',
+        expect.any(Object),
+      );
     });
   });
 });

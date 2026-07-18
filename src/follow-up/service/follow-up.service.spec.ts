@@ -23,6 +23,7 @@ import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -36,6 +37,7 @@ const mockCacheService = {
 
 const mockFirstTimerRepo = {
   findOne: jest.fn(),
+  find: jest.fn(),
   findAndCount: jest.fn(),
   save: jest.fn(),
   create: jest.fn(),
@@ -99,6 +101,8 @@ const mockEmailQueueService = {
   queueEmailWithTemplate: jest.fn(),
 };
 
+const mockAuditLogService = { log: jest.fn() };
+
 const followUpProfile = {
   id: 'wp-1',
   status: WorkerStatusEnum.ACTIVE,
@@ -139,6 +143,7 @@ describe('FollowUpService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: EmailQueueService, useValue: mockEmailQueueService },
+        { provide: AuditLogService, useValue: mockAuditLogService },
         {
           provide: getRepositoryToken(FirstTimer),
           useValue: mockFirstTimerRepo,

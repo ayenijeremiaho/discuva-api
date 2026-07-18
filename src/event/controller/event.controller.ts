@@ -29,6 +29,7 @@ interface GetEventsQuery {
   from?: string;
   to?: string;
   upcoming?: string;
+  search?: string;
 }
 
 @Controller('events')
@@ -78,6 +79,7 @@ export class EventController {
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
         upcoming: query.upcoming === 'true',
+        search: query.search,
       },
     );
   }

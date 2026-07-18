@@ -421,28 +421,32 @@ export class DepartmentService {
   ): Promise<{ updated: number; skipped: number }> {
     const department = await this.getDepartmentOrThrow(departmentId);
 
-    let updated = 0;
-    let skipped = 0;
+    // Batched instead of a findOne+save per member — one existence check +
+    // one bulk UPDATE regardless of how many ids are submitted.
+    const uniqueIds = Array.from(new Set(dto.memberIds));
+    const existingRows = await this.workerProfileRepository
+      .createQueryBuilder('wp')
+      .select('wp.member_id', 'memberId')
+      .where('wp.member_id IN (:...ids)', { ids: uniqueIds })
+      .getRawMany<{ memberId: string }>();
+    const existingIds = existingRows.map((r) => r.memberId);
+    const updated = existingIds.length;
+    const skipped = uniqueIds.length - updated;
 
-    for (const memberId of dto.memberIds) {
-      const profile = await this.workerProfileRepository.findOne({
-        where: { member: { id: memberId } },
-        relations: ['department'],
-      });
-      if (!profile) {
-        skipped++;
-        continue;
-      }
-      profile.department = department;
-      await this.workerProfileRepository.save(profile);
-      updated++;
+    if (updated > 0) {
+      await this.workerProfileRepository
+        .createQueryBuilder()
+        .update(WorkerProfile)
+        .set({ department: { id: departmentId } as Department })
+        .where('member_id IN (:...ids)', { ids: existingIds })
+        .execute();
     }
 
     this.auditLogService.log('BULK_DEPARTMENT_ASSIGNED', {
       actorId,
       targetId: departmentId,
       targetName: department.name,
-      metadata: { updated, skipped, memberIds: dto.memberIds },
+      metadata: { updated, skipped, memberIds: existingIds },
     });
 
     return { updated, skipped };

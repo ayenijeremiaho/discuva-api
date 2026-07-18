@@ -167,7 +167,12 @@ describe('AttendanceService', () => {
           provide: UtilityService,
           useValue: { sendEmailWithTemplate: jest.fn() },
         },
-        { provide: DateService, useValue: new DateService() },
+        {
+          provide: DateService,
+          useValue: new DateService(
+            mockConfigService as unknown as ConfigService,
+          ),
+        },
         { provide: CacheService, useValue: mockCacheService },
         {
           provide: getQueueToken(FOLLOW_UP_QUEUE),
@@ -514,11 +519,13 @@ describe('AttendanceService', () => {
 
   describe('getAttendanceStreak', () => {
     it('should return streak count for consecutive PRESENT/LATE records', async () => {
-      mockAttendanceRepo.find.mockResolvedValue([
+      const qb = makeQb();
+      qb.getRawMany.mockResolvedValue([
         { status: AttendanceStatusEnum.PRESENT },
         { status: AttendanceStatusEnum.LATE },
         { status: AttendanceStatusEnum.PRESENT },
       ]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
 
       const streak = await service.getAttendanceStreak(
         'member-1',
@@ -529,11 +536,13 @@ describe('AttendanceService', () => {
     });
 
     it('should break streak on ABSENT record', async () => {
-      mockAttendanceRepo.find.mockResolvedValue([
+      const qb = makeQb();
+      qb.getRawMany.mockResolvedValue([
         { status: AttendanceStatusEnum.PRESENT },
         { status: AttendanceStatusEnum.ABSENT },
         { status: AttendanceStatusEnum.PRESENT },
       ]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
 
       const streak = await service.getAttendanceStreak(
         'member-1',
@@ -544,13 +553,15 @@ describe('AttendanceService', () => {
     });
 
     it('should skip ON_LEAVE records without breaking the streak', async () => {
-      mockAttendanceRepo.find.mockResolvedValue([
+      const qb = makeQb();
+      qb.getRawMany.mockResolvedValue([
         { status: AttendanceStatusEnum.PRESENT },
         { status: AttendanceStatusEnum.ON_LEAVE },
         { status: AttendanceStatusEnum.LATE },
         { status: AttendanceStatusEnum.ON_LEAVE },
         { status: AttendanceStatusEnum.PRESENT },
       ]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
 
       const streak = await service.getAttendanceStreak(
         'member-1',
@@ -561,7 +572,9 @@ describe('AttendanceService', () => {
     });
 
     it('should return 0 for empty record list', async () => {
-      mockAttendanceRepo.find.mockResolvedValue([]);
+      const qb = makeQb();
+      qb.getRawMany.mockResolvedValue([]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
 
       const streak = await service.getAttendanceStreak(
         'member-1',
@@ -572,10 +585,12 @@ describe('AttendanceService', () => {
     });
 
     it('should return 0 when most recent record is ABSENT', async () => {
-      mockAttendanceRepo.find.mockResolvedValue([
+      const qb = makeQb();
+      qb.getRawMany.mockResolvedValue([
         { status: AttendanceStatusEnum.ABSENT },
         { status: AttendanceStatusEnum.PRESENT },
       ]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
 
       const streak = await service.getAttendanceStreak(
         'member-1',
@@ -583,6 +598,65 @@ describe('AttendanceService', () => {
       );
 
       expect(streak).toBe(0);
+    });
+  });
+
+  describe('getMyAttendanceSummary', () => {
+    it('computes lifetime rate/streak from the full history, not just a page of it', async () => {
+      const aggregateQb = makeQb();
+      aggregateQb.getRawOne.mockResolvedValue({
+        total: '120',
+        attended: '108',
+        lastCheckin: '2026-07-10T09:00:00.000Z',
+      });
+      const streakQb = makeQb();
+      streakQb.getRawMany.mockResolvedValue([
+        { status: AttendanceStatusEnum.PRESENT },
+        { status: AttendanceStatusEnum.PRESENT },
+      ]);
+      mockAttendanceRepo.createQueryBuilder
+        .mockReturnValueOnce(aggregateQb)
+        .mockReturnValueOnce(streakQb);
+
+      const result = await service.getMyAttendanceSummary(
+        'member-1',
+        MemberRoleEnum.MEMBER,
+      );
+
+      expect(result).toEqual({
+        totalCount: 120,
+        presentCount: 108,
+        attendanceRatePercentage: 90,
+        lastCheckedInDate: new Date('2026-07-10T09:00:00.000Z'),
+        attendanceStreak: 2,
+      });
+    });
+
+    it('returns a zero rate and null last-checked-in date with no attendance history', async () => {
+      const aggregateQb = makeQb();
+      aggregateQb.getRawOne.mockResolvedValue({
+        total: '0',
+        attended: '0',
+        lastCheckin: null,
+      });
+      const streakQb = makeQb();
+      streakQb.getRawMany.mockResolvedValue([]);
+      mockAttendanceRepo.createQueryBuilder
+        .mockReturnValueOnce(aggregateQb)
+        .mockReturnValueOnce(streakQb);
+
+      const result = await service.getMyAttendanceSummary(
+        'member-1',
+        MemberRoleEnum.MEMBER,
+      );
+
+      expect(result).toEqual({
+        totalCount: 0,
+        presentCount: 0,
+        attendanceRatePercentage: 0,
+        lastCheckedInDate: null,
+        attendanceStreak: 0,
+      });
     });
   });
 

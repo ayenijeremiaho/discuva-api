@@ -1,5 +1,6 @@
 import { Expose, Type } from 'class-transformer';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
+import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 
 export class DepartmentRefDto {
   @Expose()
@@ -7,6 +8,9 @@ export class DepartmentRefDto {
 
   @Expose()
   name: string;
+
+  @Expose()
+  key: DepartmentKeyEnum | null;
 }
 
 export class WorkerProfileDto {

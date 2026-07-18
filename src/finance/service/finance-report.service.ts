@@ -76,14 +76,18 @@ export class FinanceReportService {
     });
     if (!account) throw new NotFoundException('Account not found.');
 
+    // Omitting fromDate previously scanned every posted line ever recorded
+    // against the account — default to a bounded 1-year lookback instead.
+    const effectiveFromDate = fromDate ?? this.defaultReportFromDate();
+
     const qb = this.lineRepo
       .createQueryBuilder('l')
       .innerJoinAndSelect('l.journalEntry', 'je')
       .where('l.account_id = :accountId', { accountId })
       .andWhere('je.status = :status', { status: JournalEntryStatus.POSTED })
+      .andWhere('je.date >= :fromDate', { fromDate: effectiveFromDate })
       .orderBy('je.date', 'ASC');
 
-    if (fromDate) qb.andWhere('je.date >= :fromDate', { fromDate });
     if (toDate) qb.andWhere('je.date <= :toDate', { toDate });
 
     const lines = await qb.getMany();
@@ -93,9 +97,17 @@ export class FinanceReportService {
         name: account.name,
         currentBalance: account.currentBalance,
       },
+      fromDate: effectiveFromDate,
+      toDate: toDate ?? null,
       lines,
       generatedAt: new Date(),
     };
+  }
+
+  private defaultReportFromDate(): string {
+    const d = new Date();
+    d.setDate(d.getDate() - 365);
+    return d.toISOString().slice(0, 10);
   }
 
   async trialBalance(periodId?: string): Promise<object> {
@@ -208,19 +220,29 @@ export class FinanceReportService {
     });
     if (!account) throw new NotFoundException('Account not found.');
 
+    // Omitting fromDate previously scanned every posted line ever recorded
+    // against the account — default to a bounded 1-year lookback instead.
+    const effectiveFromDate = fromDate ?? this.defaultReportFromDate();
+
     const qb = this.lineRepo
       .createQueryBuilder('l')
       .innerJoinAndSelect('l.journalEntry', 'je')
       .where('l.account_id = :accountId', { accountId })
       .andWhere('je.status = :status', { status: JournalEntryStatus.POSTED })
+      .andWhere('je.date >= :fromDate', { fromDate: effectiveFromDate })
       .orderBy('je.date', 'ASC')
       .addOrderBy('je.createdAt', 'ASC');
 
-    if (fromDate) qb.andWhere('je.date >= :fromDate', { fromDate });
     if (toDate) qb.andWhere('je.date <= :toDate', { toDate });
 
     const lines = await qb.getMany();
-    return { account, lines, generatedAt: new Date() };
+    return {
+      account,
+      fromDate: effectiveFromDate,
+      toDate: toDate ?? null,
+      lines,
+      generatedAt: new Date(),
+    };
   }
 
   async budgetActuals(budgetId: string): Promise<object> {
@@ -424,6 +446,12 @@ export class FinanceReportService {
     toDate?: string,
     accountSubtype?: AccountSubtype,
   ): Promise<object> {
+    // A periodId already scopes the query to that accounting period, so an
+    // unbounded default lookback would only ever narrow results that are
+    // already bounded — the default applies only when neither is given.
+    const effectiveFromDate =
+      fromDate ?? (periodId ? undefined : this.defaultReportFromDate());
+
     const qb = this.lineRepo
       .createQueryBuilder('l')
       .innerJoin('l.journalEntry', 'je')
@@ -439,7 +467,8 @@ export class FinanceReportService {
 
     if (periodId)
       qb.andWhere('je.accounting_period_id = :periodId', { periodId });
-    if (fromDate) qb.andWhere('je.date >= :fromDate', { fromDate });
+    if (effectiveFromDate)
+      qb.andWhere('je.date >= :fromDate', { fromDate: effectiveFromDate });
     if (toDate) qb.andWhere('je.date <= :toDate', { toDate });
     if (accountSubtype)
       qb.andWhere('a.subtype = :accountSubtype', { accountSubtype });
@@ -450,7 +479,7 @@ export class FinanceReportService {
     return {
       memberId,
       periodId: periodId ?? null,
-      fromDate: fromDate ?? null,
+      fromDate: effectiveFromDate ?? null,
       toDate: toDate ?? null,
       accountSubtype: accountSubtype ?? null,
       lines,

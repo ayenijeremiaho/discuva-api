@@ -24,6 +24,7 @@ import {
   TitheProofStatus,
   TitheUnmatchedStatus,
 } from '../enum/tithe.enum';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import {
   TITHE_PROCESS_JOB,
   TITHE_QUEUE,
@@ -626,7 +627,7 @@ export class TitheService {
     user: MemberAuth,
     fromMonth?: string,
     toMonth?: string,
-  ): Promise<void> {
+  ): Promise<{ message: string; recordCount: number }> {
     const member = await this.memberRepo.findOne({ where: { id: user.id } });
     if (!member) throw new NotFoundException('Member not found');
 
@@ -664,6 +665,7 @@ export class TitheService {
       {
         name: UtilityService.capitalizeFirstLetter(member.firstname),
         count: records.length,
+        period: this.formatStatementPeriod(fromMonth, toMonth),
       },
       [{ filename: 'tithe-statement.pdf', content: pdfBuffer }],
       EmailCategory.GIVING_RECEIPT,
@@ -672,6 +674,11 @@ export class TitheService {
     this.logger.log(
       `Tithe statement emailed to ${member.email} — ${records.length} records`,
     );
+
+    return {
+      message: `Your tithe statement has been emailed to ${member.email}.`,
+      recordCount: records.length,
+    };
   }
 
   async submitProof(
@@ -851,7 +858,7 @@ export class TitheService {
     );
   }
 
-  @Cron('0 3 * * *')
+  @Cron('0 3 * * *', { timeZone: CHURCH_TIMEZONE })
   async purgeExpiredProofs(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(
       TitheService.PROOF_CLEANUP_LOCK,
@@ -965,6 +972,23 @@ export class TitheService {
   private lastDayOfMonth(ym: string): string {
     const [year, month] = ym.split('-').map(Number);
     return new Date(year, month, 0).toISOString().slice(0, 10);
+  }
+
+  private formatStatementPeriod(
+    fromMonth?: string,
+    toMonth?: string,
+  ): string | undefined {
+    if (!fromMonth && !toMonth) return undefined;
+    const fmt = (ym: string) => {
+      const [year, month] = ym.split('-').map(Number);
+      return new Date(year, month - 1, 1).toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+      });
+    };
+    if (fromMonth && toMonth) return `${fmt(fromMonth)} – ${fmt(toMonth)}`;
+    if (fromMonth) return `${fmt(fromMonth)} onwards`;
+    return `Up to ${fmt(toMonth as string)}`;
   }
 
   private async notifyFinanceTeam(

@@ -5,13 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ServiceHeadcount } from '../entity/service-headcount.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { CreateServiceHeadcountDto } from '../dto/create-service-headcount.dto';
-import { UpdateServiceHeadcountDto } from '../dto/update-service-headcount.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 
 const TRENDS_TTL = 1800;
@@ -47,6 +46,22 @@ export interface HeadcountTrendsResult {
   data: HeadcountTrendPoint[];
 }
 
+export interface ServiceSlotHeadcountSummary {
+  serviceSlotId: string;
+  serviceSlotName: string;
+  startTime: Date;
+  headcount: (HeadcountTotal & { id: string; notes: string | null }) | null;
+}
+
+export interface EventHeadcountSummary {
+  eventId: string;
+  eventName: string;
+  slotCount: number;
+  recordedCount: number;
+  serviceSlots: ServiceSlotHeadcountSummary[];
+  total: HeadcountTotal;
+}
+
 @Injectable()
 export class ServiceHeadcountService {
   constructor(
@@ -68,17 +83,23 @@ export class ServiceHeadcountService {
     });
     if (!serviceSlot) throw new NotFoundException('Service slot not found');
 
-    const record = this.headcountRepo.create({
-      serviceSlot,
-      maleAdults: dto.maleAdults ?? 0,
-      femaleAdults: dto.femaleAdults ?? 0,
-      teenagers: dto.teenagers ?? 0,
-      children: dto.children ?? 0,
-      mobileChurch: dto.mobileChurch ?? 0,
-      customGroups: dto.customGroups ?? {},
-      notes: dto.notes ?? null,
-      recordedBy: admin,
+    // One headcount per slot — re-recording (e.g. a corrected count) edits
+    // the existing row instead of creating a sibling, so summing across a
+    // service's sub-services never double-counts.
+    const existing = await this.headcountRepo.findOne({
+      where: { serviceSlot: { id: dto.serviceSlotId } },
     });
+    const record = existing ?? this.headcountRepo.create({ serviceSlot });
+
+    record.maleAdults = dto.maleAdults ?? 0;
+    record.femaleAdults = dto.femaleAdults ?? 0;
+    record.teenagers = dto.teenagers ?? 0;
+    record.children = dto.children ?? 0;
+    record.mobileChurch = dto.mobileChurch ?? 0;
+    record.customGroups = dto.customGroups ?? {};
+    record.notes = dto.notes ?? null;
+    record.recordedBy = admin;
+
     const saved = await this.headcountRepo.save(record);
     this.cacheService.flushNamespace('headcount:trends');
     const total = this.computeTotal(saved);
@@ -86,30 +107,6 @@ export class ServiceHeadcountService {
       `Headcount recorded for slot ${dto.serviceSlotId} by admin ${admin.id} (total: ${total})`,
     );
     return Object.assign(saved, { total });
-  }
-
-  async update(
-    id: string,
-    dto: UpdateServiceHeadcountDto,
-  ): Promise<ServiceHeadcount & { total: number }> {
-    const record = await this.headcountRepo.findOne({
-      where: { id },
-      relations: ['serviceSlot', 'recordedBy', 'recordedBy.member'],
-    });
-    if (!record) throw new NotFoundException('Headcount record not found');
-
-    if (dto.maleAdults !== undefined) record.maleAdults = dto.maleAdults;
-    if (dto.femaleAdults !== undefined) record.femaleAdults = dto.femaleAdults;
-    if (dto.teenagers !== undefined) record.teenagers = dto.teenagers;
-    if (dto.children !== undefined) record.children = dto.children;
-    if (dto.mobileChurch !== undefined) record.mobileChurch = dto.mobileChurch;
-    if (dto.customGroups !== undefined) record.customGroups = dto.customGroups;
-    if (dto.notes !== undefined) record.notes = dto.notes;
-
-    const saved = await this.headcountRepo.save(record);
-    this.cacheService.flushNamespace('headcount:trends');
-    this.logger.log(`Headcount ${id} updated`);
-    return Object.assign(saved, { total: this.computeTotal(saved) });
   }
 
   async findAll(
@@ -165,23 +162,109 @@ export class ServiceHeadcountService {
     return Object.assign(record, { total: this.computeTotal(record) });
   }
 
+  // The service-level view: every sub-service under the event alongside its
+  // headcount (if recorded yet) plus the aggregate across all of them, so an
+  // admin running a multi-service Sunday can see the whole event's total
+  // without adding up each sub-service by hand.
+  async getEventSummary(eventId: string): Promise<EventHeadcountSummary> {
+    const slots = await this.serviceSlotRepo.find({
+      where: { event: { id: eventId } },
+      relations: ['event'],
+      order: { startTime: 'ASC' },
+    });
+    if (slots.length === 0) {
+      throw new NotFoundException('Event not found or has no service slots');
+    }
+
+    const records = await this.headcountRepo.find({
+      where: { serviceSlot: { id: In(slots.map((s) => s.id)) } },
+      relations: ['serviceSlot'],
+    });
+    const recordBySlotId = new Map(records.map((r) => [r.serviceSlot.id, r]));
+
+    const total: HeadcountTotal = {
+      maleAdults: 0,
+      femaleAdults: 0,
+      teenagers: 0,
+      children: 0,
+      mobileChurch: 0,
+      customGroups: {},
+      total: 0,
+    };
+
+    const serviceSlots: ServiceSlotHeadcountSummary[] = slots.map((slot) => {
+      const record = recordBySlotId.get(slot.id);
+      if (record) {
+        total.maleAdults += record.maleAdults;
+        total.femaleAdults += record.femaleAdults;
+        total.teenagers += record.teenagers;
+        total.children += record.children;
+        total.mobileChurch += record.mobileChurch;
+        for (const [group, count] of Object.entries(
+          record.customGroups ?? {},
+        )) {
+          total.customGroups[group] = (total.customGroups[group] ?? 0) + count;
+        }
+        total.total += this.computeTotal(record);
+      }
+      return {
+        serviceSlotId: slot.id,
+        serviceSlotName: slot.name,
+        startTime: slot.startTime,
+        headcount: record
+          ? {
+              id: record.id,
+              maleAdults: record.maleAdults,
+              femaleAdults: record.femaleAdults,
+              teenagers: record.teenagers,
+              children: record.children,
+              mobileChurch: record.mobileChurch,
+              customGroups: record.customGroups,
+              notes: record.notes,
+              total: this.computeTotal(record),
+            }
+          : null,
+      };
+    });
+
+    return {
+      eventId,
+      eventName: slots[0].event.name,
+      slotCount: slots.length,
+      recordedCount: records.length,
+      serviceSlots,
+      total,
+    };
+  }
+
   async getTrends(
     period: HeadcountPeriod = 'weekly',
     from?: string,
     to?: string,
     serviceSlotName?: string,
   ): Promise<HeadcountTrendsResult> {
-    const key = `headcount:trends:${period}:${from ?? 'all'}:${to ?? 'all'}:${serviceSlotName ?? 'all'}`;
+    // Unbounded (no from/to) previously scanned every headcount record ever
+    // logged for in-memory bucketing — default to a bounded lookback window
+    // instead, matching the pattern used elsewhere (e.g. service-session
+    // analytics) rather than the full history.
+    const effectiveFrom = from ?? this.defaultTrendsFrom();
+    const key = `headcount:trends:${period}:${effectiveFrom}:${to ?? 'all'}:${serviceSlotName ?? 'all'}`;
     return this.cacheService.getOrSet(
       key,
-      () => this.fetchTrends(period, from, to, serviceSlotName),
+      () => this.fetchTrends(period, effectiveFrom, to, serviceSlotName),
       TRENDS_TTL,
     );
   }
 
+  private defaultTrendsFrom(): string {
+    const d = new Date();
+    d.setDate(d.getDate() - 365);
+    return d.toISOString().slice(0, 10);
+  }
+
   private async fetchTrends(
     period: HeadcountPeriod,
-    from?: string,
+    from: string,
     to?: string,
     serviceSlotName?: string,
   ): Promise<HeadcountTrendsResult> {
@@ -190,7 +273,7 @@ export class ServiceHeadcountService {
       .innerJoinAndSelect('h.serviceSlot', 'slot')
       .orderBy('slot.startTime', 'ASC');
 
-    if (from) qb.andWhere('slot.startTime >= :from', { from: new Date(from) });
+    qb.andWhere('slot.startTime >= :from', { from: new Date(from) });
     if (to) qb.andWhere('slot.startTime <= :to', { to: new Date(to) });
     if (serviceSlotName)
       qb.andWhere('slot.name ILIKE :name', { name: `%${serviceSlotName}%` });
@@ -234,7 +317,7 @@ export class ServiceHeadcountService {
 
     return {
       period,
-      from: from ?? null,
+      from,
       to: to ?? null,
       data: Array.from(bucketMap.values()),
     };

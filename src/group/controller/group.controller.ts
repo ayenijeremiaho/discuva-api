@@ -15,8 +15,11 @@ import {
 import { GroupService } from '../service/group.service';
 import { CreateGroupDto, UpdateGroupDto } from '../dto/create-group.dto';
 import {
+  AddFirstTimersToGroupDto,
   AddGroupMemberDto,
+  AddPhoneGroupMembersDto,
   BulkAddGroupMembersDto,
+  BulkRemoveGroupEntriesDto,
   BulkRemoveGroupMembersDto,
 } from '../dto/group-member.dto';
 import { AdminGuard } from '../../admin/guard/admin.guard';
@@ -128,5 +131,46 @@ export class GroupController {
     @CurrentUser() user: MemberAuth,
   ) {
     return this.groupService.bulkRemoveMembers(id, dto, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.GROUPS_WRITE)
+  @Post(':id/members/phone')
+  addPhoneEntries(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddPhoneGroupMembersDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.groupService.addPhoneEntries(id, dto, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.GROUPS_WRITE)
+  @Post(':id/members/first-timers')
+  addFirstTimersToGroup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddFirstTimersToGroupDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.groupService.addFirstTimersToGroup(id, dto, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.GROUPS_WRITE)
+  @Delete(':id/entries/:entryId')
+  removeEntry(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('entryId', ParseUUIDPipe) entryId: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.groupService.removeEntry(id, entryId, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.GROUPS_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/entries/bulk-remove')
+  bulkRemoveEntries(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: BulkRemoveGroupEntriesDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.groupService.bulkRemoveEntries(id, dto, user.id);
   }
 }

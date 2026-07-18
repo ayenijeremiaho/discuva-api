@@ -58,6 +58,14 @@ export interface DepartmentEventAttendanceResult {
   }[];
 }
 
+export interface MyAttendanceSummary {
+  totalCount: number;
+  presentCount: number;
+  attendanceRatePercentage: number;
+  lastCheckedInDate: Date | null;
+  attendanceStreak: number;
+}
+
 @Injectable()
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
@@ -708,12 +716,19 @@ export class AttendanceService {
     memberId: string,
     role: MemberRoleEnum,
   ): Promise<number> {
-    const records = await this.attendanceRepository.find({
-      where: { member: { id: memberId }, roleAtCheckin: role },
-      order: { createdAt: 'DESC' },
-      select: ['status'],
-      take: 500,
-    });
+    // Raw select (not repository.find with a `select` array) — TypeORM's
+    // find-with-relation-where + take/select combination generates a
+    // subquery-based pagination strategy that references the (excluded)
+    // primary key column and fails with "column distinctAlias.Attendance_id
+    // does not exist".
+    const records = await this.attendanceRepository
+      .createQueryBuilder('attendance')
+      .select('attendance.status', 'status')
+      .where('attendance.member_id = :memberId', { memberId })
+      .andWhere('attendance.roleAtCheckin = :role', { role })
+      .orderBy('attendance.createdAt', 'DESC')
+      .limit(500)
+      .getRawMany<{ status: AttendanceStatusEnum }>();
 
     let streak = 0;
     for (const record of records) {
@@ -729,6 +744,49 @@ export class AttendanceService {
       }
     }
     return streak;
+  }
+
+  // Lifetime summary (rate + streak) computed entirely in SQL over the
+  // member's full history — this backs the mobile app's account/history
+  // screen, which previously derived these from just the first page of
+  // /my-history results (wrong for anyone with more than a page of records).
+  // ON_LEAVE is excluded from both numerator and denominator: an approved
+  // leave shouldn't count against the rate. "Attended" mirrors
+  // getAttendanceStreak's convention (PRESENT/LATE/ATTENDED_ONLINE).
+  async getMyAttendanceSummary(
+    memberId: string,
+    role: MemberRoleEnum,
+  ): Promise<MyAttendanceSummary> {
+    const { total, attended, lastCheckin } = await this.attendanceRepository
+      .createQueryBuilder('attendance')
+      .select('COUNT(*)', 'total')
+      .addSelect(
+        `SUM(CASE WHEN attendance.status IN ('PRESENT','LATE','ATTENDED_ONLINE') THEN 1 ELSE 0 END)`,
+        'attended',
+      )
+      .addSelect('MAX(attendance.checkinTime)', 'lastCheckin')
+      .where('attendance.member_id = :memberId', { memberId })
+      .andWhere('attendance.roleAtCheckin = :role', { role })
+      .andWhere(`attendance.status != 'ON_LEAVE'`)
+      .getRawOne<{
+        total: string;
+        attended: string;
+        lastCheckin: string | null;
+      }>();
+
+    const totalCount = Number.parseInt(total ?? '0', 10);
+    const presentCount = Number.parseInt(attended ?? '0', 10);
+    const attendanceRatePercentage =
+      totalCount === 0 ? 0 : Math.round((presentCount / totalCount) * 100);
+    const attendanceStreak = await this.getAttendanceStreak(memberId, role);
+
+    return {
+      totalCount,
+      presentCount,
+      attendanceRatePercentage,
+      lastCheckedInDate: lastCheckin ? new Date(lastCheckin) : null,
+      attendanceStreak,
+    };
   }
 
   async getPeriodStats(

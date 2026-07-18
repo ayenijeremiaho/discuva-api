@@ -4,7 +4,6 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
-  Patch,
   Post,
   Query,
   UseGuards,
@@ -19,7 +18,6 @@ import {
   ServiceHeadcountService,
 } from '../service/service-headcount.service';
 import { CreateServiceHeadcountDto } from '../dto/create-service-headcount.dto';
-import { UpdateServiceHeadcountDto } from '../dto/update-service-headcount.dto';
 
 @Controller('service-headcount')
 @UseGuards(AdminGuard)
@@ -30,15 +28,6 @@ export class ServiceHeadcountController {
   @RequiresPermission(AdminPermission.HEADCOUNT_WRITE)
   create(@Body() dto: CreateServiceHeadcountDto, @CurrentAdmin() admin: Admin) {
     return this.headcountSvc.create(dto, admin);
-  }
-
-  @Patch(':id')
-  @RequiresPermission(AdminPermission.HEADCOUNT_WRITE)
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateServiceHeadcountDto,
-  ) {
-    return this.headcountSvc.update(id, dto);
   }
 
   @Get()
@@ -73,6 +62,12 @@ export class ServiceHeadcountController {
       to,
       serviceSlotName,
     );
+  }
+
+  @Get('event/:eventId/summary')
+  @RequiresPermission(AdminPermission.HEADCOUNT_READ)
+  getEventSummary(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.headcountSvc.getEventSummary(eventId);
   }
 
   @Get(':id')

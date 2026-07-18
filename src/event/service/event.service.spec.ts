@@ -482,4 +482,98 @@ describe('EventService', () => {
       expect(result.allowedDistanceInMeters).toBe(100);
     });
   });
+
+  describe('getUpcomingEvents', () => {
+    it('excludes an event whose slots have all already ended today', async () => {
+      const now = new Date();
+      const pastEvent = {
+        id: 'event-past',
+        serviceSlots: [{ endTime: new Date(now.getTime() - 60 * 60 * 1000) }],
+      };
+      const futureEvent = {
+        id: 'event-future',
+        serviceSlots: [{ endTime: new Date(now.getTime() + 60 * 60 * 1000) }],
+      };
+      mockEventRepo.find.mockResolvedValue([pastEvent, futureEvent]);
+
+      const result = await service.getUpcomingEvents(5);
+
+      expect(result.map((e: any) => e.id)).toEqual(['event-future']);
+    });
+
+    it('includes an event where at least one slot has not yet ended', async () => {
+      const now = new Date();
+      const event = {
+        id: 'event-mixed',
+        serviceSlots: [
+          { endTime: new Date(now.getTime() - 60 * 60 * 1000) },
+          { endTime: new Date(now.getTime() + 60 * 60 * 1000) },
+        ],
+      };
+      mockEventRepo.find.mockResolvedValue([event]);
+
+      const result = await service.getUpcomingEvents(5);
+
+      expect(result.map((e: any) => e.id)).toEqual(['event-mixed']);
+    });
+
+    it('includes an event with no slots yet scheduled', async () => {
+      const event = { id: 'event-no-slots', serviceSlots: [] };
+      mockEventRepo.find.mockResolvedValue([event]);
+
+      const result = await service.getUpcomingEvents(5);
+
+      expect(result.map((e: any) => e.id)).toEqual(['event-no-slots']);
+    });
+
+    it('respects the limit after filtering', async () => {
+      const now = new Date();
+      const futureSlot = [
+        { endTime: new Date(now.getTime() + 60 * 60 * 1000) },
+      ];
+      mockEventRepo.find.mockResolvedValue([
+        { id: 'e1', serviceSlots: futureSlot },
+        { id: 'e2', serviceSlots: futureSlot },
+        { id: 'e3', serviceSlots: futureSlot },
+      ]);
+
+      const result = await service.getUpcomingEvents(2);
+
+      expect(result).toHaveLength(2);
+    });
+  });
+
+  describe('getAll', () => {
+    const makeQb = () => ({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    });
+
+    it('applies a name search filter when provided', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', { search: 'Picnic' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('event.name ILIKE :search', {
+        search: '%Picnic%',
+      });
+    });
+
+    it('does not apply a search filter when omitted', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', {});
+
+      expect(qb.andWhere).not.toHaveBeenCalledWith(
+        expect.stringContaining('ILIKE'),
+        expect.anything(),
+      );
+    });
+  });
 });

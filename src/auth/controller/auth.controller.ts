@@ -27,6 +27,10 @@ import {
   RequestDeviceResetDto,
   VerifyDeviceResetDto,
 } from '../dto/device-reset.dto';
+import {
+  RequestEmailChangeDto,
+  ConfirmEmailChangeDto,
+} from '../dto/email-change.dto';
 import { plainToInstance } from 'class-transformer';
 import { MemberDto } from '../../member/dto/member.dto';
 
@@ -136,6 +140,28 @@ export class AuthController {
   ): Promise<{ message: string }> {
     const message = await this.authService.changePassword(req.user.id, dto);
     return { message };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('email-change/request')
+  async requestEmailChange(
+    @Request() req: any,
+    @Body() dto: RequestEmailChangeDto,
+  ): Promise<{ message: string }> {
+    await this.authService.requestEmailChange(req.user.id, dto.newEmail);
+    return {
+      message: `A verification code has been sent to ${dto.newEmail}.`,
+    };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('email-change/confirm')
+  async confirmEmailChange(
+    @Request() req: any,
+    @Body() dto: ConfirmEmailChangeDto,
+  ): Promise<{ message: string }> {
+    await this.authService.confirmEmailChange(req.user.id, dto.otp);
+    return { message: 'Your email address has been updated successfully.' };
   }
 
   @Public()

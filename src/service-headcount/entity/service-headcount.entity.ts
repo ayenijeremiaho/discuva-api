@@ -1,9 +1,9 @@
 import {
   Column,
   Entity,
-  Index,
   JoinColumn,
   ManyToOne,
+  OneToOne,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
@@ -15,8 +15,7 @@ export class ServiceHeadcount extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
-  @ManyToOne(() => ServiceSlot, { nullable: false, onDelete: 'CASCADE' })
+  @OneToOne(() => ServiceSlot, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'service_slot_id' })
   serviceSlot: ServiceSlot;
 

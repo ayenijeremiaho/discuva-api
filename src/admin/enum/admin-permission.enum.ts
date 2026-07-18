@@ -50,6 +50,8 @@ export enum AdminPermission {
   PRAYER_WRITE = 'prayer:write',
   FACILITY_RENTAL_READ = 'facility_rental:read',
   FACILITY_RENTAL_WRITE = 'facility_rental:write',
+  SMS_READ = 'sms:read',
+  SMS_SEND = 'sms:send',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -104,6 +106,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.PRAYER_WRITE]: 'Manage Prayer Roster',
   [AdminPermission.FACILITY_RENTAL_READ]: 'View Facility Bookings',
   [AdminPermission.FACILITY_RENTAL_WRITE]: 'Manage Facility Rentals',
+  [AdminPermission.SMS_READ]: 'View SMS Balance & Logs',
+  [AdminPermission.SMS_SEND]: 'Send SMS Messages',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -203,6 +207,10 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View facility bookings, pricing tiers, add-ons, and availability calendar',
   [AdminPermission.FACILITY_RENTAL_WRITE]:
     'Manage facilities, pricing tiers, add-ons, confirm or reject bookings, apply discount overrides, and record payments',
+  [AdminPermission.SMS_READ]:
+    'View SMS balance, per-message cost estimates, and delivery logs',
+  [AdminPermission.SMS_SEND]:
+    'Send SMS messages, including enabling SMS delivery on announcements',
 };
 
 export interface AdminPermissionGroupItem {
@@ -312,6 +320,10 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
   buildGroup('Facility Rental', [
     AdminPermission.FACILITY_RENTAL_READ,
     AdminPermission.FACILITY_RENTAL_WRITE,
+  ]),
+  buildGroup('SMS Messaging', [
+    AdminPermission.SMS_READ,
+    AdminPermission.SMS_SEND,
   ]),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,

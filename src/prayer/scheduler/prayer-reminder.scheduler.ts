@@ -7,6 +7,7 @@ import { PrayerMeetingStatus, PrayerRosterStatus } from '../enum/prayer.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 @Injectable()
 export class PrayerReminderScheduler {
@@ -19,7 +20,7 @@ export class PrayerReminderScheduler {
     private readonly pushService: PushNotificationService,
   ) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
   async sendReminders(): Promise<void> {
     const today = new Date();
     const twoDaysAhead = new Date(today);

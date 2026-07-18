@@ -100,6 +100,7 @@ The universal identity for every person in the system.
 | baptizedWithHolyGhost | boolean           | Optional                                                                                                  |
 | dateJoinedChurch      | Date (date only)  | Optional; full YYYY-MM-DD date, stored in `date_joined_church` column                                     |
 | workerProfile         | WorkerProfile     | OneToOne, null for plain members                                                                          |
+| pastor                | Pastor \| null    | OneToOne, null unless the member carries a pastoral designation — see Pastor table below                  |
 | attendances           | Attendance[]      | OneToMany                                                                                                 |
 | enrollments           | ClassEnrollment[] | OneToMany                                                                                                 |
 
@@ -118,6 +119,50 @@ Created when a member is promoted to WORKER. Deleted when revoked.
 | yearJoinedWorkforce   | Date               | Optional                                                                                         |
 | completedSOD          | boolean            | School of Disciples                                                                              |
 | completedBibleCollege | boolean            |                                                                                                  |
+
+### Pastor
+
+A pastoral designation on a member, independent of `WorkerProfile`/`Department` — a pastor may have no department
+(e.g. a Lead Pastor) or may separately also be an HOD. At most one row per member (`OneToOne` on `member`).
+
+| Field  | Type           | Notes                                              |
+|--------|----------------|-----------------------------------------------------|
+| id     | UUID           | PK                                                   |
+| member | Member         | OneToOne, `onDelete: CASCADE`                        |
+| type   | PastorTypeEnum | LEAD \| PARISH \| ASSOCIATE                          |
+
+Managed via `POST/PATCH/DELETE /members/:id/pastor` (see Member Module). Surfaced on `MemberDto` as
+`pastorType: PastorTypeEnum | null`, computed from the `pastor` relation.
+
+### MemberImportJob
+
+Tracks a single bulk-import spreadsheet upload from preview through commit.
+
+| Field             | Type                  | Notes                                                                 |
+|-------------------|-----------------------|------------------------------------------------------------------------|
+| id                | UUID                  | PK                                                                      |
+| originalFilename  | string                | Filename as uploaded                                                    |
+| status            | MemberImportJobStatus | READY_FOR_REVIEW \| COMMITTED                                          |
+| totalRows         | int                   | Total data rows parsed from the sheet                                   |
+| validRows         | int                   | Rows with zero validation errors at preview time                        |
+| createdCount      | int                   | Members actually created on commit                                      |
+| failedCommitCount | int                   | Rows that still failed at commit time despite passing preview           |
+| createdBy         | Admin                 | ManyToOne, `onDelete: RESTRICT`                                          |
+
+### MemberImportRow
+
+One row of a `MemberImportJob`'s source spreadsheet.
+
+| Field           | Type                  | Notes                                                                          |
+|-----------------|-----------------------|-----------------------------------------------------------------------------------|
+| id              | UUID                  | PK                                                                                 |
+| job             | MemberImportJob       | ManyToOne, `onDelete: CASCADE`                                                     |
+| rowNumber       | int                   | 1-based spreadsheet row number (header is row 1)                                   |
+| data            | jsonb                 | Parsed row fields — see `MemberImportRowData` interface                            |
+| errors          | jsonb (string[])      | Validation errors found at preview time; empty array = eligible to commit          |
+| status          | MemberImportRowStatus | PENDING \| CREATED \| FAILED                                                       |
+| createdMemberId | UUID \| null          | Set once the row's member is created                                              |
+| commitError     | string \| null        | Set only if the row passed preview validation but still failed at commit time      |
 
 ### Event
 
@@ -268,6 +313,8 @@ Joins a WorkerProfile to a Department as head or assistant lead.
 | group        | ManyToOne → Group, nullable (required when audience=GROUP); triggers a push notification to every group member on create |
 | publishedAt  | defaults to creation time                                                  |
 | expiresAt    | nullable; expired items excluded from feed                                 |
+| sendViaSms   | boolean, default `false`; requires the caller's admin role to hold `SMS_SEND` (see SMS Module) |
+| smsBody      | text, nullable; required when `sendViaSms=true`; deliberately separate from `body` since SMS is billed per segment |
 
 ### Group
 
@@ -901,7 +948,7 @@ Physical attendance count record for one service slot, broken down by demographi
 | Field        | Type                    | Notes                                                          |
 |--------------|-------------------------|----------------------------------------------------------------|
 | id           | UUID                    | PK                                                             |
-| serviceSlot  | ServiceSlot             | ManyToOne, CASCADE on delete                                   |
+| serviceSlot  | ServiceSlot             | OneToOne (unique), CASCADE on delete                           |
 | maleAdults   | int                     | Default 0                                                      |
 | femaleAdults | int                     | Default 0                                                      |
 | teenagers    | int                     | Default 0                                                      |
@@ -1191,17 +1238,21 @@ Refresh token delivery and transport differ by surface:
 Every call to `POST /auth/refresh` performs a full rotation:
 
 - A **new** refresh token is issued and its hash replaces the previous one in `member_sessions`.
-- The **previous** hash is stored in Redis under `rt_rotated:{memberId}:{surface}` for the duration of the refresh token's TTL.
-- If an already-rotated token is presented (i.e. the hash matches the Redis entry but not the current session hash), the server detects **credential reuse**, immediately invalidates the entire session for that surface, and returns HTTP 401. This limits the blast radius of a stolen refresh token to a single use.
-- On reuse detection the member receives a `session-security-alert` email advising them to change their password if the sign-out was unexpected.
+- The **previous** hash, plus the full token response that was just issued and the rotation timestamp, are stored together in Redis under `rt_rotated:{memberId}:{surface}` for the duration of the refresh token's TTL.
+- If an already-rotated token is presented (i.e. the hash matches the Redis entry but not the current session hash), the server checks how long ago the rotation happened:
+  - **Within the reuse grace window (10s)** — treated as a benign concurrent-request race, not theft (e.g. two browser tabs on the same admin login, or the proactive pre-expiry refresh racing a reactive 401-triggered refresh). The server does **not** rotate again or touch the session; it replays the exact tokens issued by the rotation that already happened, so both callers converge on the same valid pair.
+  - **Outside the grace window** — treated as **credential reuse**, the server immediately invalidates the entire session for that surface, and returns HTTP 401. This limits the blast radius of a stolen refresh token to a single use.
+- On reuse detection (outside the grace window) the member receives a `session-security-alert` email advising them to change their password if the sign-out was unexpected.
 
 ### Absolute Session Lifetime
 
-Each session row in `member_sessions` carries a `createdAt` timestamp set at first login and never updated on subsequent rotations. On every refresh request, `validateRefreshToken` checks:
+Each session row in `member_sessions` is upserted per `member + surface` — `updateLogin()` reuses the existing row across logins rather than creating a new one, updating only `hashedRefreshToken`/`lastLogin`/`lastLogout`. `createdAt` (from `BaseEntity`) is therefore set once at the row's *first-ever* login and never moves again — it is **not** a valid anchor for "how long has this login been going." On every refresh request, `validateRefreshToken` checks:
 
 ```
-Date.now() - session.createdAt > SESSION_MAX_AGE_DAYS × 86 400 000 ms
+Date.now() - session.lastLogin > SESSION_MAX_AGE_DAYS × 86 400 000 ms
 ```
+
+(Anchored on `lastLogin`, which resets on every login, not `createdAt` — using `createdAt` would mean any member whose session row is older than `SESSION_MAX_AGE_DAYS` gets force-logged-out on the very first refresh after *every* future login, no matter how recently they signed in.)
 
 If the threshold is exceeded the session is invalidated and HTTP 401 is returned, forcing a fresh login regardless of how recently the token was rotated. `SESSION_MAX_AGE_DAYS` defaults to 30 and is configurable via environment variable.
 
@@ -1257,6 +1308,22 @@ without admin involvement, subject to a rate limit.
    used, updates the password, **invalidates any existing session**, and emails a confirmation. On success the user must
    log in fresh.
 
+### Self-Service Email Change Flow
+
+A logged-in member/worker can change their own email address without admin involvement. Unlike the forgot-password
+and device-reset flows above, both routes require an authenticated session (`JwtAuthGuard` via the global guard, no
+`@Public()`) — the OTP is a second factor confirming ownership of the *new* mailbox, not a way to prove account
+ownership from scratch.
+
+1. `POST /auth/email-change/request` — accepts `{ newEmail }`. Returns `409 Conflict` if `newEmail` is already used by
+   another member. Rate-limited the same way as `forgot-password` (`checkOtpRateLimit`, keyed on the caller's member
+   id). Deletes any prior unused request, generates a 6-digit OTP, stores an Argon2 hash **and the target `newEmail`**
+   in `email_change_otps` (mirrors `DeviceResetOtp`'s pattern of locking in the sensitive value at request time), and
+   emails the code **to the new address** (not the current one) — this doubles as proof the caller controls it.
+2. `POST /auth/email-change/confirm` — accepts `{ otp }`. Verifies the OTP and expiry (`OTP_TTL_SECONDS`) against the
+   caller's own most recent unused record, re-checks that `newEmail` is still unclaimed (`409` on a race), marks the
+   record used, updates `member.email` to the stored `newEmail`, and emails a confirmation to the new address.
+
 ### Role Elevation
 
 The access token's role is re-validated from the live database on every request via `validateAccessToken`. This means if
@@ -1290,6 +1357,16 @@ Admin-only SS routes (delete class/session) use `AdminGuard + SUNDAY_SCHOOL_WRIT
 Admin-only CC routes (age group/class group CRUD, slot-level check-in report) use
 `AdminGuard + CHILDREN_CHURCH_WRITE/READ` instead.
 
+**Fixed: `key` was never reaching clients.** The mechanism above was fully enforced server-side, but `DepartmentRefDto`
+(the shape of `department`/`secondaryDepartment` on `WorkerProfileDto`, returned by `GET /auth/me` and `GET /members/me`)
+only exposed `id`/`name` — `key` had no `@Expose()` and was stripped by `class-transformer`'s `excludeExtraneousValues`.
+Faithapp (the member PWA) has no way to read a field the API never sends, so its Children's Church tab was gated on
+`department.name === "Children Church"` — a literal string match that ignored `secondaryDepartment` entirely and would
+silently break the moment the department was renamed, even though the *actual* authorization check above never cared
+about the name at all. `DepartmentRefDto` now exposes `key: DepartmentKeyEnum | null`, and Faithapp's
+`children-church.tsx` gates on `department?.key === "CHILDREN_CHURCH" || secondaryDepartment?.key === "CHILDREN_CHURCH"`,
+matching the backend's own rule exactly (including the secondary-department case it previously missed).
+
 ---
 
 ## 5. Module Reference
@@ -1297,8 +1374,12 @@ Admin-only CC routes (age group/class group CRUD, slot-level check-in report) us
 ### Auth Module
 
 **Routes:** `POST /auth/signup`, `POST /auth/login`, `POST /auth/admin-login`, `POST /auth/refresh`,
-`POST /auth/logout`, `GET /auth/me`, `POST /auth/change-password`, `POST /auth/forgot-password`,
+`POST /auth/logout`, `GET /auth/me`, `POST /auth/change-password`, `POST /auth/email-change/request`,
+`POST /auth/email-change/confirm`, `POST /auth/forgot-password`,
 `POST /auth/reset-password`, `POST /auth/device-reset/request`, `POST /auth/device-reset/verify`
+
+`POST /auth/email-change/*` require an authenticated session (member or worker) — see Self-Service Email Change Flow
+above for the full request/confirm sequence.
 
 **Route separation:** `POST /auth/login` is for the **mobile app** (members & workers) and enforces device lock —
 `deviceId` is required. `POST /auth/admin-login` is for the **web admin portal** — it verifies that the caller has an
@@ -1311,6 +1392,67 @@ Manages the universal identity. Admin portal routes (list members, promote/revok
 passwords) are now guarded by `AdminGuard` + the appropriate `MEMBERS_READ` or `MEMBERS_WRITE` permission.
 
 **Routes prefix:** `/members`
+
+**Self-service profile edit:** `PATCH /members/me` (`JwtAuthGuard` only, no admin) lets a member/worker update their
+own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus`
+(`UpdateMyProfileDto`, all fields optional). Deliberately excludes `email` (handled by the OTP-gated email-change
+flow — see Self-Service Email Change Flow), and the admin-only church-record fields `dateJoinedChurch`,
+`yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost`.
+
+**Pastor designation:** three `AdminGuard` + `MEMBERS_WRITE` routes manage the optional `Pastor` relation on a member
+(same permission as promote-to-worker — no separate permission was introduced):
+
+- `POST /members/:id/pastor` — body `{ type: PastorTypeEnum }` — assigns the designation; `409 Conflict` if the
+  member is already a pastor.
+- `PATCH /members/:id/pastor` — body `{ type: PastorTypeEnum }` — changes the type; `404` if the member is not a
+  pastor.
+- `DELETE /members/:id/pastor` — removes the designation; `404` if the member is not a pastor. Returns `204`.
+
+`pastorType: PastorTypeEnum | null` is surfaced on `MemberDto` (`GET /auth/me`, `GET /members/me`,
+`GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `pastor` relation.
+
+### Member Bulk Import
+
+Lets an admin create many members at once from a spreadsheet, via a preview-then-commit flow so validation errors
+can be reviewed before anything is written. Controller: `MemberImportController`, all routes `AdminGuard` +
+`MEMBERS_WRITE`.
+
+**Routes prefix:** `/members/bulk-import`
+
+| Method | Path                              | Description                                                                                          |
+|--------|-----------------------------------|-------------------------------------------------------------------------------------------------------|
+| GET    | `/members/bulk-import/template`   | Streams a `.xlsx` template with the expected columns (see below)                                     |
+| POST   | `/members/bulk-import/preview`    | Multipart upload, field name `file`, 5 MB cap (`LimitedFileInterceptor`). Parses and validates every row, persists a `MemberImportJob` + `MemberImportRow[]`, returns `{ ...job, rows }` |
+| GET    | `/members/bulk-import/:jobId`     | Refetch a previously-previewed job and its rows                                                       |
+| POST   | `/members/bulk-import/:jobId/commit` | Creates a `Member` (+ `WorkerProfile` if the row's `department` column was filled) for every row with zero validation errors; generates a random temp password per member and emails it via the `welcome-member` template; returns `{ createdCount, failedRows }` |
+
+**Commit is batched, not per-row.** `commitImport` resolves duplicate-email and department-name lookups for the
+*entire* batch in 2 queries up front (not one of each per row), then inserts every still-eligible row's `Member`
+(+ `WorkerProfile`, if applicable) in a single transaction. This means a row can still independently fail
+pre-validation (email taken since preview, unknown department) and land in `failedRows` exactly as before, but a
+row that passes pre-validation and is included in the transaction is no longer isolated from the others — a genuine
+DB-level failure during the bulk insert (e.g. a race-condition constraint violation) fails the whole commit rather
+than just that one row, unlike the old per-row-transaction implementation. In practice this only matters for the
+rare case a pre-validated row fails for a reason pre-validation couldn't catch.
+
+**Template columns:** First Name*, Last Name*, Email*, Phone Number, Gender (MALE/FEMALE), Birth Day (1-31), Birth
+Month (1-12), Birth Year, Marital Status (SINGLE/MARRIED/DIVORCED/WIDOWED), Year Born Again, Year Baptized, Baptized
+With Holy Ghost (TRUE/FALSE), Date Joined Church (YYYY-MM-DD), Department (optional — creates the member as a
+Worker), Profession, Year Joined Workforce.
+
+**Validation (at preview time, one pass over every row):**
+
+- Each row is validated against `SignupDto`'s rules (required fields, formats).
+- Duplicate email **within the file** is flagged, pointing at the earlier row number.
+- Email already existing in the DB is flagged.
+- A filled `department` column is looked up case-insensitively; an unknown department name is flagged as an error
+  (`Unknown department: "..."`) and the row is excluded from commit.
+- `job.validRows` = rows with zero errors; only those are eligible for commit.
+
+**Commit behavior:** re-checks each valid row's email uniqueness and department lookup (guards against a race between
+preview and commit); on a per-row failure the row is marked `FAILED` with `commitError` set and processing continues
+with the remaining rows rather than aborting the whole job. A job can only be committed once — re-committing an
+already-`COMMITTED` job returns `400 Bad Request`.
 
 ### Admin Module
 
@@ -1379,6 +1521,8 @@ its slot times (e.g. editing a slot's time left the event's dates stale), which 
 
 Each slot can have multiple reminder schedules via sub-resource `/events/slots/:slotId/reminders` (admin-only). See EventReminder model.
 
+**Admin frontend UX (`Faithapp-admin`, `app/events/page.tsx`):** since the event's date range is entirely derived from its slots' times (no manual override, per above), the create/edit form's `SlotRow` sets `min` on the datetime-local inputs (a slot's End Time can't be earlier than its own Start Time; each slot after the first has its Start Time's `min` set to the previous slot's End Time, since slots run in sequence) — but `min` on `type="datetime-local"` only reliably restricts the browser's *calendar* date view; the time-of-day spinner on an already-valid date isn't blocked interactively in Chrome/most browsers, only flagged `:invalid` on blur/submit, which read as "not working" for the time portion. `updateSlot()` therefore also clamps values in JS the instant they change: a slot's End Time snaps forward to match its Start Time if set earlier, a slot's Start Time snaps forward to the previous slot's End Time if set earlier (pulling its own End Time along if that would now precede it), and moving a slot's End Time later pulls the next slot's Start Time forward with it if it would otherwise fall behind. `min` is kept alongside this for the calendar-level hint; the JS clamp is what actually prevents an invalid time-of-day from sticking. Neither replaces backend validation, which still governs what's actually accepted on submit.
+
 **Reminder dispatch (cron `*/15 * * * *`):** Queries `EventReminder` rows where `enabled = true`, `lastSentAt IS NULL`, `fireAt <= now`, and `slot.startTime > now`. The filter runs entirely in SQL — `fireAt` is pre-computed at reminder creation (and recalculated if `intervalPreset` is updated). When a slot is deleted or recreated (e.g., event update), its reminders are cascade-deleted. On `create`, `fireAt = slot.startTime − preset_minutes`. On `update` with a new `intervalPreset`, `fireAt` is recalculated from the existing slot's `startTime`.
 
 ### Venue Module
@@ -1405,6 +1549,19 @@ event creation — create a venue once, reference it by ID in any config or slot
 **Duplicate check-in:** The `(member, event)` unique constraint is enforced at DB level. If a member tries to check in twice for the same event, the service catches the `QueryFailedError` (PG error code `23505`) and returns `409 Conflict` with the message "You have already checked in for this event."
 
 **Event data on absent records:** Absence records have `serviceSlot = null` (no physical slot was entered). History endpoints (`GET /attendances/my-history`, `GET /attendances/history`, `GET /attendances/history/department`) join the `event` relation directly on the `Attendance` entity rather than through `serviceSlot`, so `event` is always populated regardless of status.
+
+**Lifetime summary (`GET /attendances/my-summary`), computed in SQL not client-side:** Returns
+`{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` for the calling
+member, via `AttendanceService.getMyAttendanceSummary`. This exists because the mobile app previously derived rate
+and streak from whatever page of `/attendances/my-history` it had fetched (e.g. the last 10 records) — correct only
+for a member with 10 or fewer lifetime records, silently wrong for anyone else. `attendanceRatePercentage` and
+`totalCount`/`presentCount` are a single aggregate query (`COUNT`/`SUM(CASE WHEN status IN (...))`) over the
+member's **entire** history (not date-windowed, unlike the admin-dashboard-facing `getPersonalAttendancePercentage`
+which defaults to a 30-day window) — `ON_LEAVE` records are excluded from both numerator and denominator (an
+approved leave shouldn't count against the rate), and `PRESENT`/`LATE`/`ATTENDED_ONLINE` all count as attended.
+`attendanceStreak` delegates to the existing `getAttendanceStreak` (walks the last 500 records newest-first,
+skip `ON_LEAVE`, break on `ABSENT`) — already used by the dashboard and already covered by the
+`(member, roleAtCheckin, createdAt)` composite index, so no new index was needed for this endpoint.
 
 **Routes prefix:** `/attendances`
 
@@ -1460,6 +1617,38 @@ required. When `audience = GROUP`, `groupId` (UUID) is required.
 
 **GROUP audience + push notification:** When an announcement is created with `audience = GROUP`, `AnnouncementService.create()` resolves the group's member ids (`GroupService.getMemberIdsForGroup`) and fire-and-forgets a single `PushNotificationService.dispatchToMemberIds()` call (idempotency key = the announcement id, so a retry or duplicate call never double-sends). Failure to dispatch is logged as a warning and never fails the announcement creation itself — the announcement is still visible in-app via the feed regardless of push delivery outcome.
 
+**Optional SMS delivery (`sendViaSms`/`smsBody`):** `CreateAnnouncementDto`/`UpdateAnnouncementDto` accept
+`sendViaSms?: boolean` and `smsBody?: string`. Setting `sendViaSms: true` requires the caller's admin role to hold
+the `SMS_SEND` permission (checked in `AnnouncementService`, not the DTO — a DTO can't inspect the caller's
+permission set — throws `403 Forbidden` otherwise) and requires `smsBody` to be non-empty. `smsBody` is deliberately
+separate from `body`: the announcement body is often long-form and meant for in-app reading, whereas SMS is billed
+per segment, so admins compose a distinct, short message for it. On `create`, an SMS is sent (awaited, not
+fire-and-forget, since it's a paid external call whose failure must be caught and logged synchronously) whenever
+`sendViaSms` is set. On `update`, the SMS is sent only on the **transition** into `sendViaSms=true` — re-saving an
+already-SMS'd announcement (e.g. editing its title afterward) does not re-text everyone.
+
+**SMS phone number resolution (`resolvePhoneNumbers`)** — independent of the push-notification audience logic above.
+Always restricted to `ACTIVE` members with a non-null `phoneNumber`, further filtered by audience:
+
+- `ALL` — every eligible member
+- `MEMBERS_ONLY` — role = MEMBER
+- `WORKERS_ONLY` — role = WORKER
+- `DEPARTMENT` — workers whose `workerProfile.department` matches `announcement.department`
+- `INDIVIDUAL` — just `announcement.targetMember`
+- `GROUP` — members resolved via `GroupService.getMemberIdsForGroup(announcement.group.id)`
+
+`resolvePhoneNumbers` takes a plain `{ audience, departmentId?, targetMemberId?, groupId? }` target rather than an
+`Announcement` entity, so it's reusable outside the announcement-creation flow — see `sendSmsBroadcast` below.
+
+**SMS-only broadcast (`POST /announcements/sms-broadcast`), no announcement created:** For sending a text blast to an
+audience without publishing anything to the in-app feed. Guarded solely by `SMS_SEND` (not `ANNOUNCEMENTS_WRITE` —
+an admin with SMS access but no announcement-authoring access can use this). Body: `SendSmsBroadcastDto` —
+`audience` (required) + the matching `departmentId`/`targetMemberId`/`groupId` for `DEPARTMENT`/`INDIVIDUAL`/`GROUP`
+audiences + `message` (required). Reuses the same `resolvePhoneNumbers` targeting as `sendViaSms` on a regular
+announcement. No `Announcement` row is created, no push notification is sent, and no title/body is required — this
+is purely an SMS send. Returns `{ sentCount }`; `sentCount: 0` (not an error) when the resolved audience has no
+members with a phone number on file. Logs `SMS_BROADCAST_SENT` to the audit log (`metadata: { audience, count }`).
+
 **Routes prefix:** `/announcements`
 
 **Picking a group when creating a `GROUP` announcement** does not require `groups:read`/`groups:write` — the admin
@@ -1477,7 +1666,15 @@ fixed group of people without re-selecting individuals each time. A group's memb
 **Entities:**
 
 - `Group` (`groups` table) — `name` (unique), `description` (nullable), `createdBy` (nullable FK → `members`, `SET NULL`).
-- `GroupMember` (`group_members` table) — join entity, `@Unique(['group', 'member'])`, both FKs `ON DELETE CASCADE` (removing a group or a member cleans up membership rows automatically), `addedBy` (nullable FK → `members`, `SET NULL`).
+- `GroupMember` (`group_members` table) — join entity. A row is either a real Member (`member` FK set) **or** a
+  phone-only entry (`phoneNumber` + optional `label` set, `member` null) — e.g. a manually-typed number, or one
+  imported from a `FirstTimer` who has no `Member` account (first-timers can't join Groups any other way, since
+  they aren't `Member` records). Enforced by a `CHECK` constraint (`member_id IS NOT NULL AND phone_number IS NULL`
+  OR the reverse) added in migration `AddGroupMemberPhoneEntries`, plus service-layer logic that only ever sets one
+  side. `@Unique(['group', 'member'])` and `@Unique(['group', 'phoneNumber'])` both apply — Postgres treats NULLs as
+  distinct per unique index, so real-member rows (phoneNumber null) and phone-only rows (member null) don't collide
+  with each other's constraint. `group`/`member` FKs `ON DELETE CASCADE` (removing a group or a member cleans up
+  membership rows automatically), `addedBy` (nullable FK → `members`, `SET NULL`).
 
 **Permissions:** `groups:read`, `groups:write` (grouped under "Announcements" in `AdminPermissionGroups`, since a group's only current purpose is targeting announcements).
 
@@ -1485,19 +1682,82 @@ fixed group of people without re-selecting individuals each time. A group's memb
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/groups` | List all groups with `memberCount` (no pagination — reference data, mirrors the Departments policy) |
+| GET | `/groups` | List all groups with `memberCount` (no pagination — reference data, mirrors the Departments policy). `memberCount` counts all `group_members` rows regardless of kind, so phone-only entries count too. |
 | GET | `/groups/lookup` | Minimal `{id, name}[]` list, gated on `announcements:write` instead of `groups:read` — lets any admin who can create a `GROUP` announcement populate the group picker without also needing group-management access. Registered before `:id` so it isn't swallowed as a param. |
 | GET | `/groups/:id` | Get one group with `memberCount` |
 | POST | `/groups` | Create a group (`name`, optional `description`) |
 | PATCH | `/groups/:id` | Rename / update description |
 | DELETE | `/groups/:id` | Delete a group (cascades to its `group_members` rows) |
-| GET | `/groups/:id/members` | Paginated member roster (`page`, `limit`; can grow large, mirrors the Workers-by-Department policy) |
-| POST | `/groups/:id/members` | Add a single member (`memberId`) |
-| POST | `/groups/:id/members/bulk-add` | Add multiple members at once (`memberIds: string[]`); returns `{added, skipped}` — duplicates are skipped, not errored |
-| DELETE | `/groups/:id/members/:memberId` | Remove a single member |
-| POST | `/groups/:id/members/bulk-remove` | Remove multiple members at once (`memberIds: string[]`); returns `{removed}` |
+| GET | `/groups/:id/members` | Paginated roster (`page`, `limit`; can grow large, mirrors the Workers-by-Department policy) — `leftJoin`s the member relation so phone-only rows are included, not just real members |
+| POST | `/groups/:id/members` | Add a single real member (`memberId`) |
+| POST | `/groups/:id/members/bulk-add` | Add multiple real members at once (`memberIds: string[]`); returns `{added, skipped}` — duplicates are skipped, not errored |
+| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; returns `{added, skipped}` — duplicate phone numbers within the group are skipped |
+| POST | `/groups/:id/members/first-timers` | Bulk-import every `FirstTimer` captured within a date range as phone-only entries (label = their name). Body: `{ dateFrom, dateTo }` (ISO 8601); returns `{added, skipped}` |
+| DELETE | `/groups/:id/members/:memberId` | Remove a single real member by member id (kept for backward compatibility — cannot address phone-only rows, which have no member id) |
+| POST | `/groups/:id/members/bulk-remove` | Remove multiple real members at once by member id (`memberIds: string[]`); returns `{removed}` |
+| DELETE | `/groups/:id/entries/:entryId` | Remove a single roster entry by its own `GroupMember` row id — works for both real members and phone-only entries |
+| POST | `/groups/:id/entries/bulk-remove` | Remove multiple roster entries at once by row id (`entryIds: string[]`); returns `{removed}` |
+
+**Resolving a group's phone numbers for SMS** (`AnnouncementService.resolveGroupPhoneNumbers`, used by both regular
+announcement `sendViaSms` and the dedicated SMS-only broadcast): unions two sources — active Members in the group
+with a phone number on file (via `GroupService.getMemberIdsForGroup`, then a direct Member query for the
+active/phone-on-file filter) and raw phone-only entries (`GroupService.getPhoneOnlyNumbersForGroup`) — deduped
+via `Set`. Phone-only entries have no "active" concept; they're included as-is.
 
 **Indexes** (migration `AddGroupsModule`): `group_members(group_id)` and `group_members(member_id)` back the roster listing and the group-audience membership check used by the announcement feed's `EXISTS` subquery; `announcements(group_id)` backs the same feed query.
+
+### SMS Module
+
+Provider-agnostic SMS sending, currently backed by Termii. Consumers (e.g. `AnnouncementService`) depend only on
+`SmsService`/`SmsProvider` — swapping vendors means writing a new class implementing `SmsProvider` and changing one
+line in `SmsModule`, with no other call site changes.
+
+**Provider abstraction (`src/sms/interface/sms-provider.interface.ts`):**
+
+```ts
+interface SmsProvider {
+  send(to: string[], message: string, encoding: 'plain' | 'unicode'): Promise<{ messageId: string; status: string }>;
+  getBalance(): Promise<{ balance: number; currency: string }>;
+  getMessageHistory(): Promise<SmsLogEntry[]>;
+}
+```
+
+Registered under the `SMS_PROVIDER` DI token in `SmsModule`; `TermiiSmsProvider` is the current concrete
+implementation.
+
+**`SmsService`:**
+
+- `calculateSegments(message)` — determines encoding and segment count for billing purposes. A message is encoded
+  `plain` (GSM-7, 160 chars/segment) unless it contains a non-ASCII character **or** one of the characters Termii
+  documents as forcing UCS-2/unicode encoding even though they're otherwise ordinary ASCII punctuation:
+  `; ^ { } \ [ ~ ] | € ' "` — in which case it's encoded `unicode` (70 chars/segment). Returns
+  `{ segments, encoding, characterCount }`.
+- `send(to, message)` — batches `to` into groups of 100 (Termii's per-request recipient cap,
+  `TERMII_MAX_RECIPIENTS_PER_REQUEST`) and calls the provider once per batch. A failed batch is logged and skipped;
+  it does not abort the remaining batches.
+- `getLogs()` — pure passthrough to `provider.getMessageHistory()`. No local persistence: every call to
+  `GET /admin/sms/logs` re-fetches Termii's own message-history endpoint live, so this is always current but also
+  always network-dependent (no caching/sync job exists).
+
+**Message history (`TermiiSmsProvider.getMessageHistory`):** calls Termii's `GET /api/sms/inbox?api_key=...`
+(undocumented pagination or date-filter params — it's a flat array of every message on the account) and maps its
+raw field names (`receiver`, `message`, `status`, `sms_type`, `message_id`, `created_at`, `sender?`) to the
+provider-agnostic `SmsLogEntry` shape (`recipient`, `message`, `status`, `type`, `messageId`, `sentAt`, `sender?`).
+A non-array response body is treated as empty rather than thrown.
+
+**Routes prefix:** `/admin/sms` (`AdminGuard`)
+
+| Method | Path                       | Permission | Description                                                            |
+|--------|----------------------------|------------|--------------------------------------------------------------------------|
+| GET    | `/admin/sms/balance`       | SMS_READ   | Returns `{ balance, currency }` from the provider                        |
+| POST   | `/admin/sms/segment-count` | SMS_READ   | Body `{ message }` — returns `{ segments, encoding, characterCount }` without sending anything |
+| GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]`, not paginated or filtered server-side (Termii's endpoint doesn't support either); the frontend paginates/filters the returned array client-side |
+
+**Env vars:** `TERMII_API_KEY`, `TERMII_SENDER_ID`, `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — see
+Environment Variables.
+
+**Announcement integration:** see "Optional SMS delivery" under Announcements Module — sending SMS on an
+announcement requires the `SMS_SEND` permission (distinct from `SMS_READ`, which only allows checking balance/cost).
 
 ### Utility Module
 
@@ -1564,6 +1824,12 @@ send personal wishes that persist permanently in the member's birthday book.
 
 **Wish wall:** Wishes persist in `birthday_wishes` regardless of announcement expiry. Rate-limited to `WISH_DAILY_LIMIT`
 wishes per sender per day (default: 20). Input is DOMPurify-sanitized.
+
+**Fields returned by `/birthday/upcoming`** (admin-only): `id`, `firstname`, `lastname`, `email`, `phoneNumber`, `birthMonth`, `birthDay`, `birthYear`. `birthYear` is nullable — members aren't required to disclose it, so the endpoint only ever uses `birthMonth`/`birthDay` (recurring, year-independent) to determine "is today/upcoming a birthday"; `birthYear` is included purely so callers can render a full date when it's known, falling back to a day+month-only display when it's not.
+
+**Fields returned by `/birthday/today`** (member-facing, `BirthdayCelebrant`): `id`, `firstname`, `lastname`, `birthMonth`, `birthDay`, `birthYear`, `role`, `departmentName`, `pastorType`, `alreadyWishedByMe`. Deliberately does **not** include `email`/`phoneNumber` — those are fine for the admin-only `/birthday/upcoming` view but not for a response every member can call. Same-named celebrants are disambiguated instead via `role`/`departmentName` (from `workerProfile.department`, loaded via the `workerProfile` and `workerProfile.department` relations) and `pastorType` (from the `pastor` relation) — informational church-role context rather than personal contact info. `Member` has no photo/avatar column — birthday UIs render initials instead.
+
+**`alreadyWishedByMe` on `/birthday/today`:** computed per request from the caller's own JWT identity (not present on `/birthday/upcoming`, which is admin-only and has no "sender" concept) — `true` when the calling member already has a `BirthdayWish` row for that recipient this calendar year. `sendWish()` already enforced one-wish-per-sender-per-recipient-per-year at the DB level (`@Unique(['recipient', 'sender', 'year'])` on `BirthdayWish`) and rejected a second attempt with 400 — this field just surfaces that same state proactively on load, computed via a single extra query (`BirthdayWish.find({ sender, year, recipient: In(todaysBirthdayIds) })`) rather than the client only discovering it reactively after a failed second send.
 
 **Routes prefix:** `/birthday`
 
@@ -1652,9 +1918,9 @@ Enables the finance team to manage bank accounts, upload Excel tithe payment she
 
 `GET /admin/tithes/records/download` accepts the same filters (no pagination) and returns an `.xlsx` file with columns: Member Name, Email, Account (bank name), Currency, Amount, Payment Date, Sender Bank, Reference.
 
-**Member visibility:** Members view their own tithes at `GET /tithes/me` and request a PDF statement emailed to them at `POST /tithes/me/download`. Optional query params `fromMonth` and `toMonth` (format `YYYY-MM`) filter the records included in the statement and display a period range in the PDF (e.g. `?fromMonth=2026-01&toMonth=2026-06`). If only one bound is supplied the other is open-ended.
+**Member visibility:** Members view their own tithes at `GET /tithes/me` and request a PDF statement emailed to them at `POST /tithes/me/statement/send` (`TitheService.emailTitheStatement` — renamed from `/tithes/me/download`, which never downloaded anything; it always emailed a PDF). Optional query params `fromMonth` and `toMonth` (format `YYYY-MM`) filter the records included in the statement and display a period range in the PDF (e.g. `?fromMonth=2026-01&toMonth=2026-06`). If only one bound is supplied the other is open-ended. Returns `{ message, recordCount }` (200 OK) — previously returned `204 No Content`, which meant the frontend's success message could never actually render since HTTP clients discard the body of a 204 regardless of what the server sends. The email body itself (not just the attached PDF) also states the period in prose (`formatStatementPeriod()` — "January 2026 – June 2026" / "March 2026 onwards" / "Up to June 2026") and the record count, falling back to "all N tithe records on file" when no range was requested, so the email is accurate on its own without needing to open the PDF.
 
-**Tithe payment proof:** Members and workers submit proof of an offline tithe payment via `POST /tithes/proof` (multipart, field: `file`, max 2 MB; body field `titheAccountId` — the account they paid into). The file is uploaded to Cloudinary and a `TithePaymentProof` record is created with status `PENDING` and `expiresAt` set to `TITHE_PROOF_EXPIRY_DAYS` days from submission (default 90). Finance team admins review proofs at `GET /admin/tithes/proofs` and can `CONFIRM` or `DECLINE` each one. Confirming or declining triggers an email to the member that includes the bank name and account-level currency. A daily cron at `03:00 UTC` (with distributed Redis lock `lock:tithe-proof-cleanup`) finds all expired proofs (`expiresAt ≤ now`), deletes each file from Cloudinary using the stored `publicId` + `resourceType`, and removes the DB rows.
+**Tithe payment proof:** Members and workers submit proof of an offline tithe payment via `POST /tithes/proof` (multipart, field: `file`, max 2 MB; body field `titheAccountId` — the account they paid into). The file is uploaded to Cloudinary and a `TithePaymentProof` record is created with status `PENDING` and `expiresAt` set to `TITHE_PROOF_EXPIRY_DAYS` days from submission (default 90). Finance team admins review proofs at `GET /admin/tithes/proofs` and can `CONFIRM` or `DECLINE` each one. Confirming or declining triggers an email to the member that includes the bank name and account-level currency. A daily cron at `03:00` (church-local time, see [Timezone](#timezone)) (with distributed Redis lock `lock:tithe-proof-cleanup`) finds all expired proofs (`expiresAt ≤ now`), deletes each file from Cloudinary using the stored `publicId` + `resourceType`, and removes the DB rows.
 
 **Routes prefix (admin):** `/admin/tithes`  
 **Routes prefix (member):** `/tithes`
@@ -1705,6 +1971,8 @@ One profile can be flagged `isDefault`. Upload accepts optional `?profileId` que
 
 `PATCH /admin/finance/reconciliation/jobs/:jobId/rows/:rowId/confirm` stages a row by linking it to a ledger account (`confirmedAccount`). `POST /admin/finance/reconciliation/jobs/:id/post-confirmed` creates one `PENDING_APPROVAL` journal entry per confirmed row using `bankAccountId` + `accountingPeriodId` from the request body. Each row gets idempotency key `reconciliation-row:{rowId}`; re-calling the endpoint is safe.
 
+**Posting is batched on the read side, per-row on the write side (deliberately).** `ReconciliationService.postConfirmedRows` resolves which rows are already posted in one batched query up front (instead of one idempotency lookup per row), but each row's actual posting (journal entry + 2 lines + row status update) still runs in its own transaction. This is intentional, unlike the fully-batched bulk operations elsewhere in the codebase: a bad row in a bank-import batch (e.g. a stale account reference) shouldn't block the rest of the batch from posting, so rows remain independent units of work. The `idempotency_key` column's DB-level `UNIQUE` constraint — not the batched pre-check — is the actual guard against double-posting under a race (e.g. the endpoint invoked twice concurrently); a unique-violation on insert is caught and treated the same as "already posted."
+
 A row fingerprint (`sha256` of date+narration+amount+creditDebit) prevents duplicate rows within the same job. A transaction fingerprint (`sha256` of date+amount+creditDebit) prevents the same transaction appearing across different upload jobs.
 
 Admin-configurable profile endpoints (`FINANCE_RECONCILE` permission):
@@ -1714,7 +1982,11 @@ Admin-configurable profile endpoints (`FINANCE_RECONCILE` permission):
 - `PATCH /admin/finance/bank-import-profiles/:id` — update profile
 - `GET /admin/finance/bank-import-profiles/:id/template` — download a pre-filled CSV template with correct column headers and two sample rows for the profile
 
-**Annual giving statements:** Gated by `ANNUAL_GIVING_STATEMENT_ENABLED` (default `false`). When enabled, a cron fires on January 1st at 08:00 (with distributed Redis lock) and emails each active member a summary of their total giving for the previous year, using the `annual-giving-statement.html` template. The batch query is a single grouped SQL join across `finance_journal_entry_lines` → `finance_journal_entries` → `finance_journal_entry_links` — one round-trip for all members, not per-member. Members can also trigger their own statement on demand via `POST /finance/me/giving-statement/send` regardless of the env var flag.
+**Annual giving statements:** Gated by `ANNUAL_GIVING_STATEMENT_ENABLED` (default `false`). When enabled, a cron fires on January 1st at 08:00 (with distributed Redis lock) and emails each active member a summary of their total giving for the previous year, using the `annual-giving-statement.html` template. Members can also trigger their own statement on demand via `POST /finance/me/giving-statement/send` regardless of the env var flag; this endpoint now returns a `message` field describing the outcome (sent, or "no recorded giving for `{year}` yet").
+
+`fetchMemberTotals()` sums directly from the actual giving records — `TitheRecord` (all of a member's tithes in the date range) plus `PledgeContribution` with `status = CONFIRMED` (joined through `Pledge` for `member_id`) — merged in-memory by member. This intentionally does **not** go through `finance_journal_entry_links`: that link table is only ever populated by fully-manual journal entry creation (`JournalEntryService`) — bank reconciliation, offering auto-journal, and tithe recording never create one — so a link-based total would be 0 or wildly incomplete for almost every member. `GET /admin/finance/reports/member-giving` (an admin-facing report, distinct from this member-facing statement) still uses the `finance_journal_entry_links` path deliberately — it's a strict "show me actual posted GL lines linked to this member" audit view, not a giving total, and carries the same underlying limitation by design until/unless tithes and offerings get their own automatic journal-linking.
+
+The `annual-giving-statement.html` template was also silently rendering with a blank church name/address and no currency symbol — it referenced `{{ churchName }}`/`{{ churchAddress }}` (camelCase) and `{{ currency }}`, but `EmailQueueService.compileTemplate()` only ever injects `church_name`/`church_address`/`logo_url` (snake_case) globally, and the scheduler never passed `currency`. Handlebars renders unresolved variables as an empty string, not literal `{{ }}` text, so this went unnoticed. Fixed: template now references the snake_case globals, and both `sendForMember()` and `run()` pass `currency: configService.get('CURRENCY_CODE')`.
 
 **Recurring entry scheduler:** Runs daily at 08:00 (Redis lock). For each active `RecurringEntry` where `nextDueAt ≤ now`, generates a `PENDING_APPROVAL` journal entry in the current month's open accounting period and advances `nextDueAt` to the next due date. The journal entry creation, line saves, and `nextDueAt` update all run inside a single `dataSource.transaction()` — a crash mid-write cannot leave a journal entry with no lines.
 
@@ -1749,6 +2021,7 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 | Offerings | `/admin/finance/offerings` |
 | Budgets | `/admin/finance/budgets` |
 | Pledge campaigns + pledges | `/admin/finance/pledges` |
+| Pledge contribution review queue | `/admin/finance/pledges/contributions` |
 | Recurring entries | `/admin/finance/recurring-entries` |
 | Petty cash | `/admin/finance/petty-cash` |
 | Reconciliation (CSV upload) | `/admin/finance/reconciliation` |
@@ -1769,6 +2042,8 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 | `GET /admin/finance/reports/member-giving` | Giving history for a member (`memberId` required, `TITHE_READ`) |
 | `GET /admin/finance/reports/dashboard` | Finance dashboard snapshot: MTD income/expenses, pending entries, budget utilisation, outstanding pledges |
 
+**`cash-flow`, `account-ledger`, `member-giving` default to a bounded ~365-day lookback.** Omitting `fromDate` previously scanned every posted journal line ever recorded against the account/member — each now defaults `fromDate` to 365 days ago (via `FinanceReportService.defaultReportFromDate()`) when the caller doesn't supply one, and echoes the effective `fromDate`/`toDate` actually used back in the response so a caller can tell a default was applied. `member-giving` skips the default entirely when `periodId` is given, since a period already bounds the query. Passing an explicit `fromDate` (however old) is honored as-is — the default only kicks in when both date filters are omitted.
+
 **Offering reconciliation — auto-journal (optional):**
 
 `PATCH /admin/finance/offerings/:id/reconcile` accepts optional fields `autoJournal`, `debitAccountId`, `creditAccountId`, and `accountingPeriodId`. When `autoJournal: true` all three IDs are required. A double-entry journal entry is created as `PENDING_APPROVAL` (not auto-posted — segregation of duties: a different admin must approve via the normal journal approval flow). Idempotency key: `offering-auto-journal:{offeringId}`. The reconciling admin is recorded in `reconciledBy` on the offering. The total equals `cashAmount + expectedTransferAmount`. Creation runs inside a `dataSource.transaction()` to prevent duplicate journals under concurrent requests. Account balances are updated only when the journal entry is subsequently approved — not at creation.
@@ -1777,16 +2052,33 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/finance/pledge-campaigns` | List active, non-lapsed pledge campaigns a member can pledge against (member-safe subset of the admin campaign shape — no `createdBy`) |
 | `POST` | `/finance/me/pledges` | Self-service pledge — member commits a pledge to a campaign |
 | `GET` | `/finance/me/pledges` | List the authenticated member's pledges |
+| `POST` | `/finance/me/pledges/:id/contributions` | Log a payment claim toward one of the member's own pledges (`amount`, `paymentDate`, optional `reference`) |
+| `GET` | `/finance/me/pledges/:id/contributions` | List the contribution claims (any status) for one of the member's own pledges |
 | `GET` | `/finance/me/giving-summary` | YTD tithe total, active pledges, last tithe — cross-type giving view |
 | `POST` | `/finance/me/giving-statement/send` | Trigger annual giving statement email for the previous year (on-demand, always available) |
+
+**Pledge campaign discovery (`GET /finance/pledge-campaigns`):** Filters to `isActive = true AND endDate >= CURRENT_DATE` — a campaign that's lapsed or been deactivated is never pledge-able even if a member still has the ID. Not paginated (bounded, admin-controlled reference data, same category as departments/venues). This is distinct from `GET /admin/finance/pledges/campaigns`, which is admin-only and returns the full entity including `createdBy`.
+
+**Deactivating a campaign (`PATCH /admin/finance/pledges/campaigns/:id/active`, `FINANCE_WRITE`):** Body `{ isActive: boolean }`. This is the only way to edit a campaign after creation — there is no general update endpoint. Deactivating a campaign only removes it from `GET /finance/pledge-campaigns` (members can no longer start new pledges against it); it does not touch any existing pledges under that campaign, which keep whatever status/contributions they already have.
+
+**Manual pledge completion vs. contribution-confirmed completion (important distinction):** `PATCH /admin/finance/pledges/:id/status` and the pledge-contribution confirm flow are two independent mechanisms that can both result in `status: COMPLETED`, and they are **not reconciled with each other by design**. Manually setting a pledge to `COMPLETED`/`CANCELLED` via the status endpoint does not touch `amountPaid` or any pending contributions — a pledge can be manually marked `COMPLETED` while `amountPaid` is still 0 and a contribution is still sitting `PENDING`. The only way to reach `COMPLETED` *with `amountPaid` guaranteed to equal `totalAmount`* is via the contribution-confirm auto-complete path (`PledgeService.maybeAutoCompletePledge`, triggered after `confirmContribution`). Admins using the manual status endpoint should understand it as a pure administrative override, independent of payment tracking.
 
 **Pledge self-service:** `MakePledgeDto` requires `campaignId`, `totalAmount`, `frequency` (`ONE_OFF | MONTHLY | QUARTERLY`), `startDate`. Pledges created this way are identical in schema to admin-created pledges; the audit log records `source: 'member-self-service'`.
 
 **Pledge status transitions:** `COMPLETED` and `CANCELLED` are terminal states — once a pledge reaches either status, `PATCH /admin/finance/pledges/:id/status` throws `400 Bad Request`. This prevents accidental reactivation of fulfilled or cancelled commitments.
 
 **Pledge reminder scheduler:** Runs daily at 08:00 (Redis lock `lock:pledge-reminders`). For each `ACTIVE` pledge, calculates the next due date (rolling forward from `startDate` by `frequency`). Sends a `pledge-reminder` email when `diffDays` is 7 (upcoming), 0 (due today), or −3 (overdue). Redis cache key `pledge-reminder:{pledgeId}:{dueDateKey}:{diffDays}` with 2-day TTL prevents duplicate sends.
+
+**Pledge contributions (tracking actual payments):** `Pledge.status` alone never reflected whether a pledge had actually been paid — it was a manual admin flag. `finance_pledge_contributions` closes that gap with a claim-and-confirm flow mirroring the tithe payment-proof pattern:
+
+- `POST /finance/me/pledges/:id/contributions` — the pledge's own member logs a payment claim (`amount`, `paymentDate`, optional `reference`). 403s if the pledge belongs to someone else; 400s if the pledge isn't `ACTIVE`. Starts as `PENDING`.
+- `GET /admin/finance/pledges/contributions` (`FINANCE_READ`) — paginated review queue, filterable by `status`/`pledgeId`/`campaignId`.
+- `POST /admin/finance/pledges/contributions/:id/confirm` / `.../decline` (`FINANCE_WRITE`) — finance reviews each claim. Confirming stamps `reviewedBy`/`reviewedAt`, emails the member (`pledge-contribution-confirmed`), and re-sums that pledge's `CONFIRMED` contributions — if the sum reaches `totalAmount`, the pledge is automatically flipped to `COMPLETED` (no manual status click needed). Declining requires a `financeNote` and emails `pledge-contribution-declined`.
+- Only `CONFIRMED` contributions count. `amountPaid` (per pledge, on `GET /finance/me/pledges` and `GET /admin/finance/pledges`) and `totalPaid` (per campaign, on both campaign-list endpoints) are always computed live from `SUM(amount) WHERE status = 'CONFIRMED'` — never stored/denormalized, same approach as the existing `totalPledged`/`pledgeCount` subqueries on `PledgeCampaign`.
+- A pledge's committed `totalAmount` and its actually-paid `amountPaid` are deliberately distinct fields — a pledge can be `ACTIVE` with `amountPaid` anywhere from 0 up to (but not yet reaching) `totalAmount`.
 
 **Budget utilisation alerts:** Runs daily at 08:00 (Redis lock `lock:budget-utilization-alerts`). Calculates actuals for each active budget by summing posted journal entry lines for the budget's account within the budget date range. Sends `finance-budget-alert` email to all admins with `FINANCE_READ` permission at 80% and 100% utilisation thresholds. Dedup via `alert_80_sent_at` / `alert_100_sent_at` columns on `finance_budgets` (persists across Redis flushes). Each threshold fires at most once per budget.
 
@@ -1921,6 +2213,8 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Return visit tracking:** `POST /admin/follow-up/first-timers/:id/visits` (requires `FOLLOW_UP_WRITE`) records that a first-timer attended again. Body: `{ eventId?, notes?, visitedAt? }` — `visitedAt` defaults to today.
 
+**No dedicated first-timer SMS route.** Texting first-timers is done by adding them to a Group (see Groups Module's phone-only entries, sourced "from First-Timers" over a date range) and sending via `POST /announcements/sms-broadcast` with `audience: GROUP` — this superseded a former one-off `POST /admin/follow-up/first-timers/sms` route, consolidating all SMS sending into the Announcements module.
+
 **Pipeline report:** `GET /admin/follow-up/first-timers/pipeline?from=&to=` (requires `FOLLOW_UP_READ`) returns a funnel breakdown: `{ total, untouched, contacted, returned, invited, converted }`. Each first-timer is placed in the highest stage they have reached.
 
 **Stale task list:** `GET /admin/follow-up/tasks/stale?daysInactive=7&page=1&limit=20` (requires `FOLLOW_UP_READ`) returns open tasks with no activity for ≥ N days, ordered oldest-activity-first.
@@ -1934,11 +2228,15 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 Records and retrieves physical attendance counts for services, broken down by demographic group. All routes are admin-portal only (`AdminGuard`). Headcount data can be filtered by service slot, date range, or slot name; trends are bucketed by week, month, or quarter.
 
-**Entity:** `ServiceHeadcount` — one record per slot per submission. Admins with `HEADCOUNT_WRITE` can submit corrections by patching an existing record.
+**Entity:** `ServiceHeadcount` — one record per service slot (`OneToOne`, enforced by a unique constraint on `service_slot_id`). `POST /service-headcount` is an upsert: recording again for a slot that already has a headcount edits that row in place instead of creating a sibling, so summing across a service's sub-services never double-counts.
 
 **Computed total:** Every response includes a `total` field (sum of fixed groups + all `customGroups` values). Not stored in DB.
 
-**Trends:** `GET /service-headcount/trends` returns bucketed data. Each bucket is keyed by `periodLabel + serviceSlotName` so multiple slots on the same Sunday appear as separate series.
+**Event-level summary (`GET /service-headcount/event/:eventId/summary`):** The service-level view for a multi-service Sunday — returns every sub-service (`ServiceSlot`) under the event ordered by `startTime`, each with its headcount if recorded (`null` otherwise), plus an aggregate `total` summed across whichever sub-services have been recorded so far (`recordedCount`/`slotCount` show how many are still outstanding). This is the primary admin-facing view (`app/service-headcount`'s "By Event" tab) — an admin picks the Event once and records each sub-service's count inline without leaving the page, and sees the full-service total without adding sub-services up by hand. Reuses the same 5-field-plus-custom-groups form as the flat `POST` route; no new DTO.
+
+**No separate correction endpoint (by design):** `PATCH /service-headcount/:id` existed early on for correcting a record, consumed only by the Records tab's now-removed "Edit" button (a flat historical list, separate from the "By Event" tab). Once headcount became upsert-on-`POST`, that PATCH route had no remaining frontend caller — removed entirely (controller route, service method, `UpdateServiceHeadcountDto`) rather than left as dead, unconsumed admin API surface. Corrections now happen exactly one way: re-recording the same sub-service through the "By Event" tab, which pre-fills the existing values and edits in place.
+
+**Trends:** `GET /service-headcount/trends` returns bucketed data. Each bucket is keyed by `periodLabel + serviceSlotName` so multiple slots on the same Sunday appear as separate series. `customGroups`' dynamic per-church keys mean the per-bucket aggregation stays in-memory rather than SQL `GROUP BY`, but omitting `from` now defaults to a bounded ~365-day lookback (`defaultTrendsFrom()`) instead of scanning every headcount record ever logged — an explicit `from` is always honored as-is.
 
 **Routes prefix:** `/service-headcount`
 
@@ -1989,6 +2287,8 @@ Queries `prayer_roster_entries` where the meeting date is 2 days or 1 day away a
 - `1787011200000-AddFinanceAccountCode`
 - `1787097600000-AddPledgeGuestName`
 - `1787184000000-AddMissingFkIndexes` *(13 FK indexes across high-traffic tables: `attendances.service_slot_id`, `follow_up_tasks.(member_id, event_id)`, `first_timer_visits.(first_timer_id, event_id)`, `follow_up_notes.task_id`, `finance_journal_entry_lines.(journal_entry_id, account_id)`, `finance_offerings.fund_id`, `finance_reconciliation_rows.job_id`, `tithe_records.(batch_id)`, composite `tithe_records(member_id, payment_date)`, `asset_checkouts.asset_id`)*
+- `1787875200000-CreatePledgeContributions` *(creates `finance_pledge_contributions`: `pledge_id` FK `CASCADE`, `submitted_by_id` FK to `members` `RESTRICT`, `reviewed_by` FK to `admins` `SET NULL`, `amount`, `payment_date`, `reference`, `status` default `PENDING`, `reviewed_at`, `finance_note`)*
+- `1788393600000-AddPerformanceIndexes` *(composite `members(birth_month, birth_day)` for upcoming-birthday lookups; `first_timers.created_at` for date-range queries; composite `follow_up_tasks(status, due_date)`; single-column `status` indexes on `tithe_upload_batches`, `tithe_unmatched_records`, `tithe_dispute_records`, `tithe_payment_proofs`; `finance_requests.category_id`)*
 
 ---
 
@@ -2003,7 +2303,7 @@ Delivers Web Push notifications to members and workers via the standard Web Push
   - **OTP device reset** (`POST /auth/device-reset/verify`): backend deletes the subscription automatically. The frontend must re-subscribe after the member's next login on the new device.
   - **Explicit opt-out:** member calls `DELETE /v1/notifications/subscribe`.
   - **Stale subscription:** push service returns `410 Gone` or `404` — processor deletes it automatically, no retry.
-- `PushNotificationService.dispatchToMemberIds(memberIds, payload)` finds subscriptions and enqueues one Bull job per subscriber with a stable `jobId` (`push:{memberId}:{idempotencyKey}`) for deduplication.
+- `PushNotificationService.dispatchToMemberIds(memberIds, payload)` finds subscriptions and enqueues all subscribers' jobs in a single `queue.addBulk()` call (each still keeps its own stable `jobId`, `push:{memberId}:{idempotencyKey}`, for deduplication) rather than one `queue.add()` round trip per subscriber — matters most for large-fanout sends (e.g. an `ALL` audience announcement to thousands of members).
 - `PushNotificationService.dispatchToWorkerProfileIds(workerProfileIds, payload)` resolves worker profile IDs to member IDs via a single SQL query, then delegates to `dispatchToMemberIds`.
 - `PushNotificationProcessor` processes each job: checks a Redis idempotency key (`notif:sent:{memberId}:{idempotencyKey}`, 24 h TTL) before sending. On `410 Gone` or `404` from the push service, the stale subscription is deleted — no retry. Any other error is re-thrown for Bull to retry (3 attempts, exponential backoff).
 
@@ -2082,7 +2382,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - **`effectiveSlots`** on `GET /service-session/:code/state` — a flattened, per-session array (`{ id, position, status, type, topic, allocatedMinutes, memberName, guestName, backupMemberId, backupMemberName, backupGuestName, actualSeconds, startedAt, completedAt }`, built by `withEffectiveSessionSlots` in `util/slot-display.ts`) keyed by **`ServiceSessionSlot.id`**, with each slot's DRAFT-template fields (`programmeSlot.topic`/`allocatedMinutes`/`member`/`guestName`) merged with any live overrides (`overriddenTopic`, `overriddenSpeakerName`, `overriddenMember`, `adjustedAllocatedMinutes`) already resolved. This is the array every live frontend view (`/service-programme/live/:sessionCode`, `/live/:code/manage`, `/live/:code/presentation`, `/live/:code/audience`, `SessionRunner`) reads for its slot list — **fixed a bug** where those views previously read `session.programme.slots` (`ServiceProgrammeSlot[]`, the DRAFT template's own IDs) and passed those ids straight into `reorderLiveSlots`, which validates against `ServiceSessionSlot` ids and therefore always threw `BadRequestException('Slot list must contain exactly the upcoming (not-yet-started) slot IDs')` — reordering during a live session could never actually succeed. The `backup*` fields always reflect the DRAFT slot's `backupMember`/`backupGuestName` as-is — there is no "override the backup" concept, so they stay constant even after the primary speaker has been overridden.
 - **`overrideSlot`** (`POST /service-session/:code/slots/:position/override`, `RolesGuard`+`WORKER`, and `POST /service-session/:code/pm/slots/:position/override`, `Public`+`ShareTokenGuard`) lets an operator rename a slot's topic and/or swap its minister/speaker (by linking a `Member` via `overriddenMemberId`, or a free-text guest name via `overriddenSpeakerName`) **while the session is live**, from either the authenticated Live Session Dashboard or the public Programme Manager link — both call the same service method, with `memberId: null` on the PM path (same pattern as `advance`/`rewind`/etc.). The override is stored on the `ServiceSessionSlot` row, never mutates the underlying DRAFT `ServiceProgrammeSlot`, and is immediately reflected in `effectiveSlots` (and therefore every view listed above) on the next poll.
 - **Swap to backup** — both the Live Session Dashboard and the Programme Manager view render a "Backup: {name} — tap to swap" affordance on any slot that has one (current slot and each upcoming slot in the queue), computed client-side by `backupLabel`/`backupOverridePayload` in `use-service-session.ts`. Clicking it calls the same `overrideSlot` endpoint with `overriddenMemberId` (if the backup is a linked `Member`) or `overriddenSpeakerName` (if it's a guest) — a one-click fallback for when the primary speaker doesn't show up, no re-search required. The Presentation and Audience views deliberately do **not** show backup info — it's operational/control-surface data, not something the congregation needs to see.
-- The admin frontend's `AddSlotModal`/`EditSlotModal` (`app/service-programme/page.tsx`) now expose an "Assign a Backup" toggle mirroring the primary "Handled by" member/guest picker — the backend (`CreateServiceProgrammeSlotDto`/`UpdateServiceProgrammeSlotDto`) already supported `backupMemberId`/`backupGuestName`; the gap was purely that no frontend form exposed it. Fixing this also surfaced and fixed a real pre-existing bug: the frontend's `ServiceProgrammeSlot` type declared a flat `memberId` field that the API never actually returns (the API returns a nested `member: { id, firstname, lastname } | null` relation object) — so `EditSlotModal` always initialized to "Guest" mode with an empty field when editing a slot that actually had a member assigned, and saving without noticing would silently clear the assignment. The type now matches the real shape (`member`/`backupMember` as nested objects), and both modals correctly detect and pre-fill an existing assignment.
+- Adding or editing a slot on an already-created DRAFT programme (`ProgrammeDetailPanel`) exposes the same "Add backup speaker" toggle as the creation dashboard's `ItemEditorRow` (see below) — both flows share the one component, so backup assignment works identically whether you're building a programme for the first time or coming back to edit it later.
 - Each session also gets a `shareToken` (random UUID, Redis-only, same TTL/lifecycle as the anchor) generated in `start()`, powering three public, unauthenticated frontend routes, all reading `GET /service-session/:code/state` — no new backend endpoints were needed for any of them: `/live/:code/presentation` (read-only, big-screen display, dark theme, meant to be opened in its own browser tab/window via the "Open Presentation Window" button so it can be dragged to a second monitor/projector and fullscreened with the `F` shortcut), `/live/:code/manage?token=...` (full remote control — advance/rewind/pause/resume/adjust-time/reorder/end, share-token gated), and `/live/:code/audience` (read-only, mobile-first, light theme — current slot + countdown + progress bar, "Up Next", and the full running order with done/current/upcoming state; intended for members/workers to follow along on their own phone during the service, no share token required since it's read-only like the presentation view). Admins copy/open these links from the "Presentation Link" / "Presentation Window" / "Programme Manager Link" / "Audience Link" buttons on the service-programme, service-session, and live-session dashboards (`GET /service-session/:code/share-links`). The link can be invalidated without ending the session via `POST /service-session/:code/rotate-share-token`, which overwrites the Redis key with a freshly generated token — any copy of the old link stops working immediately (this only affects the Programme Manager link; the Presentation and Audience links have no token to rotate).
 - Ending a live session always requires an explicit two-step confirmation ("End" → "End?" Yes/No) in every surface that can end one — the authenticated Live Session Dashboard, the `SessionRunner` card, and the public Programme Manager view — so a single stray click can never terminate a session.
 - **`rewind` is destructive** — it resets the current slot back to PENDING and reopens the previous slot as IN_PROGRESS, unconditionally nulling that previous slot's `completedAt`/`actualSeconds` (there is no shadow/history column, so a mistaken rewind previously destroyed the recorded actual duration of a finished slot with only an audit-log breadcrumb — no way to recover the numbers). Two mitigations: (1) `rewind()` now reads both affected `ServiceSessionSlot` rows *before* overwriting them and stringifies their prior `status`/`startedAt`/`completedAt`/`actualSeconds` into the `REWIND_SLOT` action-log `detail` field, so the destroyed values are recoverable from the audit log/CSV even though the DB row itself is overwritten; (2) every UI surface that can trigger rewind (Live Session Dashboard, `SessionRunner`, public Programme Manager view) now requires an explicit Yes/No confirmation before calling it, mirroring the "End Session" pattern. Adjusting the timer (`adjustTime`, ± seconds) is non-destructive to slot records but still requires the same Yes/No confirmation in the Dashboard and Programme Manager views, since a mis-tap changes the running countdown an operator and congregation are actively watching.
@@ -2094,9 +2394,15 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
   - Frontend: `hooks/use-live-session-socket.ts` connects to the namespace, joins the session's room, and calls back into each view's `setPayload` on every `session:state` event. Each of the four views kept only a much slower (30s) safety-net `setInterval` poll as a fallback for the rare case a broadcast is missed during a disconnect/reconnect or a backend restart — this is a defense-in-depth measure, not the primary update path anymore. The socket origin is derived from `NEXT_PUBLIC_API_URL`'s origin (stripping the versioned `/v1` path — Socket.IO attaches to the raw HTTP server, not the REST prefix).
   - The per-IP `@Throttle({ limit: 300, ttl: 60_000 })` override on `GET :code/state`/`GET :code/slots/:position` is left in place for the initial load and safety-net poll, but is no longer the thing standing between this module and a real capacity problem — it never bounded aggregate load across many distinct viewer IPs in the first place.
 - The presentation view's countdown has three visual states: normal (white) → **caution** ("Wrapping Up", amber, pulsing) once remaining time drops to `SERVICE_SLOT_CAUTION_THRESHOLD_RATIO` (env, default `0.25`, i.e. the last 25% of the slot's allocated time) → **overtime** ("Time's Up", red, pulsing) once elapsed exceeds the allocation, after which the display counts up (`+MM:SS`). The ratio is resolved server-side and returned as `cautionThresholdRatio` on `GET /service-session/:code/state`, so the frontend has a single source of truth rather than duplicating the value in its own env config. See `SlotTimerDisplay` (frontend). The presentation page also supports a keyboard shortcut (`F`) to toggle browser fullscreen via the Fullscreen API.
-- When a `ServiceProgrammeSlot` is assigned a member (via `addSlot` or `updateSlot`'s `memberId`), a fire-and-forget notification email is queued (template: `service-slot-assigned`) if the member has an email on file, with a generated `.ics` calendar invite attached when the underlying `ServiceSlot` has both a `startTime` and `endTime`. Guests (`guestName`, no member record) are never emailed. Re-editing a slot without changing its assigned member does not re-send the email. The response from `addSlot`/`updateSlot` may include a non-blocking `conflictWarning` string when the assigned member already has another slot (in a different programme) whose service time overlaps this one — surfaced in the admin UI but never prevents the save.
+- When a `ServiceProgrammeSlot` is assigned a member (via `addSlot` or `updateSlot`'s `memberId`), `notifySlotAssignment()` fires two independent, fire-and-forget notifications — neither gates the other, since a member may have one channel but not the other:
+  - **Email** (template: `service-slot-assigned`) if the member has an email on file, with a generated `.ics` calendar invite attached when the underlying `ServiceSlot` has both a `startTime` and `endTime`. The template body includes the formatted service **date** (`{{ serviceDate }}`, e.g. "Sunday, 19 July 2026") and **time range** (`{{ serviceTime }}`, e.g. "8:00 AM – 10:00 AM") as plain text in the "Your slot" attributes table — not just carried in the `.ics` attachment, so the schedule is readable even without a calendar client. Both fields are computed once via `fmtAssignmentDate`/`fmtAssignmentTime` and reused for the push body below.
+  - **Push notification** (`PushNotificationService.dispatchToMemberIds`, `@Global()` module — no explicit import needed) to the assigned member, unconditionally (no email required). `idempotencyKey: service-slot-assigned:${slot.id}:${member.id}` keys it per slot-and-person so a primary/backup reassignment on the same slot doesn't dedupe against each other. Body includes the slot type, service name, and date/time when available (e.g. "Speaker — Sunday Service — First Service on Sunday, 19 July 2026 at 8:00 AM – 10:00 AM"); links to `/events` in the member app.
+
+  Guests (`guestName`, no member record) never reach this method — nothing to email or push. Re-editing a slot without changing its assigned member does not re-send either notification. The response from `addSlot`/`updateSlot` may include a non-blocking `conflictWarning` string when the assigned member already has another slot (in a different programme) whose service time overlaps this one — surfaced in the admin UI but never prevents the save.
+- Assigning a **backup** member (`backupMemberId`, via the same two endpoints) triggers the identical email + push pair for the backup, with `isBackup: true` in the template data — the template (`{{#if isBackup}}`) swaps the heading/body copy to make clear they're the backup, not the primary, and the subject/push title reads "You're the Backup for: …" instead of "You've Been Added to the Programme: …". Same at-most-once-per-change rule as the primary: re-editing a slot without changing the backup does not re-send.
+- **`POST /service-programme` (`create`) is fully batched, not one round trip per programme/slot.** Given N programmes (each with its own set of slots — e.g. creating First Service and Second Service's whole order-of-service in one request), the previous implementation looped per programme (`programmeRepo.save` once each) and, within that, per slot (a `memberRepo.findOne` for the assignee, another for the backup, then `slotRepo.save`) — a 2-programme, 15-slot-each request was 60+ sequential DB round trips. It now: resolves every referenced `memberId`/`backupMemberId` across every programme's slots in one `memberRepo.find({id: In(...)})`, bulk-inserts all programmes in one `programmeRepo.save(array)`, bulk-inserts all slots in one `slotRepo.save(array)`, and reloads all created programmes for the response in one `programmeRepo.find({id: In(...)})` instead of an N-times `findOne`. No change to the request/response shape. One intentional side-effect of the batching: the per-slot `conflictWarning` computation (`findMemberConflictWarning`) is no longer run during `create()` — its result was already discarded here even before this change (only `addSlot`/`updateSlot`'s single-slot paths surface it), so skipping the computation removes wasted queries without changing any observable behavior.
 - `ServiceProgrammeReminderScheduler` runs daily at 09:00 (`@Cron('0 9 * * *')`, guarded by a Redis lock so only one instance runs it) and emails a reminder (template: `service-slot-reminder`, same `.ics` attachment logic as the assignment email) to every assigned member whose `ServiceProgrammeSlot.reminderSentAt` is still null and whose programme is DRAFT with a `ServiceSlot.startTime` 24–48 hours away. `reminderSentAt` is stamped immediately after queuing to guarantee at-most-once delivery even if the cron overlaps a slow run.
-- `GET /service-session/:code/action-log/csv` streams the full `ServiceActionEntry` audit trail for a session as a CSV download (Timestamp, Actor Role, Actor, Action, Detail) for admins who need an offline record beyond the in-app log; `GET /service-session/:code/action-log` returns the 10 most recent entries as JSON for the dashboard's in-app activity feed. `GET /service-session/:code/report/pdf` (session report PDF), `GET /service-session/event/:eventId/report/pdf` (full event report), and `GET /service-session/event/:eventId/report/summary-pdf` (event summary) existed on the backend with no frontend consumer for a while — the Live Session Dashboard's "Share & Access" card gained a "Session Report (PDF)" button (next to the existing "Audit Log (CSV)" one) wired to the first of these; the event-level PDF routes remain unwired for now.
+- `GET /service-session/:code/action-log/csv` streams the full `ServiceActionEntry` audit trail for a session as a CSV download (Timestamp, Actor Role, Actor, Action, Detail) for admins who need an offline record beyond the in-app log; `GET /service-session/:code/action-log` returns the 10 most recent entries as JSON for the dashboard's in-app activity feed. `GET /service-session/:code/report/pdf` (session report PDF), `GET /service-session/event/:eventId/report/pdf` (full event report), and `GET /service-session/event/:eventId/report/summary-pdf` (event summary) all existed on the backend with no frontend consumer for a while — all three are now wired: the Live Session Dashboard's "Share & Access" card has a "Session Report (PDF)" button (next to "Audit Log (CSV)") for the first; the Programmes list's per-event header has "Full Report"/"Session Report"/"Summary" download buttons for the other two (see Service Programme Module notes below for their distinct availability gating).
 - **Session report fixes** — `buildSessionReport()`'s `totalPauseDurationSeconds` only ever summed pause entries that had a `resumedAt` (`ServicePauseEntry.resumedAt: Date | null`); a session ended while still paused left that final pause entry with `resumedAt: null` forever, silently dropping its entire duration from the total (and showing "ongoing" in the pause log indefinitely). `end()` now closes any still-open pause entry (`resumedAt IS NULL`, same query used by `advance()`/`resume()`) inside its existing transaction before finalizing the session, so the total and the pause log are always accurate once a session ends. Separately, the session-report PDF's per-slot table (`PdfService.drawSessionReport`/`drawFullEventReport`) dropped its "Type" column and split the previous combined "Topic / Speaker" column (joined with `·`) into two distinct "Topic" and "Speaker" columns — removing the Type column on its own would have made any slot with no topic set indistinguishable from another (`SessionSlotReport.topic` is nullable), so the new `PdfService.slotTopicLabel()` falls back to a human-readable type label (`ServiceSlotTypeLabels[type]`, e.g. "Praise & Worship") whenever a slot has no topic, rather than a bare "—"; `drawEventSummaryReport`'s already-separate Topic/Speaker columns and `drawOrderOfServiceTable`'s topic column were both updated to use the same shared helper for consistency. The single-session PDF also gained a small **Analysis** section — a handful of narrative, presentation-only insights derived from data already on `SessionReport` (on-time/over/under completion counts and combined variance, skipped-slot count, the single biggest overrun slot, and a pause summary with the most common reason) — rendered between the Pause Log and the closing time-summary band. These insights are computed in `PdfService` at render time and are deliberately **not** added to the `SessionReport` JSON contract or the `GET /service-session/:code/report` response. The Pause Log table (in both `drawSessionReport` and `drawFullEventReport`) also stopped rendering a bare `Slot ${p.slotPosition + 1}` — `ServicePauseEntry` only ever stored the slot's numeric position with no name, so the report showed unexplained entries like "Slot 3" with nothing tying it back to the actual slot. `PdfService.pauseSlotLabel()` now resolves that position back to the matching `SessionSlotReport` and reuses `slotTopicLabel()`, so the Pause Log shows the same human-readable topic/type label as the Slots table above it.
 - **`GET /service-session/:code/pm/report/pdf`** — the same session report PDF, now also reachable from the public Programme Manager link (`ShareTokenGuard` + `NamedAccessGuard`, controller delegates to a shared private `sendSessionReportPdf` helper alongside the admin route to avoid duplicating the response-header logic). `getReportPdf`/`getFormattedReport` have no session-status precondition — this works whether the session is still LIVE or already COMPLETED — but the frontend surfaces it specifically on the manage page's "Session Ended" screen, since that's the point a PM user actually wants it. This required reordering `/live/:code/manage`'s early-return checks: the name+PIN sign-in gate now runs **before** the "Session Ended" check (previously the reverse — anyone with just the raw link could see the ended-session message with no PIN at all, and a report-download button placed there would have failed silently for anyone who hadn't signed in). Now reaching the ended-session screen guarantees a `grantToken` is already in hand.
 - Admin frontend information architecture: the `GET /service-programme` list groups programmes under their parent event (using the `event`/`serviceSlotDetail` fields above) instead of rendering every service slot as an unrelated row, so multi-slot events (e.g. First/Second Service on the same Sunday) visibly belong together. A persistent "Live" pill in the admin top bar (`useActiveSessions`, polling `GET /service-session/active`) is reachable from any page and deep-links straight into a dedicated full-width Live Session Dashboard at `/service-programme/live/:sessionCode` — replacing the old cramped side-panel controls, which now show only a status summary with a link to the dashboard. The poll interval backs off adaptively: 20s while at least one session is LIVE, 60s while idle (the common case, since most of the time nothing is live) — this cut the steady-state request volume from this always-mounted, every-page component by 3x without slowing detection of a session actually starting/ending.
@@ -2106,11 +2412,26 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - When the session ends, remaining PENDING slots are marked SKIPPED, the programme status moves to COMPLETED, and if `saveAsTemplate = true` the programme is auto-saved as a `ServiceProgrammeTemplate`. A session-report email is fire-and-forget dispatched to all active Admin department workers via Bull queue (template: `service-session-report`).
 - **Indexes** (migration `AddServiceProgrammeQueryIndexes`): `service_sessions(status)` backs the frequently-polled `getActiveSessions()` (global Live pill, every 20s from every open admin tab); `service_programme_slots(member_id)` backs the synchronous double-booking conflict check run on every slot assignment; `service_programmes(status)` backs the daily reminder scheduler's DRAFT filter; a partial index on `service_programme_slots(reminder_sent_at) WHERE reminder_sent_at IS NULL` matches that scheduler's exact predicate and stays small regardless of table growth. `service_slots(start_time)`/`(end_time)` (pre-existing) already cover the conflict check's time-overlap comparison and the reminder scheduler's 24–48h window.
 - **Create Programme dashboard** — the admin "New Programme" flow (`CreateProgrammeDashboard` in `app/service-programme/page.tsx`) replaced a plain "pick one slot, create an empty draft, add items one at a time afterward" modal. The entry point is an **Event** picker, not a slot picker — service slots are only ever a sub-part of an event, so making the admin pick one arbitrary slot just to "unlock" the rest was the wrong mental model. The dropdown lists distinct events (deduped from the slot list client-side, dated by their earliest slot's start time, events where every slot already has a programme excluded), and picking one loads all of that event's slots into a full-width dashboard: a left-hand list of the event's services (each independently checked on/off, with its own item count/duration, the first not-yet-programmed one auto-selected), and a right-hand editor for whichever service is selected — each service's order-of-service is a genuinely separate list (no shared/master list, per explicit product direction), built with real HTML5 drag-and-drop reordering (matching the pattern already used for reordering an existing DRAFT programme's slots) plus the existing move-up/down buttons for accessibility. Submitting maps each checked service to one `programmes[]` entry in the `POST /service-programme` call above.
-  - **Item entry is inline, not modal-based** (`ItemEditorRow`) — the initial version reused the existing full-screen `AddSlotModal` (built for adding a single slot to an already-created programme) for this dashboard too, which turned out to be too many clicks per item for building a whole order-of-service in one sitting. It was replaced with an always-visible "quick add" row at the end of each service's item list — type, topic, duration, and a single merged speaker field (see `SpeakerInput` below) editable directly in place; pressing Enter or the check button appends the item and immediately resets the row for the next one, with no modal open/close cycle. Clicking an existing item turns that row into the same inline editor (pre-filled, Save/Cancel) instead of reopening the modal. `AddSlotModal`/`EditSlotModal` are unchanged and still used by the existing/already-created programme's detail panel (`ProgrammeDetailPanel`) — this change is scoped to the multi-slot creation dashboard only.
+  - **Item entry is inline, not modal-based** (`ItemEditorRow`) — the initial version reused the old full-screen `AddSlotModal`/`EditSlotModal` (originally built for adding/editing a single slot on an already-created programme) for this dashboard too, which turned out to be too many clicks per item for building a whole order-of-service in one sitting. It was replaced with an always-visible "quick add" row at the end of each service's item list — type, topic, duration, and a single merged speaker field (see `SpeakerInput` below) editable directly in place; pressing Enter or the check button appends the item and immediately resets the row for the next one, with no modal open/close cycle. Clicking an existing item turns that row into the same inline editor (pre-filled, Save/Cancel) instead of reopening a modal.
+  - **`ProgrammeDetailPanel` (editing an already-created DRAFT programme) now uses the same `ItemEditorRow`** instead of `AddSlotModal`/`EditSlotModal`, which have been deleted — editing a programme days after creating it now has the exact same inline, no-modal feel as building it the first time, instead of two different UIs for the same data depending on when you touch it. `slotToEditorValue()` converts the live API `ServiceProgrammeSlot` shape (`member`/`backupMember` as nested `{id, firstname, lastname}` objects) into the shared `ItemEditorValue` the row edits; committing calls the real `addSlot`/`updateSlot` endpoints directly (no local draft array — each commit is its own API round trip, unlike the creation dashboard which batches everything into one `POST /service-programme` call). Topic and speaker quick-pick suggestions are drawn from the programme's own other slots rather than the whole event, since this panel only ever has one programme's slots in scope.
   - **`SpeakerInput`** merges the old Member/Guest toggle into one field: typing is treated as a guest name by default, and picking a live-search match upgrades it to a member — removing the extra "which kind of person" click before you could even start typing. A backup speaker toggle ("+ Add backup speaker") is available on each row in this dashboard, using the same merged `SpeakerInput`.
   - Topic and speaker fields autocomplete/suggest from names already used anywhere else in the same event (`topicSuggestions`/`memberSuggestions`, derived client-side from all services' in-progress items — not persisted, not an API concern), so a repeated item (e.g. "Praise & Worship", the same worship leader) doesn't have to be retyped per service.
   - **"Copy from…"** in the active service's header lets you duplicate another already-configured service's full item list (including backups) into the current one in one action — the order of service is usually similar across a multi-service Sunday even though the ministers differ, so this is duplicate-then-edit rather than a shared/master list (each service's items stay fully independent once copied; editing one afterward never affects the other). Prompts for confirmation only if the target service already has items, since that copy would overwrite them.
+  - **"Apply template…"** sits next to "Copy from…" in the same header — applying a saved `ServiceProgrammeTemplate` (previously only usable via `applyTemplate()` on an already-created programme, a second trip after creation) now populates the active service's local draft list directly at creation time, client-side, the same way "Copy from…" does (`templateSlotToDraftItem()` converts the template's `ServiceProgrammeSlot[]` into the local `DraftItem[]` shape). Same overwrite-confirmation rule as "Copy from…". `applyTemplate()`/`ApplyTemplateModal` are unchanged and still available on an already-created programme via `ProgrammeDetailPanel`'s "Template" button — this is an additional, earlier entry point, not a replacement.
   - `DraftItemRow`'s secondary line (speaker/duration) uses each slot type's `cfg.text` colour (e.g. `text-amber-800` for Speaker) instead of a flat grey — that per-type colour token existed in `SLOT_TYPE_CONFIG` already but was unused; pairing it with the matching `cfg.bg` tint (e.g. `bg-amber-50`) gives correct, type-appropriate contrast instead of one grey that read as low-contrast against every row colour.
+  - **"My Upcoming Assignments"** — previously a member/worker's only signal that they were scheduled was the one-off `service-slot-assigned` email; there was no way to look it up later. `GET /service-programme/my-assignments` (`getMyUpcomingAssignments()` in `ServiceProgrammeService`) fixes this on the read side: any authenticated member/worker can pull their own upcoming slots — as primary or backup — across every not-yet-completed programme. This is admin-portal-agnostic (`JwtAuthGuard` only, no admin permission), consumed by the **member-facing** app (`Faithapp`, a separate Next.js PWA from the admin portal `Faithapp-admin`) rather than the admin dashboard — `hooks/use-my-assignments.ts` there fetches it and `components/layout/home.tsx` renders a horizontally-scrolling "My Upcoming Assignments" card row on the member home screen (dark cards matching the existing hero's palette), shown only when the member actually has something coming up.
+  - **Real-time "my slot" view + personal service history** — two more member-facing additions alongside "My Upcoming Assignments" in `Faithapp`: (1) once a member's upcoming assignment's programme goes LIVE, its card becomes tappable (pulsing "Live" badge) and links to `/my-assignment/:sessionCode`, a page backed by `GET /service-session/:sessionCode/my-status` (`getMyLiveStatus()`) — shows a live countdown to their turn, an "you're up now" banner once it arrives, an "your part is complete" state afterward, and the full running order with their own row highlighted; the countdown ticks locally client-side between 8s polls using the same `fetchedAt` + elapsed-time technique the admin Live Session Dashboard already uses, rather than polling more aggressively. (2) `/service-history` (`hooks/use-my-service-history.ts` → `GET /service-session/my-history`) — a paginated list of the member's own completed slots with total time served and a per-slot-type breakdown, linked from Profile's Worker Operations section. Both reuse existing server-side logic rather than introducing new authorization concepts: `getMyLiveStatus` never exposes other members' identities (only role/position/timing derived values), and `getMyServiceHistory`'s effective-speaker crediting rule is identical to `getAnalytics`'s `memberId` filter, so the two can never disagree about who gets credit for a slot.
+  - **Analytics tab** — a third tab alongside Programmes/Templates (`AnalyticsTab` in `app/service-programme/page.tsx`) surfaces `GET /service-session/analytics`, which existed on the backend fully built but had no frontend caller before this. Filterable by date range and service slot name; renders summary cards (completed sessions, avg completion rate, total overrun slots, total pause time — all derived client-side from the `sessions` array) plus three tables: per-slot-type stats (avg actual vs. allocated time, overrun counts), top speakers (by total/avg time on the mic), and recent completed sessions. Gives an admin running several services a week visibility into load-balancing and pacing without opening individual session reports one at a time. **Defaults to a bounded ~180-day lookback** (`ServiceSessionService.defaultAnalyticsFrom()`) when `from` is omitted, instead of the 6-way-joined query scanning every COMPLETED session ever recorded — the tab's own `from`/`to` inputs are pre-populated with this same 180-day window on first load so the shown range is never silently narrower than what the UI displays; an explicit `from` (however old) is always honored as-is.
+    - Fixed: the "Service Slot Name" (and date-range) filters silently did nothing — `load()` was wrapped in `useCallback(..., [fetchAnalytics])`, missing `from`/`to`/`serviceSlotName` from its dependency array, so the memoized closure always read the empty strings captured on first render regardless of what was typed. Fixed by including them in the deps; the initial-mount fetch now runs from a plain `useEffect(() => { load(); }, [])` instead of depending on `load` itself, so typing a filter doesn't trigger a fetch on every keystroke — only clicking "Load" (`onClick={load}`) does, now with the current input values.
+    - Fixed (backend): even once the frontend closure bug was fixed, the filter still only matched a session's sub-service label (`serviceSlot.name`, e.g. "First Service") — typing the service's actual name (the parent Event's name, e.g. "Sunday Service") matched nothing, since `event` was never joined into the analytics query at all. `fetchAnalytics()` now joins `serviceSlot.event` and matches `(serviceSlot.name ILIKE :name OR event.name ILIKE :name)`, so either name works. Frontend field relabelled "Service Slot Name" → "Service Name" to match.
+    - The "Service Name" field suggests as you type via `ServiceNameFilterInput`, matching `SearchableSelect`'s visual pattern (the same one the service-headcount page's slot pickers use) rather than a native `<datalist>` — a search-icon input, a dropdown of matches each showing its date as a grey sublabel (`{name} — {date}`, since the same name recurs across many dates and there'd be no way to tell occurrences apart otherwise), and once a suggestion is clicked, a chip (`{name} — {date}` + a clear button) replaces the input, exactly like a selected `SearchableSelect` option. The datalist was tried first but browser-native datalist rendering/filtering is inconsistent enough that it read as broken to users. One deliberate difference from `SearchableSelect`: typing without clicking a suggestion still updates the filter value (clearing any previously-selected chip back to free-text mode) rather than requiring an exact pick, since the backend does a partial/ILIKE match on `serviceSlotName` and the field needs to stay usable for names or occurrences that aren't in the (client-side, non-exhaustive) suggestion list. The filtering itself is a local substring match — no API round-trip, unlike the Minister/Speaker filter which searches live.
+    - Fixed: suggestions were sourced from the hook's `fetchServiceSlots()` — built for the "Create Programme" picker, so it deliberately filters to future events only and excludes any slot that already has a programme. Analytics needs the opposite (names of *past/completed* sessions), and since a slot only shows up in analytics once its programme has actually run, that filter combination excluded essentially every real name, leaving the suggestion list empty regardless of the input component. `AnalyticsTab` now fetches `GET /events?page=1&limit=200` directly (no `upcoming` param — that filter is opt-in and off by default) and collects every distinct event/service-slot name with no date or usage filtering, dropping its dependency on the shared `hook` prop entirely (`<AnalyticsTab />` takes none now).
+    - **Minister/Speaker filter** — `MemberFilterInput` (new, in `app/service-programme/page.tsx`) is the same live `/members?search=` combobox as `SpeakerInput` used at creation time, minus the guest-name fallback (this is a filter, not an assignment field). Backend-side, `memberId` restricts the query to sessions this member actually appeared in via a session-slot subquery (`session.id IN (SELECT ... service_session_slots ... WHERE ps.member_id = :memberId OR ss.overridden_member_id = :memberId)`) — a raw SQL subquery rather than a plain join-then-filter, because filtering on a left-joined `sessionSlots` relation directly would silently truncate that session's OTHER slots out of the hydrated result (corrupting `completionRate`, which depends on the session's full slot count). Within an included session, the per-slot accumulation loop also skips slots that aren't this member's, so `slotTypeStats`/`topSpeakers` reflect only their own contribution — while `completionRate`/`totalDurationMinutes` stay session-wide (those describe the whole service, not one person's slice of it).
+    - **Slot Type filter** — a `<select>` of the 8 `ServiceSlotTypeEnum` values (reusing `SLOT_TYPES`/`SLOT_TYPE_CONFIG`, already defined in this file for the programme editor). Backend-side, `slotType` doesn't remove sessions from the list (a service having no "Offering" segment isn't itself meaningful to filter out) — it only restricts which slots feed into `slotTypeStats`/`topSpeakers`/the per-session `overrunSlots` count, so "compare just Offering segments across every service" resolves to a single-row breakdown table instead of scrolling past 7 other types to find it.
+    - **Quick date presets** ("7d" / "30d" / "This Quarter") compute the range and fetch immediately on click, rather than just filling the date inputs and waiting for "Load" — since a preset click is already one deliberate action, requiring a second "Load" click after it would be redundant. They call `fetchAnalytics` directly with the freshly computed dates instead of going through the memoized `load()`, for the same reason `load()` itself doesn't chase its own tail: `setFrom`/`setTo` don't take effect until the next render, so calling the existing `load()` immediately afterward would still run with the previous (stale) range.
+  - **Create Programme's Event picker is now searchable** — was a plain `<select>` listing every open event; replaced with the same `SearchableSelect` component used by the headcount page's Event/service-slot pickers (extracted to the shared `components/ui/searchable-select.tsx` rather than duplicated, and re-imported into the headcount page too). Each option's sublabel shows the date and sub-service count, matching the old `<option>` text.
+  - **Full-event report downloads** — the Programmes list groups by event already (`groupProgrammesByEvent`); each event group's header now has a "Full Report" button (`GET /service-programme/event/:eventId/pdf`, always available — the order-of-service across every sub-service regardless of session state) plus a "Session Report" button that only appears once every programme in the group is `COMPLETED` (`GET /service-session/event/:eventId/report/pdf`, the post-service analytics report — timing, pauses, completion rate — which 400s if any session isn't finished yet, so it's hidden rather than shown-then-erroring). Both backend routes already existed and were unused by any frontend button before this. Each individual sub-service row also has its own small download icon ("download this service only", `GET /service-programme/:id/pdf`) alongside the existing detail-panel download, for a quick single-service PDF without opening the panel.
+  - **"Start Service" bulk-start** — a multi-service Sunday no longer needs one "Start Session" click per sub-service. Each event group's header shows a "Start Service" button whenever at least one of its programmes is still `DRAFT`, calling the new `POST /service-session/event/:eventId/start` (`startEventSessions` in `use-service-session.ts`) which starts every startable DRAFT programme under that event in one request. No new "EventSession" entity was introduced — this loops the existing per-programme `start()` server-side (`ServiceSessionService.startEvent()` → `ServiceProgrammeService.findStartableDraftProgrammesForEvent()`), so each sub-service still gets its own independent session, anchor, and share token, controlled separately exactly as before; the only change is removing the repetitive click to kick them off. The event-grouped Programmes list (each row already showing a `StatusBadge`) doubles as the "at a glance" event dashboard the button lands you back on — a dedicated summary page wasn't built since the existing grouped list already shows every sub-service's DRAFT/LIVE/COMPLETED state together.
 
 **Access control:**
 - Programme CRUD and reporting: `AdminGuard` + `SERVICE_PROGRAMME_READ` (reads) or `SERVICE_PROGRAMME_WRITE` (mutations). Assign these permissions to admin roles via the role management API.
@@ -2147,13 +2468,16 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /auth/admin-login                                          | Public                                                        | Admin portal login — verifies active Admin record; no device check                                            |
 | POST   | /auth/refresh                                              | Public                                                        | Exchange refresh token                                                                                        |
 | POST   | /auth/logout                                               | Any                                                           | Invalidate session                                                                                            |
-| GET    | /auth/me                                                   | Any                                                           | Own profile. Includes `isHod: boolean` — `true` if the authenticated member has a row in `department_leads`. Clients should fetch this once on load to drive HOD-gated UI.                                  |
+| GET    | /auth/me                                                   | Any                                                           | Own profile. Includes `isHod: boolean` — `true` if the authenticated member has a row in `department_leads`; and `pastorType: PastorTypeEnum \| null`. Clients should fetch this once on load to drive HOD-gated UI.                                  |
 | POST   | /auth/change-password                                      | Any                                                           | Change password (required when `requires_password_change` is true)                                            |
+| POST   | /auth/email-change/request                                 | Any (JwtAuthGuard)                                            | Body `{ newEmail }` — sends a 6-digit OTP to the new address; rate-limited; `409` if already in use by another member |
+| POST   | /auth/email-change/confirm                                 | Any (JwtAuthGuard)                                            | Body `{ otp }` — verifies OTP, updates own email, sends a confirmation email                                  |
 | POST   | /auth/forgot-password                                      | Public                                                        | Request OTP reset code (rate-limited)                                                                         |
 | POST   | /auth/reset-password                                       | Public                                                        | Verify OTP and set new password; invalidates current session                                                  |
 | POST   | /auth/device-reset/request                                 | Public                                                        | Self-service device reset — rate-limited; issues OTP to registered email; locks in `newDeviceId` at request   |
 | POST   | /auth/device-reset/verify                                  | Public                                                        | Verify OTP and swap `deviceId` to `newDeviceId`; invalidates all active sessions                              |
 | GET    | /members/me                                                | Any (JwtAuthGuard)                                            | Own member profile with workerProfile + department relations                                                  |
+| PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` (excludes email and admin-only church-record fields) |
 | GET    | /members?page=&limit=&role=&search=                        | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive)   |
 | GET    | /members/workers                                           | AdminGuard (MEMBERS_READ)                                     | List workers (filterable by status)                                                                           |
 | GET    | /members/:id                                               | AdminGuard (MEMBERS_READ)                                     | Get member by ID                                                                                              |
@@ -2165,6 +2489,13 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | PATCH  | /members/:id/status                                        | AdminGuard (MEMBERS_WRITE)                                    | Activate/deactivate member                                                                                    |
 | POST   | /members/:id/reset-password                                | AdminGuard (MEMBERS_WRITE)                                    | Reset & email new password                                                                                    |
 | DELETE | /members/:id/device                                        | AdminGuard (MEMBERS_WRITE)                                    | Purge device lock; invalidates all active sessions                                                            |
+| POST   | /members/:id/pastor                                        | AdminGuard (MEMBERS_WRITE)                                    | Assign pastoral designation, body `{ type: PastorTypeEnum }`; `409` if already a pastor                       |
+| PATCH  | /members/:id/pastor                                        | AdminGuard (MEMBERS_WRITE)                                    | Change pastor type, body `{ type: PastorTypeEnum }`; `404` if not a pastor                                    |
+| DELETE | /members/:id/pastor                                        | AdminGuard (MEMBERS_WRITE)                                    | Remove pastoral designation; `404` if not a pastor; returns `204`                                             |
+| GET    | /members/bulk-import/template                              | AdminGuard (MEMBERS_WRITE)                                    | Streams a `.xlsx` bulk-import template                                                                        |
+| POST   | /members/bulk-import/preview                               | AdminGuard (MEMBERS_WRITE)                                    | Multipart `file` upload (5 MB cap); validates every row, persists a `MemberImportJob` + rows, returns `{ ...job, rows }` |
+| GET    | /members/bulk-import/:jobId                                | AdminGuard (MEMBERS_WRITE)                                    | Refetch a previously-previewed import job and its rows                                                        |
+| POST   | /members/bulk-import/:jobId/commit                         | AdminGuard (MEMBERS_WRITE)                                    | Create a Member (+ WorkerProfile if `department` was filled) for every valid row; returns `{ createdCount, failedRows }` |
 | GET    | /admin/roles                                               | AdminGuard (ADMIN_READ)                                       | List admin roles                                                                                              |
 | GET    | /admin/roles/:id                                           | AdminGuard (ADMIN_READ)                                       | Get admin role by ID                                                                                          |
 | POST   | /admin/roles                                               | AdminGuard (ADMIN_WRITE)                                      | Create admin role                                                                                             |
@@ -2179,6 +2510,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /admin/audit-logs                                          | AdminGuard (AUDIT_READ)                                       | Paginated audit log; filterable by action, actorId, targetId, dateFrom, dateTo                                |
 | POST   | /attendances/checkin                                       | Any                                                           | Check in to a service slot (workers must include `location`; one record per event per member)                 |
 | GET    | /attendances/my-history                                    | Any                                                           | Own attendance records                                                                                        |
+| GET    | /attendances/my-summary                                    | Any                                                           | Own lifetime rate/streak, computed in SQL over full history (not just the current page) — `{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` |
 | GET    | /attendances/history                                       | AdminGuard (ATTENDANCE_READ)                                  | All attendance records; query: `page`, `limit`, `memberId`, `slotId`, `status`, `dateFrom`, `dateTo`, `search` (ILIKE on firstname, lastname, email) |
 | GET    | /attendances/history/department?slotId=                    | WORKER                                                        | Department attendance for a slot (scoped to caller's own department via lead role)                            |
 | GET    | /attendances/department/event/:eventId                     | WORKER                                                        | Worker attendance for all slots of an event (scoped to caller's own department via lead role)                 |
@@ -2206,7 +2538,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
-| GET    | /events                                                    | Any                                                           | List events. Query: `page`, `limit`, `orderBy`, `order`, `from` (YYYY-MM-DD), `to` (YYYY-MM-DD), `upcoming=true` |
+| GET    | /events                                                    | Any                                                           | List events. Query: `page`, `limit`, `orderBy`, `order`, `from` (YYYY-MM-DD), `to` (YYYY-MM-DD), `upcoming=true`, `search` (case-insensitive match on event name — powers searchable event pickers in the admin frontend) |
 | DELETE | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Delete single event — blocked if `attendanceMarked = true` or event is in the past                           |
 | DELETE | /events/recurring/:recurringEventId                        | AdminGuard (EVENTS_WRITE)                                     | Delete future recurring events                                                                                |
 | POST   | /event-config                                              | AdminGuard (EVENTS_WRITE)                                     | Create timing config                                                                                          |
@@ -2251,12 +2583,16 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | PATCH  | /classes/enrollments/:id/status                            | AdminGuard (CLASSES_WRITE)                                    | Update enrolment status                                                                                       |
 | GET    | /classes/my/enrollments                                    | Any                                                           | Own enrolments                                                                                                |
 | GET    | /classes/:id/enrollments                                   | AdminGuard (CLASSES_READ)                                     | All enrolments for a class                                                                                    |
-| POST   | /announcements                                             | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Create announcement                                                                                           |
-| PATCH  | /announcements/:id                                         | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Update announcement                                                                                           |
+| POST   | /announcements                                             | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Create announcement; optional `sendViaSms` (requires `SMS_SEND`) + `smsBody` (required if `sendViaSms=true`)  |
+| POST   | /announcements/sms-broadcast                               | AdminGuard (SMS_SEND)                                         | Send an SMS to an audience without creating an announcement; body `{ audience, departmentId?/targetMemberId?/groupId?, message }` — returns `{ sentCount }` |
+| PATCH  | /announcements/:id                                         | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Update announcement; same `sendViaSms`/`smsBody` rules as create — SMS only (re-)sent on the transition into `sendViaSms=true` |
 | DELETE | /announcements/:id                                         | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Delete announcement                                                                                           |
 | GET    | /announcements/all?search=&audience=&page=&limit=          | AdminGuard (ANNOUNCEMENTS_READ)                               | All announcements (paginated); optional `search` filters by title (case-insensitive); optional `audience` filters by value (ALL/WORKERS_ONLY/MEMBERS_ONLY/DEPARTMENT/INDIVIDUAL) |
 | GET    | /announcements/feed                                        | Any                                                           | My filtered feed                                                                                              |
 | GET    | /announcements/:id                                         | Any                                                           | Get announcement                                                                                              |
+| GET    | /admin/sms/balance                                         | AdminGuard (SMS_READ)                                         | Returns `{ balance, currency }` from the SMS provider                                                         |
+| POST   | /admin/sms/segment-count                                   | AdminGuard (SMS_READ)                                         | Body `{ message }` — returns `{ segments, encoding, characterCount }`                                         |
+| GET    | /admin/sms/logs                                            | AdminGuard (SMS_READ)                                         | Live passthrough to the provider's message history — not paginated/filtered server-side                       |
 | GET    | /birthday/today                                            | Any (JwtAuthGuard)                                            | List active members with a birthday today (birthDay + birthMonth match current date)                          |
 | GET    | /birthday/upcoming                                         | AdminGuard (MEMBERS_READ)                                     | List active members with upcoming birthdays; `?days=N` (default 7) sets the lookahead window, ordered by month/day |
 | POST   | /birthday/wishes/:recipientId                              | Any                                                           | Send a birthday wish (once per year per sender; rate-limited to WISH_DAILY_LIMIT/day)                         |
@@ -2343,7 +2679,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | PATCH  | /admin/tithes/disputes/:id/approve                         | AdminGuard (FINANCE_WRITE)                                    | Approve a tithe dispute (creates TitheRecord)                                                                 |
 | PATCH  | /admin/tithes/disputes/:id/reject                          | AdminGuard (FINANCE_WRITE)                                    | Reject a tithe dispute                                                                                        |
 | GET    | /tithes/me                                                 | Any (JwtAuthGuard)                                            | Member's own tithe records (paginated)                                                                        |
-| POST   | /tithes/me/download                                        | Any (JwtAuthGuard)                                            | Email a PDF tithe statement to the caller's registered email. Optional query: `fromMonth` (YYYY-MM), `toMonth` (YYYY-MM) — filters records to the date range and prints the period on the PDF |
+| POST   | /tithes/me/statement/send                                  | Any (JwtAuthGuard)                                            | Email a PDF tithe statement to the caller's registered email. Optional query: `fromMonth` (YYYY-MM), `toMonth` (YYYY-MM) — filters records to the date range and prints the period on the PDF |
 | POST   | /tithes/proof                                              | Any (JwtAuthGuard)                                            | Submit tithe payment proof (multipart, field: file, max 2 MB); body: amount, paymentDate, bankName?, reference? |
 | GET    | /tithes/proof                                              | Any (JwtAuthGuard)                                            | List caller's own tithe payment proofs (paginated)                                                            |
 | GET    | /admin/tithes/proofs?status=&search=&page=&limit=          | AdminGuard (FINANCE_READ)                                     | List all tithe payment proofs; optional `status` filter (PENDING/CONFIRMED/DECLINED); `search` filters by member firstname, lastname, or email |
@@ -2364,10 +2700,11 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /finance/requests/:id                                      | WORKER — HOD only                                             | Get a single request from own department (includes proofUrl once attached)                                    |
 | POST   | /service-programme                                         | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Create a programme for one or more service slots in one call — body is `{ programmes: [{ serviceSlotId, slots? }], saveAsTemplate? }` (`programmes` min 1). One `ServiceProgramme` per slot still (1:1 with `ServiceSlot`), but a multi-service Sunday (First/Second Service under one Event) can be programmed in a single request instead of one round trip per slot. Each entry's `slots` (order-of-service items) is independent — sibling slots are not required to have matching items, or any items at all. 404 if any `serviceSlotId` doesn't exist; 409 (naming the affected slots) if any already has a programme — the whole call is rejected, none are created. Each `slots` item is created the same way `POST /service-programme/:id/slots` would (member/backup resolution, assignment email, conflict-warning check), in array order starting at position 0. `saveAsTemplate` applies to every programme created in the call. Response is a single fully-loaded programme (same shape as `GET /service-programme/:id`) when `programmes` has one entry, or an array of them when it has multiple. Omitting an entry's `slots` still creates that programme as an empty DRAFT, added to later. |
 | GET    | /service-programme                                         | AdminGuard + SERVICE_PROGRAMME_READ                           | List all programmes paginated (query: page, limit). Each result includes structured `event: { id, name, eventDate }` and `serviceSlotDetail: { id, name, startTime, endTime }` (in addition to the flattened `serviceSlotName` string) so the admin UI can group programmes by their parent event instead of rendering every slot as an unrelated row. |
+| GET    | /service-programme/my-assignments                          | JwtAuthGuard                                                  | The calling member's own upcoming slots (as primary or backup) across every DRAFT/LIVE programme, ordered by service start time. Each entry includes `isBackup`, so a member on standby can tell it apart from a confirmed slot. Excludes COMPLETED programmes and anything already in the past. Also includes `sessionCode` — `null` until the programme's session goes LIVE, then the code needed to call `GET /service-session/:sessionCode/my-status`. |
 | GET    | /service-programme/templates                               | AdminGuard + SERVICE_PROGRAMME_READ                           | List all reusable programme templates ordered by name                                                         |
 | DELETE | /service-programme/templates/:templateId                   | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Delete a template                                                                                             |
 | GET    | /service-programme/:id                                     | AdminGuard + SERVICE_PROGRAMME_READ                           | Get a single programme with all slots and member relations. Each slot includes flattened `memberName`/`backupMemberName` strings derived from the loaded `member`/`backupMember` relations, so the frontend never has to resolve the relation object itself. |
-| PATCH  | /service-programme/:id                                     | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Update programme metadata (saveAsTemplate flag)                                                               |
+| PATCH  | /service-programme/:id                                     | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Update programme metadata (saveAsTemplate flag). Existed with no frontend consumer until now — `ProgrammeDetailPanel` has a "Save as template when completed" toggle next to the status flow. |
 | DELETE | /service-programme/:id                                     | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Delete a DRAFT programme — 400 if LIVE or COMPLETED                                                          |
 | POST   | /service-programme/:id/slots                               | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Append a slot (appended at next position). If `memberId` is set and that member has an email, queues a `service-slot-assigned` notification email. |
 | PUT    | /service-programme/:id/slots/reorder                       | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Reorder all slots (body: `{ slots: [{ id }] }` in desired order) — DRAFT programmes only; for LIVE sessions use `PUT /service-session/:sessionCode/slots/reorder` |
@@ -2376,8 +2713,9 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /service-programme/:id/apply-template/:templateId          | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Apply a template to a DRAFT programme (clears existing slots, copies template structure)                      |
 | GET    | /service-programme/event/:eventId/pdf                      | AdminGuard + SERVICE_PROGRAMME_READ                           | Download the full event programme as a PDF (application/pdf). Covers every service slot in the event ordered by start time. Each service shows its programme slots (type, topic, speaker, backup, minutes) or a "no programme" notice if not yet created. Filename derived from event name. |
 | GET    | /service-programme/:id/pdf                                 | AdminGuard + SERVICE_PROGRAMME_READ                           | Download a single programme as a PDF (application/pdf). Includes slot name, event date/time, all slots with type, topic, speaker, backup, and allocated minutes. |
-| GET    | /service-programme/:id/sessions                            | AdminGuard + SERVICE_PROGRAMME_READ                           | Paginated list of historical sessions for a programme (query: page, limit)                                    |
+| GET    | /service-programme/:id/sessions                            | AdminGuard + SERVICE_PROGRAMME_READ                           | Paginated list of historical sessions for a programme (query: page, limit). Existed with no frontend consumer until now — `ProgrammeDetailPanel` has a collapsible "Session History" section (usually 0–1 entries under current business rules, since a programme can't be restarted once it leaves DRAFT; the endpoint exists for the audit trail regardless). |
 | POST   | /service-session/programme/:programmeId/start              | JwtAuthGuard (+ assertCanControlSession)                      | Start a session for a DRAFT programme; returns session with sessionCode and generates a Redis shareToken       |
+| POST   | /service-session/event/:eventId/start                      | JwtAuthGuard (+ assertCanControlSession)                      | Bulk-start every DRAFT programme with slots under the event in one call (loops the single-programme `start()`); returns an array of sessions. 404 if the event has no service slots; 400 if none of its programmes are startable (all already started/completed, or none have slots yet). |
 | POST   | /service-session/:sessionCode/advance                      | JwtAuthGuard (+ assertCanControlSession)                      | Advance to next slot; returns updated Redis anchor                                                            |
 | POST   | /service-session/:sessionCode/rewind                       | JwtAuthGuard (+ assertCanControlSession)                      | Go back to previous slot — 400 if already at first slot                                                      |
 | POST   | /service-session/:sessionCode/pause                        | JwtAuthGuard (+ assertCanControlSession)                      | Pause session (body: reason); creates ServicePauseEntry                                                       |
@@ -2401,23 +2739,25 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /service-session/:sessionCode/pm/slots/:position/override    | Public + ShareTokenGuard (`?token=`) + NamedAccessGuard (`?grantToken=`) | Same as `/slots/:position/override`, callable from the public Programme Manager link — lets the PM rename a topic or swap the minister/speaker mid-service, not just admins |
 | POST   | /service-session/:sessionCode/pm/end                        | Public + ShareTokenGuard (`?token=`) + NamedAccessGuard (`?grantToken=`) | Same as `/end`, callable from the public Programme Manager link (session end is included in the public link's scope by product decision) |
 | GET    | /service-session/active                                    | AdminGuard + SERVICE_PROGRAMME_READ                           | Returns `{ sessionCode, serviceSlotName, startedAt }[]` for every currently LIVE session — powers the global "Live" indicator shown in the admin top bar on every page |
-| GET    | /service-session/analytics                                 | AdminGuard + SERVICE_PROGRAMME_READ                           | Aggregate analytics across COMPLETED sessions (query: from, to, serviceSlotName); overrun stats, avg times, top speakers |
+| GET    | /service-session/analytics                                 | AdminGuard + SERVICE_PROGRAMME_READ                           | Aggregate analytics across COMPLETED sessions (query: from, to, serviceSlotName — matches either the sub-service's own name or its parent event's name; memberId — restricts to sessions this member appeared in, as originally assigned or as whoever stepped in; slotType — restricts the type/speaker breakdown to one `ServiceSlotTypeEnum` value); overrun stats, avg times, top speakers |
+| GET    | /service-session/my-history?page=&limit=                   | JwtAuthGuard                                                  | The calling member's own COMPLETED-session slot history (query: page, limit; default 1/10). Returns `{ totalSlots, totalActualSeconds, bySlotType: [{type, count, totalActualSeconds}], entries: [{eventName, serviceSlotName, sessionDate, type, topic, allocatedMinutes, actualSeconds}], page, limit, totalCount, totalPages }`. Summary/`bySlotType` are computed over the caller's full history, not just the current page. Credits only the *effective* speaker of a slot (`overriddenMember?.id ?? programmeSlot.member?.id`) — a listed backup who never actually went on gets no credit, matching the same rule `getAnalytics`'s `memberId` filter already uses. Powers the member-facing app's "Service History" page. |
 | GET    | /service-session/:sessionCode/state                        | Public (`@Public()`)                                          | Get live session state — anchor from Redis + programme data + `effectiveSlots` (see below); used by presentation, audience, and Programme Manager views |
 | GET    | /service-session/:sessionCode/slots/:position              | Public (`@Public()`)                                          | Single slot state for speaker view — programmeSlot data, overrides, and current anchor                        |
+| GET    | /service-session/:sessionCode/my-status                    | JwtAuthGuard                                                  | The calling member's personal view of a LIVE session — role (`PRIMARY`/`BACKUP`), position, whether it's currently their turn (`isMyTurnNow`), whether they've already gone (`hasPassed`), an `estimatedSecondsUntilMyTurn` (remaining time on the current slot plus the allocated time of every slot in between, `null` once it's their turn or already passed), and the full `runningOrder`. 404 if the caller has no primary or backup slot in the session. Powers the member-facing app's real-time "my slot" view (`/my-assignment/:sessionCode`), polled every 8s. |
 | GET    | /service-session/:sessionCode/report                       | AdminGuard + SERVICE_PROGRAMME_READ                           | Formatted session report: duration, completion rate, per-slot overrun, pause log                              |
 | GET    | /service-session/:sessionCode/report/pdf                   | AdminGuard + SERVICE_PROGRAMME_READ                           | Download session report as a PDF file — same data as JSON report, formatted for printing and sharing          |
 | GET    | /service-session/:sessionCode/pm/report/pdf                | Public + ShareTokenGuard (`?token=`) + NamedAccessGuard (`?grantToken=`) | Same PDF as above, callable from the public Programme Manager link — surfaced on the manage page's "Session Ended" screen |
 | GET    | /service-session/:sessionCode/action-log                   | JwtAuthGuard (+ assertCanControlSession)                      | Returns the 10 most recent `ServiceActionEntry` rows (newest first) as JSON — powers the "Recent Activity" feed on the Live Session Dashboard. Same access tier as the control actions (not admin-only), since it's operational context, not a compliance artifact. |
 | GET    | /service-session/:sessionCode/action-log/csv                | AdminGuard + SERVICE_PROGRAMME_READ                           | Download the full `ServiceActionEntry` audit trail for a session as CSV (Timestamp, Actor Role, Actor, Action, Detail) — admin-only compliance export, distinct from the JSON feed above |
 | GET    | /service-session/event/:eventId/report/pdf                 | AdminGuard + SERVICE_PROGRAMME_READ                           | Download a full-event PDF covering all service slots in one document. Requires all sessions to be COMPLETED; returns 400 if any are still live and 404 if none exist. Includes variance summary table, per-slot allocated vs actual, slot variance (sum of individual slot overruns), and an ACCENT time-summary band per section. |
-| GET    | /service-session/event/:eventId/report/summary-pdf         | AdminGuard + SERVICE_PROGRAMME_READ                           | Download a shareable one-page event summary PDF (admin access). Does NOT require sessions to be COMPLETED — works at any point after at least one session has started. Contains 4 stat cards (Speakers Done, Total Allocated, Total Actual, Overall Variance) and a single flat table across all services: # \| Speaker \| Topic/Slot \| Allocated \| Actual \| Variance \| Status. Times in MM:SS. Status labels: Over Time (red), Under Time/On Time (green), Not Used/Pending (muted). Returns 404 if no sessions exist. |
+| GET    | /service-session/event/:eventId/report/summary-pdf         | AdminGuard + SERVICE_PROGRAMME_READ                           | Download a shareable one-page event summary PDF (admin access). Does NOT require sessions to be COMPLETED — works at any point after at least one session has started. Contains 4 stat cards (Speakers Done, Total Allocated, Total Actual, Overall Variance) and a single flat table across all services: # \| Speaker \| Topic/Slot \| Allocated \| Actual \| Variance \| Status. Times in MM:SS. Status labels: Over Time (red), Under Time/On Time (green), Not Used/Pending (muted). Returns 404 if no sessions exist. Now wired to a "Summary" button in the Programmes list's per-event header, shown whenever at least one sub-service is no longer DRAFT (matching this route's actual requirement, looser than the "Session Report" button's all-COMPLETED gate). |
 | GET    | /service-session/event/:eventId/summary-pdf                | JwtAuthGuard + WORKER + Admin dept (primary or secondary)     | Identical PDF to the admin route above, but accessible by workers in the Admin department (primary or secondary). Enforces `assertIsAdminDeptWorker` — returns 403 if the authenticated worker is not in the Admin department (no `SERVICE_PROGRAMME_WRITE` fallback; this check is intentionally separate from `assertCanControlSession` used by session control). Designed for mobile use: admin-dept workers can download and share the summary immediately after service ends. |
 
-| POST   | /service-headcount                                         | AdminGuard + HEADCOUNT_WRITE                                  | Record physical attendance headcount for a service slot (body: serviceSlotId, maleAdults, femaleAdults, teenagers, children, mobileChurch, customGroups?, notes?) |
-| PATCH  | /service-headcount/:id                                     | AdminGuard + HEADCOUNT_WRITE                                  | Correct an existing headcount record (any field except serviceSlotId)                                         |
+| POST   | /service-headcount                                         | AdminGuard + HEADCOUNT_WRITE                                  | Record physical attendance headcount for a service slot (body: serviceSlotId, maleAdults, femaleAdults, teenagers, children, mobileChurch, customGroups?, notes?); upsert — recording again for the same slot edits the existing row. This is the only way to correct a record — the separate PATCH endpoint was removed (see ServiceHeadcount Module notes above). |
 | GET    | /service-headcount                                         | AdminGuard + HEADCOUNT_READ                                   | List headcount records (query: page, limit, serviceSlotId, from, to); each record includes computed `total`   |
 | GET    | /service-headcount/trends                                  | AdminGuard + HEADCOUNT_READ                                   | Aggregated attendance trends bucketed by period (query: period=weekly\|monthly\|quarterly, from, to, serviceSlotName); returns grouped data per slot per bucket |
-| GET    | /service-headcount/:id                                     | AdminGuard + HEADCOUNT_READ                                   | Get a single headcount record by ID (includes computed `total`)                                               |
+| GET    | /service-headcount/event/:eventId/summary                  | AdminGuard + HEADCOUNT_READ                                   | Every sub-service under the event with its headcount (or null) plus the aggregate total across recorded sub-services |
+| GET    | /service-headcount/:id                                     | AdminGuard + HEADCOUNT_READ                                   | Get a single headcount record by ID (includes computed `total`). Existed with no frontend consumer until now — the Records tab has a "View details" (eye icon) action per row, showing `notes`/`customGroups`/`recordedBy` (none of which the flat table has room for). |
 
 | GET    | /admin/settings                                            | AdminGuard (any admin)                                        | List all known modules with their current enabled status and `required` flag (absent row = enabled by default) |
 | GET    | /admin/settings/:key                                       | AdminGuard (any admin)                                        | Get one module setting by key (e.g. `incident_report`, `asset_management`). Returns `required` flag.          |
@@ -2773,6 +3113,12 @@ with application cache keys.
 | `REDIS_PASSWORD` | —           | Redis auth password (leave blank if no auth)                   |
 | `REDIS_DB`       | `0`         | Logical database index (0–15)                                  |
 
+### Timezone
+
+| Variable   | Default        | Description                                                                                                                                                                                                                                                                    |
+|------------|----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `TIMEZONE` | `Africa/Lagos` | IANA timezone name. Drives two things: (1) every daily/specific-time `@Cron` job below runs in this timezone via its `timeZone` option, not the server process's own clock; (2) `DateService.startOfDay()`/`endOfDay()` (used by `getTotalCheckInsToday()`) compute day boundaries in this timezone. Does **not** change `process.env.TZ` — the server process itself still runs in whatever timezone its host/container is set to (UTC in this deployment); only these two call sites are timezone-aware. All "runs daily at HH:MM" times documented below are in this configured timezone. |
+
 ### Cache TTLs
 
 | Variable                        | Default | Description                                                        |
@@ -2858,6 +3204,14 @@ Generate keys once with `npx web-push generate-vapid-keys` and store permanently
 | `BULL_BOARD_USER`    | —       | Username for the Bull Board queue dashboard at `/queues`. If unset, dashboard is not mounted.      |
 | `BULL_BOARD_PASSWORD`| —       | Password for the Bull Board queue dashboard. Required alongside `BULL_BOARD_USER`.                 |
 
+### SMS (Termii)
+
+| Variable            | Default                        | Description                                                    |
+|---------------------|---------------------------------|------------------------------------------------------------------|
+| `TERMII_API_KEY`    | — *(optional)*                  | Termii API key                                                    |
+| `TERMII_SENDER_ID`  | — *(optional)*                  | Termii sender ID shown as the SMS "from" name                    |
+| `TERMII_BASE_URL`   | `https://api.ng.termii.com`     | Termii API base URL                                               |
+
 ---
 
 ## 11. Enum Reference
@@ -2878,9 +3232,21 @@ Granular permissions assigned to `AdminRole` records:
 `sunday_school:read` · `sunday_school:write` · `children_church:read` · `children_church:write` · `admin:read` ·
 `admin:write` · `audit:read` · `finance:read` · `finance:write` · `follow_up:read` · `follow_up:write` ·
 `service_programme:read` · `service_programme:write` · `headcount:read` · `headcount:write` ·
-`prayer:read` · `prayer:write`
+`prayer:read` · `prayer:write` · `sms:read` · `sms:send`
 
-`GET /enums` returns these as both a flat `adminPermissions` list (value + label) and a grouped `adminPermissionGroups` list (group name + permissions with value, label, and description) — use the grouped form to render the permission assignment UI.
+`GET /enums` returns these as both a flat `adminPermissions` list (value + label) and a grouped `adminPermissionGroups` list (group name + permissions with value, label, and description) — use the grouped form to render the permission assignment UI. `sms:read`/`sms:send` are grouped under "SMS Messaging".
+
+### PastorTypeEnum
+
+`LEAD` · `PARISH` · `ASSOCIATE`
+
+### MemberImportJobStatus
+
+`READY_FOR_REVIEW` · `COMMITTED`
+
+### MemberImportRowStatus
+
+`PENDING` · `CREATED` · `FAILED`
 
 ### MemberStatusEnum / WorkerStatusEnum
 

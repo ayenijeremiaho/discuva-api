@@ -42,6 +42,7 @@ import { PrayerModule } from './prayer/prayer.module';
 import { FacilityRentalModule } from './facility-rental/facility-rental.module';
 import { PushNotificationModule } from './push-notification/push-notification.module';
 import { GroupModule } from './group/group.module';
+import { SmsModule } from './sms/sms.module';
 
 @Module({
   imports: [
@@ -165,6 +166,7 @@ import { GroupModule } from './group/group.module';
     FacilityRentalModule,
     PushNotificationModule,
     GroupModule,
+    SmsModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: AppThrottlerGuard }],

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   addDays,
   addHours,
@@ -15,6 +16,7 @@ import {
   subMinutes,
   subSeconds,
 } from 'date-fns';
+import { fromZonedTime, toZonedTime } from 'date-fns-tz';
 
 /**
  * Date utility service that provides a clean interface for date operations.
@@ -28,6 +30,12 @@ import {
  */
 @Injectable()
 export class DateService {
+  private readonly timezone: string;
+
+  constructor(private readonly configService: ConfigService) {
+    this.timezone =
+      this.configService.get<string>('TIMEZONE') ?? 'Africa/Lagos';
+  }
   /**
    * Get current date and time
    */
@@ -108,19 +116,23 @@ export class DateService {
   }
 
   /**
-   * Get start of day (midnight)
+   * Get start of day (midnight) in the church's configured timezone,
+   * regardless of the server process's own timezone.
    * @param date - The date to get start of day for (defaults to now)
    */
   startOfDay(date?: Date): Date {
-    return startOfDay(date || new Date());
+    const zoned = toZonedTime(date || new Date(), this.timezone);
+    return fromZonedTime(startOfDay(zoned), this.timezone);
   }
 
   /**
-   * Get end of day (last millisecond of the day)
+   * Get end of day (last millisecond of the day) in the church's configured
+   * timezone, regardless of the server process's own timezone.
    * @param date - The date to get end of day for (defaults to now)
    */
   endOfDay(date?: Date): Date {
-    return endOfDay(date || new Date());
+    const zoned = toZonedTime(date || new Date(), this.timezone);
+    return fromZonedTime(endOfDay(zoned), this.timezone);
   }
 
   /**

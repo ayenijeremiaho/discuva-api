@@ -1053,12 +1053,63 @@ describe('TitheService', () => {
         'john@test.com',
         'Your Tithe Statement',
         'tithe-statement',
-        expect.objectContaining({ name: 'John' }),
+        expect.objectContaining({ name: 'John', period: undefined }),
         expect.arrayContaining([
           expect.objectContaining({ filename: 'tithe-statement.pdf' }),
         ]),
         'GIVING_RECEIPT',
       );
+    });
+
+    it('should include a human-readable period when fromMonth/toMonth are given', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockRecordRepo.find.mockResolvedValue([]);
+
+      await service.emailTitheStatement(mockUser, '2026-01', '2026-06');
+
+      expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
+        'john@test.com',
+        'Your Tithe Statement',
+        'tithe-statement',
+        expect.objectContaining({ period: 'January 2026 – June 2026' }),
+        expect.any(Array),
+        'GIVING_RECEIPT',
+      );
+    });
+
+    it('should format an open-ended "from" period', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockRecordRepo.find.mockResolvedValue([]);
+
+      await service.emailTitheStatement(mockUser, '2026-03', undefined);
+
+      expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
+        'john@test.com',
+        'Your Tithe Statement',
+        'tithe-statement',
+        expect.objectContaining({ period: 'March 2026 onwards' }),
+        expect.any(Array),
+        'GIVING_RECEIPT',
+      );
+    });
+
+    it('should return a confirmation message and record count instead of void', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockRecordRepo.find.mockResolvedValue([
+        {
+          paymentDate: '2026-01-01',
+          amount: 5000,
+          bankName: null,
+          reference: null,
+        },
+      ]);
+
+      const result = await service.emailTitheStatement(mockUser);
+
+      expect(result).toEqual({
+        message: expect.stringContaining('john@test.com'),
+        recordCount: 1,
+      });
     });
   });
 });

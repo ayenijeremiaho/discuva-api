@@ -53,6 +53,7 @@ const mockProgrammeSvc = {
   assertProgrammeIsDraft: jest.fn(),
   setProgrammeStatus: jest.fn(),
   upsertTemplateFromProgramme: jest.fn(),
+  findStartableDraftProgrammesForEvent: jest.fn(),
 };
 
 const mockSessionRepo = {
@@ -369,6 +370,57 @@ describe('ServiceSessionService', () => {
         'cache-key',
         expect.any(String),
         expect.any(Number),
+      );
+    });
+  });
+
+  // ── startEvent ────────────────────────────────────────────────────────────
+
+  describe('startEvent', () => {
+    beforeEach(() => {
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      mockProgrammeSvc.setProgrammeStatus.mockResolvedValue(undefined);
+      mockDataSource.transaction.mockImplementation(async (cb) => {
+        mockSessionRepo.create.mockReturnValue(mockSession);
+        mockSessionRepo.save.mockResolvedValue(mockSession);
+        mockSessionSlotRepo.create.mockReturnValue({});
+        mockSessionSlotRepo.save.mockResolvedValue([]);
+        return cb({
+          create: (Entity: unknown, data: unknown) =>
+            mockSessionRepo.create(data),
+          save: (Entity: unknown, data: unknown) => mockSessionRepo.save(data),
+        });
+      });
+    });
+
+    it('starts every startable draft programme under the event', async () => {
+      mockProgrammeSvc.findStartableDraftProgrammesForEvent.mockResolvedValue([
+        { ...draftProgramme, id: 'prog-1' },
+        { ...draftProgramme, id: 'prog-2' },
+      ]);
+
+      const sessions = await service.startEvent('event-1', 'member-1');
+
+      expect(sessions).toHaveLength(2);
+      expect(
+        mockProgrammeSvc.findStartableDraftProgrammesForEvent,
+      ).toHaveBeenCalledWith('event-1');
+      expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
+        'prog-1',
+        ServiceProgrammeStatusEnum.LIVE,
+      );
+      expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
+        'prog-2',
+        ServiceProgrammeStatusEnum.LIVE,
+      );
+    });
+
+    it('throws BadRequestException when the event has no startable draft programmes', async () => {
+      mockProgrammeSvc.findStartableDraftProgrammesForEvent.mockResolvedValue(
+        [],
+      );
+      await expect(service.startEvent('event-1', 'member-1')).rejects.toThrow(
+        BadRequestException,
       );
     });
   });
@@ -1023,6 +1075,170 @@ describe('ServiceSessionService', () => {
     });
   });
 
+  describe('getMyLiveStatus', () => {
+    const buildSlot = (overrides: Record<string, unknown>) => ({
+      position: 0,
+      status: ServiceSessionSlotStatusEnum.PENDING,
+      adjustedAllocatedMinutes: null,
+      overriddenTopic: null,
+      overriddenSpeakerName: null,
+      overriddenMember: null,
+      actualSeconds: null,
+      startedAt: null,
+      completedAt: null,
+      programmeSlot: {
+        type: ServiceSlotTypeEnum.SPEAKER,
+        topic: 'A topic',
+        allocatedMinutes: 10,
+        member: null,
+        guestName: null,
+        backupMember: null,
+        backupGuestName: null,
+      },
+      ...overrides,
+    });
+
+    it('throws NotFoundException when the member has no slot in this session', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [buildSlot({ position: 0 })],
+      });
+      mockCacheService.get.mockResolvedValue(liveAnchor);
+
+      await expect(
+        service.getMyLiveStatus('SVC-ABC123', 'not-in-this-session'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('reports isMyTurnNow when the current position matches my slot', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [
+          buildSlot({
+            position: 0,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              member: { id: 'member-1' },
+            },
+          }),
+        ],
+      });
+      mockCacheService.get.mockResolvedValue({
+        ...liveAnchor,
+        currentSlotPosition: 0,
+      });
+
+      const result = await service.getMyLiveStatus('SVC-ABC123', 'member-1');
+
+      expect(result.myRole).toBe('PRIMARY');
+      expect(result.isMyTurnNow).toBe(true);
+      expect(result.hasPassed).toBe(false);
+      expect(result.estimatedSecondsUntilMyTurn).toBeNull();
+    });
+
+    it('identifies a BACKUP-role match when the member is not the primary speaker', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [
+          buildSlot({
+            position: 0,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              member: { id: 'someone-else' },
+              backupMember: { id: 'member-1' },
+            },
+          }),
+        ],
+      });
+      mockCacheService.get.mockResolvedValue({
+        ...liveAnchor,
+        currentSlotPosition: 0,
+      });
+
+      const result = await service.getMyLiveStatus('SVC-ABC123', 'member-1');
+      expect(result.myRole).toBe('BACKUP');
+    });
+
+    it('reports hasPassed once the running order has moved beyond my position', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [
+          buildSlot({
+            position: 0,
+            status: ServiceSessionSlotStatusEnum.COMPLETED,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              member: { id: 'member-1' },
+            },
+          }),
+          buildSlot({
+            position: 1,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              member: { id: 'someone-else' },
+            },
+          }),
+        ],
+      });
+      mockCacheService.get.mockResolvedValue({
+        ...liveAnchor,
+        currentSlotPosition: 1,
+      });
+
+      const result = await service.getMyLiveStatus('SVC-ABC123', 'member-1');
+      expect(result.hasPassed).toBe(true);
+      expect(result.estimatedSecondsUntilMyTurn).toBeNull();
+    });
+
+    it('estimates seconds until my turn as remaining-current-slot plus allocated time of slots in between', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [
+          buildSlot({
+            position: 0,
+            status: ServiceSessionSlotStatusEnum.IN_PROGRESS,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              allocatedMinutes: 10, // 600s allocated
+              member: { id: 'someone-else' },
+            },
+          }),
+          buildSlot({
+            position: 1,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              allocatedMinutes: 5, // 300s — the slot in between
+              member: { id: 'another-person' },
+            },
+          }),
+          buildSlot({
+            position: 2,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              member: { id: 'member-1' },
+            },
+          }),
+        ],
+      });
+      // Anchor: current slot (position 0) started 100s ago, nothing paused —
+      // 600s allocated - 100s elapsed = 500s remaining on the current slot.
+      mockCacheService.get.mockResolvedValue({
+        ...liveAnchor,
+        currentSlotPosition: 0,
+        slotStartedAt: Date.now() - 100_000,
+        slotBaseSeconds: 0,
+      });
+
+      const result = await service.getMyLiveStatus('SVC-ABC123', 'member-1');
+
+      expect(result.isMyTurnNow).toBe(false);
+      expect(result.hasPassed).toBe(false);
+      // ~500s remaining on current + 300s for the in-between slot = ~800s
+      expect(result.estimatedSecondsUntilMyTurn).toBeGreaterThan(795);
+      expect(result.estimatedSecondsUntilMyTurn).toBeLessThanOrEqual(800);
+    });
+  });
+
   describe('advance', () => {
     beforeEach(() => {
       mockAdminRepo.findOne.mockResolvedValue(validAdmin);
@@ -1460,6 +1676,318 @@ describe('ServiceSessionService', () => {
         }),
       );
       expect(buf).toEqual(Buffer.from('pdf'));
+    });
+  });
+
+  // ── getAnalytics ──────────────────────────────────────────────────────────
+
+  describe('getAnalytics', () => {
+    const buildQb = (sessions: object[]) => ({
+      innerJoinAndSelect: jest.fn().mockReturnThis(),
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(sessions),
+    });
+
+    const completedSession = {
+      sessionCode: 'SVC-ANL001',
+      startedAt: new Date('2026-06-15T09:00:00Z'),
+      endedAt: new Date('2026-06-15T11:00:00Z'),
+      sessionSlots: [],
+      pauseEntries: [],
+    };
+
+    it('returns aggregated totals for completed sessions', async () => {
+      const qb = buildQb([completedSession]);
+      mockSessionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getAnalytics();
+      expect(result.totalSessions).toBe(1);
+      expect(result.sessions[0].sessionCode).toBe('SVC-ANL001');
+    });
+
+    it('defaults to a bounded ~180-day lookback instead of scanning full history when no "from" is given', async () => {
+      const qb = buildQb([completedSession]);
+      mockSessionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAnalytics();
+
+      const call = qb.andWhere.mock.calls.find(
+        (c: unknown[]) => c[0] === 'session.startedAt >= :from',
+      );
+      expect(call).toBeDefined();
+      const usedFrom = (call![1] as { from: Date }).from;
+      const daysAgo = (Date.now() - usedFrom.getTime()) / (1000 * 60 * 60 * 24);
+      expect(daysAgo).toBeGreaterThan(179);
+      expect(daysAgo).toBeLessThan(181);
+    });
+
+    it('uses the caller-supplied "from" as-is instead of the default when provided', async () => {
+      const qb = buildQb([completedSession]);
+      mockSessionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAnalytics('2020-01-01');
+
+      expect(qb.andWhere).toHaveBeenCalledWith('session.startedAt >= :from', {
+        from: new Date('2020-01-01'),
+      });
+    });
+
+    it('filters by either the sub-service name or the parent event name — not just the sub-service', async () => {
+      const qb = buildQb([completedSession]);
+      mockSessionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAnalytics(undefined, undefined, 'Sunday Service');
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(serviceSlot.name ILIKE :name OR event.name ILIKE :name)',
+        { name: '%Sunday Service%' },
+      );
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
+        'serviceSlot.event',
+        'event',
+      );
+    });
+
+    it('returns an empty result when no completed sessions match', async () => {
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb([]));
+      const result = await service.getAnalytics(undefined, undefined, 'Nope');
+      expect(result.totalSessions).toBe(0);
+      expect(result.sessions).toEqual([]);
+      expect(result.slotTypeStats).toEqual([]);
+      expect(result.topSpeakers).toEqual([]);
+    });
+
+    it('scopes sessions to the given member via a session-slot subquery', async () => {
+      const qb = buildQb([completedSession]);
+      mockSessionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAnalytics(undefined, undefined, undefined, 'member-1');
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('service_session_slots'),
+        { memberId: 'member-1' },
+      );
+    });
+
+    const mixedSession = {
+      sessionCode: 'SVC-MIX001',
+      startedAt: new Date('2026-06-15T09:00:00Z'),
+      endedAt: new Date('2026-06-15T11:00:00Z'),
+      pauseEntries: [],
+      sessionSlots: [
+        {
+          status: ServiceSessionSlotStatusEnum.COMPLETED,
+          actualSeconds: 700,
+          adjustedAllocatedMinutes: null,
+          overriddenMember: null,
+          programmeSlot: {
+            type: 'SPEAKER',
+            allocatedMinutes: 10,
+            member: { id: 'member-1', firstname: 'Ada', lastname: 'Obi' },
+          },
+        },
+        {
+          status: ServiceSessionSlotStatusEnum.COMPLETED,
+          actualSeconds: 500,
+          adjustedAllocatedMinutes: null,
+          overriddenMember: null,
+          programmeSlot: {
+            type: 'WORSHIP',
+            allocatedMinutes: 10,
+            member: { id: 'member-2', firstname: 'Ben', lastname: 'Uche' },
+          },
+        },
+      ],
+    };
+
+    it('restricts the slot-type breakdown to the requested type only, leaving completionRate session-wide', async () => {
+      mockSessionRepo.createQueryBuilder.mockReturnValue(
+        buildQb([mixedSession]),
+      );
+
+      const result = await service.getAnalytics(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'SPEAKER',
+      );
+
+      expect(result.slotTypeStats).toHaveLength(1);
+      expect(result.slotTypeStats[0].type).toBe('SPEAKER');
+      expect(result.sessions[0].completionRate).toBe(100); // both slots completed, unfiltered
+      expect(result.sessions[0].overrunSlots).toBe(1); // only the SPEAKER slot counted (700s actual vs 600s allocated — it did overrun)
+    });
+
+    it('restricts the slot-type breakdown to the requested member only, ignoring co-presenters in the same session', async () => {
+      mockSessionRepo.createQueryBuilder.mockReturnValue(
+        buildQb([mixedSession]),
+      );
+
+      const result = await service.getAnalytics(
+        undefined,
+        undefined,
+        undefined,
+        'member-2',
+      );
+
+      expect(result.topSpeakers).toEqual([]); // member-2's slot is WORSHIP, not SPEAKER — topSpeakers stays SPEAKER-only
+      expect(result.slotTypeStats).toHaveLength(1);
+      expect(result.slotTypeStats[0].type).toBe('WORSHIP');
+    });
+  });
+
+  describe('getMyServiceHistory', () => {
+    const buildQb = (sessions: object[]) => ({
+      innerJoinAndSelect: jest.fn().mockReturnThis(),
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue(sessions),
+    });
+
+    const buildSession = (over: Record<string, unknown>) => ({
+      startedAt: new Date('2026-06-15T09:00:00Z'),
+      programme: {
+        serviceSlot: {
+          name: 'First Service',
+          event: { name: 'Sunday Service' },
+        },
+      },
+      sessionSlots: [],
+      ...over,
+    });
+
+    it('only includes slots where I was the effective speaker (override or original assignment), not a listed backup who never went on', async () => {
+      const session = buildSession({
+        sessionSlots: [
+          {
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.SPEAKER,
+              topic: 'Faith',
+              allocatedMinutes: 30,
+              member: { id: 'member-1' },
+            },
+            overriddenMember: null,
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: 1800,
+          },
+          {
+            // member-1 is listed as backup here but never actually presented
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.WORSHIP,
+              topic: null,
+              allocatedMinutes: 20,
+              member: { id: 'someone-else' },
+              backupMember: { id: 'member-1' },
+            },
+            overriddenMember: null,
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: 1200,
+          },
+        ],
+      });
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb([session]));
+
+      const result = await service.getMyServiceHistory('member-1');
+
+      expect(result.totalSlots).toBe(1);
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0]).toEqual(
+        expect.objectContaining({
+          eventName: 'Sunday Service',
+          serviceSlotName: 'First Service',
+          type: ServiceSlotTypeEnum.SPEAKER,
+          actualSeconds: 1800,
+        }),
+      );
+      expect(result.totalActualSeconds).toBe(1800);
+    });
+
+    it('credits an override to whoever actually stepped in, not the originally-assigned member', async () => {
+      const session = buildSession({
+        sessionSlots: [
+          {
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.SPEAKER,
+              topic: 'Faith',
+              allocatedMinutes: 30,
+              member: { id: 'originally-assigned' },
+            },
+            overriddenMember: { id: 'member-1' },
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: 900,
+          },
+        ],
+      });
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb([session]));
+
+      const result = await service.getMyServiceHistory('member-1');
+      expect(result.totalSlots).toBe(1);
+      expect(result.totalActualSeconds).toBe(900);
+    });
+
+    it('aggregates totals by slot type across sessions', async () => {
+      const speakerSlot = (actualSeconds: number) => ({
+        programmeSlot: {
+          type: ServiceSlotTypeEnum.SPEAKER,
+          topic: 'A topic',
+          allocatedMinutes: 30,
+          member: { id: 'member-1' },
+        },
+        overriddenMember: null,
+        overriddenTopic: null,
+        adjustedAllocatedMinutes: null,
+        actualSeconds,
+      });
+      const sessions = [
+        buildSession({ sessionSlots: [speakerSlot(600)] }),
+        buildSession({ sessionSlots: [speakerSlot(700)] }),
+      ];
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb(sessions));
+
+      const result = await service.getMyServiceHistory('member-1');
+      expect(result.bySlotType).toEqual([
+        {
+          type: ServiceSlotTypeEnum.SPEAKER,
+          count: 2,
+          totalActualSeconds: 1300,
+        },
+      ]);
+    });
+
+    it('paginates entries while keeping summary totals computed over the full set', async () => {
+      const slot = (n: number) => ({
+        programmeSlot: {
+          type: ServiceSlotTypeEnum.SPEAKER,
+          topic: `Topic ${n}`,
+          allocatedMinutes: 10,
+          member: { id: 'member-1' },
+        },
+        overriddenMember: null,
+        overriddenTopic: null,
+        adjustedAllocatedMinutes: null,
+        actualSeconds: 100,
+      });
+      const sessions = Array.from({ length: 15 }, (_, i) =>
+        buildSession({ sessionSlots: [slot(i)] }),
+      );
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb(sessions));
+
+      const result = await service.getMyServiceHistory('member-1', 2, 10);
+
+      expect(result.totalCount).toBe(15);
+      expect(result.totalSlots).toBe(15);
+      expect(result.entries).toHaveLength(5); // page 2 of 10 — remaining 5
+      expect(result.page).toBe(2);
+      expect(result.totalPages).toBe(2);
     });
   });
 

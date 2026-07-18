@@ -23,12 +23,16 @@ import { CreateServiceProgrammeSlotDto } from '../dto/create-service-programme-s
 import { UpdateServiceProgrammeSlotDto } from '../dto/update-service-programme-slot.dto';
 import { ReorderProgrammeSlotsDto } from '../dto/reorder-programme-slots.dto';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
-import { ServiceSlotTypeLabels } from '../enum/service-slot-type.enum';
+import {
+  ServiceSlotTypeEnum,
+  ServiceSlotTypeLabels,
+} from '../enum/service-slot-type.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PdfService } from '../../utility/service/pdf.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { buildServiceSlotIcs } from '../util/ics-builder';
 import {
   withMemberNames,
@@ -49,6 +53,23 @@ export type ServiceProgrammeWithSummary = ServiceProgramme & {
   } | null;
 };
 
+export interface MyAssignment {
+  slotId: string;
+  programmeId: string;
+  eventName: string | null;
+  serviceSlotName: string;
+  startTime: Date;
+  endTime: Date;
+  type: ServiceSlotTypeEnum;
+  topic: string | null;
+  allocatedMinutes: number;
+  isBackup: boolean;
+  programmeStatus: ServiceProgrammeStatusEnum;
+  // Only populated once the programme has actually gone LIVE — this is what
+  // the frontend needs to poll GET /service-session/:code/my-status.
+  sessionCode: string | null;
+}
+
 @Injectable()
 export class ServiceProgrammeService {
   constructor(
@@ -65,6 +86,7 @@ export class ServiceProgrammeService {
     private readonly memberRepo: Repository<Member>,
     private readonly pdfService: PdfService,
     private readonly emailQueueService: EmailQueueService,
+    private readonly pushNotificationService: PushNotificationService,
   ) {}
 
   private readonly logger = new Logger(ServiceProgrammeService.name);
@@ -93,30 +115,95 @@ export class ServiceProgrammeService {
       throw new ConflictException(`A programme already exists for: ${names}`);
     }
 
-    const results: ServiceProgrammeWithSummary[] = [];
-    for (const item of dto.programmes) {
-      const serviceSlot = serviceSlotById.get(item.serviceSlotId);
-      const programme = this.programmeRepo.create({
-        serviceSlot,
+    const programmes = this.programmeRepo.create(
+      dto.programmes.map((item) => ({
+        serviceSlot: serviceSlotById.get(item.serviceSlotId),
         saveAsTemplate: dto.saveAsTemplate ?? false,
         createdByAdmin: admin,
-      });
-      const saved = await this.programmeRepo.save(programme);
+      })),
+    );
+    const savedProgrammes = await this.programmeRepo.save(programmes);
+    savedProgrammes.forEach((saved, index) => {
       this.logger.log(
-        `Programme ${saved.id} created for slot ${item.serviceSlotId} by admin ${admin.id}`,
+        `Programme ${saved.id} created for slot ${dto.programmes[index].serviceSlotId} by admin ${admin.id}`,
       );
+    });
 
-      if (item.slots?.length) {
-        for (const [position, slotDto] of item.slots.entries()) {
-          await this.createSlotForProgramme(saved, slotDto, position);
+    const memberIds = new Set<string>();
+    for (const item of dto.programmes) {
+      for (const slotDto of item.slots ?? []) {
+        if (slotDto.memberId) memberIds.add(slotDto.memberId);
+        if (slotDto.backupMemberId) memberIds.add(slotDto.backupMemberId);
+      }
+    }
+    const members = memberIds.size
+      ? await this.memberRepo.find({ where: { id: In([...memberIds]) } })
+      : [];
+    const memberById = new Map(members.map((m) => [m.id, m]));
+
+    const slotsToSave: ServiceProgrammeSlot[] = [];
+    dto.programmes.forEach((item, programmeIndex) => {
+      const saved = savedProgrammes[programmeIndex];
+      (item.slots ?? []).forEach((slotDto, position) => {
+        const member = slotDto.memberId
+          ? memberById.get(slotDto.memberId)
+          : null;
+        if (slotDto.memberId && !member) {
+          throw new NotFoundException('Member not found');
         }
+        const backupMember = slotDto.backupMemberId
+          ? memberById.get(slotDto.backupMemberId)
+          : null;
+        if (slotDto.backupMemberId && !backupMember) {
+          throw new NotFoundException('Backup member not found');
+        }
+        slotsToSave.push(
+          this.slotRepo.create({
+            programme: saved,
+            position,
+            type: slotDto.type,
+            topic: slotDto.topic ?? null,
+            member: member ?? null,
+            guestName: slotDto.guestName ?? null,
+            backupMember: backupMember ?? null,
+            backupGuestName: slotDto.backupGuestName ?? null,
+            allocatedMinutes: slotDto.allocatedMinutes,
+          }),
+        );
+      });
+      if (item.slots?.length) {
         this.logger.log(
           `${item.slots.length} slot(s) added to programme ${saved.id} at creation`,
         );
       }
+    });
 
-      results.push(await this.findOne(saved.id));
+    const savedSlots = slotsToSave.length
+      ? await this.slotRepo.save(slotsToSave)
+      : [];
+
+    // Conflict-warning is a non-blocking, per-slot advisory that the create()
+    // path has never surfaced to the caller (its return value was discarded
+    // even before this method was batched) — skipped here entirely rather
+    // than computed-and-thrown-away, unlike addSlot()/updateSlot() which do
+    // return it.
+    for (const slot of savedSlots) {
+      if (slot.member)
+        this.notifySlotAssignment(slot.member, slot.programme, slot);
+      if (slot.backupMember) {
+        this.notifySlotAssignment(
+          slot.backupMember,
+          slot.programme,
+          slot,
+          true,
+        );
+      }
     }
+
+    const summaries = await this.findManyWithSummary(
+      savedProgrammes.map((p) => p.id),
+    );
+    const results = savedProgrammes.map((p) => summaries.get(p.id));
 
     return results.length === 1 ? results[0] : results;
   }
@@ -152,6 +239,50 @@ export class ServiceProgrammeService {
     );
   }
 
+  // A member's own upcoming slots across every not-yet-completed programme,
+  // whether they're the primary assignee or the backup — the "what am I
+  // doing this month" view a member/worker has no other way to see today
+  // (currently the only signal is a one-off assignment email).
+  async getMyUpcomingAssignments(memberId: string): Promise<MyAssignment[]> {
+    const slots = await this.slotRepo
+      .createQueryBuilder('slot')
+      .innerJoinAndSelect('slot.programme', 'programme')
+      .innerJoinAndSelect('programme.serviceSlot', 'serviceSlot')
+      .leftJoinAndSelect('serviceSlot.event', 'event')
+      .leftJoinAndSelect('slot.member', 'member')
+      .leftJoinAndSelect('programme.session', 'session')
+      .where(
+        '(slot.member_id = :memberId OR slot.backup_member_id = :memberId)',
+        {
+          memberId,
+        },
+      )
+      .andWhere('serviceSlot.start_time >= :now', { now: new Date() })
+      .andWhere('programme.status IN (:...statuses)', {
+        statuses: [
+          ServiceProgrammeStatusEnum.DRAFT,
+          ServiceProgrammeStatusEnum.LIVE,
+        ],
+      })
+      .orderBy('serviceSlot.start_time', 'ASC')
+      .getMany();
+
+    return slots.map((slot) => ({
+      slotId: slot.id,
+      programmeId: slot.programme.id,
+      eventName: slot.programme.serviceSlot.event?.name ?? null,
+      serviceSlotName: slot.programme.serviceSlot.name,
+      startTime: slot.programme.serviceSlot.startTime,
+      endTime: slot.programme.serviceSlot.endTime,
+      type: slot.type,
+      topic: slot.topic,
+      allocatedMinutes: slot.allocatedMinutes,
+      isBackup: slot.member?.id !== memberId,
+      programmeStatus: slot.programme.status,
+      sessionCode: slot.programme.session?.sessionCode ?? null,
+    }));
+  }
+
   async findOne(id: string): Promise<ServiceProgrammeWithSummary> {
     const programme = await this.programmeRepo.findOne({
       where: { id },
@@ -168,6 +299,30 @@ export class ServiceProgrammeService {
     });
     if (!programme) throw new NotFoundException('Programme not found');
     return this.withServiceSlotSummary(programme);
+  }
+
+  // Batched sibling of findOne() — used by create() so a multi-programme
+  // request re-fetches all of its programmes in one query instead of one
+  // round trip per programme.
+  private async findManyWithSummary(
+    ids: string[],
+  ): Promise<Map<string, ServiceProgrammeWithSummary>> {
+    const programmes = await this.programmeRepo.find({
+      where: { id: In(ids) },
+      relations: [
+        'serviceSlot',
+        'serviceSlot.event',
+        'createdByAdmin',
+        'createdByAdmin.member',
+        'slots',
+        'slots.member',
+        'slots.backupMember',
+      ],
+      order: { slots: { position: 'ASC' } },
+    });
+    return new Map(
+      programmes.map((p) => [p.id, this.withServiceSlotSummary(p)]),
+    );
   }
 
   // `serviceSlot` is a relation object; the admin frontend renders flat
@@ -291,6 +446,9 @@ export class ServiceProgrammeService {
     );
 
     if (member) this.notifySlotAssignment(member, programme, saved);
+    if (backupMember) {
+      this.notifySlotAssignment(backupMember, programme, saved, true);
+    }
 
     const conflictWarning = member
       ? await this.findMemberConflictWarning(member, programme)
@@ -323,6 +481,7 @@ export class ServiceProgrammeService {
     }
 
     const previousMemberId = slot.member?.id ?? null;
+    const previousBackupMemberId = slot.backupMember?.id ?? null;
 
     if (dto.memberId !== undefined) {
       slot.member = dto.memberId
@@ -347,6 +506,20 @@ export class ServiceProgrammeService {
 
     if (isNewAssignment) {
       this.notifySlotAssignment(saved.member, slot.programme, saved);
+    }
+
+    const isNewBackupAssignment =
+      dto.backupMemberId !== undefined &&
+      saved.backupMember &&
+      saved.backupMember.id !== previousBackupMemberId;
+
+    if (isNewBackupAssignment) {
+      this.notifySlotAssignment(
+        saved.backupMember,
+        slot.programme,
+        saved,
+        true,
+      );
     }
 
     const conflictWarning = isNewAssignment
@@ -411,58 +584,105 @@ export class ServiceProgrammeService {
     return `${member.firstname} ${member.lastname} is already assigned to an overlapping service${suffix}.`;
   }
 
+  private fmtAssignmentDate(date: Date): string {
+    return new Date(date).toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+  }
+
+  private fmtAssignmentTime(date: Date): string {
+    return new Date(date).toLocaleTimeString('en-GB', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    });
+  }
+
   // Fire-and-forget notification when a member is assigned a service-programme
-  // slot. Guests (guestName, no member record) have no email to notify.
+  // slot — both an email (guests, no member record, never reach here) and a
+  // push notification, since a member may have one channel but not the other
+  // (no email on file, or never granted push permission) and neither should
+  // block the other.
   private notifySlotAssignment(
     member: Member,
     programme: ServiceProgramme,
     slot: ServiceProgrammeSlot,
+    isBackup = false,
   ): void {
-    if (!member.email) return;
-
     const serviceSlotName = programme.serviceSlot
       ? [programme.serviceSlot.event?.name, programme.serviceSlot.name]
           .filter(Boolean)
           .join(' — ')
       : 'the service';
+    const slotType = ServiceSlotTypeLabels[slot.type] ?? slot.type;
 
-    const subject = `You've Been Added to the Programme: ${serviceSlotName}`;
+    const subject = isBackup
+      ? `You're the Backup for: ${serviceSlotName}`
+      : `You've Been Added to the Programme: ${serviceSlotName}`;
+
+    const serviceDate = programme.serviceSlot?.startTime
+      ? this.fmtAssignmentDate(programme.serviceSlot.startTime)
+      : '';
+    const serviceTime =
+      programme.serviceSlot?.startTime && programme.serviceSlot?.endTime
+        ? `${this.fmtAssignmentTime(programme.serviceSlot.startTime)} – ${this.fmtAssignmentTime(programme.serviceSlot.endTime)}`
+        : '';
+
     const templateData = {
       memberName: member.firstname,
       serviceSlotName,
-      slotType: ServiceSlotTypeLabels[slot.type] ?? slot.type,
+      slotType,
       topic: slot.topic ?? '',
       allocatedMinutes: slot.allocatedMinutes,
+      isBackup,
+      serviceDate,
+      serviceTime,
     };
 
-    if (programme.serviceSlot?.startTime && programme.serviceSlot?.endTime) {
-      const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
-      const ics = buildServiceSlotIcs({
-        uid: slot.id,
-        startTime: programme.serviceSlot.startTime,
-        endTime: programme.serviceSlot.endTime,
-        summary: `${templateData.slotType}${topicSuffix} — ${serviceSlotName}`,
-        description: `You're assigned to ${templateData.slotType} for ${serviceSlotName}.`,
-      });
-      this.emailQueueService.queueEmailWithTemplateAndAttachments(
-        member.email,
-        subject,
-        'service-slot-assigned',
-        templateData,
-        [{ filename: 'service-slot.ics', content: ics }],
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-      );
-    } else {
-      this.emailQueueService.queueEmailWithTemplate(
-        member.email,
-        subject,
-        'service-slot-assigned',
-        templateData,
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-      );
+    if (member.email) {
+      if (programme.serviceSlot?.startTime && programme.serviceSlot?.endTime) {
+        const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
+        const ics = buildServiceSlotIcs({
+          uid: slot.id,
+          startTime: programme.serviceSlot.startTime,
+          endTime: programme.serviceSlot.endTime,
+          summary: `${slotType}${topicSuffix} — ${serviceSlotName}`,
+          description: `You're assigned to ${slotType} for ${serviceSlotName}.`,
+        });
+        this.emailQueueService.queueEmailWithTemplateAndAttachments(
+          member.email,
+          subject,
+          'service-slot-assigned',
+          templateData,
+          [{ filename: 'service-slot.ics', content: ics }],
+          undefined,
+          EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+        );
+      } else {
+        this.emailQueueService.queueEmailWithTemplate(
+          member.email,
+          subject,
+          'service-slot-assigned',
+          templateData,
+          undefined,
+          EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+        );
+      }
     }
+
+    let pushBody = `${slotType} — ${serviceSlotName}`;
+    if (serviceDate) pushBody += ` on ${serviceDate}`;
+    if (serviceDate && serviceTime) pushBody += ` at ${serviceTime}`;
+
+    this.pushNotificationService.dispatchToMemberIds([member.id], {
+      idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
+      title: subject,
+      body: pushBody,
+      url: '/events',
+    });
   }
 
   async reorderSlots(
@@ -652,6 +872,32 @@ export class ServiceProgrammeService {
         `Template "${slotName}" created from programme ${programme.id}`,
       );
     }
+  }
+
+  // Every DRAFT programme under the event that actually has slots to run —
+  // used by "Start Service" to bulk-start a multi-service Sunday in one
+  // action instead of one "Start Session" click per sub-service.
+  async findStartableDraftProgrammesForEvent(
+    eventId: string,
+  ): Promise<ServiceProgramme[]> {
+    const slots = await this.serviceSlotRepo.find({
+      where: { event: { id: eventId } },
+    });
+    if (!slots.length) {
+      throw new NotFoundException('Event not found or has no service slots');
+    }
+
+    const programmes = await this.programmeRepo.find({
+      where: { serviceSlot: { id: In(slots.map((s) => s.id)) } },
+      relations: ['slots', 'serviceSlot'],
+    });
+
+    return programmes.filter(
+      (p) =>
+        p.status === ServiceProgrammeStatusEnum.DRAFT &&
+        p.slots &&
+        p.slots.length > 0,
+    );
   }
 
   async assertProgrammeIsDraft(id: string): Promise<ServiceProgramme> {

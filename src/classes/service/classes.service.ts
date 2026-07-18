@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
 import { Member } from '../../member/entity/member.entity';
@@ -217,18 +217,63 @@ export class ClassesService {
       throw new BadRequestException('Cannot enrol members into a closed class');
     }
 
-    let enrolled = 0;
+    // Batched instead of looping enrollMember() per id (which re-fetched the
+    // class and did its own existence/duplicate checks per member) — one
+    // member-validity check, one existing-enrollment check, and one bulk
+    // save regardless of batch size.
+    const uniqueIds = Array.from(new Set(dto.memberIds));
+
+    const validMembers = await this.memberRepo.find({
+      where: { id: In(uniqueIds) },
+      select: ['id'],
+    });
+    const validIds = new Set(validMembers.map((m) => m.id));
+
+    const existingEnrollments = await this.enrollmentRepo.find({
+      where: {
+        churchClass: { id: dto.classId },
+        member: { id: In(uniqueIds) },
+      },
+      relations: ['member'],
+    });
+    const existingByMemberId = new Map(
+      existingEnrollments.map((e) => [e.member.id, e]),
+    );
+
+    const toSave: ClassEnrollment[] = [];
     let skipped = 0;
 
-    for (const memberId of dto.memberIds) {
-      try {
-        await this.enrollMember({ memberId, classId: dto.classId });
-        enrolled++;
-      } catch {
+    for (const memberId of uniqueIds) {
+      if (!validIds.has(memberId)) {
         skipped++;
+        continue;
+      }
+      const existing = existingByMemberId.get(memberId);
+      if (existing) {
+        if (existing.status !== EnrollmentStatusEnum.CANCELLED) {
+          skipped++;
+          continue;
+        }
+        existing.status = EnrollmentStatusEnum.IN_PROGRESS;
+        existing.cancelledAt = null;
+        existing.completedAt = null;
+        toSave.push(existing);
+      } else {
+        toSave.push(
+          this.enrollmentRepo.create({
+            member: { id: memberId } as Member,
+            churchClass,
+            status: EnrollmentStatusEnum.IN_PROGRESS,
+          }),
+        );
       }
     }
 
+    if (toSave.length > 0) {
+      await this.enrollmentRepo.save(toSave);
+    }
+
+    const enrolled = toSave.length;
     this.logger.log(
       `Bulk enrol in "${churchClass.name}": ${enrolled} enrolled, ${skipped} skipped`,
     );

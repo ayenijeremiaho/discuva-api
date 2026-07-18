@@ -8,6 +8,7 @@ import {
 import { MemberService } from './member.service';
 import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
+import { Pastor } from '../entity/pastor.entity';
 import { Department } from '../../department/entity/department.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { SundaySchoolClass } from '../../sunday-school/entity/sunday-school-class.entity';
@@ -18,11 +19,13 @@ import { ConfigService } from '@nestjs/config';
 import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
+import { PastorTypeEnum } from '../enums/pastor-type.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
+  find: jest.fn(),
   findAndCount: jest.fn(),
   save: jest.fn(),
   update: jest.fn(),
@@ -44,6 +47,13 @@ const mockWorkerProfileRepo = {
 
 const mockDepartmentRepo = {
   findOneBy: jest.fn(),
+};
+
+const mockPastorRepo = {
+  save: jest.fn(),
+  create: jest.fn(),
+  remove: jest.fn(),
+  findOne: jest.fn(),
 };
 
 const mockUtilityService = {
@@ -82,6 +92,10 @@ describe('MemberService', () => {
         {
           provide: getRepositoryToken(WorkerProfile),
           useValue: mockWorkerProfileRepo,
+        },
+        {
+          provide: getRepositoryToken(Pastor),
+          useValue: mockPastorRepo,
         },
         {
           provide: getRepositoryToken(Department),
@@ -264,55 +278,105 @@ describe('MemberService', () => {
   });
 
   describe('bulkPromoteToWorker', () => {
-    it('should count promoted and skipped correctly', async () => {
-      const promoted = { id: 'm1', role: MemberRoleEnum.WORKER } as any;
+    const department = { id: 'dept-1', name: 'Music' };
+    const mockTxManager = {
+      save: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+
+    beforeEach(() => {
+      mockTxManager.save.mockClear();
+      mockTxManager.update.mockClear();
+      mockMemberRepo.manager.transaction.mockImplementation(
+        async (cb: (em: typeof mockTxManager) => Promise<void>) =>
+          cb(mockTxManager),
+      );
+    });
+
+    it('marks every member as failed with one reason when the department does not exist', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue(null);
+
+      const result = await service.bulkPromoteToWorker(
+        { memberIds: ['m1', 'm2'], departmentId: 'missing-dept' } as any,
+        'actor-1',
+      );
+
+      expect(result).toEqual({
+        promoted: 0,
+        skipped: 2,
+        failures: [
+          { memberId: 'm1', reason: 'Department not found' },
+          { memberId: 'm2', reason: 'Department not found' },
+        ],
+      });
+      expect(mockMemberRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('promotes eligible members and skips the rest, in one batched transaction', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue(department);
+      // m1 is eligible, m2 is already a worker, m3 doesn't exist
+      mockMemberRepo.find.mockResolvedValue([
+        {
+          id: 'm1',
+          email: 'm1@test.com',
+          firstname: 'Jane',
+          lastname: 'Doe',
+          workerProfile: null,
+        },
+        {
+          id: 'm2',
+          email: 'm2@test.com',
+          firstname: 'John',
+          lastname: 'Smith',
+          workerProfile: { id: 'wp-existing' },
+        },
+      ]);
+      mockWorkerProfileRepo.create.mockImplementation((x) => x);
       jest
-        .spyOn(service, 'promoteToWorker')
-        .mockResolvedValueOnce(promoted)
-        .mockRejectedValueOnce(new NotFoundException('Member not found'))
-        .mockResolvedValueOnce({ ...promoted, id: 'm3' });
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockImplementation((s: string) => s);
 
       const result = await service.bulkPromoteToWorker(
         { memberIds: ['m1', 'm2', 'm3'], departmentId: 'dept-1' } as any,
         'actor-1',
       );
 
-      expect(result.promoted).toBe(2);
-      expect(result.skipped).toBe(1);
-      expect(result.failures).toHaveLength(1);
-      expect(result.failures[0].memberId).toBe('m2');
-      expect(result.failures[0].reason).toBe('Member not found');
-    });
-
-    it('should include reason in failures when promoteToWorker throws', async () => {
-      jest
-        .spyOn(service, 'promoteToWorker')
-        .mockRejectedValueOnce(new BadRequestException('Already a worker'));
-
-      const result = await service.bulkPromoteToWorker(
-        { memberIds: ['bad-id'], departmentId: 'dept-1' } as any,
-        'actor-1',
+      expect(result.promoted).toBe(1);
+      expect(result.skipped).toBe(2);
+      expect(result.failures).toEqual(
+        expect.arrayContaining([
+          {
+            memberId: 'm2',
+            reason: 'This member is already registered as a worker.',
+          },
+          { memberId: 'm3', reason: 'Member not found' },
+        ]),
       );
-
-      expect(result.skipped).toBe(1);
-      expect(result.failures[0]).toMatchObject({
-        memberId: 'bad-id',
-        reason: 'Already a worker',
+      expect(mockTxManager.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          member: expect.objectContaining({ id: 'm1' }),
+        }),
+      ]);
+      expect(mockTxManager.update).toHaveBeenCalledWith(Member, ['m1'], {
+        role: MemberRoleEnum.WORKER,
       });
     });
 
-    it('should return empty failures array on full success', async () => {
-      const promoted = { id: 'm1', role: MemberRoleEnum.WORKER } as any;
-      jest.spyOn(service, 'promoteToWorker').mockResolvedValue(promoted);
+    it('does not open a transaction when no member is eligible', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue(department);
+      mockMemberRepo.find.mockResolvedValue([]);
 
       const result = await service.bulkPromoteToWorker(
         { memberIds: ['m1'], departmentId: 'dept-1' } as any,
         'actor-1',
       );
 
-      expect(result.promoted).toBe(1);
-      expect(result.skipped).toBe(0);
-      expect(result.failures).toEqual([]);
+      expect(result).toEqual({
+        promoted: 0,
+        skipped: 1,
+        failures: [{ memberId: 'm1', reason: 'Member not found' }],
+      });
+      expect(mockMemberRepo.manager.transaction).not.toHaveBeenCalled();
     });
   });
 
@@ -372,6 +436,100 @@ describe('MemberService', () => {
       await expect(
         service.revokeWorker('nonexistent', 'actor-1'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('assignPastor', () => {
+    it('should throw ConflictException if member is already a pastor', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        pastor: { id: 'pastor-1', type: PastorTypeEnum.ASSOCIATE },
+      });
+
+      await expect(
+        service.assignPastor(
+          'member-1',
+          { type: PastorTypeEnum.LEAD },
+          'actor-1',
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('should create a Pastor record for a member with none', async () => {
+      const member = { id: 'member-1', email: 'm@test.com', pastor: null };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockPastorRepo.create.mockReturnValue({
+        member,
+        type: PastorTypeEnum.LEAD,
+      });
+      mockPastorRepo.save.mockResolvedValue({});
+
+      await service.assignPastor(
+        'member-1',
+        { type: PastorTypeEnum.LEAD },
+        'actor-1',
+      );
+
+      expect(mockPastorRepo.create).toHaveBeenCalledWith({
+        member,
+        type: PastorTypeEnum.LEAD,
+      });
+      expect(mockPastorRepo.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('updatePastorType', () => {
+    it('should throw NotFoundException if member is not a pastor', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        pastor: null,
+      });
+
+      await expect(
+        service.updatePastorType(
+          'member-1',
+          { type: PastorTypeEnum.PARISH },
+          'actor-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should update the type on the existing Pastor record', async () => {
+      const pastor = { id: 'pastor-1', type: PastorTypeEnum.ASSOCIATE };
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', pastor });
+      mockPastorRepo.save.mockResolvedValue({});
+
+      await service.updatePastorType(
+        'member-1',
+        { type: PastorTypeEnum.PARISH },
+        'actor-1',
+      );
+
+      expect(mockPastorRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ type: PastorTypeEnum.PARISH }),
+      );
+    });
+  });
+
+  describe('removePastor', () => {
+    it('should throw NotFoundException if member is not a pastor', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        pastor: null,
+      });
+
+      await expect(service.removePastor('member-1', 'actor-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should remove the existing Pastor record', async () => {
+      const pastor = { id: 'pastor-1', type: PastorTypeEnum.LEAD };
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', pastor });
+
+      await service.removePastor('member-1', 'actor-1');
+
+      expect(mockPastorRepo.remove).toHaveBeenCalledWith(pastor);
     });
   });
 
@@ -476,6 +634,40 @@ describe('MemberService', () => {
         }),
       );
       expect(result).toBe('Password changed successfully');
+    });
+  });
+
+  describe('updateMyProfile', () => {
+    it('should apply only the provided fields and save', async () => {
+      const member = {
+        id: 'member-1',
+        firstname: 'Old',
+        lastname: 'Name',
+        email: 'member@test.com',
+        gender: null,
+      };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.updateMyProfile('member-1', {
+        firstname: 'New',
+      } as any);
+
+      expect(result.firstname).toBe('New');
+      expect(result.lastname).toBe('Name');
+      expect(mockMemberRepo.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateEmail', () => {
+    it('should update the member email directly', async () => {
+      mockMemberRepo.update.mockResolvedValue({ affected: 1 });
+
+      await service.updateEmail('member-1', 'new@test.com');
+
+      expect(mockMemberRepo.update).toHaveBeenCalledWith('member-1', {
+        email: 'new@test.com',
+      });
     });
   });
 

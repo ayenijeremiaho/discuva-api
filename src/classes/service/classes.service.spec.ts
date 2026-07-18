@@ -46,6 +46,7 @@ const mockEnrollmentRepo = {
 const mockMemberRepo = {
   findOne: jest.fn(),
   existsBy: jest.fn(),
+  find: jest.fn(),
 };
 
 describe('ClassesService', () => {
@@ -229,6 +230,97 @@ describe('ClassesService', () => {
         expect.objectContaining({ status: EnrollmentStatusEnum.IN_PROGRESS }),
       );
       expect(result.status).toBe(EnrollmentStatusEnum.IN_PROGRESS);
+    });
+  });
+
+  describe('bulkEnrollMembers', () => {
+    const churchClass = { id: 'class-1', name: 'New Believers' };
+
+    it('should throw BadRequestException when the class is closed', async () => {
+      mockClassRepo.findOne.mockResolvedValue({
+        ...churchClass,
+        status: 'CLOSED',
+      });
+
+      await expect(
+        service.bulkEnrollMembers({
+          classId: 'class-1',
+          memberIds: ['member-1'],
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('enrols valid, not-yet-enrolled members and skips the rest, in one batched save', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      // member-3 doesn't exist; member-1 and member-2 do
+      mockMemberRepo.find.mockResolvedValue([
+        { id: 'member-1' },
+        { id: 'member-2' },
+      ]);
+      // member-2 already has a COMPLETED enrollment (can't re-enrol)
+      mockEnrollmentRepo.find.mockResolvedValue([
+        {
+          id: 'enroll-2',
+          member: { id: 'member-2' },
+          status: EnrollmentStatusEnum.COMPLETED,
+        },
+      ]);
+      mockEnrollmentRepo.create.mockImplementation((x) => x);
+      mockEnrollmentRepo.save.mockResolvedValue([]);
+
+      const result = await service.bulkEnrollMembers({
+        classId: 'class-1',
+        memberIds: ['member-1', 'member-2', 'member-3'],
+      } as any);
+
+      expect(result).toEqual({ enrolled: 1, skipped: 2 });
+      expect(mockEnrollmentRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          member: { id: 'member-1' },
+          status: EnrollmentStatusEnum.IN_PROGRESS,
+        }),
+      ]);
+    });
+
+    it('resets a CANCELLED enrollment back to IN_PROGRESS as part of the same batch', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockMemberRepo.find.mockResolvedValue([{ id: 'member-1' }]);
+      const cancelled = {
+        id: 'enroll-1',
+        member: { id: 'member-1' },
+        status: EnrollmentStatusEnum.CANCELLED,
+        cancelledAt: new Date(),
+        completedAt: null,
+      };
+      mockEnrollmentRepo.find.mockResolvedValue([cancelled]);
+      mockEnrollmentRepo.save.mockResolvedValue([]);
+
+      const result = await service.bulkEnrollMembers({
+        classId: 'class-1',
+        memberIds: ['member-1'],
+      } as any);
+
+      expect(result).toEqual({ enrolled: 1, skipped: 0 });
+      expect(mockEnrollmentRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          status: EnrollmentStatusEnum.IN_PROGRESS,
+          cancelledAt: null,
+        }),
+      ]);
+    });
+
+    it('does not call save when every member is invalid or already enrolled', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockMemberRepo.find.mockResolvedValue([]);
+      mockEnrollmentRepo.find.mockResolvedValue([]);
+
+      const result = await service.bulkEnrollMembers({
+        classId: 'class-1',
+        memberIds: ['member-1'],
+      } as any);
+
+      expect(result).toEqual({ enrolled: 0, skipped: 1 });
+      expect(mockEnrollmentRepo.save).not.toHaveBeenCalled();
     });
   });
 

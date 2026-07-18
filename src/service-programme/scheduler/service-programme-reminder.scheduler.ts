@@ -9,6 +9,7 @@ import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { buildServiceSlotIcs } from '../util/ics-builder';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 const REMINDER_LOCK = 'lock:service-programme-reminder';
 const REMINDER_WINDOW_START_HOURS = 24;
@@ -25,7 +26,7 @@ export class ServiceProgrammeReminderScheduler {
     private readonly cacheService: CacheService,
   ) {}
 
-  @Cron('0 9 * * *')
+  @Cron('0 9 * * *', { timeZone: CHURCH_TIMEZONE })
   async sendUpcomingSlotReminders(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(REMINDER_LOCK, 270);
     if (!acquired) {

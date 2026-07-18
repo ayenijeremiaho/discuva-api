@@ -13,6 +13,9 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
+import { CurrentUser } from '../../auth/decorator/current-user.decorator';
+import { MemberAuth } from '../../auth/interface/auth.interface';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
@@ -77,6 +80,12 @@ export class ServiceProgrammeController {
       `attachment; filename="programme-${safe}.pdf"`,
     );
     res.end(buffer);
+  }
+
+  @Get('my-assignments')
+  @UseGuards(JwtAuthGuard)
+  getMyAssignments(@CurrentUser() user: MemberAuth) {
+    return this.programmeSvc.getMyUpcomingAssignments(user.id);
   }
 
   @Get(':id')

@@ -23,8 +23,8 @@ export class BirthdayController {
   constructor(private readonly birthdayService: BirthdayService) {}
 
   @Get('today')
-  getTodaysBirthdays() {
-    return this.birthdayService.getTodaysBirthdays();
+  getTodaysBirthdays(@CurrentUser() user: MemberAuth) {
+    return this.birthdayService.getTodaysBirthdays(user.id);
   }
 
   @UseGuards(AdminGuard)

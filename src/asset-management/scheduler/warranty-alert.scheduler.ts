@@ -9,6 +9,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 @Injectable()
 export class WarrantyAlertScheduler {
@@ -25,7 +26,7 @@ export class WarrantyAlertScheduler {
     private readonly configService: ConfigService,
   ) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
   async dispatchWarrantyAlerts(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(
       WarrantyAlertScheduler.LOCK_KEY,

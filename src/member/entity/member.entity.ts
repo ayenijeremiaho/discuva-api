@@ -14,6 +14,7 @@ import { MaritalStatusEnum } from '../enums/marital-status.enum';
 import { WorkerProfile } from './worker-profile.entity';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { ClassEnrollment } from '../../classes/entity/class-enrollment.entity';
+import { Pastor } from './pastor.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 
 @Entity({ name: 'members' })
@@ -94,4 +95,10 @@ export class Member extends BaseEntity {
 
   @OneToMany(() => ClassEnrollment, (enrollment) => enrollment.member)
   classEnrollments: ClassEnrollment[];
+
+  @OneToOne(() => Pastor, (pastor) => pastor.member, {
+    nullable: true,
+    eager: false,
+  })
+  pastor: Pastor;
 }

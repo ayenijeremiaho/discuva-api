@@ -4,11 +4,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { Member } from '../../member/entity/member.entity';
-import { JournalEntryLine } from '../entity/journal-entry-line.entity';
+import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
+import { PledgeContribution } from '../entity/pledge-contribution.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
-import { JournalEntryStatus } from '../enum/finance.enum';
+import { PledgeContributionStatus } from '../enum/finance.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 @Injectable()
 export class AnnualGivingStatementScheduler {
@@ -18,14 +20,16 @@ export class AnnualGivingStatementScheduler {
   constructor(
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
-    @InjectRepository(JournalEntryLine)
-    private readonly lineRepo: Repository<JournalEntryLine>,
+    @InjectRepository(TitheRecord)
+    private readonly titheRecordRepo: Repository<TitheRecord>,
+    @InjectRepository(PledgeContribution)
+    private readonly contributionRepo: Repository<PledgeContribution>,
     private readonly cacheService: CacheService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
   ) {}
 
-  @Cron('0 8 1 1 *')
+  @Cron('0 8 1 1 *', { timeZone: CHURCH_TIMEZONE })
   async sendAnnualStatements(): Promise<void> {
     if (!this.configService.get<boolean>('ANNUAL_GIVING_STATEMENT_ENABLED'))
       return;
@@ -45,14 +49,26 @@ export class AnnualGivingStatementScheduler {
 
   async sendForMember(
     memberId: string,
-  ): Promise<{ sent: boolean; year: number; total: number }> {
+  ): Promise<{ sent: boolean; year: number; total: number; message: string }> {
     const year = new Date().getFullYear() - 1;
     const result = await this.fetchMemberTotals(year, memberId);
     const row = result[0];
-    if (!row || Number(row.total) === 0) return { sent: false, year, total: 0 };
+    if (!row || Number(row.total) === 0)
+      return {
+        sent: false,
+        year,
+        total: 0,
+        message: `You have no recorded giving for ${year} yet.`,
+      };
 
     const member = await this.memberRepo.findOne({ where: { id: memberId } });
-    if (!member) return { sent: false, year, total: 0 };
+    if (!member)
+      return {
+        sent: false,
+        year,
+        total: 0,
+        message: 'Unable to send your giving statement right now.',
+      };
 
     this.utilityService.sendEmailWithTemplate(
       member.email,
@@ -63,9 +79,15 @@ export class AnnualGivingStatementScheduler {
         year,
         total: Number(row.total).toFixed(2),
         lineCount: Number(row.lineCount),
+        currency: this.configService.get<string>('CURRENCY_CODE'),
       },
     );
-    return { sent: true, year, total: Number(row.total) };
+    return {
+      sent: true,
+      year,
+      total: Number(row.total),
+      message: `Your ${year} giving statement has been emailed to ${member.email}.`,
+    };
   }
 
   private async run(): Promise<void> {
@@ -95,6 +117,7 @@ export class AnnualGivingStatementScheduler {
             year: previousYear,
             total: Number(row.total).toFixed(2),
             lineCount: Number(row.lineCount),
+            currency: this.configService.get<string>('CURRENCY_CODE'),
           },
         );
         sent++;
@@ -110,35 +133,71 @@ export class AnnualGivingStatementScheduler {
     );
   }
 
+  /**
+   * Sums giving directly from the actual giving records (TitheRecord +
+   * CONFIRMED PledgeContribution) rather than finance_journal_entry_links —
+   * nothing but fully-manual journal entry creation ever populates that link
+   * table, so a link-based total is essentially always empty in practice.
+   */
   private async fetchMemberTotals(year: number, memberId?: string) {
     const fromDate = `${year}-01-01`;
     const toDate = `${year}-12-31`;
 
-    const qb = this.lineRepo
-      .createQueryBuilder('l')
-      .innerJoin('l.journalEntry', 'je')
-      .innerJoin(
-        'finance_journal_entry_links',
-        'jel',
-        'jel.journal_entry_id = je.id',
-      )
-      .where('je.status = :status', { status: JournalEntryStatus.POSTED })
-      .andWhere('je.date >= :fromDate', { fromDate })
-      .andWhere('je.date <= :toDate', { toDate })
-      .select('jel.member_id', 'memberId')
-      .addSelect('SUM(l.amount)', 'total')
-      .addSelect('COUNT(l.id)', 'lineCount')
-      .groupBy('jel.member_id')
-      .having('SUM(l.amount) > 0');
+    const titheQb = this.titheRecordRepo
+      .createQueryBuilder('tr')
+      .select('tr.member_id', 'memberId')
+      .addSelect('SUM(tr.amount)', 'total')
+      .addSelect('COUNT(tr.id)', 'lineCount')
+      .where('tr.paymentDate >= :fromDate', { fromDate })
+      .andWhere('tr.paymentDate <= :toDate', { toDate })
+      .groupBy('tr.member_id');
+    if (memberId) titheQb.andWhere('tr.member_id = :memberId', { memberId });
 
-    if (memberId) {
-      qb.andWhere('jel.member_id = :memberId', { memberId });
+    const contributionQb = this.contributionRepo
+      .createQueryBuilder('pc')
+      .innerJoin('pc.pledge', 'p')
+      .select('p.member_id', 'memberId')
+      .addSelect('SUM(pc.amount)', 'total')
+      .addSelect('COUNT(pc.id)', 'lineCount')
+      .where('pc.status = :status', {
+        status: PledgeContributionStatus.CONFIRMED,
+      })
+      .andWhere('pc.paymentDate >= :fromDate', { fromDate })
+      .andWhere('pc.paymentDate <= :toDate', { toDate })
+      .groupBy('p.member_id');
+    if (memberId)
+      contributionQb.andWhere('p.member_id = :memberId', { memberId });
+
+    const [titheRows, contributionRows] = await Promise.all([
+      titheQb.getRawMany<{
+        memberId: string;
+        total: string;
+        lineCount: string;
+      }>(),
+      contributionQb.getRawMany<{
+        memberId: string;
+        total: string;
+        lineCount: string;
+      }>(),
+    ]);
+
+    const totals = new Map<string, { total: number; lineCount: number }>();
+    for (const row of [...titheRows, ...contributionRows]) {
+      const existing = totals.get(row.memberId) ?? {
+        total: 0,
+        lineCount: 0,
+      };
+      existing.total += Number(row.total);
+      existing.lineCount += Number(row.lineCount);
+      totals.set(row.memberId, existing);
     }
 
-    return qb.getRawMany<{
-      memberId: string;
-      total: string;
-      lineCount: string;
-    }>();
+    return Array.from(totals.entries())
+      .map(([memberId, v]) => ({
+        memberId,
+        total: String(v.total),
+        lineCount: String(v.lineCount),
+      }))
+      .filter((r) => Number(r.total) > 0);
   }
 }

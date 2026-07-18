@@ -2,8 +2,6 @@ import {
   Body,
   Controller,
   Get,
-  HttpCode,
-  HttpStatus,
   ParseIntPipe,
   Post,
   Query,
@@ -43,13 +41,12 @@ export class TitheMemberController {
     return this.titheService.getMyTithes(req.user, page, limit);
   }
 
-  @Post('me/download')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('me/statement/send')
   emailStatement(
     @Request() req: any,
     @Query('fromMonth') fromMonth?: string,
     @Query('toMonth') toMonth?: string,
-  ): Promise<void> {
+  ) {
     return this.titheService.emailTitheStatement(req.user, fromMonth, toMonth);
   }
 

@@ -7,6 +7,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { Pledge } from '../entity/pledge.entity';
 import { PledgeFrequency } from '../enum/finance.enum';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 
 @Injectable()
 export class PledgeReminderScheduler {
@@ -20,7 +21,7 @@ export class PledgeReminderScheduler {
     private readonly configService: ConfigService,
   ) {}
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
   async dispatchPledgeReminders(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(
       PledgeReminderScheduler.LOCK_KEY,

@@ -118,6 +118,7 @@ export class EventService {
       from?: Date;
       to?: Date;
       upcoming?: boolean;
+      search?: string;
     } = {},
   ): Promise<PaginationResponseDto<Event>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
@@ -140,6 +141,8 @@ export class EventService {
     if (filter.from)
       qb.andWhere('event.eventDate >= :from', { from: filter.from });
     if (filter.to) qb.andWhere('event.eventDate <= :to', { to: filter.to });
+    if (filter.search)
+      qb.andWhere('event.name ILIKE :search', { search: `%${filter.search}%` });
 
     const [events, total] = await qb.getManyAndCount();
 
@@ -230,12 +233,18 @@ export class EventService {
   }
 
   async getUpcomingEvents(limit = 5): Promise<Event[]> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return this.eventRepository.find({
-      where: { eventDate: MoreThanOrEqual(today) },
+    // `eventDate` is a date-only column, so filtering on it alone treats an
+    // event as "upcoming" for its entire calendar day even once every one of
+    // its slots has actually finished (e.g. a 9am-1pm Sunday service still
+    // showing as upcoming at 4pm). Fetch date-level candidates first (cheap),
+    // then drop any whose slots have all already ended before taking `limit`.
+    const now = new Date();
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const candidates = await this.eventRepository.find({
+      where: { eventDate: MoreThanOrEqual(startOfToday) },
       order: { eventDate: 'ASC' },
-      take: limit,
       relations: [
         'serviceSlots',
         'serviceSlots.config',
@@ -243,6 +252,14 @@ export class EventService {
         'serviceSlots.venueOverride',
       ],
     });
+
+    const stillUpcoming = candidates.filter(
+      (event) =>
+        !event.serviceSlots?.length ||
+        event.serviceSlots.some((slot) => new Date(slot.endTime) >= now),
+    );
+
+    return stillUpcoming.slice(0, limit);
   }
 
   resolveSlotConfig(slot: ServiceSlot): {

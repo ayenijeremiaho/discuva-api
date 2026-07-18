@@ -109,6 +109,12 @@ export enum PledgeStatus {
   CANCELLED = 'CANCELLED',
 }
 
+export enum PledgeContributionStatus {
+  PENDING = 'PENDING',
+  CONFIRMED = 'CONFIRMED',
+  DECLINED = 'DECLINED',
+}
+
 export enum RecurringFrequency {
   WEEKLY = 'WEEKLY',
   MONTHLY = 'MONTHLY',

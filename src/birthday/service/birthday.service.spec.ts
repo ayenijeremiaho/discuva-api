@@ -30,6 +30,7 @@ const makeQb = () => ({
 
 const mockWishRepo = {
   findOne: jest.fn(),
+  find: jest.fn().mockResolvedValue([]),
   create: jest.fn(),
   save: jest.fn(),
   createQueryBuilder: jest.fn(),
@@ -38,6 +39,7 @@ const mockWishRepo = {
 const mockMemberRepo = {
   createQueryBuilder: jest.fn(),
   update: jest.fn().mockResolvedValue(undefined),
+  find: jest.fn().mockResolvedValue([]),
 };
 
 const mockAnnouncementRepo = {
@@ -302,6 +304,96 @@ describe('BirthdayService', () => {
         expect.stringContaining('sender-id'),
         expect.any(Number),
       );
+    });
+  });
+
+  describe('getTodaysBirthdays', () => {
+    it('queries by birthMonth/birthDay/status and loads workerProfile/department/pastor relations', async () => {
+      mockMemberRepo.find.mockResolvedValue([]);
+
+      await service.getTodaysBirthdays();
+
+      expect(mockMemberRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ status: MemberStatusEnum.ACTIVE }),
+          relations: ['workerProfile', 'workerProfile.department', 'pastor'],
+        }),
+      );
+    });
+
+    it('never includes email or phoneNumber in the returned shape', async () => {
+      mockMemberRepo.find.mockResolvedValue([
+        makeMember({
+          id: 'member-1',
+          email: 'should-not-leak@test.com',
+          phoneNumber: '+1234567890',
+        } as any),
+      ]);
+
+      const result = await service.getTodaysBirthdays();
+
+      expect(result[0]).not.toHaveProperty('email');
+      expect(result[0]).not.toHaveProperty('phoneNumber');
+    });
+
+    it('derives departmentName from workerProfile.department and pastorType from pastor', async () => {
+      mockMemberRepo.find.mockResolvedValue([
+        makeMember({
+          id: 'member-1',
+          workerProfile: { department: { name: 'Worship' } },
+        } as any),
+        makeMember({
+          id: 'member-2',
+          pastor: { type: 'LEAD' },
+        } as any),
+        makeMember({ id: 'member-3' } as any),
+      ]);
+
+      const result = await service.getTodaysBirthdays();
+
+      expect(result.find((m) => m.id === 'member-1')?.departmentName).toBe(
+        'Worship',
+      );
+      expect(result.find((m) => m.id === 'member-1')?.pastorType).toBeNull();
+      expect(result.find((m) => m.id === 'member-2')?.pastorType).toBe('LEAD');
+      expect(
+        result.find((m) => m.id === 'member-3')?.departmentName,
+      ).toBeNull();
+      expect(result.find((m) => m.id === 'member-3')?.pastorType).toBeNull();
+    });
+
+    it('flags alreadyWishedByMe only for recipients the current sender already wished this year', async () => {
+      mockMemberRepo.find.mockResolvedValue([
+        makeMember({ id: 'member-1' }),
+        makeMember({ id: 'member-2' }),
+      ]);
+      mockWishRepo.find.mockResolvedValue([{ recipient: { id: 'member-1' } }]);
+
+      const result = await service.getTodaysBirthdays('sender-1');
+
+      expect(mockWishRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            sender: { id: 'sender-1' },
+          }),
+        }),
+      );
+      expect(result.find((m) => m.id === 'member-1')?.alreadyWishedByMe).toBe(
+        true,
+      );
+      expect(result.find((m) => m.id === 'member-2')?.alreadyWishedByMe).toBe(
+        false,
+      );
+    });
+
+    it('skips the wish lookup entirely when no currentMemberId is provided', async () => {
+      mockMemberRepo.find.mockResolvedValue([makeMember({ id: 'member-1' })]);
+      mockWishRepo.find.mockResolvedValue([]);
+
+      const result = await service.getTodaysBirthdays();
+
+      expect(mockWishRepo.find).not.toHaveBeenCalled();
+      expect(result[0].alreadyWishedByMe).toBe(false);
     });
   });
 

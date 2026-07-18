@@ -151,10 +151,15 @@
                   <div>
                     <h1>Your Tithe Statement, {{ name }}</h1>
                     <p>Please find your tithe statement attached to this email as a PDF.</p>
-                    <p>The statement includes all tithe records we have on file for your account. If you notice any
+                    {{#if period}}
+                    <p>The statement covers <strong>{{ period }}</strong> and includes {{ count }} tithe record(s) on file for your account. If you notice any
                       discrepancies, please contact the finance team.</p>
+                    {{else}}
+                    <p>The statement includes all {{ count }} tithe record(s) we have on file for your account. If you notice any
+                      discrepancies, please contact the finance team.</p>
+                    {{/if}}
                     <p style="margin-top: 35px; color: #8A817C;">Sincerely,<br><span
-                      style="color: #121212; font-weight: 500;">{{ church_name }} Dev Team</span></p>
+                      style="color: #121212; font-weight: 500;">{{ church_name }} Finance Team</span></p>
                   </div>
                 </td>
               </tr>

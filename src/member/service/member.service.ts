@@ -6,9 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindManyOptions, Repository } from 'typeorm';
+import { FindManyOptions, In, Repository } from 'typeorm';
 import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
+import { Pastor } from '../entity/pastor.entity';
 import { Department } from '../../department/entity/department.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { SundaySchoolClass } from '../../sunday-school/entity/sunday-school-class.entity';
@@ -26,6 +27,8 @@ import { UpdateMemberDto } from '../dto/update-member.dto';
 import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
+import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
+import { AssignPastorDto } from '../dto/assign-pastor.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 
@@ -41,6 +44,8 @@ export class MemberService {
     private readonly memberRepository: Repository<Member>,
     @InjectRepository(WorkerProfile)
     private readonly workerProfileRepository: Repository<WorkerProfile>,
+    @InjectRepository(Pastor)
+    private readonly pastorRepository: Repository<Pastor>,
     @InjectRepository(Department)
     private readonly departmentRepository: Repository<Department>,
     private readonly utilityService: UtilityService,
@@ -194,31 +199,111 @@ export class MemberService {
     skipped: number;
     failures: { memberId: string; reason: string }[];
   }> {
-    let promoted = 0;
-    let skipped = 0;
-    const failures: { memberId: string; reason: string }[] = [];
+    const uniqueIds = Array.from(new Set(dto.memberIds));
 
-    for (const memberId of dto.memberIds) {
-      try {
-        await this.promoteToWorker(
+    const department = await this.departmentRepository.findOneBy({
+      id: dto.departmentId,
+    });
+    if (!department) {
+      const failures = uniqueIds.map((memberId) => ({
+        memberId,
+        reason: 'Department not found',
+      }));
+      this.auditLogService.log('BULK_WORKER_PROMOTED', {
+        actorId,
+        metadata: {
+          promoted: 0,
+          skipped: failures.length,
+          departmentId: dto.departmentId,
+        },
+      });
+      return { promoted: 0, skipped: failures.length, failures };
+    }
+
+    // Batched instead of looping promoteToWorker() per id (which cost ~5
+    // round trips per member, each in its own transaction) — one batch
+    // member fetch, one bulk profile insert, and one bulk role UPDATE
+    // inside a single transaction, regardless of batch size.
+    const members = await this.memberRepository.find({
+      where: { id: In(uniqueIds) },
+      relations: ['workerProfile'],
+    });
+    const membersById = new Map(members.map((m) => [m.id, m]));
+
+    const failures: { memberId: string; reason: string }[] = [];
+    const eligible: Member[] = [];
+    for (const memberId of uniqueIds) {
+      const member = membersById.get(memberId);
+      if (!member) {
+        failures.push({ memberId, reason: 'Member not found' });
+        continue;
+      }
+      if (member.workerProfile) {
+        failures.push({
           memberId,
-          {
-            departmentId: dto.departmentId,
-            profession: dto.profession,
-            yearJoinedWorkforce: dto.yearJoinedWorkforce,
-          },
-          actorId,
+          reason: 'This member is already registered as a worker.',
+        });
+        continue;
+      }
+      eligible.push(member);
+    }
+
+    if (eligible.length > 0) {
+      await this.memberRepository.manager.transaction(
+        async (transactionalEntityManager) => {
+          const profiles = eligible.map((member) => {
+            const profile = this.workerProfileRepository.create({
+              department,
+              status: WorkerStatusEnum.ACTIVE,
+              profession: dto.profession,
+              yearJoinedWorkforce: dto.yearJoinedWorkforce
+                ? new Date(`${dto.yearJoinedWorkforce}-01-01`)
+                : null,
+            });
+            profile.member = member;
+            return profile;
+          });
+          await transactionalEntityManager.save(profiles);
+          await transactionalEntityManager.update(
+            Member,
+            eligible.map((m) => m.id),
+            { role: MemberRoleEnum.WORKER },
+          );
+        },
+      );
+
+      for (const member of eligible) {
+        this.logger.log(
+          `Member ${member.id} promoted to worker in department ${dto.departmentId}`,
         );
-        promoted++;
-      } catch (err: any) {
-        skipped++;
-        const reason = err?.message ?? 'Unknown error';
-        failures.push({ memberId, reason });
-        this.logger.warn(
-          `bulkPromoteToWorker: skipped member ${memberId} — ${reason}`,
+        const firstName = UtilityService.capitalizeFirstLetter(
+          member.firstname,
+        );
+        this.utilityService.sendEmailWithTemplate(
+          member.email,
+          `${firstName}, Welcome to ${this.productName} Workforce`,
+          'welcome-worker',
+          {
+            name: `${firstName} ${member.lastname[0].toUpperCase()}.`,
+            login_url: this.configService.get<string>('LOGIN_URL'),
+            username: member.email,
+            explainer_video_android_url: this.configService.get<string>(
+              'EXPLAINER_VIDEO_ANDROID_URL',
+            ),
+            explainer_video_ios_url: this.configService.get<string>(
+              'EXPLAINER_VIDEO_IOS_URL',
+            ),
+            support_form_url:
+              this.configService.get<string>('SUPPORT_FORM_URL'),
+            churchName: this.churchName,
+            churchAddress: this.churchAddress,
+          },
         );
       }
     }
+
+    const promoted = eligible.length;
+    const skipped = failures.length;
 
     this.auditLogService.log('BULK_WORKER_PROMOTED', {
       actorId,
@@ -282,6 +367,77 @@ export class MemberService {
     );
   }
 
+  async assignPastor(
+    memberId: string,
+    dto: AssignPastorDto,
+    actorId: string,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, ['pastor']);
+    if (member.pastor) {
+      throw new ConflictException(
+        'This member is already designated as a pastor.',
+      );
+    }
+
+    const pastor = this.pastorRepository.create({ member, type: dto.type });
+    await this.pastorRepository.save(pastor);
+
+    this.auditLogService.log('PASTOR_ASSIGNED', {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+      metadata: { type: dto.type },
+    });
+
+    return this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'pastor',
+    ]);
+  }
+
+  async updatePastorType(
+    memberId: string,
+    dto: AssignPastorDto,
+    actorId: string,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, ['pastor']);
+    if (!member.pastor) {
+      throw new NotFoundException('This member is not designated as a pastor.');
+    }
+
+    member.pastor.type = dto.type;
+    await this.pastorRepository.save(member.pastor);
+
+    this.auditLogService.log('PASTOR_TYPE_UPDATED', {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+      metadata: { type: dto.type },
+    });
+
+    return this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'pastor',
+    ]);
+  }
+
+  async removePastor(memberId: string, actorId: string): Promise<void> {
+    const member = await this.getById(memberId, ['pastor']);
+    if (!member.pastor) {
+      throw new NotFoundException('This member is not designated as a pastor.');
+    }
+
+    await this.pastorRepository.remove(member.pastor);
+
+    this.auditLogService.log('PASTOR_REMOVED', {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+    });
+  }
+
   async updateMember(
     id: string,
     dto: UpdateMemberDto,
@@ -319,6 +475,39 @@ export class MemberService {
       metadata: { changes: Object.keys(dto) },
     });
     return saved;
+  }
+
+  async updateMyProfile(
+    memberId: string,
+    dto: UpdateMyProfileDto,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'pastor',
+    ]);
+
+    if (dto.firstname) member.firstname = dto.firstname;
+    if (dto.lastname) member.lastname = dto.lastname;
+    if (dto.phoneNumber) member.phoneNumber = dto.phoneNumber;
+    if (dto.gender) member.gender = dto.gender;
+    if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
+    if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;
+    if (dto.birthYear !== undefined) member.birthYear = dto.birthYear ?? null;
+    if (dto.maritalStatus) member.maritalStatus = dto.maritalStatus;
+
+    const saved = await this.memberRepository.save(member);
+    this.auditLogService.log('MEMBER_UPDATED', {
+      actorId: memberId,
+      targetId: memberId,
+      targetEmail: saved.email,
+      metadata: { changes: Object.keys(dto), self: true },
+    });
+    return saved;
+  }
+
+  async updateEmail(memberId: string, newEmail: string): Promise<void> {
+    await this.memberRepository.update(memberId, { email: newEmail });
   }
 
   async updateWorkerProfile(
@@ -569,6 +758,7 @@ export class MemberService {
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.workerProfile', 'workerProfile')
       .leftJoinAndSelect('workerProfile.department', 'department')
+      .leftJoinAndSelect('member.pastor', 'pastor')
       .orderBy('member.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -596,6 +786,7 @@ export class MemberService {
       .createQueryBuilder('member')
       .innerJoinAndSelect('member.workerProfile', 'profile')
       .innerJoinAndSelect('profile.department', 'department')
+      .leftJoinAndSelect('member.pastor', 'pastor')
       .where('member.role = :role', { role: MemberRoleEnum.WORKER });
 
     if (status) {
