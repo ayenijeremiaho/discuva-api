@@ -218,9 +218,12 @@ export class AuthController {
     };
   }
 
+  private isSecureEnv(): boolean {
+    return this.configService.get<string>('NODE_ENV') !== 'development';
+  }
+
   private setRefreshCookie(res: Response, token: string): void {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
+    const secure = this.isSecureEnv();
     const expiry =
       this.configService.get<string>('REFRESH_JWT_EXPIRY_IN') ?? '7d';
     const match = /^(\d+)([smhd])$/i.exec(expiry);
@@ -236,20 +239,19 @@ export class AuthController {
 
     res.cookie(REFRESH_COOKIE_NAME, token, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      secure,
+      sameSite: secure ? 'none' : 'lax',
       path: REFRESH_COOKIE_PATH,
       maxAge,
     });
   }
 
   private clearRefreshCookie(res: Response): void {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
+    const secure = this.isSecureEnv();
     res.clearCookie(REFRESH_COOKIE_NAME, {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' : 'lax',
+      secure,
+      sameSite: secure ? 'none' : 'lax',
       path: REFRESH_COOKIE_PATH,
     });
   }

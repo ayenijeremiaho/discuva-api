@@ -1233,6 +1233,8 @@ Refresh token delivery and transport differ by surface:
 2. **Access token expires** → call `POST /auth/refresh`. Admin web clients rely on the httpOnly cookie (sent automatically); mobile clients send the refresh token in the `Authorization: Bearer` header. The refresh token carries `aud` and renews the same-surface session.
 3. **Logout** → clears the session row for the caller's surface. For the ADMIN surface the httpOnly cookie is also cleared. The other surface's session is unaffected.
 
+**Admin cookie `secure`/`sameSite` flags are `NODE_ENV !== 'development'`, not `NODE_ENV === 'production'`.** The admin web app calls the API cross-site with `withCredentials: true`, which requires `secure: true; sameSite: 'none'` — browsers drop any cookie without those flags on a cross-site request. Railway always serves over HTTPS regardless of environment name, so `test`/staging deployments need the same secure cookie behavior as production; only local dev runs over plain HTTP and needs the relaxed `lax`/non-secure cookie. Checking `=== 'production'` previously meant any other deployed `NODE_ENV` value (e.g. `test`) silently downgraded to a cookie that cross-site browsers refuse to send back on refresh, dropping the admin session on every refresh call.
+
 ### Refresh Token Rotation & Reuse Detection
 
 Every call to `POST /auth/refresh` performs a full rotation:
