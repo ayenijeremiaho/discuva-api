@@ -6813,6 +6813,96 @@
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Announcement not found\"\n}"
             }
           ]
+        },
+        {
+          "name": "React to Announcement",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emoji\": \"\ud83d\ude4f\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/announcements/{{announcementId}}/react",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                "{{announcementId}}",
+                "react"
+              ],
+              "variable": [
+                {
+                  "key": "announcementId",
+                  "value": "{{announcementId}}"
+                }
+              ]
+            },
+            "description": "Any authenticated member/worker. emoji must be one of: \ud83d\udc4d \u2764\ufe0f \ud83d\ude4f \ud83c\udf89 \ud83d\udc4f. Reacting again updates the existing reaction (one per member per announcement)."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove My Reaction",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/announcements/{{announcementId}}/react",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                "{{announcementId}}",
+                "react"
+              ],
+              "variable": [
+                {
+                  "key": "announcementId",
+                  "value": "{{announcementId}}"
+                }
+              ]
+            },
+            "description": "Any authenticated member/worker. Removes the caller's own reaction, if any."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Reaction Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/announcements/{{announcementId}}/reactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements",
+                "{{announcementId}}",
+                "reactions"
+              ],
+              "variable": [
+                {
+                  "key": "announcementId",
+                  "value": "{{announcementId}}"
+                }
+              ]
+            },
+            "description": "Any authenticated member/worker. Returns { summary: [{emoji,count}], myReaction }, where myReaction is the calling member's own current reaction (or null)."
+          },
+          "response": []
         }
       ]
     },
@@ -17449,7 +17539,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"key\": \"sunday_school\",\n    \"moduleName\": \"Sunday School\",\n    \"enabled\": true,\n    \"required\": false\n  },\n  {\n    \"key\": \"children_church\",\n    \"moduleName\": \"Children's Church\",\n    \"enabled\": true,\n    \"required\": false\n  },\n  {\n    \"key\": \"facility_rental\",\n    \"moduleName\": \"Facility Rental\",\n    \"enabled\": true,\n    \"required\": false\n  },\n  {\n    \"key\": \"finance\",\n    \"moduleName\": \"Finance\",\n    \"enabled\": true,\n    \"required\": true\n  }\n]"
+              "body": "[\n  {\n    \"key\": \"sunday_school\",\n    \"moduleName\": \"Sunday School\",\n    \"displayName\": null,\n    \"enabled\": true,\n    \"required\": false\n  },\n  {\n    \"key\": \"children_church\",\n    \"moduleName\": \"Children's Church\",\n    \"displayName\": null,\n    \"enabled\": true,\n    \"required\": false\n  },\n  {\n    \"key\": \"facility_rental\",\n    \"moduleName\": \"Facility Rental\",\n    \"displayName\": null,\n    \"enabled\": true,\n    \"required\": false\n  },\n  {\n    \"key\": \"service_programme\",\n    \"moduleName\": \"Service Programme\",\n    \"displayName\": null,\n    \"enabled\": true,\n    \"required\": true\n  }\n]"
             }
           ]
         },
@@ -17489,7 +17579,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"key\": \"sunday_school\",\n  \"moduleName\": \"Sunday School\",\n  \"enabled\": true,\n  \"required\": false\n}"
+              "body": "{\n  \"key\": \"sunday_school\",\n  \"moduleName\": \"Sunday School\",\n  \"displayName\": null,\n  \"enabled\": true,\n  \"required\": false\n}"
             }
           ]
         },
@@ -17524,21 +17614,53 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enabled\": false\n}",
+              "raw": "{\n  \"enabled\": false,\n  \"displayName\": \"Elders' Feedback\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Enable or disable a module. Returns 400 if the module is marked required. Upserts the row, invalidates cache, and writes CHURCH_SETTING_UPDATED audit log."
+            "description": "Enable/disable a module and/or set a displayName override. Returns 400 if disabling a module marked required. Merges rather than overwrites -- omitting displayName preserves any previously-set label. Upserts the row, invalidates cache, and writes CHURCH_SETTING_UPDATED audit log."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"key\": \"sunday_school\",\n  \"moduleName\": \"Sunday School\",\n  \"enabled\": true,\n  \"required\": false\n}"
+              "body": "{\n  \"key\": \"sunday_school\",\n  \"moduleName\": \"Sunday School\",\n  \"displayName\": \"Elders' Feedback\",\n  \"enabled\": false,\n  \"required\": false\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get module state (shared, any authenticated role)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/modules/state",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "modules",
+                "state"
+              ]
+            },
+            "description": "Single source of truth for module enabled state, consumed by both frontends for nav/tile visibility and permission-group visibility. Any authenticated member, worker, or admin can call this (JwtAuthGuard, not AdminGuard)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"key\": \"sunday_school\",\n    \"enabled\": true,\n    \"displayName\": \"Sunday School\"\n  },\n  {\n    \"key\": \"evangelism\",\n    \"enabled\": false,\n    \"displayName\": \"Evangelism\"\n  }\n]"
             }
           ]
         }

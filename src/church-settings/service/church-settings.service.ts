@@ -32,25 +32,36 @@ export class ChurchSettingsService {
   async findAll(): Promise<ChurchSettingResponseDto[]> {
     const rows = await this.settingRepo.find();
     const overrides = new Map(
-      rows.map((r) => [r.key, (r.value as { enabled: boolean }).enabled]),
+      rows.map((r) => [
+        r.key,
+        r.value as { enabled: boolean; displayName?: string },
+      ]),
     );
-    return KNOWN_MODULES.map((m) => ({
-      key: m.key,
-      moduleName: m.moduleName,
-      required: m.required,
-      enabled: overrides.get(m.key) ?? true,
-    }));
+    return KNOWN_MODULES.map((m) => {
+      const override = overrides.get(m.key);
+      return {
+        key: m.key,
+        moduleName: m.moduleName,
+        required: m.required,
+        enabled: override?.enabled ?? true,
+        displayName: override?.displayName,
+      };
+    });
   }
 
   async findOne(key: string): Promise<ChurchSettingResponseDto> {
     this.assertKnownKey(key);
     const module = KNOWN_MODULES.find((m) => m.key === key)!;
     const row = await this.settingRepo.findOne({ where: { key } });
+    const value = row?.value as
+      | { enabled: boolean; displayName?: string }
+      | undefined;
     return {
       key,
       moduleName: module.moduleName,
       required: module.required,
-      enabled: row ? (row.value as { enabled: boolean }).enabled : true,
+      enabled: value?.enabled ?? true,
+      displayName: value?.displayName,
     };
   }
 
@@ -69,14 +80,23 @@ export class ChurchSettingsService {
     }
 
     let row = await this.settingRepo.findOne({ where: { key } });
+    // PATCH semantics: an omitted displayName means "leave it as-is", not
+    // "clear it" — e.g. toggling enabled via the settings-page switch never
+    // sends displayName, and must not wipe a previously-set rename.
+    const existingDisplayName = (
+      row?.value as { displayName?: string } | undefined
+    )?.displayName;
+    const displayName = dto.displayName ?? existingDisplayName;
+    const value = { enabled: dto.enabled, displayName };
+
     if (!row) {
       row = this.settingRepo.create({
         key,
         moduleName: module.moduleName,
-        value: { enabled: dto.enabled },
+        value,
       });
     } else {
-      row.value = { enabled: dto.enabled };
+      row.value = value;
     }
     await this.settingRepo.save(row);
     this.cacheService.del(this.cacheKey(key));
@@ -92,6 +112,7 @@ export class ChurchSettingsService {
       moduleName: module.moduleName,
       required: module.required,
       enabled: dto.enabled,
+      displayName,
     };
   }
 
@@ -101,9 +122,25 @@ export class ChurchSettingsService {
     if (cached !== undefined) return cached.enabled;
 
     const row = await this.settingRepo.findOne({ where: { key } });
-    const enabled = row ? (row.value as { enabled: boolean }).enabled : true;
+    const value = row?.value as { enabled: boolean } | undefined;
+    const enabled = value?.enabled ?? true;
     this.cacheService.set(cacheKey, { enabled }, this.CACHE_TTL);
     return enabled;
+  }
+
+  // Public-facing, module-agnostic state — consumed by both frontends for
+  // nav/tile visibility. Unlike findAll(), this doesn't require AdminGuard,
+  // since regular workers/members also need to know which mobile features
+  // are enabled for their church.
+  async getPublicModuleState(): Promise<
+    { key: string; enabled: boolean; displayName: string }[]
+  > {
+    const all = await this.findAll();
+    return all.map((m) => ({
+      key: m.key,
+      enabled: m.enabled,
+      displayName: m.displayName ?? m.moduleName,
+    }));
   }
 
   private assertKnownKey(key: string): void {

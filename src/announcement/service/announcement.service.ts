@@ -8,11 +8,13 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
 import { Announcement } from '../entity/announcement.entity';
+import { AnnouncementReaction } from '../entity/announcement-reaction.entity';
 import {
   CreateAnnouncementDto,
   UpdateAnnouncementDto,
 } from '../dto/create-announcement.dto';
 import { SendSmsBroadcastDto } from '../dto/send-sms-broadcast.dto';
+import { ReactToAnnouncementDto } from '../dto/react-to-announcement.dto';
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
@@ -38,6 +40,8 @@ export class AnnouncementService {
   constructor(
     @InjectRepository(Announcement)
     private readonly announcementRepo: Repository<Announcement>,
+    @InjectRepository(AnnouncementReaction)
+    private readonly reactionRepo: Repository<AnnouncementReaction>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
     private readonly sanitizationService: SanitizationService,
@@ -447,6 +451,77 @@ export class AnnouncementService {
       limit,
       total,
     );
+  }
+
+  async react(
+    announcementId: string,
+    memberId: string,
+    dto: ReactToAnnouncementDto,
+  ): Promise<AnnouncementReaction> {
+    await this.getOrThrow(announcementId);
+
+    const existing = await this.reactionRepo.findOne({
+      where: {
+        announcement: { id: announcementId },
+        member: { id: memberId },
+      },
+    });
+
+    if (existing) {
+      existing.emoji = dto.emoji;
+      return this.reactionRepo.save(existing);
+    }
+
+    const reaction = this.reactionRepo.create({
+      announcement: { id: announcementId } as Announcement,
+      member: { id: memberId } as Member,
+      emoji: dto.emoji,
+    });
+    return this.reactionRepo.save(reaction);
+  }
+
+  async removeReaction(
+    announcementId: string,
+    memberId: string,
+  ): Promise<void> {
+    await this.reactionRepo.delete({
+      announcement: { id: announcementId },
+      member: { id: memberId },
+    });
+  }
+
+  async getReactionSummary(
+    announcementId: string,
+    memberId?: string,
+  ): Promise<{
+    summary: { emoji: string; count: number }[];
+    myReaction: string | null;
+  }> {
+    const rows = await this.reactionRepo
+      .createQueryBuilder('r')
+      .select('r.emoji', 'emoji')
+      .addSelect('COUNT(*)', 'count')
+      .where('r.announcement_id = :announcementId', { announcementId })
+      .groupBy('r.emoji')
+      .getRawMany<{ emoji: string; count: string }>();
+
+    const summary = rows.map((r) => ({
+      emoji: r.emoji,
+      count: Number.parseInt(r.count, 10),
+    }));
+
+    let myReaction: string | null = null;
+    if (memberId) {
+      const mine = await this.reactionRepo.findOne({
+        where: {
+          announcement: { id: announcementId },
+          member: { id: memberId },
+        },
+      });
+      myReaction = mine?.emoji ?? null;
+    }
+
+    return { summary, myReaction };
   }
 
   private async getOrThrow(id: string): Promise<Announcement> {

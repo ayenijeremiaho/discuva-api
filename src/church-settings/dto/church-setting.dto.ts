@@ -1,9 +1,13 @@
-import { IsBoolean, IsNotEmpty } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class UpdateChurchSettingDto {
   @IsBoolean()
   @IsNotEmpty()
   enabled: boolean;
+
+  @IsOptional()
+  @IsString()
+  displayName?: string;
 }
 
 export class ChurchSettingResponseDto {
@@ -11,4 +15,5 @@ export class ChurchSettingResponseDto {
   moduleName: string;
   enabled: boolean;
   required: boolean;
+  displayName?: string;
 }

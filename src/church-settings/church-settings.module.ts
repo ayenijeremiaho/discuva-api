@@ -2,7 +2,10 @@ import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ChurchSetting } from './entity/church-setting.entity';
 import { ChurchSettingsService } from './service/church-settings.service';
-import { ChurchSettingsController } from './controller/church-settings.controller';
+import {
+  ChurchSettingsController,
+  ModuleStateController,
+} from './controller/church-settings.controller';
 import { ModuleEnabledGuard } from './guard/module-enabled.guard';
 import { UtilityModule } from '../utility/utility.module';
 
@@ -10,7 +13,7 @@ import { UtilityModule } from '../utility/utility.module';
 @Module({
   imports: [TypeOrmModule.forFeature([ChurchSetting]), UtilityModule],
   providers: [ChurchSettingsService, ModuleEnabledGuard],
-  controllers: [ChurchSettingsController],
+  controllers: [ChurchSettingsController, ModuleStateController],
   exports: [ChurchSettingsService, ModuleEnabledGuard],
 })
 export class ChurchSettingsModule {}

@@ -37,8 +37,11 @@ import {
   UpdateTitheAccountDto,
 } from '../dto/tithe.dto';
 import { VirtualAccountService } from '../../finance/service/virtual-account.service';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(JwtAuthGuard, AdminGuard)
+@RequiresModule('tithe')
+@UseGuards(JwtAuthGuard, AdminGuard, ModuleEnabledGuard)
 @Controller('admin/tithes')
 export class TitheAdminController {
   constructor(

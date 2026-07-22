@@ -11,7 +11,7 @@ import { SmsModule } from '../sms/sms.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Announcement]),
+    TypeOrmModule.forFeature([Announcement, AnnouncementReaction]),
     MemberModule,
     UtilityModule,
     GroupModule,

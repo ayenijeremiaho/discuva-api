@@ -428,6 +428,18 @@ Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-c
 | sendViaSms   | boolean, default `false`; requires the caller's admin role to hold `SMS_SEND` (see SMS Module) |
 | smsBody      | text, nullable; required when `sendViaSms=true`; deliberately separate from `body` since SMS is billed per segment |
 
+### AnnouncementReaction
+
+A member's emoji reaction to an announcement they received.
+
+| Field        | Notes                                                                     |
+|--------------|----------------------------------------------------------------------------|
+| announcement | ManyToOne → Announcement, `onDelete: CASCADE`, indexed                     |
+| member       | ManyToOne → Member, `onDelete: CASCADE`                                    |
+| emoji        | character varying, validated against a fixed set (`ReactionEmojiEnum`: 👍 ❤️ 🙏 🎉 👏) |
+
+**Unique constraint:** `(announcement, member)` — one reaction per member per announcement. Reacting again with a different emoji updates the existing row rather than adding a second one (not Slack-style multi-emoji-per-user).
+
 ### Group
 
 | Field       | Type            | Notes                                                   |
@@ -1666,6 +1678,49 @@ system creates:
 2. A `SuperAdmin` `AdminRole` carrying all permissions
 3. An `Admin` record linking the two
 
+### Church Settings Module
+
+Lets an admin turn optional feature modules on/off per-installation without a deploy — the mechanism that keeps the
+platform usable by congregations that don't run every ministry this codebase supports. Backed by `ChurchSetting`
+(`key` unique, `value: jsonb` = `{ enabled: boolean, displayName?: string }`), read through `ChurchSettingsService`
+with a short-TTL cache (`cacheService`) so `isEnabled()` checks on every request don't hit Postgres each time.
+
+**`KNOWN_MODULES`** (`src/church-settings/constants/known-modules.constant.ts`) is the fixed list of togglable
+modules, each with a `required: boolean`. `required: true` modules (`departments`, `service_programme`) can never be
+disabled — `PATCH /admin/settings/:key` returns `400` if attempted. Everything else defaults to `required: false`:
+`incident_report`, `asset_management`, `evangelism`, `follow_up`, `pastor_feedback`, `prayer`, `sunday_school`,
+`children_church`, `facility_rental`, `tithe`, `classes`, `announcements`. A module with no row in the database is
+treated as **enabled** (absent = on) — a fresh install has everything available until an admin opts out.
+
+**`displayName` override:** an admin can rename a module's label (e.g. "Pastor Feedback" → "Elders' Feedback") via
+the same `PATCH /admin/settings/:key` body without touching `enabled`. `ChurchSettingsService.upsert()` merges
+rather than overwrites — passing `{ enabled }` alone preserves whatever `displayName` was previously set (a toggle
+flip must never silently blank out a custom label). Both frontends fall back to the module's default label when
+`displayName` is unset.
+
+**Enforcement (`ModuleEnabledGuard` + `@RequiresModule(key)`):** mirrors the existing `AdminGuard` +
+`@RequiresPermission` idiom — `@RequiresModule('evangelism')` sets metadata via `Reflector`, and `ModuleEnabledGuard`
+(added into the controller's existing `@UseGuards([...])` array, not a separate decorator call) reads it and calls
+`isEnabled()`, throwing `403` if the module is off. Applied at the controller level across every optional module's
+admin and member-facing controllers, so a disabled module is fully unreachable via the API, not just hidden in the
+UI.
+
+**`GET /modules/state`** (`JwtAuthGuard`, any authenticated member/worker/admin) is the one shared source of truth
+for "is module X on," returning `{ key, enabled, displayName }[]` for every known module (`displayName` falls back
+to the module's default label). Both Faithapp-admin's sidebar and Faithapp mobile's Explore/Ministry/Leadership
+tiles read from this single endpoint (`useModuleState()` hook, near-identical implementation in both frontends)
+rather than each frontend independently guessing module state — the same duplication risk already seen once with
+Faithapp-admin's hardcoded permission-group list (see Admin Module's `AdminPermissionGroups` note below).
+
+**`AdminPermissionGroups` visibility tied to module state:** each `AdminPermissionGroup` (see `AdminPermission` enum
+reference) optionally carries a `moduleKey`. Faithapp-admin's role-permission picker (`app/admin-management/page.tsx`)
+and the read-only permission display (`app/profile/page.tsx`) both filter `PERMISSION_GROUPS`/`AdminPermissionGroups`
+through `isModuleEnabled(group.moduleKey)` before rendering — an admin is never offered permissions for a feature
+that's disabled for their church. Core, non-toggleable groups (Members, Events & Venues, Departments, Attendance,
+Finance, Administration, etc.) carry no `moduleKey` and are always shown.
+
+**Routes prefix:** `/admin/settings` (admin CRUD), `/modules/state` (shared read endpoint, all authenticated roles)
+
 ### Event Module
 
 Manages events and service slots. Events can be single or recurring (daily/weekly/monthly). At least one `serviceSlot`
@@ -1913,6 +1968,19 @@ audiences + `message` (required). Reuses the same `resolvePhoneNumbers` targetin
 announcement. No `Announcement` row is created, no push notification is sent, and no title/body is required — this
 is purely an SMS send. Returns `{ sentCount }`; `sentCount: 0` (not an error) when the resolved audience has no
 members with a phone number on file. Logs `SMS_BROADCAST_SENT` to the audit log (`metadata: { audience, count }`).
+
+**Emoji reactions:** any authenticated member/worker can react to an announcement with one of a fixed emoji set
+(`ReactionEmojiEnum`: 👍 ❤️ 🙏 🎉 👏) via `POST announcements/:id/react` — reacting again just updates the existing
+reaction (one per member per announcement, not multi-emoji). `DELETE announcements/:id/react` removes it.
+`GET announcements/:id/reactions` returns `{ summary: { emoji, count }[], myReaction: string | null }` —
+`myReaction` reflects the *calling* member's own reaction so the frontend can highlight it without a separate
+lookup. No audit logging on reactions — too high-frequency/low-stakes to be worth an audit trail entry per click.
+
+**Known limitation (as of this writing):** push notifications on `create()` are only dispatched for `audience: GROUP`
+(`notifyGroup()`) — `ALL`/`MEMBERS_ONLY`/`WORKERS_ONLY`/`DEPARTMENT` announcements are created and appear in the feed
+but never trigger a push notification. Slated to be fixed alongside the Sermon Archive's livestream-triggered
+announcements (see Sermon Module), since a system-triggered "we're live" announcement needs to reach everyone, not
+just a group.
 
 **Routes prefix:** `/announcements`
 
@@ -2953,6 +3021,9 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /announcements/all?search=&audience=&page=&limit=          | AdminGuard (ANNOUNCEMENTS_READ)                               | All announcements (paginated); optional `search` filters by title (case-insensitive); optional `audience` filters by value (ALL/WORKERS_ONLY/MEMBERS_ONLY/DEPARTMENT/INDIVIDUAL) |
 | GET    | /announcements/feed                                        | Any                                                           | My filtered feed                                                                                              |
 | GET    | /announcements/:id                                         | Any                                                           | Get announcement                                                                                              |
+| POST   | /announcements/:id/react                                   | Any                                                            | React with an emoji (upserts — one reaction per member per announcement)                                     |
+| DELETE | /announcements/:id/react                                   | Any                                                            | Remove own reaction                                                                                           |
+| GET    | /announcements/:id/reactions                               | Any                                                            | `{ summary: {emoji,count}[], myReaction }` — myReaction reflects the calling member                          |
 | GET    | /admin/sms/balance                                         | AdminGuard (SMS_READ)                                         | Returns `{ balance, currency }` from the SMS provider                                                         |
 | POST   | /admin/sms/segment-count                                   | AdminGuard (SMS_READ)                                         | Body `{ message }` — returns `{ segments, encoding, characterCount }`                                         |
 | GET    | /admin/sms/logs                                            | AdminGuard (SMS_READ)                                         | Live passthrough to the provider's message history — not paginated/filtered server-side                       |
@@ -3122,9 +3193,10 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /service-headcount/event/:eventId/summary                  | AdminGuard + HEADCOUNT_READ                                   | Every sub-service under the event with its headcount (or null) plus the aggregate total across recorded sub-services |
 | GET    | /service-headcount/:id                                     | AdminGuard + HEADCOUNT_READ                                   | Get a single headcount record by ID (includes computed `total`). Existed with no frontend consumer until now — the Records tab has a "View details" (eye icon) action per row, showing `notes`/`customGroups`/`recordedBy` (none of which the flat table has room for). |
 
-| GET    | /admin/settings                                            | AdminGuard (any admin)                                        | List all known modules with their current enabled status and `required` flag (absent row = enabled by default) |
+| GET    | /admin/settings                                            | AdminGuard (any admin)                                        | List all known modules with their current enabled status, `displayName`, and `required` flag (absent row = enabled by default) |
 | GET    | /admin/settings/:key                                       | AdminGuard (any admin)                                        | Get one module setting by key (e.g. `incident_report`, `asset_management`). Returns `required` flag.          |
-| PATCH  | /admin/settings/:key                                       | AdminGuard (ADMIN_WRITE)                                      | Enable or disable a module — body: `{ "enabled": boolean }`. Returns `400` if module is `required`. Upserts the row, invalidates cache, and writes `CHURCH_SETTING_UPDATED` audit log. |
+| PATCH  | /admin/settings/:key                                       | AdminGuard (ADMIN_WRITE)                                      | Enable/disable a module and/or set a `displayName` override — body: `{ enabled?: boolean, displayName?: string }`. Returns `400` if disabling a `required` module. Merges rather than overwrites — omitting `displayName` preserves any previously-set label. Upserts the row, invalidates cache, and writes `CHURCH_SETTING_UPDATED` audit log. |
+| GET    | /modules/state                                             | JwtAuthGuard (any authenticated role)                         | Shared read endpoint: `{ key, enabled, displayName }[]` for every known module. Single source of truth consumed by both frontends for nav/tile visibility and permission-group visibility — see Church Settings Module. |
 
 | POST   | /incidents                                                 | JwtAuthGuard + Module: incident_report                        | Submit a new incident report. `multipart/form-data`. Rate-limited to `INCIDENT_DAILY_REPORT_LIMIT` (default 2) per member per 24 h. Fields: `title`, `description`, `location?`, `isAnonymous?` (default false). File field: `images` (up to 5 image files, max 5 MB each — uploaded to Cloudinary; `incident-images` folder). Notifies admins with INCIDENT_REPORT_WRITE permission by email. |
 | GET    | /incidents?page=&limit=                                    | JwtAuthGuard + Module: incident_report                        | Returns only the current member's own reports. Members cannot see reports submitted by others.                |

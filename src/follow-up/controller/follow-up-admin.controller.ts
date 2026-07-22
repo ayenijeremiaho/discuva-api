@@ -21,6 +21,8 @@ import { ReassignTaskDto } from '../dto/reassign-task.dto';
 import { BulkUpdateTasksDto } from '../dto/bulk-update-tasks.dto';
 import { AdminUpdateFollowUpTaskDto } from '../dto/admin-update-follow-up-task.dto';
 import { LogVisitDto } from '../dto/log-visit.dto';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import {
   FirstTimerSourceEnum,
   FollowUpTaskStatusEnum,
@@ -33,7 +35,8 @@ class MarkConvertedDto {
   memberId?: string;
 }
 
-@UseGuards(AdminGuard)
+@RequiresModule('follow_up')
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('admin/follow-up')
 export class FollowUpAdminController {
   constructor(private readonly followUpService: FollowUpService) {}

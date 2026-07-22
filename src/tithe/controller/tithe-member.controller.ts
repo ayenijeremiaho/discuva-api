@@ -16,10 +16,13 @@ import { SubmitTitheProofDto } from '../dto/tithe.dto';
 import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
 import { VirtualAccountService } from '../../finance/service/virtual-account.service';
 import { RequestVirtualAccountDto } from '../../finance/dto/virtual-account.dto';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
 const TITHE_PROOF_MAX_BYTES = 2 * 1024 * 1024;
 
-@UseGuards(JwtAuthGuard)
+@RequiresModule('tithe')
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('tithes')
 export class TitheMemberController {
   constructor(

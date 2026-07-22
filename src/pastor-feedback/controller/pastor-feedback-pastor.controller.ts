@@ -13,8 +13,11 @@ import { RespondToFeedbackDto } from '../dto/pastor-feedback.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(JwtAuthGuard)
+@RequiresModule('pastor_feedback')
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('pastor-feedback/pastor')
 export class PastorFeedbackPastorController {
   constructor(private readonly feedbackService: PastorFeedbackService) {}

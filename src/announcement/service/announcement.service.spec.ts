@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { AnnouncementService } from './announcement.service';
 import { Announcement } from '../entity/announcement.entity';
+import { AnnouncementReaction } from '../entity/announcement-reaction.entity';
+import { ReactionEmojiEnum } from '../enum/reaction-emoji.enum';
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -69,6 +71,14 @@ const mockAnnouncementRepo = {
   createQueryBuilder: jest.fn(),
 };
 
+const mockReactionRepo = {
+  findOne: jest.fn(),
+  save: jest.fn(),
+  create: jest.fn(),
+  delete: jest.fn(),
+  createQueryBuilder: jest.fn(),
+};
+
 const mockMemberQb = {
   leftJoin: jest.fn().mockReturnThis(),
   where: jest.fn().mockReturnThis(),
@@ -97,6 +107,10 @@ describe('AnnouncementService', () => {
         {
           provide: getRepositoryToken(Announcement),
           useValue: mockAnnouncementRepo,
+        },
+        {
+          provide: getRepositoryToken(AnnouncementReaction),
+          useValue: mockReactionRepo,
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: SanitizationService, useValue: mockSanitizationService },
@@ -656,6 +670,107 @@ describe('AnnouncementService', () => {
         'Hi first-timer',
       );
       expect(result).toEqual({ sentCount: 1 });
+    });
+  });
+
+  describe('react', () => {
+    it('throws NotFoundException when the announcement does not exist', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.react('missing', 'member-1', { emoji: ReactionEmojiEnum.PRAY }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('creates a new reaction when none exists', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue({ id: 'ann-1' });
+      mockReactionRepo.findOne.mockResolvedValue(null);
+      const created = { id: 'react-1', emoji: ReactionEmojiEnum.PRAY };
+      mockReactionRepo.create.mockReturnValue(created);
+      mockReactionRepo.save.mockResolvedValue(created);
+
+      const result = await service.react('ann-1', 'member-1', {
+        emoji: ReactionEmojiEnum.PRAY,
+      });
+
+      expect(mockReactionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          announcement: { id: 'ann-1' },
+          member: { id: 'member-1' },
+          emoji: ReactionEmojiEnum.PRAY,
+        }),
+      );
+      expect(result).toEqual(created);
+    });
+
+    it('updates the emoji when a reaction already exists for that member', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue({ id: 'ann-1' });
+      const existing = { id: 'react-1', emoji: ReactionEmojiEnum.THUMBS_UP };
+      mockReactionRepo.findOne.mockResolvedValue(existing);
+      mockReactionRepo.save.mockImplementation((r) => Promise.resolve(r));
+
+      const result = await service.react('ann-1', 'member-1', {
+        emoji: ReactionEmojiEnum.HEART,
+      });
+
+      expect(mockReactionRepo.create).not.toHaveBeenCalled();
+      expect(result.emoji).toBe(ReactionEmojiEnum.HEART);
+    });
+  });
+
+  describe('removeReaction', () => {
+    it('deletes the reaction for that member/announcement pair', async () => {
+      mockReactionRepo.delete.mockResolvedValue({ affected: 1 });
+
+      await service.removeReaction('ann-1', 'member-1');
+
+      expect(mockReactionRepo.delete).toHaveBeenCalledWith({
+        announcement: { id: 'ann-1' },
+        member: { id: 'member-1' },
+      });
+    });
+  });
+
+  describe('getReactionSummary', () => {
+    it('returns emoji counts grouped from the query builder, with myReaction null when no memberId given', async () => {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([
+          { emoji: ReactionEmojiEnum.PRAY, count: '5' },
+          { emoji: ReactionEmojiEnum.HEART, count: '2' },
+        ]),
+      };
+      mockReactionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getReactionSummary('ann-1');
+
+      expect(result.summary).toEqual([
+        { emoji: ReactionEmojiEnum.PRAY, count: 5 },
+        { emoji: ReactionEmojiEnum.HEART, count: 2 },
+      ]);
+      expect(result.myReaction).toBeNull();
+      expect(mockReactionRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it("includes the caller's own reaction when memberId is given", async () => {
+      const qb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      mockReactionRepo.createQueryBuilder.mockReturnValue(qb);
+      mockReactionRepo.findOne.mockResolvedValue({
+        emoji: ReactionEmojiEnum.CLAP,
+      });
+
+      const result = await service.getReactionSummary('ann-1', 'member-1');
+
+      expect(result.myReaction).toBe(ReactionEmojiEnum.CLAP);
     });
   });
 });

@@ -5,6 +5,7 @@ import { ChildCheckInStatusEnum } from '../enums/child-checkin-status.enum';
 import { GuardianRelationshipEnum } from '../enums/guardian-relationship.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { AdminGuard } from '../../admin/guard/admin.guard';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 
 const mockChildrenChurchService = {
@@ -53,6 +54,8 @@ describe('ChildrenChurchController', () => {
       ],
     })
       .overrideGuard(AdminGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleEnabledGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

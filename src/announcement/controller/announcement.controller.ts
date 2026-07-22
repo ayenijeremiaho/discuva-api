@@ -16,6 +16,7 @@ import {
   UpdateAnnouncementDto,
 } from '../dto/create-announcement.dto';
 import { SendSmsBroadcastDto } from '../dto/send-sms-broadcast.dto';
+import { ReactToAnnouncementDto } from '../dto/react-to-announcement.dto';
 import { AnnouncementAudienceEnum } from '../enum/announcement-audience.enum';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
@@ -25,8 +26,11 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(JwtAuthGuard)
+@RequiresModule('announcements')
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('announcements')
 export class AnnouncementController {
   constructor(private readonly announcementService: AnnouncementService) {}
@@ -110,5 +114,30 @@ export class AnnouncementController {
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.announcementService.getById(id);
+  }
+
+  @Post(':id/react')
+  react(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReactToAnnouncementDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.announcementService.react(id, user.id, dto);
+  }
+
+  @Delete(':id/react')
+  removeReaction(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.announcementService.removeReaction(id, user.id);
+  }
+
+  @Get(':id/reactions')
+  getReactionSummary(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.announcementService.getReactionSummary(id, user.id);
   }
 }

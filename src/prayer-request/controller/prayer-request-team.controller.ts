@@ -21,8 +21,11 @@ import { PregnancyCaseStatusEnum } from '../enum/pregnancy-case-status.enum';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(JwtAuthGuard)
+@RequiresModule('prayer')
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller()
 export class PrayerRequestTeamController {
   constructor(private readonly prayerRequestService: PrayerRequestService) {}

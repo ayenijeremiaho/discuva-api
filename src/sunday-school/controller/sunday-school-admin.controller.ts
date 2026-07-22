@@ -24,8 +24,11 @@ import {
   OpenSelfMarkDto,
 } from '../dto/create-sunday-school-session.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(AdminGuard)
+@RequiresModule('sunday_school')
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('admin/sunday-school')
 export class SundaySchoolAdminController {
   constructor(private readonly sundaySchoolService: SundaySchoolService) {}

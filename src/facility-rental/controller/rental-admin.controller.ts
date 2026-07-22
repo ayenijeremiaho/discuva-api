@@ -33,8 +33,11 @@ import {
 } from '../dto/rental-booking.dto';
 import { MarkPaymentPaidDto } from '../dto/rental-payment.dto';
 import { RentalBookingStatus } from '../enum/rental.enum';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(AdminGuard)
+@RequiresModule('facility_rental')
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('facility-rental/admin')
 export class RentalAdminController {
   constructor(

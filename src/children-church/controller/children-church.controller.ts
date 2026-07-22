@@ -34,7 +34,11 @@ import { FlagCheckInDto } from '../dto/flag-check-in.dto';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
+@RequiresModule('children_church')
+@UseGuards(ModuleEnabledGuard)
 @Controller('children-church')
 export class ChildrenChurchController {
   constructor(private readonly childrenChurchService: ChildrenChurchService) {}

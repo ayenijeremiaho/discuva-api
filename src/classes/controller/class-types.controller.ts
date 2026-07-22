@@ -15,8 +15,11 @@ import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(JwtAuthGuard)
+@RequiresModule('classes')
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('classes/types')
 export class ClassTypesController {
   constructor(private readonly classTypesService: ClassTypesService) {}

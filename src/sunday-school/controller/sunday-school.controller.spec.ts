@@ -4,6 +4,7 @@ import { SundaySchoolService } from '../service/sunday-school.service';
 import { SundaySchoolAttendanceStatus } from '../enums/sunday-school-attendance-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { AdminGuard } from '../../admin/guard/admin.guard';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 
 const mockSundaySchoolService = {
@@ -49,6 +50,8 @@ describe('SundaySchoolController', () => {
       ],
     })
       .overrideGuard(AdminGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(ModuleEnabledGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

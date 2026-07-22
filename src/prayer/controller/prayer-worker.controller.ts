@@ -15,8 +15,11 @@ import { PrayerMeetingService } from '../service/prayer-meeting.service';
 import { PrayerConfigService } from '../service/prayer-config.service';
 import { PrayerAudience } from '../enum/prayer.enum';
 import { SelfSelectPrayerSlotDto } from '../dto/prayer.dto';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(JwtAuthGuard, RolesGuard)
+@RequiresModule('prayer')
+@UseGuards(JwtAuthGuard, RolesGuard, ModuleEnabledGuard)
 @Roles(MemberRoleEnum.WORKER)
 @Controller('prayer')
 export class PrayerWorkerController {

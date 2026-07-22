@@ -237,15 +237,24 @@ export interface AdminPermissionGroupItem {
 
 export interface AdminPermissionGroup {
   group: string;
+  // Church-settings module key this group maps to, if any (see KNOWN_MODULES
+  // in src/church-settings). Lets the frontend hide the group from role
+  // management when the church has disabled that module. Left undefined for
+  // groups that mix permissions across modules or map to a required
+  // (non-toggleable) module — hiding those would risk hiding something a
+  // church still needs.
+  moduleKey?: string;
   permissions: AdminPermissionGroupItem[];
 }
 
 function buildGroup(
   group: string,
   keys: AdminPermission[],
+  moduleKey?: string,
 ): AdminPermissionGroup {
   return {
     group,
+    moduleKey,
     permissions: keys.map((value) => ({
       value,
       label: AdminPermissionLabels[value],
@@ -281,18 +290,24 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     AdminPermission.HEADCOUNT_READ,
     AdminPermission.HEADCOUNT_WRITE,
   ]),
-  buildGroup('Sunday School', [
-    AdminPermission.SUNDAY_SCHOOL_READ,
-    AdminPermission.SUNDAY_SCHOOL_WRITE,
-  ]),
-  buildGroup("Children's Church", [
-    AdminPermission.CHILDREN_CHURCH_READ,
-    AdminPermission.CHILDREN_CHURCH_WRITE,
-  ]),
-  buildGroup('Training Classes', [
-    AdminPermission.CLASSES_READ,
-    AdminPermission.CLASSES_WRITE,
-  ]),
+  buildGroup(
+    'Sunday School',
+    [AdminPermission.SUNDAY_SCHOOL_READ, AdminPermission.SUNDAY_SCHOOL_WRITE],
+    'sunday_school',
+  ),
+  buildGroup(
+    "Children's Church",
+    [
+      AdminPermission.CHILDREN_CHURCH_READ,
+      AdminPermission.CHILDREN_CHURCH_WRITE,
+    ],
+    'children_church',
+  ),
+  buildGroup(
+    'Training Classes',
+    [AdminPermission.CLASSES_READ, AdminPermission.CLASSES_WRITE],
+    'classes',
+  ),
   buildGroup('Leave Requests', [
     AdminPermission.LEAVE_READ,
     AdminPermission.LEAVE_WRITE,
@@ -304,51 +319,74 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     AdminPermission.FINANCE_RECONCILE,
     AdminPermission.FINANCE_REPORT,
   ]),
-  buildGroup('Tithe & Giving', [
-    AdminPermission.TITHE_READ,
-    AdminPermission.TITHE_WRITE,
-  ]),
-  buildGroup('Announcements', [
-    AdminPermission.ANNOUNCEMENTS_READ,
-    AdminPermission.ANNOUNCEMENTS_WRITE,
-    AdminPermission.GROUPS_READ,
-    AdminPermission.GROUPS_WRITE,
-  ]),
+  buildGroup(
+    'Tithe & Giving',
+    [AdminPermission.TITHE_READ, AdminPermission.TITHE_WRITE],
+    'tithe',
+  ),
+  buildGroup(
+    'Announcements',
+    [
+      AdminPermission.ANNOUNCEMENTS_READ,
+      AdminPermission.ANNOUNCEMENTS_WRITE,
+      AdminPermission.GROUPS_READ,
+      AdminPermission.GROUPS_WRITE,
+    ],
+    'announcements',
+  ),
   buildGroup('Notes & Follow-Up', [
     AdminPermission.NOTES_READ,
     AdminPermission.NOTES_WRITE,
     AdminPermission.FOLLOW_UP_READ,
     AdminPermission.FOLLOW_UP_WRITE,
   ]),
-  buildGroup('Incident Reports', [
-    AdminPermission.INCIDENT_REPORT_READ,
-    AdminPermission.INCIDENT_REPORT_WRITE,
-  ]),
-  buildGroup('Asset Management', [
-    AdminPermission.ASSET_MANAGEMENT_READ,
-    AdminPermission.ASSET_MANAGEMENT_WRITE,
-    AdminPermission.ASSET_MAINTENANCE_ALERT,
-  ]),
-  buildGroup('Prayer Roster', [
-    AdminPermission.PRAYER_READ,
-    AdminPermission.PRAYER_WRITE,
-  ]),
-  buildGroup('Facility Rental', [
-    AdminPermission.FACILITY_RENTAL_READ,
-    AdminPermission.FACILITY_RENTAL_WRITE,
-  ]),
+  buildGroup(
+    'Incident Reports',
+    [
+      AdminPermission.INCIDENT_REPORT_READ,
+      AdminPermission.INCIDENT_REPORT_WRITE,
+    ],
+    'incident_report',
+  ),
+  buildGroup(
+    'Asset Management',
+    [
+      AdminPermission.ASSET_MANAGEMENT_READ,
+      AdminPermission.ASSET_MANAGEMENT_WRITE,
+      AdminPermission.ASSET_MAINTENANCE_ALERT,
+    ],
+    'asset_management',
+  ),
+  buildGroup(
+    'Prayer Roster',
+    [AdminPermission.PRAYER_READ, AdminPermission.PRAYER_WRITE],
+    'prayer',
+  ),
+  buildGroup(
+    'Facility Rental',
+    [
+      AdminPermission.FACILITY_RENTAL_READ,
+      AdminPermission.FACILITY_RENTAL_WRITE,
+    ],
+    'facility_rental',
+  ),
   buildGroup('SMS Messaging', [
     AdminPermission.SMS_READ,
     AdminPermission.SMS_SEND,
   ]),
-  buildGroup('Pastor Feedback', [
-    AdminPermission.PASTOR_FEEDBACK_READ,
-    AdminPermission.PASTOR_FEEDBACK_WRITE,
-  ]),
-  buildGroup('Evangelism', [
-    AdminPermission.EVANGELISM_READ,
-    AdminPermission.EVANGELISM_WRITE,
-  ]),
+  buildGroup(
+    'Pastor Feedback',
+    [
+      AdminPermission.PASTOR_FEEDBACK_READ,
+      AdminPermission.PASTOR_FEEDBACK_WRITE,
+    ],
+    'pastor_feedback',
+  ),
+  buildGroup(
+    'Evangelism',
+    [AdminPermission.EVANGELISM_READ, AdminPermission.EVANGELISM_WRITE],
+    'evangelism',
+  ),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,
     AdminPermission.ADMIN_READ,

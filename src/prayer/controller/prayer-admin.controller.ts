@@ -15,6 +15,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { PrayerConfigService } from '../service/prayer-config.service';
 import { PrayerMeetingService } from '../service/prayer-meeting.service';
 import { PrayerRosterService } from '../service/prayer-roster.service';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import {
   ClonePrayerProgramDto,
   CreatePrayerDayConfigDto,
@@ -30,7 +32,8 @@ import {
   UpdatePrayerScheduleRuleDto,
 } from '../dto/prayer.dto';
 
-@UseGuards(AdminGuard)
+@RequiresModule('prayer')
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('prayer/admin')
 export class PrayerAdminController {
   constructor(

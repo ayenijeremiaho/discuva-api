@@ -18,8 +18,11 @@ import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
 import { UpdateFollowUpTaskDto } from '../dto/update-follow-up-task.dto';
 import { AddNoteDto } from '../dto/add-note.dto';
 import { FollowUpTaskStatusEnum } from '../enums/follow-up.enum';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(RolesGuard)
+@RequiresModule('follow_up')
+@UseGuards(RolesGuard, ModuleEnabledGuard)
 @Roles(MemberRoleEnum.WORKER)
 @Controller('follow-up')
 export class FollowUpController {

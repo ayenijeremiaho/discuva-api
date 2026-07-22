@@ -20,8 +20,11 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
-@UseGuards(AdminGuard)
+@RequiresModule('pastor_feedback')
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('pastor-feedback/admin')
 export class PastorFeedbackAdminController {
   constructor(private readonly feedbackService: PastorFeedbackService) {}

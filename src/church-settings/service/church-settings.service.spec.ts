@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ChurchSettingsService } from './church-settings.service';
 import { ChurchSetting } from '../entity/church-setting.entity';
 import { KNOWN_MODULES } from '../constants/known-modules.constant';
@@ -72,6 +72,22 @@ describe('ChurchSettingsService', () => {
       );
       expect(result.find((r) => r.key === 'asset_management')?.enabled).toBe(
         true,
+      );
+    });
+
+    it('surfaces a displayName override when present', async () => {
+      mockSettingRepo.find.mockResolvedValue([
+        {
+          key: 'incident_report',
+          moduleName: 'Incident Report',
+          value: { enabled: true, displayName: 'Safety Reports' },
+        },
+      ]);
+
+      const result = await service.findAll();
+
+      expect(result.find((r) => r.key === 'incident_report')?.displayName).toBe(
+        'Safety Reports',
       );
     });
   });
@@ -166,6 +182,50 @@ describe('ChurchSettingsService', () => {
         service.upsert('unknown_module', { enabled: false }),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('stores a displayName override alongside enabled', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      mockSettingRepo.create.mockImplementation((v) => v);
+      mockSettingRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.upsert('incident_report', {
+        enabled: true,
+        displayName: 'Safety Reports',
+      });
+
+      expect(mockSettingRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          value: { enabled: true, displayName: 'Safety Reports' },
+        }),
+      );
+      expect(result.displayName).toBe('Safety Reports');
+    });
+
+    it('throws BadRequestException when disabling a required module', async () => {
+      await expect(
+        service.upsert('departments', { enabled: false }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('preserves an existing displayName when toggling enabled without passing displayName', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({
+        key: 'incident_report',
+        moduleName: 'Incident Report',
+        value: { enabled: true, displayName: 'Safety Reports' },
+      });
+      mockSettingRepo.save.mockImplementation((r) => Promise.resolve(r));
+
+      const result = await service.upsert('incident_report', {
+        enabled: false,
+      });
+
+      expect(result.displayName).toBe('Safety Reports');
+      expect(mockSettingRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          value: { enabled: false, displayName: 'Safety Reports' },
+        }),
+      );
+    });
   });
 
   describe('isEnabled', () => {
@@ -200,6 +260,39 @@ describe('ChurchSettingsService', () => {
         { enabled: false },
         300,
       );
+    });
+  });
+
+  describe('getPublicModuleState', () => {
+    it('falls back to moduleName when no displayName override is set', async () => {
+      mockSettingRepo.find.mockResolvedValue([]);
+
+      const result = await service.getPublicModuleState();
+
+      const incidentReport = result.find((r) => r.key === 'incident_report');
+      expect(incidentReport).toEqual({
+        key: 'incident_report',
+        enabled: true,
+        displayName: 'Incident Report',
+      });
+    });
+
+    it('uses the displayName override when set', async () => {
+      mockSettingRepo.find.mockResolvedValue([
+        {
+          key: 'evangelism',
+          moduleName: 'Evangelism',
+          value: { enabled: false, displayName: 'Outreach' },
+        },
+      ]);
+
+      const result = await service.getPublicModuleState();
+
+      expect(result.find((r) => r.key === 'evangelism')).toEqual({
+        key: 'evangelism',
+        enabled: false,
+        displayName: 'Outreach',
+      });
     });
   });
 });

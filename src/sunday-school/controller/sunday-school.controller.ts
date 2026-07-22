@@ -29,7 +29,11 @@ import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
+@RequiresModule('sunday_school')
+@UseGuards(ModuleEnabledGuard)
 @Controller('sunday-school')
 export class SundaySchoolController {
   constructor(private readonly sundaySchoolService: SundaySchoolService) {}
