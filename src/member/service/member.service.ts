@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindManyOptions, In, Repository } from 'typeorm';
+import { EntityManager, FindManyOptions, In, Repository } from 'typeorm';
 import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
 import { Pastor } from '../entity/pastor.entity';
@@ -31,6 +31,7 @@ import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
 import { AssignPastorDto } from '../dto/assign-pastor.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 
 @Injectable()
 export class MemberService {
@@ -53,6 +54,7 @@ export class MemberService {
     private readonly sessionService: MemberSessionService,
     private readonly configService: ConfigService,
     private readonly pushService: PushNotificationService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -60,6 +62,31 @@ export class MemberService {
   }
 
   async signup(dto: SignupDto): Promise<Member> {
+    const saved = await this.createMemberRecord(dto);
+    this.auditLogService.log('MEMBER_SIGNED_UP', {
+      targetId: saved.id,
+      targetEmail: saved.email,
+    });
+    return saved;
+  }
+
+  // Same account-creation path as self-signup (temp password, forced
+  // change-password on first login, welcome email) — an admin filling this
+  // in on someone's behalf is otherwise identical. Promoting to worker is a
+  // separate, already-existing action (POST members/:id/promote), not
+  // folded into this endpoint.
+  async createByAdmin(dto: SignupDto, actorId: string): Promise<Member> {
+    const saved = await this.createMemberRecord(dto);
+    this.auditLogService.log('MEMBER_CREATED_BY_ADMIN', {
+      actorId,
+      targetId: saved.id,
+      targetEmail: saved.email,
+      targetName: `${saved.firstname} ${saved.lastname}`,
+    });
+    return saved;
+  }
+
+  private async createMemberRecord(dto: SignupDto): Promise<Member> {
     await this.assertEmailUnique(dto.email);
 
     const tempPassword = UtilityService.generateRandomPassword();
@@ -92,11 +119,7 @@ export class MemberService {
     });
 
     const saved = await this.memberRepository.save(member);
-    this.logger.log(`New member registered: ${saved.id}`);
-    this.auditLogService.log('MEMBER_SIGNED_UP', {
-      targetId: saved.id,
-      targetEmail: saved.email,
-    });
+    this.logger.log(`New member created: ${saved.id}`);
 
     const firstName = UtilityService.capitalizeFirstLetter(saved.firstname);
     this.utilityService.sendEmailWithTemplate(
@@ -116,6 +139,33 @@ export class MemberService {
     return saved;
   }
 
+  // revokeWorker()/demoteTraineeToMember() never delete the WorkerProfile row
+  // (only deactivate it) so a member who is later re-promoted resumes their
+  // prior progress — department/profession are only overwritten when this
+  // call explicitly supplies them; completedSOD/completedBibleCollege/isTrainee
+  // are left untouched either way, since they're never part of this dto.
+  private buildOrReactivateWorkerProfile(
+    member: Member,
+    department: Department,
+    dto: { profession?: string; yearJoinedWorkforce?: string },
+  ): { profile: WorkerProfile; isReinstatement: boolean } {
+    const isReinstatement = !!member.workerProfile;
+    const profile =
+      member.workerProfile ?? this.workerProfileRepository.create();
+    profile.member = member;
+    profile.department = department;
+    profile.status = WorkerStatusEnum.ACTIVE;
+    if (!isReinstatement || dto.profession !== undefined) {
+      profile.profession = dto.profession;
+    }
+    if (!isReinstatement || dto.yearJoinedWorkforce !== undefined) {
+      profile.yearJoinedWorkforce = dto.yearJoinedWorkforce
+        ? new Date(`${dto.yearJoinedWorkforce}-01-01`)
+        : null;
+    }
+    return { profile, isReinstatement };
+  }
+
   async promoteToWorker(
     memberId: string,
     dto: PromoteToWorkerDto,
@@ -123,7 +173,7 @@ export class MemberService {
   ): Promise<Member> {
     const member = await this.getById(memberId, ['workerProfile']);
 
-    if (member.workerProfile) {
+    if (member.workerProfile?.status === WorkerStatusEnum.ACTIVE) {
       throw new BadRequestException(
         'This member is already registered as a worker.',
       );
@@ -134,15 +184,11 @@ export class MemberService {
     });
     if (!department) throw new NotFoundException('Department not found');
 
-    const profile = this.workerProfileRepository.create({
+    const { profile, isReinstatement } = this.buildOrReactivateWorkerProfile(
+      member,
       department,
-      status: WorkerStatusEnum.ACTIVE,
-      profession: dto.profession,
-      yearJoinedWorkforce: dto.yearJoinedWorkforce
-        ? new Date(`${dto.yearJoinedWorkforce}-01-01`)
-        : null,
-    });
-    profile.member = member;
+      dto,
+    );
 
     await this.memberRepository.manager.transaction(
       async (transactionalEntityManager) => {
@@ -154,20 +200,25 @@ export class MemberService {
     );
 
     this.logger.log(
-      `Member ${memberId} promoted to worker in department ${dto.departmentId}`,
+      `Member ${memberId} ${isReinstatement ? 'reinstated as' : 'promoted to'} worker in department ${dto.departmentId}`,
     );
-    this.auditLogService.log('WORKER_PROMOTED', {
-      actorId,
-      targetId: member.id,
-      targetEmail: member.email,
-      targetName: `${member.firstname} ${member.lastname}`,
-      metadata: { departmentId: dto.departmentId },
-    });
+    this.auditLogService.log(
+      isReinstatement ? 'WORKER_REINSTATED' : 'WORKER_PROMOTED',
+      {
+        actorId,
+        targetId: member.id,
+        targetEmail: member.email,
+        targetName: `${member.firstname} ${member.lastname}`,
+        metadata: { departmentId: dto.departmentId },
+      },
+    );
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Welcome to ${this.productName} Workforce`,
+      isReinstatement
+        ? `${firstName}, Welcome Back to ${this.productName} Workforce`
+        : `${firstName}, Welcome to ${this.productName} Workforce`,
       'welcome-worker',
       {
         name: `${firstName} ${member.lastname[0].toUpperCase()}.`,
@@ -238,7 +289,7 @@ export class MemberService {
         failures.push({ memberId, reason: 'Member not found' });
         continue;
       }
-      if (member.workerProfile) {
+      if (member.workerProfile?.status === WorkerStatusEnum.ACTIVE) {
         failures.push({
           memberId,
           reason: 'This member is already registered as a worker.',
@@ -249,21 +300,15 @@ export class MemberService {
     }
 
     if (eligible.length > 0) {
+      const built = eligible.map((member) =>
+        this.buildOrReactivateWorkerProfile(member, department, dto),
+      );
+
       await this.memberRepository.manager.transaction(
         async (transactionalEntityManager) => {
-          const profiles = eligible.map((member) => {
-            const profile = this.workerProfileRepository.create({
-              department,
-              status: WorkerStatusEnum.ACTIVE,
-              profession: dto.profession,
-              yearJoinedWorkforce: dto.yearJoinedWorkforce
-                ? new Date(`${dto.yearJoinedWorkforce}-01-01`)
-                : null,
-            });
-            profile.member = member;
-            return profile;
-          });
-          await transactionalEntityManager.save(profiles);
+          await transactionalEntityManager.save(
+            built.map(({ profile }) => profile),
+          );
           await transactionalEntityManager.update(
             Member,
             eligible.map((m) => m.id),
@@ -313,6 +358,32 @@ export class MemberService {
     return { promoted, skipped, failures };
   }
 
+  // Shared by revokeWorker()/demoteTraineeToMember(): removes department-lead
+  // roles and SS teacher assignments (no cascade on those FKs), deactivates
+  // the WorkerProfile, and resets role to MEMBER. Deliberately never deletes
+  // the WorkerProfile row — buildOrReactivateWorkerProfile() picks it back up
+  // on a later re-promotion so completedSOD/completedBibleCollege/isTrainee
+  // and department history aren't lost.
+  private async deactivateWorkerAccess(
+    member: Member,
+    transactionalEntityManager: EntityManager,
+  ): Promise<void> {
+    await transactionalEntityManager.delete(DepartmentLead, {
+      workerProfile: { id: member.workerProfile.id },
+    });
+    await transactionalEntityManager.update(
+      SundaySchoolClass,
+      { teacher: { id: member.id } },
+      { teacher: null },
+    );
+
+    member.workerProfile.status = WorkerStatusEnum.INACTIVE;
+    await transactionalEntityManager.save(member.workerProfile);
+
+    member.role = MemberRoleEnum.MEMBER;
+    await transactionalEntityManager.save(member);
+  }
+
   async revokeWorker(memberId: string, actorId: string): Promise<void> {
     const member = await this.getById(memberId, ['workerProfile']);
     if (!member.workerProfile)
@@ -320,31 +391,9 @@ export class MemberService {
         'This member is not registered as a worker.',
       );
 
-    const profileId = member.workerProfile.id;
-
-    // Use transaction to ensure all revocation steps complete atomically
     await this.memberRepository.manager.transaction(
-      async (transactionalEntityManager) => {
-        // Remove department lead roles — no cascade on this FK, so must be done explicitly.
-        await transactionalEntityManager.delete(DepartmentLead, {
-          workerProfile: { id: profileId },
-        });
-
-        // Null out any SS class teacher assignments so the revoked worker
-        // is no longer listed as teacher on classes they can no longer access.
-        await transactionalEntityManager.update(
-          SundaySchoolClass,
-          { teacher: { id: member.id } },
-          { teacher: null },
-        );
-
-        // Remove worker profile
-        await transactionalEntityManager.remove(member.workerProfile);
-
-        // Update member role to MEMBER
-        member.role = MemberRoleEnum.MEMBER;
-        await transactionalEntityManager.save(member);
-      },
+      (transactionalEntityManager) =>
+        this.deactivateWorkerAccess(member, transactionalEntityManager),
     );
 
     this.logger.log(`Worker access revoked for member ${memberId}`);
@@ -359,6 +408,60 @@ export class MemberService {
       member.email,
       `${firstName}, Your ${this.productName} Role Has Been Updated`,
       'worker-revoked',
+      {
+        name: firstName,
+        churchName: this.churchName,
+        churchAddress: this.churchAddress,
+      },
+    );
+  }
+
+  // Same deactivation as revokeWorker(), plus clearing isTrainee (the whole
+  // point of this action is ending trainee status specifically). Restricted
+  // to isTrainee=true profiles so it can't be used as a substitute for a real
+  // revoke-worker on an established (non-trainee) worker.
+  async demoteTraineeToMember(
+    memberId: string,
+    actorId: string,
+  ): Promise<void> {
+    const member = await this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+    ]);
+    if (!member.workerProfile) {
+      throw new BadRequestException(
+        'This member is not registered as a worker.',
+      );
+    }
+    if (!member.workerProfile.isTrainee) {
+      throw new BadRequestException(
+        'Only trainee workers can be demoted via this path — use revoke-worker instead.',
+      );
+    }
+
+    const departmentId = member.workerProfile.department?.id;
+
+    await this.memberRepository.manager.transaction(
+      async (transactionalEntityManager) => {
+        member.workerProfile.isTrainee = false;
+        await this.deactivateWorkerAccess(member, transactionalEntityManager);
+      },
+    );
+
+    this.logger.log(`Trainee worker ${memberId} demoted to member`);
+    this.auditLogService.log('WORKER_TRAINEE_DEMOTED', {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+      targetName: `${member.firstname} ${member.lastname}`,
+      metadata: { departmentId },
+    });
+
+    const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    this.utilityService.sendEmailWithTemplate(
+      member.email,
+      `${firstName}, Your ${this.productName} Training Has Ended`,
+      'trainee-demoted',
       {
         name: firstName,
         churchName: this.churchName,
@@ -506,6 +609,84 @@ export class MemberService {
     return saved;
   }
 
+  async updateMyPhoto(
+    memberId: string,
+    file: Express.Multer.File,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'pastor',
+    ]);
+
+    const previousPublicId = member.photoPublicId;
+    const uploaded = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      'profile-pictures',
+      undefined,
+      file.mimetype,
+    );
+    member.photoUrl = uploaded.secureUrl;
+    member.photoPublicId = uploaded.publicId;
+
+    const saved = await this.memberRepository.save(member);
+
+    if (previousPublicId) {
+      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
+    }
+
+    this.auditLogService.log('MEMBER_PHOTO_UPDATED', {
+      actorId: memberId,
+      targetId: memberId,
+      targetEmail: saved.email,
+      metadata: { self: true },
+    });
+    return saved;
+  }
+
+  async removeMyPhoto(memberId: string): Promise<Member> {
+    const member = await this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'pastor',
+    ]);
+    const saved = await this.clearPhoto(member);
+    this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
+      actorId: memberId,
+      targetId: memberId,
+      targetEmail: saved.email,
+      metadata: { self: true },
+    });
+    return saved;
+  }
+
+  async removeMemberPhoto(memberId: string, actorId: string): Promise<Member> {
+    const member = await this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'pastor',
+    ]);
+    const saved = await this.clearPhoto(member);
+    this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
+      actorId,
+      targetId: memberId,
+      targetEmail: saved.email,
+      metadata: { self: false },
+    });
+    return saved;
+  }
+
+  private async clearPhoto(member: Member): Promise<Member> {
+    const previousPublicId = member.photoPublicId;
+    member.photoUrl = null;
+    member.photoPublicId = null;
+    const saved = await this.memberRepository.save(member);
+    if (previousPublicId) {
+      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
+    }
+    return saved;
+  }
+
   async updateEmail(memberId: string, newEmail: string): Promise<void> {
     await this.memberRepository.update(memberId, { email: newEmail });
   }
@@ -550,6 +731,7 @@ export class MemberService {
     if (dto.completedSOD !== undefined) profile.completedSOD = dto.completedSOD;
     if (dto.completedBibleCollege !== undefined)
       profile.completedBibleCollege = dto.completedBibleCollege;
+    if (dto.isTrainee !== undefined) profile.isTrainee = dto.isTrainee;
 
     const saved = await this.workerProfileRepository.save(profile);
     this.auditLogService.log('WORKER_PROFILE_UPDATED', {
@@ -773,6 +955,33 @@ export class MemberService {
 
     const [members, total] = await qb.getManyAndCount();
     return UtilityService.createPaginationResponse(members, page, limit, total);
+  }
+
+  // Narrow, bounded, minimal-field search — built specifically for the
+  // Admin-department mobile check-in flow (AttendanceController's
+  // department/search-members route), not a general member picker. No email
+  // or phone in the result: department/role is disambiguation enough, per
+  // the same principle already applied to the birthday-wish celebrant list.
+  async searchActiveMembersLite(
+    query: string,
+    limit = 10,
+  ): Promise<Pick<Member, 'id' | 'firstname' | 'lastname' | 'role'>[]> {
+    if (!query.trim()) return [];
+    return this.memberRepository
+      .createQueryBuilder('member')
+      .select([
+        'member.id',
+        'member.firstname',
+        'member.lastname',
+        'member.role',
+      ])
+      .where('member.status = :status', { status: MemberStatusEnum.ACTIVE })
+      .andWhere(
+        '(LOWER(member.firstname) LIKE LOWER(:s) OR LOWER(member.lastname) LIKE LOWER(:s))',
+        { s: `%${query}%` },
+      )
+      .take(limit)
+      .getMany();
   }
 
   async getWorkers(

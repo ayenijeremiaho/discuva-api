@@ -18,10 +18,6 @@ import {
   GuardianRelationshipLabels,
 } from '../children-church/enums/guardian-relationship.enum';
 import {
-  ChurchClassTypeEnum,
-  ChurchClassTypeLabels,
-} from '../classes/enum/church-class-type.enum';
-import {
   EnrollmentStatusEnum,
   EnrollmentStatusLabels,
 } from '../classes/enum/enrollment-status.enum';
@@ -115,10 +111,6 @@ export class EnumsController {
       guardianRelationships: toEnumOptions(
         GuardianRelationshipEnum,
         GuardianRelationshipLabels,
-      ),
-      churchClassTypes: toEnumOptions(
-        ChurchClassTypeEnum,
-        ChurchClassTypeLabels,
       ),
       enrollmentStatuses: toEnumOptions(
         EnrollmentStatusEnum,

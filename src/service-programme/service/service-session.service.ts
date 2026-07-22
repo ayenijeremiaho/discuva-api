@@ -220,17 +220,26 @@ export class ServiceSessionService {
 
   private readonly logger = new Logger(ServiceSessionService.name);
 
-  // Bulk-start every DRAFT programme under an event in one call, so a
-  // 6-service Sunday is one "Start Service" action instead of 6 separate
-  // "Start Session" clicks. Deliberately reuses start() as-is per sub-service
-  // (own session, own anchor, own share token) rather than introducing a
-  // parent "EventSession" concept — sub-services still run and are
-  // controlled independently, this just removes the repetitive click.
-  async startEvent(
-    eventId: string,
-    memberId: string,
-  ): Promise<ServiceSession[]> {
+  // Starts only the next service slot in the event (earliest startTime among
+  // DRAFT programmes), not every slot at once — a multi-service Sunday runs
+  // First Service, then calling this again once it's ended picks up Second
+  // Service, and so on. Reuses start() as-is per sub-service (own session,
+  // own anchor, own share token) rather than introducing a parent
+  // "EventSession" concept.
+  async startEvent(eventId: string, memberId: string): Promise<ServiceSession> {
     await this.assertCanControlSession(memberId);
+
+    const liveSession = await this.sessionRepo.findOne({
+      where: {
+        status: ServiceSessionStatusEnum.LIVE,
+        programme: { serviceSlot: { event: { id: eventId } } },
+      },
+    });
+    if (liveSession) {
+      throw new ConflictException(
+        'A service session for this event is still live — end it before starting the next slot',
+      );
+    }
 
     const programmes =
       await this.programmeSvc.findStartableDraftProgrammesForEvent(eventId);
@@ -240,11 +249,7 @@ export class ServiceSessionService {
       );
     }
 
-    const sessions: ServiceSession[] = [];
-    for (const programme of programmes) {
-      sessions.push(await this.start(programme.id, memberId));
-    }
-    return sessions;
+    return this.start(programmes[0].id, memberId);
   }
 
   async start(programmeId: string, memberId: string): Promise<ServiceSession> {

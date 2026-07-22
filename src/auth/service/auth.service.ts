@@ -153,19 +153,21 @@ export class AuthService {
       );
     }
 
-    if (member.role === MemberRoleEnum.WORKER && !member.workerProfile) {
-      throw new UnauthorizedException(
-        'Worker access revoked. Please contact admin.',
-      );
-    }
-
-    if (
-      member.workerProfile &&
-      member.workerProfile.status !== WorkerStatusEnum.ACTIVE
-    ) {
-      throw new UnauthorizedException(
-        'Worker account suspended. Please contact admin.',
-      );
+    // Scoped to role === WORKER: a MEMBER-role account may still carry a
+    // leftover INACTIVE WorkerProfile from a prior revoke/demotion (kept
+    // around so re-promotion resumes their progress) — that's history, not a
+    // reason to block an ordinary member login.
+    if (member.role === MemberRoleEnum.WORKER) {
+      if (!member.workerProfile) {
+        throw new UnauthorizedException(
+          'Worker access revoked. Please contact admin.',
+        );
+      }
+      if (member.workerProfile.status !== WorkerStatusEnum.ACTIVE) {
+        throw new UnauthorizedException(
+          'Worker account suspended. Please contact admin.',
+        );
+      }
     }
 
     return {
@@ -310,18 +312,17 @@ export class AuthService {
         'Account is inactive. Please contact admin.',
       );
     }
-    if (member.role === MemberRoleEnum.WORKER && !member.workerProfile) {
-      throw new UnauthorizedException(
-        'Worker access revoked. Please log in again.',
-      );
-    }
-    if (
-      member.workerProfile &&
-      member.workerProfile.status !== WorkerStatusEnum.ACTIVE
-    ) {
-      throw new UnauthorizedException(
-        'Worker account suspended. Please log in again.',
-      );
+    if (member.role === MemberRoleEnum.WORKER) {
+      if (!member.workerProfile) {
+        throw new UnauthorizedException(
+          'Worker access revoked. Please log in again.',
+        );
+      }
+      if (member.workerProfile.status !== WorkerStatusEnum.ACTIVE) {
+        throw new UnauthorizedException(
+          'Worker account suspended. Please log in again.',
+        );
+      }
     }
 
     return {
@@ -404,18 +405,17 @@ export class AuthService {
         'Account is inactive. Please contact admin.',
       );
     }
-    if (member.role === MemberRoleEnum.WORKER && !member.workerProfile) {
-      throw new UnauthorizedException(
-        'Worker access revoked. Please log in again.',
-      );
-    }
-    if (
-      member.workerProfile &&
-      member.workerProfile.status !== WorkerStatusEnum.ACTIVE
-    ) {
-      throw new UnauthorizedException(
-        'Worker account suspended. Please log in again.',
-      );
+    if (member.role === MemberRoleEnum.WORKER) {
+      if (!member.workerProfile) {
+        throw new UnauthorizedException(
+          'Worker access revoked. Please log in again.',
+        );
+      }
+      if (member.workerProfile.status !== WorkerStatusEnum.ACTIVE) {
+        throw new UnauthorizedException(
+          'Worker account suspended. Please log in again.',
+        );
+      }
     }
 
     return {
@@ -429,7 +429,7 @@ export class AuthService {
 
   async getProfile(
     memberId: string,
-  ): Promise<{ member: Member; isHod: boolean }> {
+  ): Promise<{ member: Member; isHod: boolean; isTrainee: boolean }> {
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
@@ -441,7 +441,11 @@ export class AuthService {
         where: { workerProfile: { id: member.workerProfile.id } },
       });
     }
-    return { member, isHod };
+    return {
+      member,
+      isHod,
+      isTrainee: member.workerProfile?.isTrainee ?? false,
+    };
   }
 
   async changePassword(

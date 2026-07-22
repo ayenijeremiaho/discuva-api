@@ -37,4 +37,17 @@ export class ClassEnrollment extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
+
+  @Column({ name: 'certificate_issued', default: false })
+  certificateIssued: boolean;
+
+  @Column({
+    name: 'certificate_issued_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  certificateIssuedAt: Date | null;
+
+  @Column({ name: 'certificate_number', type: 'varchar', nullable: true })
+  certificateNumber: string | null;
 }

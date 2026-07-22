@@ -33,6 +33,8 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { DateService } from '../../utility/service/date.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 
 export interface DepartmentAttendanceSummary {
   departmentId: string;
@@ -89,6 +91,7 @@ export class AttendanceService {
     private readonly attendanceRepository: Repository<Attendance>,
     @InjectRepository(ServiceSlot)
     private readonly slotRepository: Repository<ServiceSlot>,
+    private readonly auditLogService: AuditLogService,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -1003,6 +1006,87 @@ export class AttendanceService {
         `(member=${record.member?.id}, event=${record.event?.id})`,
     );
     return saved;
+  }
+
+  // Covers two cases with one action: checking in someone who has no phone
+  // (no row exists yet for this member+event) and "restoring a streak" for
+  // someone who was auto-marked ABSENT (a row exists — just flip it). Streak
+  // is computed live from these rows (see getAttendanceStreak), so there is
+  // no separate streak field to repair — fixing the row is the whole fix.
+  async adminMarkAttendance(
+    memberId: string,
+    serviceSlotId: string,
+    status: AttendanceStatusEnum,
+    actorId: string,
+  ): Promise<Attendance> {
+    const [slot, member] = await Promise.all([
+      this.getSlotOrThrow(serviceSlotId),
+      this.memberService.getById(memberId),
+    ]);
+
+    let record = await this.attendanceRepository.findOne({
+      where: { member: { id: memberId }, event: { id: slot.event.id } },
+    });
+
+    if (record) {
+      record.status = status;
+      record.serviceSlot = slot;
+      record.checkinTime = record.checkinTime ?? this.dateService.now();
+    } else {
+      record = this.attendanceRepository.create({
+        member,
+        event: slot.event,
+        serviceSlot: slot,
+        checkinTime: this.dateService.now(),
+        status,
+        roleAtCheckin: member.role,
+        location: null,
+      });
+    }
+
+    const saved = await this.attendanceRepository.save(record);
+    this.auditLogService.log('ATTENDANCE_ADMIN_MARKED', {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+      targetName: `${member.firstname} ${member.lastname}`,
+      metadata: { eventId: slot.event.id, serviceSlotId, status },
+    });
+    this.logger.log(
+      `${actorId} marked attendance for member ${memberId} on event ${slot.event.id}: ${status}`,
+    );
+    return saved;
+  }
+
+  // Mobile-only gate for Admin-department workers (front-desk staff who need
+  // to check people in without going through the admin portal). Mirrors the
+  // identical department-key check in ServiceSessionService.assertIsAdminDeptWorker.
+  async assertIsAdminDeptWorker(memberId: string): Promise<void> {
+    const member = await this.memberService.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'workerProfile.secondaryDepartment',
+    ]);
+    const profile = member.workerProfile;
+    if (
+      profile &&
+      (profile.department?.key === DepartmentKeyEnum.ADMIN ||
+        profile.secondaryDepartment?.key === DepartmentKeyEnum.ADMIN)
+    ) {
+      return;
+    }
+    throw new ForbiddenException(
+      'Only Admin department workers can perform this action',
+    );
+  }
+
+  // Backs the mobile check-in flow's member picker — deliberately scoped to
+  // Admin-department workers only (via assertIsAdminDeptWorker), returning
+  // minimal fields (see MemberService.searchActiveMembersLite) rather than a
+  // general member-search surface.
+  async searchMembersForCheckin(actorId: string, query: string) {
+    await this.assertIsAdminDeptWorker(actorId);
+    return this.memberService.searchActiveMembersLite(query);
   }
 
   async getTotalCheckInsToday(): Promise<number> {

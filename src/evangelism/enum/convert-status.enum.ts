@@ -1,0 +1,5 @@
+export enum ConvertStatusEnum {
+  UNSAVED = 'UNSAVED',
+  SAVED = 'SAVED',
+  UNDERGOING_DISCIPLESHIP = 'UNDERGOING_DISCIPLESHIP',
+}

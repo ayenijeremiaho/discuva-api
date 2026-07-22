@@ -1,12 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ClassesService } from './classes.service';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
 import { Member } from '../../member/entity/member.entity';
 import { EnrollmentStatusEnum } from '../enum/enrollment-status.enum';
-import { ChurchClassTypeEnum } from '../enum/church-class-type.enum';
+import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { UtilityService } from '../../utility/service/utility.service';
 
 const makeQb = () => ({
   where: jest.fn().mockReturnThis(),
@@ -26,6 +29,7 @@ const makeQb = () => ({
 
 const mockClassRepo = {
   findOne: jest.fn(),
+  find: jest.fn(),
   findAndCount: jest.fn(),
   save: jest.fn(),
   create: jest.fn(),
@@ -49,6 +53,16 @@ const mockMemberRepo = {
   find: jest.fn(),
 };
 
+const mockAuditLogService = { log: jest.fn() };
+
+const mockUtilityService = {
+  sendEmailWithTemplate: jest.fn(),
+};
+
+const mockConfigService = {
+  get: jest.fn(),
+};
+
 describe('ClassesService', () => {
   let service: ClassesService;
 
@@ -64,6 +78,9 @@ describe('ClassesService', () => {
           useValue: mockEnrollmentRepo,
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
+        { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: UtilityService, useValue: mockUtilityService },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -74,7 +91,7 @@ describe('ClassesService', () => {
     it('should create and save church class', async () => {
       const dto = {
         name: 'New Believers',
-        type: ChurchClassTypeEnum.BELIEVERS,
+        classTypeId: 'class-type-1',
         description: 'Intro class',
       };
       const classObj = { id: 'class-1', ...dto };
@@ -84,14 +101,17 @@ describe('ClassesService', () => {
       const result = await service.createClass(dto as any);
 
       expect(mockClassRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ name: dto.name, type: dto.type }),
+        expect.objectContaining({
+          name: dto.name,
+          classType: { id: dto.classTypeId },
+        }),
       );
       expect(mockClassRepo.save).toHaveBeenCalledWith(classObj);
       expect(result).toMatchObject({ id: 'class-1' });
     });
 
     it('should set facilitator to null when no facilitatorId provided', async () => {
-      const dto = { name: 'Class', type: ChurchClassTypeEnum.BELIEVERS };
+      const dto = { name: 'Class', classTypeId: 'class-type-1' };
       mockClassRepo.create.mockReturnValue({ ...dto, facilitator: null });
       mockClassRepo.save.mockResolvedValue({
         id: 'class-1',
@@ -109,7 +129,7 @@ describe('ClassesService', () => {
     it('should set facilitator as reference when facilitatorId provided', async () => {
       const dto = {
         name: 'Class',
-        type: ChurchClassTypeEnum.BELIEVERS,
+        classTypeId: 'class-type-1',
         facilitatorId: 'member-1',
       };
       mockClassRepo.create.mockReturnValue({
@@ -475,7 +495,7 @@ describe('ClassesService', () => {
 
       expect(mockEnrollmentRepo.find).toHaveBeenCalledWith({
         where: { member: { id: 'member-1' } },
-        relations: ['churchClass'],
+        relations: ['churchClass', 'churchClass.classType'],
         order: { enrolledAt: 'DESC' },
       });
       expect(result).toEqual(enrollments);
@@ -500,6 +520,267 @@ describe('ClassesService', () => {
       const result = await service.getMyEnrollments('member-1');
 
       expect(result).toHaveLength(3);
+    });
+  });
+
+  describe('getPromotionCandidate', () => {
+    it('throws NotFoundException if enrollment does not exist', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.getPromotionCandidate('nonexistent'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('is not eligible when the enrollment is not COMPLETED', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        status: EnrollmentStatusEnum.IN_PROGRESS,
+        churchClass: {
+          classType: { id: 'ct-1', nextClassType: { id: 'ct-2' } },
+        },
+      });
+
+      const result = await service.getPromotionCandidate('enroll-1');
+
+      expect(result.eligible).toBe(false);
+      expect(result.openClasses).toEqual([]);
+    });
+
+    it('is not eligible when the class type is standalone (no next type)', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        status: EnrollmentStatusEnum.COMPLETED,
+        churchClass: { classType: { id: 'ct-1', nextClassType: null } },
+      });
+
+      const result = await service.getPromotionCandidate('enroll-1');
+
+      expect(result.eligible).toBe(false);
+    });
+
+    it('returns open classes of the next type when eligible', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        status: EnrollmentStatusEnum.COMPLETED,
+        churchClass: {
+          classType: { id: 'ct-1', nextClassType: { id: 'ct-2' } },
+        },
+      });
+      const openClasses = [{ id: 'class-2', name: 'Workers in Training' }];
+      mockClassRepo.find.mockResolvedValue(openClasses);
+
+      const result = await service.getPromotionCandidate('enroll-1');
+
+      expect(result.eligible).toBe(true);
+      expect(result.nextClassType).toEqual({ id: 'ct-2' });
+      expect(result.openClasses).toEqual(openClasses);
+      expect(mockClassRepo.find).toHaveBeenCalledWith({
+        where: {
+          classType: { id: 'ct-2' },
+          status: ChurchClassStatusEnum.ACTIVE,
+        },
+        order: { createdAt: 'DESC' },
+      });
+    });
+  });
+
+  describe('promoteEnrollment', () => {
+    const baseEnrollment = {
+      id: 'enroll-1',
+      member: {
+        id: 'member-1',
+        email: 'a@b.com',
+        firstname: 'Ada',
+        lastname: 'Lovelace',
+      },
+      status: EnrollmentStatusEnum.COMPLETED,
+      churchClass: {
+        id: 'class-1',
+        name: 'Believers Class',
+        classType: { id: 'ct-1', nextClassType: { id: 'ct-2' } },
+      },
+    };
+
+    it('throws NotFoundException if enrollment does not exist', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.promoteEnrollment(
+          'nonexistent',
+          { targetClassId: 'class-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException if enrollment is not COMPLETED', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        ...baseEnrollment,
+        status: EnrollmentStatusEnum.IN_PROGRESS,
+      });
+
+      await expect(
+        service.promoteEnrollment(
+          'enroll-1',
+          { targetClassId: 'class-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when the class type is standalone', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        ...baseEnrollment,
+        churchClass: {
+          ...baseEnrollment.churchClass,
+          classType: { id: 'ct-1', nextClassType: null },
+        },
+      });
+
+      await expect(
+        service.promoteEnrollment(
+          'enroll-1',
+          { targetClassId: 'class-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException if the target class does not exist', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue(baseEnrollment);
+      mockClassRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.promoteEnrollment(
+          'enroll-1',
+          { targetClassId: 'class-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException if target class is not of the expected next type', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue(baseEnrollment);
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'class-2',
+        classType: { id: 'ct-3' },
+      });
+
+      await expect(
+        service.promoteEnrollment(
+          'enroll-1',
+          { targetClassId: 'class-2' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('enrolls the member into the target class, logs, and emails on success', async () => {
+      mockEnrollmentRepo.findOne
+        .mockResolvedValueOnce(baseEnrollment) // load the enrollment being promoted
+        .mockResolvedValueOnce(null); // enrollMember's existing-enrollment check — none, create fresh
+      mockClassRepo.findOne
+        .mockResolvedValueOnce({ id: 'class-2', classType: { id: 'ct-2' } }) // target class type check
+        .mockResolvedValueOnce({
+          id: 'class-2',
+          name: 'Workers in Training',
+          status: ChurchClassStatusEnum.ACTIVE,
+        }); // getClassOrThrow inside enrollMember
+      mockMemberRepo.existsBy.mockResolvedValue(true);
+      const newEnrollment = {
+        id: 'enroll-2',
+        status: EnrollmentStatusEnum.IN_PROGRESS,
+      };
+      mockEnrollmentRepo.create.mockReturnValue(newEnrollment);
+      mockEnrollmentRepo.save.mockResolvedValue(newEnrollment);
+
+      const result = await service.promoteEnrollment(
+        'enroll-1',
+        { targetClassId: 'class-2' },
+        'admin-1',
+      );
+
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'CLASS_LEVEL_PROMOTED',
+        expect.objectContaining({
+          actorId: 'admin-1',
+          targetId: 'member-1',
+        }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalled();
+      expect(result).toBe(newEnrollment);
+    });
+  });
+
+  describe('issueCertificate', () => {
+    const completedEnrollment = {
+      id: 'enroll-1',
+      status: EnrollmentStatusEnum.COMPLETED,
+      member: {
+        id: 'member-1',
+        email: 'a@b.com',
+        firstname: 'Ada',
+        lastname: 'Lovelace',
+      },
+      churchClass: { id: 'class-1', name: 'Believers Class' },
+      certificateIssued: false,
+      certificateIssuedAt: null,
+      certificateNumber: null,
+    };
+
+    it('throws NotFoundException if enrollment does not exist', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.issueCertificate('nonexistent', {}, 'admin-1'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException if enrollment is not COMPLETED', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        ...completedEnrollment,
+        status: EnrollmentStatusEnum.IN_PROGRESS,
+      });
+
+      await expect(
+        service.issueCertificate('enroll-1', {}, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('marks the certificate issued, sets the number, and audit-logs', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({ ...completedEnrollment });
+      mockEnrollmentRepo.save.mockImplementation((e) => Promise.resolve(e));
+
+      const result = await service.issueCertificate(
+        'enroll-1',
+        { certificateNumber: 'CERT-001' },
+        'admin-1',
+      );
+
+      expect(result.certificateIssued).toBe(true);
+      expect(result.certificateIssuedAt).toBeInstanceOf(Date);
+      expect(result.certificateNumber).toBe('CERT-001');
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'CLASS_CERTIFICATE_ISSUED',
+        expect.objectContaining({
+          actorId: 'admin-1',
+          targetId: 'member-1',
+          metadata: expect.objectContaining({
+            enrollmentId: 'enroll-1',
+            certificateNumber: 'CERT-001',
+          }),
+        }),
+      );
+    });
+
+    it('defaults certificateNumber to null when not provided', async () => {
+      mockEnrollmentRepo.findOne.mockResolvedValue({ ...completedEnrollment });
+      mockEnrollmentRepo.save.mockImplementation((e) => Promise.resolve(e));
+
+      const result = await service.issueCertificate('enroll-1', {}, 'admin-1');
+
+      expect(result.certificateNumber).toBeNull();
     });
   });
 });

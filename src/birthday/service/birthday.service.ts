@@ -34,6 +34,7 @@ export interface BirthdayCelebrant {
   departmentName: string | null;
   pastorType: PastorTypeEnum | null;
   alreadyWishedByMe: boolean;
+  photoUrl: string | null;
 }
 
 @Injectable()
@@ -164,8 +165,8 @@ export class BirthdayService implements OnApplicationBootstrap {
     }
 
     // Deliberately omits email/phoneNumber from this member-facing response —
-    // role/department/pastor type disambiguate same-named celebrants without
-    // exposing personal contact info to other members.
+    // role/department/pastor type (and now photoUrl) disambiguate same-named
+    // celebrants without exposing personal contact info to other members.
     return members.map((m) => ({
       id: m.id,
       firstname: m.firstname,
@@ -177,6 +178,7 @@ export class BirthdayService implements OnApplicationBootstrap {
       departmentName: m.workerProfile?.department?.name ?? null,
       pastorType: m.pastor?.type ?? null,
       alreadyWishedByMe: wishedIds.has(m.id),
+      photoUrl: m.photoUrl,
     }));
   }
 

@@ -21,6 +21,7 @@ import { EmailChangeOtp } from '../entity/email-change-otp.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
 import { SessionSurface } from '../enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
@@ -222,6 +223,54 @@ describe('AuthService', () => {
 
       const result = await service.validateMember(
         'active@test.com',
+        'correct_pass',
+      );
+
+      expect(result).toEqual({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        requiresPasswordChange: false,
+        surface: SessionSurface.MEMBER,
+      });
+    });
+
+    it('should throw UnauthorizedException if role is WORKER but workerProfile is INACTIVE', async () => {
+      const member = {
+        id: 'member-1',
+        email: 'worker@test.com',
+        password: 'hashed_pass',
+        status: MemberStatusEnum.ACTIVE,
+        role: MemberRoleEnum.WORKER,
+        changedPassword: true,
+        workerProfile: { id: 'wp-1', status: WorkerStatusEnum.INACTIVE },
+      };
+      mockMemberService.findByEmail.mockResolvedValue(member);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+
+      await expect(
+        service.validateMember('worker@test.com', 'correct_pass'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    // Regression: revokeWorker()/demoteTraineeToMember() keep the
+    // WorkerProfile row (status INACTIVE) instead of deleting it, so a plain
+    // MEMBER with that history must still be able to log in — the suspended
+    // check must only gate people currently holding the WORKER role.
+    it('should allow login for a MEMBER-role account with a leftover INACTIVE workerProfile', async () => {
+      const member = {
+        id: 'member-1',
+        email: 'demoted@test.com',
+        password: 'hashed_pass',
+        status: MemberStatusEnum.ACTIVE,
+        role: MemberRoleEnum.MEMBER,
+        changedPassword: true,
+        workerProfile: { id: 'wp-1', status: WorkerStatusEnum.INACTIVE },
+      };
+      mockMemberService.findByEmail.mockResolvedValue(member);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+
+      const result = await service.validateMember(
+        'demoted@test.com',
         'correct_pass',
       );
 

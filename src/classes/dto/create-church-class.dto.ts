@@ -1,20 +1,18 @@
 import {
-  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
 } from 'class-validator';
-import { ChurchClassTypeEnum } from '../enum/church-class-type.enum';
 
 export class CreateChurchClassDto {
   @IsNotEmpty()
   @IsString()
   name: string;
 
-  @IsEnum(ChurchClassTypeEnum)
-  type: ChurchClassTypeEnum;
+  @IsUUID()
+  classTypeId: string;
 
   @IsOptional()
   @IsString()
@@ -37,6 +35,10 @@ export class UpdateChurchClassDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsUUID()
+  classTypeId?: string;
 
   @IsOptional()
   @IsString()

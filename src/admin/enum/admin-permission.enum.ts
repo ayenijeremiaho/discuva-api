@@ -52,6 +52,10 @@ export enum AdminPermission {
   FACILITY_RENTAL_WRITE = 'facility_rental:write',
   SMS_READ = 'sms:read',
   SMS_SEND = 'sms:send',
+  PASTOR_FEEDBACK_READ = 'pastor_feedback:read',
+  PASTOR_FEEDBACK_WRITE = 'pastor_feedback:write',
+  EVANGELISM_READ = 'evangelism:read',
+  EVANGELISM_WRITE = 'evangelism:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -67,8 +71,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.ATTENDANCE_WRITE]: 'Manage Attendance',
   [AdminPermission.LEAVE_READ]: 'View Leave Requests',
   [AdminPermission.LEAVE_WRITE]: 'Manage Leave Requests',
-  [AdminPermission.CLASSES_READ]: 'View Church Classes',
-  [AdminPermission.CLASSES_WRITE]: 'Manage Church Classes',
+  [AdminPermission.CLASSES_READ]: 'View Training Classes',
+  [AdminPermission.CLASSES_WRITE]: 'Manage Training Classes',
   [AdminPermission.ANNOUNCEMENTS_READ]: 'View Announcements',
   [AdminPermission.ANNOUNCEMENTS_WRITE]: 'Manage Announcements',
   [AdminPermission.GROUPS_READ]: 'View Groups',
@@ -108,6 +112,10 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.FACILITY_RENTAL_WRITE]: 'Manage Facility Rentals',
   [AdminPermission.SMS_READ]: 'View SMS Balance & Logs',
   [AdminPermission.SMS_SEND]: 'Send SMS Messages',
+  [AdminPermission.PASTOR_FEEDBACK_READ]: 'View Pastor Feedback',
+  [AdminPermission.PASTOR_FEEDBACK_WRITE]: 'Manage Pastor Feedback',
+  [AdminPermission.EVANGELISM_READ]: 'View Evangelism Converts',
+  [AdminPermission.EVANGELISM_WRITE]: 'Manage Evangelism Converts',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -133,9 +141,9 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View worker leave requests and their current statuses',
   [AdminPermission.LEAVE_WRITE]: 'Approve or reject worker leave requests',
   [AdminPermission.CLASSES_READ]:
-    'View church classes, topics, and enrollment records',
+    'View training classes, topics, and enrollment records',
   [AdminPermission.CLASSES_WRITE]:
-    'Create and manage church classes and member enrollments',
+    'Create and manage training classes and member enrollments',
   [AdminPermission.ANNOUNCEMENTS_READ]:
     'View all announcements sent to members or workers',
   [AdminPermission.ANNOUNCEMENTS_WRITE]:
@@ -211,6 +219,14 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View SMS balance, per-message cost estimates, and delivery logs',
   [AdminPermission.SMS_SEND]:
     'Send SMS messages, including enabling SMS delivery on announcements',
+  [AdminPermission.PASTOR_FEEDBACK_READ]:
+    'View weekly pastor feedback submissions and responses across all departments',
+  [AdminPermission.PASTOR_FEEDBACK_WRITE]:
+    'Edit or delete pastor feedback submissions, and respond as a pastor',
+  [AdminPermission.EVANGELISM_READ]:
+    'View all evangelism converts, follow-up history, and assignments',
+  [AdminPermission.EVANGELISM_WRITE]:
+    'Reassign convert follow-up ownership and link converts to member records',
 };
 
 export interface AdminPermissionGroupItem {
@@ -273,7 +289,7 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     AdminPermission.CHILDREN_CHURCH_READ,
     AdminPermission.CHILDREN_CHURCH_WRITE,
   ]),
-  buildGroup('Church Classes', [
+  buildGroup('Training Classes', [
     AdminPermission.CLASSES_READ,
     AdminPermission.CLASSES_WRITE,
   ]),
@@ -324,6 +340,14 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
   buildGroup('SMS Messaging', [
     AdminPermission.SMS_READ,
     AdminPermission.SMS_SEND,
+  ]),
+  buildGroup('Pastor Feedback', [
+    AdminPermission.PASTOR_FEEDBACK_READ,
+    AdminPermission.PASTOR_FEEDBACK_WRITE,
+  ]),
+  buildGroup('Evangelism', [
+    AdminPermission.EVANGELISM_READ,
+    AdminPermission.EVANGELISM_WRITE,
   ]),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,

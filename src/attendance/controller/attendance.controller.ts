@@ -14,7 +14,10 @@ import {
 } from '@nestjs/common';
 import { AttendanceService } from '../service/attendance.service';
 import { CheckInDto } from '../dto/check-in.dto';
-import { CorrectAttendanceDto } from '../dto/attendance.dto';
+import {
+  AdminMarkAttendanceDto,
+  CorrectAttendanceDto,
+} from '../dto/attendance.dto';
 import { OnlineConfirmDto } from '../../follow-up/dto/online-confirm.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
@@ -176,5 +179,48 @@ export class AttendanceController {
       dto.status,
       req.user.id,
     );
+  }
+
+  // Covers two cases: checking in a member/worker with no phone, and
+  // "restoring a streak" by fixing a previously auto-marked ABSENT row —
+  // see AttendanceService.adminMarkAttendance for why one action does both.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_WRITE)
+  @Post('admin/mark')
+  async adminMarkAttendance(
+    @Request() req: any,
+    @Body() dto: AdminMarkAttendanceDto,
+  ) {
+    return this.attendanceService.adminMarkAttendance(
+      dto.memberId,
+      dto.serviceSlotId,
+      dto.status,
+      req.user.id,
+    );
+  }
+
+  // Same action, reachable from the mobile app for workers physically at the
+  // door (e.g. Admin department front-desk staff) rather than the admin
+  // portal — gated in-service by department key, not an admin permission.
+  @UseGuards(JwtAuthGuard)
+  @Post('department/mark')
+  async departmentMarkAttendance(
+    @Request() req: any,
+    @Body() dto: AdminMarkAttendanceDto,
+  ) {
+    await this.attendanceService.assertIsAdminDeptWorker(req.user.id);
+    return this.attendanceService.adminMarkAttendance(
+      dto.memberId,
+      dto.serviceSlotId,
+      dto.status,
+      req.user.id,
+    );
+  }
+
+  // The mobile check-in flow's member picker — Admin-department workers only.
+  @UseGuards(JwtAuthGuard)
+  @Get('department/search-members')
+  async searchMembersForCheckin(@Request() req: any, @Query('q') q = '') {
+    return this.attendanceService.searchMembersForCheckin(req.user.id, q);
   }
 }

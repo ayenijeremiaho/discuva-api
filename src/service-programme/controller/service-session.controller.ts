@@ -60,14 +60,12 @@ export class ServiceSessionController {
     @Param('eventId', ParseUUIDPipe) eventId: string,
     @CurrentUser() user: MemberAuth,
   ) {
-    const sessions = await this.sessionSvc.startEvent(eventId, user.id);
-    for (const session of sessions) {
-      this.gateway.broadcastState(
-        session.sessionCode,
-        await this.sessionSvc.getState(session.sessionCode),
-      );
-    }
-    return sessions;
+    const session = await this.sessionSvc.startEvent(eventId, user.id);
+    this.gateway.broadcastState(
+      session.sessionCode,
+      await this.sessionSvc.getState(session.sessionCode),
+    );
+    return session;
   }
 
   @Post(':sessionCode/advance')

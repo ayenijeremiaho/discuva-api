@@ -37,4 +37,8 @@ export class UpdateWorkerProfileDto {
   @IsOptional()
   @IsBoolean()
   completedBibleCollege?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  isTrainee?: boolean;
 }

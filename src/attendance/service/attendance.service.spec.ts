@@ -21,6 +21,8 @@ import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { DepartmentService } from '../../department/service/department.service';
 import { DateService } from '../../utility/service/date.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { getQueueToken } from '@nestjs/bull';
 import { FOLLOW_UP_QUEUE } from '../../follow-up/processor/post-event.processor';
@@ -78,6 +80,7 @@ const mockMemberService = {
   count: jest.fn(),
   getMembersNotCheckedInForEvent: jest.fn(),
   getWorkersNotCheckedInForEvent: jest.fn(),
+  searchActiveMembersLite: jest.fn(),
 };
 
 const mockEventService = {
@@ -100,6 +103,8 @@ const mockDepartmentService = {
   getWorkersInDepartment: jest.fn(),
   isMemberDepartmentLead: jest.fn(),
 };
+
+const mockAuditLogService = { log: jest.fn() };
 
 const defaultVenue = {
   id: 'venue-1',
@@ -178,6 +183,7 @@ describe('AttendanceService', () => {
           provide: getQueueToken(FOLLOW_UP_QUEUE),
           useValue: mockFollowUpQueue,
         },
+        { provide: AuditLogService, useValue: mockAuditLogService },
       ],
     }).compile();
 
@@ -739,6 +745,206 @@ describe('AttendanceService', () => {
       expect(mockAttendanceRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: AttendanceStatusEnum.PRESENT }),
       );
+    });
+  });
+
+  describe('adminMarkAttendance', () => {
+    const slot = makeSlot(new Date());
+    const member = {
+      id: 'member-1',
+      email: 'ada@test.com',
+      firstname: 'Ada',
+      lastname: 'Lovelace',
+      role: MemberRoleEnum.WORKER,
+    };
+
+    it('creates a new record when the member has no existing attendance for this event', async () => {
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue(member);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.create.mockImplementation((x) => x);
+      mockAttendanceRepo.save.mockImplementation((x) =>
+        Promise.resolve({ ...x, id: 'att-new' }),
+      );
+
+      const result = await service.adminMarkAttendance(
+        'member-1',
+        'slot-1',
+        AttendanceStatusEnum.PRESENT,
+        'admin-1',
+      );
+
+      expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          member,
+          event: slot.event,
+          serviceSlot: slot,
+          status: AttendanceStatusEnum.PRESENT,
+          roleAtCheckin: MemberRoleEnum.WORKER,
+          location: null,
+        }),
+      );
+      expect(result.id).toBe('att-new');
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'ATTENDANCE_ADMIN_MARKED',
+        expect.objectContaining({ actorId: 'admin-1', targetId: 'member-1' }),
+      );
+    });
+
+    it('updates the existing record (e.g. a prior ABSENT row) instead of creating a duplicate', async () => {
+      const existing = {
+        id: 'att-1',
+        status: AttendanceStatusEnum.ABSENT,
+        checkinTime: null,
+        member,
+        event: slot.event,
+        serviceSlot: null,
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue(member);
+      mockAttendanceRepo.findOne.mockResolvedValue(existing);
+      mockAttendanceRepo.save.mockImplementation((x) => Promise.resolve(x));
+
+      const result = await service.adminMarkAttendance(
+        'member-1',
+        'slot-1',
+        AttendanceStatusEnum.PRESENT,
+        'admin-1',
+      );
+
+      expect(mockAttendanceRepo.create).not.toHaveBeenCalled();
+      expect(result.status).toBe(AttendanceStatusEnum.PRESENT);
+      expect(result.serviceSlot).toBe(slot);
+      expect(result.checkinTime).toBeInstanceOf(Date);
+    });
+
+    it('does not overwrite an already-set checkinTime on an existing record', async () => {
+      const originalTime = new Date('2026-01-01T09:00:00.000Z');
+      const existing = {
+        id: 'att-1',
+        status: AttendanceStatusEnum.ABSENT,
+        checkinTime: originalTime,
+        member,
+        event: slot.event,
+        serviceSlot: null,
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue(member);
+      mockAttendanceRepo.findOne.mockResolvedValue(existing);
+      mockAttendanceRepo.save.mockImplementation((x) => Promise.resolve(x));
+
+      const result = await service.adminMarkAttendance(
+        'member-1',
+        'slot-1',
+        AttendanceStatusEnum.PRESENT,
+        'admin-1',
+      );
+
+      expect(result.checkinTime).toBe(originalTime);
+    });
+
+    it('throws NotFoundException when the slot does not exist', async () => {
+      mockSlotRepo.findOne.mockResolvedValue(null);
+      mockMemberService.getById.mockResolvedValue(member);
+
+      await expect(
+        service.adminMarkAttendance(
+          'member-1',
+          'slot-1',
+          AttendanceStatusEnum.PRESENT,
+          'admin-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('assertIsAdminDeptWorker', () => {
+    it("resolves when the worker's primary department key is ADMIN", async () => {
+      mockMemberService.getById.mockResolvedValue({
+        workerProfile: {
+          department: { key: DepartmentKeyEnum.ADMIN },
+          secondaryDepartment: null,
+        },
+      });
+
+      await expect(
+        service.assertIsAdminDeptWorker('member-1'),
+      ).resolves.toBeUndefined();
+    });
+
+    it("resolves when the worker's secondary department key is ADMIN", async () => {
+      mockMemberService.getById.mockResolvedValue({
+        workerProfile: {
+          department: { key: DepartmentKeyEnum.MEDIA },
+          secondaryDepartment: { key: DepartmentKeyEnum.ADMIN },
+        },
+      });
+
+      await expect(
+        service.assertIsAdminDeptWorker('member-1'),
+      ).resolves.toBeUndefined();
+    });
+
+    it('throws ForbiddenException for a worker outside the Admin department', async () => {
+      mockMemberService.getById.mockResolvedValue({
+        workerProfile: {
+          department: { key: DepartmentKeyEnum.MEDIA },
+          secondaryDepartment: null,
+        },
+      });
+
+      await expect(service.assertIsAdminDeptWorker('member-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('throws ForbiddenException for a plain member with no workerProfile', async () => {
+      mockMemberService.getById.mockResolvedValue({ workerProfile: null });
+
+      await expect(service.assertIsAdminDeptWorker('member-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('searchMembersForCheckin', () => {
+    it('rejects the search for a non-Admin-department caller before querying', async () => {
+      mockMemberService.getById.mockResolvedValue({
+        workerProfile: {
+          department: { key: DepartmentKeyEnum.MEDIA },
+          secondaryDepartment: null,
+        },
+      });
+
+      await expect(
+        service.searchMembersForCheckin('member-1', 'ada'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockMemberService.searchActiveMembersLite).not.toHaveBeenCalled();
+    });
+
+    it('delegates to MemberService.searchActiveMembersLite for an Admin-department worker', async () => {
+      mockMemberService.getById.mockResolvedValue({
+        workerProfile: {
+          department: { key: DepartmentKeyEnum.ADMIN },
+          secondaryDepartment: null,
+        },
+      });
+      const found = [
+        {
+          id: 'm1',
+          firstname: 'Ada',
+          lastname: 'Lovelace',
+          role: MemberRoleEnum.MEMBER,
+        },
+      ];
+      mockMemberService.searchActiveMembersLite.mockResolvedValue(found);
+
+      const result = await service.searchMembersForCheckin('worker-1', 'ada');
+
+      expect(mockMemberService.searchActiveMembersLite).toHaveBeenCalledWith(
+        'ada',
+      );
+      expect(result).toEqual(found);
     });
   });
 

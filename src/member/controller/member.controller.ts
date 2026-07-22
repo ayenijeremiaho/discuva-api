@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,8 +11,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { MemberService } from '../service/member.service';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
@@ -22,6 +26,7 @@ import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
 import { AssignPastorDto } from '../dto/assign-pastor.dto';
+import { SignupDto } from '../dto/signup.dto';
 import { plainToInstance } from 'class-transformer';
 import { MemberDto } from '../dto/member.dto';
 import { WorkerProfileDto } from '../dto/worker-profile.dto';
@@ -48,6 +53,23 @@ export class MemberController {
   ) {
     const result = await this.memberService.getAll(+page, +limit, role, search);
     return UtilityService.getPaginationResponseDto(result, MemberDto);
+  }
+
+  // Creates a plain MEMBER account (temp password + forced change-password
+  // on first login, same as self-signup) — for members without a phone/email
+  // habit who need an account set up on their behalf. Promoting to worker
+  // afterwards is the existing, separate POST members/:id/promote action.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Post()
+  async createByAdmin(
+    @Body() dto: SignupDto,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<MemberDto> {
+    const member = await this.memberService.createByAdmin(dto, user.id);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
   }
 
   @UseGuards(AdminGuard)
@@ -82,6 +104,42 @@ export class MemberController {
     @Body() dto: UpdateMyProfileDto,
   ): Promise<MemberDto> {
     const member = await this.memberService.updateMyProfile(user.id, dto);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/photo')
+  @UseInterceptors(
+    FileInterceptor('photo', {
+      limits: { fileSize: 3 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(
+            new BadRequestException('Only image files are allowed'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async updateMyPhoto(
+    @CurrentUser() user: MemberAuth,
+    @UploadedFile() photo?: Express.Multer.File,
+  ): Promise<MemberDto> {
+    if (!photo) throw new BadRequestException('No photo provided');
+    const member = await this.memberService.updateMyPhoto(user.id, photo);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me/photo')
+  async removeMyPhoto(@CurrentUser() user: MemberAuth): Promise<MemberDto> {
+    const member = await this.memberService.removeMyPhoto(user.id);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
@@ -153,6 +211,17 @@ export class MemberController {
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Post(':id/demote-trainee')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async demoteTraineeToMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<void> {
+    await this.memberService.demoteTraineeToMember(id, user.id);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
   @Patch(':id/worker-profile')
   async updateWorkerProfile(
     @Param('id', ParseUUIDPipe) id: string,
@@ -206,6 +275,19 @@ export class MemberController {
     @CurrentUser() user: MemberAuth,
   ): Promise<void> {
     await this.memberService.removePastor(id, user.id);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Delete(':id/photo')
+  async removeMemberPhoto(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<MemberDto> {
+    const member = await this.memberService.removeMemberPhoto(id, user.id);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
   }
 
   @UseGuards(AdminGuard)

@@ -1,9 +1,20 @@
-import { IsEnum } from 'class-validator';
+import { IsEnum, IsUUID } from 'class-validator';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { Exclude, Expose } from 'class-transformer';
 import { ToDateString } from '../../utility/dto/date-converter';
 
 export class CorrectAttendanceDto {
+  @IsEnum(AttendanceStatusEnum)
+  status: AttendanceStatusEnum;
+}
+
+export class AdminMarkAttendanceDto {
+  @IsUUID()
+  memberId: string;
+
+  @IsUUID()
+  serviceSlotId: string;
+
   @IsEnum(AttendanceStatusEnum)
   status: AttendanceStatusEnum;
 }

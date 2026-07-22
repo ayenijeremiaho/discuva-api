@@ -393,29 +393,42 @@ describe('ServiceSessionService', () => {
       });
     });
 
-    it('starts every startable draft programme under the event', async () => {
+    it('starts only the earliest startable draft programme under the event', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(null);
       mockProgrammeSvc.findStartableDraftProgrammesForEvent.mockResolvedValue([
         { ...draftProgramme, id: 'prog-1' },
         { ...draftProgramme, id: 'prog-2' },
       ]);
+      mockProgrammeSvc.assertProgrammeIsDraft.mockResolvedValue({
+        ...draftProgramme,
+        id: 'prog-1',
+      });
 
-      const sessions = await service.startEvent('event-1', 'member-1');
+      const session = await service.startEvent('event-1', 'member-1');
 
-      expect(sessions).toHaveLength(2);
+      expect(session).toEqual(mockSession);
       expect(
         mockProgrammeSvc.findStartableDraftProgrammesForEvent,
       ).toHaveBeenCalledWith('event-1');
+      expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledTimes(1);
       expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
         'prog-1',
         ServiceProgrammeStatusEnum.LIVE,
       );
-      expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
-        'prog-2',
-        ServiceProgrammeStatusEnum.LIVE,
+    });
+
+    it('throws ConflictException when a session for this event is already live', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      await expect(service.startEvent('event-1', 'member-1')).rejects.toThrow(
+        ConflictException,
       );
+      expect(
+        mockProgrammeSvc.findStartableDraftProgrammesForEvent,
+      ).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when the event has no startable draft programmes', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(null);
       mockProgrammeSvc.findStartableDraftProgrammesForEvent.mockResolvedValue(
         [],
       );

@@ -140,6 +140,7 @@ export class EmailQueueService {
       [EmailCategory.LOGIN_ALERT]: 'EMAIL_LOGIN_ALERT_ENABLED',
       [EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT]:
         'EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED',
+      [EmailCategory.PASTOR_FEEDBACK]: 'EMAIL_PASTOR_FEEDBACK_ENABLED',
     };
     return this.config.get<boolean>(flagMap[category]) !== false;
   }

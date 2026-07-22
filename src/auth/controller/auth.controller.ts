@@ -124,12 +124,14 @@ export class AuthController {
   @Get('me')
   async getProfile(
     @Request() req: any,
-  ): Promise<MemberDto & { isHod: boolean }> {
-    const { member, isHod } = await this.authService.getProfile(req.user.id);
+  ): Promise<MemberDto & { isHod: boolean; isTrainee: boolean }> {
+    const { member, isHod, isTrainee } = await this.authService.getProfile(
+      req.user.id,
+    );
     const dto = plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
-    return { ...dto, isHod };
+    return { ...dto, isHod, isTrainee };
   }
 
   @SkipPasswordChangeCheck()

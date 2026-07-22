@@ -99,14 +99,18 @@ The universal identity for every person in the system.
 | yearBaptized          | Date              | Optional                                                                                                  |
 | baptizedWithHolyGhost | boolean           | Optional                                                                                                  |
 | dateJoinedChurch      | Date (date only)  | Optional; full YYYY-MM-DD date, stored in `date_joined_church` column                                     |
+| photoUrl              | string \| null    | Cloudinary `secure_url` of the member's self-uploaded profile picture. `null` until first upload.         |
+| photoPublicId         | string \| null    | Internal — Cloudinary public_id, used to delete the old asset on replace/remove. Not exposed on `MemberDto`. |
 | workerProfile         | WorkerProfile     | OneToOne, null for plain members                                                                          |
 | pastor                | Pastor \| null    | OneToOne, null unless the member carries a pastoral designation — see Pastor table below                  |
 | attendances           | Attendance[]      | OneToMany                                                                                                 |
 | enrollments           | ClassEnrollment[] | OneToMany                                                                                                 |
 
+**Profile picture:** self-service via `POST/DELETE members/me/photo` (`JwtAuthGuard`), uploaded to Cloudinary folder `profile-pictures` (3MB limit, image mimetypes only). Replacing a photo uploads the new one first, saves it, then deletes the previous Cloudinary asset by `photoPublicId` (fire-and-forget). Admins can also clear a member's photo via `DELETE members/:id/photo` (`AdminGuard` + `MEMBERS_WRITE`) for moderation. `GET /birthday/today`'s `BirthdayCelebrant` shape also carries `photoUrl`, alongside the existing role/department/pastorType disambiguation for same-named celebrants (see Birthday Module).
+
 ### WorkerProfile
 
-Created when a member is promoted to WORKER. Deleted when revoked.
+Created when a member is promoted to WORKER. **Never deleted by any revocation path** — `revokeWorker` and `demoteTraineeToMember` both deactivate the row (`status = INACTIVE`) rather than removing it, so a member's worker history (department, profession, `completedSOD`/`completedBibleCollege`, `isTrainee`) survives and is picked back up if they're later re-promoted.
 
 | Field                 | Type               | Notes                                                                                            |
 |-----------------------|--------------------|--------------------------------------------------------------------------------------------------|
@@ -119,6 +123,17 @@ Created when a member is promoted to WORKER. Deleted when revoked.
 | yearJoinedWorkforce   | Date               | Optional                                                                                         |
 | completedSOD          | boolean            | School of Disciples                                                                              |
 | completedBibleCollege | boolean            |                                                                                                  |
+| isTrainee             | boolean            | Default `false`. Marks a worker as still in training/probation — has full worker access (role stays `WORKER`, `RolesGuard` only checks `role`) but is flagged in the UI (mobile "Training" badge, admin "Trainee" badge). Toggled via `PATCH members/:id/worker-profile`. |
+
+**Deactivation (`revokeWorker` / `demoteTraineeToMember`) — shared, non-destructive:** both go through a private `deactivateWorkerAccess()` helper that removes `DepartmentLead` rows and any Sunday School teacher assignment (no cascade on those FKs), sets `workerProfile.status = INACTIVE`, and resets `member.role = MEMBER`. Access is fully revoked immediately — `RolesGuard` does an exact match on `role` alone, so a `MEMBER`-role account can't reach worker routes regardless of what its (inactive) `WorkerProfile` looks like. The two differ only in guard + what they touch on `isTrainee`:
+- `revokeWorker` — any active worker, `POST members/:id/revoke-worker`. Leaves `isTrainee` untouched (so reinstatement resumes exactly as they left off, trainee or not).
+- `demoteTraineeToMember` — `isTrainee = true` profiles only (400 otherwise — "use revoke-worker instead"), `POST members/:id/demote-trainee`. Explicitly clears `isTrainee`, since ending trainee status is the point of this action.
+
+Both use `AdminGuard` + `MEMBERS_WRITE`.
+
+**Reinstatement (`promoteToWorker`):** now checks `workerProfile?.status === ACTIVE` (not mere existence) before rejecting with "already registered as a worker" — a member with an `INACTIVE` profile is eligible again. `buildOrReactivateWorkerProfile()` reuses the existing row instead of creating a new one: `department` and `status` are always set from the call, but `profession`/`yearJoinedWorkforce` are only overwritten if explicitly supplied this time (otherwise the prior values are kept), and `completedSOD`/`completedBibleCollege`/`isTrainee` are never touched by this path at all — they simply carry over. Audit-logged as `WORKER_REINSTATED` (vs `WORKER_PROMOTED` for a genuinely new profile) so the trail distinguishes the two. `bulkPromoteToWorker` uses the same helper and ACTIVE-only guard for consistency.
+
+**Login/refresh gating (`auth.service.ts`):** the "worker account suspended" check is scoped to `member.role === WORKER` — it used to fire whenever *any* `workerProfile` existed with a non-`ACTIVE` status, which would have wrongly blocked login for a plain `MEMBER` carrying a leftover `INACTIVE` profile from a prior revoke/demotion. Applied identically in `validateMember`, `validateRefreshToken`, and its rotated-token-replay path.
 
 ### Pastor
 
@@ -271,6 +286,83 @@ One record per member per **event**. Workers and members both receive one attend
 
 Joins a WorkerProfile to a Department as head or assistant lead.
 
+### PastorFeedback
+
+Weekly structured feedback a department's HOD or Assistant HOD (D_HOD) submits, which a pastor can read and respond to — from both the admin portal and the mobile app.
+
+| Field                  | Notes                                                                                          |
+|------------------------|--------------------------------------------------------------------------------------------------|
+| department             | ManyToOne → Department (`onDelete: CASCADE` — historical feedback for a deleted department is meaningless to retain) |
+| submittedBy            | ManyToOne → WorkerProfile, nullable (`onDelete: SET NULL` — a later worker revocation shouldn't be blocked by old feedback) |
+| submittedByName        | Snapshotted at submit time (mirrors `AuditLog`'s `targetName` pattern) so history survives regardless of the live FK |
+| weekOf                 | date — the Monday of the week being reported on (canonical anchor, unambiguous)                 |
+| attendanceNotes        | text, required                                                                                   |
+| highlights             | text, required                                                                                   |
+| challenges             | text, required                                                                                   |
+| prayerRequests         | text, nullable                                                                                   |
+| additionalNotes        | text, nullable                                                                                   |
+| submittedAt            | auto timestamp                                                                                   |
+| respondedByPastor      | ManyToOne → Pastor, nullable (`onDelete: SET NULL`)                                              |
+| respondedByPastorName  | Snapshotted at response time, same rationale as `submittedByName`                                |
+| pastorResponse         | text, nullable                                                                                   |
+| pastorRespondedAt      | timestamp, nullable                                                                              |
+
+**Unique constraint:** (department, weekOf) — one submission per department per week. Editing after submission is a `PATCH` on the same row; there's no draft/submitted status or read-receipt lock.
+
+**Ownership check (submission/edit):** the caller must be an HOD or Assistant HOD (`DepartmentLead` row) of the target department — checked via `DepartmentLead.exists({ workerProfile, department })`, mirroring the `isHod` check in `auth.service.ts:getProfile()`. Not gated by `RolesGuard`/`@Roles(WORKER)` alone, since being a worker isn't sufficient — must specifically lead that department.
+
+**Ownership check (pastor response):** the caller must have a `Pastor` record (`pastorRepo.exists({ member: { id } })`, any `PastorTypeEnum`). Available via both the admin portal (an `Admin` account whose linked `Member` has a `Pastor` record) and the mobile app (any member with a `Pastor` record).
+
+### PrayerRequest
+
+A private prayer request submitted by any member/worker — visible only to the submitter, Prayer department workers, and pastors.
+
+| Field           | Notes                                                                                          |
+|-----------------|--------------------------------------------------------------------------------------------------|
+| member          | ManyToOne → Member, nullable (`onDelete: SET NULL` — a deactivated member's request history survives) |
+| submittedByName | Snapshotted at submit time, same rationale as `PastorFeedback.submittedByName`                  |
+| content         | text, required                                                                                   |
+| status          | OPEN \| PRAYED_FOR \| ANSWERED (character varying, default OPEN)                                |
+
+### Testimony
+
+An opt-in-public testimony — either tied to one of the submitter's own prayer requests, or general.
+
+| Field           | Notes                                                                                          |
+|-----------------|--------------------------------------------------------------------------------------------------|
+| member          | ManyToOne → Member, nullable (`onDelete: SET NULL`)                                              |
+| submittedByName | Snapshotted at submit time                                                                       |
+| prayerRequest   | ManyToOne → PrayerRequest, nullable (`onDelete: SET NULL`) — null means a general testimony       |
+| content         | text, required                                                                                   |
+| isPublic        | boolean, default false — the submitter's own opt-in flag set at submission time; no separate publish/moderation step |
+
+### PregnancyPrayerCase
+
+Tracks a pregnant woman receiving ongoing prayer support — created and managed by the Prayer team (or pastors), not self-submitted. Lives in the same `src/prayer-request/` module and reuses `PRAYER_READ`/`PRAYER_WRITE` — no new permission.
+
+| Field           | Notes                                                                                          |
+|-----------------|--------------------------------------------------------------------------------------------------|
+| member          | ManyToOne → Member, nullable (`onDelete: SET NULL`) — she may not be an existing member          |
+| name            | Snapshot, always present regardless of `member`                                                  |
+| edd             | date — estimated due date                                                                        |
+| details         | text, nullable — general context/notes                                                           |
+| status          | ACTIVE \| DELIVERED \| DISCONTINUED (character varying, default ACTIVE)                          |
+| lastPrayedAt    | timestamptz, nullable — denormalized, updated whenever a new `PregnancyPrayerVisit` is logged     |
+| createdBy       | ManyToOne → Member, nullable (`onDelete: SET NULL`)                                               |
+| createdByName   | Snapshotted at creation time                                                                      |
+
+### PregnancyPrayerVisit
+
+A log entry recorded each time the Prayer team prays with/visits a pregnant woman — mirrors the `FirstTimerVisit` idiom in the Follow-Up module.
+
+| Field         | Notes                                                              |
+|---------------|----------------------------------------------------------------------|
+| case          | ManyToOne → PregnancyPrayerCase (`onDelete: CASCADE`)                |
+| loggedBy      | ManyToOne → Member, nullable (`onDelete: SET NULL`)                  |
+| loggedByName  | Snapshotted at log time                                              |
+| note          | text, nullable — follow-up note                                     |
+| visitedAt     | timestamptz, default now                                             |
+
 ### RequestLeave
 
 | Field             | Notes                                            |
@@ -285,11 +377,24 @@ Joins a WorkerProfile to a Department as head or assistant lead.
 
 | Field               | Notes                                                          |
 |---------------------|----------------------------------------------------------------|
-| type                | BELIEVERS \| BAPTISMAL \| WORKERS_IN_TRAINING \| BIBLE_COLLEGE \| SCHOOL_OF_DISCIPLESHIP |
+| classType           | ManyToOne → ClassType (nullable: false, onDelete: RESTRICT)   |
 | facilitator         | ManyToOne → Member (nullable)                                  |
 | startDate / endDate | date strings                                                   |
 
 **Delete guard:** Deleting a class is blocked if any enrolment record exists (any status — IN_PROGRESS, COMPLETED, or CANCELLED). This preserves historical enrolment data. A class with enrolment history cannot be deleted.
+
+### ClassType
+
+Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-creatable and admin-editable, not a fixed set. `ChurchClassTypeEnum` still exists in code purely as a reference for the migration's seed data; it's not used at runtime anymore (removed from the generic `/enums` endpoint's `churchClassTypes` key for the same reason — it no longer reflects reality once admins add their own types).
+
+| Field           | Notes                                                                 |
+|-----------------|------------------------------------------------------------------------|
+| name            | unique                                                                  |
+| description     | nullable text                                                          |
+| isActive        | boolean, default true — deactivated types are hidden from class-create pickers but existing classes keep referencing them (RESTRICT prevents hard-deleting a type still in use) |
+| nextClassType   | ManyToOne → ClassType, nullable, self-referencing (`onDelete: SET NULL`) |
+
+**Promotion chain:** `nextClassType` is a self-referencing pointer, not a `level` number — a class type either points to the next type in its progression or is `null` (standalone, no promotion). The chain is entirely admin-configured via the ClassType CRUD endpoints; nothing is pre-wired by the migration (the 5 seeded legacy types — Believers' Class, Baptismal Class, Workers in Training, Bible College, School of Discipleship — all seed with `nextClassType = null`). Writes are validated server-side against self-reference and cycles (walks the proposed chain up to 20 hops looking for a loop back to the type being edited) since a DB FK can't express "no cycles."
 
 ### ClassEnrollment
 
@@ -300,8 +405,15 @@ Joins a WorkerProfile to a Department as head or assistant lead.
 | status                    | IN_PROGRESS \| COMPLETED \| CANCELLED |
 | enrolledAt                | auto timestamp                        |
 | completedAt / cancelledAt | set when status changes               |
+| certificateIssued         | boolean, default false                |
+| certificateIssuedAt       | timestamptz, nullable                 |
+| certificateNumber         | varchar, nullable                     |
 
 **Unique constraint:** (member, churchClass)
+
+**Level promotion:** When an enrollment is `COMPLETED` and its class's `classType.nextClassType` is set, `GET classes/enrollments/:enrollmentId/promotion-candidate` reports eligibility plus any currently-open (`ACTIVE`) classes of that next type. Promotion itself is a separate, explicit, admin-confirmed action — `POST classes/enrollments/:enrollmentId/promote` (body: `targetClassId`) — mirroring the `promoteToWorker` pattern (transaction + `CLASS_LEVEL_PROMOTED` audit log entry + a `class-level-promotion` templated email to the member). Nothing is auto-enrolled on completion; standalone class types (no `nextClassType`) simply have no promotion affordance.
+
+**Certificates:** Once an enrollment is `COMPLETED`, `PATCH classes/enrollments/:enrollmentId/certificate` (body: optional `certificateNumber`) marks it as having received a certificate — sets `certificateIssued = true`, `certificateIssuedAt = now()`, and stores `certificateNumber` if given. This is a manual, admin-confirmed record only (no file upload); it logs `CLASS_CERTIFICATE_ISSUED`.
 
 ### Announcement
 
@@ -441,7 +553,9 @@ row — only the final outcome is recorded.
 **Audit Actions:**
 `ADMIN_CREATED` · `MEMBER_SIGNED_UP` · `MEMBER_LOGIN` · `MEMBER_LOGOUT` · `ADMIN_LOGIN` · `PASSWORD_CHANGED` ·
 `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED` · `ADMIN_PASSWORD_RESET` · `WORKER_PROMOTED` ·
-`WORKER_REVOKED` · `MEMBER_ACTIVATED` · `MEMBER_DEACTIVATED` · `MEMBER_UPDATED` · `DEVICE_PURGED` ·
+`WORKER_REVOKED` · `MEMBER_ACTIVATED` · `MEMBER_DEACTIVATED` · `MEMBER_UPDATED` · `MEMBER_CREATED_BY_ADMIN` · `MEMBER_PHOTO_UPDATED` ·
+`MEMBER_PHOTO_REMOVED` · `ATTENDANCE_ADMIN_MARKED` ·
+`PRAYER_REQUEST_SUBMITTED` · `PRAYER_REQUEST_STATUS_UPDATED` · `TESTIMONY_SUBMITTED` · `DEVICE_PURGED` ·
 `DEVICE_RESET_REQUESTED` · `DEVICE_RESET_COMPLETED` ·
 `ANNOUNCEMENT_CREATED` · `ANNOUNCEMENT_UPDATED` · `ANNOUNCEMENT_DELETED` · `EVENT_CREATED` · `EVENT_UPDATED` ·
 `EVENT_DELETED` · `NOTE_CREATED` · `NOTE_UPDATED` · `NOTE_DELETED` · `LEAVE_APPROVED` · `LEAVE_REJECTED` ·
@@ -829,6 +943,37 @@ Records each return visit a first-timer makes before or after converting.
 | event     | Event \| null     | ManyToOne, SET NULL on delete — event attended. Indexed. |
 | visitedAt | date              | YYYY-MM-DD — date of the visit                  |
 | notes     | text \| null      | Optional observation from the admin             |
+
+### Convert
+
+An evangelism outreach contact — not assumed to be an existing `Member`. See the Evangelism Module section below.
+
+| Field            | Type              | Notes                                                                 |
+|------------------|-------------------|--------------------------------------------------------------------------|
+| id               | UUID              | PK                                                                        |
+| name             | varchar           | Required — the only mandatory field on upload                            |
+| phone            | varchar \| null   |                                                                            |
+| notes            | text \| null      |                                                                            |
+| status           | varchar           | UNSAVED \| SAVED \| UNDERGOING_DISCIPLESHIP, default UNSAVED. Indexed.    |
+| onboardedBy      | Member \| null    | ManyToOne, SET NULL on delete. Indexed.                                   |
+| onboardedByName  | varchar           | Snapshotted at upload time                                                |
+| assignedTo       | WorkerProfile \| null | ManyToOne, SET NULL on delete. Indexed. Who is currently following up. |
+| member           | Member \| null    | ManyToOne, SET NULL on delete — set once the convert joins as a member    |
+| linkedAt         | timestamptz \| null |                                                                          |
+| lastContactedAt  | timestamptz \| null | Denormalized, updated on every new ConvertFollowUpLog                   |
+
+### ConvertFollowUpLog
+
+One row per contact attempt with a convert — mirrors `FirstTimerVisit`.
+
+| Field        | Type           | Notes                                    |
+|--------------|----------------|-------------------------------------------|
+| id           | UUID           | PK                                        |
+| convert      | Convert        | ManyToOne, CASCADE on delete. Indexed.    |
+| loggedBy     | Member \| null | ManyToOne, SET NULL on delete             |
+| loggedByName | varchar        | Snapshotted at log time                   |
+| note         | text \| null   |                                            |
+| contactedAt  | timestamptz    | Default now                               |
 
 ---
 
@@ -1395,6 +1540,15 @@ passwords) are now guarded by `AdminGuard` + the appropriate `MEMBERS_READ` or `
 
 **Routes prefix:** `/members`
 
+**Admin-created members:** `POST /members` (`AdminGuard` + `MEMBERS_WRITE`) lets an admin create a plain `MEMBER`
+account directly — for members without a phone/email habit, or who otherwise can't complete self-signup. Body is
+`SignupDto` (same DTO as `POST /auth/signup`). `MemberService.createByAdmin` shares its implementation with
+`signup()` via a private `createMemberRecord` helper: same temp password generation, `changedPassword: false`
+(forces the change-password flow on first login), and welcome-member email with the temp password/login URL. The
+only difference is the audit action — `MEMBER_CREATED_BY_ADMIN` (with the admin as `actorId`) instead of
+`MEMBER_SIGNED_UP`. Promoting the new member to a worker afterwards is a separate step — use the existing
+`POST /members/:id/promote`.
+
 **Self-service profile edit:** `PATCH /members/me` (`JwtAuthGuard` only, no admin) lets a member/worker update their
 own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus`
 (`UpdateMyProfileDto`, all fields optional). Deliberately excludes `email` (handled by the OTP-gated email-change
@@ -1412,6 +1566,13 @@ flow — see Self-Service Email Change Flow), and the admin-only church-record f
 
 `pastorType: PastorTypeEnum | null` is surfaced on `MemberDto` (`GET /auth/me`, `GET /members/me`,
 `GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `pastor` relation.
+
+**Profile photo:** `POST /members/me/photo` (multipart, field `photo`) uploads/replaces the caller's own photo via
+`CloudinaryService` (folder `profile-pictures`); `DELETE /members/me/photo` removes it. Both `JwtAuthGuard` only —
+self-service, no admin permission required. `DELETE /members/:id/photo` (`AdminGuard` + `MEMBERS_WRITE`) lets an
+admin clear another member's photo for moderation. All three return the updated `MemberDto`. Audit-logged as
+`MEMBER_PHOTO_UPDATED` / `MEMBER_PHOTO_REMOVED`, with `metadata: { self: true|false }` distinguishing a member's
+own action from an admin's.
 
 ### Member Bulk Import
 
@@ -1527,6 +1688,8 @@ Each slot can have multiple reminder schedules via sub-resource `/events/slots/:
 
 **Reminder dispatch (cron `*/15 * * * *`):** Queries `EventReminder` rows where `enabled = true`, `lastSentAt IS NULL`, `fireAt <= now`, and `slot.startTime > now`. The filter runs entirely in SQL — `fireAt` is pre-computed at reminder creation (and recalculated if `intervalPreset` is updated). When a slot is deleted or recreated (e.g., event update), its reminders are cascade-deleted. On `create`, `fireAt = slot.startTime − preset_minutes`. On `update` with a new `intervalPreset`, `fireAt` is recalculated from the existing slot's `startTime`.
 
+**Service slot ordering:** `EventService.getAll()`, `getById()`, and `getUpcomingEvents()` all explicitly order the `serviceSlots` relation by `startTime` ASC (query-builder `.addOrderBy('serviceSlots.startTime', 'ASC')` for `getAll`; TypeORM's relation `order` option for the other two, e.g. `order: { serviceSlots: { startTime: 'ASC' } }`). Without this, a joined one-to-many relation has no guaranteed order — First/Second Service could come back in either order depending on DB/join internals, which showed up as the admin portal's event list not consistently showing slots in the order they begin.
+
 ### Venue Module
 
 Manages named venue records referenced by event configs and individual service slots. Venues decouple location data from
@@ -1565,6 +1728,33 @@ approved leave shouldn't count against the rate), and `PRESENT`/`LATE`/`ATTENDED
 skip `ON_LEAVE`, break on `ABSENT`) — already used by the dashboard and already covered by the
 `(member, roleAtCheckin, createdAt)` composite index, so no new index was needed for this endpoint.
 
+**Admin-assisted attendance (`AttendanceService.adminMarkAttendance`):** one action covers two cases —
+checking in a member/worker with no phone (no `Attendance` row exists yet for that member+event), and
+"restoring a streak" for someone auto-marked `ABSENT` by the absence-marking cron (a row already exists —
+this just updates it). There's no separate streak field to repair: `attendanceStreak` is always computed live
+from `Attendance` rows (see `getAttendanceStreak` above), so fixing/creating the row *is* the fix. If a record
+already exists for `(member, event)` its `status`/`serviceSlot` are updated and `checkinTime` is left untouched
+if already set; otherwise a new record is created with `checkinTime = now`, `roleAtCheckin` = the member's
+current role, and `location: null` (this is an assisted check-in, not GPS-verified). Reachable two ways:
+- `POST /attendances/admin/mark` — admin portal, `AdminGuard` + `ATTENDANCE_WRITE`.
+- `POST /attendances/department/mark` — mobile app, `JwtAuthGuard` only, gated in-service by
+  `assertIsAdminDeptWorker()` (the caller's `workerProfile.department` or `secondaryDepartment` must have
+  `key === DepartmentKeyEnum.ADMIN` — the same department-key idiom already used by
+  `ServiceSessionService.assertIsAdminDeptWorker`). Front-desk/Admin-department workers get this without
+  needing an admin-portal login.
+
+Both routes take `{ memberId, serviceSlotId, status }` (`AdminMarkAttendanceDto`) — the slot determines the
+event (`slot.event`), matching how self-check-in (`POST /attendances/checkin`) already resolves it. Audit-logged
+as `ATTENDANCE_ADMIN_MARKED`.
+
+**Mobile member picker for admin-assisted check-in (`GET /attendances/department/search-members?q=`):**
+deliberately narrow — gated by the same `assertIsAdminDeptWorker()` check, bounded to 10 results
+(`MemberService.searchActiveMembersLite`), and returns only `id`/`firstname`/`lastname`/`role` (no email or
+phone) since this is a lookup for "which person is standing in front of me," not a general member directory.
+This is the one exception in the codebase to "no non-admin member-search endpoint" — justified because the
+whole point of this flow is finding one named person on the spot; it's scoped tightly enough (Admin-department
+workers only, minimal fields, capped results) that it doesn't reopen a general member-picker surface.
+
 **Routes prefix:** `/attendances`
 
 ### Department Module
@@ -1577,6 +1767,77 @@ optional `key` field on a department links it to a module-access category (e.g. 
 by department (`GET /departments/:id/workers`) remains paginated as it can be large.
 
 **Routes prefix:** `/departments`
+
+### Pastor Feedback Module
+
+A weekly, structured feedback channel from departments up to the pastorate — the department's HOD or Assistant HOD (D_HOD) submits it; a pastor reads and responds, from either the admin portal or the mobile app.
+
+**Three controllers, one service:**
+- `pastor-feedback-worker.controller.ts` (`JwtAuthGuard`) — `POST /pastor-feedback` (submit), `PATCH /pastor-feedback/:id` (edit own), `GET /pastor-feedback/my` (own history). Ownership is checked in-service (HOD/D_HOD of the target department), not by role alone.
+- `pastor-feedback-admin.controller.ts` (`AdminGuard`) — cross-department browse/edit/delete (`PASTOR_FEEDBACK_READ`/`WRITE`), plus `POST /pastor-feedback/admin/:id/respond` for an admin whose linked `Member` has a `Pastor` record.
+- `pastor-feedback-pastor.controller.ts` (`JwtAuthGuard`, mobile-facing) — same cross-department browse plus `POST /pastor-feedback/pastor/:id/respond`, gated by `assertIsPastor()` (any `Pastor` record) rather than an admin permission.
+
+**Weekly reminder scheduler (`PastorFeedbackReminderScheduler`):** `@Cron('0 9 * * 1', { timeZone: CHURCH_TIMEZONE })` — Monday 9am. Computes `weekOf` as the Monday of the week that just closed, finds every `Department` with no `PastorFeedback` row for that week, and emails + pushes a reminder to the department's HOD (falling back to the D_HOD if no HOD is assigned; skipped entirely if neither exists). Unlike `PrayerReminderScheduler`, no `reminderSent` boolean is needed — the row's absence *is* the "still pending" signal, and push de-duplication relies on `PushNotificationService`'s `idempotencyKey` (`pastor-feedback-reminder:{departmentId}:{weekOf}`).
+
+**Routes prefix:** `/pastor-feedback`, `/pastor-feedback/admin`, `/pastor-feedback/pastor`
+
+**Rename data-migration note:** the original Department Feedback → Pastor Feedback rename only renamed the
+`AdminPermission` enum values in code (`department_feedback:read/write` → `pastor_feedback:read/write`) — it did
+not touch already-granted `AdminRole.permissions` (a raw `text[]` column checked via a plain `.includes()` in
+`AdminGuard`, not a normalized join table). Any role granted the old strings before the rename silently lost
+access with no error. Fixed by `1788998400000-FixStalePastorFeedbackPermissions.ts`, which `array_replace`s the
+old strings for the new ones on every existing `admin_roles` row. **General lesson:** any future rename of an
+`AdminPermission` enum value needs a matching data-migration for `admin_roles.permissions`, not just the code
+rename — the enum change alone never reaches rows that already exist.
+
+### Prayer Request Module
+
+Lets any member/worker submit a **private** prayer request and, separately, share an **opt-in public** testimony —
+either tied to one of their own prayer requests or general. This is distinct from the Prayer Roster Module below,
+which schedules workers into prayer-meeting duty slots; this module is member-submitted requests with a lifecycle
+(`OPEN` → `PRAYED_FOR` → `ANSWERED`), unrelated to any meeting.
+
+**Visibility:**
+- Prayer requests are visible only to the submitter, workers in the Prayer department, and pastors — never a
+  public wall. Testimonies default to private; the submitter alone decides at submission time whether theirs
+  appears on the shared public feed (`isPublic`) — there is no separate admin moderation/publish step.
+
+**Entities:** `PrayerRequest` (`prayer_requests`) and `Testimony` (`testimonies`), both with a nullable
+`member` FK (`SET NULL`) plus a `submittedByName` snapshot, mirroring `PastorFeedback.submittedBy`'s pattern so a
+deactivated member's history survives. A `Testimony.prayerRequest` FK (nullable, `SET NULL`) links it to a specific
+request; `null` means a general testimony not tied to any request.
+
+**Three controllers, one service (`PrayerRequestService`):**
+- `prayer-request-worker.controller.ts` (`JwtAuthGuard`) — `POST /prayer-requests` (submit), `GET /prayer-requests/mine`
+  (own history), `POST /testimonies` (submit, optional `prayerRequestId` — enforced to be the caller's own request),
+  `GET /testimonies/mine`, `GET /testimonies/public` (the opt-in feed, open to any authenticated member/worker).
+- `prayer-request-team.controller.ts` (`JwtAuthGuard`, mobile-facing) — `GET /prayer-requests/team`,
+  `PATCH /prayer-requests/team/:id/status`. Gated in-service by `assertIsPrayerTeamOrPastor()`: any worker whose
+  primary or secondary department key is `PRAYER`, or any member with a `Pastor` record.
+- `prayer-request-admin.controller.ts` (`AdminGuard`) — `GET /prayer-requests/admin`,
+  `PATCH /prayer-requests/admin/:id/status`, `GET /testimonies/admin` (full visibility, not just public ones).
+  Reuses the existing `PRAYER_READ`/`PRAYER_WRITE` permissions (already grouped under "Prayer Roster" in
+  `AdminPermissionGroups`) — no new permission was introduced, since this is the same overall "Prayer" domain.
+
+**Routes prefix:** none fixed — routes span `/prayer-requests*` and `/testimonies*` across the three controllers
+(each controller uses `@Controller()` with a full path per handler rather than a single shared prefix, since the
+two resources don't share one).
+
+**Pregnancy prayer tracking:** the same module also tracks pregnant women receiving ongoing prayer support —
+`PregnancyPrayerCase` (name, EDD, details, status) plus `PregnancyPrayerVisit` (a log entry per prayer/visit,
+mirroring the `FirstTimerVisit` idiom in the Follow-Up module). Unlike prayer requests, these are created and
+managed entirely by the Prayer team/pastors on the woman's behalf — there is no worker-facing self-submit
+controller. `PregnancyPrayerCase.lastPrayedAt` is denormalized and updated whenever a new visit is logged, so the
+UI can show "last prayed" without joining the visit log on every read. Reuses `PRAYER_READ`/`PRAYER_WRITE` — no new
+permission. Every `PregnancyPrayerVisit` is also readable back via `GET
+prayer-requests/team/pregnancy-cases/:id/visits` (mobile) and `GET
+prayer-requests/admin/pregnancy-cases/:id/visits` (admin, `PRAYER_READ`) — paginated, newest first, so the full
+visit-and-note history is reviewable, not just the denormalized `lastPrayedAt` date. Routes: `GET/POST
+prayer-requests/team/pregnancy-cases`, `POST prayer-requests/team/pregnancy-cases/:id/visit`, `PATCH
+prayer-requests/team/pregnancy-cases/:id/status`, `GET prayer-requests/team/pregnancy-cases/:id/visits` (mobile,
+`assertIsPrayerTeamOrPastor` gated) and the parallel `GET prayer-requests/admin/pregnancy-cases`, `PATCH
+prayer-requests/admin/pregnancy-cases/:id/status`, `GET prayer-requests/admin/pregnancy-cases/:id/visits` (admin
+portal oversight, read + status-only — case creation and visit logging stay Prayer-team/mobile-only by design).
 
 ### Leave Module
 
@@ -1591,15 +1852,17 @@ overlapping a slot's time range, they are marked ON_LEAVE instead of ABSENT.
 
 **Routes prefix:** `/leave`
 
-### Classes Module
+### Classes Module (displayed as "Training Classes")
 
-Tracks member progress through structured church programs.
+Tracks member progress through structured church programs. The module, route path (`/classes`), and permission keys (`classes:read`/`classes:write`) are unchanged — only the user-facing label was renamed from "Classes"/"Church Classes" to "Training Classes" (sidebar nav, breadcrumbs, page headings, permission labels). Renaming the permission enum *keys* would strand existing `admin_roles.permissions` rows (see the Pastor Feedback rename note under the Pastor Feedback Module section), so only display strings changed.
 
-**Class types:** BELIEVERS, BAPTISMAL, WORKERS_IN_TRAINING, BIBLE_COLLEGE, SCHOOL_OF_DISCIPLESHIP
+**Class types:** admin-defined via `ClassType` CRUD (`/classes/types`) — not a fixed enum. Each type optionally points to a `nextClassType`, forming an admin-configured promotion chain (see the `ClassType` entity section above). Deactivating a type (`isActive: false`) hides it from new-class pickers without breaking existing classes that reference it.
 
-**Enrollment statuses:** IN_PROGRESS → COMPLETED or CANCELLED
+**Enrollment statuses:** IN_PROGRESS → COMPLETED or CANCELLED. A `COMPLETED` enrollment whose class type has a `nextClassType` becomes eligible for level promotion (`GET classes/enrollments/:id/promotion-candidate` → `POST classes/enrollments/:id/promote`) — an explicit, separate, admin-confirmed action, not automatic.
 
-**Routes prefix:** `/classes`
+**Certificates:** A `COMPLETED` enrollment can be marked as having received a certificate via `PATCH classes/enrollments/:id/certificate` (optional `certificateNumber`) — see the `ClassEnrollment` entity section above.
+
+**Routes prefix:** `/classes`, `/classes/types`
 
 ### Announcements Module
 
@@ -1786,6 +2049,7 @@ Shared infrastructure used across the entire application.
 | `CHILDREN_CHURCH` | `EMAIL_CHILDREN_CHURCH_ENABLED` | `true` |
 | `LOGIN_ALERT` | `EMAIL_LOGIN_ALERT_ENABLED` | `true` |
 | `SERVICE_PROGRAMME_ASSIGNMENT` | `EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED` | `true` |
+| `PASTOR_FEEDBACK` | `EMAIL_PASTOR_FEEDBACK_ENABLED` | `true` |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
 conditionals, and `{{#each}}` for loops. Values are HTML-escaped automatically; use `{{{variable}}}` only for
@@ -1829,7 +2093,7 @@ wishes per sender per day (default: 20). Input is DOMPurify-sanitized.
 
 **Fields returned by `/birthday/upcoming`** (admin-only): `id`, `firstname`, `lastname`, `email`, `phoneNumber`, `birthMonth`, `birthDay`, `birthYear`. `birthYear` is nullable — members aren't required to disclose it, so the endpoint only ever uses `birthMonth`/`birthDay` (recurring, year-independent) to determine "is today/upcoming a birthday"; `birthYear` is included purely so callers can render a full date when it's known, falling back to a day+month-only display when it's not.
 
-**Fields returned by `/birthday/today`** (member-facing, `BirthdayCelebrant`): `id`, `firstname`, `lastname`, `birthMonth`, `birthDay`, `birthYear`, `role`, `departmentName`, `pastorType`, `alreadyWishedByMe`. Deliberately does **not** include `email`/`phoneNumber` — those are fine for the admin-only `/birthday/upcoming` view but not for a response every member can call. Same-named celebrants are disambiguated instead via `role`/`departmentName` (from `workerProfile.department`, loaded via the `workerProfile` and `workerProfile.department` relations) and `pastorType` (from the `pastor` relation) — informational church-role context rather than personal contact info. `Member` has no photo/avatar column — birthday UIs render initials instead.
+**Fields returned by `/birthday/today`** (member-facing, `BirthdayCelebrant`): `id`, `firstname`, `lastname`, `birthMonth`, `birthDay`, `birthYear`, `role`, `departmentName`, `pastorType`, `alreadyWishedByMe`, `photoUrl`. Deliberately does **not** include `email`/`phoneNumber` — those are fine for the admin-only `/birthday/upcoming` view but not for a response every member can call. Same-named celebrants are disambiguated instead via `role`/`departmentName` (from `workerProfile.department`, loaded via the `workerProfile` and `workerProfile.department` relations), `pastorType` (from the `pastor` relation), and now `photoUrl` (from `Member.photoUrl` — see Member Module) — the mobile UI shows the photo when set, falling back to initials.
 
 **`alreadyWishedByMe` on `/birthday/today`:** computed per request from the caller's own JWT identity (not present on `/birthday/upcoming`, which is admin-only and has no "sender" concept) — `true` when the calling member already has a `BirthdayWish` row for that recipient this calendar year. `sendWish()` already enforced one-wish-per-sender-per-recipient-per-year at the DB level (`@Unique(['recipient', 'sender', 'year'])` on `BirthdayWish`) and rejected a second attempt with 400 — this field just surfaces that same state proactively on load, computed via a single extra query (`BirthdayWish.find({ sender, year, recipient: In(todaysBirthdayIds) })`) rather than the client only discovering it reactively after a failed second send.
 
@@ -2226,6 +2490,49 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Routes (admin portal):** `/admin/follow-up/first-timers`, `/admin/follow-up/first-timers/pipeline`, `/admin/follow-up/first-timers/:id/invite-to-membership`, `/admin/follow-up/first-timers/:id/mark-converted`, `/admin/follow-up/first-timers/:id/visits`, `/admin/follow-up/tasks`, `/admin/follow-up/tasks/:id`, `/admin/follow-up/tasks/stale`, `/admin/follow-up/tasks/:id/reassign`, `/admin/follow-up/tasks/bulk`, `/admin/follow-up/report`
 
+### Evangelism Module
+
+Tracks converts from initial outreach contact through to becoming a church member — distinct from the Follow-Up
+module above, which is scoped to first-timers who visited a service. A convert here is not assumed to be an
+existing `Member`; they may just be a name and phone number an outreach worker captured in the field.
+
+**Entities:** `Convert` (`converts`) — `name`, `phone` (nullable), `notes` (nullable), `status`
+(`UNSAVED` \| `SAVED` \| `UNDERGOING_DISCIPLESHIP`, default `UNSAVED`), `onboardedBy`/`onboardedByName` (who
+uploaded them, snapshotted), `assignedTo` (ManyToOne → `WorkerProfile`, nullable `SET NULL` — who is currently
+following up, mirrors `FollowUpTask.assignedTo`), `member`/`linkedAt` (set once the convert becomes an actual
+`Member`, mirrors `first_timers.converted_member_id`/`converted_at`), `lastContactedAt` (denormalized, updated on
+every new follow-up log). `ConvertFollowUpLog` (`convert_follow_up_logs`) — one row per contact attempt: `convert`
+(CASCADE), `loggedBy`/`loggedByName`, `note` (nullable), `contactedAt` — mirrors the `FirstTimerVisit` idiom.
+
+**Access model:**
+- **Uploading a convert** (`POST evangelism/converts`) is open to any authenticated worker — deliberately as
+  simple as possible (only `name` is required).
+- **Team inbox and follow-up logging** (`GET evangelism/converts/team`, `POST
+  evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`) require the caller to be a worker
+  whose primary or secondary department key is `EVANGELISM` — enforced by
+  `ConvertService.assertIsEvangelismDeptWorker()`, a direct copy of `assertIsAdminDeptWorker()`
+  (`service-programme/service/service-session.service.ts`) with the department swapped.
+- **Admin portal** (`AdminGuard` + new `EVANGELISM_READ`/`EVANGELISM_WRITE` permissions) — cross-member view of
+  every convert, plus `PATCH evangelism/converts/admin/:id/reassign` (validates the target `workerProfileId`
+  resolves to an Evangelism-department worker, else `400`) and `PATCH
+  evangelism/converts/admin/:id/link-member` (links a convert to a real `Member` once they join).
+
+**Follow-up staleness (no cron):** `GET evangelism/converts/team` computes `daysSinceLastContact` and `isOverdue`
+per convert on every read (overdue = no contact in the last 7 days, and not yet linked to a member) — a UI
+indicator only, not a background job or notification.
+
+**Follow-up history:** every `ConvertFollowUpLog` row written by `POST evangelism/converts/:id/follow-up` is
+readable back via `GET evangelism/converts/:id/follow-up-history` (mobile, Evangelism-dept worker) and `GET
+evangelism/converts/admin/:id/follow-up-history` (admin, `EVANGELISM_READ`) — paginated, newest first. Both share
+`ConvertService.getFollowUpHistory()`.
+
+**Routes (mobile, worker/team):** `POST evangelism/converts`, `GET evangelism/converts/team?status=&page=&limit=`,
+`POST evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`, `GET
+evangelism/converts/:id/follow-up-history?page=&limit=`
+**Routes (admin portal):** `GET evangelism/converts/admin?status=&page=&limit=`, `PATCH
+evangelism/converts/admin/:id/reassign`, `PATCH evangelism/converts/admin/:id/link-member`, `GET
+evangelism/converts/admin/:id/follow-up-history?page=&limit=`
+
 ### ServiceHeadcount Module
 
 Records and retrieves physical attendance counts for services, broken down by demographic group. All routes are admin-portal only (`AdminGuard`). Headcount data can be filtered by service slot, date range, or slot name; trends are bucketed by week, month, or quarter.
@@ -2433,7 +2740,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
     - **Quick date presets** ("7d" / "30d" / "This Quarter") compute the range and fetch immediately on click, rather than just filling the date inputs and waiting for "Load" — since a preset click is already one deliberate action, requiring a second "Load" click after it would be redundant. They call `fetchAnalytics` directly with the freshly computed dates instead of going through the memoized `load()`, for the same reason `load()` itself doesn't chase its own tail: `setFrom`/`setTo` don't take effect until the next render, so calling the existing `load()` immediately afterward would still run with the previous (stale) range.
   - **Create Programme's Event picker is now searchable** — was a plain `<select>` listing every open event; replaced with the same `SearchableSelect` component used by the headcount page's Event/service-slot pickers (extracted to the shared `components/ui/searchable-select.tsx` rather than duplicated, and re-imported into the headcount page too). Each option's sublabel shows the date and sub-service count, matching the old `<option>` text.
   - **Full-event report downloads** — the Programmes list groups by event already (`groupProgrammesByEvent`); each event group's header now has a "Full Report" button (`GET /service-programme/event/:eventId/pdf`, always available — the order-of-service across every sub-service regardless of session state) plus a "Session Report" button that only appears once every programme in the group is `COMPLETED` (`GET /service-session/event/:eventId/report/pdf`, the post-service analytics report — timing, pauses, completion rate — which 400s if any session isn't finished yet, so it's hidden rather than shown-then-erroring). Both backend routes already existed and were unused by any frontend button before this. Each individual sub-service row also has its own small download icon ("download this service only", `GET /service-programme/:id/pdf`) alongside the existing detail-panel download, for a quick single-service PDF without opening the panel.
-  - **"Start Service" bulk-start** — a multi-service Sunday no longer needs one "Start Session" click per sub-service. Each event group's header shows a "Start Service" button whenever at least one of its programmes is still `DRAFT`, calling the new `POST /service-session/event/:eventId/start` (`startEventSessions` in `use-service-session.ts`) which starts every startable DRAFT programme under that event in one request. No new "EventSession" entity was introduced — this loops the existing per-programme `start()` server-side (`ServiceSessionService.startEvent()` → `ServiceProgrammeService.findStartableDraftProgrammesForEvent()`), so each sub-service still gets its own independent session, anchor, and share token, controlled separately exactly as before; the only change is removing the repetitive click to kick them off. The event-grouped Programmes list (each row already showing a `StatusBadge`) doubles as the "at a glance" event dashboard the button lands you back on — a dedicated summary page wasn't built since the existing grouped list already shows every sub-service's DRAFT/LIVE/COMPLETED state together.
+  - **"Start Service" sequential start** — a multi-service Sunday starts one sub-service at a time in slot order (First Service, then Second Service, and so on), not all at once. Each event group's header shows a "Start `<slot name>`" button whenever at least one of its programmes is still `DRAFT`, labeled with the earliest not-yet-started slot (`getNextDraftProgramme` in `page.tsx`, sorted by `serviceSlotDetail.startTime`). Calling `POST /service-session/event/:eventId/start` (`startEventSessions` in `use-service-session.ts`) starts only that one programme and returns a single session (not an array). The backend rejects the call with 409 if a session for the event is already `LIVE` — the current slot must be ended (`POST /service-session/:sessionCode/end`) before the button can start the next one. No new "EventSession" entity was introduced — `ServiceSessionService.startEvent()` still reuses the existing per-programme `start()`, it just now picks the single earliest `ServiceProgrammeService.findStartableDraftProgrammesForEvent()` result (that method sorts by `serviceSlot.startTime` ASC) instead of looping over all of them. The frontend button is disabled (with an explanatory tooltip) whenever any programme in the event group is `LIVE`, in addition to the backend's 409 — so an admin can't click it mid-service and only sees the error if state is stale.
 
 **Access control:**
 - Programme CRUD and reporting: `AdminGuard` + `SERVICE_PROGRAMME_READ` (reads) or `SERVICE_PROGRAMME_WRITE` (mutations). Assign these permissions to admin roles via the role management API.
@@ -2470,7 +2777,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /auth/admin-login                                          | Public                                                        | Admin portal login — verifies active Admin record; no device check                                            |
 | POST   | /auth/refresh                                              | Public                                                        | Exchange refresh token                                                                                        |
 | POST   | /auth/logout                                               | Any                                                           | Invalidate session                                                                                            |
-| GET    | /auth/me                                                   | Any                                                           | Own profile. Includes `isHod: boolean` — `true` if the authenticated member has a row in `department_leads`; and `pastorType: PastorTypeEnum \| null`. Clients should fetch this once on load to drive HOD-gated UI.                                  |
+| GET    | /auth/me                                                   | Any                                                           | Own profile. Includes `isHod: boolean` — `true` if the authenticated member has a row in `department_leads`; `pastorType: PastorTypeEnum \| null`; and `isTrainee: boolean` — mirrors `workerProfile.isTrainee` (`false` for non-workers). Clients should fetch this once on load to drive HOD/trainee-gated UI.                                  |
 | POST   | /auth/change-password                                      | Any                                                           | Change password (required when `requires_password_change` is true)                                            |
 | POST   | /auth/email-change/request                                 | Any (JwtAuthGuard)                                            | Body `{ newEmail }` — sends a 6-digit OTP to the new address; rate-limited; `409` if already in use by another member |
 | POST   | /auth/email-change/confirm                                 | Any (JwtAuthGuard)                                            | Body `{ otp }` — verifies OTP, updates own email, sends a confirmation email                                  |
@@ -2480,14 +2787,19 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /auth/device-reset/verify                                  | Public                                                        | Verify OTP and swap `deviceId` to `newDeviceId`; invalidates all active sessions                              |
 | GET    | /members/me                                                | Any (JwtAuthGuard)                                            | Own member profile with workerProfile + department relations                                                  |
 | PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` (excludes email and admin-only church-record fields) |
+| POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
+| DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
+| DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
 | GET    | /members?page=&limit=&role=&search=                        | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive)   |
+| POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |
 | GET    | /members/workers                                           | AdminGuard (MEMBERS_READ)                                     | List workers (filterable by status)                                                                           |
 | GET    | /members/:id                                               | AdminGuard (MEMBERS_READ)                                     | Get member by ID                                                                                              |
 | PATCH  | /members/:id                                               | AdminGuard (MEMBERS_WRITE)                                    | Update member details                                                                                         |
 | POST   | /members/bulk-promote                                      | AdminGuard (MEMBERS_WRITE)                                    | Bulk promote members to workers; returns `{ promoted, skipped, failures: [{ memberId, reason }] }`            |
-| POST   | /members/:id/promote                                       | AdminGuard (MEMBERS_WRITE)                                    | Promote member to worker                                                                                      |
-| POST   | /members/:id/revoke-worker                                 | AdminGuard (MEMBERS_WRITE)                                    | Remove worker role                                                                                            |
-| PATCH  | /members/:id/worker-profile                                | AdminGuard (MEMBERS_WRITE)                                    | Update worker profile                                                                                         |
+| POST   | /members/:id/promote                                       | AdminGuard (MEMBERS_WRITE)                                    | Promote member to worker — reactivates a prior INACTIVE WorkerProfile (resumes department/progress) if one exists, else creates new |
+| POST   | /members/:id/revoke-worker                                 | AdminGuard (MEMBERS_WRITE)                                    | Remove worker role (deactivates WorkerProfile to INACTIVE; row is kept, not deleted)                          |
+| POST   | /members/:id/demote-trainee                                | AdminGuard (MEMBERS_WRITE)                                    | Demote a trainee worker to MEMBER (keeps WorkerProfile as INACTIVE history; 400 if not a trainee)             |
+| PATCH  | /members/:id/worker-profile                                | AdminGuard (MEMBERS_WRITE)                                    | Update worker profile (incl. `isTrainee`)                                                                     |
 | PATCH  | /members/:id/status                                        | AdminGuard (MEMBERS_WRITE)                                    | Activate/deactivate member                                                                                    |
 | POST   | /members/:id/reset-password                                | AdminGuard (MEMBERS_WRITE)                                    | Reset & email new password                                                                                    |
 | DELETE | /members/:id/device                                        | AdminGuard (MEMBERS_WRITE)                                    | Purge device lock; invalidates all active sessions                                                            |
@@ -2520,6 +2832,9 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /attendances/leaderboard                                   | AdminGuard (ATTENDANCE_READ)                                  | Top workers by attendance                                                                                     |
 | PATCH  | /attendances/:id/correct                                   | AdminGuard (ATTENDANCE_WRITE)                                 | Admin correction of an attendance record status                                                               |
 | GET    | /attendances/at-risk?minAbsences=&from=&to=&page=&limit=   | AdminGuard (ATTENDANCE_READ)                                  | Members with ≥ N ABSENT records in range; returns `absenceCount`, `lastSeenAt`, `hasOpenFollowUpTask`         |
+| POST   | /attendances/admin/mark                                    | AdminGuard (ATTENDANCE_WRITE)                                 | Create/backfill an attendance record for any member+event — no-phone check-in and streak restore, body `{ memberId, serviceSlotId, status }` |
+| POST   | /attendances/department/mark                               | JwtAuthGuard (Admin-department worker)                        | Same action, mobile-reachable for Admin-department front-desk workers; same body                              |
+| GET    | /attendances/department/search-members?q=                 | JwtAuthGuard (Admin-department worker)                        | Narrow member lookup (≤10 results, id/firstname/lastname/role only) backing the mobile check-in picker         |
 | POST   | /attendances/online-confirm                                | JwtAuthGuard (any authenticated member)                       | Confirm online attendance for an event (updates ABSENT → ATTENDED_ONLINE within window)                       |
 | POST   | /follow-up/first-timers                                    | WORKER (FOLLOW_UP dept)                                       | Register a first-timer (auto-creates FollowUpTask via round-robin)                                            |
 | GET    | /follow-up/tasks/mine                                      | WORKER (FOLLOW_UP dept)                                       | List follow-up tasks assigned to the caller                                                                   |
@@ -2537,6 +2852,15 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | PATCH  | /admin/follow-up/first-timers/:id/mark-converted           | AdminGuard (FOLLOW_UP_WRITE)                                  | Mark first-timer as converted; optional `{ memberId }` body links to their Member record                     |
 | PATCH  | /admin/follow-up/tasks/:id                                 | AdminGuard (FOLLOW_UP_WRITE)                                  | Admin update of any task: `status`, `outcome`, `outcomeNotes`, `dueDate`, `noteContent`, `contactMethod`     |
 | GET    | /admin/follow-up/report                                    | AdminGuard (FOLLOW_UP_READ)                                   | Pastoral report: first-timer totals, task stats, overdue count, conversion rate, by-worker, by-event         |
+| POST   | /evangelism/converts                                       | JwtAuthGuard (any worker)                                     | Upload a convert (only `name` required)                                                                       |
+| GET    | /evangelism/converts/team?status=&page=&limit=             | JwtAuthGuard (Evangelism-dept worker)                          | Cross-member browse with follow-up staleness fields (mobile)                                                  |
+| POST   | /evangelism/converts/:id/follow-up                         | JwtAuthGuard (Evangelism-dept worker)                          | Log a follow-up contact                                                                                       |
+| PATCH  | /evangelism/converts/:id/status                            | JwtAuthGuard (Evangelism-dept worker)                          | Update convert status                                                                                          |
+| GET    | /evangelism/converts/:id/follow-up-history?page=&limit=    | JwtAuthGuard (Evangelism-dept worker)                          | Full follow-up log for a convert, newest first (mobile)                                                       |
+| GET    | /evangelism/converts/admin?status=&page=&limit=            | AdminGuard (EVANGELISM_READ)                                   | Cross-member browse (admin portal)                                                                            |
+| PATCH  | /evangelism/converts/admin/:id/reassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Reassign follow-up to another Evangelism-dept worker                                                          |
+| PATCH  | /evangelism/converts/admin/:id/link-member                 | AdminGuard (EVANGELISM_WRITE)                                  | Link a convert to their new Member record                                                                     |
+| GET    | /evangelism/converts/admin/:id/follow-up-history?page=&limit= | AdminGuard (EVANGELISM_READ)                                | Full follow-up log for a convert, newest first (admin portal)                                                 |
 | POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
@@ -2570,21 +2894,58 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /departments/leads                                         | AdminGuard (DEPARTMENTS_READ)                                 | All department leads                                                                                          |
 | GET    | /departments/:id/workers                                   | AdminGuard (DEPARTMENTS_READ)                                 | List workers in a department (paginated)                                                                      |
 | GET    | /departments/my/summary                                    | WORKER                                                        | Own department summary (lead only)                                                                            |
+| POST   | /pastor-feedback                                       | JwtAuthGuard (HOD/D_HOD of departmentId)                      | Submit weekly pastor feedback                                                                             |
+| PATCH  | /pastor-feedback/:id                                   | JwtAuthGuard (must be the submitter)                          | Edit own submission                                                                                            |
+| GET    | /pastor-feedback/my?page=&limit=                       | JwtAuthGuard                                                  | Own submission history                                                                                         |
+| GET    | /pastor-feedback/admin?departmentId=&weekOf=&page=&limit= | AdminGuard (PASTOR_FEEDBACK_READ)                      | Cross-department browse                                                                                        |
+| GET    | /pastor-feedback/admin/department/:departmentId        | AdminGuard (PASTOR_FEEDBACK_READ)                         | One department's submission history                                                                            |
+| PATCH  | /pastor-feedback/admin/:id                              | AdminGuard (PASTOR_FEEDBACK_WRITE)                        | Edit a submission on the HOD's behalf                                                                          |
+| DELETE | /pastor-feedback/admin/:id                              | AdminGuard (PASTOR_FEEDBACK_WRITE)                        | Delete a submission                                                                                             |
+| POST   | /pastor-feedback/admin/:id/respond                      | AdminGuard (PASTOR_FEEDBACK_WRITE)                        | Respond as pastor (requires admin's linked Member to have a Pastor record)                                     |
+| GET    | /pastor-feedback/pastor?departmentId=&weekOf=&page=&limit= | JwtAuthGuard (Pastor record required)                     | Cross-department browse (mobile)                                                                               |
+| GET    | /pastor-feedback/pastor/department/:departmentId        | JwtAuthGuard (Pastor record required)                         | One department's submission history (mobile)                                                                  |
+| POST   | /pastor-feedback/pastor/:id/respond                     | JwtAuthGuard (Pastor record required)                         | Respond as pastor (mobile)                                                                                     |
+| POST   | /prayer-requests                                       | Any (JwtAuthGuard)                                            | Submit a private prayer request                                                                                |
+| GET    | /prayer-requests/mine?page=&limit=                     | Any (JwtAuthGuard)                                             | Own prayer request history                                                                                     |
+| POST   | /testimonies                                           | Any (JwtAuthGuard)                                            | Submit a testimony (optional `prayerRequestId`, `isPublic`); body: `SubmitTestimonyDto`                        |
+| GET    | /testimonies/mine?page=&limit=                         | Any (JwtAuthGuard)                                             | Own testimony history                                                                                          |
+| GET    | /testimonies/public?page=&limit=                       | Any (JwtAuthGuard)                                             | Opt-in public testimony feed                                                                                    |
+| GET    | /prayer-requests/team?status=&page=&limit=             | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Cross-member browse (mobile)                                                                                    |
+| PATCH  | /prayer-requests/team/:id/status                       | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Update a request's status (mobile)                                                                              |
+| GET    | /prayer-requests/admin?status=&page=&limit=            | AdminGuard (PRAYER_READ)                                       | Cross-member browse (admin portal)                                                                              |
+| PATCH  | /prayer-requests/admin/:id/status                      | AdminGuard (PRAYER_WRITE)                                      | Update a request's status (admin portal)                                                                        |
+| GET    | /testimonies/admin?page=&limit=                        | AdminGuard (PRAYER_READ)                                       | Full testimony browse (not just public ones)                                                                   |
+| GET    | /prayer-requests/team/pregnancy-cases?status=&page=&limit= | JwtAuthGuard (Prayer-dept worker or Pastor)                | Cross-member pregnancy prayer case browse (mobile)                                                              |
+| POST   | /prayer-requests/team/pregnancy-cases                  | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Create a pregnancy prayer case (mobile)                                                                        |
+| POST   | /prayer-requests/team/pregnancy-cases/:id/visit        | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Log a prayer visit (mobile)                                                                                    |
+| PATCH  | /prayer-requests/team/pregnancy-cases/:id/status       | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Update case status (mobile)                                                                                    |
+| GET    | /prayer-requests/team/pregnancy-cases/:id/visits       | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Full visit log for a case, newest first (mobile)                                                              |
+| GET    | /prayer-requests/admin/pregnancy-cases?status=&page=&limit= | AdminGuard (PRAYER_READ)                                  | Cross-member pregnancy prayer case browse (admin portal)                                                       |
+| PATCH  | /prayer-requests/admin/pregnancy-cases/:id/status      | AdminGuard (PRAYER_WRITE)                                      | Update case status (admin portal)                                                                              |
+| GET    | /prayer-requests/admin/pregnancy-cases/:id/visits      | AdminGuard (PRAYER_READ)                                       | Full visit log for a case, newest first (admin portal)                                                        |
 | POST   | /leave                                                     | WORKER                                                        | Request leave                                                                                                 |
 | PATCH  | /leave/:id/action                                          | AdminGuard (LEAVE_WRITE)                                      | Approve or reject leave                                                                                       |
 | DELETE | /leave/:id                                                 | WORKER                                                        | Delete own pending leave                                                                                      |
 | GET    | /leave/my-history?page=&limit=&status=                     | WORKER                                                        | Own leave history (paginated)                                                                                 |
 | GET    | /leave/history                                             | AdminGuard (LEAVE_READ)                                       | All leave requests                                                                                            |
 | GET    | /leave/department?page=&limit=&status=                     | WORKER                                                        | Department leave requests (lead only, paginated)                                                              |
-| POST   | /classes                                                   | AdminGuard (CLASSES_WRITE)                                    | Create class                                                                                                  |
+| POST   | /classes                                                   | AdminGuard (CLASSES_WRITE)                                    | Create class (body: `classTypeId`, not `type`)                                                                |
 | PATCH  | /classes/:id                                               | AdminGuard (CLASSES_WRITE)                                    | Update class                                                                                                  |
 | DELETE | /classes/:id                                               | AdminGuard (CLASSES_WRITE)                                    | Delete class                                                                                                  |
-| GET    | /classes                                                   | Any                                                           | List classes (filterable by type)                                                                             |
+| GET    | /classes?classTypeId=                                      | Any                                                           | List classes (filterable by `classTypeId`)                                                                    |
 | GET    | /classes/:id                                               | Any                                                           | Get class                                                                                                     |
 | POST   | /classes/enroll                                            | AdminGuard (CLASSES_WRITE)                                    | Enrol member in class                                                                                         |
 | PATCH  | /classes/enrollments/:id/status                            | AdminGuard (CLASSES_WRITE)                                    | Update enrolment status                                                                                       |
+| PATCH  | /classes/enrollments/:id/certificate                       | AdminGuard (CLASSES_WRITE)                                    | Issue a certificate for a COMPLETED enrolment (body: optional `certificateNumber`)                            |
+| GET    | /classes/enrollments/:id/promotion-candidate                | AdminGuard (CLASSES_READ)                                     | Check level-promotion eligibility + open classes of the next type                                             |
+| POST   | /classes/enrollments/:id/promote                            | AdminGuard (CLASSES_WRITE)                                    | Promote a COMPLETED enrolment into the next class type (body: `targetClassId`)                                |
 | GET    | /classes/my/enrollments                                    | Any                                                           | Own enrolments                                                                                                |
 | GET    | /classes/:id/enrollments                                   | AdminGuard (CLASSES_READ)                                     | All enrolments for a class                                                                                    |
+| POST   | /classes/types                                             | AdminGuard (CLASSES_WRITE)                                    | Create class type                                                                                             |
+| PATCH  | /classes/types/:id                                         | AdminGuard (CLASSES_WRITE)                                    | Update class type (name/description/isActive/nextClassTypeId)                                                 |
+| DELETE | /classes/types/:id                                         | AdminGuard (CLASSES_WRITE)                                    | Delete class type (blocked if any class still references it)                                                 |
+| GET    | /classes/types                                             | Any                                                           | List all class types (unpaginated, cached) — member-readable so the mobile app can show current types         |
+| GET    | /classes/types/:id                                         | Any                                                           | Get class type                                                                                                |
 | POST   | /announcements                                             | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Create announcement; optional `sendViaSms` (requires `SMS_SEND`) + `smsBody` (required if `sendViaSms=true`)  |
 | POST   | /announcements/sms-broadcast                               | AdminGuard (SMS_SEND)                                         | Send an SMS to an audience without creating an announcement; body `{ audience, departmentId?/targetMemberId?/groupId?, message }` — returns `{ sentCount }` |
 | PATCH  | /announcements/:id                                         | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Update announcement; same `sendViaSms`/`smsBody` rules as create — SMS only (re-)sent on the transition into `sendViaSms=true` |
@@ -2717,7 +3078,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /service-programme/:id/pdf                                 | AdminGuard + SERVICE_PROGRAMME_READ                           | Download a single programme as a PDF (application/pdf). Includes slot name, event date/time, all slots with type, topic, speaker, backup, and allocated minutes. |
 | GET    | /service-programme/:id/sessions                            | AdminGuard + SERVICE_PROGRAMME_READ                           | Paginated list of historical sessions for a programme (query: page, limit). Existed with no frontend consumer until now — `ProgrammeDetailPanel` has a collapsible "Session History" section (usually 0–1 entries under current business rules, since a programme can't be restarted once it leaves DRAFT; the endpoint exists for the audit trail regardless). |
 | POST   | /service-session/programme/:programmeId/start              | JwtAuthGuard (+ assertCanControlSession)                      | Start a session for a DRAFT programme; returns session with sessionCode and generates a Redis shareToken       |
-| POST   | /service-session/event/:eventId/start                      | JwtAuthGuard (+ assertCanControlSession)                      | Bulk-start every DRAFT programme with slots under the event in one call (loops the single-programme `start()`); returns an array of sessions. 404 if the event has no service slots; 400 if none of its programmes are startable (all already started/completed, or none have slots yet). |
+| POST   | /service-session/event/:eventId/start                      | JwtAuthGuard (+ assertCanControlSession)                      | Starts only the next DRAFT programme in the event (earliest `serviceSlot.startTime`); returns a single session. 409 if a session for this event is already LIVE — end it first. 404 if the event has no service slots; 400 if no programme is startable (all already started/completed, or none have slots yet). Call again after ending the current session to advance to the next slot. |
 | POST   | /service-session/:sessionCode/advance                      | JwtAuthGuard (+ assertCanControlSession)                      | Advance to next slot; returns updated Redis anchor                                                            |
 | POST   | /service-session/:sessionCode/rewind                       | JwtAuthGuard (+ assertCanControlSession)                      | Go back to previous slot — 400 if already at first slot                                                      |
 | POST   | /service-session/:sessionCode/pause                        | JwtAuthGuard (+ assertCanControlSession)                      | Pause session (body: reason); creates ServicePauseEntry                                                       |
@@ -2944,12 +3305,16 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Register first-timers                           | —               | ✓ (FOLLOW_UP-dept worker)    |
 | View / update own follow-up tasks               | —               | ✓ (FOLLOW_UP-dept worker)    |
 | Confirm online attendance                       | ✓               | ✓                            |
+| Submit a prayer request / testimony             | ✓               | ✓                            |
+| View public testimony feed                      | ✓               | ✓                            |
+| Prayer team inbox (view/update request status)  | —               | ✓ (PRAYER-dept worker or Pastor) |
 
 ### Admin Portal (`AdminGuard` + permission)
 
 | Action                                        | Permission              |
 |-----------------------------------------------|-------------------------|
 | List / view members                           | `MEMBERS_READ`          |
+| Create a member account directly              | `MEMBERS_WRITE`         |
 | Promote / revoke workers, reset passwords     | `MEMBERS_WRITE`         |
 | View events / configs                         | `EVENTS_READ`           |
 | Create / update / delete events & configs     | `EVENTS_WRITE`          |
@@ -2958,6 +3323,7 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Create / update / delete departments & leads  | `DEPARTMENTS_WRITE`     |
 | View all attendance, leaderboard              | `ATTENDANCE_READ`       |
 | Correct an attendance record status           | `ATTENDANCE_WRITE`      |
+| Mark/backfill attendance for a member (admin portal) | `ATTENDANCE_WRITE` |
 | View all leave requests                       | `LEAVE_READ`            |
 | Approve / reject leave                        | `LEAVE_WRITE`           |
 | View classes & enrolments                     | `CLASSES_READ`          |
@@ -2983,6 +3349,12 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Record and correct physical attendance headcounts   | `HEADCOUNT_WRITE` |
 | View prayer config, rules, roster, and meetings     | `PRAYER_READ`     |
 | Manage prayer days, rules, assignments, and roster  | `PRAYER_WRITE`    |
+| View prayer requests and testimonies                | `PRAYER_READ`     |
+| Update a prayer request's status                    | `PRAYER_WRITE`    |
+| View pregnancy prayer cases                         | `PRAYER_READ`     |
+| Update a pregnancy prayer case's status              | `PRAYER_WRITE`    |
+| View evangelism converts and follow-up history      | `EVANGELISM_READ` |
+| Reassign convert follow-up, link convert to member  | `EVANGELISM_WRITE`|
 
 ---
 
@@ -3079,6 +3451,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_INCIDENT_REPORT_ENABLED`    | `true`  | Incident report notifications |
 | `EMAIL_CHILDREN_CHURCH_ENABLED`    | `true`  | Children church pickup codes  |
 | `EMAIL_LOGIN_ALERT_ENABLED`        | `true`  | New device login notifications |
+| `EMAIL_PASTOR_FEEDBACK_ENABLED` | `true` | Weekly feedback reminders and pastor-response notifications |
 
 ### Auth / OTP
 
@@ -3273,6 +3646,8 @@ Granular permissions assigned to `AdminRole` records:
 ### ChurchClassTypeEnum
 
 `BELIEVERS` · `BAPTISMAL` · `WORKERS_IN_TRAINING` · `BIBLE_COLLEGE` · `SCHOOL_OF_DISCIPLESHIP`
+
+**Legacy — not used at runtime.** Class types are now admin-creatable via the `ClassType` entity (see Data Models above); this enum only documents the 5 values the `AddClassTypesTable` migration seeded as rows, for reference when reading that migration.
 
 ### EnrollmentStatusEnum
 

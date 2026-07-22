@@ -8,17 +8,21 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
+import { ClassType } from '../entity/class-type.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
   CreateChurchClassDto,
   UpdateChurchClassDto,
 } from '../dto/create-church-class.dto';
 import { BulkEnrollDto, EnrollMemberDto } from '../dto/enroll-member.dto';
+import { PromoteEnrollmentDto } from '../dto/promote-enrollment.dto';
+import { IssueCertificateDto } from '../dto/issue-certificate.dto';
 import { EnrollmentStatusEnum } from '../enum/enrollment-status.enum';
-import { ChurchClassTypeEnum } from '../enum/church-class-type.enum';
 import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { ConfigService } from '@nestjs/config';
 
 export interface ClassEnrollmentBreakdown {
   classId: string;
@@ -32,6 +36,9 @@ export interface ClassEnrollmentBreakdown {
 @Injectable()
 export class ClassesService {
   private readonly logger = new Logger(ClassesService.name);
+  private readonly productName: string;
+  private readonly churchName: string;
+  private readonly churchAddress: string;
 
   constructor(
     @InjectRepository(ChurchClass)
@@ -40,12 +47,19 @@ export class ClassesService {
     private readonly enrollmentRepo: Repository<ClassEnrollment>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
-  ) {}
+    private readonly auditLogService: AuditLogService,
+    private readonly utilityService: UtilityService,
+    private readonly configService: ConfigService,
+  ) {
+    this.productName = this.configService.get<string>('PRODUCT_NAME');
+    this.churchName = this.configService.get<string>('CHURCH_NAME');
+    this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
+  }
 
   async createClass(dto: CreateChurchClassDto): Promise<ChurchClass> {
     const churchClass = this.classRepo.create({
       name: dto.name,
-      type: dto.type,
+      classType: { id: dto.classTypeId } as ClassType,
       description: dto.description ?? null,
       startDate: dto.startDate ?? null,
       endDate: dto.endDate ?? null,
@@ -63,6 +77,8 @@ export class ClassesService {
     const churchClass = await this.getClassOrThrow(id);
 
     if (dto.name !== undefined) churchClass.name = dto.name;
+    if (dto.classTypeId !== undefined)
+      churchClass.classType = { id: dto.classTypeId } as ClassType;
     if (dto.description !== undefined)
       churchClass.description = dto.description;
     if (dto.startDate !== undefined) churchClass.startDate = dto.startDate;
@@ -101,25 +117,27 @@ export class ClassesService {
   async getClass(id: string): Promise<ChurchClass> {
     const churchClass = await this.classRepo.findOne({
       where: { id },
-      relations: ['facilitator'],
+      relations: ['facilitator', 'classType', 'classType.nextClassType'],
     });
     if (!churchClass) throw new NotFoundException('Class not found');
     return churchClass;
   }
 
   async getAllClasses(
-    type?: ChurchClassTypeEnum,
+    classTypeId?: string,
     page = 1,
     limit = 10,
   ): Promise<PaginationResponseDto<ChurchClass>> {
     const query = this.classRepo
       .createQueryBuilder('c')
       .leftJoinAndSelect('c.facilitator', 'facilitator')
+      .leftJoinAndSelect('c.classType', 'classType')
       .orderBy('c.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
 
-    if (type) query.where('c.type = :type', { type });
+    if (classTypeId)
+      query.where('classType.id = :classTypeId', { classTypeId });
 
     const [classes, total] = await query.getManyAndCount();
     return UtilityService.createPaginationResponse(classes, page, limit, total);
@@ -383,7 +401,7 @@ export class ClassesService {
   async getMyEnrollments(memberId: string): Promise<ClassEnrollment[]> {
     return this.enrollmentRepo.find({
       where: { member: { id: memberId } },
-      relations: ['churchClass'],
+      relations: ['churchClass', 'churchClass.classType'],
       order: { enrolledAt: 'DESC' },
     });
   }
@@ -409,6 +427,162 @@ export class ClassesService {
       limit,
       total,
     );
+  }
+
+  async getPromotionCandidate(enrollmentId: string): Promise<{
+    eligible: boolean;
+    nextClassType: ClassType | null;
+    openClasses: ChurchClass[];
+  }> {
+    const enrollment = await this.enrollmentRepo.findOne({
+      where: { id: enrollmentId },
+      relations: [
+        'churchClass',
+        'churchClass.classType',
+        'churchClass.classType.nextClassType',
+      ],
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    const nextClassType = enrollment.churchClass.classType.nextClassType;
+    if (
+      enrollment.status !== EnrollmentStatusEnum.COMPLETED ||
+      !nextClassType
+    ) {
+      return { eligible: false, nextClassType: null, openClasses: [] };
+    }
+
+    const openClasses = await this.classRepo.find({
+      where: {
+        classType: { id: nextClassType.id },
+        status: ChurchClassStatusEnum.ACTIVE,
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    return { eligible: true, nextClassType, openClasses };
+  }
+
+  async promoteEnrollment(
+    enrollmentId: string,
+    dto: PromoteEnrollmentDto,
+    actorId: string,
+  ): Promise<ClassEnrollment> {
+    const enrollment = await this.enrollmentRepo.findOne({
+      where: { id: enrollmentId },
+      relations: [
+        'member',
+        'churchClass',
+        'churchClass.classType',
+        'churchClass.classType.nextClassType',
+      ],
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    if (enrollment.status !== EnrollmentStatusEnum.COMPLETED) {
+      throw new BadRequestException(
+        'Only completed enrollments can be promoted',
+      );
+    }
+
+    const nextClassType = enrollment.churchClass.classType.nextClassType;
+    if (!nextClassType) {
+      throw new BadRequestException(
+        'This class type has no next level to promote into',
+      );
+    }
+
+    const targetClass = await this.classRepo.findOne({
+      where: { id: dto.targetClassId },
+      relations: ['classType'],
+    });
+    if (!targetClass) throw new NotFoundException('Target class not found');
+    if (targetClass.classType.id !== nextClassType.id) {
+      throw new BadRequestException(
+        'Target class is not of the expected next class type',
+      );
+    }
+
+    const newEnrollment = await this.enrollMember({
+      memberId: enrollment.member.id,
+      classId: targetClass.id,
+    });
+
+    this.auditLogService.log('CLASS_LEVEL_PROMOTED', {
+      actorId,
+      targetId: enrollment.member.id,
+      targetEmail: enrollment.member.email,
+      targetName: `${enrollment.member.firstname} ${enrollment.member.lastname}`,
+      metadata: {
+        fromClassId: enrollment.churchClass.id,
+        fromClassTypeId: enrollment.churchClass.classType.id,
+        toClassId: targetClass.id,
+        toClassTypeId: nextClassType.id,
+      },
+    });
+
+    const firstName = UtilityService.capitalizeFirstLetter(
+      enrollment.member.firstname,
+    );
+    this.utilityService.sendEmailWithTemplate(
+      enrollment.member.email,
+      `${firstName}, You've Been Promoted to ${targetClass.name}`,
+      'class-level-promotion',
+      {
+        name: firstName,
+        fromClassName: enrollment.churchClass.name,
+        toClassName: targetClass.name,
+        churchName: this.churchName,
+        churchAddress: this.churchAddress,
+      },
+    );
+
+    this.logger.log(
+      `Member ${enrollment.member.id} promoted from class "${enrollment.churchClass.name}" to "${targetClass.name}"`,
+    );
+
+    return newEnrollment;
+  }
+
+  async issueCertificate(
+    enrollmentId: string,
+    dto: IssueCertificateDto,
+    actorId: string,
+  ): Promise<ClassEnrollment> {
+    const enrollment = await this.enrollmentRepo.findOne({
+      where: { id: enrollmentId },
+      relations: ['member', 'churchClass'],
+    });
+    if (!enrollment) throw new NotFoundException('Enrollment not found');
+
+    if (enrollment.status !== EnrollmentStatusEnum.COMPLETED) {
+      throw new BadRequestException(
+        'Only completed enrollments can have a certificate issued',
+      );
+    }
+
+    enrollment.certificateIssued = true;
+    enrollment.certificateIssuedAt = new Date();
+    enrollment.certificateNumber = dto.certificateNumber ?? null;
+
+    const saved = await this.enrollmentRepo.save(enrollment);
+
+    this.auditLogService.log('CLASS_CERTIFICATE_ISSUED', {
+      actorId,
+      targetId: enrollment.member.id,
+      targetEmail: enrollment.member.email,
+      targetName: `${enrollment.member.firstname} ${enrollment.member.lastname}`,
+      metadata: {
+        enrollmentId,
+        classId: enrollment.churchClass.id,
+        certificateNumber: enrollment.certificateNumber,
+      },
+    });
+
+    this.logger.log(
+      `Certificate issued for enrollment ${enrollmentId} (class "${enrollment.churchClass.name}")`,
+    );
+    return saved;
   }
 
   private async getClassOrThrow(id: string): Promise<ChurchClass> {

@@ -324,6 +324,7 @@ describe('EventService', () => {
           'serviceSlots.config.defaultVenue',
           'serviceSlots.venueOverride',
         ],
+        order: { serviceSlots: { startTime: 'ASC' } },
       });
     });
   });
@@ -547,10 +548,23 @@ describe('EventService', () => {
     const makeQb = () => ({
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
       take: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    });
+
+    it('orders service slots by start time', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', {});
+
+      expect(qb.addOrderBy).toHaveBeenCalledWith(
+        'serviceSlots.startTime',
+        'ASC',
+      );
     });
 
     it('applies a name search filter when provided', async () => {

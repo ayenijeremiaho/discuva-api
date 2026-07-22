@@ -209,6 +209,22 @@
       "key": "importJobId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "classTypeId",
+      "value": ""
+    },
+    {
+      "key": "pastorFeedbackId",
+      "value": ""
+    },
+    {
+      "key": "prayerRequestId",
+      "value": ""
+    },
+    {
+      "key": "testimonyId",
+      "value": ""
     }
   ],
   "auth": {
@@ -474,14 +490,14 @@
                 "me"
               ]
             },
-            "description": "Returns own member profile including isHod: boolean (true if the member is a Head of Department). Clients should call this once on load to determine HOD status."
+            "description": "Returns own member profile including isHod: boolean (true if the member is a Head of Department), pastorType, and isTrainee: boolean (mirrors workerProfile.isTrainee, false for non-workers). Clients should call this once on load to determine HOD/pastor/trainee-gated UI."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"changedPassword\": true,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"department\": { \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\", \"name\": \"Ushering\", \"key\": null },\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Engineer\",\n    \"yearJoinedWorkforce\": \"2021\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false\n  }\n}"
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"photoUrl\": null,\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"changedPassword\": true,\n  \"isHod\": false,\n  \"isTrainee\": true,\n  \"pastorType\": null,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"department\": {\n      \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\",\n      \"name\": \"Ushering\",\n      \"key\": null\n    },\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Engineer\",\n    \"yearJoinedWorkforce\": \"2021\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"isTrainee\": true\n  }\n}"
             }
           ]
         },
@@ -878,6 +894,45 @@
           ]
         },
         {
+          "name": "Create Member (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members"
+              ]
+            },
+            "description": "Admin-created member account (MEMBERS_WRITE). Body is the same SignupDto as public self-signup \u2014 only firstname/lastname/email are required. Do NOT include a password: the server generates a temporary one and emails it to the member, with changedPassword=false forcing a password change on first login. Use this for members without a phone/email habit, or who can't self-register. Promoting the new member to a worker afterwards is a separate call \u2014 POST members/:id/promote."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"data\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\",\n    \"email\": \"john.doe@example.com\",\n    \"phoneNumber\": \"+2348012345678\",\n    \"role\": \"MEMBER\",\n    \"status\": \"ACTIVE\",\n    \"changedPassword\": false,\n    \"createdAt\": \"2026-07-21T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-21T08:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
           "name": "Get All Workers",
           "request": {
             "method": "GET",
@@ -992,6 +1047,75 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{ \"statusCode\": 400, \"message\": [\"phoneNumber must be 7\u201320 digits, optionally prefixed with +\"] }"
+            }
+          ]
+        },
+        {
+          "name": "Upload My Profile Photo",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "photo",
+                  "type": "file",
+                  "src": "",
+                  "description": "Image file, max 3 MB. Replaces any existing photo."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/me/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "photo"
+              ]
+            },
+            "description": "Any authenticated member (JwtAuthGuard). Uploads/replaces the caller's own profile photo via Cloudinary (folder profile-pictures). The previous photo (if any) is deleted after the new one is saved. Returns the updated member profile."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"photoUrl\": \"https://res.cloudinary.com/example/image/upload/v1/profile-pictures/1234567890.jpg\"\n}"
+            },
+            {
+              "name": "400 Invalid File",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"Only image files are allowed\" }"
+            }
+          ]
+        },
+        {
+          "name": "Remove My Profile Photo",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/members/me/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "photo"
+              ]
+            },
+            "description": "Any authenticated member (JwtAuthGuard). Removes the caller's own profile photo (Cloudinary asset deleted, photoUrl set to null). Returns the updated member profile."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"photoUrl\": null\n}"
             }
           ]
         },
@@ -1120,7 +1244,7 @@
                 }
               ]
             },
-            "description": "Creates a WorkerProfile for the member, assigns them to a department and sets role to WORKER. departmentId is required; profession and yearJoinedWorkforce are optional."
+            "description": "Creates a WorkerProfile for the member, assigns them to a department, and sets role to WORKER. departmentId is required; profession and yearJoinedWorkforce are optional. If the member has a prior INACTIVE WorkerProfile (from a previous revoke-worker or demote-trainee), it's reactivated instead of creating a new one \u2014 department/status are updated from this call, profession/yearJoinedWorkforce only if supplied, and completedSOD/completedBibleCollege/isTrainee carry over untouched. Audit-logged as WORKER_REINSTATED in that case (WORKER_PROMOTED for a genuinely new profile)."
           },
           "response": [
             {
@@ -1192,7 +1316,7 @@
                 }
               ]
             },
-            "description": "Removes the WorkerProfile and resets the member's role back to MEMBER. Returns 204 No Content."
+            "description": "Deactivates the WorkerProfile (status -> INACTIVE) and resets the member's role back to MEMBER. The WorkerProfile row is kept, not deleted, so re-promoting this member later (POST /members/:id/promote) resumes their prior department/profession/completedSOD/completedBibleCollege history instead of starting fresh. Returns 204 No Content."
           },
           "response": [
             {
@@ -1200,6 +1324,44 @@
               "status": "No Content",
               "code": 204,
               "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Demote Trainee to Member",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/demote-trainee",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "demote-trainee"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "Demotes a trainee worker (isTrainee=true) back to MEMBER. Unlike revoke-worker, the WorkerProfile row is kept (status set to INACTIVE, isTrainee cleared) as training history \u2014 only role access is revoked. 400 if the worker profile isn't currently a trainee (use revoke-worker for a full revoke instead). Returns 204 No Content."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            },
+            {
+              "name": "400 Bad Request \u2014 not a trainee",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Only trainee workers can be demoted via this path \u2014 use revoke-worker instead.\"\n}"
             }
           ]
         },
@@ -1215,7 +1377,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"status\": \"ACTIVE\",\n  \"profession\": \"Accountant\",\n  \"yearJoinedWorkforce\": \"2021\",\n  \"completedSOD\": true,\n  \"completedBibleCollege\": false,\n  \"secondaryDepartmentId\": \"{{secondaryDepartmentId}}\"\n}",
+              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"status\": \"ACTIVE\",\n  \"profession\": \"Accountant\",\n  \"yearJoinedWorkforce\": \"2021\",\n  \"completedSOD\": true,\n  \"completedBibleCollege\": false,\n  \"isTrainee\": true,\n  \"secondaryDepartmentId\": \"{{secondaryDepartmentId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1239,7 +1401,7 @@
                 }
               ]
             },
-            "description": "Update a worker's profile fields. All fields are optional. Pass `\"secondaryDepartmentId\": null` to remove the secondary department assignment. Omitting `secondaryDepartmentId` entirely leaves the current value unchanged. ADMIN only."
+            "description": "Update a worker's profile fields. All fields are optional. Pass `\"secondaryDepartmentId\": null` to remove the secondary department assignment. Omitting `secondaryDepartmentId` entirely leaves the current value unchanged. `isTrainee` marks/unmarks a worker as still in training (full worker access, just UI-flagged) \u2014 to actually demote a trainee back to MEMBER, use POST /members/:id/demote-trainee instead. ADMIN only."
           },
           "response": [
             {
@@ -1514,6 +1676,38 @@
               "status": "Not Found",
               "code": 404,
               "body": "{ \"statusCode\": 404, \"message\": \"This member is not a pastor.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Remove Member Photo (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/photo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "photo"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "AdminGuard (MEMBERS_WRITE). Moderation \u2014 clears a member's profile photo (Cloudinary asset deleted, photoUrl set to null). Returns the updated member profile."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"photoUrl\": null\n}"
             }
           ]
         },
@@ -2672,6 +2866,126 @@
               "status": "Not Found",
               "code": 404,
               "body": "{ \"statusCode\": 404, \"message\": \"Attendance record not found\" }"
+            }
+          ]
+        },
+        {
+          "name": "Mark Attendance (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"status\": \"PRESENT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendances/admin/mark",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "admin",
+                "mark"
+              ]
+            },
+            "description": "AdminGuard (ATTENDANCE_WRITE). Creates or backfills an attendance record for any member on any event/slot \u2014 covers checking in someone with no phone, and restoring a streak by fixing a record the system auto-marked ABSENT. If a record already exists for (member, event) it is updated in place; otherwise a new one is created. Body: { memberId, serviceSlotId, status }."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a\",\n  \"status\": \"PRESENT\",\n  \"checkinTime\": \"2026-06-15T07:45:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mark Attendance (Mobile \u2014 Admin Dept Worker)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"status\": \"PRESENT\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendances/department/mark",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "department",
+                "mark"
+              ]
+            },
+            "description": "JwtAuthGuard only \u2014 same action as Mark Attendance (Admin), reachable from the mobile app instead of the admin portal. Gated in-service: the caller's workerProfile.department (or secondaryDepartment) must have key = 'ADMIN'. Returns 403 otherwise."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f9a\",\n  \"status\": \"PRESENT\",\n  \"checkinTime\": \"2026-06-15T07:45:00.000Z\"\n}"
+            },
+            {
+              "name": "403 Forbidden",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{ \"statusCode\": 403, \"message\": \"Only Admin department workers can perform this action\" }"
+            }
+          ]
+        },
+        {
+          "name": "Search Members for Check-in (Mobile \u2014 Admin Dept Worker)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/attendances/department/search-members?q=ada",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "department",
+                "search-members"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ada"
+                }
+              ]
+            },
+            "description": "JwtAuthGuard only, gated the same way as Mark Attendance (Mobile). Narrow member lookup backing the mobile check-in picker \u2014 capped at 10 results, returns only id/firstname/lastname/role (no email or phone). Not a general member-search endpoint."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"firstname\": \"Ada\", \"lastname\": \"Lovelace\", \"role\": \"MEMBER\" }\n]"
             }
           ]
         },
@@ -4229,6 +4543,1057 @@
       ]
     },
     {
+      "name": "Pastor Feedback (Worker)",
+      "item": [
+        {
+          "name": "Submit Pastor Feedback (HOD/D_HOD)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback"
+              ]
+            },
+            "description": "Caller must be the HOD or Assistant HOD (D_HOD) of departmentId \u2014 checked via DepartmentLead, not just @Roles(WORKER). 409 if feedback for this department+week already exists.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"weekOf\": \"2026-07-13\",\n  \"attendanceNotes\": \"Good turnout, slight dip from last week\",\n  \"highlights\": \"Two new volunteers joined the team\",\n  \"challenges\": \"Sound system cut out mid-service\",\n  \"prayerRequests\": \"Pray for the team's stamina during the busy season\",\n  \"additionalNotes\": \"Requesting budget for a backup mixer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"f1a2b3c4-5d6e-7f8a-9b0c-1d2e3f4a5b6c\",\n  \"department\": { \"id\": \"d1e2f3a4-5b6c-7d8e-9f0a-1b2c3d4e5f6a\", \"name\": \"Media\" },\n  \"weekOf\": \"2026-07-13\",\n  \"attendanceNotes\": \"Good turnout, slight dip from last week\",\n  \"highlights\": \"Two new volunteers joined the team\",\n  \"challenges\": \"Sound system cut out mid-service\",\n  \"prayerRequests\": \"Pray for the team's stamina during the busy season\",\n  \"additionalNotes\": \"Requesting budget for a backup mixer\",\n  \"submittedByName\": \"Ada Lovelace\",\n  \"submittedAt\": \"2026-07-20T09:00:00.000Z\",\n  \"pastorResponse\": null\n}"
+            },
+            {
+              "name": "403 Forbidden \u2014 not the department lead",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Only this department's HOD or Assistant HOD can submit feedback for it\"\n}"
+            },
+            {
+              "name": "409 Conflict \u2014 already submitted",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"statusCode\": 409,\n  \"message\": \"Feedback for this department and week has already been submitted\"\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('pastorFeedbackId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Own Feedback",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/{{pastorFeedbackId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "{{pastorFeedbackId}}"
+              ],
+              "variable": [
+                {
+                  "key": "pastorFeedbackId",
+                  "value": "{{pastorFeedbackId}}"
+                }
+              ]
+            },
+            "description": "Only the original submitter (matched by workerProfileId) can edit.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"highlights\": \"Updated: three new volunteers joined the team\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "403 Forbidden",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"You can only edit feedback you submitted\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "My Submission History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/my?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "my"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Paginated. Empty page if caller has no WorkerProfile."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pastor Feedback (Admin)",
+      "item": [
+        {
+          "name": "Get All Feedback (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/admin?departmentId={{departmentId}}&weekOf=2026-07-13&page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "admin"
+              ],
+              "query": [
+                {
+                  "key": "departmentId",
+                  "value": "{{departmentId}}",
+                  "description": "optional"
+                },
+                {
+                  "key": "weekOf",
+                  "value": "2026-07-13",
+                  "description": "optional"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Admin only (PASTOR_FEEDBACK_READ). Cross-department browse."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Feedback For Department (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/admin/department/{{departmentId}}?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "admin",
+                "department",
+                "{{departmentId}}"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "departmentId",
+                  "value": "{{departmentId}}"
+                }
+              ]
+            },
+            "description": "Admin only (PASTOR_FEEDBACK_READ)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Feedback (Admin)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/admin/{{pastorFeedbackId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "admin",
+                "{{pastorFeedbackId}}"
+              ],
+              "variable": [
+                {
+                  "key": "pastorFeedbackId",
+                  "value": "{{pastorFeedbackId}}"
+                }
+              ]
+            },
+            "description": "Admin only (PASTOR_FEEDBACK_WRITE). Edits on the HOD's behalf, no ownership check.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challenges\": \"Sound system cut out mid-service \\u2014 replacement ordered\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Feedback (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/admin/{{pastorFeedbackId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "admin",
+                "{{pastorFeedbackId}}"
+              ],
+              "variable": [
+                {
+                  "key": "pastorFeedbackId",
+                  "value": "{{pastorFeedbackId}}"
+                }
+              ]
+            },
+            "description": "Admin only (PASTOR_FEEDBACK_WRITE)."
+          },
+          "response": []
+        },
+        {
+          "name": "Respond as Pastor (Admin)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/admin/{{pastorFeedbackId}}/respond",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "admin",
+                "{{pastorFeedbackId}}",
+                "respond"
+              ],
+              "variable": [
+                {
+                  "key": "pastorFeedbackId",
+                  "value": "{{pastorFeedbackId}}"
+                }
+              ]
+            },
+            "description": "Admin only (PASTOR_FEEDBACK_WRITE). Requires the admin's linked Member to have a Pastor record \u2014 403 otherwise.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"Thank you for the update \\u2014 praying for the team this week.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "403 Forbidden \u2014 not a pastor",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Only pastors can respond to pastor feedback\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Pastor Feedback (Pastor)",
+      "item": [
+        {
+          "name": "Get All Feedback (Pastor)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/pastor?departmentId={{departmentId}}&weekOf=2026-07-13&page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "pastor"
+              ],
+              "query": [
+                {
+                  "key": "departmentId",
+                  "value": "{{departmentId}}",
+                  "description": "optional"
+                },
+                {
+                  "key": "weekOf",
+                  "value": "2026-07-13",
+                  "description": "optional"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Mobile app. JwtAuthGuard + assertIsPastor() \u2014 403 if the calling member has no Pastor record."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Feedback For Department (Pastor)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/pastor/department/{{departmentId}}?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "pastor",
+                "department",
+                "{{departmentId}}"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "departmentId",
+                  "value": "{{departmentId}}"
+                }
+              ]
+            },
+            "description": "Mobile app. Pastor record required."
+          },
+          "response": []
+        },
+        {
+          "name": "Respond as Pastor (Mobile)",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/pastor-feedback/pastor/{{pastorFeedbackId}}/respond",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pastor-feedback",
+                "pastor",
+                "{{pastorFeedbackId}}",
+                "respond"
+              ],
+              "variable": [
+                {
+                  "key": "pastorFeedbackId",
+                  "value": "{{pastorFeedbackId}}"
+                }
+              ]
+            },
+            "description": "Mobile app. Pastor record required. Emails + pushes the submitting HOD.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"Thank you for the update \\u2014 praying for the team this week.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Prayer Requests (Worker)",
+      "item": [
+        {
+          "name": "Submit Prayer Request",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests"
+              ]
+            },
+            "description": "Private \u2014 visible only to the submitter, Prayer department workers, and pastors. Any authenticated member/worker can submit.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Please pray for my family's health and strength this season.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"data\": {\n    \"id\": \"a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d\",\n    \"submittedByName\": \"Ada Lovelace\",\n    \"content\": \"Please pray for my family's health and strength this season.\",\n    \"status\": \"OPEN\",\n    \"createdAt\": \"2026-07-21T09:00:00.000Z\",\n    \"updatedAt\": \"2026-07-21T09:00:00.000Z\"\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data && res.data.id) pm.collectionVariables.set('prayerRequestId', res.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "My Prayer Requests",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "mine"
+              ]
+            },
+            "description": "Own prayer request submission history, paginated."
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Testimony",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/testimonies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "testimonies"
+              ]
+            },
+            "description": "prayerRequestId is optional \u2014 omit for a general testimony not tied to any request. Must be the caller's own prayer request if provided. isPublic is the submitter's own opt-in choice; there is no separate moderation/publish step.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"God answered \\u2014 my family is doing so much better now!\",\n  \"prayerRequestId\": \"{{prayerRequestId}}\",\n  \"isPublic\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"data\": {\n    \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n    \"submittedByName\": \"Ada Lovelace\",\n    \"content\": \"God answered \\u2014 my family is doing so much better now!\",\n    \"isPublic\": true,\n    \"prayerRequest\": {\n      \"id\": \"a1b2c3d4-5e6f-7a8b-9c0d-1e2f3a4b5c6d\"\n    },\n    \"createdAt\": \"2026-07-21T09:05:00.000Z\"\n  }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data && res.data.id) pm.collectionVariables.set('testimonyId', res.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "My Testimonies",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/testimonies/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "testimonies",
+                "mine"
+              ]
+            },
+            "description": "Own testimony submission history, paginated."
+          },
+          "response": []
+        },
+        {
+          "name": "Public Testimony Feed",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/testimonies/public",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "testimonies",
+                "public"
+              ]
+            },
+            "description": "The opt-in public feed \u2014 any authenticated member/worker can read it."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Prayer Requests (Team)",
+      "item": [
+        {
+          "name": "Get All Prayer Requests (Team)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team"
+              ]
+            },
+            "description": "Mobile-facing cross-member browse. Caller must be a Prayer department worker (primary or secondary) or have a Pastor record \u2014 checked via assertIsPrayerTeamOrPastor(), not a fixed role/permission."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Prayer Request Status (Team)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team/{{prayerRequestId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team",
+                "{{prayerRequestId}}",
+                "status"
+              ]
+            },
+            "description": "status: OPEN | PRAYED_FOR | ANSWERED. Same access check as the team browse endpoint.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PRAYED_FOR\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pregnancy Prayer Cases (Team)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team/pregnancy-cases?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team",
+                "pregnancy-cases"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Mobile-facing. Prayer department worker (primary or secondary) or Pastor only. Optional status filter: ACTIVE | DELIVERED | DISCONTINUED."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Pregnancy Prayer Case (Team)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jane Doe\",\n  \"edd\": \"2026-12-01\",\n  \"details\": \"First pregnancy, requested ongoing prayer support\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team/pregnancy-cases",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team",
+                "pregnancy-cases"
+              ]
+            },
+            "description": "Prayer department worker or Pastor only. memberId is optional (she may not be an existing member)."
+          },
+          "response": []
+        },
+        {
+          "name": "Log Pregnancy Prayer Visit (Team)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Prayed together, doing well\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team/pregnancy-cases/{{caseId}}/visit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team",
+                "pregnancy-cases",
+                "{{caseId}}",
+                "visit"
+              ],
+              "variable": [
+                {
+                  "key": "caseId",
+                  "value": "{{caseId}}"
+                }
+              ]
+            },
+            "description": "Updates the case's lastPrayedAt to the new visit's timestamp."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Pregnancy Case Status (Team)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"DELIVERED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team/pregnancy-cases/{{caseId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team",
+                "pregnancy-cases",
+                "{{caseId}}",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "caseId",
+                  "value": "{{caseId}}"
+                }
+              ]
+            },
+            "description": "status: ACTIVE | DELIVERED | DISCONTINUED"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pregnancy Visit History (Team)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/team/pregnancy-cases/{{caseId}}/visits?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "team",
+                "pregnancy-cases",
+                "{{caseId}}",
+                "visits"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "caseId",
+                  "value": "{{caseId}}"
+                }
+              ]
+            },
+            "description": "Prayer department worker or Pastor only. Full PregnancyPrayerVisit history for a case, newest first \u2014 not just the denormalized lastPrayedAt date."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Prayer Requests (Admin)",
+      "item": [
+        {
+          "name": "Get All Prayer Requests (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "admin"
+              ]
+            },
+            "description": "Admin portal cross-member browse. Reuses the existing PRAYER_READ permission (grouped under \"Prayer Roster\") \u2014 no new permission was introduced."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Prayer Request Status (Admin)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/admin/{{prayerRequestId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "admin",
+                "{{prayerRequestId}}",
+                "status"
+              ]
+            },
+            "description": "Reuses the existing PRAYER_WRITE permission.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ANSWERED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Testimonies (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/testimonies/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "testimonies",
+                "admin"
+              ]
+            },
+            "description": "Full testimony visibility for admins \u2014 not filtered to isPublic=true like the member-facing public feed."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pregnancy Prayer Cases (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/admin/pregnancy-cases?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "admin",
+                "pregnancy-cases"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "ACTIVE",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Admin only (PRAYER_READ). Read/oversight only \u2014 case creation and visit logging stay Prayer-team/mobile-only."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Pregnancy Case Status (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"DISCONTINUED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/admin/pregnancy-cases/{{caseId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "admin",
+                "pregnancy-cases",
+                "{{caseId}}",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "caseId",
+                  "value": "{{caseId}}"
+                }
+              ]
+            },
+            "description": "Admin only (PRAYER_WRITE)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Pregnancy Visit History (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/prayer-requests/admin/pregnancy-cases/{{caseId}}/visits?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "prayer-requests",
+                "admin",
+                "pregnancy-cases",
+                "{{caseId}}",
+                "visits"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "caseId",
+                  "value": "{{caseId}}"
+                }
+              ]
+            },
+            "description": "Admin only (PRAYER_READ). Full PregnancyPrayerVisit history for a case, newest first."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Classes",
       "description": "Discipleship classes (Believers, Baptismal, Workers-in-Training, Bible College) that members enroll in.\n\n**Access:** Admin-only for create/update/delete/enroll/update-enrollment. Any authenticated member can view their own enrollments via `GET /classes/my/enrollments`. General class listings are open to any authenticated user.\n\n**Key concepts:**\n- Class types: `BELIEVERS` | `BAPTISMAL` | `WORKERS_IN_TRAINING` | `BIBLE_COLLEGE`\n- Enrollment statuses: `IN_PROGRESS` | `COMPLETED` | `CANCELLED`\n- A member cannot enroll in the same class twice (409 if already enrolled and IN_PROGRESS)\n- Classes with active IN_PROGRESS enrollments cannot be deleted \u2014 complete or cancel all enrollments first\n- `facilitatorId` links a member as the class facilitator/teacher (optional)\n\n**Typical flow:**\n1. Admin creates a class with type and date range\n2. Admin enrolls members via `POST /classes/enroll`\n3. Member sees their enrollment in `GET /classes/my/enrollments`\n4. Admin marks complete via `PATCH /classes/enrollments/:id/status` with `{ \"status\": \"COMPLETED\" }`",
       "item": [
@@ -4244,7 +5609,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"New Believers Class\",\n  \"type\": \"BELIEVERS\",\n  \"description\": \"Foundation class for new members\",\n  \"facilitatorId\": \"{{memberId}}\",\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-09-30\"\n}",
+              "raw": "{\n  \"name\": \"New Believers Class\",\n  \"classTypeId\": \"{{classTypeId}}\",\n  \"description\": \"Foundation class for new members\",\n  \"facilitatorId\": \"{{memberId}}\",\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-09-30\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4260,7 +5625,7 @@
                 "classes"
               ]
             },
-            "description": "type: BELIEVERS | BAPTISMAL | WORKERS_IN_TRAINING | BIBLE_COLLEGE"
+            "description": "classTypeId references a ClassType created via POST /classes/types."
           },
           "event": [
             {
@@ -4378,12 +5743,192 @@
           ]
         },
         {
+          "name": "Create Class Type (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Believers' Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"nextClassTypeId\": \"{{classTypeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "types"
+              ]
+            },
+            "description": "nextClassTypeId is optional \u2014 omit for a standalone class type with no promotion chain."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('classTypeId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"c1d2e3f4-5a6b-7c8d-9e0f-1a2b3c4d5e6f\",\n  \"name\": \"Believers' Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"isActive\": true,\n  \"nextClassType\": null,\n  \"createdAt\": \"2026-07-20T08:00:00.000Z\"\n}"
+            },
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"This would create a promotion cycle between class types\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Class Type (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nextClassTypeId\": \"{{classTypeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/types/{{classTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "types",
+                "{{classTypeId}}"
+              ],
+              "variable": [
+                {
+                  "key": "classTypeId",
+                  "value": "{{classTypeId}}"
+                }
+              ]
+            },
+            "description": "Send nextClassTypeId: null to clear the promotion chain and make the type standalone again."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Class Type (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/classes/types/{{classTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "types",
+                "{{classTypeId}}"
+              ],
+              "variable": [
+                {
+                  "key": "classTypeId",
+                  "value": "{{classTypeId}}"
+                }
+              ]
+            },
+            "description": "Blocked with 400 if any ChurchClass still references this type \u2014 deactivate it instead (PATCH isActive: false)."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request \u2014 still referenced",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Cannot delete this class type \u2014 3 class(es) still reference it. Deactivate it instead.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get All Class Types",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/classes/types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "types"
+              ]
+            },
+            "description": "Member/worker-readable (JwtAuthGuard only, no admin permission) \u2014 unpaginated admin-controlled reference data, cached, so the mobile app can list current class types."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"c1d2e3f4-5a6b-7c8d-9e0f-1a2b3c4d5e6f\",\n    \"name\": \"Believers' Class\",\n    \"description\": null,\n    \"isActive\": true,\n    \"nextClassType\": { \"id\": \"d2e3f4a5-6b7c-8d9e-0f1a-2b3c4d5e6f7a\", \"name\": \"Workers in Training\" }\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get Class Type by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/classes/types/{{classTypeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "types",
+                "{{classTypeId}}"
+              ],
+              "variable": [
+                {
+                  "key": "classTypeId",
+                  "value": "{{classTypeId}}"
+                }
+              ]
+            },
+            "description": "Member/worker-readable (JwtAuthGuard only, no admin permission)."
+          },
+          "response": []
+        },
+        {
           "name": "Get All Classes",
           "request": {
             "method": "GET",
-            "description": "Any authenticated user. Returns paginated classes filtered by optional `type` query param. Includes facilitator relation.",
+            "description": "Any authenticated user. Returns paginated classes filtered by optional `classTypeId` query param. Includes facilitator and classType relations.",
             "url": {
-              "raw": "{{baseUrl}}/classes?type=BELIEVERS&page=1&limit=10",
+              "raw": "{{baseUrl}}/classes?classTypeId={{classTypeId}}&page=1&limit=10",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -4392,9 +5937,9 @@
               ],
               "query": [
                 {
-                  "key": "type",
-                  "value": "BELIEVERS",
-                  "description": "BELIEVERS | BAPTISMAL | WORKERS_IN_TRAINING | BIBLE_COLLEGE (optional)"
+                  "key": "classTypeId",
+                  "value": "{{classTypeId}}",
+                  "description": "Filter by class type id (optional)"
                 },
                 {
                   "key": "page",
@@ -4567,6 +6112,141 @@
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Enrollment not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Promotion Candidate (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/classes/enrollments/{{enrollmentId}}/promotion-candidate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "enrollments",
+                "{{enrollmentId}}",
+                "promotion-candidate"
+              ],
+              "variable": [
+                {
+                  "key": "enrollmentId",
+                  "value": "{{enrollmentId}}"
+                }
+              ]
+            },
+            "description": "Admin only (CLASSES_READ). Checks whether a COMPLETED enrollment's class type has a nextClassType, and lists any currently-open classes of that type."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 eligible",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"eligible\": true,\n  \"nextClassType\": { \"id\": \"d2e3f4a5-6b7c-8d9e-0f1a-2b3c4d5e6f7a\", \"name\": \"Workers in Training\" },\n  \"openClasses\": [\n    { \"id\": \"e3f4a5b6-7c8d-9e0f-1a2b-3c4d5e6f7a8b\", \"name\": \"Workers in Training \u2014 2026 Q3\" }\n  ]\n}"
+            },
+            {
+              "name": "200 OK \u2014 not eligible",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"eligible\": false,\n  \"nextClassType\": null,\n  \"openClasses\": []\n}"
+            }
+          ]
+        },
+        {
+          "name": "Promote Enrollment (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetClassId\": \"{{classId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/enrollments/{{enrollmentId}}/promote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "enrollments",
+                "{{enrollmentId}}",
+                "promote"
+              ],
+              "variable": [
+                {
+                  "key": "enrollmentId",
+                  "value": "{{enrollmentId}}"
+                }
+              ]
+            },
+            "description": "Admin only (CLASSES_WRITE), admin-confirmed action \u2014 not automatic. targetClassId must be a class of the enrollment's classType.nextClassType. Enrolls the member, logs CLASS_LEVEL_PROMOTED, emails the member."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request \u2014 standalone type",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"This class type has no next level to promote into\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Issue Certificate (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"certificateNumber\": \"CERT-2026-001\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/enrollments/{{enrollmentId}}/certificate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "enrollments",
+                "{{enrollmentId}}",
+                "certificate"
+              ],
+              "variable": [
+                {
+                  "key": "enrollmentId",
+                  "value": "{{enrollmentId}}"
+                }
+              ]
+            },
+            "description": "Admin only (CLASSES_WRITE). Only a COMPLETED enrollment can have a certificate issued. certificateNumber is optional. Sets certificateIssued=true, certificateIssuedAt=now(), logs CLASS_CERTIFICATE_ISSUED. No file upload involved."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request \u2014 not completed",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Only completed enrollments can have a certificate issued\"\n}"
             }
           ]
         },
@@ -12586,6 +14266,363 @@
       ]
     },
     {
+      "name": "Evangelism (Worker/Team)",
+      "item": [
+        {
+          "name": "Upload Convert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Smith\",\n  \"phone\": \"+2348012345678\",\n  \"notes\": \"Met at outreach event\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts"
+              ]
+            },
+            "description": "Any authenticated worker. Only `name` is required \u2014 kept as simple as possible. status defaults to UNSAVED."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Team Converts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/team?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "team"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "SAVED",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Caller must be a worker whose primary or secondary department key is EVANGELISM. Each convert includes computed daysSinceLastContact and isOverdue (>7 days idle and not yet linked to a member)."
+          },
+          "response": []
+        },
+        {
+          "name": "Log Follow-Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Called, doing well, invited to Sunday service\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/{{convertId}}/follow-up",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "{{convertId}}",
+                "follow-up"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Evangelism-dept worker only. Updates the convert's lastContactedAt to now."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Convert Status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SAVED\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/{{convertId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "{{convertId}}",
+                "status"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Evangelism-dept worker only. status: UNSAVED | SAVED | UNDERGOING_DISCIPLESHIP"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Follow-Up History (Team)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/{{convertId}}/follow-up-history?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "{{convertId}}",
+                "follow-up-history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Evangelism-dept worker only. Full ConvertFollowUpLog history for a convert, newest first \u2014 not just the denormalized lastContactedAt date."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Evangelism (Admin)",
+      "item": [
+        {
+          "name": "Get All Converts (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "status",
+                  "value": "UNSAVED",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ). Cross-member browse with onboardedBy/assignedTo populated."
+          },
+          "response": []
+        },
+        {
+          "name": "Reassign Convert (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workerProfileId\": \"{{workerProfileId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/{{convertId}}/reassign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "{{convertId}}",
+                "reassign"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). workerProfileId must belong to a worker in the Evangelism department (primary or secondary), else 400."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request \u2014 not an Evangelism worker",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Target worker must be in the Evangelism department\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Link Convert to Member (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/{{convertId}}/link-member",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "{{convertId}}",
+                "link-member"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). Marks the convert as having joined \u2014 sets member and linkedAt."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Follow-Up History (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/{{convertId}}/follow-up-history?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "{{convertId}}",
+                "follow-up-history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ). Full ConvertFollowUpLog history for a convert, newest first."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Service Programme",
       "description": "Order-of-service programme builder with live session control. Admin creates and populates the programme; Admin-department workers run it live from the mobile app.\n\n**Access:**\n- Programme CRUD: AdminGuard\n- Session control (start/advance/rewind/pause/resume/end/override): WORKER in the Admin department (`key: ADMIN`)\n- Session state (read-only): public \u2014 the `sessionCode` is the credential\n- Reports and analytics: AdminGuard\n\n**Key concepts:**\n- A `ServiceProgramme` is linked 1:1 to a `serviceSlot`. One programme per slot.\n- Programmes have `ProgrammeSlot` items (type: `SPEAKER` | `BREAK`) with ordering, topic, assigned member, and allocatedMinutes.\n- Programmes progress: `DRAFT` (editable) \u2192 `LIVE` (session running) \u2192 `COMPLETED` (session ended)\n- When started, a live `ServiceSession` is created with a `sessionCode` (e.g. SVC-ABC123). Clients poll `GET /v1/service-session/:sessionCode/state` to track progress.\n- `saveAsTemplate: true` auto-upserts a `ServiceProgrammeTemplate` on session end for reuse.\n- PDFs: download the programme runsheet before service, or the full session report after.\n\n**Typical flow:**\n1. Admin: Create programme linked to a service slot\n2. Admin: Add slots (SPEAKER/BREAK), set members and topics, reorder as needed\n3. Worker (Admin dept): `POST /v1/service-session/programme/:programmeId/start` \u2014 session goes LIVE\n4. Worker: `POST /v1/service-session/:sessionCode/advance` as each slot completes\n5. Worker: `POST /v1/service-session/:sessionCode/end` \u2014 session COMPLETED, template saved\n6. Admin: `GET /v1/service-session/:sessionCode/report` for the post-service analysis",
       "item": [
@@ -13401,7 +15438,7 @@
               ]
             },
             {
-              "name": "Start Event Sessions (Bulk)",
+              "name": "Start Next Event Slot",
               "request": {
                 "method": "POST",
                 "header": [
@@ -13428,14 +15465,20 @@
                     }
                   ]
                 },
-                "description": "Bulk-start every DRAFT programme with slots under the event in one call (e.g. First + Second Service on the same Sunday) instead of starting each sub-service individually. Returns an array of sessions, one per started programme. 404 if the event has no service slots; 400 if none of its programmes are startable."
+                "description": "Starts only the next DRAFT programme in the event, in slot order (e.g. First Service, then Second Service on the same Sunday) \u2014 not all sub-services at once. Returns a single session for the slot it just started. Call this again after ending the current session (`POST /service-session/:sessionCode/end`) to advance to the next slot. 409 if a session for this event is already LIVE. 404 if the event has no service slots; 400 if no programme is startable (all done, or none have slots yet)."
               },
               "response": [
                 {
                   "name": "201 Created",
                   "status": "Created",
                   "code": 201,
-                  "body": "[\n  {\n    \"id\": \"sess-uuid-1\",\n    \"sessionCode\": \"SVC-ABC123\",\n    \"status\": \"LIVE\",\n    \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n    \"endedAt\": null\n  },\n  {\n    \"id\": \"sess-uuid-2\",\n    \"sessionCode\": \"SVC-DEF456\",\n    \"status\": \"LIVE\",\n    \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n    \"endedAt\": null\n  }\n]"
+                  "body": "{\n  \"id\": \"sess-uuid-1\",\n  \"sessionCode\": \"SVC-ABC123\",\n  \"status\": \"LIVE\",\n  \"startedAt\": \"2026-07-19T08:00:00.000Z\",\n  \"endedAt\": null\n}"
+                },
+                {
+                  "name": "409 Conflict",
+                  "status": "Conflict",
+                  "code": 409,
+                  "body": "{\n  \"statusCode\": 409,\n  \"message\": \"A service session for this event is still live \u2014 end it before starting the next slot\"\n}"
                 },
                 {
                   "name": "400 Bad Request",

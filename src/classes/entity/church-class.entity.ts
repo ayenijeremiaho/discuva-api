@@ -2,14 +2,15 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
   ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
-import { ChurchClassTypeEnum } from '../enum/church-class-type.enum';
 import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
 import { Member } from '../../member/entity/member.entity';
 import { ClassEnrollment } from './class-enrollment.entity';
+import { ClassType } from './class-type.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 
 @Entity('church_classes')
@@ -21,8 +22,9 @@ export class ChurchClass extends BaseEntity {
   name: string;
 
   @Index()
-  @Column()
-  type: ChurchClassTypeEnum;
+  @ManyToOne(() => ClassType, { nullable: false, onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'class_type_id' })
+  classType: ClassType;
 
   @Column({ nullable: true, type: 'text' })
   description: string | null;

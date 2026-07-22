@@ -55,6 +55,10 @@ export class WorkerProfile extends BaseEntity {
   @Column({ default: false })
   completedBibleCollege: boolean;
 
+  @Index()
+  @Column({ default: false })
+  isTrainee: boolean;
+
   @OneToMany(() => RequestLeave, (leave) => leave.workerProfile)
   leaveRequests: RequestLeave[];
 }

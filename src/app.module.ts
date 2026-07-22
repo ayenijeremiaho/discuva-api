@@ -22,6 +22,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { RequestLeaveModule } from './request-leave/request-leave.module';
 import { NotesModule } from './notes/notes.module';
 import { ClassesModule } from './classes/classes.module';
+import { PastorFeedbackModule } from './pastor-feedback/pastor-feedback.module';
 import { AnnouncementModule } from './announcement/announcement.module';
 import { VenueModule } from './venue/venue.module';
 import { SundaySchoolModule } from './sunday-school/sunday-school.module';
@@ -39,10 +40,12 @@ import { IncidentReportModule } from './incident-report/incident-report.module';
 import { AssetManagementModule } from './asset-management/asset-management.module';
 import { FinanceModule } from './finance/finance.module';
 import { PrayerModule } from './prayer/prayer.module';
+import { PrayerRequestModule } from './prayer-request/prayer-request.module';
 import { FacilityRentalModule } from './facility-rental/facility-rental.module';
 import { PushNotificationModule } from './push-notification/push-notification.module';
 import { GroupModule } from './group/group.module';
 import { SmsModule } from './sms/sms.module';
+import { EvangelismModule } from './evangelism/evangelism.module';
 
 @Module({
   imports: [
@@ -146,6 +149,7 @@ import { SmsModule } from './sms/sms.module';
     RequestLeaveModule,
     NotesModule,
     ClassesModule,
+    PastorFeedbackModule,
     AnnouncementModule,
     VenueModule,
     SundaySchoolModule,
@@ -163,10 +167,12 @@ import { SmsModule } from './sms/sms.module';
     AssetManagementModule,
     FinanceModule,
     PrayerModule,
+    PrayerRequestModule,
     FacilityRentalModule,
     PushNotificationModule,
     GroupModule,
     SmsModule,
+    EvangelismModule,
   ],
   controllers: [AppController],
   providers: [AppService, { provide: APP_GUARD, useClass: AppThrottlerGuard }],

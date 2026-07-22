@@ -874,9 +874,10 @@ export class ServiceProgrammeService {
     }
   }
 
-  // Every DRAFT programme under the event that actually has slots to run —
-  // used by "Start Service" to bulk-start a multi-service Sunday in one
-  // action instead of one "Start Session" click per sub-service.
+  // Every DRAFT programme under the event that actually has slots to run,
+  // ordered by service slot start time — "Start Service" starts only the
+  // earliest one (First Service before Second Service) and calling it again
+  // once that slot ends picks up the next one in sequence.
   async findStartableDraftProgrammesForEvent(
     eventId: string,
   ): Promise<ServiceProgramme[]> {
@@ -892,12 +893,17 @@ export class ServiceProgrammeService {
       relations: ['slots', 'serviceSlot'],
     });
 
-    return programmes.filter(
-      (p) =>
-        p.status === ServiceProgrammeStatusEnum.DRAFT &&
-        p.slots &&
-        p.slots.length > 0,
-    );
+    return programmes
+      .filter(
+        (p) =>
+          p.status === ServiceProgrammeStatusEnum.DRAFT &&
+          p.slots &&
+          p.slots.length > 0,
+      )
+      .sort(
+        (a, b) =>
+          a.serviceSlot.startTime.getTime() - b.serviceSlot.startTime.getTime(),
+      );
   }
 
   async assertProgrammeIsDraft(id: string): Promise<ServiceProgramme> {

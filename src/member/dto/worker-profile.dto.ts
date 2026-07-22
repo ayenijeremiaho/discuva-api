@@ -33,6 +33,9 @@ export class WorkerProfileDto {
   completedBibleCollege: boolean;
 
   @Expose()
+  isTrainee: boolean;
+
+  @Expose()
   @Type(() => DepartmentRefDto)
   department: DepartmentRefDto;
 

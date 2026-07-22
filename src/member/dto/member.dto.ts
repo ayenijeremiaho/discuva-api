@@ -59,6 +59,9 @@ export class MemberDto {
   dateJoinedChurch: Date;
 
   @Expose()
+  photoUrl: string | null;
+
+  @Expose()
   @Type(() => WorkerProfileDto)
   workerProfile: WorkerProfileDto;
 

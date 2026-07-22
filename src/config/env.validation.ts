@@ -135,6 +135,7 @@ export const envValidationSchema = Joi.object({
   EMAIL_INCIDENT_REPORT_ENABLED: Joi.boolean().default(true),
   EMAIL_CHILDREN_CHURCH_ENABLED: Joi.boolean().default(true),
   EMAIL_LOGIN_ALERT_ENABLED: Joi.boolean().default(true),
+  EMAIL_PASTOR_FEEDBACK_ENABLED: Joi.boolean().default(true),
 
   BULL_BOARD_USER: Joi.string().optional(),
   BULL_BOARD_PASSWORD: Joi.string().optional(),

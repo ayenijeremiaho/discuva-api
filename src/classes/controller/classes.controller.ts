@@ -20,7 +20,8 @@ import {
   EnrollMemberDto,
   UpdateEnrollmentStatusDto,
 } from '../dto/enroll-member.dto';
-import { ChurchClassTypeEnum } from '../enum/church-class-type.enum';
+import { PromoteEnrollmentDto } from '../dto/promote-enrollment.dto';
+import { IssueCertificateDto } from '../dto/issue-certificate.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
@@ -59,11 +60,15 @@ export class ClassesController {
 
   @Get()
   findAll(
-    @Query('type') type?: ChurchClassTypeEnum,
+    @Query('classTypeId') classTypeId?: string,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    return this.classesService.getAllClasses(type, Number(page), Number(limit));
+    return this.classesService.getAllClasses(
+      classTypeId,
+      Number(page),
+      Number(limit),
+    );
   }
 
   @Get('my/enrollments')
@@ -105,6 +110,37 @@ export class ClassesController {
     @Body() dto: UpdateEnrollmentStatusDto,
   ) {
     return this.classesService.updateEnrollmentStatus(enrollmentId, dto.status);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_READ)
+  @Get('enrollments/:enrollmentId/promotion-candidate')
+  getPromotionCandidate(
+    @Param('enrollmentId', ParseUUIDPipe) enrollmentId: string,
+  ) {
+    return this.classesService.getPromotionCandidate(enrollmentId);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post('enrollments/:enrollmentId/promote')
+  promoteEnrollment(
+    @Param('enrollmentId', ParseUUIDPipe) enrollmentId: string,
+    @Body() dto: PromoteEnrollmentDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.classesService.promoteEnrollment(enrollmentId, dto, user.id);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Patch('enrollments/:enrollmentId/certificate')
+  issueCertificate(
+    @Param('enrollmentId', ParseUUIDPipe) enrollmentId: string,
+    @Body() dto: IssueCertificateDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.classesService.issueCertificate(enrollmentId, dto, user.id);
   }
 
   @UseGuards(AdminGuard)

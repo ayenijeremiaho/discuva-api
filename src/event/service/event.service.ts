@@ -102,6 +102,7 @@ export class EventService {
     const event = await this.eventRepository.findOne({
       where: { id },
       relations: SLOT_RELATIONS,
+      order: { serviceSlots: { startTime: 'ASC' } },
     });
     if (!event) throw new NotFoundException('Event not found');
     if (memberId) await this.attachMyAttendance([event], memberId);
@@ -130,6 +131,7 @@ export class EventService {
       .leftJoinAndSelect('config.defaultVenue', 'defaultVenue')
       .leftJoinAndSelect('serviceSlots.venueOverride', 'venueOverride')
       .orderBy(`event.${orderBy}`, order)
+      .addOrderBy('serviceSlots.startTime', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -244,7 +246,7 @@ export class EventService {
 
     const candidates = await this.eventRepository.find({
       where: { eventDate: MoreThanOrEqual(startOfToday) },
-      order: { eventDate: 'ASC' },
+      order: { eventDate: 'ASC', serviceSlots: { startTime: 'ASC' } },
       relations: [
         'serviceSlots',
         'serviceSlots.config',

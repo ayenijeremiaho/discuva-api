@@ -83,6 +83,13 @@ export class Member extends BaseEntity {
   @Column({ nullable: true, type: 'smallint', name: 'birthday_greeted_year' })
   birthdayGreetedYear: number | null;
 
+  @Column({ nullable: true })
+  photoUrl: string | null;
+
+  @Exclude()
+  @Column({ nullable: true })
+  photoPublicId: string | null;
+
   @OneToOne(() => WorkerProfile, (wp) => wp.member, {
     nullable: true,
     cascade: true,
