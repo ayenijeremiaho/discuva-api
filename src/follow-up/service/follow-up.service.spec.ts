@@ -20,6 +20,7 @@ import {
 } from '../enums/follow-up.enum';
 import { FirstTimerVisit } from '../entity/first-timer-visit.entity';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { CacheService } from '../../utility/service/cache.service';
@@ -103,6 +104,11 @@ const mockEmailQueueService = {
 
 const mockAuditLogService = { log: jest.fn() };
 
+const mockDepartmentAccessService = {
+  hasDepartmentAccessKey: jest.fn(),
+  assertHasDepartmentAccessKey: jest.fn(),
+};
+
 const followUpProfile = {
   id: 'wp-1',
   status: WorkerStatusEnum.ACTIVE,
@@ -128,6 +134,11 @@ describe('FollowUpService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Default: authorize as a Follow-Up dept worker so functional tests focus
+    // on business logic; individual tests override with mockRejectedValueOnce.
+    mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      undefined,
+    );
     qbMock.getRawMany.mockResolvedValue([]);
     qbMock.getRawOne.mockResolvedValue({
       total: '0',
@@ -158,6 +169,10 @@ describe('FollowUpService', () => {
           provide: getRepositoryToken(FirstTimerVisit),
           useValue: mockVisitRepo,
         },
+        {
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
+        },
       ],
     }).compile();
 
@@ -167,35 +182,30 @@ describe('FollowUpService', () => {
   // ── assertWorkerInFollowUpDept ────────────────────────────────────────────
 
   describe('assertWorkerInFollowUpDept', () => {
-    it('throws ForbiddenException when worker profile not found', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(null);
+    it('propagates the ForbiddenException thrown by DepartmentAccessService', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValueOnce(
+        new ForbiddenException(
+          'Access restricted to Follow-Up department workers',
+        ),
+      );
       await expect(
         service.assertWorkerInFollowUpDept('member-1'),
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws ForbiddenException when worker is not in FOLLOW_UP dept', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(nonFollowUpProfile);
-      await expect(
-        service.assertWorkerInFollowUpDept('member-1'),
-      ).rejects.toThrow(ForbiddenException);
-    });
+    it('delegates to DepartmentAccessService with the FOLLOW_UP key', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
+      await service.assertWorkerInFollowUpDept('member-1');
 
-    it('resolves when worker primary dept is FOLLOW_UP', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(followUpProfile);
-      await expect(
-        service.assertWorkerInFollowUpDept('member-1'),
-      ).resolves.toBeUndefined();
-    });
-
-    it('resolves when worker secondary dept is FOLLOW_UP', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        ...nonFollowUpProfile,
-        secondaryDepartment: { id: 'dept-3', key: DepartmentKeyEnum.FOLLOW_UP },
-      });
-      await expect(
-        service.assertWorkerInFollowUpDept('member-1'),
-      ).resolves.toBeUndefined();
+      expect(
+        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+      ).toHaveBeenCalledWith(
+        'member-1',
+        DepartmentKeyEnum.FOLLOW_UP,
+        expect.any(String),
+      );
     });
   });
 
@@ -224,7 +234,11 @@ describe('FollowUpService', () => {
 
   describe('createFirstTimerByWorker', () => {
     it('throws ForbiddenException when caller is not in FOLLOW_UP dept', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(nonFollowUpProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValueOnce(
+        new ForbiddenException(
+          'Access restricted to Follow-Up department workers',
+        ),
+      );
       await expect(
         service.createFirstTimerByWorker(
           { firstname: 'A', lastname: 'B', phone: '08011111111' },
@@ -339,7 +353,11 @@ describe('FollowUpService', () => {
 
   describe('updateTask', () => {
     it('throws ForbiddenException when caller is not in FOLLOW_UP dept', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(nonFollowUpProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValueOnce(
+        new ForbiddenException(
+          'Access restricted to Follow-Up department workers',
+        ),
+      );
       await expect(
         service.updateTask(
           'task-1',

@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -30,9 +29,9 @@ import { ChildCheckInDto } from '../dto/child-check-in.dto';
 import { ChildCheckOutDto } from '../dto/child-check-out.dto';
 import { FlagCheckInDto } from '../dto/flag-check-in.dto';
 import { Member } from '../../member/entity/member.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -58,10 +57,9 @@ export class ChildrenChurchService {
     private readonly guardianRepo: Repository<ChildGuardian>,
     @InjectRepository(ChildCheckIn)
     private readonly checkInRepo: Repository<ChildCheckIn>,
-    @InjectRepository(WorkerProfile)
-    private readonly workerProfileRepo: Repository<WorkerProfile>,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
   }
@@ -701,21 +699,10 @@ export class ChildrenChurchService {
   // ─── Authorization Helpers ────────────────────────────────────────────────
 
   private async requireChildrenChurchAuth(user: MemberAuth): Promise<void> {
-    if (await this.isChildrenChurchWorker(user.id)) return;
-    throw new ForbiddenException(
+    await this.departmentAccessService.assertHasDepartmentAccessKey(
+      user.id,
+      DepartmentKeyEnum.CHILDREN_CHURCH,
       'Only Children Church department workers are authorized to perform this action.',
-    );
-  }
-
-  private async isChildrenChurchWorker(memberId: string): Promise<boolean> {
-    const profile = await this.workerProfileRepo.findOne({
-      where: { member: { id: memberId } },
-      relations: ['department', 'secondaryDepartment'],
-    });
-    if (!profile) return false;
-    return (
-      profile.department?.key === DepartmentKeyEnum.CHILDREN_CHURCH ||
-      profile.secondaryDepartment?.key === DepartmentKeyEnum.CHILDREN_CHURCH
     );
   }
 

@@ -29,6 +29,7 @@ import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enu
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { PdfService } from '../../utility/service/pdf.service';
@@ -98,6 +99,11 @@ const mockAccessGrantRepo = {
 const mockWorkerProfileRepo = {
   findOne: jest.fn(),
   createQueryBuilder: jest.fn(),
+};
+
+const mockDepartmentAccessService = {
+  hasDepartmentAccessKey: jest.fn(),
+  assertHasDepartmentAccessKey: jest.fn(),
 };
 
 const mockEmailQueueService = {
@@ -245,6 +251,10 @@ describe('ServiceSessionService', () => {
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: getRepositoryToken(Admin), useValue: mockAdminRepo },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
+        },
       ],
     }).compile();
 
@@ -2015,7 +2025,9 @@ describe('ServiceSessionService', () => {
     });
 
     it('allows an Admin-department worker regardless of SERVICE_PROGRAMME_WRITE — a separate, narrower check than session control', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(adminDeptProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
       mockAdminRepo.findOne.mockResolvedValue(null);
       mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb([]));
 
@@ -2025,7 +2037,11 @@ describe('ServiceSessionService', () => {
     });
 
     it('rejects a worker who is not in the Admin department, even if they are also an Admin with SERVICE_PROGRAMME_WRITE', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(nonAdminProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+        new ForbiddenException(
+          'Only Admin department workers can perform this action',
+        ),
+      );
       mockAdminRepo.findOne.mockResolvedValue(validAdmin);
 
       await expect(

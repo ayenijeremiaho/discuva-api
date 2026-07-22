@@ -14,9 +14,9 @@ import { ChildCheckIn } from '../entity/child-check-in.entity';
 import { ChildCheckInStatusEnum } from '../enums/child-checkin-status.enum';
 import { GuardianRelationshipEnum } from '../enums/guardian-relationship.enum';
 import { Member } from '../../member/entity/member.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { ConfigService } from '@nestjs/config';
@@ -64,8 +64,9 @@ const mockCheckInRepo = {
 
 const mockMemberRepo = {};
 
-const mockWorkerProfileRepo = {
-  findOne: jest.fn(),
+const mockDepartmentAccessService = {
+  hasDepartmentAccessKey: jest.fn(),
+  assertHasDepartmentAccessKey: jest.fn(),
 };
 
 const mockUtilityService = {
@@ -91,35 +92,6 @@ const otherWorkerUser = {
   role: MemberRoleEnum.WORKER,
   requiresPasswordChange: false,
   surface: SessionSurface.MEMBER,
-};
-
-const mockCCDeptProfile = {
-  department: {
-    id: 'dept-cc',
-    key: DepartmentKeyEnum.CHILDREN_CHURCH,
-    name: 'Children Church',
-  },
-  secondaryDepartment: null,
-};
-const mockCCSecondaryProfile = {
-  department: {
-    id: 'dept-worship',
-    key: DepartmentKeyEnum.WORSHIP,
-    name: 'Worship',
-  },
-  secondaryDepartment: {
-    id: 'dept-cc',
-    key: DepartmentKeyEnum.CHILDREN_CHURCH,
-    name: 'Children Church',
-  },
-};
-const mockOtherDeptProfile = {
-  department: {
-    id: 'dept-ushering',
-    key: DepartmentKeyEnum.USHERING,
-    name: 'Ushering',
-  },
-  secondaryDepartment: null,
 };
 
 // ─── Data fixtures ─────────────────────────────────────────────────────────
@@ -181,8 +153,8 @@ describe('ChildrenChurchService', () => {
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         {
-          provide: getRepositoryToken(WorkerProfile),
-          useValue: mockWorkerProfileRepo,
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
         },
         { provide: UtilityService, useValue: mockUtilityService },
         {
@@ -194,7 +166,9 @@ describe('ChildrenChurchService', () => {
 
     service = module.get<ChildrenChurchService>(ChildrenChurchService);
     // Default: authorize as CC dept worker so functional tests focus on business logic
-    mockWorkerProfileRepo.findOne.mockResolvedValue(mockCCDeptProfile);
+    mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      undefined,
+    );
   });
 
   // ─── Authorization ────────────────────────────────────────────────────────
@@ -209,7 +183,9 @@ describe('ChildrenChurchService', () => {
     });
 
     it('admin worker in CC dept is authorized', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(mockCCDeptProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
       await service.registerChild(adminUser, {
         firstname: 'Alice',
         lastname: 'Smith',
@@ -219,7 +195,9 @@ describe('ChildrenChurchService', () => {
     });
 
     it('CC primary dept worker is allowed', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(mockCCDeptProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
       await service.registerChild(ccWorkerUser, {
         firstname: 'Alice',
         lastname: 'Smith',
@@ -229,7 +207,9 @@ describe('ChildrenChurchService', () => {
     });
 
     it('CC secondary dept worker is allowed', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(mockCCSecondaryProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
       await service.registerChild(ccWorkerUser, {
         firstname: 'Alice',
         lastname: 'Smith',
@@ -239,7 +219,11 @@ describe('ChildrenChurchService', () => {
     });
 
     it('worker from a different department is denied', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(mockOtherDeptProfile);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+        new ForbiddenException(
+          'Only Children Church department workers are authorized to perform this action.',
+        ),
+      );
       await expect(
         service.registerChild(otherWorkerUser, {
           firstname: 'Alice',
@@ -250,7 +234,11 @@ describe('ChildrenChurchService', () => {
     });
 
     it('worker with no profile is denied', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(null);
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+        new ForbiddenException(
+          'Only Children Church department workers are authorized to perform this action.',
+        ),
+      );
       await expect(
         service.registerChild(otherWorkerUser, {
           firstname: 'Alice',
@@ -258,6 +246,24 @@ describe('ChildrenChurchService', () => {
           dateOfBirth: '2024-01-15',
         }),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('checks the CHILDREN_CHURCH key via DepartmentAccessService', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
+      await service.registerChild(ccWorkerUser, {
+        firstname: 'Alice',
+        lastname: 'Smith',
+        dateOfBirth: '2024-01-15',
+      });
+      expect(
+        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+      ).toHaveBeenCalledWith(
+        ccWorkerUser.id,
+        DepartmentKeyEnum.CHILDREN_CHURCH,
+        expect.any(String),
+      );
     });
   });
 

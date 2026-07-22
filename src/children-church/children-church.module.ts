@@ -10,6 +10,7 @@ import { ChildrenChurchController } from './controller/children-church.controlle
 import { MemberModule } from '../member/member.module';
 import { EventModule } from '../event/event.module';
 import { UtilityModule } from '../utility/utility.module';
+import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { UtilityModule } from '../utility/utility.module';
     MemberModule,
     EventModule,
     UtilityModule,
+    DepartmentModule,
   ],
   controllers: [ChildrenChurchController],
   providers: [ChildrenChurchService],

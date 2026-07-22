@@ -10,6 +10,7 @@ import { PrayerRequestTeamController } from './controller/prayer-request-team.co
 import { PrayerRequestAdminController } from './controller/prayer-request-admin.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
+import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UtilityModule } from '../utility/utility.module';
     ]),
     MemberModule,
     UtilityModule,
+    DepartmentModule,
   ],
   providers: [PrayerRequestService],
   controllers: [

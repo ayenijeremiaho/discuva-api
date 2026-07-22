@@ -9,7 +9,6 @@ import { PrayerRequest } from '../entity/prayer-request.entity';
 import { Testimony } from '../entity/testimony.entity';
 import { PregnancyPrayerCase } from '../entity/pregnancy-prayer-case.entity';
 import { PregnancyPrayerVisit } from '../entity/pregnancy-prayer-visit.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { Pastor } from '../../member/entity/pastor.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
@@ -23,6 +22,7 @@ import {
 import { PrayerRequestStatusEnum } from '../enum/prayer-request-status.enum';
 import { PregnancyCaseStatusEnum } from '../enum/pregnancy-case-status.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -40,12 +40,11 @@ export class PrayerRequestService {
     private readonly pregnancyCaseRepo: Repository<PregnancyPrayerCase>,
     @InjectRepository(PregnancyPrayerVisit)
     private readonly pregnancyVisitRepo: Repository<PregnancyPrayerVisit>,
-    @InjectRepository(WorkerProfile)
-    private readonly workerProfileRepo: Repository<WorkerProfile>,
     @InjectRepository(Pastor)
     private readonly pastorRepo: Repository<Pastor>,
     private readonly memberService: MemberService,
     private readonly auditLogService: AuditLogService,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {}
 
   async submitRequest(
@@ -325,14 +324,11 @@ export class PrayerRequestService {
     });
     if (isPastor) return;
 
-    const profile = await this.workerProfileRepo.findOne({
-      where: { member: { id: memberId } },
-      relations: ['department', 'secondaryDepartment'],
-    });
     if (
-      profile &&
-      (profile.department?.key === DepartmentKeyEnum.PRAYER ||
-        profile.secondaryDepartment?.key === DepartmentKeyEnum.PRAYER)
+      await this.departmentAccessService.hasDepartmentAccessKey(
+        memberId,
+        DepartmentKeyEnum.PRAYER,
+      )
     ) {
       return;
     }

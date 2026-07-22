@@ -9,12 +9,14 @@ import { ConvertTeamController } from './controller/convert-team.controller';
 import { ConvertAdminController } from './controller/convert-admin.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
+import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Convert, ConvertFollowUpLog, WorkerProfile]),
     MemberModule,
     UtilityModule,
+    DepartmentModule,
   ],
   providers: [ConvertService],
   controllers: [

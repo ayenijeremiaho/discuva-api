@@ -20,9 +20,9 @@ import { AssignSundaySchoolMemberDto } from '../dto/assign-sunday-school-member.
 import { CreateSundaySchoolSessionDto } from '../dto/create-sunday-school-session.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
 import { Member } from '../../member/entity/member.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 
 export interface SessionRosterEntry {
@@ -57,8 +57,7 @@ export class SundaySchoolService {
     private readonly attendanceRepo: Repository<SundaySchoolAttendance>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
-    @InjectRepository(WorkerProfile)
-    private readonly workerProfileRepo: Repository<WorkerProfile>,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {}
 
   async createClass(
@@ -796,8 +795,7 @@ export class SundaySchoolService {
 
   /**
    * Grants access to:
-   * - ADMIN (always)
-   * - Workers whose department name contains "sunday school" (case-insensitive)
+   * - Workers in a department whose key is SUNDAY_SCHOOL (primary or secondary)
    * - The appointed teacher of a specific class (when classId is provided)
    *
    * Workers from other departments can therefore be empowered by being appointed
@@ -807,24 +805,18 @@ export class SundaySchoolService {
     user: MemberAuth,
     classId?: string,
   ): Promise<void> {
-    if (await this.isSundaySchoolDeptWorker(user.id)) return;
+    if (
+      await this.departmentAccessService.hasDepartmentAccessKey(
+        user.id,
+        DepartmentKeyEnum.SUNDAY_SCHOOL,
+      )
+    )
+      return;
 
     if (classId && (await this.isClassTeacher(user.id, classId))) return;
 
     throw new ForbiddenException(
       'Only Sunday School staff or the appointed class teacher are authorized to perform this action.',
-    );
-  }
-
-  private async isSundaySchoolDeptWorker(memberId: string): Promise<boolean> {
-    const profile = await this.workerProfileRepo.findOne({
-      where: { member: { id: memberId } },
-      relations: ['department', 'secondaryDepartment'],
-    });
-    if (!profile) return false;
-    return (
-      profile.department?.key === DepartmentKeyEnum.SUNDAY_SCHOOL ||
-      profile.secondaryDepartment?.key === DepartmentKeyEnum.SUNDAY_SCHOOL
     );
   }
 

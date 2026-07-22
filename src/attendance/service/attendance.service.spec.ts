@@ -19,6 +19,7 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { DepartmentService } from '../../department/service/department.service';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { DateService } from '../../utility/service/date.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -106,6 +107,11 @@ const mockDepartmentService = {
 
 const mockAuditLogService = { log: jest.fn() };
 
+const mockDepartmentAccessService = {
+  hasDepartmentAccessKey: jest.fn(),
+  assertHasDepartmentAccessKey: jest.fn(),
+};
+
 const defaultVenue = {
   id: 'venue-1',
   name: 'Main Auditorium',
@@ -168,6 +174,10 @@ describe('AttendanceService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: DataSource, useValue: mockDataSource },
         { provide: DepartmentService, useValue: mockDepartmentService },
+        {
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
+        },
         {
           provide: UtilityService,
           useValue: { sendEmailWithTemplate: jest.fn() },
@@ -859,47 +869,28 @@ describe('AttendanceService', () => {
   });
 
   describe('assertIsAdminDeptWorker', () => {
-    it("resolves when the worker's primary department key is ADMIN", async () => {
-      mockMemberService.getById.mockResolvedValue({
-        workerProfile: {
-          department: { key: DepartmentKeyEnum.ADMIN },
-          secondaryDepartment: null,
-        },
-      });
+    it('delegates to DepartmentAccessService with the ADMIN key', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
 
-      await expect(
-        service.assertIsAdminDeptWorker('member-1'),
-      ).resolves.toBeUndefined();
-    });
+      await service.assertIsAdminDeptWorker('member-1');
 
-    it("resolves when the worker's secondary department key is ADMIN", async () => {
-      mockMemberService.getById.mockResolvedValue({
-        workerProfile: {
-          department: { key: DepartmentKeyEnum.MEDIA },
-          secondaryDepartment: { key: DepartmentKeyEnum.ADMIN },
-        },
-      });
-
-      await expect(
-        service.assertIsAdminDeptWorker('member-1'),
-      ).resolves.toBeUndefined();
-    });
-
-    it('throws ForbiddenException for a worker outside the Admin department', async () => {
-      mockMemberService.getById.mockResolvedValue({
-        workerProfile: {
-          department: { key: DepartmentKeyEnum.MEDIA },
-          secondaryDepartment: null,
-        },
-      });
-
-      await expect(service.assertIsAdminDeptWorker('member-1')).rejects.toThrow(
-        ForbiddenException,
+      expect(
+        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+      ).toHaveBeenCalledWith(
+        'member-1',
+        DepartmentKeyEnum.ADMIN,
+        expect.any(String),
       );
     });
 
-    it('throws ForbiddenException for a plain member with no workerProfile', async () => {
-      mockMemberService.getById.mockResolvedValue({ workerProfile: null });
+    it('propagates the ForbiddenException thrown by DepartmentAccessService', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+        new ForbiddenException(
+          'Only Admin department workers can perform this action',
+        ),
+      );
 
       await expect(service.assertIsAdminDeptWorker('member-1')).rejects.toThrow(
         ForbiddenException,
@@ -909,12 +900,11 @@ describe('AttendanceService', () => {
 
   describe('searchMembersForCheckin', () => {
     it('rejects the search for a non-Admin-department caller before querying', async () => {
-      mockMemberService.getById.mockResolvedValue({
-        workerProfile: {
-          department: { key: DepartmentKeyEnum.MEDIA },
-          secondaryDepartment: null,
-        },
-      });
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+        new ForbiddenException(
+          'Only Admin department workers can perform this action',
+        ),
+      );
 
       await expect(
         service.searchMembersForCheckin('member-1', 'ada'),
@@ -923,12 +913,9 @@ describe('AttendanceService', () => {
     });
 
     it('delegates to MemberService.searchActiveMembersLite for an Admin-department worker', async () => {
-      mockMemberService.getById.mockResolvedValue({
-        workerProfile: {
-          department: { key: DepartmentKeyEnum.ADMIN },
-          secondaryDepartment: null,
-        },
-      });
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
       const found = [
         {
           id: 'm1',

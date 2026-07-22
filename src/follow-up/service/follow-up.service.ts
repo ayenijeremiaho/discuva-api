@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -27,6 +26,7 @@ import { FirstTimerVisit } from '../entity/first-timer-visit.entity';
 import { LogVisitDto } from '../dto/log-visit.dto';
 import { AddNoteDto } from '../dto/add-note.dto';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -63,6 +63,7 @@ export class FollowUpService {
     private readonly workerProfileRepo: Repository<WorkerProfile>,
     @InjectRepository(FirstTimerVisit)
     private readonly visitRepo: Repository<FirstTimerVisit>,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {
     this.followUpDueDays = this.configService.get<number>('FOLLOW_UP_DUE_DAYS');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -608,22 +609,11 @@ export class FollowUpService {
   }
 
   async assertWorkerInFollowUpDept(memberId: string): Promise<void> {
-    const profile = await this.workerProfileRepo.findOne({
-      where: { member: { id: memberId } },
-      relations: ['department', 'secondaryDepartment'],
-    });
-
-    if (!profile) throw new ForbiddenException('Worker profile not found');
-
-    const inDept =
-      profile.department?.key === DepartmentKeyEnum.FOLLOW_UP ||
-      profile.secondaryDepartment?.key === DepartmentKeyEnum.FOLLOW_UP;
-
-    if (!inDept) {
-      throw new ForbiddenException(
-        'Access restricted to Follow-Up department workers',
-      );
-    }
+    await this.departmentAccessService.assertHasDepartmentAccessKey(
+      memberId,
+      DepartmentKeyEnum.FOLLOW_UP,
+      'Access restricted to Follow-Up department workers',
+    );
   }
 
   private computeDueDate(): Date {

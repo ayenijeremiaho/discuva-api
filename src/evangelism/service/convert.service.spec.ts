@@ -13,6 +13,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberService } from '../../member/service/member.service';
 import { ConvertStatusEnum } from '../enum/convert-status.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
@@ -36,6 +37,11 @@ const mockWorkerProfileRepo = {
 };
 
 const mockAuditLogService = { log: jest.fn() };
+
+const mockDepartmentAccessService = {
+  hasDepartmentAccessKey: jest.fn(),
+  assertHasDepartmentAccessKey: jest.fn(),
+};
 
 const mockMemberService = {
   getById: jest.fn(),
@@ -70,6 +76,10 @@ describe('ConvertService', () => {
         },
         { provide: MemberService, useValue: mockMemberService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        {
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
+        },
       ],
     }).compile();
 
@@ -356,41 +366,28 @@ describe('ConvertService', () => {
   });
 
   describe('assertIsEvangelismDeptWorker', () => {
-    it('resolves when Evangelism is the primary department', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        department: { key: DepartmentKeyEnum.EVANGELISM },
-        secondaryDepartment: null,
-      });
+    it('delegates to DepartmentAccessService with the EVANGELISM key', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+        undefined,
+      );
 
-      await expect(
-        service.assertIsEvangelismDeptWorker('member-1'),
-      ).resolves.toBeUndefined();
+      await service.assertIsEvangelismDeptWorker('member-1');
+
+      expect(
+        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+      ).toHaveBeenCalledWith(
+        'member-1',
+        DepartmentKeyEnum.EVANGELISM,
+        expect.any(String),
+      );
     });
 
-    it('resolves when Evangelism is the secondary department', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        department: { key: DepartmentKeyEnum.MEDIA },
-        secondaryDepartment: { key: DepartmentKeyEnum.EVANGELISM },
-      });
-
-      await expect(
-        service.assertIsEvangelismDeptWorker('member-1'),
-      ).resolves.toBeUndefined();
-    });
-
-    it('throws ForbiddenException otherwise', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        department: { key: DepartmentKeyEnum.MEDIA },
-        secondaryDepartment: null,
-      });
-
-      await expect(
-        service.assertIsEvangelismDeptWorker('member-1'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('throws ForbiddenException when no WorkerProfile exists', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(null);
+    it('propagates the ForbiddenException thrown by DepartmentAccessService', async () => {
+      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+        new ForbiddenException(
+          'Only Evangelism department workers can perform this action',
+        ),
+      );
 
       await expect(
         service.assertIsEvangelismDeptWorker('member-1'),

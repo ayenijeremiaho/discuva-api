@@ -9,6 +9,7 @@ import { SundaySchoolController } from './controller/sunday-school.controller';
 import { SundaySchoolAdminController } from './controller/sunday-school-admin.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
+import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { UtilityModule } from '../utility/utility.module';
     ]),
     MemberModule,
     UtilityModule,
+    DepartmentModule,
   ],
   controllers: [SundaySchoolController, SundaySchoolAdminController],
   providers: [SundaySchoolService],

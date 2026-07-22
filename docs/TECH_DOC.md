@@ -279,7 +279,7 @@ One record per member per **event**. Workers and members both receive one attend
 | id             | UUID PK                                                                                                                                                |
 | name           | Unique                                                                                                                                                 |
 | description    |                                                                                                                                                        |
-| key            | DepartmentKeyEnum \| null — access-control category for department-gated modules; not unique (multiple departments can share the same key, e.g. MEDIA) |
+| key            | string \| null — free-form access-control category for department-gated modules; not unique (multiple departments can share the same key, e.g. MEDIA). Not validated against a fixed enum — `DepartmentKeyEnum`/`DepartmentKeyLabels` are preset suggestions surfaced by the frontend picker (`GET departments/keys`), not the full set of valid values. A church can create a brand-new access category (e.g. `STAGE_LIGHTING`) just by typing it, no backend change or deploy required. |
 | workerProfiles | OneToMany → WorkerProfile                                                                                                                              |
 
 ### DepartmentLead
@@ -1528,10 +1528,21 @@ to share access to the same module (e.g. both "Technical Media" and "Social Medi
 
 **How it works:**
 
-- Each `Department` record has a nullable `key: DepartmentKeyEnum | null` field. The key is **not unique** — many
-  departments may share the same key.
+- Each `Department` record has a nullable `key: string | null` field — **free-form, not validated against a fixed
+  enum**. `DepartmentKeyEnum`/`DepartmentKeyLabels` (`src/department/enums/department-key.enum.ts`) are preset
+  suggestions surfaced by the frontend picker, not the full set of legal values; `CreateDepartmentDto`/`UpdateDepartmentDto`
+  only require `key` to be a string. A church can introduce a brand-new access category (e.g. a department with
+  `key = "STAGE_LIGHTING"`) just by typing it when creating/editing a department — no backend code change or
+  deploy required. The key is **not unique** — many departments may share the same key.
 - A `WorkerProfile` has a primary `department` and an optional `secondaryDepartment`. A worker passes a key-based gate
   if **either** their primary or secondary department carries the required key.
+- **`DepartmentAccessService`** (`src/department/service/department-access.service.ts`, exported from `DepartmentModule`)
+  is the single shared implementation of this check — `hasDepartmentAccessKey(memberId, key)` (boolean, for composing
+  with other conditions like "or is a pastor" or "or is the class teacher") and `assertHasDepartmentAccessKey(memberId, key, message?)`
+  (throws `ForbiddenException`). Collapses what used to be 7 near-identical, independently-implemented
+  `assertIsXDeptWorker()` methods across `attendance`, `evangelism`, `sunday-school`, `prayer-request`,
+  `service-session`, `children-church`, and `follow-up` services into one implementation — each now just calls it
+  with its own key and message.
 - HOD (head-of-department) assignment is always restricted to the worker's **primary** department.
 
 **Sunday School access** — a request passes if any of the following is true:
@@ -1554,7 +1565,7 @@ only exposed `id`/`name` — `key` had no `@Expose()` and was stripped by `class
 Faithapp (the member PWA) has no way to read a field the API never sends, so its Children's Church tab was gated on
 `department.name === "Children Church"` — a literal string match that ignored `secondaryDepartment` entirely and would
 silently break the moment the department was renamed, even though the *actual* authorization check above never cared
-about the name at all. `DepartmentRefDto` now exposes `key: DepartmentKeyEnum | null`, and Faithapp's
+about the name at all. `DepartmentRefDto` now exposes `key: string | null`, and Faithapp's
 `children-church.tsx` gates on `department?.key === "CHILDREN_CHURCH" || secondaryDepartment?.key === "CHILDREN_CHURCH"`,
 matching the backend's own rule exactly (including the secondary-department case it previously missed).
 
@@ -3853,10 +3864,12 @@ Granular permissions assigned to `AdminRole` records:
 
 ### DepartmentKeyEnum
 
-Access-control categories for department-gated modules. A department's `key` field uses one of these values (or is null
-if the department is not linked to any gated module). Multiple departments can share the same key.
+**Preset suggestions only — not a validation constraint.** `Department.key` is a free-form `string | null`;
+`CreateDepartmentDto`/`UpdateDepartmentDto` accept any string. These values are what the frontend picker offers by
+default and what most access-control checks currently key off of, but a church can type any custom string when
+creating/editing a department to introduce a brand-new access category with no backend change required.
 
-`SUNDAY_SCHOOL` · `CHILDREN_CHURCH` · `WORSHIP` · `USHERING` · `MEDIA` · `PROTOCOL` · `WELFARE` · `PRAYER` · `EVANGELISM` · `YOUTH` · `YOUNG_ADULTS` · `FOLLOW_UP`
+`SUNDAY_SCHOOL` · `CHILDREN_CHURCH` · `WORSHIP` · `USHERING` · `MEDIA` · `PROTOCOL` · `WELFARE` · `PRAYER` · `EVANGELISM` · `YOUTH` · `YOUNG_ADULTS` · `FOLLOW_UP` · `ADMIN`
 
 ### SundaySchoolAttendanceStatus
 
@@ -3929,10 +3942,6 @@ if the department is not linked to any gated module). Multiple departments can s
 ### ServiceActionRoleEnum
 
 `ADMIN` · `WORKER` · `PUBLIC_LINK` (action performed via the public Programme Manager share link, no authenticated member)
-
-### DepartmentKeyEnum (updated)
-
-`SUNDAY_SCHOOL` · `CHILDREN_CHURCH` · `WORSHIP` · `USHERING` · `MEDIA` · `PROTOCOL` · `WELFARE` · `PRAYER` · `EVANGELISM` · `YOUTH` · `YOUNG_ADULTS` · `FOLLOW_UP` · `ADMIN`
 
 ### IncidentStatusEnum
 

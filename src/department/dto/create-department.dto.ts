@@ -1,5 +1,4 @@
-import { IsEnum, IsNotEmpty, IsOptional } from 'class-validator';
-import { DepartmentKeyEnum } from '../enums/department-key.enum';
+import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CreateDepartmentDto {
   @IsNotEmpty()
@@ -8,7 +7,10 @@ export class CreateDepartmentDto {
   @IsNotEmpty()
   description: string;
 
+  // Free-form access category — not validated against DepartmentKeyEnum,
+  // which is only a set of preset suggestions for the frontend picker (see
+  // Department.key's doc comment).
   @IsOptional()
-  @IsEnum(DepartmentKeyEnum)
-  key?: DepartmentKeyEnum;
+  @IsString()
+  key?: string;
 }

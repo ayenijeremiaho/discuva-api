@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,6 +18,7 @@ import {
 } from '../dto/convert.dto';
 import { ConvertStatusEnum } from '../enum/convert-status.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -43,6 +43,7 @@ export class ConvertService {
     private readonly workerProfileRepo: Repository<WorkerProfile>,
     private readonly memberService: MemberService,
     private readonly auditLogService: AuditLogService,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {}
 
   async createConvert(
@@ -255,19 +256,9 @@ export class ConvertService {
   }
 
   async assertIsEvangelismDeptWorker(memberId: string): Promise<void> {
-    const profile = await this.workerProfileRepo.findOne({
-      where: { member: { id: memberId } },
-      relations: ['department', 'secondaryDepartment'],
-    });
-    if (
-      profile &&
-      (profile.department?.key === DepartmentKeyEnum.EVANGELISM ||
-        profile.secondaryDepartment?.key === DepartmentKeyEnum.EVANGELISM)
-    ) {
-      return;
-    }
-
-    throw new ForbiddenException(
+    await this.departmentAccessService.assertHasDepartmentAccessKey(
+      memberId,
+      DepartmentKeyEnum.EVANGELISM,
       'Only Evangelism department workers can perform this action',
     );
   }

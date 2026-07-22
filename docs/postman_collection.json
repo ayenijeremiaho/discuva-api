@@ -3744,7 +3744,7 @@
                 "keys"
               ]
             },
-            "description": "Returns the list of all valid DepartmentKeyEnum values. Use this to populate key-selection dropdowns when creating or updating a department. No auth required beyond a valid JWT."
+            "description": "Returns DepartmentKeyEnum's preset values as suggestions for key-selection UIs \u2014 not the full set of valid values. Department.key is a free-form string; any value works when creating/updating a department, not just these presets. No auth required beyond a valid JWT."
           },
           "response": [
             {
@@ -3857,7 +3857,7 @@
                 "departments"
               ]
             },
-            "description": "ADMIN only. The optional `key` field links this department to a module-access category (DepartmentKeyEnum). Multiple departments may share the same key. Omit `key` (or pass null) if the department does not gate any module. Example keys: SUNDAY_SCHOOL, CHILDREN_CHURCH, MEDIA."
+            "description": "ADMIN only. The optional `key` field links this department to a module-access category. Free-form string, not restricted to DepartmentKeyEnum \u2014 pass any value to create a brand-new access category with no backend change. Multiple departments may share the same key. Omit `key` (or pass null) if the department does not need a module-access category."
           },
           "event": [
             {
@@ -3921,7 +3921,7 @@
                 }
               ]
             },
-            "description": "ADMIN only. All fields are optional. The `key` field can be updated to change module access. Set to null to remove module gating."
+            "description": "ADMIN only. All fields are optional. The `key` field can be updated to change module access \u2014 free-form string, not restricted to DepartmentKeyEnum. Set to null to remove module gating."
           },
           "response": [
             {

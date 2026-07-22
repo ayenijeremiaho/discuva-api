@@ -1,6 +1,5 @@
 import { Expose, Type } from 'class-transformer';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 
 export class DepartmentRefDto {
   @Expose()
@@ -9,8 +8,10 @@ export class DepartmentRefDto {
   @Expose()
   name: string;
 
+  // Free-form — matches Department.key (see its doc comment). Not validated
+  // against DepartmentKeyEnum, which is only a preset-suggestion list.
   @Expose()
-  key: DepartmentKeyEnum | null;
+  key: string | null;
 }
 
 export class WorkerProfileDto {

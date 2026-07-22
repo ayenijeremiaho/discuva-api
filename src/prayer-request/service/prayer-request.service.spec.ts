@@ -6,13 +6,13 @@ import { PrayerRequest } from '../entity/prayer-request.entity';
 import { Testimony } from '../entity/testimony.entity';
 import { PregnancyPrayerCase } from '../entity/pregnancy-prayer-case.entity';
 import { PregnancyPrayerVisit } from '../entity/pregnancy-prayer-visit.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { Pastor } from '../../member/entity/pastor.entity';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberService } from '../../member/service/member.service';
 import { PrayerRequestStatusEnum } from '../enum/prayer-request-status.enum';
 import { PregnancyCaseStatusEnum } from '../enum/pregnancy-case-status.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
@@ -44,8 +44,9 @@ const mockPregnancyVisitRepo = {
   findAndCount: jest.fn(),
 };
 
-const mockWorkerProfileRepo = {
-  findOne: jest.fn(),
+const mockDepartmentAccessService = {
+  hasDepartmentAccessKey: jest.fn(),
+  assertHasDepartmentAccessKey: jest.fn(),
 };
 
 const mockPastorRepo = {
@@ -89,13 +90,13 @@ describe('PrayerRequestService', () => {
           provide: getRepositoryToken(PregnancyPrayerVisit),
           useValue: mockPregnancyVisitRepo,
         },
-        {
-          provide: getRepositoryToken(WorkerProfile),
-          useValue: mockWorkerProfileRepo,
-        },
         { provide: getRepositoryToken(Pastor), useValue: mockPastorRepo },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: MemberService, useValue: mockMemberService },
+        {
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
+        },
       ],
     }).compile();
 
@@ -448,48 +449,30 @@ describe('PrayerRequestService', () => {
       await expect(
         service.assertIsPrayerTeamOrPastor('member-1'),
       ).resolves.toBeUndefined();
-      expect(mockWorkerProfileRepo.findOne).not.toHaveBeenCalled();
+      expect(
+        mockDepartmentAccessService.hasDepartmentAccessKey,
+      ).not.toHaveBeenCalled();
     });
 
-    it('resolves when the member is a Prayer department worker', async () => {
+    it('resolves when the member is a Prayer department worker (checked via DepartmentAccessService)', async () => {
       mockPastorRepo.exists.mockResolvedValue(false);
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        department: { key: DepartmentKeyEnum.PRAYER },
-        secondaryDepartment: null,
-      });
+      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
+        true,
+      );
 
       await expect(
         service.assertIsPrayerTeamOrPastor('member-1'),
       ).resolves.toBeUndefined();
-    });
-
-    it('resolves when Prayer is the secondary department', async () => {
-      mockPastorRepo.exists.mockResolvedValue(false);
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        department: { key: DepartmentKeyEnum.MEDIA },
-        secondaryDepartment: { key: DepartmentKeyEnum.PRAYER },
-      });
-
-      await expect(
-        service.assertIsPrayerTeamOrPastor('member-1'),
-      ).resolves.toBeUndefined();
+      expect(
+        mockDepartmentAccessService.hasDepartmentAccessKey,
+      ).toHaveBeenCalledWith('member-1', DepartmentKeyEnum.PRAYER);
     });
 
     it('throws ForbiddenException otherwise', async () => {
       mockPastorRepo.exists.mockResolvedValue(false);
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        department: { key: DepartmentKeyEnum.MEDIA },
-        secondaryDepartment: null,
-      });
-
-      await expect(
-        service.assertIsPrayerTeamOrPastor('member-1'),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('throws ForbiddenException when no WorkerProfile exists', async () => {
-      mockPastorRepo.exists.mockResolvedValue(false);
-      mockWorkerProfileRepo.findOne.mockResolvedValue(null);
+      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
+        false,
+      );
 
       await expect(
         service.assertIsPrayerTeamOrPastor('member-1'),

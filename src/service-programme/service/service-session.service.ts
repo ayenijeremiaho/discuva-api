@@ -15,8 +15,8 @@ import { ServiceSessionSlot } from '../entity/service-session-slot.entity';
 import { ServicePauseEntry } from '../entity/service-pause-entry.entity';
 import { ServiceActionEntry } from '../entity/service-action-entry.entity';
 import { ServiceSessionAccessGrant } from '../entity/service-session-access-grant.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { Member } from '../../member/entity/member.entity';
+import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { ServiceProgrammeService } from './service-programme.service';
 import { PauseSessionDto } from '../dto/pause-session.dto';
 import { RuntimeOverrideDto } from '../dto/runtime-override.dto';
@@ -25,6 +25,7 @@ import { ServiceSessionSlotStatusEnum } from '../enum/service-session-slot-statu
 import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { Admin } from '../../admin/entity/admin.entity';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
@@ -209,13 +210,14 @@ export class ServiceSessionService {
     private readonly actionEntryRepo: Repository<ServiceActionEntry>,
     @InjectRepository(ServiceSessionAccessGrant)
     private readonly accessGrantRepo: Repository<ServiceSessionAccessGrant>,
-    @InjectRepository(WorkerProfile)
-    private readonly workerProfileRepo: Repository<WorkerProfile>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(WorkerProfile)
+    private readonly workerProfileRepo: Repository<WorkerProfile>,
     private readonly configService: ConfigService,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {}
 
   private readonly logger = new Logger(ServiceSessionService.name);
@@ -1913,19 +1915,9 @@ export class ServiceSessionService {
   // to live-session control, so it keeps its own department-based rule
   // rather than sharing (and being narrowed by) the control-access check.
   private async assertIsAdminDeptWorker(memberId: string): Promise<void> {
-    const profile = await this.workerProfileRepo.findOne({
-      where: { member: { id: memberId } },
-      relations: ['department', 'secondaryDepartment'],
-    });
-    if (
-      profile &&
-      (profile.department?.key === DepartmentKeyEnum.ADMIN ||
-        profile.secondaryDepartment?.key === DepartmentKeyEnum.ADMIN)
-    ) {
-      return;
-    }
-
-    throw new ForbiddenException(
+    await this.departmentAccessService.assertHasDepartmentAccessKey(
+      memberId,
+      DepartmentKeyEnum.ADMIN,
       'Only Admin department workers can perform this action',
     );
   }

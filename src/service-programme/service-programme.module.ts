@@ -20,6 +20,7 @@ import { ShareTokenGuard } from './guard/share-token.guard';
 import { NamedAccessGuard } from './guard/named-access.guard';
 import { ServiceProgrammeReminderScheduler } from './scheduler/service-programme-reminder.scheduler';
 import { UtilityModule } from '../utility/utility.module';
+import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { UtilityModule } from '../utility/utility.module';
       WorkerProfile,
     ]),
     UtilityModule,
+    DepartmentModule,
   ],
   controllers: [ServiceProgrammeController, ServiceSessionController],
   providers: [

@@ -28,6 +28,7 @@ import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Event } from '../../event/entity/event.entity';
 import { EventService } from '../../event/service/event.service';
 import { DepartmentService } from '../../department/service/department.service';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { DateService } from '../../utility/service/date.service';
@@ -82,6 +83,7 @@ export class AttendanceService {
     private readonly memberService: MemberService,
     private readonly eventService: EventService,
     private readonly departmentService: DepartmentService,
+    private readonly departmentAccessService: DepartmentAccessService,
     private readonly configService: ConfigService,
     private readonly utilityService: UtilityService,
     private readonly dateService: DateService,
@@ -1059,23 +1061,11 @@ export class AttendanceService {
   }
 
   // Mobile-only gate for Admin-department workers (front-desk staff who need
-  // to check people in without going through the admin portal). Mirrors the
-  // identical department-key check in ServiceSessionService.assertIsAdminDeptWorker.
+  // to check people in without going through the admin portal).
   async assertIsAdminDeptWorker(memberId: string): Promise<void> {
-    const member = await this.memberService.getById(memberId, [
-      'workerProfile',
-      'workerProfile.department',
-      'workerProfile.secondaryDepartment',
-    ]);
-    const profile = member.workerProfile;
-    if (
-      profile &&
-      (profile.department?.key === DepartmentKeyEnum.ADMIN ||
-        profile.secondaryDepartment?.key === DepartmentKeyEnum.ADMIN)
-    ) {
-      return;
-    }
-    throw new ForbiddenException(
+    await this.departmentAccessService.assertHasDepartmentAccessKey(
+      memberId,
+      DepartmentKeyEnum.ADMIN,
       'Only Admin department workers can perform this action',
     );
   }

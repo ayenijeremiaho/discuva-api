@@ -20,6 +20,7 @@ import {
 } from './processor/post-event.processor';
 import { FollowUpScheduler } from './scheduler/follow-up.scheduler';
 import { UtilityModule } from '../utility/utility.module';
+import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { UtilityModule } from '../utility/utility.module';
       },
     }),
     UtilityModule,
+    DepartmentModule,
   ],
   controllers: [FollowUpController, FollowUpAdminController],
   providers: [FollowUpService, PostEventProcessor, FollowUpScheduler],
