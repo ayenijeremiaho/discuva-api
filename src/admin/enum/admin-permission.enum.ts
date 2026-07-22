@@ -56,6 +56,8 @@ export enum AdminPermission {
   PASTOR_FEEDBACK_WRITE = 'pastor_feedback:write',
   EVANGELISM_READ = 'evangelism:read',
   EVANGELISM_WRITE = 'evangelism:write',
+  SERMON_READ = 'sermon:read',
+  SERMON_WRITE = 'sermon:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -116,6 +118,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.PASTOR_FEEDBACK_WRITE]: 'Manage Pastor Feedback',
   [AdminPermission.EVANGELISM_READ]: 'View Evangelism Converts',
   [AdminPermission.EVANGELISM_WRITE]: 'Manage Evangelism Converts',
+  [AdminPermission.SERMON_READ]: 'View Sermon Archive',
+  [AdminPermission.SERMON_WRITE]: 'Manage Sermon Archive',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -227,6 +231,9 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View all evangelism converts, follow-up history, and assignments',
   [AdminPermission.EVANGELISM_WRITE]:
     'Reassign convert follow-up ownership and link converts to member records',
+  [AdminPermission.SERMON_READ]: 'View sermon archive entries',
+  [AdminPermission.SERMON_WRITE]:
+    'Create, edit, and delete sermon archive entries, and trigger "we\'re live" announcements',
 };
 
 export interface AdminPermissionGroupItem {
@@ -386,6 +393,11 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'Evangelism',
     [AdminPermission.EVANGELISM_READ, AdminPermission.EVANGELISM_WRITE],
     'evangelism',
+  ),
+  buildGroup(
+    'Sermon Archive',
+    [AdminPermission.SERMON_READ, AdminPermission.SERMON_WRITE],
+    'sermons',
   ),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,

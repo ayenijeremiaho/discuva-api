@@ -21,6 +21,7 @@ export const KNOWN_MODULES = [
   { key: 'tithe', moduleName: 'Tithe & Giving', required: false },
   { key: 'classes', moduleName: 'Training Classes', required: false },
   { key: 'announcements', moduleName: 'Announcements', required: false },
+  { key: 'sermons', moduleName: 'Sermon Archive', required: false },
 ] as const;
 
 export type KnownModuleKey = (typeof KNOWN_MODULES)[number]['key'];

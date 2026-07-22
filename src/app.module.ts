@@ -37,6 +37,7 @@ import { ServiceProgrammeModule } from './service-programme/service-programme.mo
 import { ServiceHeadcountModule } from './service-headcount/service-headcount.module';
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
+import { SermonModule } from './sermon/sermon.module';
 import { AssetManagementModule } from './asset-management/asset-management.module';
 import { FinanceModule } from './finance/finance.module';
 import { PrayerModule } from './prayer/prayer.module';
@@ -164,6 +165,7 @@ import { EvangelismModule } from './evangelism/evangelism.module';
     ServiceHeadcountModule,
     ChurchSettingsModule,
     IncidentReportModule,
+    SermonModule,
     AssetManagementModule,
     FinanceModule,
     PrayerModule,

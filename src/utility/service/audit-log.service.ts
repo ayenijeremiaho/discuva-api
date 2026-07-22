@@ -183,7 +183,11 @@ export type AuditAction =
   | 'RECONCILIATION_BULK_CONFIRMED'
   | 'RECONCILIATION_ROWS_POSTED'
   | 'VIRTUAL_ACCOUNT_CREATED'
-  | 'VIRTUAL_ACCOUNT_DEACTIVATED';
+  | 'VIRTUAL_ACCOUNT_DEACTIVATED'
+  // Sermon archive
+  | 'SERMON_CREATED'
+  | 'SERMON_UPDATED'
+  | 'SERMON_DELETED';
 
 export interface AuditContext {
   actorId?: string;

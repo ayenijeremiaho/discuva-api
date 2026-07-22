@@ -17969,6 +17969,345 @@
       ]
     },
     {
+      "name": "Sermons (Member)",
+      "item": [
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/sermons?page=1&limit=20&series=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "sermons"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "series",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paginated list for any authenticated member/worker \u2014 no department or class gating. 403 if the sermons module is disabled for this church."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n      \"title\": \"Walking in Faith\",\n      \"speakerName\": \"Pastor John Doe\",\n      \"date\": \"2026-07-19T09:00:00.000Z\",\n      \"description\": \"A message on trusting God through uncertainty.\",\n      \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n      \"mixlrUrl\": null,\n      \"series\": \"Faith Series\",\n      \"createdAt\": \"2026-07-19T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-19T10:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ],
+          "name": "List sermons"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/sermons/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "sermons",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a single sermon."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Walking in Faith\",\n  \"speakerName\": \"Pastor John Doe\",\n  \"date\": \"2026-07-19T09:00:00.000Z\",\n  \"description\": \"A message on trusting God through uncertainty.\",\n  \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n  \"mixlrUrl\": null,\n  \"series\": \"Faith Series\",\n  \"createdAt\": \"2026-07-19T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-19T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Get sermon"
+        }
+      ]
+    },
+    {
+      "name": "Sermons (Admin)",
+      "item": [
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sermons",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sermons"
+              ]
+            },
+            "description": "Create a sermon archive entry. At least one of youtubeUrl/mixlrUrl is required (400 otherwise). Requires SERMON_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Walking in Faith\",\n  \"speakerName\": \"Pastor John Doe\",\n  \"date\": \"2026-07-19T09:00:00.000Z\",\n  \"description\": \"A message on trusting God through uncertainty.\",\n  \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n  \"series\": \"Faith Series\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Walking in Faith\",\n  \"speakerName\": \"Pastor John Doe\",\n  \"date\": \"2026-07-19T09:00:00.000Z\",\n  \"description\": \"A message on trusting God through uncertainty.\",\n  \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n  \"mixlrUrl\": null,\n  \"series\": \"Faith Series\",\n  \"createdAt\": \"2026-07-19T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-19T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Create sermon"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sermons?page=1&limit=20&series=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sermons"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "series",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Optional exact series filter"
+                }
+              ]
+            },
+            "description": "Paginated list, newest first. Requires SERMON_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n      \"title\": \"Walking in Faith\",\n      \"speakerName\": \"Pastor John Doe\",\n      \"date\": \"2026-07-19T09:00:00.000Z\",\n      \"description\": \"A message on trusting God through uncertainty.\",\n      \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n      \"mixlrUrl\": null,\n      \"series\": \"Faith Series\",\n      \"createdAt\": \"2026-07-19T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-19T10:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ],
+          "name": "List sermons"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sermons/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sermons",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a single sermon. Requires SERMON_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Walking in Faith\",\n  \"speakerName\": \"Pastor John Doe\",\n  \"date\": \"2026-07-19T09:00:00.000Z\",\n  \"description\": \"A message on trusting God through uncertainty.\",\n  \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n  \"mixlrUrl\": null,\n  \"series\": \"Faith Series\",\n  \"createdAt\": \"2026-07-19T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-19T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Get sermon"
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sermons/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sermons",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update any field. 400 if the update would leave both youtubeUrl and mixlrUrl unset. Requires SERMON_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Walking in Faith (Part 2)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Walking in Faith (Part 2)\",\n  \"speakerName\": \"Pastor John Doe\",\n  \"date\": \"2026-07-19T09:00:00.000Z\",\n  \"description\": \"A message on trusting God through uncertainty.\",\n  \"youtubeUrl\": \"https://youtube.com/watch?v=abc123\",\n  \"mixlrUrl\": null,\n  \"series\": \"Faith Series\",\n  \"createdAt\": \"2026-07-19T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-19T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Update sermon"
+        },
+        {
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sermons/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sermons",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete a sermon archive entry. Requires SERMON_WRITE."
+          },
+          "name": "Delete sermon"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/sermons/announce-live",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "sermons",
+                "announce-live"
+              ]
+            },
+            "description": "Manual 'we're live' trigger. platform: YOUTUBE | MIXLR. Publishes an ALL-audience system announcement (no SMS, author is null) and push-notifies every active member. Requires SERMON_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"platform\": \"YOUTUBE\",\n  \"url\": \"https://youtube.com/watch?v=live123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "name": "Announce live"
+        }
+      ]
+    },
+    {
       "name": "Asset Management (Admin)",
       "item": [
         {

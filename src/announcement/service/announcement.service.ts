@@ -103,9 +103,7 @@ export class AnnouncementService {
       metadata: { title: saved.title, audience: saved.audience },
     });
 
-    if (saved.audience === AnnouncementAudienceEnum.GROUP && dto.groupId) {
-      this.notifyGroup(dto.groupId, saved);
-    }
+    this.dispatchPushNotification(saved);
 
     if (saved.sendViaSms) {
       // Awaited deliberately, unlike the fire-and-forget push notification
@@ -118,22 +116,103 @@ export class AnnouncementService {
     return saved;
   }
 
-  private notifyGroup(groupId: string, announcement: Announcement): void {
-    this.groupService
-      .getMemberIdsForGroup(groupId)
-      .then((memberIds) =>
-        this.pushNotificationService.dispatchToMemberIds(memberIds, {
+  // Resolves and pushes to every audience type, not just GROUP — previously
+  // ALL/MEMBERS_ONLY/WORKERS_ONLY/DEPARTMENT announcements were created and
+  // appeared in the feed but never triggered a push notification.
+  private dispatchPushNotification(announcement: Announcement): void {
+    this.resolveMemberIdsForAudience({
+      audience: announcement.audience,
+      departmentId: announcement.department?.id,
+      targetMemberId: announcement.targetMember?.id,
+      groupId: announcement.group?.id,
+    })
+      .then((memberIds) => {
+        if (memberIds.length === 0) return undefined;
+        return this.pushNotificationService.dispatchToMemberIds(memberIds, {
           idempotencyKey: announcement.id,
           title: announcement.title,
           body: announcement.body.slice(0, 150),
           url: '/announcements',
-        }),
-      )
+        });
+      })
       .catch((err: Error) =>
         this.logger.warn(
-          `Failed to dispatch group push notification for announcement ${announcement.id}: ${err.message}`,
+          `Failed to dispatch push notification for announcement ${announcement.id}: ${err.message}`,
         ),
       );
+  }
+
+  private async resolveMemberIdsForAudience(target: {
+    audience: AnnouncementAudienceEnum;
+    departmentId?: string;
+    targetMemberId?: string;
+    groupId?: string;
+  }): Promise<string[]> {
+    if (target.audience === AnnouncementAudienceEnum.GROUP) {
+      return target.groupId
+        ? this.groupService.getMemberIdsForGroup(target.groupId)
+        : [];
+    }
+    if (target.audience === AnnouncementAudienceEnum.INDIVIDUAL) {
+      return target.targetMemberId ? [target.targetMemberId] : [];
+    }
+
+    const qb = this.memberRepo
+      .createQueryBuilder('m')
+      .leftJoin('m.workerProfile', 'wp')
+      .where('m.status = :status', { status: MemberStatusEnum.ACTIVE });
+
+    switch (target.audience) {
+      case AnnouncementAudienceEnum.MEMBERS_ONLY:
+        qb.andWhere('m.role = :role', { role: MemberRoleEnum.MEMBER });
+        break;
+      case AnnouncementAudienceEnum.WORKERS_ONLY:
+        qb.andWhere('m.role = :role', { role: MemberRoleEnum.WORKER });
+        break;
+      case AnnouncementAudienceEnum.DEPARTMENT:
+        if (!target.departmentId) return [];
+        qb.andWhere('wp.department = :deptId', {
+          deptId: target.departmentId,
+        });
+        break;
+      case AnnouncementAudienceEnum.ALL:
+      default:
+        break;
+    }
+
+    const members = await qb.getMany();
+    return members.map((m) => m.id);
+  }
+
+  // System-triggered announcements (e.g. a "we're live now" broadcast)
+  // skip the SMS-permission check entirely — they never send SMS — and
+  // reuse the same persist + push-notify path as an admin-authored one.
+  async createSystemAnnouncement(
+    title: string,
+    body: string,
+    actorId?: string,
+  ): Promise<Announcement> {
+    const announcement = this.announcementRepo.create({
+      title,
+      body: this.sanitizationService.sanitizeForEmail(body),
+      audience: AnnouncementAudienceEnum.ALL,
+      author: null,
+      publishedAt: new Date(),
+    });
+
+    const saved = await this.announcementRepo.save(announcement);
+    this.logger.log(
+      `System announcement "${saved.title}" published (id: ${saved.id})`,
+    );
+    this.auditLogService.log('ANNOUNCEMENT_CREATED', {
+      actorId,
+      targetId: saved.id,
+      metadata: { title: saved.title, audience: saved.audience, system: true },
+    });
+
+    this.dispatchPushNotification(saved);
+
+    return saved;
   }
 
   async update(

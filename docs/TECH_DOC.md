@@ -422,7 +422,7 @@ Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-c
 | audience     | ALL \| WORKERS_ONLY \| MEMBERS_ONLY \| DEPARTMENT \| INDIVIDUAL \| GROUP   |
 | department   | ManyToOne → Department (required when audience=DEPARTMENT)                 |
 | targetMember | ManyToOne → Member, nullable (required when audience=INDIVIDUAL)           |
-| group        | ManyToOne → Group, nullable (required when audience=GROUP); triggers a push notification to every group member on create |
+| group        | ManyToOne → Group, nullable (required when audience=GROUP)                 |
 | publishedAt  | defaults to creation time                                                  |
 | expiresAt    | nullable; expired items excluded from feed                                 |
 | sendViaSms   | boolean, default `false`; requires the caller's admin role to hold `SMS_SEND` (see SMS Module) |
@@ -986,6 +986,24 @@ One row per contact attempt with a convert — mirrors `FirstTimerVisit`.
 | loggedByName | varchar        | Snapshotted at log time                   |
 | note         | text \| null   |                                            |
 | contactedAt  | timestamptz    | Default now                               |
+
+---
+
+### Sermon
+
+Link-based sermon archive entry — no file uploads. See Sermon Module for the "Announce Live" trigger.
+
+| Field       | Type            | Notes                                                        |
+|-------------|-----------------|---------------------------------------------------------------|
+| id          | UUID            | PK                                                             |
+| title       | varchar         |                                                                 |
+| speakerName | varchar         | Plain string, not a Member FK — guest speakers may not be in the system |
+| date        | timestamptz     | Indexed; list is ordered newest-first                          |
+| description | text \| null    |                                                                 |
+| youtubeUrl  | varchar \| null | At least one of youtubeUrl/mixlrUrl required                   |
+| mixlrUrl    | varchar \| null | At least one of youtubeUrl/mixlrUrl required                   |
+| series      | varchar \| null | Indexed; plain string tag, filterable, not its own entity       |
+| createdBy   | Admin \| null   | ManyToOne, SET NULL on delete                                   |
 
 ---
 
@@ -1935,7 +1953,7 @@ role and optional `departmentId`.
 When `audience = DEPARTMENT`, `departmentId` is required. When `audience = INDIVIDUAL`, `targetMemberId` (UUID) is
 required. When `audience = GROUP`, `groupId` (UUID) is required.
 
-**GROUP audience + push notification:** When an announcement is created with `audience = GROUP`, `AnnouncementService.create()` resolves the group's member ids (`GroupService.getMemberIdsForGroup`) and fire-and-forgets a single `PushNotificationService.dispatchToMemberIds()` call (idempotency key = the announcement id, so a retry or duplicate call never double-sends). Failure to dispatch is logged as a warning and never fails the announcement creation itself — the announcement is still visible in-app via the feed regardless of push delivery outcome.
+**Push notification on every audience:** `AnnouncementService.create()` always fire-and-forgets a single `PushNotificationService.dispatchToMemberIds()` call after saving, for every audience type — not just `GROUP`. `resolveMemberIdsForAudience()` computes the recipient member-id list per audience (`GROUP` → `GroupService.getMemberIdsForGroup`; `INDIVIDUAL` → the single `targetMember`; `ALL`/`MEMBERS_ONLY`/`WORKERS_ONLY`/`DEPARTMENT` → an `ACTIVE`-member query filtered by role/department, mirroring `resolvePhoneNumbers`'s SMS-targeting logic but without requiring a phone number on file). No push is sent when the resolved list is empty. Idempotency key = the announcement id, so a retry or duplicate call never double-sends. Failure to dispatch is logged as a warning and never fails the announcement creation itself — the announcement is still visible in-app via the feed regardless of push delivery outcome.
 
 **Optional SMS delivery (`sendViaSms`/`smsBody`):** `CreateAnnouncementDto`/`UpdateAnnouncementDto` accept
 `sendViaSms?: boolean` and `smsBody?: string`. Setting `sendViaSms: true` requires the caller's admin role to hold
@@ -1976,11 +1994,11 @@ reaction (one per member per announcement, not multi-emoji). `DELETE announcemen
 `myReaction` reflects the *calling* member's own reaction so the frontend can highlight it without a separate
 lookup. No audit logging on reactions — too high-frequency/low-stakes to be worth an audit trail entry per click.
 
-**Known limitation (as of this writing):** push notifications on `create()` are only dispatched for `audience: GROUP`
-(`notifyGroup()`) — `ALL`/`MEMBERS_ONLY`/`WORKERS_ONLY`/`DEPARTMENT` announcements are created and appear in the feed
-but never trigger a push notification. Slated to be fixed alongside the Sermon Archive's livestream-triggered
-announcements (see Sermon Module), since a system-triggered "we're live" announcement needs to reach everyone, not
-just a group.
+**System-triggered announcements (`createSystemAnnouncement`):** a small internal entry point used by features that
+need to publish an `ALL`-audience announcement without going through the admin-authored `create()` flow — no
+`Admin`/SMS-permission check, `author` is left `null` (the FK is nullable for exactly this reason), `publishedAt` is
+now, and the same persist + push-notify path runs. Used today by the Sermon Archive's "Announce Live" trigger (see
+Sermon Module); designed to also be the target of the planned YouTube WebSub livestream-detection integration.
 
 **Routes prefix:** `/announcements`
 
@@ -2601,6 +2619,28 @@ evangelism/converts/:id/follow-up-history?page=&limit=`
 evangelism/converts/admin/:id/reassign`, `PATCH evangelism/converts/admin/:id/link-member`, `GET
 evangelism/converts/admin/:id/follow-up-history?page=&limit=`
 
+### Sermon Module
+
+A link-based sermon archive — no file uploads. Each `Sermon` (`title`, `speakerName`, `date`, optional `description`,
+`series`, `youtubeUrl`, `mixlrUrl`) stores links to where the content actually lives (YouTube, Mixlr) rather than
+hosting media itself. At least one of `youtubeUrl`/`mixlrUrl` is required on create, and an update that would clear
+both (leaving neither set) is rejected with `400` — a sermon archive entry with no link anywhere is not useful.
+`series` is a plain string tag, not its own entity — deliberately, since nothing in this feature needs series-level
+metadata beyond a filterable label. Paginated (grows unboundedly, same policy as members/attendance).
+
+**"Announce Live" manual trigger (`POST admin/sermons/announce-live`):** the MVP for "auto-trigger an announcement
+when we go live" — an admin clicks "We're Live on YouTube" or "We're Live on Mixlr" on the Sermons page, providing
+the livestream URL. This calls `AnnouncementService.createSystemAnnouncement()` directly (see Announcements Module)
+with a default title (`🔴 Live Now on YouTube` / `🔴 Live Now on Mixlr`, overridable) and a body containing the URL.
+Zero external-API risk, works identically for both platforms today, and doubles as the fallback path for the planned
+YouTube WebSub automation (a channel actually going live still needs a human-clickable escape hatch for when the
+automated detection misses a stream or a platform's API is unavailable).
+
+**Routes (admin, `AdminGuard`):** `POST/GET/PATCH/DELETE admin/sermons`(`/:id` for single-record routes) —
+`SERMON_READ`/`SERMON_WRITE`; `POST admin/sermons/announce-live` — `SERMON_WRITE`.
+**Routes (member, `JwtAuthGuard` + `@RequiresModule('sermons')`):** `GET sermons?page=&limit=&series=`,
+`GET sermons/:id` — any authenticated member/worker, no department or class gating (sermons are for everyone).
+
 ### ServiceHeadcount Module
 
 Records and retrieves physical attendance counts for services, broken down by demographic group. All routes are admin-portal only (`AdminGuard`). Headcount data can be filtered by service slot, date range, or slot name; trends are bucketed by week, month, or quarter.
@@ -2929,6 +2969,15 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | PATCH  | /evangelism/converts/admin/:id/reassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Reassign follow-up to another Evangelism-dept worker                                                          |
 | PATCH  | /evangelism/converts/admin/:id/link-member                 | AdminGuard (EVANGELISM_WRITE)                                  | Link a convert to their new Member record                                                                     |
 | GET    | /evangelism/converts/admin/:id/follow-up-history?page=&limit= | AdminGuard (EVANGELISM_READ)                                | Full follow-up log for a convert, newest first (admin portal)                                                 |
+
+| POST   | /admin/sermons                                             | AdminGuard (SERMON_WRITE)                                     | Create a sermon archive entry — body: title, speakerName, date, description?, youtubeUrl?, mixlrUrl?, series?. 400 if neither youtubeUrl nor mixlrUrl is set. |
+| GET    | /admin/sermons?page=&limit=&series=                        | AdminGuard (SERMON_READ)                                      | Paginated list, newest first, optional exact `series` filter                                                   |
+| GET    | /admin/sermons/:id                                         | AdminGuard (SERMON_READ)                                      | Get a single sermon                                                                                             |
+| PATCH  | /admin/sermons/:id                                         | AdminGuard (SERMON_WRITE)                                     | Update any field. 400 if the update would leave both youtubeUrl and mixlrUrl unset.                            |
+| DELETE | /admin/sermons/:id                                         | AdminGuard (SERMON_WRITE)                                     | Delete a sermon archive entry                                                                                   |
+| POST   | /admin/sermons/announce-live                               | AdminGuard (SERMON_WRITE)                                     | Manual "we're live" trigger — body: `{ platform: 'YOUTUBE' \| 'MIXLR', url, title? }`. Publishes an ALL-audience system announcement via `AnnouncementService.createSystemAnnouncement()` and push-notifies every active member. |
+| GET    | /sermons?page=&limit=&series=                              | JwtAuthGuard + Module: sermons                                | Paginated list for any authenticated member/worker — no department or class gating                             |
+| GET    | /sermons/:id                                               | JwtAuthGuard + Module: sermons                                | Get a single sermon                                                                                             |
 | POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
@@ -3679,7 +3728,7 @@ Granular permissions assigned to `AdminRole` records:
 `sunday_school:read` · `sunday_school:write` · `children_church:read` · `children_church:write` · `admin:read` ·
 `admin:write` · `audit:read` · `finance:read` · `finance:write` · `follow_up:read` · `follow_up:write` ·
 `service_programme:read` · `service_programme:write` · `headcount:read` · `headcount:write` ·
-`prayer:read` · `prayer:write` · `sms:read` · `sms:send`
+`prayer:read` · `prayer:write` · `sms:read` · `sms:send` · `sermon:read` · `sermon:write`
 
 `GET /enums` returns these as both a flat `adminPermissions` list (value + label) and a grouped `adminPermissionGroups` list (group name + permissions with value, label, and description) — use the grouped form to render the permission assignment UI. `sms:read`/`sms:send` are grouped under "SMS Messaging".
 
@@ -3901,3 +3950,9 @@ Transitions: PENDING → CONFIRMED (admin) or CANCELLED/REJECTED; CONFIRMED → 
 ### RentalPaymentStatus
 
 `PENDING` · `PAID` · `REFUNDED` (REFUNDED only valid for CAUTION payments)
+
+### LivePlatformEnum
+
+`YOUTUBE` · `MIXLR`
+
+Used by the Sermon Module's manual "Announce Live" trigger to pick the default announcement title.

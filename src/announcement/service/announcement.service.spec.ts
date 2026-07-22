@@ -366,7 +366,7 @@ describe('AnnouncementService', () => {
     });
   });
 
-  describe('GROUP audience', () => {
+  describe('push notification dispatch', () => {
     it('should throw BadRequestException if audience is GROUP but no groupId provided', async () => {
       await expect(
         service.create(
@@ -426,7 +426,7 @@ describe('AnnouncementService', () => {
       );
     });
 
-    it('should not dispatch a push notification for non-GROUP audiences', async () => {
+    it('dispatches a push notification for ALL audience by resolving active members', async () => {
       const announcement = {
         id: 'ann-2',
         title: 'General',
@@ -435,6 +435,10 @@ describe('AnnouncementService', () => {
       };
       mockAnnouncementRepo.create.mockReturnValue(announcement);
       mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockMemberQb.getMany.mockResolvedValueOnce([
+        { id: 'member-3' },
+        { id: 'member-4' },
+      ]);
 
       await service.create(
         { title: 'General', body: 'Hello' } as any,
@@ -446,7 +450,76 @@ describe('AnnouncementService', () => {
       expect(mockGroupService.getMemberIdsForGroup).not.toHaveBeenCalled();
       expect(
         mockPushNotificationService.dispatchToMemberIds,
+      ).toHaveBeenCalledWith(
+        ['member-3', 'member-4'],
+        expect.objectContaining({
+          idempotencyKey: 'ann-2',
+          title: 'General',
+          url: '/announcements',
+        }),
+      );
+    });
+
+    it('does not dispatch a push notification when no eligible members are resolved', async () => {
+      const announcement = {
+        id: 'ann-3',
+        title: 'Empty',
+        body: 'Nobody',
+        audience: AnnouncementAudienceEnum.ALL,
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockMemberQb.getMany.mockResolvedValueOnce([]);
+
+      await service.create(
+        { title: 'Empty', body: 'Nobody' } as any,
+        'author-1',
+        noSmsAdmin,
+      );
+
+      await new Promise(process.nextTick);
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
       ).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createSystemAnnouncement', () => {
+    it('creates an ALL-audience announcement with no author and dispatches a push notification', async () => {
+      const announcement = {
+        id: 'sys-1',
+        title: '🔴 Live Now',
+        body: 'Join us — https://youtube.com/watch?v=abc',
+        audience: AnnouncementAudienceEnum.ALL,
+        author: null,
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockMemberQb.getMany.mockResolvedValueOnce([{ id: 'member-5' }]);
+
+      const result = await service.createSystemAnnouncement(
+        '🔴 Live Now',
+        'Join us — https://youtube.com/watch?v=abc',
+      );
+
+      expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          audience: AnnouncementAudienceEnum.ALL,
+          author: null,
+        }),
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'ANNOUNCEMENT_CREATED',
+        expect.objectContaining({
+          targetId: 'sys-1',
+          metadata: expect.objectContaining({ system: true }),
+        }),
+      );
+      await new Promise(process.nextTick);
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).toHaveBeenCalledWith(['member-5'], expect.any(Object));
+      expect(result).toBe(announcement);
     });
   });
 
