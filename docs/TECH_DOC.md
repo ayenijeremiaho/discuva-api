@@ -1007,6 +1007,20 @@ Link-based sermon archive entry — no file uploads. See Sermon Module for the "
 
 ---
 
+### YoutubeIntegrationState
+
+Singleton-per-channel durable state for the YouTube WebSub integration (see YouTube Live Detection above) — tracks
+the subscription lease and idempotency key, separate from `ChurchSetting` since this isn't an admin-toggleable module.
+
+| Field                  | Type            | Notes                                            |
+|------------------------|-----------------|---------------------------------------------------|
+| id                     | UUID            | PK                                                 |
+| channelId              | varchar, unique | The configured `YOUTUBE_CHANNEL_ID`                |
+| lastAnnouncedVideoId   | varchar \| null | Idempotency key — prevents double-announcing the same livestream |
+| subscriptionExpiresAt  | timestamptz \| null | Estimated WebSub lease expiry (informational; re-subscription runs daily regardless) |
+
+---
+
 ### ServiceProgramme
 
 One programme per service slot (unique constraint on `service_slot_id`). Status flows: `DRAFT → LIVE → COMPLETED`.
@@ -2641,6 +2655,40 @@ automated detection misses a stream or a platform's API is unavailable).
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('sermons')`):** `GET sermons?page=&limit=&series=`,
 `GET sermons/:id` — any authenticated member/worker, no department or class gating (sermons are for everyone).
 
+### YouTube Live Detection (`src/integrations/youtube/`)
+
+Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when the configured YouTube
+channel goes live and calls `AnnouncementService.createSystemAnnouncement()` automatically, no admin click needed.
+Entirely optional and env-var-gated: with `YOUTUBE_CHANNEL_ID`/`YOUTUBE_WEBSUB_CALLBACK_URL` unset, `YoutubeSubscriptionService`
+skips subscribing (logged at debug level) and the webhook controller simply never receives traffic — nothing breaks
+for churches that don't set these vars, they just keep using the manual trigger.
+
+**WebSub (PubSubHubbub) flow:**
+1. On boot (`OnModuleInit`) and daily at 2am church time (`YoutubeSubscriptionScheduler`, distributed-lock guarded the
+   same way `FollowUpScheduler` is), `YoutubeSubscriptionService.subscribe()` POSTs a subscribe request to Google's
+   public hub (`https://pubsubhubbub.appspot.com/subscribe`) for the channel's video-feed topic. The daily
+   re-subscription exists because WebSub leases expire (~5-10 days) — re-subscribing daily keeps it comfortably ahead
+   of expiry regardless of what the hub actually grants.
+2. `GET integrations/youtube/callback` handles the hub's verification handshake — echoes back `hub.challenge` verbatim
+   (required by the WebSub spec) for `subscribe`/`unsubscribe` modes, `404` otherwise.
+3. `POST integrations/youtube/callback` receives the actual "video published" notification — an Atom XML body
+   containing a `<yt:videoId>`. Extracted via a small regex (a full XML parser dependency wasn't worth adding for this
+   one fixed field). Always acks fast (`204`, no body) regardless of what happens next — `YoutubeLiveDetectionService.handleNotification()`
+   runs without being awaited by the response.
+4. `YoutubeLiveDetectionService` checks `YoutubeIntegrationState.lastAnnouncedVideoId` for this channel first
+   (idempotency — the same video can generate multiple WebSub pings). If new, calls the YouTube Data API
+   (`videos.list?part=snippet`) to confirm `snippet.liveBroadcastContent === 'live'` — the WebSub ping alone fires for
+   regular uploads too, not just livestreams. Only then does it call `createSystemAnnouncement()` and persist the
+   video id as the new `lastAnnouncedVideoId`.
+5. All external-call failures (hub POST, Data API call) are caught and logged as warnings, never thrown — a webhook
+   handler that 500s risks the hub retrying or giving up on the subscription entirely.
+
+**Mixlr is not automated** — no confirmed public webhook/API was found; the manual "Announce Live" trigger remains
+the only path for Mixlr-only streams.
+
+**Routes:** `GET/POST integrations/youtube/callback` — no guard (verified implicitly by the WebSub handshake itself,
+same trust model as the existing `POST webhooks/virtual-account-credit`).
+
 ### ServiceHeadcount Module
 
 Records and retrieves physical attendance counts for services, broken down by demographic group. All routes are admin-portal only (`AdminGuard`). Headcount data can be filtered by service slot, date range, or slot name; trends are bucketed by week, month, or quarter.
@@ -2978,6 +3026,8 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | POST   | /admin/sermons/announce-live                               | AdminGuard (SERMON_WRITE)                                     | Manual "we're live" trigger — body: `{ platform: 'YOUTUBE' \| 'MIXLR', url, title? }`. Publishes an ALL-audience system announcement via `AnnouncementService.createSystemAnnouncement()` and push-notifies every active member. |
 | GET    | /sermons?page=&limit=&series=                              | JwtAuthGuard + Module: sermons                                | Paginated list for any authenticated member/worker — no department or class gating                             |
 | GET    | /sermons/:id                                               | JwtAuthGuard + Module: sermons                                | Get a single sermon                                                                                             |
+| GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
+| POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
 | POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
@@ -3707,6 +3757,17 @@ Generate keys once with `npx web-push generate-vapid-keys` and store permanently
 | `TERMII_API_KEY`    | — *(optional)*                  | Termii API key                                                    |
 | `TERMII_SENDER_ID`  | — *(optional)*                  | Termii sender ID shown as the SMS "from" name                    |
 | `TERMII_BASE_URL`   | `https://api.ng.termii.com`     | Termii API base URL                                               |
+
+### YouTube Live Detection (optional)
+
+All three optional — leave unset to skip WebSub subscription entirely and rely on the Sermon Module's manual
+"Announce Live" trigger instead.
+
+| Variable                       | Default          | Description                                                                 |
+|---------------------------------|------------------|--------------------------------------------------------------------------|
+| `YOUTUBE_API_KEY`              | — *(optional)*   | YouTube Data API v3 key — used to confirm a notified video is actually a live broadcast |
+| `YOUTUBE_CHANNEL_ID`           | — *(optional)*   | The channel to watch for livestreams                                       |
+| `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) |
 
 ---
 

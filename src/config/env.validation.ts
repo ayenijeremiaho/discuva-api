@@ -143,4 +143,8 @@ export const envValidationSchema = Joi.object({
   TERMII_API_KEY: Joi.string().optional(),
   TERMII_SENDER_ID: Joi.string().optional(),
   TERMII_BASE_URL: Joi.string().uri().default('https://api.ng.termii.com'),
+
+  YOUTUBE_API_KEY: Joi.string().optional(),
+  YOUTUBE_CHANNEL_ID: Joi.string().optional(),
+  YOUTUBE_WEBSUB_CALLBACK_URL: Joi.string().uri().optional(),
 }).options({ allowUnknown: true });

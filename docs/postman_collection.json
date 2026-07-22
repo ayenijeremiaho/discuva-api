@@ -12912,6 +12912,100 @@
       ]
     },
     {
+      "name": "YouTube Integration (Webhook)",
+      "description": "Called by Google's PubSubHubbub hub, not a client \u2014 included here for reference/testing only. No guard; verified implicitly by the WebSub handshake. Both routes are no-ops if YOUTUBE_CHANNEL_ID/YOUTUBE_WEBSUB_CALLBACK_URL are unset.",
+      "item": [
+        {
+          "name": "WebSub verification handshake",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/integrations/youtube/callback?hub.mode=subscribe&hub.challenge=abc123&hub.topic=https://www.youtube.com/xml/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw&hub.lease_seconds=432000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "integrations",
+                "youtube",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "hub.mode",
+                  "value": "subscribe"
+                },
+                {
+                  "key": "hub.challenge",
+                  "value": "abc123"
+                },
+                {
+                  "key": "hub.topic",
+                  "value": "https://www.youtube.com/xml/feeds/videos.xml?channel_id=UC_x5XG1OV2P6uZZ5FSM9Ttw"
+                },
+                {
+                  "key": "hub.lease_seconds",
+                  "value": "432000"
+                }
+              ]
+            },
+            "description": "Google's hub calls this to confirm a subscribe/unsubscribe request. Must echo hub.challenge back verbatim, plain text, 200. 404 for any other hub.mode."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "abc123"
+            }
+          ]
+        },
+        {
+          "name": "Video published notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/atom+xml"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<feed xmlns:yt=\"http://www.youtube.com/xml/schemas/2015\" xmlns=\"http://www.w3.org/2005/Atom\">\n  <entry>\n    <yt:videoId>dQw4w9WgXcQ</yt:videoId>\n    <yt:channelId>UC_x5XG1OV2P6uZZ5FSM9Ttw</yt:channelId>\n    <title>Sunday Service</title>\n  </entry>\n</feed>",
+              "options": {
+                "raw": {
+                  "language": "xml"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/v1/integrations/youtube/callback",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "integrations",
+                "youtube",
+                "callback"
+              ]
+            },
+            "description": "Fired by the hub whenever the channel publishes/updates a video (not necessarily a livestream). Always acks 204 immediately; the video-id is checked against the YouTube Data API in the background to confirm it's actually live before announcing."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Finance (Admin)",
       "description": "Admin-side management of department finance requests raised by HODs.\n\n**Access:** AdminGuard \u2014 FINANCE_READ for list/get, FINANCE_WRITE for approve/reject/proof.\n\n**Key concepts:**\n- Finance categories group requests by expense type (e.g. Equipment, Printing, Transport). Admin creates categories first.\n- HODs raise requests with an amount, recipient bank details, reason, and optional attachment.\n- Admin reviews and approves or rejects (rejection requires a reason, which is emailed to the HOD).\n- After approving, admin can attach a payment proof file via `PATCH /admin/finance/requests/:id/proof` to confirm disbursement.\n\n**Status flow:** `PENDING` \u2192 `APPROVED` (admin approves) \u2192 proof attached OR `REJECTED` (with reason)",
       "item": [

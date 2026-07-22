@@ -38,6 +38,7 @@ import { ServiceHeadcountModule } from './service-headcount/service-headcount.mo
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
+import { YoutubeModule } from './integrations/youtube/youtube.module';
 import { AssetManagementModule } from './asset-management/asset-management.module';
 import { FinanceModule } from './finance/finance.module';
 import { PrayerModule } from './prayer/prayer.module';
@@ -166,6 +167,7 @@ import { EvangelismModule } from './evangelism/evangelism.module';
     ChurchSettingsModule,
     IncidentReportModule,
     SermonModule,
+    YoutubeModule,
     AssetManagementModule,
     FinanceModule,
     PrayerModule,
