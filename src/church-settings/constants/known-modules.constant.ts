@@ -22,6 +22,7 @@ export const KNOWN_MODULES = [
   { key: 'classes', moduleName: 'Training Classes', required: false },
   { key: 'announcements', moduleName: 'Announcements', required: false },
   { key: 'sermons', moduleName: 'Sermon Archive', required: false },
+  { key: 'games', moduleName: 'Games', required: false },
 ] as const;
 
 export type KnownModuleKey = (typeof KNOWN_MODULES)[number]['key'];

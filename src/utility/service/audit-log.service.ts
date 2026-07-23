@@ -187,7 +187,17 @@ export type AuditAction =
   // Sermon archive
   | 'SERMON_CREATED'
   | 'SERMON_UPDATED'
-  | 'SERMON_DELETED';
+  | 'SERMON_DELETED'
+  // Games
+  | 'GAME_CREATED'
+  | 'GAME_UPDATED'
+  | 'GAME_DELETED'
+  | 'GAME_QUESTION_ADDED'
+  | 'GAME_QUESTION_UPDATED'
+  | 'GAME_QUESTION_DELETED'
+  | 'GAME_QUESTIONS_REORDERED'
+  | 'GAME_SESSION_STARTED'
+  | 'GAME_SESSION_ENDED';
 
 export interface AuditContext {
   actorId?: string;

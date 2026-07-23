@@ -18402,6 +18402,834 @@
       ]
     },
     {
+      "name": "Games (Participant)",
+      "item": [
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/games/sessions/:code/join",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "sessions",
+                ":code",
+                "join"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Join a live session with its code \u2014 upserts a GameParticipant, no department/class gating. Any authenticated member/worker."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"participantId\": \"p1a2b3c4-d5e6-f7a8-9012-abcdef345678\"\n}"
+            }
+          ],
+          "name": "Join session"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/games/sessions/:code/state",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "sessions",
+                ":code",
+                "state"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Current session state \u2014 same payload the socket broadcasts."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+            }
+          ],
+          "name": "Get session state"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/games/sessions/:code/questions/:questionId/answer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "sessions",
+                ":code",
+                "questions",
+                ":questionId",
+                "answer"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                },
+                {
+                  "key": "questionId",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Submit an answer. 400 if not the current question or already answered; 403 if caller never joined.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"selectedOptionIndex\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"isCorrect\": true,\n  \"pointsAwarded\": 850\n}"
+            }
+          ],
+          "name": "Submit answer"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/games/sessions/:code/leaderboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "games",
+                "sessions",
+                ":code",
+                "leaderboard"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Live leaderboard."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"participantId\": \"p1\",\n    \"memberId\": \"m1\",\n    \"memberName\": \"Ada Lovelace\",\n    \"totalScore\": 1000\n  }\n]"
+            }
+          ],
+          "name": "Get leaderboard"
+        }
+      ]
+    },
+    {
+      "name": "Games (Admin)",
+      "item": [
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games"
+              ]
+            },
+            "description": "Create a game (DRAFT). Requires GAMES_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Bible Trivia Night\",\n  \"description\": \"Fun trivia covering the book of Genesis\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Bible Trivia Night\",\n  \"description\": \"Fun trivia covering the book of Genesis\",\n  \"status\": \"DRAFT\",\n  \"department\": null,\n  \"churchClass\": null,\n  \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Create game"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Paginated list, newest first. Requires GAMES_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n      \"title\": \"Bible Trivia Night\",\n      \"description\": \"Fun trivia covering the book of Genesis\",\n      \"status\": \"DRAFT\",\n      \"department\": null,\n      \"churchClass\": null,\n      \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ],
+          "name": "List games"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Get a single game. Requires GAMES_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Bible Trivia Night\",\n  \"description\": \"Fun trivia covering the book of Genesis\",\n  \"status\": \"DRAFT\",\n  \"department\": null,\n  \"churchClass\": null,\n  \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Get game"
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update title/description/department/churchClass. Requires GAMES_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Bible Trivia Night \\u2014 Round 2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Bible Trivia Night\",\n  \"description\": \"Fun trivia covering the book of Genesis\",\n  \"status\": \"DRAFT\",\n  \"department\": null,\n  \"churchClass\": null,\n  \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n}"
+            }
+          ],
+          "name": "Update game"
+        },
+        {
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete a game (cascades questions/sessions/participants/responses). Requires GAMES_WRITE."
+          },
+          "name": "Delete game"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id/questions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id",
+                "questions"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "List a game's questions, ordered. Requires GAMES_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"correctOptionIndex\": 1,\n    \"points\": 1000,\n    \"timeLimitSeconds\": 20\n  }\n]"
+            }
+          ],
+          "name": "List questions"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id/questions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id",
+                "questions"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Add a question. 400 if correctOptionIndex is out of range. Requires GAMES_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"questionText\": \"Who built the ark?\",\n  \"options\": [\n    \"Moses\",\n    \"Noah\",\n    \"Abraham\",\n    \"David\"\n  ],\n  \"correctOptionIndex\": 1,\n  \"points\": 1000,\n  \"timeLimitSeconds\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"order\": 0,\n  \"questionText\": \"Who built the ark?\",\n  \"options\": [\n    \"Moses\",\n    \"Noah\",\n    \"Abraham\",\n    \"David\"\n  ],\n  \"correctOptionIndex\": 1,\n  \"points\": 1000,\n  \"timeLimitSeconds\": 20\n}"
+            }
+          ],
+          "name": "Add question"
+        },
+        {
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id/questions/reorder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id",
+                "questions",
+                "reorder"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Reorder \u2014 must contain exactly the game's current question ids. Requires GAMES_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"questionIds\": [\n    \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"correctOptionIndex\": 1,\n    \"points\": 1000,\n    \"timeLimitSeconds\": 20\n  }\n]"
+            }
+          ],
+          "name": "Reorder questions"
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/questions/:questionId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                "questions",
+                ":questionId"
+              ],
+              "variable": [
+                {
+                  "key": "questionId",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Update a question (any field). Requires GAMES_WRITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"points\": 1500\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"order\": 0,\n  \"questionText\": \"Who built the ark?\",\n  \"options\": [\n    \"Moses\",\n    \"Noah\",\n    \"Abraham\",\n    \"David\"\n  ],\n  \"correctOptionIndex\": 1,\n  \"points\": 1000,\n  \"timeLimitSeconds\": 20\n}"
+            }
+          ],
+          "name": "Update question"
+        },
+        {
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/questions/:questionId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                "questions",
+                ":questionId"
+              ],
+              "variable": [
+                {
+                  "key": "questionId",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Delete a question. Requires GAMES_WRITE."
+          },
+          "name": "Delete question"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/:id/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                ":id",
+                "start"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Start a live session \u2014 400 if the game has no questions. Caller becomes the session's host. Requires GAMES_WRITE."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"s1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"startedAt\": \"2026-07-23T10:05:00.000Z\",\n  \"endedAt\": null\n}"
+            }
+          ],
+          "name": "Start session"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/sessions/:code/next-question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                "sessions",
+                ":code",
+                "next-question"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Advance to the next question \u2014 403 if caller isn't the host, 400 if session isn't LIVE or already on the last question. Requires GAMES_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+            }
+          ],
+          "name": "Next question"
+        },
+        {
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/sessions/:code/end",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                "sessions",
+                ":code",
+                "end"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "End the session (idempotent) and revert the game to DRAFT. Requires GAMES_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+            }
+          ],
+          "name": "End session"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/sessions/:code/state",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                "sessions",
+                ":code",
+                "state"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Current session state \u2014 same shape broadcast over the /game-session socket, never includes correctOptionIndex. Requires GAMES_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+            }
+          ],
+          "name": "Get session state"
+        },
+        {
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/games/sessions/:code/leaderboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "games",
+                "sessions",
+                ":code",
+                "leaderboard"
+              ],
+              "variable": [
+                {
+                  "key": "code",
+                  "value": "",
+                  "description": ""
+                }
+              ]
+            },
+            "description": "Live leaderboard, ordered by totalScore desc. Requires GAMES_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"participantId\": \"p1\",\n    \"memberId\": \"m1\",\n    \"memberName\": \"Ada Lovelace\",\n    \"totalScore\": 1000\n  }\n]"
+            }
+          ],
+          "name": "Get leaderboard"
+        }
+      ]
+    },
+    {
       "name": "Asset Management (Admin)",
       "item": [
         {

@@ -1364,6 +1364,81 @@ One payment line per booking (service fee + separate caution record if caution >
 
 ---
 
+### Game
+
+A reusable Kahoot-style quiz definition — created on the admin portal, can back multiple `GameSession`s over time.
+`department`/`churchClass` are categorization only, not access control (see Games Module).
+
+| Field       | Type                 | Notes                                                    |
+|-------------|----------------------|-----------------------------------------------------------|
+| id          | UUID                 | PK                                                         |
+| title       | varchar              |                                                             |
+| description | text \| null         |                                                             |
+| status      | GameStatusEnum       | DRAFT \| LIVE_SESSION_ACTIVE \| ARCHIVED (ARCHIVED not yet exposed via any endpoint) |
+| createdBy   | Admin \| null        | ManyToOne, SET NULL on delete                              |
+| department  | Department \| null   | ManyToOne, SET NULL on delete — reporting/filtering only    |
+| churchClass | ChurchClass \| null  | ManyToOne, SET NULL on delete — reporting/filtering only    |
+
+### GameQuestion
+
+| Field              | Type        | Notes                                          |
+|---------------------|-------------|--------------------------------------------------|
+| id                  | UUID        | PK                                                |
+| game                | Game        | ManyToOne, CASCADE on delete. Indexed.            |
+| order               | int         | Zero-based display/play order within the game     |
+| questionText        | text        |                                                    |
+| options             | jsonb       | Array of option strings, minimum 2                |
+| correctOptionIndex  | int         | Index into `options`; validated on create/update  |
+| points              | int         | Default 1000 — base score before the speed bonus  |
+| timeLimitSeconds    | int         | Default 20                                        |
+
+### GameSession
+
+One "run" of a `Game`. `sessionCode` is the join credential (`GAME-XXXXXX`).
+
+| Field                     | Type                    | Notes                                                |
+|----------------------------|-------------------------|--------------------------------------------------------|
+| id                         | UUID                    | PK                                                      |
+| game                       | Game                    | ManyToOne, CASCADE on delete. Indexed.                  |
+| sessionCode                | varchar, unique         |                                                          |
+| status                     | GameSessionStatusEnum   | SCHEDULED \| LIVE \| ENDED (SCHEDULED not yet reachable — sessions start directly into LIVE) |
+| hostAdmin                  | Admin \| null           | ManyToOne, SET NULL on delete — the only admin who can control the session |
+| currentQuestionIndex       | int \| null             | Null before start                                       |
+| currentQuestionStartedAt   | timestamptz \| null     | Server-side clock all participants are scored against   |
+| startedAt / endedAt        | timestamptz \| null     |                                                          |
+
+### GameParticipant
+
+A member's membership in one `GameSession`, with their running score. `@Unique(['session','member'])` — joining
+again just returns the existing row.
+
+| Field       | Type          | Notes                                    |
+|-------------|---------------|---------------------------------------------|
+| id          | UUID          | PK                                            |
+| session     | GameSession   | ManyToOne, CASCADE on delete. Indexed.        |
+| member      | Member        | ManyToOne, CASCADE on delete                  |
+| totalScore  | int           | Default 0; incremented per correct response   |
+
+### GameResponse
+
+One row per (session, question, participant) answer — the unique constraint is the DB-level backstop against
+double-answering. Individual responses are not audit-logged (too high-frequency/low-stakes).
+
+| Field                | Type            | Notes                                                  |
+|-----------------------|-----------------|-----------------------------------------------------------|
+| id                    | UUID            | PK                                                          |
+| session               | GameSession     | ManyToOne, CASCADE on delete. Indexed.                      |
+| question              | GameQuestion    | ManyToOne, CASCADE on delete                                |
+| participant           | GameParticipant | ManyToOne, CASCADE on delete                                |
+| selectedOptionIndex   | int             |                                                              |
+| isCorrect             | boolean         |                                                              |
+| pointsAwarded         | int             | 0 for incorrect; speed-weighted for correct (see Games Module) |
+| answeredAt            | timestamptz     |                                                              |
+
+**Unique constraint:** `(session, question, participant)`.
+
+---
+
 ## 4. Authentication & Authorization
 
 ### Dual-Surface Sessions
@@ -2930,6 +3005,72 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 
 **Routes prefix:** `/service-programme`, `/service-session`
 
+### Games Module
+
+Kahoot-style live quiz for member engagement. A `Game` (title, description, optional `department`/`churchClass` for
+admin-side categorization/reporting only — **not** access control) holds an ordered list of `GameQuestion`s and is a
+reusable definition that can be run multiple times via a `GameSession`. Games can only be created/edited on the admin
+portal (`GAMES_WRITE`); anyone with a session's join code can participate — no department/class/role gating on the
+participant side, by explicit product decision.
+
+**Game lifecycle:** `Game.status` tracks whether it's still being edited (`DRAFT`) or currently backing a live session
+(`LIVE_SESSION_ACTIVE`) — it's informational, not a gate; admins can always edit a `DRAFT` game's questions.
+`startSession` requires at least one question and flips the game to `LIVE_SESSION_ACTIVE`; `endSession` reverts it to
+`DRAFT` so the same game can be started again later.
+
+**Session lifecycle:** `GameSession.sessionCode` (`GAME-XXXXXX`, same random-alphanumeric generation as
+`ServiceSession.sessionCode`) is the join credential — no auth beyond being a logged-in member/worker is required to
+join. `startSession` sets `currentQuestionIndex = 0` and stamps `currentQuestionStartedAt`; `nextQuestion` advances
+the index and re-stamps the timestamp (400 if already on the last question — call `endSession` instead); `endSession`
+is idempotent (a second call is a no-op, not an error). `hostAdmin` is recorded at start — only that admin (or any
+admin if `hostAdmin` was somehow cleared) can control the session via `nextQuestion`/`endSession` (`ForbiddenException`
+otherwise), independent of the general `GAMES_WRITE` permission check the route itself already enforces.
+
+**Scoring (`GameService.computeScore`):** speed-bonus model — `pointsAwarded = isCorrect ? round(question.points *
+max(0.5, remainingTimeFraction)) : 0`, where `remainingTimeFraction` is computed from `currentQuestionStartedAt` (a
+server-side clock all participants are scored against, not each client's own page-load time) versus the question's
+`timeLimitSeconds`. An instant correct answer earns full points; a correct answer submitted right at the deadline
+earns 50% of the question's points; any incorrect answer earns 0. `GameParticipant.totalScore` is a running total,
+incremented per response — the leaderboard itself is always computed live from `GameResponse` rows
+(`SUM(pointsAwarded)` effectively, via `totalScore` and a `ORDER BY totalScore DESC` read), not a separately-audited
+aggregate.
+
+**Answer submission (`POST .../answer`) is a normal REST call, not a socket message** — matches this codebase's
+discipline of keeping every scored/audited action behind the guard+validation layer. It's rejected (400) if the
+session isn't `LIVE`, if the question isn't the session's *current* question (guards against a stale client
+answering a question that's already advanced past), or if the participant already answered it (also enforced at the
+DB level via a unique constraint on `(session_id, question_id, participant_id)`); 403 if the caller never called
+`join` first.
+
+**What participants never see:** `GameSessionStatePayload` (both the REST `GET .../state` response and the
+`session:state` socket broadcast) never includes `correctOptionIndex` — the admin presenter view, which does need to
+know the answer while presenting, already has the full question (with the answer) from its own authenticated
+`GET admin/games/:id/questions` fetch, so the shared broadcast payload stays participant-safe without needing two
+different payload shapes for the same event.
+
+**Routes (admin, `AdminGuard`):**
+- `POST/GET/PATCH/DELETE admin/games` (`/:id` for single-record routes) — `GAMES_READ`/`GAMES_WRITE`
+- `GET/POST admin/games/:id/questions`, `PUT admin/games/:id/questions/reorder`,
+  `PATCH/DELETE admin/games/questions/:questionId` — `GAMES_READ`/`GAMES_WRITE`
+- `POST admin/games/:id/start`, `POST admin/games/sessions/:code/next-question`,
+  `POST admin/games/sessions/:code/end` — `GAMES_WRITE`
+- `GET admin/games/sessions/:code/state`, `GET admin/games/sessions/:code/leaderboard` — `GAMES_READ`
+
+**Routes (participant, `JwtAuthGuard` + `@RequiresModule('games')`):**
+- `POST games/sessions/:code/join`, `GET games/sessions/:code/state`,
+  `POST games/sessions/:code/questions/:questionId/answer`, `GET games/sessions/:code/leaderboard` — any
+  authenticated member/worker, no department/class/role gating
+
+**WebSocket:**
+- Namespace: `/game-session`, mirrors `/service-session` exactly — `joinSession({ sessionCode })` /
+  `leaveSession({ sessionCode })` client events, room `game-session:{sessionCode}`, server event `session:state`
+  carrying the full `GameSessionStatePayload`, emitted by the controller (not the service, same split as
+  `ServiceSessionController`/`ServiceSessionGateway`) after every mutating admin or participant action.
+- No authentication required to join — session code is the read credential. Answer submission itself never happens
+  over the socket (see above).
+
+**Routes prefix:** `/admin/games`, `/games`
+
 ---
 
 ## 6. API Endpoints Quick Reference
@@ -3039,6 +3180,25 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 | GET    | /sermons/:id                                               | JwtAuthGuard + Module: sermons                                | Get a single sermon                                                                                             |
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
+| POST   | /admin/games                                               | AdminGuard (GAMES_WRITE)                                       | Create a game (DRAFT)                                                                                          |
+| GET    | /admin/games?page=&limit=                                  | AdminGuard (GAMES_READ)                                        | Paginated list, newest first                                                                                   |
+| GET    | /admin/games/:id                                           | AdminGuard (GAMES_READ)                                        | Get a single game                                                                                              |
+| PATCH  | /admin/games/:id                                           | AdminGuard (GAMES_WRITE)                                       | Update title/description/department/churchClass                                                               |
+| DELETE | /admin/games/:id                                           | AdminGuard (GAMES_WRITE)                                       | Delete a game (cascades questions/sessions/participants/responses)                                             |
+| GET    | /admin/games/:id/questions                                 | AdminGuard (GAMES_READ)                                        | List a game's questions, ordered                                                                               |
+| POST   | /admin/games/:id/questions                                 | AdminGuard (GAMES_WRITE)                                       | Add a question — body: questionText, options (>=2), correctOptionIndex, points?, timeLimitSeconds?. 400 if correctOptionIndex is out of range. |
+| PUT    | /admin/games/:id/questions/reorder                         | AdminGuard (GAMES_WRITE)                                       | Reorder — body: `{ questionIds: string[] }`, must contain exactly the game's current question ids              |
+| PATCH  | /admin/games/questions/:questionId                         | AdminGuard (GAMES_WRITE)                                       | Update a question (any field)                                                                                  |
+| DELETE | /admin/games/questions/:questionId                         | AdminGuard (GAMES_WRITE)                                       | Delete a question                                                                                              |
+| POST   | /admin/games/:id/start                                     | AdminGuard (GAMES_WRITE)                                       | Start a live session — 400 if the game has no questions. Caller becomes the session's host.                    |
+| POST   | /admin/games/sessions/:code/next-question                  | AdminGuard (GAMES_WRITE)                                       | Advance to the next question — 403 if caller isn't the host, 400 if session isn't LIVE or already on the last question |
+| POST   | /admin/games/sessions/:code/end                            | AdminGuard (GAMES_WRITE)                                       | End the session (idempotent) and revert the game to DRAFT                                                       |
+| GET    | /admin/games/sessions/:code/state                          | AdminGuard (GAMES_READ)                                        | Current session state (same shape broadcast over the socket, no correctOptionIndex)                             |
+| GET    | /admin/games/sessions/:code/leaderboard                    | AdminGuard (GAMES_READ)                                        | Live leaderboard, ordered by totalScore desc                                                                    |
+| POST   | /games/sessions/:code/join                                 | JwtAuthGuard + Module: games                                   | Join a live session with its code — upserts a GameParticipant, no department/class gating                      |
+| GET    | /games/sessions/:code/state                                | JwtAuthGuard + Module: games                                   | Current session state — same payload the socket broadcasts                                                     |
+| POST   | /games/sessions/:code/questions/:questionId/answer         | JwtAuthGuard + Module: games                                   | Submit an answer — body: `{ selectedOptionIndex }`. 400 if not the current question or already answered; 403 if caller never joined. |
+| GET    | /games/sessions/:code/leaderboard                          | JwtAuthGuard + Module: games                                   | Live leaderboard                                                                                                 |
 | POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
@@ -3537,6 +3697,10 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Update a pregnancy prayer case's status              | `PRAYER_WRITE`    |
 | View evangelism converts and follow-up history      | `EVANGELISM_READ` |
 | Reassign convert follow-up, link convert to member  | `EVANGELISM_WRITE`|
+| View sermon archive entries                          | `SERMON_READ`     |
+| Create/edit/delete sermons, trigger "we're live"     | `SERMON_WRITE`    |
+| View games, questions, sessions, and leaderboards    | `GAMES_READ`      |
+| Create/edit games and questions, control live sessions | `GAMES_WRITE`   |
 
 ---
 
@@ -4026,3 +4190,14 @@ Transitions: PENDING → CONFIRMED (admin) or CANCELLED/REJECTED; CONFIRMED → 
 `YOUTUBE` · `MIXLR`
 
 Used by the Sermon Module's manual "Announce Live" trigger to pick the default announcement title.
+
+### GameStatusEnum
+
+`DRAFT` · `LIVE_SESSION_ACTIVE` · `ARCHIVED` (not yet reachable via any endpoint)
+
+Informational, not a gate — a `DRAFT` game can always be edited even if `LIVE_SESSION_ACTIVE` from a past session
+that hasn't been ended yet.
+
+### GameSessionStatusEnum
+
+`SCHEDULED` (not yet reachable — sessions start directly into LIVE) · `LIVE` · `ENDED`

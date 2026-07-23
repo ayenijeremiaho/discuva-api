@@ -58,6 +58,8 @@ export enum AdminPermission {
   EVANGELISM_WRITE = 'evangelism:write',
   SERMON_READ = 'sermon:read',
   SERMON_WRITE = 'sermon:write',
+  GAMES_READ = 'games:read',
+  GAMES_WRITE = 'games:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -120,6 +122,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.EVANGELISM_WRITE]: 'Manage Evangelism Converts',
   [AdminPermission.SERMON_READ]: 'View Sermon Archive',
   [AdminPermission.SERMON_WRITE]: 'Manage Sermon Archive',
+  [AdminPermission.GAMES_READ]: 'View Games',
+  [AdminPermission.GAMES_WRITE]: 'Manage Games',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -234,6 +238,10 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
   [AdminPermission.SERMON_READ]: 'View sermon archive entries',
   [AdminPermission.SERMON_WRITE]:
     'Create, edit, and delete sermon archive entries, and trigger "we\'re live" announcements',
+  [AdminPermission.GAMES_READ]:
+    'View games, questions, sessions, and leaderboards',
+  [AdminPermission.GAMES_WRITE]:
+    'Create and edit games and questions, and start/control/end live game sessions',
 };
 
 export interface AdminPermissionGroupItem {
@@ -398,6 +406,11 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'Sermon Archive',
     [AdminPermission.SERMON_READ, AdminPermission.SERMON_WRITE],
     'sermons',
+  ),
+  buildGroup(
+    'Games',
+    [AdminPermission.GAMES_READ, AdminPermission.GAMES_WRITE],
+    'games',
   ),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,
