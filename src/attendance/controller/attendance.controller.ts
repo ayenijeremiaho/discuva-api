@@ -30,6 +30,9 @@ import {
   AdminAttendanceHistoryQueryDto,
   AttendanceHistoryQueryDto,
 } from '../dto/attendance-history-query.dto';
+import { ExportAttendanceEmailDto } from '../dto/export-attendance-email.dto';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
 
 @Controller('attendances')
 export class AttendanceController {
@@ -105,6 +108,17 @@ export class AttendanceController {
       dateTo,
       search,
     );
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_READ)
+  @HttpCode(HttpStatus.OK)
+  @Post('export-email')
+  async emailExportHistory(
+    @Body() dto: ExportAttendanceEmailDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.attendanceService.emailExportHistory(dto, admin);
   }
 
   @UseGuards(RolesGuard)

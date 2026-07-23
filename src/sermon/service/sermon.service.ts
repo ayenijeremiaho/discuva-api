@@ -6,7 +6,10 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sermon } from '../entity/sermon.entity';
+import { SermonNote } from '../entity/sermon-note.entity';
+import { Member } from '../../member/entity/member.entity';
 import { CreateSermonDto, UpdateSermonDto } from '../dto/sermon.dto';
+import { UpsertSermonNoteDto } from '../dto/sermon-note.dto';
 import { AnnounceLiveDto } from '../dto/announce-live.dto';
 import { LivePlatformEnum } from '../enum/live-platform.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -25,6 +28,8 @@ export class SermonService {
   constructor(
     @InjectRepository(Sermon)
     private readonly sermonRepo: Repository<Sermon>,
+    @InjectRepository(SermonNote)
+    private readonly sermonNoteRepo: Repository<SermonNote>,
     private readonly auditLogService: AuditLogService,
     private readonly announcementService: AnnouncementService,
   ) {}
@@ -123,6 +128,47 @@ export class SermonService {
       body,
       admin.id,
     );
+  }
+
+  async getMyNote(
+    sermonId: string,
+    memberId: string,
+  ): Promise<SermonNote | null> {
+    await this.getOrThrow(sermonId);
+    return this.sermonNoteRepo.findOne({
+      where: { sermon: { id: sermonId }, member: { id: memberId } },
+    });
+  }
+
+  async upsertMyNote(
+    sermonId: string,
+    memberId: string,
+    dto: UpsertSermonNoteDto,
+  ): Promise<SermonNote> {
+    await this.getOrThrow(sermonId);
+
+    const existing = await this.sermonNoteRepo.findOne({
+      where: { sermon: { id: sermonId }, member: { id: memberId } },
+    });
+
+    if (existing) {
+      existing.note = dto.note;
+      return this.sermonNoteRepo.save(existing);
+    }
+
+    const note = this.sermonNoteRepo.create({
+      sermon: { id: sermonId } as Sermon,
+      member: { id: memberId } as Member,
+      note: dto.note,
+    });
+    return this.sermonNoteRepo.save(note);
+  }
+
+  async deleteMyNote(sermonId: string, memberId: string): Promise<void> {
+    await this.sermonNoteRepo.delete({
+      sermon: { id: sermonId },
+      member: { id: memberId },
+    });
   }
 
   private async getOrThrow(id: string): Promise<Sermon> {

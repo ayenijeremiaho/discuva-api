@@ -1,9 +1,11 @@
 import {
+  BaptismRequest,
   ChildDedicationRequest,
   ChildNamingRequest,
   MarriageRequest,
 } from '../dto/note-request.dto';
 import {
+  BaptismDetails,
   ChildDedicationDetails,
   ChildNamingDetails,
   MarriageDetails,
@@ -12,11 +14,13 @@ import {
 export type NoteRequest =
   | ChildNamingRequest
   | ChildDedicationRequest
-  | MarriageRequest;
+  | MarriageRequest
+  | BaptismRequest;
 
 export type NoteDetails =
   | ChildNamingDetails
   | ChildDedicationDetails
-  | MarriageDetails;
+  | MarriageDetails
+  | BaptismDetails;
 
 export type UpdateNoteRequest = Partial<NoteRequest>;

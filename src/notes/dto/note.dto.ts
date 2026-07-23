@@ -1,11 +1,24 @@
 import { NoteTypeEnum } from '../enums/note-type.enums';
-import { Exclude, Expose } from 'class-transformer';
+import { Exclude, Expose, Type } from 'class-transformer';
 import { ToDateString } from '../../utility/dto/date-converter';
 
 export type NoteDetailsDto =
   | ChildNamingDetailsDto
   | ChildDedicationDetailsDto
-  | MarriageDetailsDto;
+  | MarriageDetailsDto
+  | BaptismDetailsDto;
+
+@Exclude()
+export class NoteMemberRefDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  firstname: string;
+
+  @Expose()
+  lastname: string;
+}
 
 @Exclude()
 export class NoteDto {
@@ -17,6 +30,10 @@ export class NoteDto {
 
   @Expose()
   details: NoteDetailsDto;
+
+  @Expose()
+  @Type(() => NoteMemberRefDto)
+  member: NoteMemberRefDto | null;
 
   @Expose()
   @ToDateString()
@@ -73,4 +90,17 @@ export class MarriageDetailsDto {
   @Expose()
   @ToDateString()
   weddingDate: Date;
+}
+
+@Exclude()
+export class BaptismDetailsDto {
+  @Expose()
+  type: NoteTypeEnum.BAPTISM;
+
+  @Expose()
+  personName: string;
+
+  @Expose()
+  @ToDateString()
+  baptismDate: Date;
 }

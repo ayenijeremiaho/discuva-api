@@ -11,11 +11,13 @@ import { validateOrReject } from 'class-validator';
 import { Note } from '../entity/note.entity';
 import { NoteTypeEnum } from '../enums/note-type.enums';
 import {
+  BaptismDetails,
   ChildDedicationDetails,
   ChildNamingDetails,
   MarriageDetails,
 } from '../entity/note-details';
 import {
+  BaptismRequest,
   ChildDedicationRequest,
   ChildNamingRequest,
   MarriageRequest,
@@ -23,11 +25,13 @@ import {
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { Member } from '../../member/entity/member.entity';
 
 type NoteRequest =
   | ChildNamingRequest
   | ChildDedicationRequest
-  | MarriageRequest;
+  | MarriageRequest
+  | BaptismRequest;
 type UpdateNoteRequest = Partial<NoteRequest> & { type: NoteTypeEnum };
 
 @Injectable()
@@ -49,6 +53,7 @@ export class NotesService {
       [NoteTypeEnum.CHILD_NAMING]: ChildNamingRequest,
       [NoteTypeEnum.CHILD_DEDICATION]: ChildDedicationRequest,
       [NoteTypeEnum.MARRIAGE]: MarriageRequest,
+      [NoteTypeEnum.BAPTISM]: BaptismRequest,
     };
 
     const RequestClass = classMap[type];
@@ -68,6 +73,9 @@ export class NotesService {
     const note = new Note();
     note.type = request.type;
     note.details = this.buildDetails(request);
+    note.member = request.memberId
+      ? ({ id: request.memberId } as Member)
+      : null;
 
     const saved = await this.noteRepository.save(note);
     this.logger.log(
@@ -97,6 +105,11 @@ export class NotesService {
     await NotesService.validateRequest(note.type, request, true);
 
     note.details = this.mergeDetails(note.type, note.details as any, request);
+    if (request.memberId !== undefined) {
+      note.member = request.memberId
+        ? ({ id: request.memberId } as Member)
+        : null;
+    }
     const saved = await this.noteRepository.save(note);
     this.auditLogService.log('NOTE_UPDATED', {
       actorId,
@@ -147,7 +160,11 @@ export class NotesService {
 
   private buildDetails(
     request: any,
-  ): ChildNamingDetails | ChildDedicationDetails | MarriageDetails {
+  ):
+    | ChildNamingDetails
+    | ChildDedicationDetails
+    | MarriageDetails
+    | BaptismDetails {
     switch (request.type) {
       case NoteTypeEnum.CHILD_NAMING:
         return {
@@ -163,6 +180,11 @@ export class NotesService {
         return {
           ...plainToInstance(MarriageDetails, request),
           weddingDate: new Date(request.weddingDate),
+        };
+      case NoteTypeEnum.BAPTISM:
+        return {
+          ...plainToInstance(BaptismDetails, request),
+          baptismDate: new Date(request.baptismDate),
         };
       default:
         throw new BadRequestException('Invalid note type');
@@ -195,8 +217,23 @@ export class NotesService {
             ? new Date(incoming.weddingDate)
             : existing.weddingDate,
         };
+      case NoteTypeEnum.BAPTISM:
+        return {
+          ...existing,
+          ...incoming,
+          baptismDate: incoming.baptismDate
+            ? new Date(incoming.baptismDate)
+            : existing.baptismDate,
+        };
       default:
         throw new BadRequestException('Unsupported note type');
     }
+  }
+
+  async getMyMilestones(memberId: string): Promise<Note[]> {
+    return this.noteRepository.find({
+      where: { member: { id: memberId } },
+      order: { createdAt: 'DESC' },
+    });
   }
 }

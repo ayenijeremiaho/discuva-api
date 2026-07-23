@@ -1928,6 +1928,15 @@ This is the one exception in the codebase to "no non-admin member-search endpoin
 whole point of this flow is finding one named person on the spot; it's scoped tightly enough (Admin-department
 workers only, minimal fields, capped results) that it doesn't reopen a general member-picker surface.
 
+**Email export (`POST /attendances/export-email`):** same shared pattern as `/service-headcount/export-email` — filters
+the same query `GET /attendances/history` already runs (no pagination), builds an `.xlsx`, and emails it via the
+`report-export` template.
+
+**Leaderboard chart (Faithapp-admin, `app/attendance/page.tsx`):** the Leaderboard tab has a Table/Chart toggle —
+Chart renders a horizontal present/absent bar per worker via the same `components/charts/bar-chart.tsx` wrapper
+introduced for the headcount trends charts. No new backend aggregation — `GET /attendances/leaderboard` was already
+aggregate-shaped (`presentCount`/`absentCount` per worker).
+
 **Routes prefix:** `/attendances`
 
 ### Department Module
@@ -2285,14 +2294,42 @@ wishes per sender per day (default: 20). Input is DOMPurify-sanitized.
 
 **Routes prefix:** `/birthday`
 
+### Membership Anniversary Module
+
+Background-only (no controller/routes) — automated congratulatory announcement + email when a member reaches a
+join-date anniversary, keyed off `Member.dateJoinedChurch` rather than `createdAt` (a member's system-account
+creation date can differ from their actual join date, e.g. for admin-backfilled historical records).
+Structurally a clone of the Birthday Module's mechanics rather than a new pattern: same lock-key/catch-up/daily-cron
+shape (`@Cron('0 6 * * *')`, `onApplicationBootstrap` catch-up for missed runs, Redis lock to prevent double-sends
+across instances), same `memberGreetedYear`-style dedup marker (`Member.anniversaryGreetedYear`, mirrors
+`birthdayGreetedYear`). Differs from Birthday in one way: greeting delivery goes through
+`AnnouncementService.createSystemAnnouncement()` (ALL-audience, push-notifies automatically) rather than Birthday's
+older direct-repository-insert pattern, which predates that helper and doesn't push-notify.
+
+**Eligibility:** `ACTIVE` members with a non-null `dateJoinedChurch` whose join month/day matches today, excluding
+the join year itself (a member who joined today this year has "0 years," not an anniversary), and not already
+greeted this calendar year.
+
+**Email:** `membership-anniversary` template, `EmailCategory.MEMBERSHIP_ANNIVERSARY` (togglable via
+`EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED`, default `true`, same convention as every other email category).
+
+**Audit:** `MEMBERSHIP_ANNIVERSARY_GREETED` per member greeted (`metadata: { years }`).
+
 ### Notes Module
 
-Pastoral records of significant events (child naming, dedication, marriage). Admin-only. Stored as typed JSON detail
-objects.
+Pastoral records of significant events (child naming, dedication, marriage, baptism — "rites of passage"). Admin-only
+write/read surface. Stored as typed JSON detail objects.
 
-**Note types:** `child_naming`, `child_dedication`, `marriage`
+**Note types:** `child_naming`, `child_dedication`, `marriage`, `baptism`
 
-**Routes prefix:** `/notes`, `/notes-analytics`
+**Optional member link:** every note type accepts an optional `memberId` on create/update, stored as a real FK
+(`Note.member`, nullable, `SET NULL`) separate from the JSON `details` blob — not part of any single type's shape,
+since linking to a member is a cross-cutting concern, not detail data. Most naming/dedication records are for
+someone not yet in the system (e.g. a newborn) so this stays optional; when set, the record becomes visible on that
+member's own profile via `GET members/me/milestones` (`JwtAuthGuard`, own data only, no admin permission needed).
+Passing `memberId: null` on update explicitly unlinks a note.
+
+**Routes prefix:** `/notes`, `/notes-analytics`, `/members/me/milestones`
 
 ### Dashboard Module
 
@@ -2741,6 +2778,12 @@ automated detection misses a stream or a platform's API is unavailable).
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('sermons')`):** `GET sermons?page=&limit=&series=`,
 `GET sermons/:id` — any authenticated member/worker, no department or class gating (sermons are for everyone).
 
+**Sermon notes (`SermonNote` entity, same module):** a private per-member journal entry on a sermon — `sermon` (CASCADE),
+`member` (CASCADE), `note` (text), unique on `(sermon, member)` so a member has exactly one editable note per sermon
+(upsert, not a multi-entry thread — matches "notes on this sermon" rather than a running journal). No admin-facing
+surface and no separate permission: `GET/PUT/DELETE sermons/:id/note` are gated only by `JwtAuthGuard` and the
+module's existing `@RequiresModule('sermons')` check, since a note is the requesting member's own data.
+
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
 Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when the configured YouTube
@@ -2788,6 +2831,10 @@ Records and retrieves physical attendance counts for services, broken down by de
 **No separate correction endpoint (by design):** `PATCH /service-headcount/:id` existed early on for correcting a record, consumed only by the Records tab's now-removed "Edit" button (a flat historical list, separate from the "By Event" tab). Once headcount became upsert-on-`POST`, that PATCH route had no remaining frontend caller — removed entirely (controller route, service method, `UpdateServiceHeadcountDto`) rather than left as dead, unconsumed admin API surface. Corrections now happen exactly one way: re-recording the same sub-service through the "By Event" tab, which pre-fills the existing values and edits in place.
 
 **Trends:** `GET /service-headcount/trends` returns bucketed data. Each bucket is keyed by `periodLabel + serviceSlotName` so multiple slots on the same Sunday appear as separate series. `customGroups`' dynamic per-church keys mean the per-bucket aggregation stays in-memory rather than SQL `GROUP BY`, but omitting `from` now defaults to a bounded ~365-day lookback (`defaultTrendsFrom()`) instead of scanning every headcount record ever logged — an explicit `from` is always honored as-is.
+
+**Email export (`POST /service-headcount/export-email`):** Reuses the same filtered query as the flat `GET /service-headcount` list (no pagination), builds an `.xlsx` via the shared `ExcelService.buildWorkbook`, and queues it as an email attachment via `EmailQueueService.queueEmailWithTemplateAndAttachments` using the shared `report-export` template (`src/utility/templates/report-export.html`, reused by every report's export endpoint — not headcount-specific). Deliberately one-off: no recurring/scheduled export exists or is planned as part of this feature.
+
+**Trends charts (Faithapp-admin, `app/service-headcount/page.tsx`):** the Trends tab has a Chart/Table toggle (defaults to Chart) consuming the same `GET /service-headcount/trends` response the table already used — no new backend endpoint, since `HeadcountTrendPoint` already carries every field the reference dashboard needed (`maleAdults`/`femaleAdults`/`teenagers`/`children`/`serviceSlotName`/`periodLabel`/`total`). Renders via three new reusable wrapper components (`components/charts/bar-chart.tsx`, `pie-chart.tsx`, `trend-line-chart.tsx`, thin wrappers over the new `recharts` dependency): a total-attendance trend line across period buckets, a per-service total bar chart, a gender-split pie chart, and a teens-vs-children bar chart — all aggregated client-side from the same trends payload. Fixed a pre-existing bug while wiring this up: the frontend's `Period` type allowed `"yearly"`, which isn't a value the backend's `HeadcountPeriod` recognizes — since the controller doesn't validate/whitelist the query param, selecting "Yearly" silently fell through to quarterly bucketing server-side. Now `"weekly" | "monthly" | "quarterly"` on both sides.
 
 **Routes prefix:** `/service-headcount`
 
@@ -3071,6 +3118,120 @@ different payload shapes for the same event.
 
 **Routes prefix:** `/admin/games`, `/games`
 
+### Service Rating Module
+
+Member-to-church pulse after a service — a 1–5 star rating plus optional comment, keyed off `(event, serviceSlot,
+member)` (the same pair `Attendance` keys off, not `ServiceSession` — the live-control-room entity, which isn't
+guaranteed to exist for every service). Structurally distinct from the Pastor Feedback module: Pastor Feedback is
+worker/HOD → leadership, weekly, per-department narrative reporting; this is member → church, per-service,
+numeric+comment. `POST service-ratings` upserts — one rating per member per service occurrence, submitting again
+edits the existing row in place.
+
+**Anonymity design:** the admin comment feed (`GET admin/service-ratings/comments`) never joins/exposes member
+identity unless the requesting admin's role includes `SERVICE_RATING_MODERATE` — `service_rating:read` alone gets an
+aggregate view and an anonymized comment feed (`member: null` per row); `service_rating:moderate` additionally
+reveals `member: { id, firstname, lastname }` on the same response and is required to delete/hide a comment
+(`DELETE admin/service-ratings/:id`). This is deliberate: default admin access should give a pulse on sentiment
+without turning ratings into a place to publicly identify who said what about a specific worker/sermon.
+
+**Routes (member, `JwtAuthGuard` + `@RequiresModule('service_ratings')`):** `POST service-ratings` (upsert),
+`GET service-ratings/mine?eventId=&serviceSlotId=`.
+**Routes (admin, `AdminGuard`):** `GET admin/service-ratings/summary?eventId=&from=&to=` (`SERVICE_RATING_READ`,
+average + 1–5 distribution), `GET admin/service-ratings/comments?page=&limit=` (`SERVICE_RATING_READ`),
+`DELETE admin/service-ratings/:id` (`SERVICE_RATING_MODERATE`, logs `SERVICE_RATING_MODERATED`).
+
+**Not audited:** individual rating submissions — matches the existing judgment call on high-frequency member actions
+(same as Games answers and announcement reactions). Only moderation (deletion) is audited.
+
+**Routes prefix:** `/service-ratings`, `/admin/service-ratings`
+
+### Volunteer Module
+
+A self-service serving marketplace — admins post `VolunteerOpportunity` records (title, optional description,
+`department` for admin-side categorization/reporting only — **not** access control, same convention as `Game`),
+members browse and sign themselves up. Genuinely new interaction pattern for this codebase: every other
+member-facing "assignment" (department membership, prayer roster, service-programme slots) is admin-assigned:
+this is the first admin-*posts*-a-slot / member-*claims*-it flow.
+
+**Capacity enforcement:** `VolunteerOpportunity.confirmedCount` is a denormalized counter (mirrors
+`PrayerMeeting.currentCapacity`'s precedent), maintained inside a DB transaction that takes a `pessimistic_write`
+lock on the opportunity row before checking `capacity` and incrementing/decrementing — this is the same
+lock-then-check-then-mutate shape `PrayerMeetingService.selectMeeting` already uses, preventing two concurrent
+sign-ups from both slipping past a capacity check that a non-transactional COUNT query could race. `capacity: null`
+means unlimited.
+
+**Sign-up is an upsert, not insert-only:** `VolunteerSignup` is unique on `(opportunity, member)`. Cancelling
+(`status → CANCELLED`) and re-signing-up flips the same row back to `CONFIRMED` rather than erroring on a duplicate
+key or leaving orphaned rows — same "one row per (parent, member), status toggles" idiom as `AnnouncementReaction`
+and `ServiceRating`, just with a two-state status instead of upsert-the-value.
+
+**No hard delete on opportunities:** the admin "remove" action is `PATCH .../cancel` (→ `status = CANCELLED`,
+audit-logged), not `DELETE` — mirrors this codebase's general preference for deactivation over deletion
+(see Member Deletion Policy) once a record may have dependent children (signups here).
+
+**Member list includes own status inline (`GET volunteer-opportunities`):** each row carries
+`mySignupStatus: 'CONFIRMED' | 'CANCELLED' | null` for the requesting member, computed via one extra batched query
+against the returned page's opportunity IDs — avoids a separate "my signups" round-trip just to render a
+Sign-Up-vs-Cancel button per row. Only `status = OPEN` and `date >= now` opportunities are listed (past/closed/
+cancelled opportunities don't show in the browse list, though they remain visible to admins).
+
+**Routes (admin, `AdminGuard`):** `POST/GET/PATCH admin/volunteer-opportunities` (`/:id` for single-record
+routes), `PATCH admin/volunteer-opportunities/:id/cancel`, `GET admin/volunteer-opportunities/:id/signups` (roster,
+CONFIRMED only) — all `VOLUNTEER_READ`/`VOLUNTEER_WRITE`.
+**Routes (member, `JwtAuthGuard` + `@RequiresModule('volunteering')`):** `GET volunteer-opportunities`,
+`POST volunteer-opportunities/:id/signup`, `DELETE volunteer-opportunities/:id/signup` — any authenticated
+member/worker, no department/class gating (open to anyone, same "no access-control implication" stance as `Game`
+and `Sermon`'s `department`/categorization fields).
+
+**Not audited:** routine cancel-my-own-signup — matches the established judgment on high-frequency, low-stakes
+member actions. `VOLUNTEER_SIGNUP_CREATED` (a commitment, worth a record unlike a passive reaction) and admin
+actions (`VOLUNTEER_OPPORTUNITY_CREATED`/`_UPDATED`/`_CANCELLED`) are audited.
+
+**Routes prefix:** `/volunteer-opportunities`, `/admin/volunteer-opportunities`
+
+### Small Group Module (displayed to users as "Fellowships")
+
+Cell/home-fellowship tracking — the structural gap identified as the biggest single engagement-platform gap for
+the target congregations (most run more on cell structure than department structure). Three entities: `SmallGroup`
+(name unique, description, `leader` — a `Member`, deliberately **not** restricted to `WorkerProfile`/`Admin` since
+cell leaders in this context aren't necessarily on the worker roster — meetingDay/meetingLocation as free-text,
+not an enum), `SmallGroupMember` (join table, unique on `(group, member)`), `SmallGroupAttendance` (unique on
+`(group, member, meetingDate)` — re-recording the same date edits in place, same upsert idiom as
+`ServiceHeadcount`).
+
+**Membership is self-service, no approval step:** `POST small-groups/:id/join` upserts-by-returning-existing
+(mirrors `VolunteerService.signUp`'s "already confirmed → return the existing row" shape) rather than erroring on
+a duplicate join. `DELETE small-groups/:id/leave` is self-leave; admin-forced removal
+(`DELETE admin/small-groups/:id/members/:memberId`) is a separate action, audited `SMALL_GROUP_MEMBER_REMOVED`
+(routine self-join/leave is not audited — matches the established judgment on high-frequency member actions).
+
+**Leader-gated attendance-recording, not admin-gated:** `POST small-groups/:id/attendance` sits under
+`JwtAuthGuard`, not `AdminGuard` — a group leader need not be a worker or admin, so `SmallGroupService`'s private
+`assertIsGroupLeader()` (mirrors `assertHasDepartmentAccessKey`'s shape: throws `ForbiddenException` if
+`group.leader?.id !== callerId`) is the only gate, independent of the admin permission system entirely. Body:
+`{ meetingDate, records: [{ memberId, status }] }` — each record upserts against the unique
+`(group, member, meetingDate)` constraint.
+
+**Full member roster requires group membership (`GET small-groups/:id/members`):** gated by
+`assertIsGroupMember()` (any current member, not leader-only) — lets a leader see who to mark attendance for and
+lets ordinary members see their own group's "family," while still keeping the full roster invisible to a member
+who's browsing groups they haven't joined yet. The browse list (`GET small-groups`) only exposes a `memberCount`,
+not the roster itself.
+
+**No archive/cancel state (unlike `VolunteerOpportunity`):** `DELETE admin/small-groups/:id` is a real delete —
+groups are simpler organizational units without the same "keep history after the window closes" need a volunteer
+opportunity has, so this follows `Game`'s full-CRUD precedent rather than `VolunteerOpportunity`'s
+cancel-don't-delete one.
+
+**Routes (admin, `AdminGuard`):** `POST/GET/PATCH/DELETE admin/small-groups` (`/:id` for single-record routes),
+`GET admin/small-groups/:id/members`, `DELETE admin/small-groups/:id/members/:memberId`,
+`GET admin/small-groups/:id/attendance` — all `SMALL_GROUP_READ`/`SMALL_GROUP_WRITE`.
+**Routes (member, `JwtAuthGuard` + `@RequiresModule('small_groups')`):** `GET small-groups`, `GET small-groups/mine`,
+`GET small-groups/:id`, `GET small-groups/:id/members` (current members only), `POST small-groups/:id/join`,
+`DELETE small-groups/:id/leave`, `POST small-groups/:id/attendance` (leader only, enforced in-service not by guard).
+
+**Routes prefix:** `/small-groups`, `/admin/small-groups`
+
 ---
 
 ## 6. API Endpoints Quick Reference
@@ -3134,6 +3295,7 @@ different payload shapes for the same event.
 | GET    | /attendances/my-history                                    | Any                                                           | Own attendance records                                                                                        |
 | GET    | /attendances/my-summary                                    | Any                                                           | Own lifetime rate/streak, computed in SQL over full history (not just the current page) — `{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` |
 | GET    | /attendances/history                                       | AdminGuard (ATTENDANCE_READ)                                  | All attendance records; query: `page`, `limit`, `memberId`, `slotId`, `status`, `dateFrom`, `dateTo`, `search` (ILIKE on firstname, lastname, email) |
+| POST   | /attendances/export-email                                  | AdminGuard (ATTENDANCE_READ)                                  | Email the currently-filtered attendance history as an `.xlsx` attachment (body: `recipientEmail?`, `memberId?`, `slotId?`, `status?`, `dateFrom?`, `dateTo?`, `search?`). `recipientEmail` defaults to the requesting admin's own email. One-off only — not a recurring/scheduled report. Logs `REPORT_EXPORTED`. |
 | GET    | /attendances/history/department?slotId=                    | WORKER                                                        | Department attendance for a slot (scoped to caller's own department via lead role)                            |
 | GET    | /attendances/department/event/:eventId                     | WORKER                                                        | Worker attendance for all slots of an event (scoped to caller's own department via lead role)                 |
 | GET    | /attendances/summary/slot/:slotId                          | AdminGuard (ATTENDANCE_READ)                                  | Status counts for a slot                                                                                      |
@@ -3178,6 +3340,9 @@ different payload shapes for the same event.
 | POST   | /admin/sermons/announce-live                               | AdminGuard (SERMON_WRITE)                                     | Manual "we're live" trigger — body: `{ platform: 'YOUTUBE' \| 'MIXLR', url, title? }`. Publishes an ALL-audience system announcement via `AnnouncementService.createSystemAnnouncement()` and push-notifies every active member. |
 | GET    | /sermons?page=&limit=&series=                              | JwtAuthGuard + Module: sermons                                | Paginated list for any authenticated member/worker — no department or class gating                             |
 | GET    | /sermons/:id                                               | JwtAuthGuard + Module: sermons                                | Get a single sermon                                                                                             |
+| GET    | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Get the requesting member's own private note for this sermon (`null` if none) — own data, no admin visibility  |
+| PUT    | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Create or update the requesting member's note for this sermon (body: `{ note }`, upsert)                        |
+| DELETE | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Delete the requesting member's note for this sermon                                                             |
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
 | POST   | /admin/games                                               | AdminGuard (GAMES_WRITE)                                       | Create a game (DRAFT)                                                                                          |
@@ -3199,6 +3364,33 @@ different payload shapes for the same event.
 | GET    | /games/sessions/:code/state                                | JwtAuthGuard + Module: games                                   | Current session state — same payload the socket broadcasts                                                     |
 | POST   | /games/sessions/:code/questions/:questionId/answer         | JwtAuthGuard + Module: games                                   | Submit an answer — body: `{ selectedOptionIndex }`. 400 if not the current question or already answered; 403 if caller never joined. |
 | GET    | /games/sessions/:code/leaderboard                          | JwtAuthGuard + Module: games                                   | Live leaderboard                                                                                                 |
+| POST   | /service-ratings                                           | JwtAuthGuard + Module: service_ratings                        | Submit or update a rating for a service (body: `eventId`, `serviceSlotId`, `rating` 1–5, `comment?`) — upsert   |
+| GET    | /service-ratings/mine?eventId=&serviceSlotId=              | JwtAuthGuard + Module: service_ratings                        | The requesting member's own rating for a service, or null                                                       |
+| GET    | /admin/service-ratings/summary?eventId=&from=&to=          | AdminGuard (SERVICE_RATING_READ)                               | Average rating, total count, and 1–5 star distribution                                                          |
+| GET    | /admin/service-ratings/comments?page=&limit=               | AdminGuard (SERVICE_RATING_READ)                               | Paginated comment feed, anonymized unless the admin also has SERVICE_RATING_MODERATE                            |
+| DELETE | /admin/service-ratings/:id                                 | AdminGuard (SERVICE_RATING_MODERATE)                            | Delete/hide a rating; logs SERVICE_RATING_MODERATED                                                             |
+| POST   | /admin/volunteer-opportunities                             | AdminGuard (VOLUNTEER_WRITE)                                    | Create an opportunity — body: title, description?, departmentId?, date, capacity? (omit for unlimited)          |
+| GET    | /admin/volunteer-opportunities?page=&limit=                | AdminGuard (VOLUNTEER_READ)                                     | Paginated list, all statuses, newest date first                                                                 |
+| PATCH  | /admin/volunteer-opportunities/:id                         | AdminGuard (VOLUNTEER_WRITE)                                    | Update any field                                                                                                |
+| PATCH  | /admin/volunteer-opportunities/:id/cancel                  | AdminGuard (VOLUNTEER_WRITE)                                    | Cancel an opportunity (status → CANCELLED); no hard delete                                                      |
+| GET    | /admin/volunteer-opportunities/:id/signups                 | AdminGuard (VOLUNTEER_READ)                                     | Roster — CONFIRMED signups with member names                                                                    |
+| GET    | /volunteer-opportunities?page=&limit=                      | JwtAuthGuard + Module: volunteering                             | Open, upcoming opportunities; each row includes the caller's own `mySignupStatus`                               |
+| POST   | /volunteer-opportunities/:id/signup                        | JwtAuthGuard + Module: volunteering                              | Sign up (upsert — re-signing after a cancel re-confirms the same row). 400 if not OPEN or at capacity.          |
+| DELETE | /volunteer-opportunities/:id/signup                        | JwtAuthGuard + Module: volunteering                              | Cancel the caller's own signup                                                                                  |
+| POST   | /admin/small-groups                                        | AdminGuard (SMALL_GROUP_WRITE)                                   | Create a group — body: name, description?, leaderId?, meetingDay?, meetingLocation?                             |
+| GET    | /admin/small-groups?page=&limit=                           | AdminGuard (SMALL_GROUP_READ)                                    | Paginated list, alphabetical by name                                                                            |
+| PATCH  | /admin/small-groups/:id                                    | AdminGuard (SMALL_GROUP_WRITE)                                   | Update any field; `leaderId: null` explicitly unassigns the leader                                              |
+| DELETE | /admin/small-groups/:id                                    | AdminGuard (SMALL_GROUP_WRITE)                                   | Hard delete — removes membership and attendance history too (CASCADE)                                          |
+| GET    | /admin/small-groups/:id/members                            | AdminGuard (SMALL_GROUP_READ)                                    | Full roster                                                                                                     |
+| DELETE | /admin/small-groups/:id/members/:memberId                 | AdminGuard (SMALL_GROUP_WRITE)                                   | Force-remove a member; logs SMALL_GROUP_MEMBER_REMOVED                                                          |
+| GET    | /admin/small-groups/:id/attendance                         | AdminGuard (SMALL_GROUP_READ)                                    | Full attendance history, newest meeting date first                                                              |
+| GET    | /small-groups?page=&limit=                                 | JwtAuthGuard + Module: small_groups                              | Browse all groups with `memberCount` (not the roster itself)                                                    |
+| GET    | /small-groups/mine                                         | JwtAuthGuard + Module: small_groups                              | Groups the caller currently belongs to                                                                          |
+| GET    | /small-groups/:id                                          | JwtAuthGuard + Module: small_groups                              | Group detail                                                                                                    |
+| GET    | /small-groups/:id/members                                  | JwtAuthGuard + Module: small_groups                              | Full roster — requires the caller to currently be a member of this group                                       |
+| POST   | /small-groups/:id/join                                     | JwtAuthGuard + Module: small_groups                              | Self-join (upsert — re-joining after leaving works)                                                             |
+| DELETE | /small-groups/:id/leave                                    | JwtAuthGuard + Module: small_groups                              | Self-leave                                                                                                      |
+| POST   | /small-groups/:id/attendance                               | JwtAuthGuard + Module: small_groups                              | Record attendance — body: `{ meetingDate, records: [{memberId, status}] }`. 403 unless the caller is this group's leader. |
 | POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
@@ -3302,12 +3494,13 @@ different payload shapes for the same event.
 | POST   | /birthday/wishes/:recipientId                              | Any                                                           | Send a birthday wish (once per year per sender; rate-limited to WISH_DAILY_LIMIT/day)                         |
 | GET    | /birthday/wishes/me                                        | Any                                                           | Read own birthday wishes (?year= filter optional)                                                             |
 | GET    | /birthday/wishes/:memberId                                 | AdminGuard (MEMBERS_READ)                                     | Read any member's birthday wishes                                                                             |
-| GET    | /notes/:type                                               | AdminGuard (NOTES_READ)                                       | List notes by type                                                                                            |
-| POST   | /notes                                                     | AdminGuard (NOTES_WRITE)                                      | Create note                                                                                                   |
-| PUT    | /notes/:id                                                 | AdminGuard (NOTES_WRITE)                                      | Update note                                                                                                   |
+| GET    | /notes/:type                                               | AdminGuard (NOTES_READ)                                       | List notes by type (types: child_naming, child_dedication, marriage, baptism)                                  |
+| POST   | /notes                                                     | AdminGuard (NOTES_WRITE)                                      | Create note; optional `memberId` to link the record to a member's own profile                                 |
+| PUT    | /notes/:id                                                 | AdminGuard (NOTES_WRITE)                                      | Update note; `memberId: null` explicitly unlinks, omitting it leaves the existing link unchanged               |
 | GET    | /notes/:type/:id                                           | AdminGuard (NOTES_READ)                                       | Get note                                                                                                      |
 | DELETE | /notes/:type/:id                                           | AdminGuard (NOTES_WRITE)                                      | Delete note                                                                                                   |
 | GET    | /notes-analytics/:type                                     | AdminGuard (NOTES_READ)                                       | Analytics for a note type                                                                                     |
+| GET    | /members/me/milestones                                     | JwtAuthGuard                                                  | The requesting member's own linked rites-of-passage records (naming/dedication/marriage/baptism), newest first |
 | GET    | /dashboard/member                                          | Any                                                           | Member dashboard                                                                                              |
 | GET    | /dashboard/worker                                          | WORKER                                                        | Worker dashboard                                                                                              |
 | GET    | /dashboard/admin                                           | AdminGuard (DASHBOARD_READ)                                   | Admin dashboard                                                                                               |
@@ -3462,6 +3655,7 @@ different payload shapes for the same event.
 | GET    | /service-headcount/trends                                  | AdminGuard + HEADCOUNT_READ                                   | Aggregated attendance trends bucketed by period (query: period=weekly\|monthly\|quarterly, from, to, serviceSlotName); returns grouped data per slot per bucket |
 | GET    | /service-headcount/event/:eventId/summary                  | AdminGuard + HEADCOUNT_READ                                   | Every sub-service under the event with its headcount (or null) plus the aggregate total across recorded sub-services |
 | GET    | /service-headcount/:id                                     | AdminGuard + HEADCOUNT_READ                                   | Get a single headcount record by ID (includes computed `total`). Existed with no frontend consumer until now — the Records tab has a "View details" (eye icon) action per row, showing `notes`/`customGroups`/`recordedBy` (none of which the flat table has room for). |
+| POST   | /service-headcount/export-email                            | AdminGuard + HEADCOUNT_READ                                   | Email the currently-filtered headcount rows as an `.xlsx` attachment (body: `recipientEmail?`, `serviceSlotId?`, `from?`, `to?`). `recipientEmail` defaults to the requesting admin's own email. One-off only — not a recurring/scheduled report. Logs `REPORT_EXPORTED`. |
 
 | GET    | /admin/settings                                            | AdminGuard (any admin)                                        | List all known modules with their current enabled status, `displayName`, and `required` flag (absent row = enabled by default) |
 | GET    | /admin/settings/:key                                       | AdminGuard (any admin)                                        | Get one module setting by key (e.g. `incident_report`, `asset_management`). Returns `required` flag.          |
@@ -3650,6 +3844,10 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Submit a prayer request / testimony             | ✓               | ✓                            |
 | View public testimony feed                      | ✓               | ✓                            |
 | Prayer team inbox (view/update request status)  | —               | ✓ (PRAYER-dept worker or Pastor) |
+| Rate a service (own rating only)                | ✓               | ✓                            |
+| Browse and sign up for volunteer opportunities  | ✓               | ✓                            |
+| Browse, join, and leave fellowships             | ✓               | ✓                            |
+| Record attendance for a fellowship (leader only) | ✓ (if leader) | ✓ (if leader)                |
 
 ### Admin Portal (`AdminGuard` + permission)
 
@@ -3701,6 +3899,12 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Create/edit/delete sermons, trigger "we're live"     | `SERMON_WRITE`    |
 | View games, questions, sessions, and leaderboards    | `GAMES_READ`      |
 | Create/edit games and questions, control live sessions | `GAMES_WRITE`   |
+| View aggregate service ratings and anonymized comments | `SERVICE_RATING_READ` |
+| Reveal identity behind a rating comment; delete/hide it | `SERVICE_RATING_MODERATE` |
+| View volunteer opportunities and sign-up rosters      | `VOLUNTEER_READ`  |
+| Create, edit, and cancel volunteer opportunities       | `VOLUNTEER_WRITE` |
+| View small groups, rosters, and attendance history    | `SMALL_GROUP_READ`  |
+| Create, edit, delete small groups; assign leaders; remove members | `SMALL_GROUP_WRITE` |
 
 ---
 
@@ -4016,7 +4220,7 @@ Granular permissions assigned to `AdminRole` records:
 
 ### NoteTypeEnum *(path param values)*
 
-`child_naming` · `child_dedication` · `marriage`
+`child_naming` · `child_dedication` · `marriage` · `baptism`
 
 ### EventRecurrencePatternEnum
 

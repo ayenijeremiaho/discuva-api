@@ -5,15 +5,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Repository, SelectQueryBuilder } from 'typeorm';
 import { ServiceHeadcount } from '../entity/service-headcount.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { CreateServiceHeadcountDto } from '../dto/create-service-headcount.dto';
+import { ExportHeadcountEmailDto } from '../dto/export-headcount-email.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
+import { ExcelService } from '../../utility/service/excel.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
 
 const TRENDS_TTL = 1800;
+const MAX_EXPORT_ROWS = 5000;
 
 export interface HeadcountTotal {
   maleAdults: number;
@@ -66,6 +71,9 @@ export interface EventHeadcountSummary {
 export class ServiceHeadcountService {
   constructor(
     private readonly cacheService: CacheService,
+    private readonly excelService: ExcelService,
+    private readonly emailQueueService: EmailQueueService,
+    private readonly auditLogService: AuditLogService,
     @InjectRepository(ServiceHeadcount)
     private readonly headcountRepo: Repository<ServiceHeadcount>,
     @InjectRepository(ServiceSlot)
@@ -109,15 +117,11 @@ export class ServiceHeadcountService {
     return Object.assign(saved, { total });
   }
 
-  async findAll(
-    page = 1,
-    limit = 20,
+  private buildFilteredQb(
     serviceSlotId?: string,
     from?: string,
     to?: string,
-  ): Promise<PaginationResponseDto<ServiceHeadcount & { total: number }>> {
-    if (page < 1) throw new BadRequestException('Page must be greater than 0');
-
+  ): SelectQueryBuilder<ServiceHeadcount> {
     const qb = this.headcountRepo
       .createQueryBuilder('h')
       .innerJoinAndSelect('h.serviceSlot', 'slot')
@@ -131,7 +135,19 @@ export class ServiceHeadcountService {
     if (from) qb.andWhere('slot.startTime >= :from', { from: new Date(from) });
     if (to) qb.andWhere('slot.startTime <= :to', { to: new Date(to) });
 
-    const [raw, total] = await qb
+    return qb;
+  }
+
+  async findAll(
+    page = 1,
+    limit = 20,
+    serviceSlotId?: string,
+    from?: string,
+    to?: string,
+  ): Promise<PaginationResponseDto<ServiceHeadcount & { total: number }>> {
+    if (page < 1) throw new BadRequestException('Page must be greater than 0');
+
+    const [raw, total] = await this.buildFilteredQb(serviceSlotId, from, to)
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();
@@ -146,6 +162,74 @@ export class ServiceHeadcountService {
       totalCount: total,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  async emailExport(dto: ExportHeadcountEmailDto, admin: Admin): Promise<void> {
+    const recipient = dto.recipientEmail ?? admin.member?.email;
+    if (!recipient) {
+      throw new BadRequestException(
+        'No recipient email available — provide recipientEmail explicitly.',
+      );
+    }
+
+    const records = await this.buildFilteredQb(
+      dto.serviceSlotId,
+      dto.from,
+      dto.to,
+    )
+      .take(MAX_EXPORT_ROWS)
+      .getMany();
+
+    const rows = records.map((r) => ({
+      serviceSlotName: r.serviceSlot.name,
+      date: r.serviceSlot.startTime.toISOString().slice(0, 10),
+      maleAdults: r.maleAdults,
+      femaleAdults: r.femaleAdults,
+      teenagers: r.teenagers,
+      children: r.children,
+      mobileChurch: r.mobileChurch,
+      total: this.computeTotal(r),
+    }));
+
+    const buffer = await this.excelService.buildWorkbook(
+      'Service Headcount',
+      [
+        { header: 'Service', key: 'serviceSlotName', width: 28 },
+        { header: 'Date', key: 'date', width: 14 },
+        { header: 'Male Adults', key: 'maleAdults', width: 14 },
+        { header: 'Female Adults', key: 'femaleAdults', width: 14 },
+        { header: 'Teenagers', key: 'teenagers', width: 12 },
+        { header: 'Children', key: 'children', width: 12 },
+        { header: 'Mobile Church', key: 'mobileChurch', width: 14 },
+        { header: 'Total', key: 'total', width: 12 },
+      ],
+      rows,
+    );
+
+    const filterSummary = [
+      dto.from ? `from ${dto.from}` : null,
+      dto.to ? `to ${dto.to}` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    await this.emailQueueService.queueEmailWithTemplateAndAttachments(
+      recipient,
+      'Your Service Headcount Report',
+      'report-export',
+      {
+        reportTitle: 'Service Headcount',
+        generatedAt: new Date().toLocaleString(),
+        filterSummary: filterSummary || null,
+      },
+      [{ filename: 'service-headcount.xlsx', content: buffer }],
+    );
+
+    this.auditLogService.log('REPORT_EXPORTED', {
+      actorId: admin.id,
+      targetEmail: recipient,
+      metadata: { report: 'service-headcount' },
+    });
   }
 
   async findOne(id: string): Promise<ServiceHeadcount & { total: number }> {

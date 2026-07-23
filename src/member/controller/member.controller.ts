@@ -90,6 +90,7 @@ export class MemberController {
     const member = await this.memberService.getById(user.id, [
       'workerProfile',
       'workerProfile.department',
+      'workerProfile.secondaryDepartment',
       'pastor',
     ]);
     return plainToInstance(MemberDto, member, {

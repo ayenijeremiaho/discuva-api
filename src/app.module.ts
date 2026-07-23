@@ -28,6 +28,10 @@ import { VenueModule } from './venue/venue.module';
 import { SundaySchoolModule } from './sunday-school/sunday-school.module';
 import { ChildrenChurchModule } from './children-church/children-church.module';
 import { BirthdayModule } from './birthday/birthday.module';
+import { MembershipAnniversaryModule } from './membership-anniversary/membership-anniversary.module';
+import { ServiceRatingModule } from './service-rating/service-rating.module';
+import { VolunteerModule } from './volunteer/volunteer.module';
+import { SmallGroupModule } from './small-group/small-group.module';
 import { AdminModule } from './admin/admin.module';
 import { EnumsModule } from './enums/enums.module';
 import { TitheModule } from './tithe/tithe.module';
@@ -158,6 +162,10 @@ import { EvangelismModule } from './evangelism/evangelism.module';
     SundaySchoolModule,
     ChildrenChurchModule,
     BirthdayModule,
+    MembershipAnniversaryModule,
+    ServiceRatingModule,
+    VolunteerModule,
+    SmallGroupModule,
     AdminModule,
     EnumsModule,
     TitheModule,

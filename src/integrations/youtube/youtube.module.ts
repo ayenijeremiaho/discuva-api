@@ -6,11 +6,13 @@ import { YoutubeLiveDetectionService } from './service/youtube-live-detection.se
 import { YoutubeSubscriptionScheduler } from './scheduler/youtube-subscription.scheduler';
 import { YoutubeWebhookController } from './controller/youtube-webhook.controller';
 import { AnnouncementModule } from '../../announcement/announcement.module';
+import { UtilityModule } from '../../utility/utility.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([YoutubeIntegrationState]),
     AnnouncementModule,
+    UtilityModule,
   ],
   providers: [
     YoutubeSubscriptionService,

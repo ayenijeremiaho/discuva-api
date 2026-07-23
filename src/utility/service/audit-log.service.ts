@@ -197,7 +197,23 @@ export type AuditAction =
   | 'GAME_QUESTION_DELETED'
   | 'GAME_QUESTIONS_REORDERED'
   | 'GAME_SESSION_STARTED'
-  | 'GAME_SESSION_ENDED';
+  | 'GAME_SESSION_ENDED'
+  // Reporting
+  | 'REPORT_EXPORTED'
+  // Rites of passage / membership anniversary
+  | 'MEMBERSHIP_ANNIVERSARY_GREETED'
+  // Service ratings
+  | 'SERVICE_RATING_MODERATED'
+  // Volunteer marketplace
+  | 'VOLUNTEER_OPPORTUNITY_CREATED'
+  | 'VOLUNTEER_OPPORTUNITY_UPDATED'
+  | 'VOLUNTEER_OPPORTUNITY_CANCELLED'
+  | 'VOLUNTEER_SIGNUP_CREATED'
+  // Small groups
+  | 'SMALL_GROUP_CREATED'
+  | 'SMALL_GROUP_UPDATED'
+  | 'SMALL_GROUP_DELETED'
+  | 'SMALL_GROUP_MEMBER_REMOVED';
 
 export interface AuditContext {
   actorId?: string;

@@ -1051,6 +1051,38 @@
           ]
         },
         {
+          "name": "Get My Milestones",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/milestones",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "milestones"
+              ]
+            },
+            "description": "The requesting member's own linked rites-of-passage records (naming/dedication/marriage/baptism), newest first. Only notes explicitly linked via memberId appear here."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"f1a2b3c4-5d6e-7f8a-9b0c-1d2e3f4a5b6c\",\n      \"type\": \"baptism\",\n      \"details\": {\n        \"type\": \"baptism\",\n        \"personName\": \"David Osei\",\n        \"baptismDate\": \"2026-08-10\"\n      },\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"David\",\n        \"lastname\": \"Osei\"\n      },\n      \"createdAt\": \"2026-08-10T10:00:00.000Z\",\n      \"updatedAt\": \"2026-08-10T10:00:00.000Z\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
           "name": "Upload My Profile Photo",
           "request": {
             "method": "POST",
@@ -2670,6 +2702,51 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"data\": [\n    {\n      \"id\": \"d0e1f2a3-9b0c-1d2e-3f4a-5b6c7d8e9f0a\",\n      \"memberId\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n      \"eventId\": \"d4e5f6a7-3b4c-5d6e-7f8a-9b0c1d2e3f4a\",\n      \"slotId\": \"e5f6a7b8-4c5d-6e7f-8a9b-0c1d2e3f4a5b\",\n      \"type\": \"IN_PERSON\",\n      \"checkedInAt\": \"2026-06-15T08:32:00.000Z\",\n      \"isLate\": false\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Email Attendance History Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendances/export-email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "export-email"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientEmail\": \"\",\n  \"memberId\": \"\",\n  \"slotId\": \"\",\n  \"status\": \"\",\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\",\n  \"search\": \"\"\n}"
+            },
+            "description": "Email the currently-filtered attendance history as an .xlsx attachment. All body fields are optional \u2014 recipientEmail defaults to the requesting admin's own email, and the remaining filters match the same query params as All Attendance History (Admin). One-off export only, not a recurring/scheduled report."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{}"
             },
             {
               "name": "401 Unauthorized",
@@ -7792,6 +7869,37 @@
               "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Invalid note data\"\n}"
             }
           ]
+        },
+        {
+          "name": "Create Baptism Note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"baptism\",\n  \"personName\": \"David Osei\",\n  \"baptismDate\": \"2026-08-10\",\n  \"memberId\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes"
+              ]
+            },
+            "description": "memberId is optional \u2014 when provided, this baptism record becomes visible on that member's own profile via GET members/me/milestones."
+          }
         },
         {
           "name": "Get Notes by Type",
@@ -17456,6 +17564,51 @@
           ]
         },
         {
+          "name": "Email Headcount Report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/service-headcount/export-email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-headcount",
+                "export-email"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipientEmail\": \"\",\n  \"serviceSlotId\": \"\",\n  \"from\": \"\",\n  \"to\": \"\"\n}"
+            },
+            "description": "Email the currently-filtered headcount rows as an .xlsx attachment. All body fields are optional \u2014 recipientEmail defaults to the requesting admin's own email, and the date/slot filters match the same query params as List Headcounts. One-off export only, not a recurring/scheduled report."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{}"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
           "name": "Get Headcount Trends",
           "request": {
             "method": "GET",
@@ -18149,6 +18302,110 @@
             }
           ],
           "name": "Get sermon"
+        },
+        {
+          "name": "Get my sermon note",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sermons/{{sermon_id}}/note",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sermons",
+                "{{sermon_id}}",
+                "note"
+              ]
+            },
+            "description": "Get the requesting member's own private note for this sermon. Returns null if none exists yet. Own data only \u2014 no admin visibility."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"id\": \"f1a2b3c4-5d6e-7f8a-9b0c-1d2e3f4a5b6c\",\n    \"note\": \"Great message on faith and patience.\",\n    \"createdAt\": \"2026-06-15T10:30:00.000Z\",\n    \"updatedAt\": \"2026-06-15T10:30:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Save my sermon note",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sermons/{{sermon_id}}/note",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sermons",
+                "{{sermon_id}}",
+                "note"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Great message on faith and patience.\"\n}"
+            },
+            "description": "Create or update the requesting member's note for this sermon. Upsert \u2014 one editable note per member per sermon, not a multi-entry thread."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"id\": \"f1a2b3c4-5d6e-7f8a-9b0c-1d2e3f4a5b6c\",\n    \"note\": \"Great message on faith and patience.\",\n    \"createdAt\": \"2026-06-15T10:30:00.000Z\",\n    \"updatedAt\": \"2026-06-15T10:30:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete my sermon note",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sermons/{{sermon_id}}/note",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sermons",
+                "{{sermon_id}}",
+                "note"
+              ]
+            },
+            "description": "Delete the requesting member's note for this sermon."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            }
+          ]
         }
       ]
     },
@@ -19226,6 +19483,824 @@
             }
           ],
           "name": "Get leaderboard"
+        }
+      ]
+    },
+    {
+      "name": "Service Ratings (Member)",
+      "item": [
+        {
+          "name": "Submit or Update My Rating",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventId\": \"{{event_id}}\",\n  \"serviceSlotId\": \"{{service_slot_id}}\",\n  \"rating\": 5,\n  \"comment\": \"Really blessed by today's message.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/service-ratings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-ratings"
+              ]
+            },
+            "description": "Upsert \u2014 submitting again for the same event+serviceSlot edits the existing rating instead of creating a duplicate."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"data\": {\n    \"id\": \"c1a2b3c4-5d6e-7f8a-9b0c-1d2e3f4a5b6c\",\n    \"rating\": 5,\n    \"comment\": \"Really blessed by today's message.\",\n    \"createdAt\": \"2026-06-15T12:00:00.000Z\",\n    \"updatedAt\": \"2026-06-15T12:00:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get My Rating",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/service-ratings/mine?eventId={{event_id}}&serviceSlotId={{service_slot_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "service-ratings",
+                "mine"
+              ],
+              "query": [
+                {
+                  "key": "eventId",
+                  "value": "{{event_id}}"
+                },
+                {
+                  "key": "serviceSlotId",
+                  "value": "{{service_slot_id}}"
+                }
+              ]
+            },
+            "description": "Returns null if the requesting member hasn't rated this service yet."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Service Ratings (Admin)",
+      "item": [
+        {
+          "name": "Get Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/service-ratings/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "service-ratings",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "eventId",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Requires SERVICE_RATING_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"averageRating\": 4.6,\n    \"totalRatings\": 42,\n    \"distribution\": { \"1\": 0, \"2\": 1, \"3\": 2, \"4\": 12, \"5\": 27 }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Comments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/service-ratings/comments?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "service-ratings",
+                "comments"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Requires SERVICE_RATING_READ. member is null in the response unless the requesting admin's role also has SERVICE_RATING_MODERATE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"data\": [\n      {\n        \"id\": \"c1a2b3c4-5d6e-7f8a-9b0c-1d2e3f4a5b6c\",\n        \"rating\": 5,\n        \"comment\": \"Really blessed by today's message.\",\n        \"createdAt\": \"2026-06-15T12:00:00.000Z\",\n        \"serviceSlotName\": \"First Service\",\n        \"eventName\": \"Sunday Service\",\n        \"member\": null\n      }\n    ],\n    \"page\": 1,\n    \"limit\": 20,\n    \"totalCount\": 1,\n    \"totalPages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Moderate Delete",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/service-ratings/{{service_rating_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "service-ratings",
+                "{{service_rating_id}}"
+              ]
+            },
+            "description": "Requires SERVICE_RATING_MODERATE. Deletes/hides a rating and logs SERVICE_RATING_MODERATED."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Volunteering (Member)",
+      "item": [
+        {
+          "name": "List Open Opportunities",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/volunteer-opportunities?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "volunteer-opportunities"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Open, upcoming opportunities only. Each row includes mySignupStatus for the requesting member."
+          }
+        },
+        {
+          "name": "Sign Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/volunteer-opportunities/{{opportunity_id}}/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "volunteer-opportunities",
+                "{{opportunity_id}}",
+                "signup"
+              ]
+            },
+            "description": "Upsert \u2014 re-signing up after cancelling re-confirms the same row. 400 if the opportunity is not OPEN or is at capacity."
+          }
+        },
+        {
+          "name": "Cancel My Sign-Up",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/volunteer-opportunities/{{opportunity_id}}/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "volunteer-opportunities",
+                "{{opportunity_id}}",
+                "signup"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Volunteering (Admin)",
+      "item": [
+        {
+          "name": "Create Opportunity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Ushering Team \u2014 Sunday Service\",\n  \"description\": \"Help welcome and seat members at the 9am service.\",\n  \"departmentId\": \"\",\n  \"date\": \"2026-08-02T08:00:00.000Z\",\n  \"capacity\": 6\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/volunteer-opportunities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "volunteer-opportunities"
+              ]
+            },
+            "description": "capacity is optional \u2014 omit for unlimited sign-ups."
+          }
+        },
+        {
+          "name": "List Opportunities",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/volunteer-opportunities?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "volunteer-opportunities"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Opportunity",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"capacity\": 8\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/volunteer-opportunities/{{opportunity_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "volunteer-opportunities",
+                "{{opportunity_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel Opportunity",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/volunteer-opportunities/{{opportunity_id}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "volunteer-opportunities",
+                "{{opportunity_id}}",
+                "cancel"
+              ]
+            },
+            "description": "Sets status to CANCELLED. No hard delete exists for opportunities."
+          }
+        },
+        {
+          "name": "Get Roster",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/volunteer-opportunities/{{opportunity_id}}/signups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "volunteer-opportunities",
+                "{{opportunity_id}}",
+                "signups"
+              ]
+            },
+            "description": "CONFIRMED signups only, with member names."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fellowships (Member)",
+      "item": [
+        {
+          "name": "Browse Groups",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/small-groups?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Each row includes memberCount, not the full roster."
+          }
+        },
+        {
+          "name": "My Groups",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/small-groups/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups",
+                "mine"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Group Members",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/small-groups/{{group_id}}/members",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups",
+                "{{group_id}}",
+                "members"
+              ]
+            },
+            "description": "403 unless the caller is currently a member of this group."
+          }
+        },
+        {
+          "name": "Join Group",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/small-groups/{{group_id}}/join",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups",
+                "{{group_id}}",
+                "join"
+              ]
+            },
+            "description": "Self-service, no approval step. Safe to call again if already joined."
+          }
+        },
+        {
+          "name": "Leave Group",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/small-groups/{{group_id}}/leave",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups",
+                "{{group_id}}",
+                "leave"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Record Attendance (Leader Only)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"meetingDate\": \"2026-06-18\",\n  \"records\": [\n    { \"memberId\": \"{{member_id}}\", \"status\": \"PRESENT\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/small-groups/{{group_id}}/attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups",
+                "{{group_id}}",
+                "attendance"
+              ]
+            },
+            "description": "403 unless the caller is this group's leader. Re-recording the same meetingDate for a member edits that row in place."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Fellowships (Admin)",
+      "item": [
+        {
+          "name": "Create Group",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Westside Cell\",\n  \"description\": \"Weekly home fellowship on the west side.\",\n  \"leaderId\": \"\",\n  \"meetingDay\": \"Wednesday\",\n  \"meetingLocation\": \"12 Ronke Street\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Groups",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Group",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leaderId\": \"{{member_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups",
+                "{{group_id}}"
+              ]
+            },
+            "description": "leaderId: null explicitly unassigns the leader."
+          }
+        },
+        {
+          "name": "Delete Group",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups",
+                "{{group_id}}"
+              ]
+            },
+            "description": "Hard delete \u2014 removes membership and attendance history too (CASCADE). Unlike Volunteer Opportunities, there is no cancel-only state."
+          }
+        },
+        {
+          "name": "Get Roster",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/members",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups",
+                "{{group_id}}",
+                "members"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Member",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/members/{{member_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups",
+                "{{group_id}}",
+                "members",
+                "{{member_id}}"
+              ]
+            },
+            "description": "Admin-forced removal; logs SMALL_GROUP_MEMBER_REMOVED."
+          }
+        },
+        {
+          "name": "Get Attendance History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "small-groups",
+                "{{group_id}}",
+                "attendance"
+              ]
+            }
+          }
         }
       ]
     },

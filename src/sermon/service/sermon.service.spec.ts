@@ -15,6 +15,7 @@ jest.mock('../../utility/service/sanitization.service', () => ({
 
 import { SermonService } from './sermon.service';
 import { Sermon } from '../entity/sermon.entity';
+import { SermonNote } from '../entity/sermon-note.entity';
 import { LivePlatformEnum } from '../enum/live-platform.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { AnnouncementService } from '../../announcement/service/announcement.service';
@@ -27,6 +28,13 @@ const mockSermonRepo = {
   remove: jest.fn(),
   findOne: jest.fn(),
   findAndCount: jest.fn(),
+};
+
+const mockSermonNoteRepo = {
+  create: jest.fn(),
+  save: jest.fn(),
+  findOne: jest.fn(),
+  delete: jest.fn(),
 };
 
 const mockAuditLogService = {
@@ -46,6 +54,10 @@ describe('SermonService', () => {
       providers: [
         SermonService,
         { provide: getRepositoryToken(Sermon), useValue: mockSermonRepo },
+        {
+          provide: getRepositoryToken(SermonNote),
+          useValue: mockSermonNoteRepo,
+        },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: AnnouncementService, useValue: mockAnnouncementService },
       ],
@@ -201,6 +213,78 @@ describe('SermonService', () => {
       expect(
         mockAnnouncementService.createSystemAnnouncement,
       ).toHaveBeenCalledWith('Custom Title', expect.any(String), 'admin-1');
+    });
+  });
+
+  describe('getMyNote', () => {
+    it('throws NotFoundException when the sermon does not exist', async () => {
+      mockSermonRepo.findOne.mockResolvedValue(null);
+      await expect(service.getMyNote('missing', 'member-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('returns null when the member has no note for this sermon', async () => {
+      mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
+      mockSermonNoteRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getMyNote('sermon-1', 'member-1');
+      expect(result).toBeNull();
+    });
+
+    it('returns the existing note when one exists', async () => {
+      mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
+      const note = { id: 'note-1', note: 'Great message' };
+      mockSermonNoteRepo.findOne.mockResolvedValue(note);
+
+      const result = await service.getMyNote('sermon-1', 'member-1');
+      expect(result).toBe(note);
+    });
+  });
+
+  describe('upsertMyNote', () => {
+    it('creates a new note when none exists yet', async () => {
+      mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
+      mockSermonNoteRepo.findOne.mockResolvedValue(null);
+      const created = { note: 'My thoughts' };
+      mockSermonNoteRepo.create.mockReturnValue(created);
+      mockSermonNoteRepo.save.mockResolvedValue({ id: 'note-1', ...created });
+
+      const result = await service.upsertMyNote('sermon-1', 'member-1', {
+        note: 'My thoughts',
+      });
+
+      expect(mockSermonNoteRepo.create).toHaveBeenCalledWith({
+        sermon: { id: 'sermon-1' },
+        member: { id: 'member-1' },
+        note: 'My thoughts',
+      });
+      expect(result).toEqual({ id: 'note-1', note: 'My thoughts' });
+    });
+
+    it('edits the existing note in place instead of creating a duplicate', async () => {
+      mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
+      const existing = { id: 'note-1', note: 'Old note' };
+      mockSermonNoteRepo.findOne.mockResolvedValue(existing);
+      mockSermonNoteRepo.save.mockImplementation((n) => Promise.resolve(n));
+
+      const result = await service.upsertMyNote('sermon-1', 'member-1', {
+        note: 'Updated note',
+      });
+
+      expect(mockSermonNoteRepo.create).not.toHaveBeenCalled();
+      expect(result.note).toBe('Updated note');
+    });
+  });
+
+  describe('deleteMyNote', () => {
+    it('deletes the note scoped to the sermon and member', async () => {
+      await service.deleteMyNote('sermon-1', 'member-1');
+
+      expect(mockSermonNoteRepo.delete).toHaveBeenCalledWith({
+        sermon: { id: 'sermon-1' },
+        member: { id: 'member-1' },
+      });
     });
   });
 });

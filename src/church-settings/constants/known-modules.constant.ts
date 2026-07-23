@@ -23,6 +23,9 @@ export const KNOWN_MODULES = [
   { key: 'announcements', moduleName: 'Announcements', required: false },
   { key: 'sermons', moduleName: 'Sermon Archive', required: false },
   { key: 'games', moduleName: 'Games', required: false },
+  { key: 'service_ratings', moduleName: 'Service Ratings', required: false },
+  { key: 'volunteering', moduleName: 'Volunteering', required: false },
+  { key: 'small_groups', moduleName: 'Fellowships', required: false },
 ] as const;
 
 export type KnownModuleKey = (typeof KNOWN_MODULES)[number]['key'];

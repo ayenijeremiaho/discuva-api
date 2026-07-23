@@ -60,6 +60,12 @@ export enum AdminPermission {
   SERMON_WRITE = 'sermon:write',
   GAMES_READ = 'games:read',
   GAMES_WRITE = 'games:write',
+  SERVICE_RATING_READ = 'service_rating:read',
+  SERVICE_RATING_MODERATE = 'service_rating:moderate',
+  VOLUNTEER_READ = 'volunteer:read',
+  VOLUNTEER_WRITE = 'volunteer:write',
+  SMALL_GROUP_READ = 'small_group:read',
+  SMALL_GROUP_WRITE = 'small_group:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -124,6 +130,12 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.SERMON_WRITE]: 'Manage Sermon Archive',
   [AdminPermission.GAMES_READ]: 'View Games',
   [AdminPermission.GAMES_WRITE]: 'Manage Games',
+  [AdminPermission.SERVICE_RATING_READ]: 'View Service Ratings',
+  [AdminPermission.SERVICE_RATING_MODERATE]: 'Moderate Service Ratings',
+  [AdminPermission.VOLUNTEER_READ]: 'View Volunteer Opportunities',
+  [AdminPermission.VOLUNTEER_WRITE]: 'Manage Volunteer Opportunities',
+  [AdminPermission.SMALL_GROUP_READ]: 'View Fellowships',
+  [AdminPermission.SMALL_GROUP_WRITE]: 'Manage Fellowships',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -242,6 +254,18 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View games, questions, sessions, and leaderboards',
   [AdminPermission.GAMES_WRITE]:
     'Create and edit games and questions, and start/control/end live game sessions',
+  [AdminPermission.SERVICE_RATING_READ]:
+    'View aggregate service ratings and the anonymized comment feed',
+  [AdminPermission.SERVICE_RATING_MODERATE]:
+    'Reveal the member identity behind a rating comment and delete/hide it',
+  [AdminPermission.VOLUNTEER_READ]:
+    'View volunteer opportunities and their sign-up rosters',
+  [AdminPermission.VOLUNTEER_WRITE]:
+    'Create, edit, and cancel volunteer opportunities',
+  [AdminPermission.SMALL_GROUP_READ]:
+    'View fellowships, rosters, and attendance history',
+  [AdminPermission.SMALL_GROUP_WRITE]:
+    'Create, edit, and delete fellowships; assign leaders; remove members',
 };
 
 export interface AdminPermissionGroupItem {
@@ -411,6 +435,24 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'Games',
     [AdminPermission.GAMES_READ, AdminPermission.GAMES_WRITE],
     'games',
+  ),
+  buildGroup(
+    'Service Ratings',
+    [
+      AdminPermission.SERVICE_RATING_READ,
+      AdminPermission.SERVICE_RATING_MODERATE,
+    ],
+    'service_ratings',
+  ),
+  buildGroup(
+    'Volunteering',
+    [AdminPermission.VOLUNTEER_READ, AdminPermission.VOLUNTEER_WRITE],
+    'volunteering',
+  ),
+  buildGroup(
+    'Fellowships',
+    [AdminPermission.SMALL_GROUP_READ, AdminPermission.SMALL_GROUP_WRITE],
+    'small_groups',
   ),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,

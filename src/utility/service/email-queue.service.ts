@@ -141,6 +141,8 @@ export class EmailQueueService {
       [EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT]:
         'EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED',
       [EmailCategory.PASTOR_FEEDBACK]: 'EMAIL_PASTOR_FEEDBACK_ENABLED',
+      [EmailCategory.MEMBERSHIP_ANNIVERSARY]:
+        'EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED',
     };
     return this.config.get<boolean>(flagMap[category]) !== false;
   }

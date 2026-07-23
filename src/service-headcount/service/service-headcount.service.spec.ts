@@ -5,6 +5,9 @@ import { ServiceHeadcountService } from './service-headcount.service';
 import { ServiceHeadcount } from '../entity/service-headcount.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { CacheService } from '../../utility/service/cache.service';
+import { ExcelService } from '../../utility/service/excel.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -14,6 +17,18 @@ const mockCacheService = {
     .fn()
     .mockImplementation((_key: string, fn: () => Promise<unknown>) => fn()),
   flushNamespace: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockExcelService = {
+  buildWorkbook: jest.fn().mockResolvedValue(Buffer.from('xlsx')),
+};
+
+const mockEmailQueueService = {
+  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
+};
+
+const mockAuditLogService = {
+  log: jest.fn(),
 };
 
 const mockHeadcountRepo = {
@@ -31,7 +46,7 @@ const mockServiceSlotRepo = {
 
 const mockAdmin = {
   id: 'admin-1',
-  member: { firstname: 'Ada', lastname: 'Admin' },
+  member: { firstname: 'Ada', lastname: 'Admin', email: 'ada@example.com' },
 };
 
 const mockSlot = {
@@ -75,6 +90,9 @@ describe('ServiceHeadcountService', () => {
       providers: [
         ServiceHeadcountService,
         { provide: CacheService, useValue: mockCacheService },
+        { provide: ExcelService, useValue: mockExcelService },
+        { provide: EmailQueueService, useValue: mockEmailQueueService },
+        { provide: AuditLogService, useValue: mockAuditLogService },
         {
           provide: getRepositoryToken(ServiceHeadcount),
           useValue: mockHeadcountRepo,
@@ -251,6 +269,65 @@ describe('ServiceHeadcountService', () => {
       expect(qbMock.andWhere).toHaveBeenCalledWith('slot.startTime >= :from', {
         from: new Date('2020-01-01'),
       });
+    });
+  });
+
+  // ── emailExport ───────────────────────────────────────────────────────────
+
+  describe('emailExport', () => {
+    it('builds a workbook from the filtered rows and emails it to the requesting admin by default', async () => {
+      await service.emailExport({}, mockAdmin as any);
+
+      expect(mockExcelService.buildWorkbook).toHaveBeenCalledWith(
+        'Service Headcount',
+        expect.any(Array),
+        [
+          expect.objectContaining({
+            serviceSlotName: 'First Service',
+            total: 285,
+          }),
+        ],
+      );
+      expect(
+        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        'ada@example.com',
+        expect.any(String),
+        'report-export',
+        expect.objectContaining({ reportTitle: 'Service Headcount' }),
+        [{ filename: 'service-headcount.xlsx', content: Buffer.from('xlsx') }],
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'REPORT_EXPORTED',
+        expect.objectContaining({
+          actorId: 'admin-1',
+          targetEmail: 'ada@example.com',
+        }),
+      );
+    });
+
+    it('throws BadRequestException when the admin has no linked member and no recipientEmail is given', async () => {
+      await expect(
+        service.emailExport({}, { id: 'admin-2', member: null } as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockExcelService.buildWorkbook).not.toHaveBeenCalled();
+    });
+
+    it('emails the explicitly provided recipient instead of the admin when given', async () => {
+      await service.emailExport(
+        { recipientEmail: 'other@example.com' },
+        mockAdmin as any,
+      );
+
+      expect(
+        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        'other@example.com',
+        expect.any(String),
+        'report-export',
+        expect.anything(),
+        expect.anything(),
+      );
     });
   });
 });

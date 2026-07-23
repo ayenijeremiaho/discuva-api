@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -18,6 +20,7 @@ import {
   ServiceHeadcountService,
 } from '../service/service-headcount.service';
 import { CreateServiceHeadcountDto } from '../dto/create-service-headcount.dto';
+import { ExportHeadcountEmailDto } from '../dto/export-headcount-email.dto';
 
 @Controller('service-headcount')
 @UseGuards(AdminGuard)
@@ -46,6 +49,16 @@ export class ServiceHeadcountController {
       from,
       to,
     );
+  }
+
+  @Post('export-email')
+  @HttpCode(HttpStatus.OK)
+  @RequiresPermission(AdminPermission.HEADCOUNT_READ)
+  emailExport(
+    @Body() dto: ExportHeadcountEmailDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.headcountSvc.emailExport(dto, admin);
   }
 
   @Get('trends')

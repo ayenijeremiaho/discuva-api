@@ -36,6 +36,12 @@ import { CacheService } from '../../utility/service/cache.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { ExcelService } from '../../utility/service/excel.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { ExportAttendanceEmailDto } from '../dto/export-attendance-email.dto';
+import { Admin } from '../../admin/entity/admin.entity';
+
+const MAX_EXPORT_ROWS = 5000;
 
 export interface DepartmentAttendanceSummary {
   departmentId: string;
@@ -94,6 +100,8 @@ export class AttendanceService {
     @InjectRepository(ServiceSlot)
     private readonly slotRepository: Repository<ServiceSlot>,
     private readonly auditLogService: AuditLogService,
+    private readonly excelService: ExcelService,
+    private readonly emailQueueService: EmailQueueService,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -303,18 +311,14 @@ export class AttendanceService {
     return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
-  async getAllHistory(
-    page = 1,
-    limit = 10,
+  private buildHistoryQb(
     memberId?: string,
     slotId?: string,
     status?: AttendanceStatusEnum,
     dateFrom?: string,
     dateTo?: string,
     search?: string,
-  ): Promise<PaginationResponseDto<Attendance>> {
-    if (page < 1) throw new BadRequestException('Page must be greater than 0');
-
+  ) {
     const qb = this.attendanceRepository
       .createQueryBuilder('attendance')
       .leftJoinAndSelect('attendance.event', 'event')
@@ -322,9 +326,7 @@ export class AttendanceService {
       .leftJoinAndSelect('member.workerProfile', 'profile')
       .leftJoinAndSelect('profile.department', 'department')
       .leftJoinAndSelect('attendance.serviceSlot', 'slot')
-      .orderBy('attendance.createdAt', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit);
+      .orderBy('attendance.createdAt', 'DESC');
 
     if (memberId) qb.andWhere('member.id = :memberId', { memberId });
     if (slotId) qb.andWhere('slot.id = :slotId', { slotId });
@@ -343,8 +345,102 @@ export class AttendanceService {
         { search: `%${search}%` },
       );
 
-    const [data, total] = await qb.getManyAndCount();
+    return qb;
+  }
+
+  async getAllHistory(
+    page = 1,
+    limit = 10,
+    memberId?: string,
+    slotId?: string,
+    status?: AttendanceStatusEnum,
+    dateFrom?: string,
+    dateTo?: string,
+    search?: string,
+  ): Promise<PaginationResponseDto<Attendance>> {
+    if (page < 1) throw new BadRequestException('Page must be greater than 0');
+
+    const [data, total] = await this.buildHistoryQb(
+      memberId,
+      slotId,
+      status,
+      dateFrom,
+      dateTo,
+      search,
+    )
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
     return UtilityService.createPaginationResponse(data, page, limit, total);
+  }
+
+  async emailExportHistory(
+    dto: ExportAttendanceEmailDto,
+    admin: Admin,
+  ): Promise<void> {
+    const recipient = dto.recipientEmail ?? admin.member?.email;
+    if (!recipient) {
+      throw new BadRequestException(
+        'No recipient email available — provide recipientEmail explicitly.',
+      );
+    }
+
+    const records = await this.buildHistoryQb(
+      dto.memberId,
+      dto.slotId,
+      dto.status,
+      dto.dateFrom,
+      dto.dateTo,
+      dto.search,
+    )
+      .take(MAX_EXPORT_ROWS)
+      .getMany();
+
+    const rows = records.map((r) => ({
+      member: `${r.member?.firstname ?? ''} ${r.member?.lastname ?? ''}`.trim(),
+      department: r.member?.workerProfile?.department?.name ?? '',
+      service: r.serviceSlot?.name ?? '',
+      status: r.status,
+      checkinTime: r.checkinTime ? r.checkinTime.toISOString() : '',
+    }));
+
+    const buffer = await this.excelService.buildWorkbook(
+      'Attendance History',
+      [
+        { header: 'Member', key: 'member', width: 28 },
+        { header: 'Department', key: 'department', width: 22 },
+        { header: 'Service', key: 'service', width: 24 },
+        { header: 'Status', key: 'status', width: 14 },
+        { header: 'Check-in Time', key: 'checkinTime', width: 24 },
+      ],
+      rows,
+    );
+
+    const filterSummary = [
+      dto.dateFrom ? `from ${dto.dateFrom}` : null,
+      dto.dateTo ? `to ${dto.dateTo}` : null,
+      dto.status ? `status ${dto.status}` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    await this.emailQueueService.queueEmailWithTemplateAndAttachments(
+      recipient,
+      'Your Attendance History Report',
+      'report-export',
+      {
+        reportTitle: 'Attendance History',
+        generatedAt: new Date().toLocaleString(),
+        filterSummary: filterSummary || null,
+      },
+      [{ filename: 'attendance-history.xlsx', content: buffer }],
+    );
+
+    this.auditLogService.log('REPORT_EXPORTED', {
+      actorId: admin.id,
+      targetEmail: recipient,
+      metadata: { report: 'attendance-history' },
+    });
   }
 
   async getDepartmentHistory(

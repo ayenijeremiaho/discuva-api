@@ -23,6 +23,8 @@ import { DepartmentAccessService } from '../../department/service/department-acc
 import { DateService } from '../../utility/service/date.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { ExcelService } from '../../utility/service/excel.service';
+import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { getQueueToken } from '@nestjs/bull';
@@ -106,6 +108,14 @@ const mockDepartmentService = {
 };
 
 const mockAuditLogService = { log: jest.fn() };
+
+const mockExcelService = {
+  buildWorkbook: jest.fn().mockResolvedValue(Buffer.from('xlsx')),
+};
+
+const mockEmailQueueService = {
+  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
+};
 
 const mockDepartmentAccessService = {
   hasDepartmentAccessKey: jest.fn(),
@@ -194,6 +204,8 @@ describe('AttendanceService', () => {
           useValue: mockFollowUpQueue,
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ExcelService, useValue: mockExcelService },
+        { provide: EmailQueueService, useValue: mockEmailQueueService },
       ],
     }).compile();
 
@@ -1221,6 +1233,89 @@ describe('AttendanceService', () => {
       );
 
       expect(result).toBe(80);
+    });
+  });
+
+  describe('emailExportHistory', () => {
+    const mockAdmin = {
+      id: 'admin-1',
+      member: { firstname: 'Ada', lastname: 'Admin', email: 'ada@example.com' },
+    } as any;
+
+    it('throws BadRequestException when the admin has no linked member and no recipientEmail is given', async () => {
+      await expect(
+        service.emailExportHistory({}, { id: 'admin-2', member: null } as any),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockExcelService.buildWorkbook).not.toHaveBeenCalled();
+    });
+
+    it('builds a workbook from the filtered history and emails it to the requesting admin by default', async () => {
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([
+        {
+          member: { firstname: 'John', lastname: 'Doe', workerProfile: null },
+          serviceSlot: { name: 'First Service' },
+          status: AttendanceStatusEnum.PRESENT,
+          checkinTime: new Date('2026-06-15T08:00:00Z'),
+        },
+      ]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.emailExportHistory({}, mockAdmin);
+
+      expect(mockExcelService.buildWorkbook).toHaveBeenCalledWith(
+        'Attendance History',
+        expect.any(Array),
+        [
+          expect.objectContaining({
+            member: 'John Doe',
+            service: 'First Service',
+            status: AttendanceStatusEnum.PRESENT,
+          }),
+        ],
+      );
+      expect(
+        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        'ada@example.com',
+        expect.any(String),
+        'report-export',
+        expect.objectContaining({ reportTitle: 'Attendance History' }),
+        [
+          {
+            filename: 'attendance-history.xlsx',
+            content: Buffer.from('xlsx'),
+          },
+        ],
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'REPORT_EXPORTED',
+        expect.objectContaining({
+          actorId: 'admin-1',
+          targetEmail: 'ada@example.com',
+        }),
+      );
+    });
+
+    it('emails the explicitly provided recipient instead of the admin when given', async () => {
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.emailExportHistory(
+        { recipientEmail: 'other@example.com' },
+        mockAdmin,
+      );
+
+      expect(
+        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
+      ).toHaveBeenCalledWith(
+        'other@example.com',
+        expect.any(String),
+        'report-export',
+        expect.anything(),
+        expect.anything(),
+      );
     });
   });
 

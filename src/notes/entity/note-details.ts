@@ -20,3 +20,9 @@ export class MarriageDetails {
   wifeName: string;
   weddingDate: Date;
 }
+
+export class BaptismDetails {
+  type: NoteTypeEnum.BAPTISM;
+  personName: string;
+  baptismDate: Date;
+}
