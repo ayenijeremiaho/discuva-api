@@ -1,26 +1,50 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
-import { PlatformAdminAuth } from '../interface/platform-admin-auth.interface';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
+import * as argon2 from 'argon2';
+import { PlatformAdmin } from '../entity/platform-admin.entity';
+import {
+  PlatformAdminAuth,
+  PlatformAdminJwtPayload,
+} from '../interface/platform-admin-auth.interface';
 
-/**
- * Scaffolding only — see MULTI_TENANT_MIGRATION.md §4.10/§9 Phase 5. Real
- * implementation needs the `public.platform_admins` table (§4.1, created
- * once Phase 1's tenant infrastructure lands) and a repository here instead
- * of these stubs.
- */
 @Injectable()
 export class PlatformAdminAuthService {
-  async validateById(_id: string): Promise<PlatformAdminAuth> {
-    throw new NotImplementedException(
-      'PlatformAdminAuthService is scaffolding — see MULTI_TENANT_MIGRATION.md §4.10',
-    );
+  constructor(
+    @InjectRepository(PlatformAdmin)
+    private readonly platformAdminRepo: Repository<PlatformAdmin>,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  async validateById(id: string): Promise<PlatformAdminAuth> {
+    const admin = await this.platformAdminRepo.findOneBy({
+      id,
+      isActive: true,
+    });
+    if (!admin) throw new UnauthorizedException();
+    return { id: admin.id, email: admin.email, role: 'platform_admin' };
   }
 
   async login(
-    _email: string,
-    _password: string,
+    email: string,
+    password: string,
   ): Promise<{ accessToken: string }> {
-    throw new NotImplementedException(
-      'PlatformAdminAuthService is scaffolding — see MULTI_TENANT_MIGRATION.md §4.10',
-    );
+    const admin = await this.platformAdminRepo
+      .createQueryBuilder('admin')
+      .addSelect('admin.passwordHash')
+      .where('admin.email = :email', { email: email.toLowerCase().trim() })
+      .andWhere('admin.isActive = true')
+      .getOne();
+
+    if (!admin || !(await argon2.verify(admin.passwordHash, password))) {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    const payload: PlatformAdminJwtPayload = {
+      sub: admin.id,
+      role: 'platform_admin',
+    };
+    return { accessToken: await this.jwtService.signAsync(payload) };
   }
 }

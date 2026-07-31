@@ -60,6 +60,7 @@ import { SmsModule } from './sms/sms.module';
 import { EvangelismModule } from './evangelism/evangelism.module';
 import { BillingModule } from './billing/billing.module';
 import { TenantModule } from './tenant/tenant.module';
+import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 
 @Module({
   imports: [
@@ -208,6 +209,7 @@ import { TenantModule } from './tenant/tenant.module';
     AdminModule,
     BillingModule,
     TenantModule,
+    PlatformAdminModule,
     EnumsModule,
     TitheModule,
     FinanceRequestModule,
