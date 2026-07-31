@@ -4092,6 +4092,16 @@ callbacks (`GET`/`POST /integrations/youtube/callback`) are decorated `@Public()
 token, so the global `JwtAuthGuard` would 401 them before their own signature verification (HMAC / `X-Hub-Signature`)
 ever runs. `@Public()` only opts a route out of JWT auth — it does not skip the handler's own signature check.
 
+**Migration history was squashed (2026-07-31):** the 107 incremental migrations that had accumulated since the
+project's first commit were replaced with a single `src/migrations/1790553600000-Baseline.ts`, generated via
+`pg_dump --schema-only` (plus a `--data-only` dump of the static reference tables: `admin_roles`, `class_types`,
+`prayer_programs`, `prayer_schedule_rules`) against a database that had every prior migration applied. The baseline
+was verified to produce a byte-identical schema and seed dataset before the switch. The original files are kept in
+`src/migrations/legacy/` for historical reference — that folder is outside the glob TypeORM scans
+(`src/data-source.ts`'s `migrations` path is non-recursive), so they no longer run. This was a pre-production
+one-time cleanup; per [`CLAUDE.md`](../CLAUDE.md), no migration is ever edited or re-squashed after it has shipped
+to a real environment.
+
 ### Runtime
 
 | Variable       | Default        | Description                                  |
