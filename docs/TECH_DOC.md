@@ -3401,6 +3401,50 @@ cancel-don't-delete one.
 
 ---
 
+### Platform Admin (Control Plane)
+
+The SaaS control plane for the multi-tenant/freemium platform — see `docs/MULTI_TENANT_MIGRATION.md` for the full
+design. Entirely separate from everything else in this document: it operates on `public` schema tables
+(`tenants`, `platform_admins`, `plans`, `subscriptions`, `communication_providers`,
+`tenant_communication_provider_configs`, `sms_wallets`) that describe *tenants themselves*, never a tenant's own
+business data, and authenticates against a completely disjoint identity system (`PlatformAdmin`, not `Member`/`Admin`).
+
+**Auth:** `PlatformAdminGuard` (validates the `platform-admin-jwt` Passport strategy, signed with
+`PLATFORM_ADMIN_JWT_SECRET` — a different secret from `JWT_SECRET`, so a tenant token can never pass as a platform
+one or vice versa). The whole controller is `@Public()` at the class level — this is load-bearing, not
+decorative: `JwtAuthGuard` is a global `APP_GUARD` that runs on every route regardless of any `@UseGuards()` also
+applied, and a platform admin never has a tenant JWT to satisfy it. `@Public()` skips only that global guard;
+`PlatformAdminGuard` still independently protects every route except login.
+
+**Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant via
+schema-qualified reads — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
+that scales to thousands of tenants without revisiting. **`impersonate`** issues a short-lived, access-token-only
+JWT (no refresh token, no session record) signed directly rather than through the normal admin-login path — see
+the code comment on `PlatformTenantService.impersonateTenant` for why. That token is only actually routable to the
+right tenant schema once `TenantMiddleware` is wired into the live request pipeline (not yet — see
+`docs/MULTI_TENANT_MIGRATION.md` §9 Phase 8).
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken }`. |
+| GET | `/platform/tenants` | List all tenants with plan/subscription status and live member/event counts. |
+| POST | `/platform/tenants` | Provision a new tenant — same `TenantProvisioningService` as self-serve `/signup`. |
+| PATCH | `/platform/tenants/:id` | Update name, logo, currency, timezone. |
+| PATCH | `/platform/tenants/:id/suspend` | `{ suspend?: boolean }`, default `true` — same route handles reactivation via `{ suspend: false }`. |
+| PATCH | `/platform/tenants/:id/plan` | Manually change a tenant's plan — comps, support fixes. Invalidates `PlanGuard`'s cached feature list. |
+| POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
+| GET | `/platform/plans` | List plan tiers. |
+| POST | `/platform/plans` | Create a plan tier. |
+| PATCH | `/platform/plans/:id` | Edit a plan tier's price/currency/features. |
+| GET | `/platform/subscriptions` | List all subscriptions — spot `past_due` churn risk. |
+| GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
+| POST | `/platform/communication-providers` | Register a new provider — `{ id, channel, name }`. |
+| GET | `/platform/tenants/:id/communication-providers` | A tenant's active provider per channel + SMS wallet balance — never the raw encrypted credentials. |
+
+**Routes prefix:** `/platform`
+
+---
+
 ## 6. API Endpoints Quick Reference
 
 > All routes are prefixed with `/v1/` via NestJS URI versioning (`defaultVersion: '1'`). For example, `POST /auth/login` is accessed as `POST /v1/auth/login`. Future endpoint versions can be declared with `@Version('2')` at the controller or method level without affecting existing routes.
@@ -4148,6 +4192,8 @@ loaded correctly before use.
 | `REFRESH_JWT_SECRET`    | — *(required, min 32 chars)* | Refresh token signing secret                 |
 | `REFRESH_JWT_EXPIRY_IN` | `7d`                         | Refresh token expiry                         |
 | `SESSION_MAX_AGE_DAYS`  | `30`                         | Absolute session lifetime in days — refresh rejected after this regardless of rotation |
+| `PLATFORM_ADMIN_JWT_SECRET` | — *(required, min 32 chars)* | Platform-admin token signing secret — deliberately separate from `JWT_SECRET` (§5 Platform Admin) |
+| `PLATFORM_ADMIN_JWT_EXPIRY_IN` | `1h`                  | Platform-admin token expiry |
 
 ### Email
 

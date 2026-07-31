@@ -225,6 +225,21 @@
     {
       "key": "testimonyId",
       "value": ""
+    },
+    {
+      "key": "platformAccessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "platformTenantId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "platformPlanId",
+      "value": "pro",
+      "type": "string"
     }
   ],
   "auth": {
@@ -26197,6 +26212,360 @@
               ]
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Platform Admin",
+      "description": "SaaS control plane for the multi-tenant/freemium platform (see docs/MULTI_TENANT_MIGRATION.md). Entirely separate auth boundary from Member/Worker/Admin - platform admins authenticate against public.platform_admins with their own JWT secret (PLATFORM_ADMIN_JWT_SECRET), never a tenant token. The whole controller is @Public() at the class level so the app's global tenant JwtAuthGuard doesn't reject these routes before PlatformAdminGuard gets a chance to run.",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.accessToken) pm.collectionVariables.set('platformAccessToken', res.data.accessToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@platform.example.com\",\n  \"password\": \"ChangeMe123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "auth", "login"]
+            },
+            "description": "Platform admin login. Returns { accessToken }. Not the same identity system as member/admin login - see public.platform_admins."
+          },
+          "response": []
+        },
+        {
+          "name": "List Tenants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants"]
+            },
+            "description": "List all tenants with plan/subscription status and live member/event counts (schema-qualified reads)."
+          },
+          "response": []
+        },
+        {
+          "name": "Provision Tenant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) pm.collectionVariables.set('platformTenantId', res.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"churchName\": \"Beta Church\",\n  \"subdomain\": \"church-beta\",\n  \"adminFirstname\": \"Admin\",\n  \"adminLastname\": \"User\",\n  \"adminEmail\": \"admin@betachurch.org\",\n  \"adminPassword\": \"Sup3rSecret!\",\n  \"planId\": \"free\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants"]
+            },
+            "description": "Provision a new tenant - same TenantProvisioningService as self-serve POST /signup (platform-admin/support use)."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Tenant",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Beta Church (Renamed)\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants", "{{platformTenantId}}"]
+            },
+            "description": "Update name, logo, currency, or timezone."
+          },
+          "response": []
+        },
+        {
+          "name": "Suspend Tenant",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/suspend",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants", "{{platformTenantId}}", "suspend"]
+            },
+            "description": "Suspends by default. Same route reactivates via { \"suspend\": false }."
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate Tenant",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"suspend\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/suspend",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants", "{{platformTenantId}}", "suspend"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change Tenant Plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"{{platformPlanId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/plan",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants", "{{platformTenantId}}", "plan"]
+            },
+            "description": "Manual plan override (comps, support fixes) - invalidates PlanGuard's cached feature list for this tenant."
+          },
+          "response": []
+        },
+        {
+          "name": "Impersonate Tenant",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/impersonate",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants", "{{platformTenantId}}", "impersonate"]
+            },
+            "description": "Issues a short-lived, access-token-only JWT for that tenant's admin (no refresh token, no session record). Only routable to the right schema once TenantMiddleware is live - see MULTI_TENANT_MIGRATION.md section 9 Phase 8."
+          },
+          "response": []
+        },
+        {
+          "name": "List Plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/plans",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "plans"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/plans",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "plans"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Plan",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"priceCents\": 75000\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/plans/enterprise",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "plans", "enterprise"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/subscriptions",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "subscriptions"]
+            },
+            "description": "Spot past_due churn risk across all tenants."
+          },
+          "response": []
+        },
+        {
+          "name": "List Communication Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/communication-providers",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "communication-providers"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Register Communication Provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"flutterwave-sms\",\n  \"channel\": \"sms\",\n  \"name\": \"Flutterwave SMS\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/communication-providers",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "communication-providers"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tenant Communication Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/communication-providers",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "tenants", "{{platformTenantId}}", "communication-providers"]
+            },
+            "description": "A tenant's active provider per channel + SMS wallet balance - never the raw encrypted credentials."
+          },
+          "response": []
         }
       ]
     }
