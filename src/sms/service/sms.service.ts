@@ -1,10 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  ISmsProvider,
   SMS_PROVIDER,
   SmsBalance,
   SmsEncoding,
   SmsLogEntry,
-  SmsProvider,
   SmsSendResult,
 } from '../interface/sms-provider.interface';
 import { TERMII_MAX_RECIPIENTS_PER_REQUEST } from '../provider/termii-sms.provider';
@@ -32,7 +32,7 @@ function chunk<T>(items: T[], size: number): T[][] {
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
 
-  constructor(@Inject(SMS_PROVIDER) private readonly provider: SmsProvider) {}
+  constructor(@Inject(SMS_PROVIDER) private readonly provider: ISmsProvider) {}
 
   calculateSegments(message: string): SegmentCalculation {
     const characterCount = message.length;

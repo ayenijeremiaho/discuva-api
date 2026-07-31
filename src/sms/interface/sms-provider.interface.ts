@@ -23,7 +23,7 @@ export interface SmsLogEntry {
 // Provider-agnostic contract. Swapping vendors (e.g. away from Termii) means
 // writing a new class that implements this and registering it in SmsModule —
 // no other call site changes.
-export interface SmsProvider {
+export interface ISmsProvider {
   send(
     to: string[],
     message: string,

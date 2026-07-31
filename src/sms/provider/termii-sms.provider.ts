@@ -5,10 +5,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  ISmsProvider,
   SmsBalance,
   SmsEncoding,
   SmsLogEntry,
-  SmsProvider,
   SmsSendResult,
 } from '../interface/sms-provider.interface';
 
@@ -17,7 +17,7 @@ import {
 export const TERMII_MAX_RECIPIENTS_PER_REQUEST = 100;
 
 @Injectable()
-export class TermiiSmsProvider implements SmsProvider {
+export class TermiiSmsProvider implements ISmsProvider {
   private readonly logger = new Logger(TermiiSmsProvider.name);
   private readonly apiKey: string;
   private readonly senderId: string;
