@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ServiceProgramme } from './entity/service-programme.entity';
 import { ServiceProgrammeSlot } from './entity/service-programme-slot.entity';
 import { ServiceSession } from './entity/service-session.entity';
@@ -24,7 +24,7 @@ import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       ServiceProgramme,
       ServiceProgrammeSlot,
       ServiceSession,

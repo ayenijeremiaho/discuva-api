@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { PushSubscription } from './entity/push-subscription.entity';
 import { WorkerProfile } from '../member/entity/worker-profile.entity';
@@ -11,7 +11,7 @@ import { UtilityModule } from '../utility/utility.module';
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PushSubscription, WorkerProfile]),
+    TenantTypeOrmModule.forFeature([PushSubscription, WorkerProfile]),
     BullModule.registerQueue({ name: 'push-notifications' }),
     UtilityModule,
   ],

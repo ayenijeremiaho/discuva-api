@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ServiceHeadcount } from './entity/service-headcount.entity';
 import { ServiceSlot } from '../event/entity/service-slot.entity';
 import { Admin } from '../admin/entity/admin.entity';
@@ -10,7 +10,12 @@ import { ServiceHeadcountController } from './controller/service-headcount.contr
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ServiceHeadcount, ServiceSlot, Admin, AdminRole]),
+    TenantTypeOrmModule.forFeature([
+      ServiceHeadcount,
+      ServiceSlot,
+      Admin,
+      AdminRole,
+    ]),
     UtilityModule,
   ],
   controllers: [ServiceHeadcountController],

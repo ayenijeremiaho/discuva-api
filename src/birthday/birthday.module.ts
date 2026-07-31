@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BirthdayWish } from './entity/birthday-wish.entity';
 import { BirthdayService } from './service/birthday.service';
 import { BirthdayController } from './controller/birthday.controller';
@@ -9,7 +9,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([BirthdayWish]),
+    TenantTypeOrmModule.forFeature([BirthdayWish]),
     MemberModule,
     AnnouncementModule,
     UtilityModule,

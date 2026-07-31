@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { Attendance } from './entity/attendance.entity';
 import { AttendanceService } from './service/attendance.service';
@@ -14,7 +14,7 @@ import { FOLLOW_UP_QUEUE } from '../follow-up/processor/post-event.processor';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Attendance, ServiceSlot]),
+    TenantTypeOrmModule.forFeature([Attendance, ServiceSlot]),
     BullModule.registerQueue({ name: FOLLOW_UP_QUEUE }),
     MemberModule,
     EventModule,
@@ -23,6 +23,6 @@ import { FOLLOW_UP_QUEUE } from '../follow-up/processor/post-event.processor';
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService, AttendanceJobService],
-  exports: [TypeOrmModule, AttendanceService],
+  exports: [TenantTypeOrmModule, AttendanceService],
 })
 export class AttendanceModule {}

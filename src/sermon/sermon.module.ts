@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Sermon } from './entity/sermon.entity';
 import { SermonNote } from './entity/sermon-note.entity';
 import { SermonService } from './service/sermon.service';
@@ -10,7 +10,7 @@ import { AnnouncementModule } from '../announcement/announcement.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Sermon, SermonNote]),
+    TenantTypeOrmModule.forFeature([Sermon, SermonNote]),
     UtilityModule,
     AnnouncementModule,
   ],

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { Fund } from './entity/fund.entity';
 import { AccountingPeriod } from './entity/accounting-period.entity';
@@ -62,7 +62,7 @@ import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       Fund,
       AccountingPeriod,
       Account,
@@ -125,6 +125,6 @@ import { AdminModule } from '../admin/admin.module';
     BankImportProfileController,
     FinanceMemberController,
   ],
-  exports: [TypeOrmModule],
+  exports: [TenantTypeOrmModule],
 })
 export class FinanceModule {}

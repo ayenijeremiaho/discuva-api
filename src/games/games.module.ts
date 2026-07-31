@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Game } from './entity/game.entity';
 import { GameQuestion } from './entity/game-question.entity';
 import { GameSession } from './entity/game-session.entity';
@@ -13,7 +13,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       Game,
       GameQuestion,
       GameSession,

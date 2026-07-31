@@ -64,11 +64,11 @@ import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 
 @Module({
   imports: [
-    // Global CLS context — safe to register ahead of tenant infrastructure
-    // landing: nothing writes tenantId/schemaName into it yet (that's
-    // TenantMiddleware, still unwired — see src/tenant/), so this is purely
-    // an inert AsyncLocalStorage wrapper around each request today. See
-    // docs/MULTI_TENANT_MIGRATION.md §4.2.
+    // Global CLS context — TenantMiddleware (src/tenant/) writes
+    // tenantId/schemaName into it on every tenant-facing request and wraps
+    // the rest of the request in a transaction via TransactionHost below,
+    // with a SET LOCAL search_path scoping all of it to that tenant's
+    // schema. See docs/MULTI_TENANT_MIGRATION.md §4.2/§4.4.
     ClsModule.forRoot({
       global: true,
       middleware: {
@@ -79,14 +79,14 @@ import { PlatformAdminModule } from './platform-admin/platform-admin.module';
         generateId: true,
         idGenerator: () => randomUUID(),
       },
-      // Makes TransactionHost injectable app-wide, for the eventual
-      // per-request "wrap in one transaction, SET LOCAL search_path"
-      // mechanism (docs/MULTI_TENANT_MIGRATION.md §4.4). Registering the
-      // plugin alone does not start transactions anywhere — nothing calls
-      // TransactionHost#withTransaction yet (that's TenantTransactionInterceptor,
-      // still unwired — see src/tenant/), and the adapter's documented
-      // fallback behavior means every existing repository call keeps using
-      // the plain (non-transactional) manager exactly as it does today.
+      // Makes TransactionHost injectable app-wide — TenantMiddleware calls
+      // TransactionHost#withTransaction directly (not an interceptor: NestJS
+      // runs Guards before Interceptors, so a transaction opened at the
+      // interceptor layer never covers guard-level DB access, e.g. the
+      // local auth strategy's credential lookup during login — confirmed
+      // empirically, see TenantMiddleware's own doc comment). Requests
+      // excluded from TenantMiddleware (§4.3) never open this transaction;
+      // their repository calls keep using the plain manager as before.
       plugins: [
         new ClsPluginTransactional({
           imports: [TypeOrmModule],

@@ -10,7 +10,7 @@ import { EmailLogService } from './service/email-log.service';
 import { AuditLog } from './entity/audit-log.entity';
 import { EmailLog } from './entity/email-log.entity';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { UtilityController } from './controller/utility.controller';
 import { AuditLogController } from './controller/audit-log.controller';
 import { EmailLogController } from './controller/email-log.controller';
@@ -34,7 +34,7 @@ import { IEmailProvider } from './email-provider/email-provider.interface';
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([AuditLog, EmailLog]),
+    TenantTypeOrmModule.forFeature([AuditLog, EmailLog]),
     BullModule.registerQueue({ name: 'email' }),
     BullModule.registerQueue({ name: 'audit-log' }),
   ],

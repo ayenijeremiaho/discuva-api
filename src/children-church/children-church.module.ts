@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ChildAgeGroup } from './entity/child-age-group.entity';
 import { ChildClassGroup } from './entity/child-class-group.entity';
 import { ChildProfile } from './entity/child-profile.entity';
@@ -14,7 +14,7 @@ import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       ChildAgeGroup,
       ChildClassGroup,
       ChildProfile,

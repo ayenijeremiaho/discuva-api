@@ -134,34 +134,55 @@ interface AppClsStore extends ClsStore {
 }
 ```
 
-### 4.3 Tenant Middleware
+### 4.3 Tenant Middleware — Also Owns the Transaction
 
-A NestJS middleware resolves the tenant from the `Host` header and writes it into the CLS store. Runs before every request.
+**This section's design changed twice after the first live-wiring attempt (§9 Phase 8) — both corrections came from
+real HTTP testing, not the isolated e2e test, and are worth understanding before touching this code.**
+
+The first version split responsibilities: `TenantMiddleware` resolved the tenant and wrote `tenantId`/`schemaName`
+into the CLS store; a separate `TenantTransactionInterceptor` opened the transaction and ran `SET LOCAL
+search_path`. That split silently failed to scope any **Guard**-level DB access (e.g. the local auth strategy's
+credential lookup during login), because NestJS runs Guards before Interceptors — the transaction didn't exist yet
+when the guard's query ran. The e2e isolation test didn't catch this because it only exercised route-handler-level
+DB access. Fixed by merging both responsibilities into `TenantMiddleware` itself, since middleware runs before
+guards, interceptors, and the handler alike:
 
 ```typescript
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {
   constructor(
-    private readonly cls: ClsService,
-    private readonly tenantRepository: Repository<Tenant>,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly config: ConfigService,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    @InjectRepository(Tenant) private readonly tenantRepository: Repository<Tenant>,
   ) {}
 
-  async use(req: Request, res: Response, next: NextFunction) {
-    const subdomain = extractSubdomain(req.hostname); // 'church-alpha'
+  async use(req: Request, res: Response, next: NextFunction): Promise<void> {
+    const subdomain = extractSubdomain(req.hostname, this.config.get('APP_BASE_DOMAIN'));
     const tenant = await this.tenantRepository.findOneBy({ subdomain, isActive: true });
-
     if (!tenant) throw new NotFoundException('Tenant not found');
 
     this.cls.set('tenantId', tenant.id);
     this.cls.set('schemaName', tenant.schemaName);
-    next();
+
+    // Holds the transaction open for the rest of the request (guards,
+    // interceptors, handler) by resolving/rejecting only once the response
+    // has actually finished — see the real source for the full res.on('finish')
+    // wrapping and the >=400 -> rollback logic.
+    await this.txHost.withTransaction(async () => {
+      await this.txHost.tx.query(`SET LOCAL search_path TO "${tenant.schemaName}", public`);
+      await new Promise<void>((resolve, reject) => { /* res.on('finish'/'close') */ next(); });
+    });
   }
 }
 ```
 
-Exempt routes: `GET /platform/*` (platform admin routes operate on `public` schema directly).
+Exempt routes (`TenantModule`'s `MiddlewareConsumer.exclude()`) — **must** include the `v1/` URI-versioning prefix,
+confirmed empirically that `exclude()`'s string patterns match the raw incoming path, prefix and all:
+`v1/platform/(.*)` (control-plane, always `public`), `v1/signup` (no tenant row exists yet by definition), and the
+unprefixed `@Version(VERSION_NEUTRAL)` routes `/`, `docs`, `health`.
 
-### 4.4 Schema Switching — search_path Per Request
+### 4.4 Schema Switching — search_path Per Request, and Why Plain Repositories Don't See It
 
 **This section's approach changed after review — read the pooling note before implementing.** The original design
 set `search_path` at the session/connection level. That's unsafe here: `env.validation.ts` already defines
@@ -171,25 +192,44 @@ the pool at the end of each transaction and can be handed to a **different tenan
 session state — a session-level `SET search_path` would leak across tenants unless the pooler is explicitly
 configured to reset it, which is fragile to depend on.
 
-**Correct approach: `SET LOCAL search_path`, inside an explicit transaction wrapping the whole request.**
+**Correct approach: `SET LOCAL search_path`, inside an explicit transaction wrapping the whole request** (§4.3).
 `SET LOCAL` is transaction-scoped — it auto-resets when the transaction ends, which is safe under transaction-mode
-pooling regardless of what the pooler does between transactions. This requires wrapping each request in one explicit
-DB transaction (via a NestJS interceptor), not just setting a value before the first query:
+pooling regardless of what the pooler does between transactions.
 
-```typescript
-// Tenant transaction interceptor — wraps every request in one transaction and
-// scopes search_path to it via SET LOCAL, which is safe under PgBouncer/Supavisor
-// transaction-mode pooling (session-level SET is not — see above).
-await dataSource.transaction(async (manager) => {
-  await manager.query(`SET LOCAL search_path TO ${schemaName}, public`);
-  // ... rest of the request handler runs against `manager` (or a CLS-scoped
-  // reference to it), so every query in this request — controller through
-  // repository — executes inside this one transaction.
-});
-```
+**A second, more consequential correction, also only caught by live testing (§9 Phase 8):** the original plan for
+this section assumed that once the whole request ran inside one transaction, ordinary `@InjectRepository(Entity)`
+repositories would transparently resolve against that transaction's `search_path` — "no changes to any repository
+or service," as this doc originally claimed. **That's false, and it's not a pooling subtlety — it's how
+`@nestjs-cls/transactional-adapter-typeorm` actually works.** Reading its source
+(`transactional-adapter-typeorm.js`) confirms it does not patch `DataSource#manager` or anything a plain
+`@InjectRepository()` resolves to; it only exposes the active transaction's `EntityManager` via
+`TransactionHost#tx` for code that explicitly asks for it. And TypeORM's own `Repository` (`Repository.js`)
+captures `manager` once, as a plain constructor property — not a live getter — so a repository built from the
+standard DI token is permanently bound to the app-wide default manager and can never see a per-request transaction,
+regardless of where or how that transaction was opened. This was proven live: `TenantMiddleware` correctly ran `SET
+LOCAL search_path` before a login request's credential lookup, but `MemberService`'s standard
+`@InjectRepository(Member)` still queried `public` and missed a row verifiably sitting in the tenant's own schema.
 
-All TypeORM queries within that transaction — including joins and subqueries — automatically resolve to the correct
-schema. No changes to any repository or service.
+**The fix: `TenantTypeOrmModule.forFeature([...])`** (`src/tenant/utility/tenant-typeorm.module.ts`) is a drop-in
+replacement for `TypeOrmModule.forFeature([...])` — same `getRepositoryToken(Entity)` DI token, so every
+`@InjectRepository(Entity)` call site is untouched. Instead of a repository built once at bootstrap, it registers a
+`Proxy` that re-resolves `txHost.tx.getRepository(Entity)` on **every property access**, which is correct for both
+tenant-scoped requests (returns the CLS-scoped transactional manager) and tenant-excluded routes (`tx` falls back to
+the plain `dataSource.manager` when no transaction is active — the platform-admin control plane relies on exactly
+this fallback). **Every feature module that owns tenant-schema tables uses this instead of `TypeOrmModule.forFeature`
+now — this is the standard for any new module**, not just the ones fixed in this pass. The only modules that
+correctly keep plain `TypeOrmModule.forFeature()` are the ones registering genuinely global, `public`-only tables:
+`TenantModule` (`Tenant` itself), `PlatformAdminModule`, and `BillingModule` (`Plan`/`Subscription` — deliberately
+excluded from the tenant schema clone, see `src/migrations/tenant/`'s header comment).
+
+**Superseded by the above — kept here as a record of what was tried and rejected, then found necessary anyway:**
+this doc originally rejected a "Repository Resolver" abstraction layer as unneeded overhead, reasoning that
+`search_path` already gave business logic zero tenancy-awareness so a resolver on top would solve an
+already-solved problem. The premise was wrong — `search_path` alone does *not* reach standard repositories, as
+above — so a repository-resolving layer wasn't optional convenience, it was the missing piece. The upside of the
+original reasoning still holds in the implementation: `TenantTypeOrmModule.forFeature()` keeps every business
+service's `@InjectRepository(Entity)` call site completely unaware of tenancy, exactly as intended — the resolver
+lives entirely in module registration, not in service code.
 
 **Implication worth being explicit about:** every request now runs inside one DB transaction by construction, not
 just requests that were already transactional. This is a real (if usually invisible) behavior change from typical
@@ -197,8 +237,6 @@ NestJS/TypeORM setups where each query is its own implicit auto-commit transacti
 a transaction open for their full duration. Keep request handlers reasonably fast; this is a stronger argument than
 usual for not doing slow synchronous work (e.g. calling a slow external API) inside a request that also touches the
 DB — push that to a Bull job instead, which already gets its own transaction per §4.6.
-
-**Considered and deliberately rejected: a "Repository Resolver" abstraction layer.** An alternative design wraps every TypeORM repository behind a tenant-aware resolver, so business services request a repository through infrastructure rather than TypeORM resolving the schema implicitly via `search_path`. This was considered and set aside — `search_path` already gives business logic zero awareness of tenancy (the stated goal), so a resolver layer on top would add a real abstraction for a problem that's already solved, contradicting the "no infrastructure overhead beyond what's needed" reasoning behind choosing schema-per-tenant in the first place (§1). Revisit only if a concrete case emerges where `search_path` genuinely can't express what's needed (e.g. a single request legitimately needing two tenants' data at once).
 
 ### 4.5 Redis Key Namespacing
 
@@ -292,10 +330,12 @@ platform-admin/support use — re-provisioning, migrating the existing client pe
    business-schema role entirely and TenantSchemaGenesis's lineage becomes the only copy that matters.
 3. Seeds the SuperAdmin role and the actual admin account from the signup form (not a placeholder) — via the
    transactional `EntityManager` directly (`txHost.tx`), not `@InjectRepository()`-injected repositories or
-   `AdminRoleService`. Those do not pick up a manually-entered CLS transaction the way they do inside a real HTTP
-   request handled by `TenantTransactionInterceptor` — confirmed empirically they kept resolving against `public`
-   regardless of `SET LOCAL search_path`, seeding the live deployment's actual `admins` table instead of the new
-   tenant schema.
+   `AdminRoleService`. As established in §4.4, standard `@InjectRepository()` repositories never see a CLS
+   transaction regardless of how it was opened — confirmed empirically here too, they kept resolving against
+   `public` regardless of `SET LOCAL search_path`, seeding the live deployment's actual `admins` table instead of
+   the new tenant schema. (`AdminModule` now registers via `TenantTypeOrmModule` like every other feature module,
+   but this method still uses `txHost.tx` directly rather than the injected repositories, since it runs inside a
+   manually-entered `cls.runWith()` block outside the normal request pipeline, before the tenant is even active.)
 4. Inserts/activates the `public.tenants` row, with `plan_id = 'free'` (§4.11)
 
 **`POST /signup` (public, unauthenticated, rate-limited by IP)** — the primary entry point:
@@ -784,10 +824,31 @@ and displays the token (using it against a live tenant request still needs Phase
 caveat as §4.10). Not visually verified in a browser (no browser tooling available when this was built) — typecheck,
 lint, production build, and a live boot against the real backend (every route 200) all passed instead.
 
-### Phase 8 — Existing Client Migration
-- Migrate existing church's data into tenant schema
-- Validate and cut over
-- Decommission old deployment
+### Phase 8 — Live Bridging (Existing Client Migration Section Retired)
+- ~~Migrate existing church's data into tenant schema~~ — **not applicable.** There is no existing production
+  church: this is a fresh rollout, the production domain isn't finalized (`APP_BASE_DOMAIN` is just an env var,
+  `localhost` for now — `*.localhost` resolves to `127.0.0.1` in every modern browser/Node with no `/etc/hosts`
+  changes), and the current test frontend already reaches the API through a Vercel subdomain. No dump/restore
+  ceremony was needed.
+- Wire `TenantMiddleware` into the live request pipeline — deferred since Phase 1 as "the bridging step." This
+  turned out to be where two genuine architectural bugs surfaced, both only via real HTTP testing against a freshly
+  provisioned tenant (the isolated e2e test passed throughout and caught neither):
+  1. **Guards run before Interceptors.** The original split (`TenantMiddleware` resolves the tenant;
+     `TenantTransactionInterceptor` opens the transaction) never scoped Guard-level DB access — e.g. the local auth
+     strategy's credential lookup during login. Fixed by merging both responsibilities into `TenantMiddleware`
+     itself (§4.3), which runs before guards, interceptors, and the handler alike. Deleted
+     `TenantTransactionInterceptor` entirely.
+  2. **Plain `@InjectRepository()` never saw the tenant transaction at all**, regardless of guard/interceptor
+     ordering — a deeper issue than (1), affecting virtually every feature module. See §4.4 for the full mechanism
+     and the fix: `TenantTypeOrmModule.forFeature()`, now standard for every module owning tenant-schema tables.
+- Added a regression test to `test/tenant-schema-isolation.e2e-spec.ts` specifically for bug (1) — a Guard
+  (`GuardNotesCheckGuard`) doing its own DB read, proven to see the correct tenant's data.
+- Verified live end-to-end against a real provisioned tenant: `POST /v1/signup`, then `POST /v1/auth/admin-login`
+  with the tenant's `Host` header (previously 401'd even with correct credentials — bug (2)), then an authenticated
+  `GET /v1/members` confirmed the returned data was scoped to that tenant alone.
+- Full verification pass: typecheck, full unit suite (1242 tests), the e2e isolation suite, and lint all clean
+  after both fixes.
+- Decommissioning an old deployment doesn't apply for the same fresh-rollout reason as above.
 
 ### Phase 9 — Multi-Branch Hierarchy (Future, Post-Cutover)
 - Add `parent_tenant_id` to `public.tenants`

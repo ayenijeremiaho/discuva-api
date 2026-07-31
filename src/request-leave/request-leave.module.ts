@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { RequestLeave } from './enitity/request-leave.entity';
 import { RequestLeaveService } from './service/request-leave.service';
 import { RequestLeaveController } from './controller/request-leave.controller';
@@ -9,13 +9,13 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([RequestLeave]),
+    TenantTypeOrmModule.forFeature([RequestLeave]),
     MemberModule,
     DepartmentModule,
     UtilityModule,
   ],
   controllers: [RequestLeaveController],
   providers: [RequestLeaveService],
-  exports: [TypeOrmModule, RequestLeaveService],
+  exports: [TenantTypeOrmModule, RequestLeaveService],
 })
 export class RequestLeaveModule {}

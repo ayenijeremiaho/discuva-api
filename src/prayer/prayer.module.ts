@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { PrayerProgram } from './entity/prayer-program.entity';
 import { PrayerScheduleConfig } from './entity/prayer-schedule-config.entity';
 import { PrayerDayConfig } from './entity/prayer-day-config.entity';
@@ -21,7 +21,7 @@ import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       PrayerProgram,
       PrayerScheduleConfig,
       PrayerDayConfig,

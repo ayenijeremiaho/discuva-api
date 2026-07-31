@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { VolunteerOpportunity } from './entity/volunteer-opportunity.entity';
 import { VolunteerSignup } from './entity/volunteer-signup.entity';
 import { VolunteerService } from './service/volunteer.service';
@@ -9,7 +9,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([VolunteerOpportunity, VolunteerSignup]),
+    TenantTypeOrmModule.forFeature([VolunteerOpportunity, VolunteerSignup]),
     UtilityModule,
   ],
   providers: [VolunteerService],

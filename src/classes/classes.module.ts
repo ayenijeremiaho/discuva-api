@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ChurchClass } from './entity/church-class.entity';
 import { ClassEnrollment } from './entity/class-enrollment.entity';
 import { ClassType } from './entity/class-type.entity';
@@ -12,7 +12,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ChurchClass, ClassEnrollment, ClassType]),
+    TenantTypeOrmModule.forFeature([ChurchClass, ClassEnrollment, ClassType]),
     MemberModule,
     UtilityModule,
   ],
@@ -22,6 +22,6 @@ import { UtilityModule } from '../utility/utility.module';
   // GET /classes/:id would otherwise swallow GET /classes/types (matching
   // "types" as :id) since both are checked as plain 2-segment paths.
   controllers: [ClassTypesController, ClassesController],
-  exports: [TypeOrmModule, ClassesService, ClassTypesService],
+  exports: [TenantTypeOrmModule, ClassesService, ClassTypesService],
 })
 export class ClassesModule {}

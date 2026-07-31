@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Member } from './entity/member.entity';
 import { WorkerProfile } from './entity/worker-profile.entity';
 import { Pastor } from './entity/pastor.entity';
@@ -18,7 +18,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       Member,
       WorkerProfile,
       Pastor,
@@ -33,6 +33,6 @@ import { UtilityModule } from '../utility/utility.module';
   ],
   controllers: [MemberController, MemberImportController],
   providers: [MemberService, MemberSessionService, MemberImportService],
-  exports: [MemberService, MemberSessionService, TypeOrmModule],
+  exports: [MemberService, MemberSessionService, TenantTypeOrmModule],
 })
 export class MemberModule {}

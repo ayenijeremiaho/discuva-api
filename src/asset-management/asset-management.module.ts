@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Asset } from './entity/asset.entity';
 import { MaintenanceSchedule } from './entity/maintenance-schedule.entity';
 import { MaintenanceRecord } from './entity/maintenance-record.entity';
@@ -20,7 +20,7 @@ import { AdminModule } from '../admin/admin.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       Asset,
       MaintenanceSchedule,
       MaintenanceRecord,

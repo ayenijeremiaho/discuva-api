@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Department } from './entity/department.entity';
 import { DepartmentLead } from './entity/department-lead.entity';
 import { DepartmentService } from './service/department.service';
@@ -12,7 +12,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       Department,
       DepartmentLead,
       WorkerProfile,
@@ -23,6 +23,6 @@ import { UtilityModule } from '../utility/utility.module';
   ],
   controllers: [DepartmentController],
   providers: [DepartmentService, DepartmentAccessService],
-  exports: [TypeOrmModule, DepartmentService, DepartmentAccessService],
+  exports: [TenantTypeOrmModule, DepartmentService, DepartmentAccessService],
 })
 export class DepartmentModule {}

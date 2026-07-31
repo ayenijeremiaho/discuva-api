@@ -136,12 +136,12 @@ export class TenantProvisioningService {
   }
 
   // Runs inside a CLS context scoped to the new tenant, same SET LOCAL
-  // search_path mechanism as TenantTransactionInterceptor (§4.4). Uses
-  // this.txHost.tx (the transactional EntityManager) directly for every
-  // read/write rather than @InjectRepository()-injected repositories or
-  // AdminRoleService — confirmed empirically that those do NOT pick up
+  // search_path mechanism TenantMiddleware uses for live requests (§4.4).
+  // Uses this.txHost.tx (the transactional EntityManager) directly for
+  // every read/write rather than @InjectRepository()-injected repositories
+  // or AdminRoleService — confirmed empirically that those do NOT pick up
   // this method's manually-entered transaction the way they do inside a
-  // real HTTP request handled by the interceptor: they kept resolving
+  // real HTTP request going through TenantMiddleware: they kept resolving
   // against `public` regardless of the SET LOCAL, seeding the live
   // deployment's actual admins table instead of the new tenant schema (a
   // duplicate-key error on a second run was what surfaced it). Mirrors

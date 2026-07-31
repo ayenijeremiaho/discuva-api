@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Admin } from './entity/admin.entity';
 import { AdminRole } from './entity/admin-role.entity';
 import { AdminService } from './service/admin.service';
@@ -14,12 +14,12 @@ import { UtilityModule } from '../utility/utility.module';
 @Global()
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Admin, AdminRole]),
+    TenantTypeOrmModule.forFeature([Admin, AdminRole]),
     MemberModule,
     UtilityModule,
   ],
   controllers: [AdminController, AdminRoleController],
   providers: [AdminService, AdminRoleService, AdminGuard, DefaultAdminSeed],
-  exports: [AdminService, AdminRoleService, AdminGuard, TypeOrmModule],
+  exports: [AdminService, AdminRoleService, AdminGuard, TenantTypeOrmModule],
 })
 export class AdminModule {}

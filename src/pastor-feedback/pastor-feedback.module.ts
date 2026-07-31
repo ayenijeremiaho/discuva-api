@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { PastorFeedback } from './entity/pastor-feedback.entity';
 import { PastorFeedbackService } from './service/pastor-feedback.service';
 import { PastorFeedbackReminderScheduler } from './scheduler/pastor-feedback-reminder.scheduler';
@@ -13,7 +13,7 @@ import { PushNotificationModule } from '../push-notification/push-notification.m
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([PastorFeedback]),
+    TenantTypeOrmModule.forFeature([PastorFeedback]),
     MemberModule,
     DepartmentModule,
     UtilityModule,

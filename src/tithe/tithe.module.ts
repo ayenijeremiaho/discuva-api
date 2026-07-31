@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { TitheAccount } from './entity/tithe-account.entity';
 import { TitheUploadBatch } from './entity/tithe-upload-batch.entity';
@@ -21,7 +21,7 @@ import { VirtualAccountWebhookController } from '../finance/controller/virtual-a
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       TitheAccount,
       TitheUploadBatch,
       TitheRecord,

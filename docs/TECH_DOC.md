@@ -1658,6 +1658,23 @@ behavior behind it and is simply dropped — those departments end up with `capa
 
 ## 5. Module Reference
 
+### Multi-Tenant Request Scoping
+
+Every request except `/v1/platform/*`, `/v1/signup`, and the version-neutral `/`, `docs`, `health` routes goes
+through `TenantMiddleware`: it resolves the tenant from the `Host` header's subdomain (stripped of
+`APP_BASE_DOMAIN`, e.g. `church-alpha.example.com` → `church-alpha`; `localhost` in dev, so `*.localhost` works with
+no `/etc/hosts` changes), then wraps the entire rest of the request — guards, interceptors, and the handler — in one
+DB transaction with `SET LOCAL search_path` set to that tenant's schema. Full design in
+`docs/MULTI_TENANT_MIGRATION.md` §4.3/§4.4.
+
+**For any new module with tenant-owned tables:** register entities with `TenantTypeOrmModule.forFeature([...])`
+(`src/tenant/utility/tenant-typeorm.module.ts`), not `TypeOrmModule.forFeature([...])`. Plain `TypeOrmModule`
+repositories never see the tenant transaction regardless of request scoping — this is a `@nestjs-cls/transactional`
+limitation, not a bug to work around per-call. `TenantTypeOrmModule` is a drop-in replacement using the same DI
+token, so `@InjectRepository(Entity)` call sites in services need no changes. Only genuinely global, `public`-only
+tables (`Tenant`, `PlatformAdmin`, `Plan`/`Subscription`, and similar control-plane entities) should keep plain
+`TypeOrmModule.forFeature()`.
+
 ### Auth Module
 
 **Routes:** `POST /auth/signup`, `POST /auth/login`, `POST /auth/admin-login`, `POST /auth/refresh`,
@@ -3420,9 +3437,9 @@ applied, and a platform admin never has a tenant JWT to satisfy it. `@Public()` 
 schema-qualified reads — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
 that scales to thousands of tenants without revisiting. **`impersonate`** issues a short-lived, access-token-only
 JWT (no refresh token, no session record) signed directly rather than through the normal admin-login path — see
-the code comment on `PlatformTenantService.impersonateTenant` for why. That token is only actually routable to the
-right tenant schema once `TenantMiddleware` is wired into the live request pipeline (not yet — see
-`docs/MULTI_TENANT_MIGRATION.md` §9 Phase 8).
+the code comment on `PlatformTenantService.impersonateTenant` for why. `TenantMiddleware` is wired into the live
+request pipeline (§5 Multi-Tenant Request Scoping below), so that token routes to the correct tenant schema like
+any other tenant-facing request.
 
 | Method | Route | Description |
 |--------|-------|-------------|
@@ -4154,6 +4171,7 @@ to a real environment.
 | `PORT`         | `3000`         | HTTP port the server listens on              |
 | `CORS_ORIGINS` | — *(required)* | Comma-separated list of allowed CORS origins |
 | `APP_NAME`     | `discovery-hub-api` | Service name used in logs and process identification |
+| `APP_BASE_DOMAIN` | `localhost` | Suffix `TenantMiddleware` strips from the `Host` header to find a tenant's subdomain (§5 Multi-Tenant Request Scoping) — `*.localhost` resolves to `127.0.0.1` with no `/etc/hosts` changes, so the default works out of the box in dev |
 
 ### Branding (used in email templates)
 

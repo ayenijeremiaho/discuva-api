@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { NotesController } from './controller/notes.controller';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Note } from './entity/note.entity';
 import { NotesService } from './service/notes.service';
 import { NotesAnalyticsService } from './service/notes-analytics.service';
@@ -9,13 +9,13 @@ import { MemberMilestonesController } from './controller/member-milestones.contr
 import { UtilityModule } from '../utility/utility.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Note]), UtilityModule],
+  imports: [TenantTypeOrmModule.forFeature([Note]), UtilityModule],
   providers: [NotesService, NotesAnalyticsService],
   controllers: [
     NotesController,
     NotesAnalyticsController,
     MemberMilestonesController,
   ],
-  exports: [TypeOrmModule, NotesService],
+  exports: [TenantTypeOrmModule, NotesService],
 })
 export class NotesModule {}

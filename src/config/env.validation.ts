@@ -20,6 +20,11 @@ export const envValidationSchema = Joi.object({
   DATABASE_POOL_MIN: Joi.number().default(10),
   DATABASE_POOL_LOG: Joi.boolean().default(false),
   APP_NAME: Joi.string().default('discovery-hub-api'),
+  // TenantMiddleware strips this suffix off the request Host header to
+  // find a tenant's subdomain (docs/MULTI_TENANT_MIGRATION.md §4.3).
+  // 'localhost' in dev — *.localhost resolves to 127.0.0.1 in every modern
+  // browser/Node with no /etc/hosts changes needed.
+  APP_BASE_DOMAIN: Joi.string().default('localhost'),
 
   JWT_SECRET: Joi.string().min(32).required(),
   JWT_EXPIRY_IN: Joi.string().default('1h'),

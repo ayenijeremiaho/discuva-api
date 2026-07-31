@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { RentalFacility } from './entity/rental-facility.entity';
 import { RentalPricingTier } from './entity/rental-pricing-tier.entity';
 import { RentalAddon } from './entity/rental-addon.entity';
@@ -21,7 +21,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       RentalFacility,
       RentalPricingTier,
       RentalAddon,

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Event } from './entity/event.entity';
 import { EventConfig } from './entity/event-config.entity';
 import { ServiceSlot } from './entity/service-slot.entity';
@@ -18,7 +18,12 @@ import { AnnouncementModule } from '../announcement/announcement.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Event, EventConfig, ServiceSlot, EventReminder]),
+    TenantTypeOrmModule.forFeature([
+      Event,
+      EventConfig,
+      ServiceSlot,
+      EventReminder,
+    ]),
     UtilityModule,
     VenueModule,
     MemberModule,
@@ -35,6 +40,6 @@ import { AnnouncementModule } from '../announcement/announcement.module';
     DefaultEventConfigSeed,
     EventReminderService,
   ],
-  exports: [TypeOrmModule, EventService, EventConfigService],
+  exports: [TenantTypeOrmModule, EventService, EventConfigService],
 })
 export class EventModule {}

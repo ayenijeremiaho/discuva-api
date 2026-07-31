@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ChurchSetting } from './entity/church-setting.entity';
 import { ChurchSettingsService } from './service/church-settings.service';
 import {
@@ -11,7 +11,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Global()
 @Module({
-  imports: [TypeOrmModule.forFeature([ChurchSetting]), UtilityModule],
+  imports: [TenantTypeOrmModule.forFeature([ChurchSetting]), UtilityModule],
   providers: [ChurchSettingsService, ModuleEnabledGuard],
   controllers: [ChurchSettingsController, ModuleStateController],
   exports: [ChurchSettingsService, ModuleEnabledGuard],

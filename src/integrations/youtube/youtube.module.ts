@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../../tenant/utility/tenant-typeorm.module';
 import { YoutubeIntegrationState } from './entity/youtube-integration-state.entity';
 import { YoutubeSubscriptionService } from './service/youtube-subscription.service';
 import { YoutubeLiveDetectionService } from './service/youtube-live-detection.service';
@@ -10,7 +10,7 @@ import { UtilityModule } from '../../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([YoutubeIntegrationState]),
+    TenantTypeOrmModule.forFeature([YoutubeIntegrationState]),
     AnnouncementModule,
     UtilityModule,
   ],

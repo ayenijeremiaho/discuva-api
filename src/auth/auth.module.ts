@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { AuthService } from './service/auth.service';
 import { AuthController } from './controller/auth.controller';
 import { JwtModule } from '@nestjs/jwt';
@@ -23,7 +23,7 @@ import { UtilityModule } from '../utility/utility.module';
   imports: [
     MemberModule,
     UtilityModule,
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       PasswordResetOtp,
       DeviceResetOtp,
       EmailChangeOtp,

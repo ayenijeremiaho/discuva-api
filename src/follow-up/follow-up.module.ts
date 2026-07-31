@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { ConfigModule } from '@nestjs/config';
 import { FirstTimer } from './entity/first-timer.entity';
@@ -25,7 +25,7 @@ import { DepartmentModule } from '../department/department.module';
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       FirstTimer,
       FirstTimerVisit,
       FollowUpTask,

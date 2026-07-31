@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { PrayerRequest } from './entity/prayer-request.entity';
 import { Testimony } from './entity/testimony.entity';
 import { PregnancyPrayerCase } from './entity/pregnancy-prayer-case.entity';
@@ -14,7 +14,7 @@ import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       PrayerRequest,
       Testimony,
       PregnancyPrayerCase,

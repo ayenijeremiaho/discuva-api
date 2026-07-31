@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { SundaySchoolClass } from './entity/sunday-school-class.entity';
 import { SundaySchoolMember } from './entity/sunday-school-member.entity';
 import { SundaySchoolSession } from './entity/sunday-school-session.entity';
@@ -13,7 +13,7 @@ import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       SundaySchoolClass,
       SundaySchoolMember,
       SundaySchoolSession,

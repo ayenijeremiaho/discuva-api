@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Announcement } from './entity/announcement.entity';
 import { AnnouncementReaction } from './entity/announcement-reaction.entity';
 import { AnnouncementService } from './service/announcement.service';
@@ -11,7 +11,7 @@ import { SmsModule } from '../sms/sms.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Announcement, AnnouncementReaction]),
+    TenantTypeOrmModule.forFeature([Announcement, AnnouncementReaction]),
     MemberModule,
     UtilityModule,
     GroupModule,
@@ -19,6 +19,6 @@ import { SmsModule } from '../sms/sms.module';
   ],
   providers: [AnnouncementService],
   controllers: [AnnouncementController],
-  exports: [TypeOrmModule, AnnouncementService],
+  exports: [TenantTypeOrmModule, AnnouncementService],
 })
 export class AnnouncementModule {}

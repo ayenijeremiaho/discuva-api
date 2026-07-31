@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { SmallGroup } from './entity/small-group.entity';
 import { SmallGroupMember } from './entity/small-group-member.entity';
 import { SmallGroupAttendance } from './entity/small-group-attendance.entity';
@@ -10,7 +10,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([
+    TenantTypeOrmModule.forFeature([
       SmallGroup,
       SmallGroupMember,
       SmallGroupAttendance,

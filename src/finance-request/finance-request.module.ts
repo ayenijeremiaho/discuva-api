@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { FinanceCategory } from './entity/finance-category.entity';
 import { FinanceRequest } from './entity/finance-request.entity';
 import { FinanceRequestService } from './service/finance-request.service';
@@ -11,7 +11,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([FinanceCategory, FinanceRequest]),
+    TenantTypeOrmModule.forFeature([FinanceCategory, FinanceRequest]),
     AdminModule,
     DepartmentModule,
     UtilityModule,

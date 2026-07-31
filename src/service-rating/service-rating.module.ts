@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ServiceRating } from './entity/service-rating.entity';
 import { ServiceSlot } from '../event/entity/service-slot.entity';
 import { ServiceRatingService } from './service/service-rating.service';
@@ -9,7 +9,7 @@ import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ServiceRating, ServiceSlot]),
+    TenantTypeOrmModule.forFeature([ServiceRating, ServiceSlot]),
     UtilityModule,
   ],
   providers: [ServiceRatingService],

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Convert } from './entity/convert.entity';
 import { ConvertFollowUpLog } from './entity/convert-follow-up-log.entity';
 import { WorkerProfile } from '../member/entity/worker-profile.entity';
@@ -13,7 +13,11 @@ import { DepartmentModule } from '../department/department.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Convert, ConvertFollowUpLog, WorkerProfile]),
+    TenantTypeOrmModule.forFeature([
+      Convert,
+      ConvertFollowUpLog,
+      WorkerProfile,
+    ]),
     MemberModule,
     UtilityModule,
     DepartmentModule,
