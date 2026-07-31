@@ -15,6 +15,8 @@
     "hash:password": "ts-node scripts/hash-password.ts",
     "seed:admin": "ts-node -r dotenv/config -r tsconfig-paths/register src/seed.ts",
     "seed:admin:prod": "node dist/seed",
+    "provision:tenant": "ts-node -r dotenv/config -r tsconfig-paths/register src/provision-tenant.ts",
+    "migration:run:all-tenants": "ts-node -r dotenv/config -r tsconfig-paths/register src/migrate-all-tenants.ts",
     "migration:generate": "ts-node -r dotenv/config -r tsconfig-paths/register ./node_modules/.bin/typeorm migration:generate src/migrations/Migration -d src/data-source.ts",
     "migration:run": "ts-node -r dotenv/config -r tsconfig-paths/register ./node_modules/.bin/typeorm migration:run -d src/data-source.ts",
     "migration:revert": "ts-node -r dotenv/config -r tsconfig-paths/register ./node_modules/.bin/typeorm migration:revert -d src/data-source.ts",

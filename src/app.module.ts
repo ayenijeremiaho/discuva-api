@@ -59,6 +59,7 @@ import { GroupModule } from './group/group.module';
 import { SmsModule } from './sms/sms.module';
 import { EvangelismModule } from './evangelism/evangelism.module';
 import { BillingModule } from './billing/billing.module';
+import { TenantModule } from './tenant/tenant.module';
 
 @Module({
   imports: [
@@ -206,6 +207,7 @@ import { BillingModule } from './billing/billing.module';
     SmallGroupModule,
     AdminModule,
     BillingModule,
+    TenantModule,
     EnumsModule,
     TitheModule,
     FinanceRequestModule,
