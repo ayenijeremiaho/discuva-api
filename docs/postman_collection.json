@@ -1000,7 +1000,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"changedPassword\": true,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Software Engineer\",\n    \"yearJoinedWorkforce\": \"2022\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"department\": { \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\", \"name\": \"Sunday School\", \"key\": \"SUNDAY_SCHOOL\" },\n    \"secondaryDepartment\": null\n  }\n}"
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"changedPassword\": true,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Software Engineer\",\n    \"yearJoinedWorkforce\": \"2022\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"department\": { \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\", \"name\": \"Sunday School\", \"capabilities\": [\"MANAGE_SUNDAY_SCHOOL\"] },\n    \"secondaryDepartment\": null\n  }\n}"
             }
           ]
         },
@@ -3814,31 +3814,31 @@
     },
     {
       "name": "Departments",
-      "description": "Church departments (Ushering, Choir, Sunday School, etc.) that workers are assigned to.\n\n**Access:** Admin-only for create/update/delete/assign-lead. Any authenticated user can list departments and read department details. Department leads (HOD/D-HOD) can view their own department summary.\n\n**Key concepts:**\n- Each department has an optional `key` (DepartmentKeyEnum) that gates module access. Example: a department with `key: SUNDAY_SCHOOL` grants workers access to the Sunday School module.\n- Multiple departments may share the same key. Call `GET /departments/keys` for all valid values.\n- Workers have a **primary** department and an optional **secondary** department (via WorkerProfile).\n- Department leads (`type: head` or `type: assistant`) are assigned from workers whose primary department matches. They unlock the department summary and can view department-level attendance and leave.\n\n**Typical flow:**\n1. Create department (`POST /departments`) with optional `key`\n2. Promote members to workers and assign them to this department\n3. Assign a HOD via `POST /departments/assign-lead` (type: head)\n4. HOD can view `GET /departments/my/summary` for their team stats",
+      "description": "Church departments (Ushering, Choir, Sunday School, etc.) that workers are assigned to.\n\n**Access:** Admin-only for create/update/delete/assign-lead. Any authenticated user can list departments and read department details. Department leads (HOD/D-HOD) can view their own department summary.\n\n**Key concepts:**\n- Each department has a `capabilities` array (`DepartmentCapability[]`) that gates module access — e.g. a department holding `MANAGE_SUNDAY_SCHOOL` grants its workers access to the Sunday School module. A department can hold zero, one, or several capabilities. Call `GET /departments/capabilities` for the full fixed list with human-readable labels.\n- Workers have a **primary** department and an optional **secondary** department (via WorkerProfile).\n- Department leads (`type: head` or `type: assistant`) are assigned from workers whose primary department matches. They unlock the department summary and can view department-level attendance and leave.\n\n**Typical flow:**\n1. Create department (`POST /departments`) with an optional `capabilities` array\n2. Promote members to workers and assign them to this department\n3. Assign a HOD via `POST /departments/assign-lead` (type: head)\n4. HOD can view `GET /departments/my/summary` for their team stats",
       "item": [
         {
-          "name": "Get Department Keys",
+          "name": "Get Department Capabilities",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/departments/keys",
+              "raw": "{{baseUrl}}/departments/capabilities",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "departments",
-                "keys"
+                "capabilities"
               ]
             },
-            "description": "Returns DepartmentKeyEnum's preset values as suggestions for key-selection UIs \u2014 not the full set of valid values. Department.key is a free-form string; any value works when creating/updating a department, not just these presets. No auth required beyond a valid JWT."
+            "description": "Returns the full fixed list of valid DepartmentCapability values as `{ value, label }[]` (the shared `EnumOption` shape used across `/enums`) \u2014 `label` is a human-readable description (from `DepartmentCapabilityLabels`) meant for capability-picker UIs. This is the complete set, not presets \u2014 `capabilities` on a department must only contain values from this list. No auth required beyond a valid JWT."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  \"USHERING\",\n  \"MUSIC\",\n  \"MEDIA\",\n  \"PRAYER\",\n  \"WELFARE\",\n  \"CHILDREN\"\n]"
+              "body": "[\n  { \"value\": \"MANAGE_SUNDAY_SCHOOL\", \"label\": \"Sunday School Management\" },\n  { \"value\": \"MANAGE_CHILDREN_CHURCH\", \"label\": \"Children's Church Management\" },\n  { \"value\": \"MANAGE_PRAYER_REQUESTS\", \"label\": \"Prayer Request Management\" },\n  { \"value\": \"MANAGE_EVANGELISM_CONVERTS\", \"label\": \"Evangelism Convert Management\" },\n  { \"value\": \"MANAGE_FOLLOW_UP\", \"label\": \"Follow-Up Management\" },\n  { \"value\": \"FRONT_DESK_OPERATIONS\", \"label\": \"Front Desk Operations (manual check-in, session reports)\" }\n]"
             },
             {
               "name": "401 Unauthorized",
@@ -3869,7 +3869,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n    \"name\": \"Ushering\",\n    \"key\": \"USHERING\",\n    \"description\": \"Ushering department\",\n    \"leads\": [],\n    \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n    \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n  }\n]"
+              "body": "[\n  {\n    \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n    \"name\": \"Ushering\",\n    \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n    \"description\": \"Ushering department\",\n    \"leads\": [],\n    \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n    \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n  }\n]"
             },
             {
               "name": "401 Unauthorized",
@@ -3906,7 +3906,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\",\n  \"name\": \"Sunday School Department\",\n  \"description\": \"Oversees all Sunday School classes and sessions\",\n  \"key\": \"SUNDAY_SCHOOL\",\n  \"head\": { \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\", \"member\": { \"firstname\": \"Jane\", \"lastname\": \"Smith\" } },\n  \"assistant\": null,\n  \"createdAt\": \"2025-06-01T00:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\",\n  \"name\": \"Sunday School Department\",\n  \"description\": \"Oversees all Sunday School classes and sessions\",\n  \"capabilities\": [\"MANAGE_SUNDAY_SCHOOL\"],\n  \"head\": { \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\", \"member\": { \"firstname\": \"Jane\", \"lastname\": \"Smith\" } },\n  \"assistant\": null,\n  \"createdAt\": \"2025-06-01T00:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
@@ -3928,7 +3928,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Technical Media\",\n  \"description\": \"Manages sound, projection and live streaming\",\n  \"key\": \"MEDIA\"\n}",
+              "raw": "{\n  \"name\": \"Technical Media\",\n  \"description\": \"Manages sound, projection and live streaming\",\n  \"capabilities\": []\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3944,7 +3944,7 @@
                 "departments"
               ]
             },
-            "description": "ADMIN only. The optional `key` field links this department to a module-access category. Free-form string, not restricted to DepartmentKeyEnum \u2014 pass any value to create a brand-new access category with no backend change. Multiple departments may share the same key. Omit `key` (or pass null) if the department does not need a module-access category."
+            "description": "ADMIN only. `capabilities` is optional and defaults to an empty array \u2014 most departments (e.g. Ushering, Media) don't need one. Each entry must be a valid `DepartmentCapability` value (see `GET /departments/capabilities`); a department can hold more than one."
           },
           "event": [
             {
@@ -3963,7 +3963,7 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"key\": \"USHERING\",\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "409 Conflict",
@@ -3985,7 +3985,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday School Department\",\n  \"description\": \"Oversees all Sunday School classes and sessions\",\n  \"key\": \"SUNDAY_SCHOOL\"\n}",
+              "raw": "{\n  \"name\": \"Sunday School Department\",\n  \"description\": \"Oversees all Sunday School classes and sessions\",\n  \"capabilities\": [\"MANAGE_SUNDAY_SCHOOL\"]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4008,14 +4008,14 @@
                 }
               ]
             },
-            "description": "ADMIN only. All fields are optional. The `key` field can be updated to change module access \u2014 free-form string, not restricted to DepartmentKeyEnum. Set to null to remove module gating."
+            "description": "ADMIN only. All fields are optional. `capabilities` fully replaces the existing array when provided \u2014 pass the complete desired set, not just additions. Pass an empty array to remove all module gating."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"key\": \"USHERING\",\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
@@ -4133,7 +4133,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"key\": \"USHERING\",\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
@@ -4178,7 +4178,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"key\": \"USHERING\",\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n  \"name\": \"Ushering\",\n  \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n  \"description\": \"Ushering department\",\n  \"leads\": [],\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n  \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
@@ -4245,7 +4245,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"department\": {\n      \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n      \"name\": \"Ushering\",\n      \"key\": \"USHERING\",\n      \"description\": \"Ushering department\",\n      \"leads\": [],\n      \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n      \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n    },\n    \"lead\": {\n      \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    }\n  }\n]"
+              "body": "[\n  {\n    \"department\": {\n      \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n      \"name\": \"Ushering\",\n      \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n      \"description\": \"Ushering department\",\n      \"leads\": [],\n      \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n      \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n    },\n    \"lead\": {\n      \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    }\n  }\n]"
             },
             {
               "name": "401 Unauthorized",
@@ -4322,7 +4322,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"department\": {\n    \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n    \"name\": \"Ushering\",\n    \"key\": \"USHERING\",\n    \"description\": \"Ushering department\",\n    \"leads\": [],\n    \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n    \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n  },\n  \"workerCount\": 12,\n  \"activeWorkers\": 10\n}"
+              "body": "{\n  \"department\": {\n    \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n    \"name\": \"Ushering\",\n    \"capabilities\": [\"FRONT_DESK_OPERATIONS\"],\n    \"description\": \"Ushering department\",\n    \"leads\": [],\n    \"createdAt\": \"2026-06-15T08:00:00.000Z\",\n    \"updatedAt\": \"2026-06-15T08:00:00.000Z\"\n  },\n  \"workerCount\": 12,\n  \"activeWorkers\": 10\n}"
             },
             {
               "name": "404 Not Found",
@@ -8510,7 +8510,7 @@
     },
     {
       "name": "Sunday School",
-      "description": "Session-based attendance for permanent Sunday School classes. Access requires ADMIN role, a worker whose primary or secondary department has key=SUNDAY_SCHOOL, or the appointed class teacher. Self-mark endpoints are open to any enrolled member when the window is open.",
+      "description": "Session-based attendance for permanent Sunday School classes. Access requires ADMIN role, a worker whose primary or secondary department holds the MANAGE_SUNDAY_SCHOOL capability, or the appointed class teacher. Self-mark endpoints are open to any enrolled member when the window is open.",
       "item": [
         {
           "name": "Create SS Class",
@@ -11489,7 +11489,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"attendanceStatus\": [\"PRESENT\", \"LATE\", \"ABSENT\", \"ON_LEAVE\", \"ATTENDED_ONLINE\"],\n  \"memberRole\": [\"MEMBER\", \"WORKER\"],\n  \"gender\": [\"MALE\", \"FEMALE\"],\n  \"maritalStatus\": [\"SINGLE\", \"MARRIED\", \"DIVORCED\", \"WIDOWED\"],\n  \"workerStatus\": [\"ACTIVE\", \"INACTIVE\"],\n  \"leaveStatus\": [\"PENDING\", \"APPROVED\", \"REJECTED\"],\n  \"announcementAudience\": [\"ALL\", \"WORKERS_ONLY\", \"DEPARTMENT\", \"INDIVIDUAL\"],\n  \"classType\": [\"BELIEVERS\", \"BAPTISMAL\", \"WORKERS_IN_TRAINING\", \"BIBLE_COLLEGE\"],\n  \"enrollmentStatus\": [\"IN_PROGRESS\", \"COMPLETED\", \"CANCELLED\"],\n  \"departmentKey\": [\"SUNDAY_SCHOOL\", \"CHILDREN_CHURCH\", \"MEDIA\", \"ADMIN\", \"FOLLOW_UP\"],\n  \"guardianRelationship\": [\"MOTHER\", \"FATHER\", \"GRANDPARENT\", \"SIBLING\", \"UNCLE\", \"AUNT\", \"FAMILY_FRIEND\", \"OTHER\"],\n  \"childCheckinStatus\": [\"CHECKED_IN\", \"CHECKED_OUT\", \"FLAGGED\"],\n  \"noteType\": [\"child_naming\", \"child_dedication\", \"marriage\"],\n  \"reminderIntervalPreset\": [\"15m\", \"30m\", \"1h\", \"3h\", \"24h\", \"48h\"]\n}"
+              "body": "{\n  \"attendanceStatus\": [\"PRESENT\", \"LATE\", \"ABSENT\", \"ON_LEAVE\", \"ATTENDED_ONLINE\"],\n  \"memberRole\": [\"MEMBER\", \"WORKER\"],\n  \"gender\": [\"MALE\", \"FEMALE\"],\n  \"maritalStatus\": [\"SINGLE\", \"MARRIED\", \"DIVORCED\", \"WIDOWED\"],\n  \"workerStatus\": [\"ACTIVE\", \"INACTIVE\"],\n  \"leaveStatus\": [\"PENDING\", \"APPROVED\", \"REJECTED\"],\n  \"announcementAudience\": [\"ALL\", \"WORKERS_ONLY\", \"DEPARTMENT\", \"INDIVIDUAL\"],\n  \"classType\": [\"BELIEVERS\", \"BAPTISMAL\", \"WORKERS_IN_TRAINING\", \"BIBLE_COLLEGE\"],\n  \"enrollmentStatus\": [\"IN_PROGRESS\", \"COMPLETED\", \"CANCELLED\"],\n  \"departmentCapabilities\": [{ \"value\": \"MANAGE_SUNDAY_SCHOOL\", \"label\": \"Sunday School Management\" }, { \"value\": \"MANAGE_CHILDREN_CHURCH\", \"label\": \"Children's Church Management\" }, { \"value\": \"MANAGE_PRAYER_REQUESTS\", \"label\": \"Prayer Request Management\" }, { \"value\": \"MANAGE_EVANGELISM_CONVERTS\", \"label\": \"Evangelism Convert Management\" }, { \"value\": \"MANAGE_FOLLOW_UP\", \"label\": \"Follow-Up Management\" }, { \"value\": \"FRONT_DESK_OPERATIONS\", \"label\": \"Front Desk Operations (manual check-in, session reports)\" }],\n  \"guardianRelationship\": [\"MOTHER\", \"FATHER\", \"GRANDPARENT\", \"SIBLING\", \"UNCLE\", \"AUNT\", \"FAMILY_FRIEND\", \"OTHER\"],\n  \"childCheckinStatus\": [\"CHECKED_IN\", \"CHECKED_OUT\", \"FLAGGED\"],\n  \"noteType\": [\"child_naming\", \"child_dedication\", \"marriage\"],\n  \"reminderIntervalPreset\": [\"15m\", \"30m\", \"1h\", \"3h\", \"24h\", \"48h\"]\n}"
             }
           ]
         },

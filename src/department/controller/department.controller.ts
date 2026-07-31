@@ -14,7 +14,14 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { DepartmentService } from '../service/department.service';
-import { DepartmentCapability } from '../enums/department-capability.enum';
+import {
+  DepartmentCapability,
+  DepartmentCapabilityLabels,
+} from '../enums/department-capability.enum';
+import {
+  EnumOption,
+  toEnumOptions,
+} from '../../utility/types/enum-option.type';
 import { CreateDepartmentDto } from '../dto/create-department.dto';
 import { UpdateDepartmentDto } from '../dto/update-department.dto';
 import { AssignDepartmentHodDto } from '../dto/assign-department-hod.dto';
@@ -39,8 +46,8 @@ export class DepartmentController {
   }
 
   @Get('capabilities')
-  getDepartmentCapabilities(): string[] {
-    return Object.values(DepartmentCapability);
+  getDepartmentCapabilities(): EnumOption[] {
+    return toEnumOptions(DepartmentCapability, DepartmentCapabilityLabels);
   }
 
   @UseGuards(AdminGuard)
