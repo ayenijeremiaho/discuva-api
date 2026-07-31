@@ -2,6 +2,10 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { MulterModule } from '@nestjs/platform-express';
+import { ClsModule } from 'nestjs-cls';
+import { ClsPluginTransactional } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
+import { DataSource } from 'typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UtilityModule } from './utility/utility.module';
@@ -56,6 +60,31 @@ import { EvangelismModule } from './evangelism/evangelism.module';
 
 @Module({
   imports: [
+    // Global CLS context — safe to register ahead of tenant infrastructure
+    // landing: nothing writes tenantId/schemaName into it yet (that's
+    // TenantMiddleware, still unwired — see src/tenant/), so this is purely
+    // an inert AsyncLocalStorage wrapper around each request today. See
+    // docs/MULTI_TENANT_MIGRATION.md §4.2.
+    ClsModule.forRoot({
+      global: true,
+      middleware: { mount: true },
+      // Makes TransactionHost injectable app-wide, for the eventual
+      // per-request "wrap in one transaction, SET LOCAL search_path"
+      // mechanism (docs/MULTI_TENANT_MIGRATION.md §4.4). Registering the
+      // plugin alone does not start transactions anywhere — nothing calls
+      // TransactionHost#withTransaction yet (that's TenantTransactionInterceptor,
+      // still unwired — see src/tenant/), and the adapter's documented
+      // fallback behavior means every existing repository call keeps using
+      // the plain (non-transactional) manager exactly as it does today.
+      plugins: [
+        new ClsPluginTransactional({
+          imports: [TypeOrmModule],
+          adapter: new TransactionalAdapterTypeOrm({
+            dataSourceToken: DataSource,
+          }),
+        }),
+      ],
+    }),
     ConfigModule.forRoot({
       isGlobal: true,
       expandVariables: true,
