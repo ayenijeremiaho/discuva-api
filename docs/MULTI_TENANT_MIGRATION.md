@@ -778,6 +778,12 @@ These phases are sequential. Each phase is a prerequisite for the next.
 - Platform admin auth flow
 - Impersonation flow
 
+**Shipped.** All four items wired to the real Phase 5 backend — tenant list with live health stats (plan, member
+count), a provisioning wizard, rename/suspend/reactivate/plan-change actions, and an impersonation flow that issues
+and displays the token (using it against a live tenant request still needs Phase 8's bridging decision, same
+caveat as §4.10). Not visually verified in a browser (no browser tooling available when this was built) — typecheck,
+lint, production build, and a live boot against the real backend (every route 200) all passed instead.
+
 ### Phase 8 — Existing Client Migration
 - Migrate existing church's data into tenant schema
 - Validate and cut over
