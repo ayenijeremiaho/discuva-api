@@ -14,6 +14,9 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { BudgetService } from '../service/budget.service';
 import {
   BudgetQueryDto,
@@ -21,7 +24,8 @@ import {
   UpdateBudgetDto,
 } from '../dto/budget.dto';
 
-@UseGuards(AdminGuard)
+@UseGuards(AdminGuard, PlanGuard)
+@RequiresPlan(PlanFeature.FINANCE)
 @Controller('admin/finance/budgets')
 export class BudgetController {
   constructor(private readonly budgetService: BudgetService) {}

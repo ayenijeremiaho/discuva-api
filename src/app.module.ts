@@ -58,6 +58,7 @@ import { PushNotificationModule } from './push-notification/push-notification.mo
 import { GroupModule } from './group/group.module';
 import { SmsModule } from './sms/sms.module';
 import { EvangelismModule } from './evangelism/evangelism.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -204,6 +205,7 @@ import { EvangelismModule } from './evangelism/evangelism.module';
     VolunteerModule,
     SmallGroupModule,
     AdminModule,
+    BillingModule,
     EnumsModule,
     TitheModule,
     FinanceRequestModule,

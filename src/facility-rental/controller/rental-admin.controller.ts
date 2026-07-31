@@ -35,9 +35,13 @@ import { MarkPaymentPaidDto } from '../dto/rental-payment.dto';
 import { RentalBookingStatus } from '../enum/rental.enum';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 
 @RequiresModule('facility_rental')
-@UseGuards(AdminGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.FACILITY_RENTAL)
+@UseGuards(AdminGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('facility-rental/admin')
 export class RentalAdminController {
   constructor(

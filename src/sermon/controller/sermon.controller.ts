@@ -15,12 +15,16 @@ import {
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { SermonService } from '../service/sermon.service';
 import { SermonQueryDto } from '../dto/sermon.dto';
 import { UpsertSermonNoteDto } from '../dto/sermon-note.dto';
 
 @RequiresModule('sermons')
-@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.SERMON)
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('sermons')
 export class SermonController {
   constructor(private readonly sermonService: SermonService) {}

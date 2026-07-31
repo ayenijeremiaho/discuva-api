@@ -10,11 +10,15 @@ import {
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { ServiceRatingService } from '../service/service-rating.service';
 import { SubmitServiceRatingDto } from '../dto/service-rating.dto';
 
 @RequiresModule('service_ratings')
-@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.SERVICE_RATING)
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('service-ratings')
 export class ServiceRatingController {
   constructor(private readonly serviceRatingService: ServiceRatingService) {}

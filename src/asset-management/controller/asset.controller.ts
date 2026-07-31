@@ -29,9 +29,13 @@ import {
 } from '../dto/asset.dto';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 
 @RequiresModule('asset_management')
-@UseGuards(AdminGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.ASSET_MANAGEMENT)
+@UseGuards(AdminGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('admin/assets')
 export class AssetController {
   constructor(

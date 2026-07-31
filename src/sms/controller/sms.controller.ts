@@ -10,10 +10,14 @@ import {
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { SmsService } from '../service/sms.service';
 import { SegmentCountDto } from '../dto/segment-count.dto';
 
-@UseGuards(AdminGuard)
+@UseGuards(AdminGuard, PlanGuard)
+@RequiresPlan(PlanFeature.SMS)
 @Controller('admin/sms')
 export class SmsController {
   constructor(private readonly smsService: SmsService) {}

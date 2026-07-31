@@ -6,6 +6,9 @@ import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { GameService } from '../service/game.service';
 import { GameSessionGateway } from '../gateway/game-session.gateway';
 import { SubmitAnswerDto } from '../dto/game.dto';
@@ -14,7 +17,8 @@ import { SubmitAnswerDto } from '../dto/game.dto';
 // department/class access-control check by product decision. A game's
 // department/churchClass are for admin-side categorization/reporting only.
 @RequiresModule('games')
-@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.GAMES)
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('games')
 export class GameParticipantController {
   constructor(

@@ -15,13 +15,17 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { PettyCashService } from '../service/petty-cash.service';
 import {
   ApprovePettyCashDto,
   CreatePettyCashReplenishmentDto,
 } from '../dto/petty-cash.dto';
 
-@UseGuards(AdminGuard)
+@UseGuards(AdminGuard, PlanGuard)
+@RequiresPlan(PlanFeature.FINANCE)
 @Controller('admin/finance/petty-cash')
 export class PettyCashController {
   constructor(private readonly pettyCashService: PettyCashService) {}

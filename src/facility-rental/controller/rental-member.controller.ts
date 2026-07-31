@@ -16,9 +16,13 @@ import { RentalConfigService } from '../service/rental-config.service';
 import { CreateRentalBookingDto } from '../dto/rental-booking.dto';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 
 @RequiresModule('facility_rental')
-@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.FACILITY_RENTAL)
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('facility-rental')
 export class RentalMemberController {
   constructor(

@@ -16,6 +16,9 @@ import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { VolunteerService } from '../service/volunteer.service';
 import {
   CreateVolunteerOpportunityDto,
@@ -23,8 +26,9 @@ import {
 } from '../dto/volunteer-opportunity.dto';
 
 @RequiresModule('volunteering')
+@RequiresPlan(PlanFeature.VOLUNTEER)
 @Controller('admin/volunteer-opportunities')
-@UseGuards(AdminGuard, ModuleEnabledGuard)
+@UseGuards(AdminGuard, ModuleEnabledGuard, PlanGuard)
 export class VolunteerAdminController {
   constructor(private readonly volunteerService: VolunteerService) {}
 

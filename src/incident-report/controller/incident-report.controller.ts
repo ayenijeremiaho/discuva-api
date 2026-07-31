@@ -20,9 +20,13 @@ import { IncidentReportService } from '../service/incident-report.service';
 import { CreateIncidentReportDto } from '../dto/incident-report.dto';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 
 @RequiresModule('incident_report')
-@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.INCIDENT_REPORT)
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('incidents')
 export class IncidentReportController {
   constructor(private readonly incidentReportService: IncidentReportService) {}

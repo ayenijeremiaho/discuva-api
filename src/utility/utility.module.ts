@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { UtilityService } from './service/utility.service';
 import { DateService } from './service/date.service';
@@ -24,6 +24,13 @@ import { GmailProvider } from './email-provider/gmail.provider';
 import { ResendProvider } from './email-provider/resend.provider';
 import { IEmailProvider } from './email-provider/email-provider.interface';
 
+// Global — CacheService (and friends) are cross-cutting utilities other
+// modules' guards/interceptors need without an explicit import path, the
+// same reason AdminModule and BillingModule are Global. Nest resolves a
+// guard's constructor dependencies using the *consuming* controller's
+// module, not the guard's own declaring module (docs/MULTI_TENANT_MIGRATION.md
+// §4.11's PlanGuard is the concrete case that surfaced this).
+@Global()
 @Module({
   imports: [
     ConfigModule,

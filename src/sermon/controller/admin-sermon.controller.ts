@@ -15,6 +15,9 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { SermonService } from '../service/sermon.service';
 import {
   CreateSermonDto,
@@ -23,7 +26,8 @@ import {
 } from '../dto/sermon.dto';
 import { AnnounceLiveDto } from '../dto/announce-live.dto';
 
-@UseGuards(AdminGuard)
+@UseGuards(AdminGuard, PlanGuard)
+@RequiresPlan(PlanFeature.SERMON)
 @Controller('admin/sermons')
 export class AdminSermonController {
   constructor(private readonly sermonService: SermonService) {}
