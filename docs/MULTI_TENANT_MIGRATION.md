@@ -275,12 +275,27 @@ platform-admin/support use — re-provisioning, migrating the existing client pe
 **`TenantProvisioningService`** does the same four steps as originally planned, unchanged:
 
 1. Creates a new PostgreSQL schema: `CREATE SCHEMA church_beta`
-2. Runs migrations against that schema: `SET search_path TO church_beta` — as of the 2026-07-31 migration squash
-   (see `src/migrations/1790553600000-Baseline.ts`), this is **one migration file**, not 107. That's what makes
-   provisioning fast enough to run synchronously inside a signup HTTP request instead of needing an async job with
-   a "setting up your account…" waiting screen.
-3. Seeds the default admin role/permissions via `DefaultAdminSeed`, then creates the actual admin account from the
-   signup form (not a placeholder)
+2. Runs migrations against that schema — **not** `src/migrations/1790553600000-Baseline.ts` directly. Baseline was
+   generated via `pg_dump --schema-only`, which hardcodes every object as `public.foo`; it can only ever target
+   `public` regardless of connection config, confirmed empirically (fails immediately with "relation already
+   exists" against a fresh schema). `src/migrations/tenant/1790726400000-TenantSchemaGenesis.ts` is a schema-agnostic
+   twin — same SQL, `public.` stripped — living outside `src/migrations/` specifically so the main app's own
+   migration runner (glob: `src/migrations/*`, non-recursive) never picks it up. It's still **one migration file**,
+   which is what makes provisioning fast enough to run synchronously inside a signup HTTP request instead of
+   needing an async job with a "setting up your account…" waiting screen. Applying it requires the target schema
+   set via the `-c search_path=...` Postgres connection startup parameter, not the TypeORM `schema` DataSource
+   option — that option only affects TypeORM's own generated SQL, not a migration's raw queries (also confirmed
+   empirically). See `TenantProvisioningService.runTenantMigrations()`.
+
+   **Maintenance cost, accepted:** any future migration touching tenant-owned business tables needs a counterpart
+   added to `src/migrations/tenant/` too, until §8's existing-client migration retires `src/migrations/`'s
+   business-schema role entirely and TenantSchemaGenesis's lineage becomes the only copy that matters.
+3. Seeds the SuperAdmin role and the actual admin account from the signup form (not a placeholder) — via the
+   transactional `EntityManager` directly (`txHost.tx`), not `@InjectRepository()`-injected repositories or
+   `AdminRoleService`. Those do not pick up a manually-entered CLS transaction the way they do inside a real HTTP
+   request handled by `TenantTransactionInterceptor` — confirmed empirically they kept resolving against `public`
+   regardless of `SET LOCAL search_path`, seeding the live deployment's actual `admins` table instead of the new
+   tenant schema.
 4. Inserts/activates the `public.tenants` row, with `plan_id = 'free'` (§4.11)
 
 **`POST /signup` (public, unauthenticated, rate-limited by IP)** — the primary entry point:
