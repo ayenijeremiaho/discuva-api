@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
 import * as webPush from 'web-push';
 import { PushNotificationService } from './push-notification.service';
 import { PushSubscription } from '../entity/push-subscription.entity';
@@ -39,6 +40,12 @@ describe('PushNotificationService', () => {
     get: jest.fn().mockReturnValue('test-value'),
   };
 
+  const mockClsService = {
+    get: jest.fn(),
+    isActive: jest.fn().mockReturnValue(false),
+    getId: jest.fn(),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -55,6 +62,7 @@ describe('PushNotificationService', () => {
         },
         { provide: getQueueToken('push-notifications'), useValue: mockQueue },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: ClsService, useValue: mockClsService },
       ],
     }).compile();
 

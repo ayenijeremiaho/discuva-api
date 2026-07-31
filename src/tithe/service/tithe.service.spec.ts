@@ -26,8 +26,15 @@ import { CacheService } from '../../utility/service/cache.service';
 import { PdfService } from '../../utility/service/pdf.service';
 import { ExcelService } from '../../utility/service/excel.service';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
+
+const mockClsService = {
+  get: jest.fn(),
+  isActive: jest.fn().mockReturnValue(false),
+  getId: jest.fn(),
+};
 
 const mockAccountRepo = {
   findOne: jest.fn(),
@@ -221,6 +228,7 @@ describe('TitheService', () => {
         { provide: PdfService, useValue: mockPdfService },
         { provide: ExcelService, useValue: mockExcelService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: ClsService, useValue: mockClsService },
       ],
     }).compile();
 

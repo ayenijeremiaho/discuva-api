@@ -9,6 +9,9 @@ import {
 import { Job } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { BulkUploadJob } from '../entity/bulk-upload-job.entity';
 import { ReconciliationRow } from '../entity/reconciliation-row.entity';
 import {
@@ -16,11 +19,14 @@ import {
   ReconciliationRowStatus,
 } from '../enum/finance.enum';
 import { CsvParser } from '../util/csv-parser';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
+import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 
 export const RECONCILIATION_QUEUE = 'finance-reconciliation';
 export const RECONCILIATION_PROCESS_JOB = 'parse-csv';
 
-export interface ReconciliationJobData {
+export interface ReconciliationJobData extends TenantJobEnvelope {
   jobId: string;
   csvContent: string;
 }
@@ -34,11 +40,19 @@ export class ReconciliationProcessor implements OnApplicationBootstrap {
     private readonly jobRepo: Repository<BulkUploadJob>,
     @InjectRepository(ReconciliationRow)
     private readonly rowRepo: Repository<ReconciliationRow>,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Process(RECONCILIATION_PROCESS_JOB)
   async handleParse(job: Job<ReconciliationJobData>): Promise<void> {
-    const { jobId, csvContent } = job.data;
+    return runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.doHandleParse(job.data),
+    );
+  }
+
+  private async doHandleParse(data: ReconciliationJobData): Promise<void> {
+    const { jobId, csvContent } = data;
     const uploadJob = await this.jobRepo.findOne({
       where: { id: jobId },
       relations: ['profile'],

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
+import { ClsService } from 'nestjs-cls';
 import { AuditLog } from '../entity/audit-log.entity';
 import { PaginationResponseDto } from '../dto/pagination-response.dto';
 import { UtilityService } from './utility.service';
@@ -10,6 +11,8 @@ import {
   AUDIT_LOG_QUEUE,
   AUDIT_LOG_WRITE_JOB,
 } from '../processor/audit-log.processor';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 
 export type AuditAction =
   // Auth & identity
@@ -240,13 +243,14 @@ export class AuditLogService {
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
     @InjectQueue(AUDIT_LOG_QUEUE) private readonly auditQueue: Queue,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
 
   log(action: AuditAction, context: AuditContext = {}): void {
     this.logger.log({ action, ...context });
     this.auditQueue.add(
       AUDIT_LOG_WRITE_JOB,
-      { action, context },
+      { action, context, ...buildJobEnvelope(this.cls) },
       {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2_000 },

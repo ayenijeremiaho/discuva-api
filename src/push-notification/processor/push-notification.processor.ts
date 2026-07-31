@@ -4,9 +4,14 @@ import { Repository } from 'typeorm';
 import { OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Job } from 'bull';
 import * as webPush from 'web-push';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { PushSubscription } from '../entity/push-subscription.entity';
 import { PushJobData } from '../dto/push-notification.dto';
 import { CacheService } from '../../utility/service/cache.service';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 
 @Injectable()
 @Processor('push-notifications')
@@ -17,11 +22,19 @@ export class PushNotificationProcessor {
     @InjectRepository(PushSubscription)
     private readonly subRepo: Repository<PushSubscription>,
     private readonly cacheService: CacheService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Process('send')
   async handle(job: Job<PushJobData>): Promise<void> {
-    const { memberId, endpoint, p256dh, auth, payload } = job.data;
+    return runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.doHandle(job.data),
+    );
+  }
+
+  private async doHandle(data: PushJobData): Promise<void> {
+    const { memberId, endpoint, p256dh, auth, payload } = data;
     const idempotencyKey = `notif:sent:${memberId}:${payload.idempotencyKey}`;
 
     const alreadySent = await this.cacheService.get(idempotencyKey);

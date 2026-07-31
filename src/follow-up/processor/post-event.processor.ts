@@ -4,22 +4,31 @@ import { Job, Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Event } from '../../event/entity/event.entity';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { AttendanceStatusEnum } from '../../attendance/enums/check-in.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { FollowUpService } from '../service/follow-up.service';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import {
+  buildJobEnvelope,
+  TenantJobEnvelope,
+} from '../../tenant/utility/job-envelope';
+import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 
 export const FOLLOW_UP_QUEUE = 'follow-up';
 export const POST_EVENT_JOB = 'post-event';
 export const ONLINE_WINDOW_CLOSED_JOB = 'online-window-closed';
 
-export interface PostEventJobData {
+export interface PostEventJobData extends TenantJobEnvelope {
   eventId: string;
 }
 
-export interface OnlineWindowClosedJobData {
+export interface OnlineWindowClosedJobData extends TenantJobEnvelope {
   eventId: string;
 }
 
@@ -40,6 +49,8 @@ export class PostEventProcessor {
     private readonly eventRepo: Repository<Event>,
     @InjectRepository(Attendance)
     private readonly attendanceRepo: Repository<Attendance>,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.onlineWindowHours = this.configService.get<number>(
       'ONLINE_CHECKIN_WINDOW_HOURS',
@@ -49,7 +60,13 @@ export class PostEventProcessor {
 
   @Process(POST_EVENT_JOB)
   async handlePostEvent(job: Job<PostEventJobData>): Promise<void> {
-    const { eventId } = job.data;
+    return runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.doHandlePostEvent(job.data),
+    );
+  }
+
+  private async doHandlePostEvent(data: PostEventJobData): Promise<void> {
+    const { eventId } = data;
     this.logger.log(`Processing post-event job for event ${eventId}`);
 
     const event = await this.eventRepo.findOne({ where: { id: eventId } });
@@ -130,7 +147,7 @@ export class PostEventProcessor {
     const delayMs = this.onlineWindowHours * 60 * 60 * 1000;
     await this.followUpQueue.add(
       ONLINE_WINDOW_CLOSED_JOB,
-      { eventId },
+      { eventId, ...buildJobEnvelope(this.cls) },
       { delay: delayMs, attempts: 3, backoff: { type: 'fixed', delay: 5000 } },
     );
   }
@@ -139,7 +156,15 @@ export class PostEventProcessor {
   async handleOnlineWindowClosed(
     job: Job<OnlineWindowClosedJobData>,
   ): Promise<void> {
-    const { eventId } = job.data;
+    return runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.doHandleOnlineWindowClosed(job.data),
+    );
+  }
+
+  private async doHandleOnlineWindowClosed(
+    data: OnlineWindowClosedJobData,
+  ): Promise<void> {
+    const { eventId } = data;
     this.logger.log(
       `Online window closed for event ${eventId}; creating follow-up tasks`,
     );

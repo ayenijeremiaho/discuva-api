@@ -11,6 +11,7 @@ import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Cron } from '@nestjs/schedule';
+import { ClsService } from 'nestjs-cls';
 import * as ExcelJS from 'exceljs';
 import { TitheAccount } from '../entity/tithe-account.entity';
 import { TitheUploadBatch } from '../entity/tithe-upload-batch.entity';
@@ -48,6 +49,8 @@ import { ExcelService } from '../../utility/service/excel.service';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { MemberAuth } from '../../auth/interface/auth.interface';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 
 const TITHE_PROOF_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -106,6 +109,7 @@ export class TitheService {
     private readonly pdfService: PdfService,
     private readonly excelService: ExcelService,
     private readonly config: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
     this.proofExpiryDays = this.config.get<number>('TITHE_PROOF_EXPIRY_DAYS');
@@ -357,7 +361,7 @@ export class TitheService {
 
     await this.titheQueue.add(
       TITHE_PROCESS_JOB,
-      { batchId: batch.id, rows },
+      { batchId: batch.id, rows, ...buildJobEnvelope(this.cls) },
       {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },
@@ -425,7 +429,7 @@ export class TitheService {
     });
     await this.titheQueue.add(
       TITHE_PROCESS_JOB,
-      { batchId: id, rows: batch.rows },
+      { batchId: id, rows: batch.rows, ...buildJobEnvelope(this.cls) },
       {
         attempts: 3,
         backoff: { type: 'exponential', delay: 5000 },

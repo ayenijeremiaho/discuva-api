@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
 import * as webPush from 'web-push';
 import { PushSubscription } from '../entity/push-subscription.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
@@ -12,6 +13,8 @@ import {
   PushPayload,
   SubscribePushDto,
 } from '../dto/push-notification.dto';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 
 @Injectable()
 export class PushNotificationService implements OnModuleInit {
@@ -23,6 +26,7 @@ export class PushNotificationService implements OnModuleInit {
     @InjectQueue('push-notifications')
     private readonly queue: Queue<PushJobData>,
     private readonly config: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
 
   onModuleInit(): void {
@@ -74,6 +78,7 @@ export class PushNotificationService implements OnModuleInit {
       where: { memberId: In(memberIds) },
     });
     if (!subscriptions.length) return;
+    const envelope = buildJobEnvelope(this.cls);
     await this.queue.addBulk(
       subscriptions.map((sub) => ({
         name: 'send',
@@ -83,6 +88,7 @@ export class PushNotificationService implements OnModuleInit {
           p256dh: sub.p256dh,
           auth: sub.auth,
           payload,
+          ...envelope,
         },
         opts: {
           jobId: `push:${sub.memberId}:${payload.idempotencyKey}`,

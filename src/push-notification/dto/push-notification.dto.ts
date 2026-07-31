@@ -1,4 +1,5 @@
 import { IsNotEmpty, IsString } from 'class-validator';
+import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
 
 export class SubscribePushDto {
   @IsString()
@@ -21,7 +22,7 @@ export interface PushPayload {
   url: string;
 }
 
-export interface PushJobData {
+export interface PushJobData extends TenantJobEnvelope {
   memberId: string;
   endpoint: string;
   p256dh: string;

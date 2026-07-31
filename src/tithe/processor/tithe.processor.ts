@@ -7,18 +7,24 @@ import {
 } from '@nestjs/bull';
 import { Job } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { TitheUploadBatch } from '../entity/tithe-upload-batch.entity';
 import { TitheRecord } from '../entity/tithe-record.entity';
 import { TitheUnmatchedRecord } from '../entity/tithe-unmatched-record.entity';
 import { TitheDisputeRecord } from '../entity/tithe-dispute-record.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TitheBatchStatus } from '../enum/tithe.enum';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
+import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 
 export const TITHE_QUEUE = 'tithe';
 export const TITHE_PROCESS_JOB = 'process-batch';
 
-export interface TitheProcessJobData {
+export interface TitheProcessJobData extends TenantJobEnvelope {
   batchId: string;
   rows: TitheRow[];
 }
@@ -38,12 +44,19 @@ export class TitheProcessor implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(TitheUploadBatch)
     private readonly batchRepo: Repository<TitheUploadBatch>,
-    private readonly dataSource: DataSource,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Process(TITHE_PROCESS_JOB)
   async handleBatch(job: Job<TitheProcessJobData>): Promise<void> {
-    const { batchId, rows } = job.data;
+    return runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.doHandleBatch(job.data),
+    );
+  }
+
+  private async doHandleBatch(data: TitheProcessJobData): Promise<void> {
+    const { batchId, rows } = data;
     const batch = await this.batchRepo.findOne({ where: { id: batchId } });
     if (!batch) return;
 
@@ -56,7 +69,12 @@ export class TitheProcessor implements OnApplicationBootstrap {
     let disputed = 0;
 
     try {
-      await this.dataSource.transaction(async (manager) => {
+      // txHost.withTransaction joins the tenant transaction runInTenantContext
+      // already opened (Propagation.Required), rather than opening a second,
+      // disconnected one that wouldn't see the SET LOCAL search_path — see
+      // src/tenant/utility/run-in-tenant-context.ts.
+      await this.txHost.withTransaction(async () => {
+        const manager = this.txHost.tx;
         matched = 0;
         unmatched = 0;
         disputed = 0;

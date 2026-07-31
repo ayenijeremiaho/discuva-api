@@ -13,9 +13,16 @@ import {
   JournalLineType,
   ReconciliationRowStatus,
 } from '../enum/finance.enum';
+import { ClsService } from 'nestjs-cls';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { RECONCILIATION_QUEUE } from '../processor/reconciliation.processor';
 import { BankImportProfileService } from './bank-import-profile.service';
+
+const mockClsService = {
+  get: jest.fn(),
+  isActive: jest.fn().mockReturnValue(false),
+  getId: jest.fn(),
+};
 
 const mockJobRepo = {
   findOne: jest.fn(),
@@ -83,6 +90,7 @@ describe('ReconciliationService', () => {
           useValue: mockBankImportProfileService,
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ClsService, useValue: mockClsService },
       ],
     }).compile();
 

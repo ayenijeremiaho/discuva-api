@@ -10,6 +10,9 @@ import { InjectQueue } from '@nestjs/bull';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { Queue } from 'bull';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { BulkUploadJob } from '../entity/bulk-upload-job.entity';
 import { ReconciliationRow } from '../entity/reconciliation-row.entity';
 import { JournalEntry } from '../entity/journal-entry.entity';
@@ -59,6 +62,7 @@ export class ReconciliationService {
     private readonly dataSource: DataSource,
     private readonly bankImportProfileService: BankImportProfileService,
     private readonly auditLogService: AuditLogService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
 
   async uploadCsv(
@@ -100,7 +104,7 @@ export class ReconciliationService {
 
     await this.queue.add(
       RECONCILIATION_PROCESS_JOB,
-      { jobId: saved.id, csvContent },
+      { jobId: saved.id, csvContent, ...buildJobEnvelope(this.cls) },
       { attempts: 3, backoff: 5000 },
     );
 

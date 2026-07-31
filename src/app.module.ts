@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { MulterModule } from '@nestjs/platform-express';
+import { randomUUID } from 'node:crypto';
 import { ClsModule } from 'nestjs-cls';
 import { ClsPluginTransactional } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -67,7 +68,14 @@ import { EvangelismModule } from './evangelism/evangelism.module';
     // docs/MULTI_TENANT_MIGRATION.md §4.2.
     ClsModule.forRoot({
       global: true,
-      middleware: { mount: true },
+      middleware: {
+        mount: true,
+        // Every request gets a correlation id via cls.getId(), independent
+        // of tenant resolution — carried into Bull job payloads (§4.6) so a
+        // processor log line can be traced back to the originating request.
+        generateId: true,
+        idGenerator: () => randomUUID(),
+      },
       // Makes TransactionHost injectable app-wide, for the eventual
       // per-request "wrap in one transaction, SET LOCAL search_path"
       // mechanism (docs/MULTI_TENANT_MIGRATION.md §4.4). Registering the

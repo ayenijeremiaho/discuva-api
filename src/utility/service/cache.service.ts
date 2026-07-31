@@ -5,7 +5,9 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
 import Redis from 'ioredis';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 
 interface CacheStats {
   hits: number;
@@ -24,7 +26,10 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     misses: 0,
   };
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+  ) {
     this.redis = new Redis({
       host: this.configService.get<string>('REDIS_HOST'),
       port: this.configService.get<number>('REDIS_PORT'),
@@ -85,7 +90,18 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return suffix ? `${namespace}:${id}:${suffix}` : `${namespace}:${id}`;
   }
 
-  async get<T>(key: string): Promise<T | undefined> {
+  // Every Redis-touching method below routes its key through this, so no
+  // call site needs to remember to namespace by tenant itself. tenantId is
+  // 'global' until TenantMiddleware is wired into the live request pipeline
+  // (docs/MULTI_TENANT_MIGRATION.md §4.5) — today that's every request, so
+  // this is currently a no-op prefix, not a live behavior change.
+  private scopedKey(key: string): string {
+    const tenantId = this.cls.get('tenantId') ?? 'global';
+    return `tenant:${tenantId}:${key}`;
+  }
+
+  async get<T>(rawKey: string): Promise<T | undefined> {
+    const key = this.scopedKey(rawKey);
     const raw = await this.redis.get(key);
     if (raw === null) {
       this.accessStats.misses++;
@@ -114,12 +130,14 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return value;
   }
 
-  async set<T>(key: string, value: T, ttl: number = 300): Promise<void> {
+  async set<T>(rawKey: string, value: T, ttl: number = 300): Promise<void> {
+    const key = this.scopedKey(rawKey);
     await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
     this.logger.debug(`Cache SET: ${key} (TTL: ${ttl}s)`);
   }
 
-  async incr(key: string, ttlSeconds: number): Promise<number> {
+  async incr(rawKey: string, ttlSeconds: number): Promise<number> {
+    const key = this.scopedKey(rawKey);
     // Lua script makes INCR + EXPIRE atomic — prevents a key with no TTL
     // if the process crashes between the two commands.
     const result = await this.redis.eval(
@@ -133,7 +151,8 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return result as number;
   }
 
-  async del(key: string): Promise<number> {
+  async del(rawKey: string): Promise<number> {
+    const key = this.scopedKey(rawKey);
     const count = await this.redis.del(key);
     if (count > 0) {
       this.logger.debug(`Cache DEL: ${key}`);
@@ -141,22 +160,29 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return count;
   }
 
-  async has(key: string): Promise<boolean> {
-    return (await this.redis.exists(key)) > 0;
+  async has(rawKey: string): Promise<boolean> {
+    return (await this.redis.exists(this.scopedKey(rawKey))) > 0;
   }
 
   async blacklistJti(jti: string, ttlSeconds: number): Promise<void> {
     if (ttlSeconds > 0) {
-      await this.redis.set(this.key('jti_bl', jti), '1', 'EX', ttlSeconds);
+      await this.redis.set(
+        this.scopedKey(this.key('jti_bl', jti)),
+        '1',
+        'EX',
+        ttlSeconds,
+      );
     }
   }
 
   async isJtiBlacklisted(jti: string): Promise<boolean> {
-    return (await this.redis.exists(this.key('jti_bl', jti))) === 1;
+    return (
+      (await this.redis.exists(this.scopedKey(this.key('jti_bl', jti)))) === 1
+    );
   }
 
-  async getTTL(key: string): Promise<number | undefined> {
-    const ttl = await this.redis.ttl(key);
+  async getTTL(rawKey: string): Promise<number | undefined> {
+    const ttl = await this.redis.ttl(this.scopedKey(rawKey));
     return ttl < 0 ? undefined : ttl;
   }
 
@@ -166,7 +192,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async flushNamespace(namespace: string): Promise<void> {
-    await this.delByPattern(`${namespace}:*`);
+    await this.delByPattern(this.scopedKey(`${namespace}:*`));
   }
 
   async stats(): Promise<CacheStats> {
@@ -189,13 +215,19 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     await this.redis.ping();
   }
 
-  async acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
-    const result = await this.redis.set(key, '1', 'EX', ttlSeconds, 'NX');
+  async acquireLock(rawKey: string, ttlSeconds: number): Promise<boolean> {
+    const result = await this.redis.set(
+      this.scopedKey(rawKey),
+      '1',
+      'EX',
+      ttlSeconds,
+      'NX',
+    );
     return result === 'OK';
   }
 
-  releaseLock(key: string): void {
-    this.redis.del(key);
+  releaseLock(rawKey: string): void {
+    this.redis.del(this.scopedKey(rawKey));
   }
 
   private async delByPattern(pattern: string): Promise<number> {

@@ -5,8 +5,11 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as Handlebars from 'handlebars';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
 import { EmailAttachment, EmailJobData } from '../processor/email.processor';
 import { EmailCategory } from '../email-provider/email-category.enum';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 
 @Injectable()
 export class EmailQueueService {
@@ -16,6 +19,7 @@ export class EmailQueueService {
   constructor(
     @InjectQueue('email') private readonly emailQueue: Queue<EmailJobData>,
     private readonly config: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {
     this.brandingData = {
       church_name: this.config.get<string>('CHURCH_NAME'),
@@ -41,7 +45,7 @@ export class EmailQueueService {
     }
     const job = await this.emailQueue.add(
       'send',
-      { to, cc, subject, html, attachments },
+      { to, cc, subject, html, attachments, ...buildJobEnvelope(this.cls) },
       {
         attempts: 5,
         backoff: { type: 'fixed', delay: 5000 },

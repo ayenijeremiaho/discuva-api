@@ -28,10 +28,17 @@ import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { getQueueToken } from '@nestjs/bull';
+import { ClsService } from 'nestjs-cls';
 import { FOLLOW_UP_QUEUE } from '../../follow-up/processor/post-event.processor';
 
 const mockFollowUpQueue = {
   add: jest.fn().mockResolvedValue({ id: 'job-1' }),
+};
+
+const mockClsService = {
+  get: jest.fn(),
+  isActive: jest.fn().mockReturnValue(false),
+  getId: jest.fn(),
 };
 
 const mockCacheService = {
@@ -206,6 +213,7 @@ describe('AttendanceService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: ExcelService, useValue: mockExcelService },
         { provide: EmailQueueService, useValue: mockEmailQueueService },
+        { provide: ClsService, useValue: mockClsService },
       ],
     }).compile();
 

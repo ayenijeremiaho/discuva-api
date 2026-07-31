@@ -11,6 +11,7 @@ import { Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
 import { Attendance } from '../entity/attendance.entity';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import {
@@ -38,6 +39,8 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { ExcelService } from '../../utility/service/excel.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { ExportAttendanceEmailDto } from '../dto/export-attendance-email.dto';
 import { Admin } from '../../admin/entity/admin.entity';
 
@@ -102,6 +105,7 @@ export class AttendanceService {
     private readonly auditLogService: AuditLogService,
     private readonly excelService: ExcelService,
     private readonly emailQueueService: EmailQueueService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -266,7 +270,7 @@ export class AttendanceService {
         await manager.update(Event, event.id, { attendanceMarked: true });
         this.followUpQueue.add(
           POST_EVENT_JOB,
-          { eventId: event.id },
+          { eventId: event.id, ...buildJobEnvelope(this.cls) },
           {
             attempts: 2,
             backoff: { type: 'fixed', delay: 5000 },
