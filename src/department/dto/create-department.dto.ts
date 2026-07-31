@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsEnum, IsNotEmpty, IsOptional } from 'class-validator';
+import { DepartmentCapability } from '../enums/department-capability.enum';
 
 export class CreateDepartmentDto {
   @IsNotEmpty()
@@ -7,10 +8,8 @@ export class CreateDepartmentDto {
   @IsNotEmpty()
   description: string;
 
-  // Free-form access category — not validated against DepartmentKeyEnum,
-  // which is only a set of preset suggestions for the frontend picker (see
-  // Department.key's doc comment).
   @IsOptional()
-  @IsString()
-  key?: string;
+  @IsArray()
+  @IsEnum(DepartmentCapability, { each: true })
+  capabilities?: DepartmentCapability[];
 }

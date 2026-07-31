@@ -27,7 +27,8 @@ export class YoutubeSubscriptionService implements OnModuleInit {
   isConfigured(): boolean {
     return !!(
       this.configService.get<string>('YOUTUBE_CHANNEL_ID') &&
-      this.configService.get<string>('YOUTUBE_WEBSUB_CALLBACK_URL')
+      this.configService.get<string>('YOUTUBE_WEBSUB_CALLBACK_URL') &&
+      this.configService.get<string>('YOUTUBE_WEBSUB_SECRET')
     );
   }
 
@@ -43,6 +44,7 @@ export class YoutubeSubscriptionService implements OnModuleInit {
     const callbackUrl = this.configService.get<string>(
       'YOUTUBE_WEBSUB_CALLBACK_URL',
     )!;
+    const secret = this.configService.get<string>('YOUTUBE_WEBSUB_SECRET')!;
     const topic = `https://www.youtube.com/xml/feeds/videos.xml?channel_id=${channelId}`;
 
     try {
@@ -52,6 +54,7 @@ export class YoutubeSubscriptionService implements OnModuleInit {
         'hub.verify': 'async',
         'hub.mode': 'subscribe',
         'hub.lease_seconds': String(ASSUMED_LEASE_DAYS * 86_400),
+        'hub.secret': secret,
       });
 
       const response = await fetch(PUBSUBHUBBUB_URL, {

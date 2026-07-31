@@ -30,7 +30,7 @@ import { ChildCheckOutDto } from '../dto/child-check-out.dto';
 import { FlagCheckInDto } from '../dto/flag-check-in.dto';
 import { Member } from '../../member/entity/member.entity';
 import { MemberAuth } from '../../auth/interface/auth.interface';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
@@ -699,10 +699,10 @@ export class ChildrenChurchService {
   // ─── Authorization Helpers ────────────────────────────────────────────────
 
   private async requireChildrenChurchAuth(user: MemberAuth): Promise<void> {
-    await this.departmentAccessService.assertHasDepartmentAccessKey(
+    await this.departmentAccessService.assertHasCapability(
       user.id,
-      DepartmentKeyEnum.CHILDREN_CHURCH,
-      'Only Children Church department workers are authorized to perform this action.',
+      DepartmentCapability.MANAGE_CHILDREN_CHURCH,
+      "Only Children's Church Management workers are authorized to perform this action.",
     );
   }
 

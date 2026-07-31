@@ -4,6 +4,7 @@ import { MemberStatusEnum } from '../enums/member-status.enum';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
 import { PastorTypeEnum } from '../enums/pastor-type.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { WorkerProfileDto } from './worker-profile.dto';
 
 export class MemberDto {
@@ -68,6 +69,16 @@ export class MemberDto {
   @Expose()
   @Transform(({ obj }) => obj.pastor?.type ?? null)
   pastorType: PastorTypeEnum | null;
+
+  @Expose()
+  @Transform(({ obj }) => {
+    const primary: DepartmentCapability[] =
+      obj.workerProfile?.department?.capabilities ?? [];
+    const secondary: DepartmentCapability[] =
+      obj.workerProfile?.secondaryDepartment?.capabilities ?? [];
+    return Array.from(new Set([...primary, ...secondary]));
+  })
+  capabilities: DepartmentCapability[];
 
   @Expose()
   createdAt: Date;

@@ -4,15 +4,19 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { YoutubeIntegrationState } from '../entity/youtube-integration-state.entity';
 import { AnnouncementService } from '../../../announcement/service/announcement.service';
+import { CacheService } from '../../../utility/service/cache.service';
 
 interface YoutubeVideosListResponse {
   items?: {
     snippet?: {
       title?: string;
       liveBroadcastContent?: string;
+      channelId?: string;
     };
   }[];
 }
+
+const NOTIFICATION_LOCK_TTL_SECONDS = 60;
 
 @Injectable()
 export class YoutubeLiveDetectionService {
@@ -23,6 +27,7 @@ export class YoutubeLiveDetectionService {
     @InjectRepository(YoutubeIntegrationState)
     private readonly stateRepo: Repository<YoutubeIntegrationState>,
     private readonly announcementService: AnnouncementService,
+    private readonly cacheService: CacheService,
   ) {}
 
   // Called from the WebSub callback with the video id parsed out of the
@@ -35,12 +40,37 @@ export class YoutubeLiveDetectionService {
     const apiKey = this.configService.get<string>('YOUTUBE_API_KEY');
     if (!channelId || !apiKey) return;
 
+    // WebSub hubs routinely redeliver the same notification; without this,
+    // two concurrent deliveries can both pass the lastAnnouncedVideoId check
+    // below before either write lands, double-announcing the same stream.
+    const lockKey = `lock:youtube-notification:${videoId}`;
+    const acquired = await this.cacheService.acquireLock(
+      lockKey,
+      NOTIFICATION_LOCK_TTL_SECONDS,
+    );
+    if (!acquired) {
+      this.logger.debug(
+        `Skipped duplicate/concurrent YouTube notification for video ${videoId}`,
+      );
+      return;
+    }
+
     try {
       let state = await this.stateRepo.findOne({ where: { channelId } });
       if (state?.lastAnnouncedVideoId === videoId) return;
 
       const snippet = await this.fetchSnippet(videoId, apiKey);
       if (!snippet || snippet.liveBroadcastContent !== 'live') return;
+      // The notification only carries a video id, not which channel it came
+      // from — without this check, any currently-live video id (reachable
+      // via the public webhook once past signature verification) would
+      // trigger a "we're live" push, not just this channel's own streams.
+      if (snippet.channelId !== channelId) {
+        this.logger.warn(
+          `Ignored live video ${videoId} — channel ${snippet.channelId} does not match configured channel ${channelId}`,
+        );
+        return;
+      }
 
       const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
       await this.announcementService.createSystemAnnouncement(
@@ -61,13 +91,19 @@ export class YoutubeLiveDetectionService {
       this.logger.warn(
         `Failed to process YouTube notification for video ${videoId}: ${err?.message ?? err}`,
       );
+    } finally {
+      this.cacheService.releaseLock(lockKey);
     }
   }
 
   private async fetchSnippet(
     videoId: string,
     apiKey: string,
-  ): Promise<{ title?: string; liveBroadcastContent?: string } | null> {
+  ): Promise<{
+    title?: string;
+    liveBroadcastContent?: string;
+    channelId?: string;
+  } | null> {
     const url = `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`;
     const response = await fetch(url);
     if (!response.ok) {

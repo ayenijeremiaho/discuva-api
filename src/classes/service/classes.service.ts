@@ -61,6 +61,7 @@ export class ClassesService {
       name: dto.name,
       classType: { id: dto.classTypeId } as ClassType,
       description: dto.description ?? null,
+      documentUrl: dto.documentUrl ?? null,
       startDate: dto.startDate ?? null,
       endDate: dto.endDate ?? null,
       facilitator: dto.facilitatorId ? { id: dto.facilitatorId } : null,
@@ -81,6 +82,8 @@ export class ClassesService {
       churchClass.classType = { id: dto.classTypeId } as ClassType;
     if (dto.description !== undefined)
       churchClass.description = dto.description;
+    if (dto.documentUrl !== undefined)
+      churchClass.documentUrl = dto.documentUrl;
     if (dto.startDate !== undefined) churchClass.startDate = dto.startDate;
     if (dto.endDate !== undefined) churchClass.endDate = dto.endDate;
     if (dto.facilitatorId !== undefined) {

@@ -90,13 +90,18 @@ export class ServiceRatingService {
   ): Promise<ServiceRatingSummary> {
     const qb = this.ratingRepo
       .createQueryBuilder('r')
-      .innerJoin('r.serviceSlot', 'slot');
+      .innerJoin('r.serviceSlot', 'slot')
+      .select('r.rating', 'rating')
+      .addSelect('COUNT(*)', 'count');
 
     if (eventId) qb.andWhere('r.event = :eventId', { eventId });
     if (from) qb.andWhere('slot.startTime >= :from', { from: new Date(from) });
     if (to) qb.andWhere('slot.startTime <= :to', { to: new Date(to) });
 
-    const ratings = await qb.getMany();
+    const rows = await qb.groupBy('r.rating').getRawMany<{
+      rating: number;
+      count: string;
+    }>();
 
     const distribution: ServiceRatingSummary['distribution'] = {
       1: 0,
@@ -105,15 +110,18 @@ export class ServiceRatingService {
       4: 0,
       5: 0,
     };
+    let totalRatings = 0;
     let sum = 0;
-    for (const r of ratings) {
-      distribution[r.rating as 1 | 2 | 3 | 4 | 5] += 1;
-      sum += r.rating;
+    for (const row of rows) {
+      const count = Number(row.count);
+      distribution[row.rating as 1 | 2 | 3 | 4 | 5] = count;
+      totalRatings += count;
+      sum += row.rating * count;
     }
 
     return {
-      averageRating: ratings.length ? sum / ratings.length : 0,
-      totalRatings: ratings.length,
+      averageRating: totalRatings ? sum / totalRatings : 0,
+      totalRatings,
       distribution,
     };
   }

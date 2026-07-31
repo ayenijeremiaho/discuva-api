@@ -114,7 +114,7 @@ export class DepartmentService {
       department.name = dto.name;
     }
     if (dto.description) department.description = dto.description;
-    if ('key' in dto) department.key = dto.key ?? null;
+    if ('capabilities' in dto) department.capabilities = dto.capabilities ?? [];
 
     const updated = await this.departmentRepository.save(department);
     this.cacheService.del(DepartmentService.CACHE_KEY);

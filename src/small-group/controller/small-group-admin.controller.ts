@@ -62,8 +62,16 @@ export class SmallGroupAdminController {
 
   @Get(':id/members')
   @RequiresPermission(AdminPermission.SMALL_GROUP_READ)
-  getRoster(@Param('id', ParseUUIDPipe) id: string) {
-    return this.smallGroupService.getRoster(id);
+  getRoster(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.smallGroupService.getRoster(
+      id,
+      page ? +page : 1,
+      limit ? +limit : 20,
+    );
   }
 
   @Delete(':id/members/:memberId')
@@ -78,7 +86,15 @@ export class SmallGroupAdminController {
 
   @Get(':id/attendance')
   @RequiresPermission(AdminPermission.SMALL_GROUP_READ)
-  getAttendanceHistory(@Param('id', ParseUUIDPipe) id: string) {
-    return this.smallGroupService.getAttendanceHistory(id);
+  getAttendanceHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.smallGroupService.getAttendanceHistory(
+      id,
+      page ? +page : 1,
+      limit ? +limit : 20,
+    );
   }
 }

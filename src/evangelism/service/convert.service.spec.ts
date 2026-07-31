@@ -12,7 +12,7 @@ import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberService } from '../../member/service/member.service';
 import { ConvertStatusEnum } from '../enum/convert-status.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
@@ -39,8 +39,8 @@ const mockWorkerProfileRepo = {
 const mockAuditLogService = { log: jest.fn() };
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const mockMemberService = {
@@ -269,7 +269,7 @@ describe('ConvertService', () => {
       mockConvertRepo.findOne.mockResolvedValue({ id: 'convert-1' });
       mockWorkerProfileRepo.findOne.mockResolvedValue({
         id: 'wp-1',
-        department: { key: DepartmentKeyEnum.MEDIA },
+        department: { capabilities: [] },
         secondaryDepartment: null,
       });
 
@@ -287,8 +287,10 @@ describe('ConvertService', () => {
       mockConvertRepo.findOne.mockResolvedValue(convert);
       const targetProfile = {
         id: 'wp-1',
-        department: { key: DepartmentKeyEnum.MEDIA },
-        secondaryDepartment: { key: DepartmentKeyEnum.EVANGELISM },
+        department: { capabilities: [] },
+        secondaryDepartment: {
+          capabilities: [DepartmentCapability.MANAGE_EVANGELISM_CONVERTS],
+        },
       };
       mockWorkerProfileRepo.findOne.mockResolvedValue(targetProfile);
       mockConvertRepo.save.mockImplementation((c) => Promise.resolve(c));
@@ -367,23 +369,23 @@ describe('ConvertService', () => {
 
   describe('assertIsEvangelismDeptWorker', () => {
     it('delegates to DepartmentAccessService with the EVANGELISM key', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
 
       await service.assertIsEvangelismDeptWorker('member-1');
 
       expect(
-        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+        mockDepartmentAccessService.assertHasCapability,
       ).toHaveBeenCalledWith(
         'member-1',
-        DepartmentKeyEnum.EVANGELISM,
+        DepartmentCapability.MANAGE_EVANGELISM_CONVERTS,
         expect.any(String),
       );
     });
 
     it('propagates the ForbiddenException thrown by DepartmentAccessService', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
         new ForbiddenException(
           'Only Evangelism department workers can perform this action',
         ),

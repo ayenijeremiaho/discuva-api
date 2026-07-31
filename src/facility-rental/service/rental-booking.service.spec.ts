@@ -33,7 +33,7 @@ const mockBookingAddonRepo = { create: jest.fn(), save: jest.fn() };
 const mockPaymentRepo = { save: jest.fn() };
 const mockFacilityRepo = { findOne: jest.fn(), findOneBy: jest.fn() };
 const mockTierRepo = { findOne: jest.fn() };
-const mockAddonRepo = { findOne: jest.fn() };
+const mockAddonRepo = { findOne: jest.fn(), find: jest.fn() };
 const mockBlockRepo = { createQueryBuilder: jest.fn() };
 const mockMemberRepo = { findOneBy: jest.fn() };
 const mockDeptLeadRepo = { exists: jest.fn() };
@@ -94,6 +94,43 @@ describe('RentalBookingService', () => {
   });
 
   it('should be defined', () => expect(service).toBeDefined());
+
+  describe('resolveAddons', () => {
+    it('returns an empty array without querying when no addons are requested', async () => {
+      const result = await service.resolveAddons([]);
+
+      expect(result).toEqual([]);
+      expect(mockAddonRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('resolves all requested addons with a single batched query', async () => {
+      const addonA = { id: 'addon-a', isActive: true };
+      const addonB = { id: 'addon-b', isActive: true };
+      mockAddonRepo.find.mockResolvedValue([addonA, addonB]);
+
+      const result = await service.resolveAddons([
+        { addonId: 'addon-a', quantity: 2 },
+        { addonId: 'addon-b', quantity: 1 },
+      ]);
+
+      expect(mockAddonRepo.find).toHaveBeenCalledTimes(1);
+      expect(result).toEqual([
+        { addon: addonA, quantity: 2 },
+        { addon: addonB, quantity: 1 },
+      ]);
+    });
+
+    it('throws NotFoundException when a requested addon is missing or inactive', async () => {
+      mockAddonRepo.find.mockResolvedValue([{ id: 'addon-a', isActive: true }]);
+
+      await expect(
+        service.resolveAddons([
+          { addonId: 'addon-a', quantity: 1 },
+          { addonId: 'addon-missing', quantity: 1 },
+        ]),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
 
   describe('computePricing', () => {
     it('applies no discount when tier is null', () => {

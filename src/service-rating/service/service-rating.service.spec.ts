@@ -10,13 +10,17 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 const makeQb = () => ({
   innerJoin: jest.fn().mockReturnThis(),
   innerJoinAndSelect: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  addSelect: jest.fn().mockReturnThis(),
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
   orderBy: jest.fn().mockReturnThis(),
+  groupBy: jest.fn().mockReturnThis(),
   skip: jest.fn().mockReturnThis(),
   take: jest.fn().mockReturnThis(),
   getMany: jest.fn().mockResolvedValue([]),
   getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+  getRawMany: jest.fn().mockResolvedValue([]),
 });
 
 const mockRatingRepo = {
@@ -131,10 +135,9 @@ describe('ServiceRatingService', () => {
 
     it('computes average and distribution across ratings', async () => {
       const qb = makeQb();
-      qb.getMany.mockResolvedValue([
-        { rating: 5 },
-        { rating: 5 },
-        { rating: 1 },
+      qb.getRawMany.mockResolvedValue([
+        { rating: 5, count: '2' },
+        { rating: 1, count: '1' },
       ]);
       mockRatingRepo.createQueryBuilder.mockReturnValue(qb);
 
@@ -144,6 +147,7 @@ describe('ServiceRatingService', () => {
       expect(result.averageRating).toBeCloseTo(3.6667, 3);
       expect(result.distribution[5]).toBe(2);
       expect(result.distribution[1]).toBe(1);
+      expect(qb.groupBy).toHaveBeenCalledWith('r.rating');
     });
   });
 

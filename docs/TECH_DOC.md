@@ -279,7 +279,7 @@ One record per member per **event**. Workers and members both receive one attend
 | id             | UUID PK                                                                                                                                                |
 | name           | Unique                                                                                                                                                 |
 | description    |                                                                                                                                                        |
-| key            | string \| null — free-form access-control category for department-gated modules; not unique (multiple departments can share the same key, e.g. MEDIA). Not validated against a fixed enum — `DepartmentKeyEnum`/`DepartmentKeyLabels` are preset suggestions surfaced by the frontend picker (`GET departments/keys`), not the full set of valid values. A church can create a brand-new access category (e.g. `STAGE_LIGHTING`) just by typing it, no backend change or deploy required. |
+| capabilities   | `DepartmentCapability[]` (`text[]`, default `{}`) — fixed, code-defined feature flags this department grants to its workers (both primary and secondary). Validated against the `DepartmentCapability` enum (`src/department/enums/department-capability.enum.ts`) — unlike the `key` column it replaced, a capability only exists if a real feature is gated on it, and a single department can hold more than one. |
 | workerProfiles | OneToMany → WorkerProfile                                                                                                                              |
 
 ### DepartmentLead
@@ -1596,53 +1596,63 @@ The access token's role is re-validated from the live database on every request 
 a member is promoted to WORKER, their existing token will reflect the new role on the next request after the DB is
 updated.
 
-### Department-Key-Based Access Control
+### Department Capabilities
 
-Certain modules are gated by a department `key` rather than a specific department name. This allows multiple departments
-to share access to the same module (e.g. both "Technical Media" and "Social Media" can carry `key=MEDIA`).
+Certain modules are gated by a department **capability** rather than a specific department name or a single free-form
+key. This is a full replacement of the earlier `Department.key`-based system: `key` (a single free-form string,
+validated against nothing but a preset-suggestion enum) has been removed entirely, in favor of `capabilities` — a
+fixed, code-defined, multi-value list. The old system conflated "this department's organizational label" with "what
+it unlocks," forcing an admin to type a magic string that had to exactly match hardcoded values scattered across both
+the backend and Faithapp mobile, and could only ever grant one capability per department. Capabilities decouple these:
+a department can be named anything, and separately be given any combination of capabilities via checkboxes in the
+admin UI.
 
 **How it works:**
 
-- Each `Department` record has a nullable `key: string | null` field — **free-form, not validated against a fixed
-  enum**. `DepartmentKeyEnum`/`DepartmentKeyLabels` (`src/department/enums/department-key.enum.ts`) are preset
-  suggestions surfaced by the frontend picker, not the full set of legal values; `CreateDepartmentDto`/`UpdateDepartmentDto`
-  only require `key` to be a string. A church can introduce a brand-new access category (e.g. a department with
-  `key = "STAGE_LIGHTING"`) just by typing it when creating/editing a department — no backend code change or
-  deploy required. The key is **not unique** — many departments may share the same key.
-- A `WorkerProfile` has a primary `department` and an optional `secondaryDepartment`. A worker passes a key-based gate
-  if **either** their primary or secondary department carries the required key.
-- **`DepartmentAccessService`** (`src/department/service/department-access.service.ts`, exported from `DepartmentModule`)
-  is the single shared implementation of this check — `hasDepartmentAccessKey(memberId, key)` (boolean, for composing
-  with other conditions like "or is a pastor" or "or is the class teacher") and `assertHasDepartmentAccessKey(memberId, key, message?)`
-  (throws `ForbiddenException`). Collapses what used to be 7 near-identical, independently-implemented
-  `assertIsXDeptWorker()` methods across `attendance`, `evangelism`, `sunday-school`, `prayer-request`,
-  `service-session`, `children-church`, and `follow-up` services into one implementation — each now just calls it
-  with its own key and message.
-- HOD (head-of-department) assignment is always restricted to the worker's **primary** department.
+- Each `Department` has a `capabilities: DepartmentCapability[]` column (`text[]`, default `{}`). `DepartmentCapability`
+  (`src/department/enums/department-capability.enum.ts`) is a **fixed enum** — six values today, each named after the
+  action it unlocks rather than a department: `MANAGE_SUNDAY_SCHOOL`, `MANAGE_CHILDREN_CHURCH`,
+  `MANAGE_PRAYER_REQUESTS`, `MANAGE_EVANGELISM_CONVERTS`, `MANAGE_FOLLOW_UP`, `FRONT_DESK_OPERATIONS`. A capability
+  only belongs in this list if a real feature is gated on it — mirrors the `KNOWN_MODULES` pattern. `CreateDepartmentDto`/
+  `UpdateDepartmentDto` validate `capabilities` with `@IsEnum(DepartmentCapability, { each: true })`; unlike the old
+  `key`, admins pick from a fixed checkbox list, not free text, and a single department can hold more than one
+  capability at once.
+- A `WorkerProfile` has a primary `department` and an optional `secondaryDepartment`. A worker has a capability if
+  **either** department's `capabilities` array includes it.
+- **`DepartmentAccessService`** (`src/department/service/department-access.service.ts`, exported from
+  `DepartmentModule`) is the single shared implementation of this check — `hasCapability(memberId, capability)`
+  (boolean, for composing with other conditions like "or is a pastor" or "or is the class teacher") and
+  `assertHasCapability(memberId, capability, message?)` (throws `ForbiddenException`). Used by 7 services —
+  `attendance`, `evangelism`, `sunday-school`, `prayer-request`, `service-session`, `children-church`, and
+  `follow-up` — each calling it with its own capability and message; two of those services (`evangelism`,
+  `follow-up`) also have an inline duplicate of the same check where they already have the `WorkerProfile` loaded
+  and calling the service would mean a redundant query.
+- `GET /auth/me` computes a flat `capabilities: DepartmentCapability[]` field on `MemberDto`
+  (`@Transform`, same pattern as `pastorType`) — a deduped union of the primary and secondary department's
+  capabilities. Faithapp mobile checks this one field (`profile?.capabilities?.includes("X")`) instead of
+  independently re-deriving the primary-or-secondary union at every call site.
+- HOD (head-of-department) assignment is always restricted to the worker's **primary** department (unrelated to
+  capabilities).
 
 **Sunday School access** — a request passes if any of the following is true:
 
-1. Caller is a WORKER whose primary or secondary department has `key = SUNDAY_SCHOOL`.
+1. Caller is a WORKER whose primary or secondary department has the `MANAGE_SUNDAY_SCHOOL` capability.
 2. Caller is the appointed teacher of the specific Sunday School class being acted upon.
 
 Admin-only SS routes (delete class/session) use `AdminGuard + SUNDAY_SCHOOL_WRITE` instead.
 
 **Children Church access** — a request passes if any of the following is true:
 
-1. Caller is a WORKER whose primary or secondary department has `key = CHILDREN_CHURCH`.
+1. Caller is a WORKER whose primary or secondary department has the `MANAGE_CHILDREN_CHURCH` capability.
 
 Admin-only CC routes (age group/class group CRUD, slot-level check-in report) use
 `AdminGuard + CHILDREN_CHURCH_WRITE/READ` instead.
 
-**Fixed: `key` was never reaching clients.** The mechanism above was fully enforced server-side, but `DepartmentRefDto`
-(the shape of `department`/`secondaryDepartment` on `WorkerProfileDto`, returned by `GET /auth/me` and `GET /members/me`)
-only exposed `id`/`name` — `key` had no `@Expose()` and was stripped by `class-transformer`'s `excludeExtraneousValues`.
-Faithapp (the member PWA) has no way to read a field the API never sends, so its Children's Church tab was gated on
-`department.name === "Children Church"` — a literal string match that ignored `secondaryDepartment` entirely and would
-silently break the moment the department was renamed, even though the *actual* authorization check above never cared
-about the name at all. `DepartmentRefDto` now exposes `key: string | null`, and Faithapp's
-`children-church.tsx` gates on `department?.key === "CHILDREN_CHURCH" || secondaryDepartment?.key === "CHILDREN_CHURCH"`,
-matching the backend's own rule exactly (including the secondary-department case it previously missed).
+**Migration note:** `1790208000000-ReplaceDepartmentKeyWithCapabilities.ts` backfills the 6 legacy `key` values that
+had real behavior behind them (`ADMIN`, `EVANGELISM`, `SUNDAY_SCHOOL`, `PRAYER`, `CHILDREN_CHURCH`, `FOLLOW_UP`) into
+their corresponding capability, then drops the `key` column. Any department whose `key` was one of the other preset
+values (`WORSHIP`, `USHERING`, `MEDIA`, `PROTOCOL`, `WELFARE`, `YOUTH`, `YOUNG_ADULTS`) or a custom string had no real
+behavior behind it and is simply dropped — those departments end up with `capabilities: []`.
 
 ---
 
@@ -1694,7 +1704,7 @@ flow — see Self-Service Email Change Flow), and the admin-only church-record f
   pastor.
 - `DELETE /members/:id/pastor` — removes the designation; `404` if the member is not a pastor. Returns `204`.
 
-`pastorType: PastorTypeEnum | null` is surfaced on `MemberDto` (`GET /auth/me`, `GET /members/me`,
+`pastorType: PastorTypeEnum | null` is surfaced on `MemberDto` (`GET /auth/me`,
 `GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `pastor` relation.
 
 **Profile photo:** `POST /members/me/photo` (multipart, field `photo`) uploads/replaces the caller's own photo via
@@ -1911,8 +1921,8 @@ if already set; otherwise a new record is created with `checkinTime = now`, `rol
 current role, and `location: null` (this is an assisted check-in, not GPS-verified). Reachable two ways:
 - `POST /attendances/admin/mark` — admin portal, `AdminGuard` + `ATTENDANCE_WRITE`.
 - `POST /attendances/department/mark` — mobile app, `JwtAuthGuard` only, gated in-service by
-  `assertIsAdminDeptWorker()` (the caller's `workerProfile.department` or `secondaryDepartment` must have
-  `key === DepartmentKeyEnum.ADMIN` — the same department-key idiom already used by
+  `assertIsAdminDeptWorker()` (the caller's `workerProfile.department` or `secondaryDepartment` must have the
+  `FRONT_DESK_OPERATIONS` capability — the same capability idiom already used by
   `ServiceSessionService.assertIsAdminDeptWorker`). Front-desk/Admin-department workers get this without
   needing an admin-portal login.
 
@@ -1995,7 +2005,7 @@ request; `null` means a general testimony not tied to any request.
   `GET /testimonies/mine`, `GET /testimonies/public` (the opt-in feed, open to any authenticated member/worker).
 - `prayer-request-team.controller.ts` (`JwtAuthGuard`, mobile-facing) — `GET /prayer-requests/team`,
   `PATCH /prayer-requests/team/:id/status`. Gated in-service by `assertIsPrayerTeamOrPastor()`: any worker whose
-  primary or secondary department key is `PRAYER`, or any member with a `Pastor` record.
+  primary or secondary department has the `MANAGE_PRAYER_REQUESTS` capability, or any member with a `Pastor` record.
 - `prayer-request-admin.controller.ts` (`AdminGuard`) — `GET /prayer-requests/admin`,
   `PATCH /prayer-requests/admin/:id/status`, `GET /testimonies/admin` (full visibility, not just public ones).
   Reuses the existing `PRAYER_READ`/`PRAYER_WRITE` permissions (already grouped under "Prayer Roster" in
@@ -2043,6 +2053,11 @@ Tracks member progress through structured church programs. The module, route pat
 **Enrollment statuses:** IN_PROGRESS → COMPLETED or CANCELLED. A `COMPLETED` enrollment whose class type has a `nextClassType` becomes eligible for level promotion (`GET classes/enrollments/:id/promotion-candidate` → `POST classes/enrollments/:id/promote`) — an explicit, separate, admin-confirmed action, not automatic.
 
 **Certificates:** A `COMPLETED` enrollment can be marked as having received a certificate via `PATCH classes/enrollments/:id/certificate` (optional `certificateNumber`) — see the `ClassEnrollment` entity section above.
+
+**Study material (`ChurchClass.documentUrl`):** optional, admin-set link to the class's syllabus/manual (Google
+Drive, PDF link, etc.) — validated as a URL (`@IsUrl()`), not a file upload. Settable at create or update
+(`POST`/`PATCH classes`). Rendered as a "View Study Material" link on the admin detail panel and the member-facing
+class detail page (`Faithapp` mobile).
 
 **Routes prefix:** `/classes`, `/classes/types`
 
@@ -2350,6 +2365,12 @@ a staff member has opened the window on the session.
 - A session is created per class per date. Staff open a timed self-mark window via `PATCH /sessions/:id/open` (body: `{ closesInMinutes: 5–480 }`); members may self-mark only while `selfMarkClosesAt` is non-null and in the future. Staff can close the window early via `PATCH /sessions/:id/close`. No cron job required — the window expires automatically at query time.
 - Bulk marking is used by teachers/staff; self-mark (`POST /sunday-school/sessions/:id/checkin`) is used by individual
   members.
+
+**Lesson material (`SundaySchoolSession.documentUrl`):** optional link to that date's lesson material (Google Drive,
+PDF link, etc.) — validated as a URL (`@IsUrl()`), settable only at session creation (`POST .../sessions`), same as
+the pre-existing `notes` field — neither has an update-after-creation route. Set via either the worker/teacher
+controller (mobile) or the admin controller; both share `CreateSundaySchoolSessionDto`. Surfaced as "View Lesson
+Material" on the teacher's roster panel (`Faithapp` mobile) and via a small link icon in the admin sessions table.
 
 **Routes prefix:** `/sunday-school` (worker/member routes) and `/admin/sunday-school` (admin routes)
 
@@ -2732,9 +2753,9 @@ every new follow-up log). `ConvertFollowUpLog` (`convert_follow_up_logs`) — on
   simple as possible (only `name` is required).
 - **Team inbox and follow-up logging** (`GET evangelism/converts/team`, `POST
   evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`) require the caller to be a worker
-  whose primary or secondary department key is `EVANGELISM` — enforced by
+  whose primary or secondary department has the `MANAGE_EVANGELISM_CONVERTS` capability — enforced by
   `ConvertService.assertIsEvangelismDeptWorker()`, a direct copy of `assertIsAdminDeptWorker()`
-  (`service-programme/service/service-session.service.ts`) with the department swapped.
+  (`service-programme/service/service-session.service.ts`) with the capability swapped.
 - **Admin portal** (`AdminGuard` + new `EVANGELISM_READ`/`EVANGELISM_WRITE` permissions) — cross-member view of
   every convert, plus `PATCH evangelism/converts/admin/:id/reassign` (validates the target `workerProfileId`
   resolves to an Evangelism-department worker, else `400`) and `PATCH
@@ -2788,35 +2809,49 @@ module's existing `@RequiresModule('sermons')` check, since a note is the reques
 
 Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when the configured YouTube
 channel goes live and calls `AnnouncementService.createSystemAnnouncement()` automatically, no admin click needed.
-Entirely optional and env-var-gated: with `YOUTUBE_CHANNEL_ID`/`YOUTUBE_WEBSUB_CALLBACK_URL` unset, `YoutubeSubscriptionService`
-skips subscribing (logged at debug level) and the webhook controller simply never receives traffic — nothing breaks
-for churches that don't set these vars, they just keep using the manual trigger.
+Entirely optional and env-var-gated: with `YOUTUBE_CHANNEL_ID`/`YOUTUBE_WEBSUB_CALLBACK_URL`/`YOUTUBE_WEBSUB_SECRET`
+unset, `YoutubeSubscriptionService.isConfigured()` is false, `subscribe()` skips (logged at debug level), and the
+webhook controller rejects everything it receives — nothing breaks for churches that don't set these vars, they just
+keep using the manual trigger. All three are required together, not just the first two: without a secret configured,
+`subscribe()` never registers a live WebSub subscription in the first place, so there's nothing legitimate for the
+callback to receive.
 
 **WebSub (PubSubHubbub) flow:**
 1. On boot (`OnModuleInit`) and daily at 2am church time (`YoutubeSubscriptionScheduler`, distributed-lock guarded the
    same way `FollowUpScheduler` is), `YoutubeSubscriptionService.subscribe()` POSTs a subscribe request to Google's
-   public hub (`https://pubsubhubbub.appspot.com/subscribe`) for the channel's video-feed topic. The daily
-   re-subscription exists because WebSub leases expire (~5-10 days) — re-subscribing daily keeps it comfortably ahead
-   of expiry regardless of what the hub actually grants.
+   public hub (`https://pubsubhubbub.appspot.com/subscribe`) for the channel's video-feed topic, including
+   `hub.secret` (`YOUTUBE_WEBSUB_SECRET`) — the hub then HMAC-SHA1-signs every notification it sends with that secret.
+   The daily re-subscription exists because WebSub leases expire (~5-10 days) — re-subscribing daily keeps it
+   comfortably ahead of expiry regardless of what the hub actually grants.
 2. `GET integrations/youtube/callback` handles the hub's verification handshake — echoes back `hub.challenge` verbatim
    (required by the WebSub spec) for `subscribe`/`unsubscribe` modes, `404` otherwise.
 3. `POST integrations/youtube/callback` receives the actual "video published" notification — an Atom XML body
-   containing a `<yt:videoId>`. Extracted via a small regex (a full XML parser dependency wasn't worth adding for this
-   one fixed field). Always acks fast (`204`, no body) regardless of what happens next — `YoutubeLiveDetectionService.handleNotification()`
-   runs without being awaited by the response.
-4. `YoutubeLiveDetectionService` checks `YoutubeIntegrationState.lastAnnouncedVideoId` for this channel first
-   (idempotency — the same video can generate multiple WebSub pings). If new, calls the YouTube Data API
-   (`videos.list?part=snippet`) to confirm `snippet.liveBroadcastContent === 'live'` — the WebSub ping alone fires for
-   regular uploads too, not just livestreams. Only then does it call `createSystemAnnouncement()` and persist the
-   video id as the new `lastAnnouncedVideoId`.
+   containing a `<yt:videoId>`. Before doing anything else, `YoutubeWebhookController` verifies the `X-Hub-Signature`
+   header (`sha1=<hex>`) against an HMAC-SHA1 of the raw body computed with `YOUTUBE_WEBSUB_SECRET`, using
+   `timingSafeEqual` — without this, the public callback URL would accept a forged POST with an arbitrary video id
+   from anyone who discovers it, triggering a fake "we're live" push to every member. A missing/mismatched signature,
+   or no secret configured at all, is dropped silently. The videoId is extracted via a small regex (a full XML parser
+   dependency wasn't worth adding for this one fixed field). Always acks fast (`204`, no body) regardless of what
+   happens next — `YoutubeLiveDetectionService.handleNotification()` runs without being awaited by the response.
+4. `YoutubeLiveDetectionService` takes a short Redis lock (`lock:youtube-notification:{videoId}`, 60s TTL) before
+   doing anything else — WebSub hubs routinely redeliver the same notification, and without this, two concurrent
+   deliveries could both pass the idempotency check below before either write lands, double-announcing the same
+   stream. It then checks `YoutubeIntegrationState.lastAnnouncedVideoId` for this channel (the actual idempotency
+   check — the same video can generate multiple WebSub pings across retries/redeliveries). If new, calls the YouTube
+   Data API (`videos.list?part=snippet`) to confirm `snippet.liveBroadcastContent === 'live'` — the WebSub ping alone
+   fires for regular uploads too, not just livestreams — **and** that `snippet.channelId` matches the configured
+   `YOUTUBE_CHANNEL_ID`, since the notification body only carries a video id, not which channel it came from. Only
+   then does it call `createSystemAnnouncement()` and persist the video id as the new `lastAnnouncedVideoId`.
 5. All external-call failures (hub POST, Data API call) are caught and logged as warnings, never thrown — a webhook
    handler that 500s risks the hub retrying or giving up on the subscription entirely.
 
 **Mixlr is not automated** — no confirmed public webhook/API was found; the manual "Announce Live" trigger remains
 the only path for Mixlr-only streams.
 
-**Routes:** `GET/POST integrations/youtube/callback` — no guard (verified implicitly by the WebSub handshake itself,
-same trust model as the existing `POST webhooks/virtual-account-credit`).
+**Routes:** `GET integrations/youtube/callback` — no guard, verified implicitly by the WebSub handshake itself
+(same trust model as the existing `POST webhooks/virtual-account-credit`). `POST integrations/youtube/callback` — no
+NestJS guard either, but is signature-verified in the controller itself as described above (a `Public()`-style route
+whose actual authentication is the HMAC check, not a bearer token).
 
 ### ServiceHeadcount Module
 
@@ -3036,7 +3071,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - Authenticated session control (start, advance, rewind, pause, resume, adjust-time, reorder, end): controller only requires `JwtAuthGuard` (any authenticated member or admin); the real rule is enforced once in `ServiceSessionService.assertCanControlSession()` — **Admin-only**: passes only for an active `Admin` entity holding `SERVICE_PROGRAMME_WRITE`. Admin-department workers do **not** get an authenticated control path (this was previously allowed via a WORKER-department check, reserved for a mobile worker UI that was never built against these endpoints — it has been removed by design). Anyone who isn't a `SERVICE_PROGRAMME_WRITE` admin, staff included, controls a session exclusively through the public Programme Manager link with a named PIN grant (see below) — so every control action outside the admin dashboard is attributable to a specific named person, not a role. This does **not** affect `getEventSummaryReportPdfForWorker` (`GET /service-session/event/:eventId/summary-pdf`, a read-only mobile PDF download) — that keeps its own narrower `assertIsAdminDeptWorker()` check (Admin-department worker, no `SERVICE_PROGRAMME_WRITE` fallback needed), deliberately kept separate so tightening session-control access doesn't also lock Admin-department workers out of an unrelated report download.
 - Public Programme Manager routes (`POST/PUT /service-session/:code/pm/*` — advance, rewind, pause, resume, adjust-time, reorder, end): `@Public()` + `ShareTokenGuard` (`?token=`), **and** `NamedAccessGuard` (`?grantToken=`). The share token only proves "has the link"; every PM-link holder used to be logged as the same generic `PUBLIC_LINK` actor with no way to tell people apart or revoke one person without rotating the link for everyone. `NamedAccessGuard` layers named, individually-revocable identity on top: an admin/worker calls `POST /service-session/:code/access-grants` (`{ name }`, `JwtAuthGuard` + `assertCanControlSession`) to generate a 6-digit PIN for a collaborator (`randomInt`-generated, argon2-hashed via `UtilityService`, returned in plaintext exactly once — never stored or retrievable again). That person then calls the public `POST /service-session/:code/pm/access` (`ShareTokenGuard` only — this route establishes identity, so it can't itself require `NamedAccessGuard`) with `{ name, pin }`; on success `verifyAccessGrant` issues a `grantToken` (random UUID, Redis-cached alongside `{ grantId, name }`, same TTL as the session) that must be appended to every subsequent `pm/*` write call. `NamedAccessGuard.resolveGrantToken` resolves that token, re-checks the underlying `ServiceSessionAccessGrant` row's `revokedAt` on every call (not just at sign-in), and stamps the grant's name onto the request (`@ActorLabel()`) so it flows through to `logAction`'s `actorLabel` column — surfaced as the `actorName` fallback in `getActionLog`/`getActionLogCsv` whenever there's no `performedByMember`. Revoking via `POST /service-session/:code/access-grants/:grantId/revoke` takes effect on that person's very next action, without touching the shared link or anyone else's grant. Grants are scoped to a single session (table `service_session_access_grants`, `session_id` FK `ON DELETE CASCADE`) — a new PIN is needed each time someone needs PM access to a new session, by design (no cross-session standing identity to manage). The frontend Live Session Dashboard's "Programme Manager Access" panel manages grants (add/list/revoke, showing the PIN once); the public `/live/:code/manage` view gates itself behind a name+PIN sign-in form the first time, then caches the resulting `grantToken` in `localStorage` (keyed per session) so it isn't re-prompted on every visit, clearing that cache automatically if any action comes back with a revoked/expired-access error.
 - **Duplicate active names are rejected, not silently allowed** — two active grants sharing a name make sign-in ambiguous (the name+PIN lookup could match whichever row it finds first, so a correct PIN for the second grant could get rejected). `generateAccessGrant` pre-checks for a non-revoked grant with the same name (trimmed, case-insensitive) and throws `ConflictException` (409) instead of creating the duplicate; a partial unique index (`uq_service_session_access_grants_session_name_active` on `(session_id, lower(name)) WHERE revoked_at IS NULL`, migration `AddServiceSessionAccessGrantUniqueActiveName`) catches the same race at the DB level as a safety net, translated back into the same 409. The caller can pass `replaceExisting: true` on `POST /service-session/:code/access-grants` to confirm the swap — this revokes the old grant (logged as `ACCESS_GRANT_REPLACED`) and issues a fresh PIN under the same name in one call. The Dashboard's "Programme Manager Access" panel surfaces this as a "Replace?" prompt when adding a name that's already active, rather than a bare error.
-- `overrideSlot` (speaker runtime override) stays `RolesGuard (WORKER)` + Admin department key check only — not exposed in the admin dashboard.
+- `overrideSlot` (speaker runtime override) stays `RolesGuard (WORKER)` + `FRONT_DESK_OPERATIONS` capability check only — not exposed in the admin dashboard.
 - Session state read (`GET /service-session/:code/state`) and speaker slot view (`GET /service-session/:code/slots/:position`): `@Public()` — session code is the access credential. (These are read-only; the share token, not the session code, gates writes.)
 - `ADMIN_WRITE` permission controls who can assign `SERVICE_PROGRAMME_READ` / `SERVICE_PROGRAMME_WRITE` to admin roles.
 
@@ -3063,7 +3098,20 @@ participant side, by explicit product decision.
 **Game lifecycle:** `Game.status` tracks whether it's still being edited (`DRAFT`) or currently backing a live session
 (`LIVE_SESSION_ACTIVE`) — it's informational, not a gate; admins can always edit a `DRAFT` game's questions.
 `startSession` requires at least one question and flips the game to `LIVE_SESSION_ACTIVE`; `endSession` reverts it to
-`DRAFT` so the same game can be started again later.
+`DRAFT` — but only if no *other* session for the game is still `LIVE` (see below), so the same game can be started
+again later. `startSession` also 400s if a `LIVE` session already exists for the game — previously a double-click or
+a second admin starting the same game would silently orphan the first session (its join code still worked, but
+nothing in the UI could get back to it).
+
+`Game.status` is a denormalized mirror of "does this game have a live session", and — as the guard above and the
+defensive check in `endSession` both exist to address — it can drift out of sync with reality (e.g. a session left
+`LIVE` from before either of those existed, or any future code path that touches a session without going through
+this service). `listGames`/`getGame` therefore return an `activeSessionCode` field sourced directly from
+`GameSession` (querying every `LIVE` session for the games in the batch), **not** gated by `Game.status ===
+LIVE_SESSION_ACTIVE` — so the admin portal's "Resume Control" action stays correct and discoverable even for a game
+whose `status` wrongly says `DRAFT` while a session is still actually running underneath it. `endSession` mirrors
+this: before resetting `Game.status` to `DRAFT`, it re-checks for any other still-`LIVE` session for the same game
+and skips the reset if one exists, so ending one orphan can't stomp on a genuinely-live sibling session.
 
 **Session lifecycle:** `GameSession.sessionCode` (`GAME-XXXXXX`, same random-alphanumeric generation as
 `ServiceSession.sessionCode`) is the join credential — no auth beyond being a logged-in member/worker is required to
@@ -3072,6 +3120,14 @@ the index and re-stamps the timestamp (400 if already on the last question — c
 is idempotent (a second call is a no-op, not an error). `hostAdmin` is recorded at start — only that admin (or any
 admin if `hostAdmin` was somehow cleared) can control the session via `nextQuestion`/`endSession` (`ForbiddenException`
 otherwise), independent of the general `GAMES_WRITE` permission check the route itself already enforces.
+
+**Countdown (`GameSessionStatePayload.currentQuestionStartedAt`):** the payload carries the current question's start
+time as epoch ms alongside the existing `secondsRemaining` snapshot. `secondsRemaining` is only accurate as of the
+moment the payload was generated — a client that just renders it verbatim sees the countdown freeze between socket
+broadcasts (previously the only source of updates: `nextQuestion`, `endSession`, or the 30s safety poll) instead of
+ticking down every second. `currentQuestionStartedAt` lets a client compute its own live countdown
+(`timeLimitSeconds - (Date.now() - currentQuestionStartedAt) / 1000`, ticked with a 1s `setInterval`), the same
+pattern `ServiceSessionController`'s `anchor.slotStartedAt` already uses for the service-programme timer.
 
 **Scoring (`GameService.computeScore`):** speed-bonus model — `pointsAwarded = isCorrect ? round(question.points *
 max(0.5, remainingTimeFraction)) : 0`, where `remainingTimeFraction` is computed from `currentQuestionStartedAt` (a
@@ -3086,7 +3142,9 @@ aggregate.
 discipline of keeping every scored/audited action behind the guard+validation layer. It's rejected (400) if the
 session isn't `LIVE`, if the question isn't the session's *current* question (guards against a stale client
 answering a question that's already advanced past), or if the participant already answered it (also enforced at the
-DB level via a unique constraint on `(session_id, question_id, participant_id)`); 403 if the caller never called
+DB level via a unique constraint on `(session_id, question_id, participant_id)` — the pre-check leaves a race window
+under a concurrent double-submit, so `submitAnswer` also catches that constraint's violation (Postgres `23505`) and
+returns the same 400 rather than letting a raw DB conflict surface as a `500`); 403 if the caller never called
 `join` first.
 
 **What participants never see:** `GameSessionStatePayload` (both the REST `GET .../state` response and the
@@ -3103,10 +3161,16 @@ different payload shapes for the same event.
   `POST admin/games/sessions/:code/end` — `GAMES_WRITE`
 - `GET admin/games/sessions/:code/state`, `GET admin/games/sessions/:code/leaderboard` — `GAMES_READ`
 
+Note: `games/sessions/:code/state` on the participant controller below is `@Public()`, not `JwtAuthGuard`-gated.
+
 **Routes (participant, `JwtAuthGuard` + `@RequiresModule('games')`):**
-- `POST games/sessions/:code/join`, `GET games/sessions/:code/state`,
+- `POST games/sessions/:code/join`,
   `POST games/sessions/:code/questions/:questionId/answer`, `GET games/sessions/:code/leaderboard` — any
   authenticated member/worker, no department/class/role gating
+- `GET games/sessions/:code/state` — `@Public()` (still behind `ModuleEnabledGuard` and a `300/60s` throttle, same
+  shape as `ServiceSessionController`'s public `:sessionCode/state`), so a projector/second-laptop presentation
+  screen can poll it with just the join code — no member/admin login needed. Never leaks `correctOptionIndex` (see
+  above), so widening this one route to unauthenticated access doesn't change what it exposes.
 
 **WebSocket:**
 - Namespace: `/game-session`, mirrors `/service-session` exactly — `joinSession({ sessionCode })` /
@@ -3117,6 +3181,53 @@ different payload shapes for the same event.
   over the socket (see above).
 
 **Routes prefix:** `/admin/games`, `/games`
+
+**Admin frontend UX (`Faithapp-admin`):** mirrors the service-programme live-session split between a control surface
+and a screen-safe display, rather than the one page both were previously crammed into. `app/games/present/[code]`
+(`withAuth`, `games:write`) is the host's control panel — question preview, the ticking countdown, Next
+Question/End Session, leaderboard — plus a "Copy Link"/"Open Screen" action for the presentation view. That view
+lives at `app/games-screen/[code]` (outside `app/games/`, so it isn't wrapped in `app/games/layout.tsx`'s admin
+`Shell` chrome) and is unauthenticated, full-bleed, dark-themed, big-type — built to be opened on a projector or a
+second laptop via the copied link, same pattern as `/live/[code]/presentation`. Both pages tick a local
+`setInterval(() => setNowMs(Date.now()), 1000)` and derive `secondsRemaining` from `currentQuestionStartedAt` via
+`calcGameSecondsRemaining()` (`hooks/use-games.ts`) instead of rendering the payload's `secondsRemaining` snapshot
+directly, fixing a bug where the on-screen countdown only changed when a broadcast arrived instead of counting down
+every second. The games list (`app/games/page.tsx`) and detail (`app/games/[id]/page.tsx`) pages surface a "Resume
+Control"/"Resume Live Session" action off the new `activeSessionCode` field for any `LIVE_SESSION_ACTIVE` game.
+
+`GameSessionStatePayload.gameTitle` (`session.game.title`) is included so the control panel and the presentation
+screen can both display which game is running instead of just the join code — most visibly on the end-of-session
+card, which previously only said "Session Ended" with no indication of which game just finished. Both now lead with
+the game's title and a warmer "That's a wrap" framing, plus (on the control panel) the leaderboard's #1 entry inline
+("`{name}` takes the win with `{score}` pts!").
+
+**Member-facing player (`Faithapp` mobile, `components/layout/game-session.tsx`, `hooks/use-game-session.ts`):** this
+surface fetches the same public `GameSessionStatePayload` but polls it on its own schedule (`LIVE_POLL_MS` = 2s while
+a question is active, no socket) rather than sharing the admin/screen views' socket-driven state — it had fallen out
+of sync with the countdown fix above (rendering the raw `secondsRemaining` snapshot, only visibly updating once per
+poll) and was missing the `gameTitle`/`currentQuestionStartedAt` fields entirely. Brought in line: `calcGameSecondsRemaining()`
+(mirroring the same-named helper in `use-games.ts`) ticks a local `nowMs` every second off `currentQuestionStartedAt`,
+and the game title now renders above the question.
+
+**Admin question-builder (`app/games/[id]/page.tsx`, `QuestionForm.removeOption`):** deleting the option currently
+marked correct used to silently reassign "correct" to whichever option shifted into that slot instead of clearing
+the selection — e.g. options `[A,B,C,D]` with `C` marked correct, deleting `C`, silently left `B` marked correct
+with no admin action. Now deleting the correct option resets `correctOptionIndex` to an unset sentinel (`-1`) and
+`canSubmit` requires a non-negative index, so the form blocks saving until the admin explicitly re-picks the correct
+answer.
+
+**"Status stays on Draft" investigation:** confirmed via direct testing that `startSession`/`endSession` flip
+`Game.status` correctly and immediately server-side (this Next.js version's client Router Cache also defaults
+`staleTimes.dynamic` to `0`, so it wasn't a caching issue either). The frontend list/detail pages
+(`app/games/page.tsx`, `app/games/[id]/page.tsx`) still call `router.refresh()` after starting/ending a session, and
+listen for `pageshow`/`visibilitychange` to refetch if the page was restored from the browser's back-forward cache
+(bfcache) — real, if secondary, sources of staleness for a plain client-fetched list. But the actual bug reproduced
+in this instance was the `Game.status` drift described above: a session left `LIVE` from before the duplicate-session
+guard existed meant a *later* session's `endSession` call reset `Game.status` to `DRAFT` while the orphaned earlier
+session was still `LIVE` underneath — so the list correctly showed `DRAFT` (matching `Game.status`), while
+`startSession` correctly 400'd on any attempt to start a new one, with no UI path back to the still-live orphan since
+`activeSessionCode` was, at the time, also gated on `Game.status === LIVE_SESSION_ACTIVE`. Sourcing
+`activeSessionCode` directly from `GameSession` (above) closes that gap.
 
 ### Service Rating Module
 
@@ -3134,8 +3245,24 @@ reveals `member: { id, firstname, lastname }` on the same response and is requir
 (`DELETE admin/service-ratings/:id`). This is deliberate: default admin access should give a pulse on sentiment
 without turning ratings into a place to publicly identify who said what about a specific worker/sermon.
 
+**Index:** `getComments()` filters `WHERE comment IS NOT NULL ORDER BY created_at DESC` across all events (a global
+moderation feed, not scoped to one event/slot) — served by a partial index,
+`IDX_service_ratings_created_at_with_comment ON service_ratings (created_at DESC) WHERE comment IS NOT NULL`, which
+stays small since most ratings have no comment.
+
+**`getSummary()` aggregates in SQL:** `GROUP BY rating` (at most 5 rows back), not a `getMany()` that pulls every
+matching row into memory to sum/count in application code — this endpoint is unbounded by design (any date range,
+any event), so aggregating in Postgres keeps it flat as ratings accumulate instead of degrading linearly.
+
+**Mobile comment capture (`Faithapp`, `components/layout/attendance.tsx`):** the star-tap itself still submits
+instantly with no comment (unchanged, one-tap). Once rated, an "Add a note" affordance appears — expands a small
+textarea, and sending it re-calls `submitRating` with the same rating plus the comment (an upsert, so no separate
+endpoint). Previously nothing in the UI ever sent a comment, so the admin moderation feed above was unreachable in
+practice regardless of backend support.
+
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('service_ratings')`):** `POST service-ratings` (upsert),
-`GET service-ratings/mine?eventId=&serviceSlotId=`.
+`GET service-ratings/mine?eventId=&serviceSlotId=` — always returned `comment` on the full entity; the mobile widget
+above now actually reads it, to restore an existing note on revisit.
 **Routes (admin, `AdminGuard`):** `GET admin/service-ratings/summary?eventId=&from=&to=` (`SERVICE_RATING_READ`,
 average + 1–5 distribution), `GET admin/service-ratings/comments?page=&limit=` (`SERVICE_RATING_READ`),
 `DELETE admin/service-ratings/:id` (`SERVICE_RATING_MODERATE`, logs `SERVICE_RATING_MODERATED`).
@@ -3173,11 +3300,24 @@ audit-logged), not `DELETE` — mirrors this codebase's general preference for d
 `mySignupStatus: 'CONFIRMED' | 'CANCELLED' | null` for the requesting member, computed via one extra batched query
 against the returned page's opportunity IDs — avoids a separate "my signups" round-trip just to render a
 Sign-Up-vs-Cancel button per row. Only `status = OPEN` and `date >= now` opportunities are listed (past/closed/
-cancelled opportunities don't show in the browse list, though they remain visible to admins).
+cancelled opportunities don't show in the browse list, though they remain visible to admins) — this is the
+member-facing "browse open opportunities" feed, hit on every load, served by a composite
+`IDX_volunteer_opportunities_status_date ON volunteer_opportunities (status, date)` index (in addition to the
+original date-only index from the marketplace's initial migration).
 
-**Routes (admin, `AdminGuard`):** `POST/GET/PATCH admin/volunteer-opportunities` (`/:id` for single-record
-routes), `PATCH admin/volunteer-opportunities/:id/cancel`, `GET admin/volunteer-opportunities/:id/signups` (roster,
-CONFIRMED only) — all `VOLUNTEER_READ`/`VOLUNTEER_WRITE`.
+**Mobile pagination (`Faithapp`, `hooks/use-volunteer.ts`):** the backend route was already properly paginated
+(`page`/`limit`); the mobile hook previously just hardcoded `limit=50` and never advanced past page 1, silently
+truncating the browse list once a church had more than 50 concurrently-open opportunities. Now tracks `page`/
+`totalPages` and exposes `goToPage`, rendered as the same prev/next pager `components/layout/sermons.tsx` already
+established for its own list — the standard pattern for a paginated list on this mobile app.
+
+**Routes (admin, `AdminGuard` + `ModuleEnabledGuard`):** `POST/GET/PATCH admin/volunteer-opportunities` (`/:id` for
+single-record routes), `PATCH admin/volunteer-opportunities/:id/cancel`,
+`GET admin/volunteer-opportunities/:id/signups` (roster, CONFIRMED only) — all `VOLUNTEER_READ`/`VOLUNTEER_WRITE`.
+`VolunteerAdminController` is also `@RequiresModule('volunteering')` (previously missing — every other admin
+controller in this codebase pairs `AdminGuard` with `ModuleEnabledGuard`; without it, admins could manage
+opportunities even with the `volunteering` module disabled in church settings, inconsistent with the member-facing
+controller which already had the check).
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('volunteering')`):** `GET volunteer-opportunities`,
 `POST volunteer-opportunities/:id/signup`, `DELETE volunteer-opportunities/:id/signup` — any authenticated
 member/worker, no department/class gating (open to anyone, same "no access-control implication" stance as `Game`
@@ -3201,13 +3341,40 @@ not an enum), `SmallGroupMember` (join table, unique on `(group, member)`), `Sma
 
 **Membership is self-service, no approval step:** `POST small-groups/:id/join` upserts-by-returning-existing
 (mirrors `VolunteerService.signUp`'s "already confirmed → return the existing row" shape) rather than erroring on
-a duplicate join. `DELETE small-groups/:id/leave` is self-leave; admin-forced removal
-(`DELETE admin/small-groups/:id/members/:memberId`) is a separate action, audited `SMALL_GROUP_MEMBER_REMOVED`
-(routine self-join/leave is not audited — matches the established judgment on high-frequency member actions).
+a duplicate join — including under a concurrent double-tap: the initial existence check leaves a race window before
+the insert, so `join()` also catches the `(group, member)` unique-constraint violation (Postgres `23505`) and
+re-fetches/returns the now-existing row instead of letting a raw DB conflict surface as a `500`. `DELETE
+small-groups/:id/leave` is self-leave; admin-forced removal (`DELETE admin/small-groups/:id/members/:memberId`) is a
+separate action, audited `SMALL_GROUP_MEMBER_REMOVED` (routine self-join/leave is not audited — matches the
+established judgment on high-frequency member actions).
+
+**A group's leader is not auto-enrolled as a member:** `create`/`update` only set `SmallGroup.leader`, they never
+insert a `SmallGroupMember` row for that person. `getMembers()`'s access check (`assertIsGroupMember`) therefore also
+accepts the caller being `group.leader.id`, not just an existing membership row — otherwise a leader who never
+separately "joined" their own group would be locked out of viewing its own roster (the mobile "Take Attendance" flow
+calls this route first). `assertIsGroupLeader()` (used by `recordAttendance`) already worked this way; this just
+brings roster access in line with it.
+
+**Index:** `listMine()` (a member's "My Fellowships" tab) filters `small_group_members` by `member_id` alone. The
+table's only prior index was `IDX_small_group_members_group_id` plus the `(group_id, member_id)` unique constraint —
+both lead with `group_id`, so neither serves a member-only lookup. Added
+`IDX_small_group_members_member_id ON small_group_members (member_id)`.
+
+**Admin `getRoster`/`getAttendanceHistory` are now paginated:** both previously returned every row for a group
+unbounded — `getAttendanceHistory` in particular grows forever (one row per member per meeting, for the life of the
+group), against the documented pagination policy. Both now take `page`/`limit` and return the standard
+`PaginationResponseDto` shape (`{ data, page, limit, totalCount, totalPages }`) instead of a bare array — a breaking
+response-shape change for `GET admin/small-groups/:id/members` and `GET admin/small-groups/:id/attendance`, updated
+on the only consumer (`Faithapp-admin/app/small-groups/page.tsx`, `hooks/use-small-groups.ts`) to unwrap
+`res.data.data.data` and render the shared `PaginationBar` per tab, same pattern the groups list itself already
+used. Backed by two new composite indexes (`ORDER BY meeting_date DESC`/`created_at ASC` within a group, previously
+only covered by the single-column `group_id` index):
+`IDX_small_group_attendance_group_id_meeting_date ON small_group_attendance (group_id, meeting_date DESC)` and
+`IDX_small_group_members_group_id_created_at ON small_group_members (group_id, created_at ASC)`.
 
 **Leader-gated attendance-recording, not admin-gated:** `POST small-groups/:id/attendance` sits under
 `JwtAuthGuard`, not `AdminGuard` — a group leader need not be a worker or admin, so `SmallGroupService`'s private
-`assertIsGroupLeader()` (mirrors `assertHasDepartmentAccessKey`'s shape: throws `ForbiddenException` if
+`assertIsGroupLeader()` (mirrors `assertHasCapability`'s shape: throws `ForbiddenException` if
 `group.leader?.id !== callerId`) is the only gate, independent of the admin permission system entirely. Body:
 `{ meetingDate, records: [{ memberId, status }] }` — each record upserts against the unique
 `(group, member, meetingDate)` constraint.
@@ -3224,8 +3391,8 @@ opportunity has, so this follows `Game`'s full-CRUD precedent rather than `Volun
 cancel-don't-delete one.
 
 **Routes (admin, `AdminGuard`):** `POST/GET/PATCH/DELETE admin/small-groups` (`/:id` for single-record routes),
-`GET admin/small-groups/:id/members`, `DELETE admin/small-groups/:id/members/:memberId`,
-`GET admin/small-groups/:id/attendance` — all `SMALL_GROUP_READ`/`SMALL_GROUP_WRITE`.
+`GET admin/small-groups/:id/members?page=&limit=`, `DELETE admin/small-groups/:id/members/:memberId`,
+`GET admin/small-groups/:id/attendance?page=&limit=` — all `SMALL_GROUP_READ`/`SMALL_GROUP_WRITE`.
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('small_groups')`):** `GET small-groups`, `GET small-groups/mine`,
 `GET small-groups/:id`, `GET small-groups/:id/members` (current members only), `POST small-groups/:id/join`,
 `DELETE small-groups/:id/leave`, `POST small-groups/:id/attendance` (leader only, enforced in-service not by guard).
@@ -3254,7 +3421,6 @@ cancel-don't-delete one.
 | POST   | /auth/reset-password                                       | Public                                                        | Verify OTP and set new password; invalidates current session                                                  |
 | POST   | /auth/device-reset/request                                 | Public                                                        | Self-service device reset — rate-limited; issues OTP to registered email; locks in `newDeviceId` at request   |
 | POST   | /auth/device-reset/verify                                  | Public                                                        | Verify OTP and swap `deviceId` to `newDeviceId`; invalidates all active sessions                              |
-| GET    | /members/me                                                | Any (JwtAuthGuard)                                            | Own member profile with workerProfile + department relations                                                  |
 | PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` (excludes email and admin-only church-record fields) |
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
@@ -3296,7 +3462,7 @@ cancel-don't-delete one.
 | GET    | /attendances/my-summary                                    | Any                                                           | Own lifetime rate/streak, computed in SQL over full history (not just the current page) — `{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` |
 | GET    | /attendances/history                                       | AdminGuard (ATTENDANCE_READ)                                  | All attendance records; query: `page`, `limit`, `memberId`, `slotId`, `status`, `dateFrom`, `dateTo`, `search` (ILIKE on firstname, lastname, email) |
 | POST   | /attendances/export-email                                  | AdminGuard (ATTENDANCE_READ)                                  | Email the currently-filtered attendance history as an `.xlsx` attachment (body: `recipientEmail?`, `memberId?`, `slotId?`, `status?`, `dateFrom?`, `dateTo?`, `search?`). `recipientEmail` defaults to the requesting admin's own email. One-off only — not a recurring/scheduled report. Logs `REPORT_EXPORTED`. |
-| GET    | /attendances/history/department?slotId=                    | WORKER                                                        | Department attendance for a slot (scoped to caller's own department via lead role)                            |
+| GET    | /attendances/history/department?slotId=&page=&limit=       | WORKER                                                        | Paginated department attendance for a slot (scoped to caller's own department via lead role); `page` defaults to 1, `limit` to 20 |
 | GET    | /attendances/department/event/:eventId                     | WORKER                                                        | Worker attendance for all slots of an event (scoped to caller's own department via lead role)                 |
 | GET    | /attendances/summary/slot/:slotId                          | AdminGuard (ATTENDANCE_READ)                                  | Status counts for a slot                                                                                      |
 | GET    | /attendances/leaderboard                                   | AdminGuard (ATTENDANCE_READ)                                  | Top workers by attendance                                                                                     |
@@ -3346,8 +3512,8 @@ cancel-don't-delete one.
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
 | POST   | /admin/games                                               | AdminGuard (GAMES_WRITE)                                       | Create a game (DRAFT)                                                                                          |
-| GET    | /admin/games?page=&limit=                                  | AdminGuard (GAMES_READ)                                        | Paginated list, newest first                                                                                   |
-| GET    | /admin/games/:id                                           | AdminGuard (GAMES_READ)                                        | Get a single game                                                                                              |
+| GET    | /admin/games?page=&limit=                                  | AdminGuard (GAMES_READ)                                        | Paginated list, newest first. Each game carries `activeSessionCode` (non-null only while `LIVE_SESSION_ACTIVE`)  |
+| GET    | /admin/games/:id                                           | AdminGuard (GAMES_READ)                                        | Get a single game, with `activeSessionCode`                                                                     |
 | PATCH  | /admin/games/:id                                           | AdminGuard (GAMES_WRITE)                                       | Update title/description/department/churchClass                                                               |
 | DELETE | /admin/games/:id                                           | AdminGuard (GAMES_WRITE)                                       | Delete a game (cascades questions/sessions/participants/responses)                                             |
 | GET    | /admin/games/:id/questions                                 | AdminGuard (GAMES_READ)                                        | List a game's questions, ordered                                                                               |
@@ -3355,13 +3521,13 @@ cancel-don't-delete one.
 | PUT    | /admin/games/:id/questions/reorder                         | AdminGuard (GAMES_WRITE)                                       | Reorder — body: `{ questionIds: string[] }`, must contain exactly the game's current question ids              |
 | PATCH  | /admin/games/questions/:questionId                         | AdminGuard (GAMES_WRITE)                                       | Update a question (any field)                                                                                  |
 | DELETE | /admin/games/questions/:questionId                         | AdminGuard (GAMES_WRITE)                                       | Delete a question                                                                                              |
-| POST   | /admin/games/:id/start                                     | AdminGuard (GAMES_WRITE)                                       | Start a live session — 400 if the game has no questions. Caller becomes the session's host.                    |
+| POST   | /admin/games/:id/start                                     | AdminGuard (GAMES_WRITE)                                       | Start a live session — 400 if the game has no questions or a LIVE session already exists for it. Caller becomes the session's host. |
 | POST   | /admin/games/sessions/:code/next-question                  | AdminGuard (GAMES_WRITE)                                       | Advance to the next question — 403 if caller isn't the host, 400 if session isn't LIVE or already on the last question |
 | POST   | /admin/games/sessions/:code/end                            | AdminGuard (GAMES_WRITE)                                       | End the session (idempotent) and revert the game to DRAFT                                                       |
-| GET    | /admin/games/sessions/:code/state                          | AdminGuard (GAMES_READ)                                        | Current session state (same shape broadcast over the socket, no correctOptionIndex)                             |
+| GET    | /admin/games/sessions/:code/state                          | AdminGuard (GAMES_READ)                                        | Current session state (same shape broadcast over the socket, no correctOptionIndex, includes `currentQuestionStartedAt`) |
 | GET    | /admin/games/sessions/:code/leaderboard                    | AdminGuard (GAMES_READ)                                        | Live leaderboard, ordered by totalScore desc                                                                    |
 | POST   | /games/sessions/:code/join                                 | JwtAuthGuard + Module: games                                   | Join a live session with its code — upserts a GameParticipant, no department/class gating                      |
-| GET    | /games/sessions/:code/state                                | JwtAuthGuard + Module: games                                   | Current session state — same payload the socket broadcasts                                                     |
+| GET    | /games/sessions/:code/state                                | Public + Module: games, throttled 300/60s                       | Current session state — same payload the socket broadcasts. Unauthenticated so the projector/screen presentation view can poll it with just the join code. |
 | POST   | /games/sessions/:code/questions/:questionId/answer         | JwtAuthGuard + Module: games                                   | Submit an answer — body: `{ selectedOptionIndex }`. 400 if not the current question or already answered; 403 if caller never joined. |
 | GET    | /games/sessions/:code/leaderboard                          | JwtAuthGuard + Module: games                                   | Live leaderboard                                                                                                 |
 | POST   | /service-ratings                                           | JwtAuthGuard + Module: service_ratings                        | Submit or update a rating for a service (body: `eventId`, `serviceSlotId`, `rating` 1–5, `comment?`) — upsert   |
@@ -3412,7 +3578,7 @@ cancel-don't-delete one.
 | GET    | /venues                                                    | Any                                                           | List venues                                                                                                   |
 | GET    | /venues/:id                                                | Any                                                           | Get venue by ID                                                                                               |
 | GET    | /departments                                               | Any                                                           | List departments                                                                                              |
-| GET    | /departments/keys                                          | Any                                                           | List all valid department key values                                                                          |
+| GET    | /departments/capabilities                                  | Any                                                           | List all valid DepartmentCapability values                                                                     |
 | GET    | /departments/:id                                           | Any                                                           | Get department                                                                                                |
 | POST   | /departments                                               | AdminGuard (DEPARTMENTS_WRITE)                                | Create department                                                                                             |
 | PATCH  | /departments/:id                                           | AdminGuard (DEPARTMENTS_WRITE)                                | Update department                                                                                             |
@@ -3913,6 +4079,19 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 All variables are validated by Joi at startup (`src/config/env.validation.ts`). Missing required variables crash the
 process with a clear error before any HTTP traffic is accepted.
 
+For the database backup/restore strategy (not an env var concern, but adjacent operational documentation that
+didn't exist anywhere before), see [`docs/BACKUP_AND_RESTORE.md`](./BACKUP_AND_RESTORE.md).
+
+**Graceful shutdown:** `main.ts` calls `app.enableShutdownHooks(['SIGTERM', 'SIGINT'])`, so in-flight requests are
+allowed to finish and NestJS lifecycle hooks (e.g. closing the DB pool, Redis, Bull queues) run before the process
+exits. Relevant when the orchestrator sends `SIGTERM` on deploy/scale-down — without this, connections would be cut
+mid-request.
+
+**Provider webhooks bypass the global JWT guard:** `POST /webhooks/virtual-account-credit` and the YouTube WebSub
+callbacks (`GET`/`POST /integrations/youtube/callback`) are decorated `@Public()`. Providers never send a bearer
+token, so the global `JwtAuthGuard` would 401 them before their own signature verification (HMAC / `X-Hub-Signature`)
+ever runs. `@Public()` only opts a route out of JWT auth — it does not skip the handler's own signature check.
+
 ### Runtime
 
 | Variable       | Default        | Description                                  |
@@ -3920,6 +4099,7 @@ process with a clear error before any HTTP traffic is accepted.
 | `NODE_ENV`     | `development`  | `development` \| `production` \| `test`      |
 | `PORT`         | `3000`         | HTTP port the server listens on              |
 | `CORS_ORIGINS` | — *(required)* | Comma-separated list of allowed CORS origins |
+| `APP_NAME`     | `discovery-hub-api` | Service name used in logs and process identification |
 
 ### Branding (used in email templates)
 
@@ -3943,9 +4123,11 @@ loaded correctly before use.
 | `DATABASE_NAME`      | — *(required)* | DB name                                                                      |
 | `DATABASE_SSL`       | `false`        | Enable SSL (`rejectUnauthorized=false`)                                      |
 | `DATABASE_LOGGING`   | `false`        | Enable TypeORM query logging                                                 |
+| `DATABASE_DEBUG`     | `false`        | Enable TypeORM debug-level query logging                                     |
 | `DATABASE_POOL_SIZE` | `50`           | Max connections in the pool                                                  |
 | `DATABASE_POOL_MIN`  | `10`           | Min idle connections kept alive                                              |
 | `DATABASE_POOL`      | `transaction`  | Pool mode for PgBouncer/Supavisor: `transaction` \| `session` \| `statement` |
+| `DATABASE_POOL_LOG`  | `false`        | Log pool connection acquire/release events                                   |
 
 ### JWT
 
@@ -4147,6 +4329,7 @@ All three optional — leave unset to skip WebSub subscription entirely and rely
 | `YOUTUBE_API_KEY`              | — *(optional)*   | YouTube Data API v3 key — used to confirm a notified video is actually a live broadcast |
 | `YOUTUBE_CHANNEL_ID`           | — *(optional)*   | The channel to watch for livestreams                                       |
 | `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) |
+| `YOUTUBE_WEBSUB_SECRET`        | — *(optional)*   | Shared HMAC secret sent as `hub.secret` on subscribe; the hub signs every notification with it (`X-Hub-Signature`), which the callback verifies. Required alongside the other two — without it, `subscribe()` never registers a live subscription and the callback rejects everything it receives. |
 
 ---
 
@@ -4230,14 +4413,14 @@ Granular permissions assigned to `AdminRole` records:
 
 `eventDate` · `createdAt` · `updatedAt`
 
-### DepartmentKeyEnum
+### DepartmentCapability
 
-**Preset suggestions only — not a validation constraint.** `Department.key` is a free-form `string | null`;
-`CreateDepartmentDto`/`UpdateDepartmentDto` accept any string. These values are what the frontend picker offers by
-default and what most access-control checks currently key off of, but a church can type any custom string when
-creating/editing a department to introduce a brand-new access category with no backend change required.
+**A fixed, validated enum — not free text.** `Department.capabilities: DepartmentCapability[]`;
+`CreateDepartmentDto`/`UpdateDepartmentDto` validate every entry with `@IsEnum(DepartmentCapability, { each: true })`.
+A department can hold any combination of these; each is named after the action it unlocks rather than after a
+department, so it stays meaningful regardless of what a given church calls the department that holds it.
 
-`SUNDAY_SCHOOL` · `CHILDREN_CHURCH` · `WORSHIP` · `USHERING` · `MEDIA` · `PROTOCOL` · `WELFARE` · `PRAYER` · `EVANGELISM` · `YOUTH` · `YOUNG_ADULTS` · `FOLLOW_UP` · `ADMIN`
+`MANAGE_SUNDAY_SCHOOL` · `MANAGE_CHILDREN_CHURCH` · `MANAGE_PRAYER_REQUESTS` · `MANAGE_EVANGELISM_CONVERTS` · `MANAGE_FOLLOW_UP` · `FRONT_DESK_OPERATIONS`
 
 ### SundaySchoolAttendanceStatus
 

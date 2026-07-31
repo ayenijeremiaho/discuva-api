@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
+import { Public } from '../../auth/decorator/public.decorator';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
@@ -28,7 +30,13 @@ export class GameParticipantController {
     return result;
   }
 
+  // Public so the projector/screen presentation view (opened on a second
+  // laptop with just the join code, no login) can poll and render it —
+  // mirrors ServiceSessionController's public :sessionCode/state route.
+  // Never leaks correctOptionIndex (see getSessionState's own comment).
   @Get('sessions/:code/state')
+  @Public()
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
   getState(@Param('code') code: string) {
     return this.gameService.getSessionState(code);
   }

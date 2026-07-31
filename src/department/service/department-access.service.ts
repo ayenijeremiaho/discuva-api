@@ -2,13 +2,13 @@ import { ForbiddenException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
+import { DepartmentCapability } from '../enums/department-capability.enum';
 
 // Collapses what used to be 7 near-identical assertIsXDeptWorker() methods
 // scattered across services (attendance, evangelism, sunday-school,
 // prayer-request, service-session, children-church, follow-up) into one
-// shared check. Department.key is a free-form string (see Department
-// entity's doc comment) — any string a church has assigned to a department
-// works here, not just the DepartmentKeyEnum presets.
+// shared check. A member has a capability if either their primary or
+// secondary department's capabilities array includes it.
 @Injectable()
 export class DepartmentAccessService {
   constructor(
@@ -16,9 +16,9 @@ export class DepartmentAccessService {
     private readonly workerProfileRepo: Repository<WorkerProfile>,
   ) {}
 
-  async hasDepartmentAccessKey(
+  async hasCapability(
     memberId: string,
-    key: string,
+    capability: DepartmentCapability,
   ): Promise<boolean> {
     const profile = await this.workerProfileRepo.findOne({
       where: { member: { id: memberId } },
@@ -26,20 +26,20 @@ export class DepartmentAccessService {
     });
     if (!profile) return false;
     return (
-      profile.department?.key === key ||
-      profile.secondaryDepartment?.key === key
+      !!profile.department?.capabilities?.includes(capability) ||
+      !!profile.secondaryDepartment?.capabilities?.includes(capability)
     );
   }
 
-  async assertHasDepartmentAccessKey(
+  async assertHasCapability(
     memberId: string,
-    key: string,
+    capability: DepartmentCapability,
     message?: string,
   ): Promise<void> {
-    if (await this.hasDepartmentAccessKey(memberId, key)) return;
+    if (await this.hasCapability(memberId, capability)) return;
     throw new ForbiddenException(
       message ??
-        `Only workers in the '${key}' department can perform this action`,
+        `Only workers in a department with the '${capability}' capability can perform this action`,
     );
   }
 }

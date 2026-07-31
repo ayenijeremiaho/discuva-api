@@ -37,6 +37,7 @@ const mockSessionRepo = {
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
+  find: jest.fn(),
 };
 
 const mockParticipantRepo = {
@@ -163,10 +164,25 @@ describe('GameService', () => {
       );
     });
 
+    it('throws BadRequestException when a live session already exists for the game', async () => {
+      mockGameRepo.findOne.mockResolvedValue({ id: 'game-1' });
+      mockQuestionRepo.count.mockResolvedValue(3);
+      mockSessionRepo.findOne.mockResolvedValue({
+        id: 'sess-existing',
+        sessionCode: 'GAME-OLD123',
+      });
+
+      await expect(service.startSession('game-1', mockAdmin)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockSessionRepo.create).not.toHaveBeenCalled();
+    });
+
     it('creates a LIVE session at question index 0 and flips the game status', async () => {
       const game = { id: 'game-1', status: GameStatusEnum.DRAFT };
       mockGameRepo.findOne.mockResolvedValue(game);
       mockQuestionRepo.count.mockResolvedValue(3);
+      mockSessionRepo.findOne.mockResolvedValue(null);
       const session = { id: 'sess-1', sessionCode: 'GAME-ABC123' };
       mockSessionRepo.create.mockReturnValue(session);
       mockSessionRepo.save.mockResolvedValue(session);
@@ -237,7 +253,7 @@ describe('GameService', () => {
         hostAdmin: { id: 'admin-1' },
         currentQuestionIndex: 0,
         currentQuestionStartedAt: new Date(Date.now() - 60_000),
-        game: { id: 'game-1' },
+        game: { id: 'game-1', title: 'Bible Trivia' },
       };
       mockSessionRepo.findOne.mockResolvedValue(session);
       mockQuestionRepo.count.mockResolvedValue(2);
@@ -270,6 +286,12 @@ describe('GameService', () => {
       expect(state.currentQuestionIndex).toBe(1);
       expect(state.currentQuestion?.id).toBe('q-2');
       expect(state.currentQuestion).not.toHaveProperty('correctOptionIndex');
+      // Clients tick their own countdown off this timestamp rather than the
+      // secondsRemaining snapshot, which goes stale between broadcasts.
+      expect(state.currentQuestionStartedAt).toBe(
+        session.currentQuestionStartedAt.getTime(),
+      );
+      expect(state.gameTitle).toBe('Bible Trivia');
     });
   });
 
@@ -284,7 +306,12 @@ describe('GameService', () => {
         currentQuestionIndex: 0,
         game,
       };
-      mockSessionRepo.findOne.mockResolvedValue(session);
+      // First call is getSessionOrThrow fetching the session itself; second
+      // is the "any other session still LIVE?" check — must return null so
+      // the DRAFT reset actually runs.
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(session)
+        .mockResolvedValueOnce(null);
       mockSessionRepo.save.mockResolvedValue(session);
       mockGameRepo.save.mockResolvedValue(game);
       mockQuestionRepo.find.mockResolvedValue([]);
@@ -300,6 +327,33 @@ describe('GameService', () => {
         'GAME_SESSION_ENDED',
         expect.objectContaining({ actorId: 'admin-1' }),
       );
+    });
+
+    it('does not reset the game to DRAFT if another session is still LIVE', async () => {
+      const game = { id: 'game-1', status: GameStatusEnum.LIVE_SESSION_ACTIVE };
+      const session = {
+        id: 'sess-1',
+        sessionCode: 'GAME-ABC123',
+        status: GameSessionStatusEnum.LIVE,
+        hostAdmin: { id: 'admin-1' },
+        currentQuestionIndex: 0,
+        game,
+      };
+      const otherLiveSession = { id: 'sess-2', sessionCode: 'GAME-OTHER99' };
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(session)
+        .mockResolvedValueOnce(otherLiveSession);
+      mockSessionRepo.save.mockResolvedValue(session);
+      mockQuestionRepo.find.mockResolvedValue([]);
+      mockParticipantRepo.count.mockResolvedValue(0);
+      mockResponseRepo.count.mockResolvedValue(0);
+      mockParticipantRepo.find.mockResolvedValue([]);
+
+      await service.endSession('GAME-ABC123', mockAdmin);
+
+      expect(session.status).toBe(GameSessionStatusEnum.ENDED);
+      expect(game.status).toBe(GameStatusEnum.LIVE_SESSION_ACTIVE);
+      expect(mockGameRepo.save).not.toHaveBeenCalled();
     });
 
     it('is idempotent — calling twice only logs once', async () => {
@@ -433,6 +487,23 @@ describe('GameService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException (not a raw 500) when a concurrent double-submit races past the duplicate check', async () => {
+      mockLiveSession();
+      mockParticipantRepo.findOne.mockResolvedValue({
+        id: 'part-1',
+        totalScore: 0,
+      });
+      mockResponseRepo.findOne.mockResolvedValue(null);
+      mockResponseRepo.create.mockImplementation((v) => v);
+      mockResponseRepo.save.mockRejectedValue({ code: '23505' });
+
+      await expect(
+        service.submitAnswer('GAME-ABC123', 'q-1', 'member-1', {
+          selectedOptionIndex: 1,
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('awards 0 points for an incorrect answer', async () => {
       mockLiveSession();
       const participant = { id: 'part-1', totalScore: 0 };
@@ -455,7 +526,12 @@ describe('GameService', () => {
     });
 
     it('awards full points for an instant correct answer', async () => {
-      mockLiveSession({ currentQuestionStartedAt: new Date() });
+      // Date.now() pinned so elapsed time is exactly 0 regardless of how
+      // long the test itself takes to run — computeScore reads real wall
+      // time, so without this the assertion is flaky under load.
+      const now = Date.now();
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+      mockLiveSession({ currentQuestionStartedAt: new Date(now) });
       const participant = { id: 'part-1', totalScore: 0 };
       mockParticipantRepo.findOne.mockResolvedValue(participant);
       mockResponseRepo.findOne.mockResolvedValue(null);
@@ -470,6 +546,7 @@ describe('GameService', () => {
           selectedOptionIndex: 1,
         } as any,
       );
+      nowSpy.mockRestore();
 
       expect(result.isCorrect).toBe(true);
       expect(result.pointsAwarded).toBe(1000);
@@ -478,7 +555,9 @@ describe('GameService', () => {
     });
 
     it('floors the speed bonus at 50% of base points for a correct answer submitted near the deadline', async () => {
-      const startedAt = new Date(Date.now() - 19_000); // 19s elapsed of a 20s window
+      const now = Date.now();
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+      const startedAt = new Date(now - 19_000); // 19s elapsed of a 20s window
       mockLiveSession({ currentQuestionStartedAt: startedAt });
       const participant = { id: 'part-1', totalScore: 0 };
       mockParticipantRepo.findOne.mockResolvedValue(participant);
@@ -494,9 +573,95 @@ describe('GameService', () => {
           selectedOptionIndex: 1,
         } as any,
       );
+      nowSpy.mockRestore();
 
       expect(result.isCorrect).toBe(true);
       expect(result.pointsAwarded).toBe(500);
+    });
+  });
+
+  describe('listGames', () => {
+    it('attaches the live session code to whichever games actually have one', async () => {
+      const liveGame = {
+        id: 'game-1',
+        status: GameStatusEnum.LIVE_SESSION_ACTIVE,
+      };
+      const draftGame = { id: 'game-2', status: GameStatusEnum.DRAFT };
+      mockGameRepo.findAndCount.mockResolvedValue([[liveGame, draftGame], 2]);
+      mockSessionRepo.find.mockResolvedValue([
+        {
+          sessionCode: 'GAME-LIVE01',
+          game: { id: 'game-1' },
+        },
+      ]);
+
+      const result = await service.listGames(1, 20);
+
+      expect(mockSessionRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: GameSessionStatusEnum.LIVE,
+          }),
+        }),
+      );
+      expect(result.data).toEqual([
+        expect.objectContaining({
+          id: 'game-1',
+          activeSessionCode: 'GAME-LIVE01',
+        }),
+        expect.objectContaining({ id: 'game-2', activeSessionCode: null }),
+      ]);
+    });
+
+    it('finds a live session even for a game whose own status wrongly says DRAFT', async () => {
+      // Regression coverage: Game.status is a denormalized mirror of "is
+      // there a live session" and can drift (e.g. a session left LIVE from
+      // before startSession's duplicate-session guard existed). This must
+      // still surface the Resume action off the real GameSession row.
+      const driftedGame = { id: 'game-1', status: GameStatusEnum.DRAFT };
+      mockGameRepo.findAndCount.mockResolvedValue([[driftedGame], 1]);
+      mockSessionRepo.find.mockResolvedValue([
+        { sessionCode: 'GAME-ORPHAN1', game: { id: 'game-1' } },
+      ]);
+
+      const result = await service.listGames(1, 20);
+
+      expect(result.data).toEqual([
+        expect.objectContaining({
+          id: 'game-1',
+          activeSessionCode: 'GAME-ORPHAN1',
+        }),
+      ]);
+    });
+
+    it('returns null activeSessionCode when no game has a live session', async () => {
+      mockGameRepo.findAndCount.mockResolvedValue([
+        [{ id: 'game-2', status: GameStatusEnum.DRAFT }],
+        1,
+      ]);
+      mockSessionRepo.find.mockResolvedValue([]);
+
+      const result = await service.listGames(1, 20);
+
+      expect(result.data).toEqual([
+        expect.objectContaining({ id: 'game-2', activeSessionCode: null }),
+      ]);
+    });
+  });
+
+  describe('getGame', () => {
+    it('includes the active session code for a live game', async () => {
+      mockGameRepo.findOne.mockResolvedValue({
+        id: 'game-1',
+        status: GameStatusEnum.LIVE_SESSION_ACTIVE,
+      });
+      mockSessionRepo.find.mockResolvedValue([
+        { sessionCode: 'GAME-LIVE01', game: { id: 'game-1' } },
+      ]);
+
+      const result = await service.getGame('game-1');
+
+      expect(result.activeSessionCode).toBe('GAME-LIVE01');
     });
   });
 

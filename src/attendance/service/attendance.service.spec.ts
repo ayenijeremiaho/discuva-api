@@ -25,7 +25,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { ExcelService } from '../../utility/service/excel.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { getQueueToken } from '@nestjs/bull';
 import { FOLLOW_UP_QUEUE } from '../../follow-up/processor/post-event.processor';
@@ -118,8 +118,8 @@ const mockEmailQueueService = {
 };
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const defaultVenue = {
@@ -882,23 +882,23 @@ describe('AttendanceService', () => {
 
   describe('assertIsAdminDeptWorker', () => {
     it('delegates to DepartmentAccessService with the ADMIN key', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
 
       await service.assertIsAdminDeptWorker('member-1');
 
       expect(
-        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+        mockDepartmentAccessService.assertHasCapability,
       ).toHaveBeenCalledWith(
         'member-1',
-        DepartmentKeyEnum.ADMIN,
+        DepartmentCapability.FRONT_DESK_OPERATIONS,
         expect.any(String),
       );
     });
 
     it('propagates the ForbiddenException thrown by DepartmentAccessService', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
         new ForbiddenException(
           'Only Admin department workers can perform this action',
         ),
@@ -912,7 +912,7 @@ describe('AttendanceService', () => {
 
   describe('searchMembersForCheckin', () => {
     it('rejects the search for a non-Admin-department caller before querying', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
         new ForbiddenException(
           'Only Admin department workers can perform this action',
         ),
@@ -925,7 +925,7 @@ describe('AttendanceService', () => {
     });
 
     it('delegates to MemberService.searchActiveMembersLite for an Admin-department worker', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       const found = [
@@ -1339,18 +1339,41 @@ describe('AttendanceService', () => {
       mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
       const records = [{ id: 'att-1' }, { id: 'att-2' }];
       const qb = makeQb();
-      qb.getMany.mockResolvedValue(records);
+      qb.getManyAndCount.mockResolvedValue([records, 2]);
       mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
 
       const result = await service.getDepartmentHistory(user, 'slot-1');
 
-      expect(result).toEqual(records);
+      expect(result.data).toEqual(records);
+      expect(result.totalCount).toBe(2);
       expect(qb.where).toHaveBeenCalledWith('dept.id = :deptId', {
         deptId: 'dept-1',
       });
       expect(qb.andWhere).toHaveBeenCalledWith('slot.id = :slotId', {
         slotId: 'slot-1',
       });
+    });
+
+    it('should paginate results', async () => {
+      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getDepartmentHistory(user, 'slot-1', 2, 10);
+
+      expect(qb.skip).toHaveBeenCalledWith(10);
+      expect(qb.take).toHaveBeenCalledWith(10);
+      expect(result.page).toBe(2);
+      expect(result.limit).toBe(10);
+    });
+
+    it('should throw BadRequestException for a non-positive page', async () => {
+      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+
+      await expect(
+        service.getDepartmentHistory(user, 'slot-1', 0),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 

@@ -22,9 +22,9 @@ import {
   EnrollmentStatusLabels,
 } from '../classes/enum/enrollment-status.enum';
 import {
-  DepartmentKeyEnum,
-  DepartmentKeyLabels,
-} from '../department/enums/department-key.enum';
+  DepartmentCapability,
+  DepartmentCapabilityLabels,
+} from '../department/enums/department-capability.enum';
 import {
   DepartmentLeadTypeEnum,
   DepartmentLeadTypeLabels,
@@ -116,7 +116,10 @@ export class EnumsController {
         EnrollmentStatusEnum,
         EnrollmentStatusLabels,
       ),
-      departmentKeys: toEnumOptions(DepartmentKeyEnum, DepartmentKeyLabels),
+      departmentCapabilities: toEnumOptions(
+        DepartmentCapability,
+        DepartmentCapabilityLabels,
+      ),
       departmentLeadTypes: toEnumOptions(
         DepartmentLeadTypeEnum,
         DepartmentLeadTypeLabels,

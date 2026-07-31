@@ -19,7 +19,7 @@ import {
   FollowUpTaskTypeEnum,
 } from '../enums/follow-up.enum';
 import { FirstTimerVisit } from '../entity/first-timer-visit.entity';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
@@ -105,8 +105,8 @@ const mockEmailQueueService = {
 const mockAuditLogService = { log: jest.fn() };
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const followUpProfile = {
@@ -115,7 +115,7 @@ const followUpProfile = {
   member: { id: 'member-1', firstname: 'Ada', email: 'ada@test.com' },
   department: {
     id: 'dept-1',
-    key: DepartmentKeyEnum.FOLLOW_UP,
+    capabilities: [DepartmentCapability.MANAGE_FOLLOW_UP],
     name: 'Follow-Up',
   },
   secondaryDepartment: null,
@@ -125,7 +125,7 @@ const nonFollowUpProfile = {
   id: 'wp-2',
   status: WorkerStatusEnum.ACTIVE,
   member: { id: 'member-2', firstname: 'Bola', email: 'bola@test.com' },
-  department: { id: 'dept-2', key: DepartmentKeyEnum.WORSHIP, name: 'Worship' },
+  department: { id: 'dept-2', capabilities: [], name: 'Worship' },
   secondaryDepartment: null,
 };
 
@@ -136,7 +136,7 @@ describe('FollowUpService', () => {
     jest.clearAllMocks();
     // Default: authorize as a Follow-Up dept worker so functional tests focus
     // on business logic; individual tests override with mockRejectedValueOnce.
-    mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+    mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
       undefined,
     );
     qbMock.getRawMany.mockResolvedValue([]);
@@ -183,7 +183,7 @@ describe('FollowUpService', () => {
 
   describe('assertWorkerInFollowUpDept', () => {
     it('propagates the ForbiddenException thrown by DepartmentAccessService', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValueOnce(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValueOnce(
         new ForbiddenException(
           'Access restricted to Follow-Up department workers',
         ),
@@ -194,16 +194,16 @@ describe('FollowUpService', () => {
     });
 
     it('delegates to DepartmentAccessService with the FOLLOW_UP key', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       await service.assertWorkerInFollowUpDept('member-1');
 
       expect(
-        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+        mockDepartmentAccessService.assertHasCapability,
       ).toHaveBeenCalledWith(
         'member-1',
-        DepartmentKeyEnum.FOLLOW_UP,
+        DepartmentCapability.MANAGE_FOLLOW_UP,
         expect.any(String),
       );
     });
@@ -234,7 +234,7 @@ describe('FollowUpService', () => {
 
   describe('createFirstTimerByWorker', () => {
     it('throws ForbiddenException when caller is not in FOLLOW_UP dept', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValueOnce(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValueOnce(
         new ForbiddenException(
           'Access restricted to Follow-Up department workers',
         ),
@@ -353,7 +353,7 @@ describe('FollowUpService', () => {
 
   describe('updateTask', () => {
     it('throws ForbiddenException when caller is not in FOLLOW_UP dept', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValueOnce(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValueOnce(
         new ForbiddenException(
           'Access restricted to Follow-Up department workers',
         ),

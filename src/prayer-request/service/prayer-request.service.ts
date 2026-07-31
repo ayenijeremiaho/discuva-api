@@ -21,7 +21,7 @@ import {
 } from '../dto/prayer-request.dto';
 import { PrayerRequestStatusEnum } from '../enum/prayer-request-status.enum';
 import { PregnancyCaseStatusEnum } from '../enum/pregnancy-case-status.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -325,9 +325,9 @@ export class PrayerRequestService {
     if (isPastor) return;
 
     if (
-      await this.departmentAccessService.hasDepartmentAccessKey(
+      await this.departmentAccessService.hasCapability(
         memberId,
-        DepartmentKeyEnum.PRAYER,
+        DepartmentCapability.MANAGE_PRAYER_REQUESTS,
       )
     ) {
       return;

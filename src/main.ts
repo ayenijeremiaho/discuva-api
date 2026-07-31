@@ -17,6 +17,7 @@ import { Request, Response, NextFunction } from 'express';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   mountBullBoard(app);
   app.use(
     helmet({

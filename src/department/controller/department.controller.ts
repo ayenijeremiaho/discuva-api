@@ -14,7 +14,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { DepartmentService } from '../service/department.service';
-import { DepartmentKeyEnum } from '../enums/department-key.enum';
+import { DepartmentCapability } from '../enums/department-capability.enum';
 import { CreateDepartmentDto } from '../dto/create-department.dto';
 import { UpdateDepartmentDto } from '../dto/update-department.dto';
 import { AssignDepartmentHodDto } from '../dto/assign-department-hod.dto';
@@ -38,9 +38,9 @@ export class DepartmentController {
     return this.departmentService.getAll();
   }
 
-  @Get('keys')
-  getDepartmentKeys(): string[] {
-    return Object.values(DepartmentKeyEnum);
+  @Get('capabilities')
+  getDepartmentCapabilities(): string[] {
+    return Object.values(DepartmentCapability);
   }
 
   @UseGuards(AdminGuard)

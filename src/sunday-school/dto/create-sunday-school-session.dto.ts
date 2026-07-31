@@ -3,6 +3,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUrl,
   IsUUID,
   Max,
   Min,
@@ -18,6 +19,10 @@ export class CreateSundaySchoolSessionDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsOptional()
+  @IsUrl()
+  documentUrl?: string;
 }
 
 export class OpenSelfMarkDto {

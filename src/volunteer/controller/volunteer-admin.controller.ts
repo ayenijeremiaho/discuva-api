@@ -14,14 +14,17 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { VolunteerService } from '../service/volunteer.service';
 import {
   CreateVolunteerOpportunityDto,
   UpdateVolunteerOpportunityDto,
 } from '../dto/volunteer-opportunity.dto';
 
+@RequiresModule('volunteering')
 @Controller('admin/volunteer-opportunities')
-@UseGuards(AdminGuard)
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 export class VolunteerAdminController {
   constructor(private readonly volunteerService: VolunteerService) {}
 

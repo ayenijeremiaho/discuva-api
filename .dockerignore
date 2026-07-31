@@ -5,5 +5,7 @@ Dockerfile
 dist
 node_modules
 *.tsbuildinfo
-.env.local
+.env
+.env.*
+!.env.example
 README.md

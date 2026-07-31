@@ -13,6 +13,13 @@ export const envValidationSchema = Joi.object({
   DATABASE_PASSWORD: Joi.string().required(),
   DATABASE_NAME: Joi.string().required(),
   DATABASE_SSL: Joi.boolean().default(false),
+  DATABASE_LOGGING: Joi.boolean().default(false),
+  DATABASE_DEBUG: Joi.boolean().default(false),
+  DATABASE_POOL: Joi.string().default('transaction'),
+  DATABASE_POOL_SIZE: Joi.number().default(50),
+  DATABASE_POOL_MIN: Joi.number().default(10),
+  DATABASE_POOL_LOG: Joi.boolean().default(false),
+  APP_NAME: Joi.string().default('discovery-hub-api'),
 
   JWT_SECRET: Joi.string().min(32).required(),
   JWT_EXPIRY_IN: Joi.string().default('1h'),
@@ -39,6 +46,9 @@ export const envValidationSchema = Joi.object({
 
   LOGIN_URL: Joi.string().uri().required(),
   ADMIN_LOGIN_URL: Joi.string().uri().required(),
+  SUPPORT_FORM_URL: Joi.string().uri().optional(),
+  EXPLAINER_VIDEO_ANDROID_URL: Joi.string().uri().optional(),
+  EXPLAINER_VIDEO_IOS_URL: Joi.string().uri().optional(),
 
   THROTTLE_TTL_MS: Joi.number().default(60_000),
   THROTTLE_LIMIT: Joi.number().default(100),
@@ -148,4 +158,8 @@ export const envValidationSchema = Joi.object({
   YOUTUBE_API_KEY: Joi.string().optional(),
   YOUTUBE_CHANNEL_ID: Joi.string().optional(),
   YOUTUBE_WEBSUB_CALLBACK_URL: Joi.string().uri().optional(),
+  // Shared HMAC secret sent as hub.secret on subscribe — the hub then signs
+  // every notification with it (X-Hub-Signature), which is how the callback
+  // tells a genuine hub delivery apart from a forged POST to the public URL.
+  YOUTUBE_WEBSUB_SECRET: Joi.string().optional(),
 }).options({ allowUnknown: true });

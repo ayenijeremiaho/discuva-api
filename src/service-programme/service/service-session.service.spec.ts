@@ -28,7 +28,7 @@ import { ServicePauseReasonEnum } from '../enum/service-pause-reason.enum';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
@@ -102,8 +102,8 @@ const mockWorkerProfileRepo = {
 };
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const mockEmailQueueService = {
@@ -137,13 +137,16 @@ const mockDataSource = {
 
 const adminDeptProfile = {
   id: 'wp-1',
-  department: { id: 'dept-1', key: DepartmentKeyEnum.ADMIN },
+  department: {
+    id: 'dept-1',
+    capabilities: [DepartmentCapability.FRONT_DESK_OPERATIONS],
+  },
   secondaryDepartment: null,
 };
 
 const nonAdminProfile = {
   id: 'wp-2',
-  department: { id: 'dept-2', key: DepartmentKeyEnum.WORSHIP },
+  department: { id: 'dept-2', capabilities: [] },
   secondaryDepartment: null,
 };
 
@@ -293,7 +296,9 @@ describe('ServiceSessionService', () => {
     it('throws ForbiddenException even when secondary department key is ADMIN', async () => {
       mockWorkerProfileRepo.findOne.mockResolvedValue({
         ...nonAdminProfile,
-        secondaryDepartment: { key: DepartmentKeyEnum.ADMIN },
+        secondaryDepartment: {
+          capabilities: [DepartmentCapability.FRONT_DESK_OPERATIONS],
+        },
       });
       mockAdminRepo.findOne.mockResolvedValue(null);
       await expect(service.advance('SVC-ABC123', 'member-1')).rejects.toThrow(
@@ -2025,7 +2030,7 @@ describe('ServiceSessionService', () => {
     });
 
     it('allows an Admin-department worker regardless of SERVICE_PROGRAMME_WRITE — a separate, narrower check than session control', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       mockAdminRepo.findOne.mockResolvedValue(null);
@@ -2037,7 +2042,7 @@ describe('ServiceSessionService', () => {
     });
 
     it('rejects a worker who is not in the Admin department, even if they are also an Admin with SERVICE_PROGRAMME_WRITE', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
         new ForbiddenException(
           'Only Admin department workers can perform this action',
         ),

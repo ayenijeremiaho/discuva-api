@@ -85,20 +85,6 @@ export class MemberController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Get('me')
-  async getMe(@CurrentUser() user: MemberAuth): Promise<MemberDto> {
-    const member = await this.memberService.getById(user.id, [
-      'workerProfile',
-      'workerProfile.department',
-      'workerProfile.secondaryDepartment',
-      'pastor',
-    ]);
-    return plainToInstance(MemberDto, member, {
-      excludeExtraneousValues: true,
-    });
-  }
-
-  @UseGuards(JwtAuthGuard)
   @Patch('me')
   async updateMe(
     @CurrentUser() user: MemberAuth,

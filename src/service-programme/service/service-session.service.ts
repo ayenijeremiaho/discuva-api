@@ -24,7 +24,7 @@ import { ServiceSessionStatusEnum } from '../enum/service-session-status.enum';
 import { ServiceSessionSlotStatusEnum } from '../enum/service-session-slot-status.enum';
 import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -1915,10 +1915,10 @@ export class ServiceSessionService {
   // to live-session control, so it keeps its own department-based rule
   // rather than sharing (and being narrowed by) the control-access check.
   private async assertIsAdminDeptWorker(memberId: string): Promise<void> {
-    await this.departmentAccessService.assertHasDepartmentAccessKey(
+    await this.departmentAccessService.assertHasCapability(
       memberId,
-      DepartmentKeyEnum.ADMIN,
-      'Only Admin department workers can perform this action',
+      DepartmentCapability.FRONT_DESK_OPERATIONS,
+      'Only Front Desk Operations workers can perform this action',
     );
   }
 
@@ -2137,9 +2137,10 @@ export class ServiceSessionService {
       .leftJoin('wp.department', 'dept')
       .leftJoin('wp.secondaryDepartment', 'secDept')
       .where('wp.status = :status', { status: WorkerStatusEnum.ACTIVE })
-      .andWhere('(dept.key = :key OR secDept.key = :key)', {
-        key: DepartmentKeyEnum.ADMIN,
-      })
+      .andWhere(
+        '(:capability = ANY(dept.capabilities) OR :capability = ANY(secDept.capabilities))',
+        { capability: DepartmentCapability.FRONT_DESK_OPERATIONS },
+      )
       .getMany();
     return workers
       .map((w) => w.member?.email)

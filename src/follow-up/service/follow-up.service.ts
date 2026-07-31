@@ -25,7 +25,7 @@ import {
 import { FirstTimerVisit } from '../entity/first-timer-visit.entity';
 import { LogVisitDto } from '../dto/log-visit.dto';
 import { AddNoteDto } from '../dto/add-note.dto';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -592,9 +592,10 @@ export class FollowUpService {
         'd_secondary.id = wp.secondary_department_id',
       )
       .leftJoin('follow_up_tasks', 'ft', 'ft.assigned_to_id = wp.id')
-      .where('(d_primary.key = :key OR d_secondary.key = :key)', {
-        key: DepartmentKeyEnum.FOLLOW_UP,
-      })
+      .where(
+        '(:capability = ANY(d_primary.capabilities) OR :capability = ANY(d_secondary.capabilities))',
+        { capability: DepartmentCapability.MANAGE_FOLLOW_UP },
+      )
       .andWhere('wp.status = :status', { status: WorkerStatusEnum.ACTIVE })
       .groupBy('wp.id')
       .orderBy('"openCount"', 'ASC')
@@ -609,10 +610,10 @@ export class FollowUpService {
   }
 
   async assertWorkerInFollowUpDept(memberId: string): Promise<void> {
-    await this.departmentAccessService.assertHasDepartmentAccessKey(
+    await this.departmentAccessService.assertHasCapability(
       memberId,
-      DepartmentKeyEnum.FOLLOW_UP,
-      'Access restricted to Follow-Up department workers',
+      DepartmentCapability.MANAGE_FOLLOW_UP,
+      'Access restricted to Follow-Up Management workers',
     );
   }
 
@@ -628,8 +629,12 @@ export class FollowUpService {
       relations: ['department', 'secondaryDepartment'],
     });
     return (
-      full?.department?.key === DepartmentKeyEnum.FOLLOW_UP ||
-      full?.secondaryDepartment?.key === DepartmentKeyEnum.FOLLOW_UP
+      !!full?.department?.capabilities?.includes(
+        DepartmentCapability.MANAGE_FOLLOW_UP,
+      ) ||
+      !!full?.secondaryDepartment?.capabilities?.includes(
+        DepartmentCapability.MANAGE_FOLLOW_UP,
+      )
     );
   }
 
@@ -654,11 +659,11 @@ export class FollowUpService {
                  LEFT JOIN departments d_secondary ON d_secondary.id = wp.secondary_department_id
                  LEFT JOIN follow_up_tasks ft
                      ON ft.assigned_to_id = wp.id AND ft.status IN ('PENDING', 'IN_PROGRESS')
-                 WHERE (d_primary.key = $1 OR d_secondary.key = $1) AND wp.status = $2
+                 WHERE ($1 = ANY(d_primary.capabilities) OR $1 = ANY(d_secondary.capabilities)) AND wp.status = $2
                  GROUP BY wp.id
                  ORDER BY COUNT(ft.id) ASC
                  LIMIT 1`,
-        [DepartmentKeyEnum.FOLLOW_UP, WorkerStatusEnum.ACTIVE],
+        [DepartmentCapability.MANAGE_FOLLOW_UP, WorkerStatusEnum.ACTIVE],
       );
 
       if (!rows.length) {

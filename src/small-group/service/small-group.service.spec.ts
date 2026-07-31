@@ -25,6 +25,7 @@ const mockMemberRepo = {
   save: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn(),
+  findAndCount: jest.fn(),
   remove: jest.fn(),
   createQueryBuilder: jest.fn(),
 };
@@ -34,24 +35,12 @@ const mockAttendanceRepo = {
   save: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn(),
+  findAndCount: jest.fn(),
 };
 
 const mockAuditLogService = { log: jest.fn() };
 
 const mockAdmin = { id: 'admin-1' } as any;
-
-const makeQb = () => ({
-  leftJoinAndSelect: jest.fn().mockReturnThis(),
-  select: jest.fn().mockReturnThis(),
-  addSelect: jest.fn().mockReturnThis(),
-  where: jest.fn().mockReturnThis(),
-  groupBy: jest.fn().mockReturnThis(),
-  orderBy: jest.fn().mockReturnThis(),
-  skip: jest.fn().mockReturnThis(),
-  take: jest.fn().mockReturnThis(),
-  getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
-  getRawMany: jest.fn().mockResolvedValue([]),
-});
 
 describe('SmallGroupService', () => {
   let service: SmallGroupService;
@@ -191,6 +180,31 @@ describe('SmallGroupService', () => {
 
       expect(result).toBe(created);
     });
+
+    it('returns the now-existing membership instead of a 500 when a concurrent join races past the initial check', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1' });
+      const created = { id: 'sgm-1' };
+      mockMemberRepo.findOne
+        .mockResolvedValueOnce(null) // initial check: no membership yet
+        .mockResolvedValueOnce(created); // re-fetch after the unique-violation catch
+      mockMemberRepo.create.mockReturnValue(created);
+      mockMemberRepo.save.mockRejectedValue({ code: '23505' });
+
+      const result = await service.join('group-1', 'member-1');
+
+      expect(result).toBe(created);
+    });
+
+    it('rethrows a save error that is not a unique violation', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1' });
+      mockMemberRepo.findOne.mockResolvedValue(null);
+      mockMemberRepo.create.mockReturnValue({ id: 'sgm-1' });
+      mockMemberRepo.save.mockRejectedValue(new Error('connection lost'));
+
+      await expect(service.join('group-1', 'member-1')).rejects.toThrow(
+        'connection lost',
+      );
+    });
   });
 
   describe('leave', () => {
@@ -212,7 +226,8 @@ describe('SmallGroupService', () => {
   });
 
   describe('getMembers', () => {
-    it('throws ForbiddenException when the requester is not a group member', async () => {
+    it('throws ForbiddenException when the requester is not a group member or its leader', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1', leader: null });
       mockMemberRepo.findOne.mockResolvedValue(null);
       await expect(service.getMembers('group-1', 'member-1')).rejects.toThrow(
         ForbiddenException,
@@ -220,6 +235,7 @@ describe('SmallGroupService', () => {
     });
 
     it('returns the roster when the requester is a group member', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1', leader: null });
       mockMemberRepo.findOne.mockResolvedValue({ id: 'sgm-1' });
       const roster = [{ id: 'sgm-1' }, { id: 'sgm-2' }];
       mockMemberRepo.find.mockResolvedValue(roster);
@@ -227,6 +243,65 @@ describe('SmallGroupService', () => {
       const result = await service.getMembers('group-1', 'member-1');
 
       expect(result).toBe(roster);
+    });
+
+    it('returns the roster for the group leader even without a separate membership row', async () => {
+      // create()/update() only set `leader` on the group — they never insert
+      // a SmallGroupMember row for them, so membership alone can't be the
+      // only path to viewing the roster.
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        leader: { id: 'leader-1' },
+      });
+      mockMemberRepo.findOne.mockResolvedValue(null);
+      const roster = [{ id: 'sgm-1' }];
+      mockMemberRepo.find.mockResolvedValue(roster);
+
+      const result = await service.getMembers('group-1', 'leader-1');
+
+      expect(result).toBe(roster);
+    });
+  });
+
+  describe('getRoster', () => {
+    it('returns a paginated roster', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1' });
+      const roster = [{ id: 'sgm-1' }, { id: 'sgm-2' }];
+      mockMemberRepo.findAndCount.mockResolvedValue([roster, 2]);
+
+      const result = await service.getRoster('group-1', 2, 10);
+
+      expect(mockMemberRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 10, take: 10 }),
+      );
+      expect(result).toEqual({
+        data: roster,
+        page: 2,
+        limit: 10,
+        totalCount: 2,
+        totalPages: 1,
+      });
+    });
+  });
+
+  describe('getAttendanceHistory', () => {
+    it('returns paginated attendance history', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1' });
+      const history = [{ id: 'att-1' }];
+      mockAttendanceRepo.findAndCount.mockResolvedValue([history, 1]);
+
+      const result = await service.getAttendanceHistory('group-1', 1, 20);
+
+      expect(mockAttendanceRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 0, take: 20 }),
+      );
+      expect(result).toEqual({
+        data: history,
+        page: 1,
+        limit: 20,
+        totalCount: 1,
+        totalPages: 1,
+      });
     });
   });
 

@@ -11,7 +11,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberService } from '../../member/service/member.service';
 import { PrayerRequestStatusEnum } from '../enum/prayer-request-status.enum';
 import { PregnancyCaseStatusEnum } from '../enum/pregnancy-case-status.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
@@ -45,8 +45,8 @@ const mockPregnancyVisitRepo = {
 };
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const mockPastorRepo = {
@@ -449,30 +449,25 @@ describe('PrayerRequestService', () => {
       await expect(
         service.assertIsPrayerTeamOrPastor('member-1'),
       ).resolves.toBeUndefined();
-      expect(
-        mockDepartmentAccessService.hasDepartmentAccessKey,
-      ).not.toHaveBeenCalled();
+      expect(mockDepartmentAccessService.hasCapability).not.toHaveBeenCalled();
     });
 
     it('resolves when the member is a Prayer department worker (checked via DepartmentAccessService)', async () => {
       mockPastorRepo.exists.mockResolvedValue(false);
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
 
       await expect(
         service.assertIsPrayerTeamOrPastor('member-1'),
       ).resolves.toBeUndefined();
-      expect(
-        mockDepartmentAccessService.hasDepartmentAccessKey,
-      ).toHaveBeenCalledWith('member-1', DepartmentKeyEnum.PRAYER);
+      expect(mockDepartmentAccessService.hasCapability).toHaveBeenCalledWith(
+        'member-1',
+        DepartmentCapability.MANAGE_PRAYER_REQUESTS,
+      );
     });
 
     it('throws ForbiddenException otherwise', async () => {
       mockPastorRepo.exists.mockResolvedValue(false);
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        false,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
 
       await expect(
         service.assertIsPrayerTeamOrPastor('member-1'),

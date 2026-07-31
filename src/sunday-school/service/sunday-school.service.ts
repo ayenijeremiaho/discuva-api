@@ -21,7 +21,7 @@ import { CreateSundaySchoolSessionDto } from '../dto/create-sunday-school-sessio
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
 import { Member } from '../../member/entity/member.entity';
 import { MemberAuth } from '../../auth/interface/auth.interface';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 
@@ -299,6 +299,7 @@ export class SundaySchoolService {
       sundaySchoolClass: cls,
       sessionDate: dto.sessionDate,
       notes: dto.notes ?? null,
+      documentUrl: dto.documentUrl ?? null,
     });
     return this.sessionRepo.save(session);
   }
@@ -656,6 +657,7 @@ export class SundaySchoolService {
       sundaySchoolClass: cls,
       sessionDate: dto.sessionDate,
       notes: dto.notes ?? null,
+      documentUrl: dto.documentUrl ?? null,
     });
     return this.sessionRepo.save(session);
   }
@@ -806,9 +808,9 @@ export class SundaySchoolService {
     classId?: string,
   ): Promise<void> {
     if (
-      await this.departmentAccessService.hasDepartmentAccessKey(
+      await this.departmentAccessService.hasCapability(
         user.id,
-        DepartmentKeyEnum.SUNDAY_SCHOOL,
+        DepartmentCapability.MANAGE_SUNDAY_SCHOOL,
       )
     )
       return;

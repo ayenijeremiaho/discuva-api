@@ -2761,7 +2761,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/attendances/history/department?slotId={{slotId}}",
+              "raw": "{{baseUrl}}/attendances/history/department?slotId={{slotId}}&page=1&limit=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -2774,10 +2774,20 @@
                 {
                   "key": "slotId",
                   "value": "{{slotId}}"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Defaults to 1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Defaults to 20"
                 }
               ]
             },
-            "description": "WORKER only (department lead). Returns attendance for their department for a given slot."
+            "description": "WORKER only (department lead). Returns paginated attendance for their department for a given slot."
           },
           "response": [
             {
@@ -5686,7 +5696,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"New Believers Class\",\n  \"classTypeId\": \"{{classTypeId}}\",\n  \"description\": \"Foundation class for new members\",\n  \"facilitatorId\": \"{{memberId}}\",\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-09-30\"\n}",
+              "raw": "{\n  \"name\": \"New Believers Class\",\n  \"classTypeId\": \"{{classTypeId}}\",\n  \"description\": \"Foundation class for new members\",\n  \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"facilitatorId\": \"{{memberId}}\",\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-09-30\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5743,7 +5753,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Believers Foundation Class\",\n  \"endDate\": \"2026-10-15\"\n}",
+              "raw": "{\n  \"name\": \"Believers Foundation Class\",\n  \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"endDate\": \"2026-10-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8883,7 +8893,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"classId\": \"{{ssClassId}}\",\n  \"sessionDate\": \"2026-06-15\",\n  \"notes\": \"Guest speaker today\"\n}",
+              "raw": "{\n  \"classId\": \"{{ssClassId}}\",\n  \"sessionDate\": \"2026-06-15\",\n  \"notes\": \"Guest speaker today\",\n  \"documentUrl\": \"https://drive.google.com/file/d/example\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9619,7 +9629,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"sundaySchoolClass\": {\n      \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"Foundations of Faith\",\n      \"description\": \"Core doctrine class for new and growing believers\",\n      \"teacher\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"sessionDate\": \"2026-07-06\",\n    \"selfMarkClosesAt\": null,\n    \"notes\": \"Chapter 4 - Salvation\",\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
+              "body": "[\n  {\n    \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"sundaySchoolClass\": {\n      \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"Foundations of Faith\",\n      \"description\": \"Core doctrine class for new and growing believers\",\n      \"teacher\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"sessionDate\": \"2026-07-06\",\n    \"selfMarkClosesAt\": null,\n    \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
             }
           ]
         },
@@ -9642,7 +9652,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"classId\": \"uuid\",\n  \"sessionDate\": \"2026-06-27\",\n  \"notes\": \"optional\"\n}",
+              "raw": "{\n  \"classId\": \"uuid\",\n  \"sessionDate\": \"2026-06-27\",\n  \"notes\": \"optional\",\n  \"documentUrl\": \"optional\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9655,7 +9665,7 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"sundaySchoolClass\": {\n    \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"Foundations of Faith\",\n    \"description\": \"Core doctrine class for new and growing believers\",\n    \"teacher\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"sessionDate\": \"2026-07-06\",\n  \"selfMarkClosesAt\": null,\n  \"notes\": \"Chapter 4 - Salvation\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"sundaySchoolClass\": {\n    \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"Foundations of Faith\",\n    \"description\": \"Core doctrine class for new and growing believers\",\n    \"teacher\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"sessionDate\": \"2026-07-06\",\n  \"selfMarkClosesAt\": null,\n  \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
             }
           ]
         },
@@ -9721,7 +9731,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"sundaySchoolClass\": {\n    \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"Foundations of Faith\",\n    \"description\": \"Core doctrine class for new and growing believers\",\n    \"teacher\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"sessionDate\": \"2026-07-06\",\n  \"selfMarkClosesAt\": \"2026-07-06T12:00:00.000Z\",\n  \"notes\": \"Chapter 4 - Salvation\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"sundaySchoolClass\": {\n    \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"Foundations of Faith\",\n    \"description\": \"Core doctrine class for new and growing believers\",\n    \"teacher\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"sessionDate\": \"2026-07-06\",\n  \"selfMarkClosesAt\": \"2026-07-06T12:00:00.000Z\",\n  \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
             }
           ]
         },
@@ -9750,7 +9760,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"sundaySchoolClass\": {\n    \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"Foundations of Faith\",\n    \"description\": \"Core doctrine class for new and growing believers\",\n    \"teacher\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"sessionDate\": \"2026-07-06\",\n  \"selfMarkClosesAt\": null,\n  \"notes\": \"Chapter 4 - Salvation\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"sundaySchoolClass\": {\n    \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"Foundations of Faith\",\n    \"description\": \"Core doctrine class for new and growing believers\",\n    \"teacher\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"sessionDate\": \"2026-07-06\",\n  \"selfMarkClosesAt\": null,\n  \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
             }
           ]
         },
@@ -9779,7 +9789,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"session\": {\n    \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"sundaySchoolClass\": {\n      \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"Foundations of Faith\",\n      \"description\": \"Core doctrine class for new and growing believers\",\n      \"teacher\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"sessionDate\": \"2026-07-06\",\n    \"selfMarkClosesAt\": null,\n    \"notes\": \"Chapter 4 - Salvation\",\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"members\": [\n    {\n      \"memberId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\",\n      \"attendance\": {\n        \"id\": \"ssa1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"session\": {\n          \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n          \"sundaySchoolClass\": {\n            \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n            \"name\": \"Foundations of Faith\",\n            \"description\": \"Core doctrine class for new and growing believers\",\n            \"teacher\": {\n              \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n              \"firstname\": \"John\",\n              \"lastname\": \"Doe\"\n            },\n            \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n            \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n          },\n          \"sessionDate\": \"2026-07-06\",\n          \"selfMarkClosesAt\": null,\n          \"notes\": \"Chapter 4 - Salvation\",\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"member\": {\n          \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n          \"firstname\": \"John\",\n          \"lastname\": \"Doe\"\n        },\n        \"status\": \"PRESENT\",\n        \"markedByTeacher\": true,\n        \"markedAt\": \"2026-07-06T10:00:00.000Z\",\n        \"createdAt\": \"2026-07-06T10:00:00.000Z\",\n        \"updatedAt\": \"2026-07-06T10:00:00.000Z\"\n      }\n    },\n    {\n      \"memberId\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n      \"firstname\": \"Jane\",\n      \"lastname\": \"Smith\",\n      \"attendance\": null\n    }\n  ]\n}"
+              "body": "{\n  \"session\": {\n    \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"sundaySchoolClass\": {\n      \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"Foundations of Faith\",\n      \"description\": \"Core doctrine class for new and growing believers\",\n      \"teacher\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"sessionDate\": \"2026-07-06\",\n    \"selfMarkClosesAt\": null,\n    \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"members\": [\n    {\n      \"memberId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\",\n      \"attendance\": {\n        \"id\": \"ssa1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"session\": {\n          \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n          \"sundaySchoolClass\": {\n            \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n            \"name\": \"Foundations of Faith\",\n            \"description\": \"Core doctrine class for new and growing believers\",\n            \"teacher\": {\n              \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n              \"firstname\": \"John\",\n              \"lastname\": \"Doe\"\n            },\n            \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n            \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n          },\n          \"sessionDate\": \"2026-07-06\",\n          \"selfMarkClosesAt\": null,\n          \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"member\": {\n          \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n          \"firstname\": \"John\",\n          \"lastname\": \"Doe\"\n        },\n        \"status\": \"PRESENT\",\n        \"markedByTeacher\": true,\n        \"markedAt\": \"2026-07-06T10:00:00.000Z\",\n        \"createdAt\": \"2026-07-06T10:00:00.000Z\",\n        \"updatedAt\": \"2026-07-06T10:00:00.000Z\"\n      }\n    },\n    {\n      \"memberId\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n      \"firstname\": \"Jane\",\n      \"lastname\": \"Smith\",\n      \"attendance\": null\n    }\n  ]\n}"
             }
           ]
         },
@@ -9817,7 +9827,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"marked\": 2,\n  \"attendances\": [\n    {\n      \"id\": \"ssa1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"session\": {\n        \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"sundaySchoolClass\": {\n          \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n          \"name\": \"Foundations of Faith\",\n          \"description\": \"Core doctrine class for new and growing believers\",\n          \"teacher\": {\n            \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n            \"firstname\": \"John\",\n            \"lastname\": \"Doe\"\n          },\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"sessionDate\": \"2026-07-06\",\n        \"selfMarkClosesAt\": null,\n        \"notes\": \"Chapter 4 - Salvation\",\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"member\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"status\": \"PRESENT\",\n      \"markedByTeacher\": true,\n      \"markedAt\": \"2026-07-06T10:00:00.000Z\",\n      \"createdAt\": \"2026-07-06T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-06T10:00:00.000Z\"\n    }\n  ]\n}"
+              "body": "{\n  \"marked\": 2,\n  \"attendances\": [\n    {\n      \"id\": \"ssa1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"session\": {\n        \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"sundaySchoolClass\": {\n          \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n          \"name\": \"Foundations of Faith\",\n          \"description\": \"Core doctrine class for new and growing believers\",\n          \"teacher\": {\n            \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n            \"firstname\": \"John\",\n            \"lastname\": \"Doe\"\n          },\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"sessionDate\": \"2026-07-06\",\n        \"selfMarkClosesAt\": null,\n        \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"member\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"status\": \"PRESENT\",\n      \"markedByTeacher\": true,\n      \"markedAt\": \"2026-07-06T10:00:00.000Z\",\n      \"createdAt\": \"2026-07-06T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-06T10:00:00.000Z\"\n    }\n  ]\n}"
             }
           ]
         }
@@ -13077,6 +13087,11 @@
               {
                 "key": "Content-Type",
                 "value": "application/atom+xml"
+              },
+              {
+                "key": "X-Hub-Signature",
+                "value": "sha1=<hmac-sha1-hex-of-body-using-YOUTUBE_WEBSUB_SECRET>",
+                "description": "Set by the hub when hub.secret was supplied on subscribe. Rejected silently (still 204) if missing/mismatched, or if YOUTUBE_WEBSUB_SECRET isn't configured at all."
               }
             ],
             "body": {
@@ -13100,7 +13115,7 @@
                 "callback"
               ]
             },
-            "description": "Fired by the hub whenever the channel publishes/updates a video (not necessarily a livestream). Always acks 204 immediately; the video-id is checked against the YouTube Data API in the background to confirm it's actually live before announcing."
+            "description": "Fired by the hub whenever the channel publishes/updates a video (not necessarily a livestream). No JWT guard — verified instead by HMAC-SHA1 signature (X-Hub-Signature, using YOUTUBE_WEBSUB_SECRET), same trust model as the Virtual Account Credit webhook. Always acks 204 immediately regardless of signature validity (never leaks whether verification passed); on a valid signature, the video-id is checked against the YouTube Data API in the background to confirm it's actually live (and on this configured channel) before announcing."
           },
           "response": [
             {
@@ -18731,17 +18746,17 @@
                 }
               ]
             },
-            "description": "Current session state \u2014 same payload the socket broadcasts."
+            "description": "No authentication required \u2014 the session code is the access credential (throttled 300/60s). Same payload the socket broadcasts. Used by the projector/screen presentation view so it can be opened on a second laptop with just the join code."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"gameTitle\": \"Bible Trivia Night\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"currentQuestionStartedAt\": 1718000000000,\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
             }
           ],
-          "name": "Get session state"
+          "name": "Get session state (Public)"
         },
         {
           "request": {
@@ -18917,14 +18932,14 @@
                 }
               ]
             },
-            "description": "Paginated list, newest first. Requires GAMES_READ."
+            "description": "Paginated list, newest first. Each game carries activeSessionCode, sourced directly from any LIVE GameSession row (not gated on the game's own status field, which can drift). Requires GAMES_READ."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n      \"title\": \"Bible Trivia Night\",\n      \"description\": \"Fun trivia covering the book of Genesis\",\n      \"status\": \"DRAFT\",\n      \"department\": null,\n      \"churchClass\": null,\n      \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n      \"title\": \"Bible Trivia Night\",\n      \"description\": \"Fun trivia covering the book of Genesis\",\n      \"status\": \"LIVE_SESSION_ACTIVE\",\n      \"department\": null,\n      \"churchClass\": null,\n      \"activeSessionCode\": \"GAME-X7K2P9\",\n      \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n      \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
             }
           ],
           "name": "List games"
@@ -18957,14 +18972,14 @@
                 }
               ]
             },
-            "description": "Get a single game. Requires GAMES_READ."
+            "description": "Get a single game, with activeSessionCode. Requires GAMES_READ."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Bible Trivia Night\",\n  \"description\": \"Fun trivia covering the book of Genesis\",\n  \"status\": \"DRAFT\",\n  \"department\": null,\n  \"churchClass\": null,\n  \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"g1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n  \"title\": \"Bible Trivia Night\",\n  \"description\": \"Fun trivia covering the book of Genesis\",\n  \"status\": \"DRAFT\",\n  \"department\": null,\n  \"churchClass\": null,\n  \"activeSessionCode\": null,\n  \"createdAt\": \"2026-07-23T10:00:00.000Z\",\n  \"updatedAt\": \"2026-07-23T10:00:00.000Z\"\n}"
             }
           ],
           "name": "Get game"
@@ -19304,7 +19319,7 @@
                 }
               ]
             },
-            "description": "Start a live session \u2014 400 if the game has no questions. Caller becomes the session's host. Requires GAMES_WRITE."
+            "description": "Start a live session \u2014 400 if the game has no questions, or if a LIVE session already exists for it (end or resume that one first). Caller becomes the session's host. Requires GAMES_WRITE."
           },
           "response": [
             {
@@ -19353,7 +19368,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"gameTitle\": \"Bible Trivia Night\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"currentQuestionStartedAt\": 1718000000000,\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
             }
           ],
           "name": "Next question"
@@ -19395,7 +19410,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"gameTitle\": \"Bible Trivia Night\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"currentQuestionStartedAt\": 1718000000000,\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
             }
           ],
           "name": "End session"
@@ -19437,7 +19452,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
+              "body": "{\n  \"sessionCode\": \"GAME-X7K2P9\",\n  \"gameTitle\": \"Bible Trivia Night\",\n  \"status\": \"LIVE\",\n  \"currentQuestionIndex\": 0,\n  \"totalQuestions\": 5,\n  \"currentQuestion\": {\n    \"id\": \"q1a2b3c4-d5e6-f7a8-9012-abcdef345678\",\n    \"order\": 0,\n    \"questionText\": \"Who built the ark?\",\n    \"options\": [\n      \"Moses\",\n      \"Noah\",\n      \"Abraham\",\n      \"David\"\n    ],\n    \"timeLimitSeconds\": 20,\n    \"points\": 1000\n  },\n  \"currentQuestionStartedAt\": 1718000000000,\n  \"secondsRemaining\": 14,\n  \"answeredCount\": 3,\n  \"participantCount\": 12,\n  \"leaderboard\": [\n    {\n      \"participantId\": \"p1\",\n      \"memberId\": \"m1\",\n      \"memberName\": \"Ada Lovelace\",\n      \"totalScore\": 1000\n    }\n  ]\n}"
             }
           ],
           "name": "Get session state"
@@ -20239,7 +20254,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/members",
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/members?page=1&limit=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -20248,8 +20263,13 @@
                 "small-groups",
                 "{{group_id}}",
                 "members"
+              ],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
               ]
-            }
+            },
+            "description": "Paginated (PaginationResponseDto — { data, page, limit, totalCount, totalPages }), ordered by created_at ASC (join order)."
           }
         },
         {
@@ -20289,7 +20309,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/attendance",
+              "raw": "{{baseUrl}}/admin/small-groups/{{group_id}}/attendance?page=1&limit=20",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -20298,8 +20318,13 @@
                 "small-groups",
                 "{{group_id}}",
                 "attendance"
+              ],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
               ]
-            }
+            },
+            "description": "Paginated (PaginationResponseDto — { data, page, limit, totalCount, totalPages }), ordered by meeting_date DESC."
           }
         }
       ]

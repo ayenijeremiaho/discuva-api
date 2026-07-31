@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Game } from '../entity/game.entity';
 import { GameQuestion } from '../entity/game-question.entity';
 import { GameSession } from '../entity/game-session.entity';
@@ -50,15 +50,22 @@ export interface LeaderboardEntry {
 
 export interface GameSessionStatePayload {
   sessionCode: string;
+  gameTitle: string;
   status: GameSessionStatusEnum;
   currentQuestionIndex: number | null;
   totalQuestions: number;
   currentQuestion: PublicGameQuestion | null;
+  // Epoch ms the current question started — clients tick their own countdown
+  // from this instead of trusting secondsRemaining, which is only a snapshot
+  // as of the last broadcast and goes stale between events.
+  currentQuestionStartedAt: number | null;
   secondsRemaining: number | null;
   answeredCount: number;
   participantCount: number;
   leaderboard: LeaderboardEntry[];
 }
+
+export type GameListItem = Game & { activeSessionCode: string | null };
 
 @Injectable()
 export class GameService {
@@ -138,18 +145,29 @@ export class GameService {
     });
   }
 
-  async getGame(id: string): Promise<Game> {
-    return this.getGameOrThrow(id);
+  async getGame(id: string): Promise<GameListItem> {
+    const game = await this.getGameOrThrow(id);
+    const [enriched] = await this.attachActiveSessionCodes([game]);
+    return enriched;
   }
 
-  async listGames(page = 1, limit = 20): Promise<PaginationResponseDto<Game>> {
+  async listGames(
+    page = 1,
+    limit = 20,
+  ): Promise<PaginationResponseDto<GameListItem>> {
     const [games, total] = await this.gameRepo.findAndCount({
       relations: ['department', 'churchClass'],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
-    return UtilityService.createPaginationResponse(games, page, limit, total);
+    const enriched = await this.attachActiveSessionCodes(games);
+    return UtilityService.createPaginationResponse(
+      enriched,
+      page,
+      limit,
+      total,
+    );
   }
 
   // ─── Questions ────────────────────────────────────────────────────────────
@@ -269,6 +287,15 @@ export class GameService {
       );
     }
 
+    const existingLive = await this.sessionRepo.findOne({
+      where: { game: { id: gameId }, status: GameSessionStatusEnum.LIVE },
+    });
+    if (existingLive) {
+      throw new BadRequestException(
+        `A live session (${existingLive.sessionCode}) is already running for this game — resume or end it before starting a new one`,
+      );
+    }
+
     const session = this.sessionRepo.create({
       game,
       sessionCode: this.generateSessionCode(),
@@ -327,8 +354,22 @@ export class GameService {
       session.endedAt = new Date();
       await this.sessionRepo.save(session);
 
-      session.game.status = GameStatusEnum.DRAFT;
-      await this.gameRepo.save(session.game);
+      // Only clear the game back to DRAFT if this was the last LIVE session
+      // for it — with the duplicate-session guard in startSession, that's
+      // normally guaranteed, but this stays defensive against any session
+      // left LIVE from before that guard existed (or a future bypass of it),
+      // which would otherwise let this overwrite a still-genuinely-live game
+      // back to DRAFT under it.
+      const stillLive = await this.sessionRepo.findOne({
+        where: {
+          game: { id: session.game.id },
+          status: GameSessionStatusEnum.LIVE,
+        },
+      });
+      if (!stillLive) {
+        session.game.status = GameStatusEnum.DRAFT;
+        await this.gameRepo.save(session.game);
+      }
 
       this.auditLogService.log('GAME_SESSION_ENDED', {
         actorId: admin.id,
@@ -411,7 +452,20 @@ export class GameService {
       pointsAwarded,
       answeredAt: new Date(),
     });
-    await this.responseRepo.save(response);
+    try {
+      await this.responseRepo.save(response);
+    } catch (err: unknown) {
+      // The findOne check above leaves a race window under a concurrent
+      // double-submit — the unique constraint on (session, question,
+      // participant) still catches it, so surface the same 400 rather than
+      // letting a raw DB conflict bubble up as a 500.
+      if ((err as { code?: string })?.code === '23505') {
+        throw new BadRequestException(
+          'You have already answered this question',
+        );
+      }
+      throw err;
+    }
 
     if (pointsAwarded > 0) {
       participant.totalScore += pointsAwarded;
@@ -458,11 +512,15 @@ export class GameService {
 
     return {
       sessionCode: session.sessionCode,
+      gameTitle: session.game.title,
       status: session.status,
       currentQuestionIndex: session.currentQuestionIndex,
       totalQuestions: questions.length,
       currentQuestion: currentQuestion
         ? this.toPublicQuestion(currentQuestion)
+        : null,
+      currentQuestionStartedAt: currentQuestion
+        ? (session.currentQuestionStartedAt?.getTime() ?? null)
         : null,
       secondsRemaining,
       answeredCount,
@@ -487,6 +545,36 @@ export class GameService {
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────
+
+  // Lets the admin games list/detail surface a "Resume" action for a game
+  // that has a LIVE session, without the admin having to remember or
+  // re-copy the join code from wherever they started it. Deliberately
+  // queries GameSession directly for every game in the batch rather than
+  // trusting Game.status — Game.status is a redundant, denormalized mirror
+  // of "is there a live session", and can drift out of sync with the real
+  // source of truth (e.g. a session left LIVE from before startSession's
+  // duplicate-session guard existed). Sourcing this from GameSession itself
+  // means the UI stays correct even if Game.status is wrong.
+  private async attachActiveSessionCodes(
+    games: Game[],
+  ): Promise<GameListItem[]> {
+    const codeByGameId = new Map<string, string>();
+    if (games.length > 0) {
+      const liveSessions = await this.sessionRepo.find({
+        where: {
+          game: { id: In(games.map((g) => g.id)) },
+          status: GameSessionStatusEnum.LIVE,
+        },
+        relations: ['game'],
+      });
+      liveSessions.forEach((s) => codeByGameId.set(s.game.id, s.sessionCode));
+    }
+
+    return games.map((g) => ({
+      ...g,
+      activeSessionCode: codeByGameId.get(g.id) ?? null,
+    }));
+  }
 
   private toPublicQuestion(question: GameQuestion): PublicGameQuestion {
     return {

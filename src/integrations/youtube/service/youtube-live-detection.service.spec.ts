@@ -16,6 +16,7 @@ jest.mock('../../../utility/service/sanitization.service', () => ({
 import { YoutubeLiveDetectionService } from './youtube-live-detection.service';
 import { YoutubeIntegrationState } from '../entity/youtube-integration-state.entity';
 import { AnnouncementService } from '../../../announcement/service/announcement.service';
+import { CacheService } from '../../../utility/service/cache.service';
 
 const mockStateRepo = {
   findOne: jest.fn(),
@@ -27,6 +28,11 @@ const mockAnnouncementService = {
   createSystemAnnouncement: jest.fn().mockResolvedValue({ id: 'ann-1' }),
 };
 
+const mockCacheService = {
+  acquireLock: jest.fn().mockResolvedValue(true),
+  releaseLock: jest.fn(),
+};
+
 const CONFIG = { YOUTUBE_CHANNEL_ID: 'UC123', YOUTUBE_API_KEY: 'key-123' };
 
 describe('YoutubeLiveDetectionService', () => {
@@ -34,6 +40,7 @@ describe('YoutubeLiveDetectionService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockCacheService.acquireLock.mockResolvedValue(true);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         YoutubeLiveDetectionService,
@@ -46,6 +53,7 @@ describe('YoutubeLiveDetectionService', () => {
           useValue: mockStateRepo,
         },
         { provide: AnnouncementService, useValue: mockAnnouncementService },
+        { provide: CacheService, useValue: mockCacheService },
       ],
     }).compile();
     service = module.get(YoutubeLiveDetectionService);
@@ -80,7 +88,11 @@ describe('YoutubeLiveDetectionService', () => {
       json: async () => ({
         items: [
           {
-            snippet: { title: 'Regular upload', liveBroadcastContent: 'none' },
+            snippet: {
+              title: 'Regular upload',
+              liveBroadcastContent: 'none',
+              channelId: 'UC123',
+            },
           },
         ],
       }),
@@ -103,7 +115,11 @@ describe('YoutubeLiveDetectionService', () => {
       json: async () => ({
         items: [
           {
-            snippet: { title: 'Sunday Service', liveBroadcastContent: 'live' },
+            snippet: {
+              title: 'Sunday Service',
+              liveBroadcastContent: 'live',
+              channelId: 'UC123',
+            },
           },
         ],
       }),
@@ -122,6 +138,31 @@ describe('YoutubeLiveDetectionService', () => {
     );
   });
 
+  it('ignores a live video that belongs to a different channel', async () => {
+    mockStateRepo.findOne.mockResolvedValue(null);
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        items: [
+          {
+            snippet: {
+              title: 'Someone else entirely',
+              liveBroadcastContent: 'live',
+              channelId: 'UC-not-ours',
+            },
+          },
+        ],
+      }),
+    } as Response);
+
+    await service.handleNotification('vid-forged');
+
+    expect(
+      mockAnnouncementService.createSystemAnnouncement,
+    ).not.toHaveBeenCalled();
+    expect(mockStateRepo.save).not.toHaveBeenCalled();
+  });
+
   it('swallows Data API errors without throwing', async () => {
     mockStateRepo.findOne.mockResolvedValue(null);
     jest.spyOn(global, 'fetch').mockRejectedValue(new Error('down'));
@@ -130,5 +171,30 @@ describe('YoutubeLiveDetectionService', () => {
     expect(
       mockAnnouncementService.createSystemAnnouncement,
     ).not.toHaveBeenCalled();
+  });
+
+  it('skips processing when the per-video lock is already held (concurrent redelivery)', async () => {
+    mockCacheService.acquireLock.mockResolvedValue(false);
+    const fetchSpy = jest.spyOn(global, 'fetch');
+
+    await service.handleNotification('vid-5');
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      mockAnnouncementService.createSystemAnnouncement,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('releases the lock after processing', async () => {
+    mockStateRepo.findOne.mockResolvedValue({
+      channelId: 'UC123',
+      lastAnnouncedVideoId: 'vid-1',
+    });
+
+    await service.handleNotification('vid-1');
+
+    expect(mockCacheService.releaseLock).toHaveBeenCalledWith(
+      'lock:youtube-notification:vid-1',
+    );
   });
 });

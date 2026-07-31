@@ -2,6 +2,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUrl,
   IsUUID,
   Matches,
 } from 'class-validator';
@@ -17,6 +18,10 @@ export class CreateChurchClassDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsUrl()
+  documentUrl?: string;
 
   @IsOptional()
   @IsUUID()
@@ -43,6 +48,10 @@ export class UpdateChurchClassDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsUrl()
+  documentUrl?: string;
 
   @IsOptional()
   @IsUUID()

@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { RentalBooking } from '../entity/rental-booking.entity';
 import { RentalBookingAddon } from '../entity/rental-booking-addon.entity';
 import { RentalPayment } from '../entity/rental-payment.entity';
@@ -361,16 +361,17 @@ export class RentalBookingService {
   async resolveAddons(
     items: { addonId: string; quantity: number }[],
   ): Promise<{ addon: RentalAddon; quantity: number }[]> {
-    const results: { addon: RentalAddon; quantity: number }[] = [];
-    for (const item of items) {
-      const addon = await this.addonRepo.findOne({
-        where: { id: item.addonId, isActive: true },
-      });
+    if (items.length === 0) return [];
+    const addons = await this.addonRepo.find({
+      where: { id: In(items.map((item) => item.addonId)), isActive: true },
+    });
+    const addonById = new Map(addons.map((addon) => [addon.id, addon]));
+    return items.map((item) => {
+      const addon = addonById.get(item.addonId);
       if (!addon)
         throw new NotFoundException(`Add-on ${item.addonId} not found`);
-      results.push({ addon, quantity: item.quantity });
-    }
-    return results;
+      return { addon, quantity: item.quantity };
+    });
   }
 
   private async determineMemberCategory(

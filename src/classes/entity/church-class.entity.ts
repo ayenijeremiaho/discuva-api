@@ -29,6 +29,11 @@ export class ChurchClass extends BaseEntity {
   @Column({ nullable: true, type: 'text' })
   description: string | null;
 
+  // Link to the class's syllabus/manual/study material — hosted externally
+  // (Google Drive, PDF link, etc.), not uploaded through this API.
+  @Column({ nullable: true, name: 'document_url' })
+  documentUrl: string | null;
+
   @Index()
   @Column({ default: ChurchClassStatusEnum.ACTIVE })
   status: ChurchClassStatusEnum;

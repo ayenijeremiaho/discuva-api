@@ -433,6 +433,7 @@ export class AuthService {
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
+      'workerProfile.secondaryDepartment',
       'pastor',
     ]);
     let isHod = false;

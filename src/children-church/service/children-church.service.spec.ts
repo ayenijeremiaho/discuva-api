@@ -15,7 +15,7 @@ import { ChildCheckInStatusEnum } from '../enums/child-checkin-status.enum';
 import { GuardianRelationshipEnum } from '../enums/guardian-relationship.enum';
 import { Member } from '../../member/entity/member.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
@@ -65,8 +65,8 @@ const mockCheckInRepo = {
 const mockMemberRepo = {};
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const mockUtilityService = {
@@ -166,7 +166,7 @@ describe('ChildrenChurchService', () => {
 
     service = module.get<ChildrenChurchService>(ChildrenChurchService);
     // Default: authorize as CC dept worker so functional tests focus on business logic
-    mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+    mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
       undefined,
     );
   });
@@ -183,7 +183,7 @@ describe('ChildrenChurchService', () => {
     });
 
     it('admin worker in CC dept is authorized', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       await service.registerChild(adminUser, {
@@ -195,7 +195,7 @@ describe('ChildrenChurchService', () => {
     });
 
     it('CC primary dept worker is allowed', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       await service.registerChild(ccWorkerUser, {
@@ -207,7 +207,7 @@ describe('ChildrenChurchService', () => {
     });
 
     it('CC secondary dept worker is allowed', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       await service.registerChild(ccWorkerUser, {
@@ -219,7 +219,7 @@ describe('ChildrenChurchService', () => {
     });
 
     it('worker from a different department is denied', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
         new ForbiddenException(
           'Only Children Church department workers are authorized to perform this action.',
         ),
@@ -234,7 +234,7 @@ describe('ChildrenChurchService', () => {
     });
 
     it('worker with no profile is denied', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockRejectedValue(
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValue(
         new ForbiddenException(
           'Only Children Church department workers are authorized to perform this action.',
         ),
@@ -249,7 +249,7 @@ describe('ChildrenChurchService', () => {
     });
 
     it('checks the CHILDREN_CHURCH key via DepartmentAccessService', async () => {
-      mockDepartmentAccessService.assertHasDepartmentAccessKey.mockResolvedValue(
+      mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
         undefined,
       );
       await service.registerChild(ccWorkerUser, {
@@ -258,10 +258,10 @@ describe('ChildrenChurchService', () => {
         dateOfBirth: '2024-01-15',
       });
       expect(
-        mockDepartmentAccessService.assertHasDepartmentAccessKey,
+        mockDepartmentAccessService.assertHasCapability,
       ).toHaveBeenCalledWith(
         ccWorkerUser.id,
-        DepartmentKeyEnum.CHILDREN_CHURCH,
+        DepartmentCapability.MANAGE_CHILDREN_CHURCH,
         expect.any(String),
       );
     });

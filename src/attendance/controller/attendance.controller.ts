@@ -127,8 +127,15 @@ export class AttendanceController {
   async getDepartmentHistory(
     @Request() req: any,
     @Query('slotId', ParseUUIDPipe) slotId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.attendanceService.getDepartmentHistory(req.user, slotId);
+    return this.attendanceService.getDepartmentHistory(
+      req.user,
+      slotId,
+      page ? +page : 1,
+      limit ? +limit : 20,
+    );
   }
 
   @UseGuards(AdminGuard)

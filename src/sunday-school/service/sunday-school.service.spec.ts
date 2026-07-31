@@ -13,7 +13,7 @@ import { SundaySchoolAttendance } from '../entity/sunday-school-attendance.entit
 import { SundaySchoolAttendanceStatus } from '../enums/sunday-school-attendance-status.enum';
 import { Member } from '../../member/entity/member.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
@@ -58,8 +58,8 @@ const mockMemberRepo = {
 };
 
 const mockDepartmentAccessService = {
-  hasDepartmentAccessKey: jest.fn(),
-  assertHasDepartmentAccessKey: jest.fn(),
+  hasCapability: jest.fn(),
+  assertHasCapability: jest.fn(),
 };
 
 const adminUser = {
@@ -149,9 +149,7 @@ describe('SundaySchoolService', () => {
 
   describe('requireSundaySchoolAuth (via createClass)', () => {
     it('admin worker in SS dept is authorized', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
       mockClassRepo.create.mockReturnValue(mockClass);
       mockClassRepo.save.mockResolvedValue(mockClass);
 
@@ -161,9 +159,7 @@ describe('SundaySchoolService', () => {
     });
 
     it('Sunday School dept worker is authorized', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
       mockClassRepo.create.mockReturnValue(mockClass);
       mockClassRepo.save.mockResolvedValue(mockClass);
 
@@ -173,9 +169,7 @@ describe('SundaySchoolService', () => {
     });
 
     it('Worker whose secondary department is Sunday School is authorized', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
       mockClassRepo.create.mockReturnValue(mockClass);
       mockClassRepo.save.mockResolvedValue(mockClass);
 
@@ -185,9 +179,7 @@ describe('SundaySchoolService', () => {
     });
 
     it('Worker from another dept without class teacher role is rejected', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        false,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
 
       await expect(
         service.createClass(otherWorkerUser, { name: 'Alpha' }),
@@ -195,26 +187,23 @@ describe('SundaySchoolService', () => {
     });
 
     it('checks the SUNDAY_SCHOOL key via DepartmentAccessService', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
       mockClassRepo.create.mockReturnValue(mockClass);
       mockClassRepo.save.mockResolvedValue(mockClass);
 
       await service.createClass(ssWorkerUser, { name: 'Alpha' });
 
-      expect(
-        mockDepartmentAccessService.hasDepartmentAccessKey,
-      ).toHaveBeenCalledWith(ssWorkerUser.id, DepartmentKeyEnum.SUNDAY_SCHOOL);
+      expect(mockDepartmentAccessService.hasCapability).toHaveBeenCalledWith(
+        ssWorkerUser.id,
+        DepartmentCapability.MANAGE_SUNDAY_SCHOOL,
+      );
     });
   });
 
   describe('requireSundaySchoolAuth (via assignMember — class teacher fallback)', () => {
     it('Class teacher from another dept is authorized for their own class', async () => {
       // otherWorkerUser is NOT in SS dept, but IS the teacher of class-1
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        false,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
       // isClassTeacher: findOne returns the class when teacher.id matches
       mockClassRepo.findOne
         .mockResolvedValueOnce(mockClass) // requireSundaySchoolAuth → isClassTeacher
@@ -234,9 +223,7 @@ describe('SundaySchoolService', () => {
     });
 
     it('Class teacher from another dept is rejected for a different class', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        false,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
       // isClassTeacher: findOne returns null — not the teacher of class-2
       mockClassRepo.findOne.mockResolvedValue(null);
 
@@ -252,9 +239,7 @@ describe('SundaySchoolService', () => {
 
   describe('createClass', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should create and save a class', async () => {
@@ -291,9 +276,7 @@ describe('SundaySchoolService', () => {
 
   describe('updateClass', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when class does not exist', async () => {
@@ -362,9 +345,7 @@ describe('SundaySchoolService', () => {
 
   describe('assignMember', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when class not found', async () => {
@@ -418,9 +399,7 @@ describe('SundaySchoolService', () => {
 
   describe('removeMember', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when assignment not found', async () => {
@@ -446,9 +425,7 @@ describe('SundaySchoolService', () => {
 
   describe('createSession', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when class not found', async () => {
@@ -494,9 +471,7 @@ describe('SundaySchoolService', () => {
     });
 
     it('should throw ForbiddenException for unauthorized worker', async () => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        false,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
       mockClassRepo.findOne.mockResolvedValue(null); // not the teacher either
 
       await expect(
@@ -512,9 +487,7 @@ describe('SundaySchoolService', () => {
 
   describe('openSelfMark', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when session not found', async () => {
@@ -549,9 +522,7 @@ describe('SundaySchoolService', () => {
 
   describe('closeSelfMark', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when session not found', async () => {
@@ -666,9 +637,7 @@ describe('SundaySchoolService', () => {
 
   describe('bulkMarkAttendance', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when session not found', async () => {
@@ -752,9 +721,7 @@ describe('SundaySchoolService', () => {
 
     it('should throw ForbiddenException for unauthorized worker', async () => {
       mockSessionRepo.findOne.mockResolvedValue(mockSession);
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        false,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
       mockClassRepo.findOne.mockResolvedValue(null); // not teacher
 
       await expect(
@@ -769,9 +736,7 @@ describe('SundaySchoolService', () => {
 
   describe('getSessionRoster', () => {
     beforeEach(() => {
-      mockDepartmentAccessService.hasDepartmentAccessKey.mockResolvedValue(
-        true,
-      );
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
     });
 
     it('should throw NotFoundException when session not found', async () => {

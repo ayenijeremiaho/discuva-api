@@ -111,13 +111,20 @@ export class SmallGroupService {
     return group;
   }
 
-  async getRoster(groupId: string): Promise<SmallGroupMember[]> {
+  async getRoster(
+    groupId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<PaginationResponseDto<SmallGroupMember>> {
     await this.getOrThrow(groupId);
-    return this.memberRepo.find({
+    const [data, total] = await this.memberRepo.findAndCount({
       where: { group: { id: groupId } },
       relations: ['member'],
       order: { createdAt: 'ASC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
   async removeMember(
@@ -138,13 +145,20 @@ export class SmallGroupService {
     });
   }
 
-  async getAttendanceHistory(groupId: string): Promise<SmallGroupAttendance[]> {
+  async getAttendanceHistory(
+    groupId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<PaginationResponseDto<SmallGroupAttendance>> {
     await this.getOrThrow(groupId);
-    return this.attendanceRepo.find({
+    const [data, total] = await this.attendanceRepo.findAndCount({
       where: { group: { id: groupId } },
       relations: ['member'],
       order: { meetingDate: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
   // ── Member-facing ────────────────────────────────────────────────────────
@@ -209,12 +223,25 @@ export class SmallGroupService {
     });
     if (existing) return existing;
 
-    return this.memberRepo.save(
-      this.memberRepo.create({
-        group: { id: groupId } as SmallGroup,
-        member: { id: memberId } as Member,
-      }),
-    );
+    try {
+      return await this.memberRepo.save(
+        this.memberRepo.create({
+          group: { id: groupId } as SmallGroup,
+          member: { id: memberId } as Member,
+        }),
+      );
+    } catch (err: unknown) {
+      // A concurrent double-tap can race past the findOne check above — the
+      // unique constraint on (group_id, member_id) still catches it, so
+      // treat that as the idempotent success it already is instead of a 500.
+      if ((err as { code?: string })?.code === '23505') {
+        const membership = await this.memberRepo.findOne({
+          where: { group: { id: groupId }, member: { id: memberId } },
+        });
+        if (membership) return membership;
+      }
+      throw err;
+    }
   }
 
   async leave(groupId: string, memberId: string): Promise<void> {
@@ -267,6 +294,13 @@ export class SmallGroupService {
     groupId: string,
     memberId: string,
   ): Promise<void> {
+    const group = await this.getOrThrow(groupId);
+    // The leader is never auto-enrolled as a membership row (create/update
+    // only set `leader`, not a SmallGroupMember) — checking leadership here
+    // too means a leader who hasn't separately "joined" their own group
+    // still isn't locked out of viewing its roster.
+    if (group.leader?.id === memberId) return;
+
     const membership = await this.memberRepo.findOne({
       where: { group: { id: groupId }, member: { id: memberId } },
     });

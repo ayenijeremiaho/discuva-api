@@ -35,7 +35,7 @@ import { DateService } from '../../utility/service/date.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { AuditLogService } from '../../utility/service/audit-log.service';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { ExcelService } from '../../utility/service/excel.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { ExportAttendanceEmailDto } from '../dto/export-attendance-email.dto';
@@ -446,14 +446,18 @@ export class AttendanceService {
   async getDepartmentHistory(
     user: MemberAuth,
     slotId: string,
-  ): Promise<Attendance[]> {
+    page = 1,
+    limit = 20,
+  ): Promise<PaginationResponseDto<Attendance>> {
+    if (page < 1) throw new BadRequestException('Page must be greater than 0');
+
     const deptId = await this.departmentService.getDepartmentIdForLead(user.id);
     if (!deptId)
       throw new ForbiddenException(
         "You must be a department lead to view this department's attendance history.",
       );
 
-    return this.attendanceRepository
+    const [data, total] = await this.attendanceRepository
       .createQueryBuilder('attendance')
       .leftJoinAndSelect('attendance.event', 'event')
       .leftJoinAndSelect('attendance.member', 'member')
@@ -463,7 +467,11 @@ export class AttendanceService {
       .where('dept.id = :deptId', { deptId })
       .andWhere('slot.id = :slotId', { slotId })
       .orderBy('attendance.createdAt', 'DESC')
-      .getMany();
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
   async getDepartmentEventAttendance(
@@ -1159,10 +1167,10 @@ export class AttendanceService {
   // Mobile-only gate for Admin-department workers (front-desk staff who need
   // to check people in without going through the admin portal).
   async assertIsAdminDeptWorker(memberId: string): Promise<void> {
-    await this.departmentAccessService.assertHasDepartmentAccessKey(
+    await this.departmentAccessService.assertHasCapability(
       memberId,
-      DepartmentKeyEnum.ADMIN,
-      'Only Admin department workers can perform this action',
+      DepartmentCapability.FRONT_DESK_OPERATIONS,
+      'Only Front Desk Operations workers can perform this action',
     );
   }
 

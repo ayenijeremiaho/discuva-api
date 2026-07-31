@@ -17,7 +17,7 @@ import {
   LinkConvertToMemberDto,
 } from '../dto/convert.dto';
 import { ConvertStatusEnum } from '../enum/convert-status.enum';
-import { DepartmentKeyEnum } from '../../department/enums/department-key.enum';
+import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -212,8 +212,12 @@ export class ConvertService {
     if (!targetProfile) throw new NotFoundException('Worker profile not found');
 
     const isEvangelismWorker =
-      targetProfile.department?.key === DepartmentKeyEnum.EVANGELISM ||
-      targetProfile.secondaryDepartment?.key === DepartmentKeyEnum.EVANGELISM;
+      !!targetProfile.department?.capabilities?.includes(
+        DepartmentCapability.MANAGE_EVANGELISM_CONVERTS,
+      ) ||
+      !!targetProfile.secondaryDepartment?.capabilities?.includes(
+        DepartmentCapability.MANAGE_EVANGELISM_CONVERTS,
+      );
     if (!isEvangelismWorker) {
       throw new BadRequestException(
         'Target worker must be in the Evangelism department',
@@ -256,10 +260,10 @@ export class ConvertService {
   }
 
   async assertIsEvangelismDeptWorker(memberId: string): Promise<void> {
-    await this.departmentAccessService.assertHasDepartmentAccessKey(
+    await this.departmentAccessService.assertHasCapability(
       memberId,
-      DepartmentKeyEnum.EVANGELISM,
-      'Only Evangelism department workers can perform this action',
+      DepartmentCapability.MANAGE_EVANGELISM_CONVERTS,
+      'Only Evangelism Convert Management workers can perform this action',
     );
   }
 }
