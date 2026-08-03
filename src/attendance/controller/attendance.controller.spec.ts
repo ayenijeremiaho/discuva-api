@@ -4,6 +4,7 @@ import { AttendanceService } from '../service/attendance.service';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 
 const mockAttendanceService = {
@@ -36,6 +37,8 @@ describe('AttendanceController', () => {
       .overrideGuard(RolesGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(PlanGuard)
       .useValue({ canActivate: () => true })
       .compile();
 

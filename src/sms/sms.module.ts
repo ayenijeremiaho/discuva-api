@@ -4,9 +4,10 @@ import { SmsService } from './service/sms.service';
 import { SmsController } from './controller/sms.controller';
 import { TermiiSmsProvider } from './provider/termii-sms.provider';
 import { SMS_PROVIDER } from './interface/sms-provider.interface';
+import { CommunicationProviderModule } from '../communication-provider/communication-provider.module';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, CommunicationProviderModule],
   controllers: [SmsController],
   providers: [
     SmsService,

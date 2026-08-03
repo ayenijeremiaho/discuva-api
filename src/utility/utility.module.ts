@@ -19,10 +19,15 @@ import { AuditLogProcessor } from './processor/audit-log.processor';
 import { CloudinaryService } from './service/cloudinary.service';
 import { PdfService } from './service/pdf.service';
 import { ExcelService } from './service/excel.service';
+import { EncryptionService } from './service/encryption.service';
 import { EMAIL_PROVIDER_TOKEN } from './email-provider/email-provider.token';
 import { GmailProvider } from './email-provider/gmail.provider';
 import { ResendProvider } from './email-provider/resend.provider';
+import { SmtpProvider } from './email-provider/smtp.provider';
+import { SendGridProvider } from './email-provider/sendgrid.provider';
+import { MailgunProvider } from './email-provider/mailgun.provider';
 import { IEmailProvider } from './email-provider/email-provider.interface';
+import { CommunicationProviderModule } from '../communication-provider/communication-provider.module';
 
 // Global — CacheService (and friends) are cross-cutting utilities other
 // modules' guards/interceptors need without an explicit import path, the
@@ -37,16 +42,33 @@ import { IEmailProvider } from './email-provider/email-provider.interface';
     TenantTypeOrmModule.forFeature([AuditLog, EmailLog]),
     BullModule.registerQueue({ name: 'email' }),
     BullModule.registerQueue({ name: 'audit-log' }),
+    // EmailProcessor resolves a tenant's own BYOK email provider via
+    // EmailCredentialResolverService — see its own module for why this
+    // edge is safely one-directional (CommunicationProviderModule doesn't
+    // import UtilityModule back).
+    CommunicationProviderModule,
   ],
   providers: [
+    GmailProvider,
+    ResendProvider,
+    SmtpProvider,
+    SendGridProvider,
+    MailgunProvider,
+    // The platform-default IEmailProvider, chosen once at boot — reuses the
+    // same DI-managed GmailProvider/ResendProvider instances below rather
+    // than constructing fresh ones, so there's exactly one live
+    // nodemailer transporter / Resend client of each kind at runtime.
     {
       provide: EMAIL_PROVIDER_TOKEN,
-      useFactory: (config: ConfigService): IEmailProvider => {
+      useFactory: (
+        config: ConfigService,
+        gmailProvider: GmailProvider,
+        resendProvider: ResendProvider,
+      ): IEmailProvider => {
         const provider = config.get<string>('EMAIL_PROVIDER') ?? 'gmail';
-        if (provider === 'resend') return new ResendProvider(config);
-        return new GmailProvider(config);
+        return provider === 'resend' ? resendProvider : gmailProvider;
       },
-      inject: [ConfigService],
+      inject: [ConfigService, GmailProvider, ResendProvider],
     },
     UtilityService,
     DateService,
@@ -60,6 +82,7 @@ import { IEmailProvider } from './email-provider/email-provider.interface';
     CloudinaryService,
     PdfService,
     ExcelService,
+    EncryptionService,
   ],
   controllers: [UtilityController, AuditLogController, EmailLogController],
   exports: [
@@ -72,6 +95,7 @@ import { IEmailProvider } from './email-provider/email-provider.interface';
     CloudinaryService,
     PdfService,
     ExcelService,
+    EncryptionService,
   ],
 })
 export class UtilityModule {}

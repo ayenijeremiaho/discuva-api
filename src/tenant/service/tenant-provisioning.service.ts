@@ -1,10 +1,12 @@
 import * as path from 'node:path';
+import { randomInt } from 'node:crypto';
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
+import { ConfigService } from '@nestjs/config';
 import dbConfig from '../../config/db.config';
 import { Tenant } from '../entity/tenant.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
@@ -14,9 +16,20 @@ import { AdminRole } from '../../admin/entity/admin-role.entity';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { PasswordResetOtp } from '../../auth/entity/password-reset-otp.entity';
+import { UtilityService } from '../../utility/service/utility.service';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { RESERVED_SUBDOMAINS } from '../utility/extract-subdomain';
 import { subdomainToSchemaName } from '../utility/schema-name';
+
+// How long a provisioning-time welcome OTP stays valid — deliberately much
+// longer than OTP_TTL_SECONDS' normal 15-minute forgot-password window,
+// since the first admin of a brand-new tenant may not open the email the
+// same day. The tradeoff (a 6-digit code living for days is more
+// brute-forceable than one living for minutes) is offset by adding
+// rate-limiting to POST /auth/reset-password itself, not by shortening this
+// past the point of being useless for its purpose.
+const WELCOME_OTP_TTL_HOURS = 48;
 
 export interface ProvisionTenantParams {
   subdomain: string;
@@ -24,8 +37,24 @@ export interface ProvisionTenantParams {
   adminFirstname: string;
   adminLastname: string;
   adminEmail: string;
-  adminPasswordHash: string;
+  // Omit entirely when nobody was present to type in their own password —
+  // platform-admin-initiated provisioning (§9 Phase 9e). seedTenantAdmin
+  // then generates one internally (never revealed to anyone) and emails
+  // the new admin a welcome message with a set-password link instead. Set
+  // this when the admin themselves supplied a password directly (POST
+  // /signup, branch invite) — behavior is unchanged for those callers.
+  adminPasswordHash?: string;
   planId?: string;
+  // Set only when this signup is completing a branch invite
+  // (docs/MULTI_TENANT_MIGRATION.md §11.1) — already validated by the
+  // caller (SignupController, via BranchInviteService.resolveInvite)
+  // before provision() is ever called.
+  parentTenantId?: string;
+  // Set only when the invite's sponsorPlan was true and the parent has a
+  // paid plan to sponsor onto — overrides planId, and stamps
+  // Subscription.sponsoredByTenantId so PlatformAnalyticsService's MRR
+  // calculation correctly excludes it.
+  sponsoredPlanId?: string;
 }
 
 // Shared by POST /signup and the provision:tenant CLI script — one
@@ -46,6 +75,8 @@ export class TenantProvisioningService {
     private readonly subscriptionRepo: Repository<Subscription>,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly utilityService: UtilityService,
+    private readonly configService: ConfigService,
   ) {}
 
   async provision(params: ProvisionTenantParams): Promise<Tenant> {
@@ -67,6 +98,7 @@ export class TenantProvisioningService {
           schemaName: subdomainToSchemaName(subdomain),
           name: params.churchName,
           isActive: false,
+          parentTenantId: params.parentTenantId ?? null,
         }),
       );
       this.logger.log(
@@ -76,12 +108,20 @@ export class TenantProvisioningService {
 
     await this.ensureSchemaExists(tenant.schemaName);
     await this.runTenantMigrations(tenant.schemaName);
-    await this.seedTenantAdmin(tenant, params);
-    await this.ensureSubscription(tenant.id, params.planId ?? 'free');
+    const welcomeOtp = await this.seedTenantAdmin(tenant, params);
+    await this.ensureSubscription(
+      tenant.id,
+      params.sponsoredPlanId ?? params.planId ?? 'free',
+      params.sponsoredPlanId ? params.parentTenantId : undefined,
+    );
 
     if (!tenant.isActive) {
       tenant.isActive = true;
       tenant = await this.tenantRepo.save(tenant);
+    }
+
+    if (welcomeOtp) {
+      this.sendWelcomeEmail(tenant, params, welcomeOtp);
     }
 
     this.logger.log(`Tenant "${subdomain}" provisioned and activated`);
@@ -147,11 +187,16 @@ export class TenantProvisioningService {
   // duplicate-key error on a second run was what surfaced it). Mirrors
   // DefaultAdminSeed's/AdminRoleService's own logic, but seeds the signup
   // form's real admin instead of an env-var placeholder.
+  // Returns the plaintext welcome OTP when one was generated (brand-new
+  // member, no adminPasswordHash supplied), so provision() can email it
+  // once this transaction has committed — null for every other case
+  // (resuming a partial provision, a pre-existing member, or a caller who
+  // supplied their own password) since there's nothing new to tell anyone.
   private async seedTenantAdmin(
     tenant: Tenant,
     params: ProvisionTenantParams,
-  ): Promise<void> {
-    await this.cls.runWith(
+  ): Promise<string | null> {
+    return this.cls.runWith(
       { tenantId: tenant.id, schemaName: tenant.schemaName } as AppClsStore,
       () =>
         this.txHost.withTransaction(async () => {
@@ -163,7 +208,7 @@ export class TenantProvisioningService {
           const [{ c: adminCount }] = await tx.query(
             'SELECT count(*)::int AS c FROM admins',
           );
-          if (adminCount > 0) return;
+          if (adminCount > 0) return null;
 
           let superAdminRole = await tx.findOneBy(AdminRole, {
             name: 'SuperAdmin',
@@ -181,18 +226,40 @@ export class TenantProvisioningService {
           let member = await tx.findOneBy(Member, {
             email: params.adminEmail,
           });
+          let welcomeOtp: string | null = null;
           if (!member) {
+            const hasCallerPassword = !!params.adminPasswordHash;
+            const passwordHash = hasCallerPassword
+              ? params.adminPasswordHash
+              : await UtilityService.hashValue(
+                  UtilityService.generateRandomPassword(),
+                );
+
             member = await tx.save(
               tx.create(Member, {
                 firstname: params.adminFirstname,
                 lastname: params.adminLastname,
                 email: params.adminEmail,
-                password: params.adminPasswordHash,
+                password: passwordHash,
                 role: MemberRoleEnum.MEMBER,
                 status: MemberStatusEnum.ACTIVE,
-                changedPassword: true,
+                changedPassword: hasCallerPassword,
               }),
             );
+
+            if (!hasCallerPassword) {
+              welcomeOtp = randomInt(0, 1000000).toString().padStart(6, '0');
+              await tx.save(
+                tx.create(PasswordResetOtp, {
+                  memberId: member.id,
+                  otpHash: await UtilityService.hashValue(welcomeOtp),
+                  expiresAt: new Date(
+                    Date.now() + WELCOME_OTP_TTL_HOURS * 60 * 60 * 1000,
+                  ),
+                  usedAt: null,
+                }),
+              );
+            }
           }
 
           await tx.save(
@@ -205,18 +272,54 @@ export class TenantProvisioningService {
           this.logger.log(
             `Seeded SuperAdmin ${params.adminEmail} for tenant "${tenant.subdomain}"`,
           );
+          return welcomeOtp;
         }),
+    );
+  }
+
+  // Fire-and-forget per this codebase's queue convention (§Redis/Cache
+  // Conventions) — the admin/OTP rows are already durably committed by the
+  // time this is called, the email is a best-effort notification on top.
+  private sendWelcomeEmail(
+    tenant: Tenant,
+    params: ProvisionTenantParams,
+    otp: string,
+  ): void {
+    const firstName = UtilityService.capitalizeFirstLetter(
+      params.adminFirstname,
+    );
+    const adminLoginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
+    const productName = this.configService.get<string>('PRODUCT_NAME');
+    const setPasswordUrl = `${adminLoginUrl}/set-password?email=${encodeURIComponent(params.adminEmail)}&otp=${otp}`;
+
+    this.utilityService.sendEmailWithTemplate(
+      params.adminEmail,
+      `Welcome to ${params.churchName}'s new ${productName} workspace`,
+      'tenant-welcome',
+      {
+        name: firstName,
+        church_name: params.churchName,
+        email: params.adminEmail,
+        otp,
+        expiresHours: WELCOME_OTP_TTL_HOURS.toString(),
+        set_password_url: setPasswordUrl,
+      },
     );
   }
 
   private async ensureSubscription(
     tenantId: string,
     planId: string,
+    sponsoredByTenantId?: string,
   ): Promise<void> {
     const existing = await this.subscriptionRepo.findOneBy({ tenantId });
     if (existing) return;
     await this.subscriptionRepo.save(
-      this.subscriptionRepo.create({ tenantId, planId }),
+      this.subscriptionRepo.create({
+        tenantId,
+        planId,
+        sponsoredByTenantId: sponsoredByTenantId ?? null,
+      }),
     );
   }
 }

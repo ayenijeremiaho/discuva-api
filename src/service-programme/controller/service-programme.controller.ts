@@ -21,6 +21,9 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { ServiceProgrammeService } from '../service/service-programme.service';
 import { ServiceSessionService } from '../service/service-session.service';
 import { CreateServiceProgrammeDto } from '../dto/create-service-programme.dto';
@@ -29,6 +32,13 @@ import { CreateServiceProgrammeSlotDto } from '../dto/create-service-programme-s
 import { UpdateServiceProgrammeSlotDto } from '../dto/update-service-programme-slot.dto';
 import { ReorderProgrammeSlotsDto } from '../dto/reorder-programme-slots.dto';
 
+// PlanGuard stacked at class level composes with each route's own
+// AdminGuard/JwtAuthGuard (NestJS runs class-level and method-level
+// @UseGuards() together, not one overriding the other) — applies to every
+// route in this controller, admin and member ("my-assignments") alike,
+// without needing @RequiresPlan repeated per method.
+@UseGuards(PlanGuard)
+@RequiresPlan(PlanFeature.SERVICE_PROGRAMME)
 @Controller('service-programme')
 export class ServiceProgrammeController {
   constructor(

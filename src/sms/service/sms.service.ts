@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   ISmsProvider,
   SMS_PROVIDER,
@@ -8,6 +9,7 @@ import {
   SmsSendResult,
 } from '../interface/sms-provider.interface';
 import { TERMII_MAX_RECIPIENTS_PER_REQUEST } from '../provider/termii-sms.provider';
+import { SmsCredentialResolverService } from '../../communication-provider/service/sms-credential-resolver.service';
 
 // Characters Termii documents as forcing UCS-2/unicode encoding (70 chars per
 // segment instead of 160) even though some of these are otherwise ordinary
@@ -32,7 +34,10 @@ function chunk<T>(items: T[], size: number): T[][] {
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
 
-  constructor(@Inject(SMS_PROVIDER) private readonly provider: ISmsProvider) {}
+  constructor(
+    @Inject(SMS_PROVIDER) private readonly provider: ISmsProvider,
+    private readonly credentialResolver: SmsCredentialResolverService,
+  ) {}
 
   calculateSegments(message: string): SegmentCalculation {
     const characterCount = message.length;
@@ -45,13 +50,28 @@ export class SmsService {
     return { segments, encoding, characterCount };
   }
 
+  // Whether a tenant's own BYOK credentials (their own Termii account, no
+  // wallet involved) or this platform's default (billed against the
+  // tenant's prepaid SmsWallet, one debit per batch actually attempted) get
+  // used is resolved once per send — not per recipient, per message.
   async send(to: string[], message: string): Promise<SmsSendResult[]> {
-    const { encoding } = this.calculateSegments(message);
+    const { segments, encoding } = this.calculateSegments(message);
+    const credentials = await this.credentialResolver.resolveCredentials();
     const batches = chunk(to, TERMII_MAX_RECIPIENTS_PER_REQUEST);
     const results: SmsSendResult[] = [];
+    const reference = randomUUID();
+
     for (const batch of batches) {
       try {
-        results.push(await this.provider.send(batch, message, encoding));
+        if (!credentials) {
+          await this.credentialResolver.debitForSend(
+            segments * batch.length,
+            reference,
+          );
+        }
+        results.push(
+          await this.provider.send(batch, message, encoding, credentials),
+        );
       } catch (err: any) {
         this.logger.error(
           `SMS batch of ${batch.length} failed: ${err?.message ?? err}`,
@@ -62,10 +82,12 @@ export class SmsService {
   }
 
   async getBalance(): Promise<SmsBalance> {
-    return this.provider.getBalance();
+    const credentials = await this.credentialResolver.resolveCredentials();
+    return this.provider.getBalance(credentials);
   }
 
   async getLogs(): Promise<SmsLogEntry[]> {
-    return this.provider.getMessageHistory();
+    const credentials = await this.credentialResolver.resolveCredentials();
+    return this.provider.getMessageHistory(credentials);
   }
 }

@@ -61,6 +61,8 @@ import { EvangelismModule } from './evangelism/evangelism.module';
 import { BillingModule } from './billing/billing.module';
 import { TenantModule } from './tenant/tenant.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
+import { CommunicationProviderModule } from './communication-provider/communication-provider.module';
+import { BranchModule } from './branch/branch.module';
 
 @Module({
   imports: [
@@ -210,6 +212,8 @@ import { PlatformAdminModule } from './platform-admin/platform-admin.module';
     BillingModule,
     TenantModule,
     PlatformAdminModule,
+    CommunicationProviderModule,
+    BranchModule,
     EnumsModule,
     TitheModule,
     FinanceRequestModule,

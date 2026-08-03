@@ -2,18 +2,27 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 import { Public } from '../../auth/decorator/public.decorator';
+import { RequiresPlatformPermission } from '../decorator/requires-platform-permission.decorator';
+import { PlatformAdminPermission } from '../enum/platform-admin-permission.enum';
 import { PlatformAdminAuthService } from '../service/platform-admin-auth.service';
 import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
+import {
+  PlatformAdminForgotPasswordDto,
+  PlatformAdminResetPasswordDto,
+} from '../dto/platform-admin-password-reset.dto';
 import { CreateTenantDto } from '../dto/create-tenant.dto';
 import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
@@ -21,6 +30,8 @@ import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
+import { RefundCheckoutSessionDto } from '../dto/refund-checkout-session.dto';
+import { CheckoutService } from '../../billing/service/checkout.service';
 
 // Route shapes match MULTI_TENANT_MIGRATION.md §4.10's capability list.
 //
@@ -42,6 +53,7 @@ export class PlatformAdminController {
     private readonly tenantService: PlatformTenantService,
     private readonly planService: PlatformPlanService,
     private readonly communicationProviderService: PlatformCommunicationProviderService,
+    private readonly checkoutService: CheckoutService,
   ) {}
 
   @Post('auth/login')
@@ -49,31 +61,57 @@ export class PlatformAdminController {
     return this.platformAdminAuthService.login(dto.email, dto.password);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('auth/forgot-password')
+  async forgotPassword(@Body() dto: PlatformAdminForgotPasswordDto) {
+    await this.platformAdminAuthService.forgotPassword(dto.email);
+    return {
+      message:
+        'If an account exists for this email, a reset code has been sent.',
+    };
+  }
+
+  // Also how a newly-onboarded platform admin sets their initial password —
+  // see PlatformAdminManagementService.create().
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('auth/reset-password')
+  async resetPassword(@Body() dto: PlatformAdminResetPasswordDto) {
+    await this.platformAdminAuthService.resetPassword(dto);
+    return { message: 'Password reset successfully. You can now log in.' };
+  }
+
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
   @Get('tenants')
   async listTenants() {
     return this.tenantService.listTenants();
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Post('tenants')
   async provisionTenant(@Body() dto: CreateTenantDto) {
     return this.tenantService.createTenant(dto);
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Patch('tenants/:id')
   async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
     return this.tenantService.updateTenant(id, dto);
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Patch('tenants/:id/suspend')
   async suspendTenant(@Param('id') id: string, @Body() dto: SuspendTenantDto) {
     return this.tenantService.suspendTenant(id, dto);
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Patch('tenants/:id/plan')
   async changeTenantPlan(
     @Param('id') id: string,
@@ -83,42 +121,53 @@ export class PlatformAdminController {
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_IMPERSONATE)
   @Post('tenants/:id/impersonate')
   async impersonateTenant(@Param('id') id: string) {
     return this.tenantService.impersonateTenant(id);
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.PLANS_READ)
   @Get('plans')
   async listPlans() {
     return this.planService.listPlans();
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.PLANS_WRITE)
   @Post('plans')
   async createPlan(@Body() dto: CreatePlanDto) {
     return this.planService.createPlan(dto);
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.PLANS_WRITE)
   @Patch('plans/:id')
   async updatePlan(@Param('id') id: string, @Body() dto: UpdatePlanDto) {
     return this.planService.updatePlan(id, dto);
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
   @Get('subscriptions')
   async listSubscriptions() {
     return this.planService.listSubscriptions();
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(
+    PlatformAdminPermission.COMMUNICATION_PROVIDERS_READ,
+  )
   @Get('communication-providers')
   async listCommunicationProviders() {
     return this.communicationProviderService.listProviders();
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(
+    PlatformAdminPermission.COMMUNICATION_PROVIDERS_WRITE,
+  )
   @Post('communication-providers')
   async registerCommunicationProvider(
     @Body() dto: RegisterCommunicationProviderDto,
@@ -127,8 +176,34 @@ export class PlatformAdminController {
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(
+    PlatformAdminPermission.COMMUNICATION_PROVIDERS_READ,
+  )
   @Get('tenants/:id/communication-providers')
   async getTenantCommunicationProviders(@Param('id') id: string) {
     return this.communicationProviderService.getTenantProviders(id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('tenants/:id/billing-sessions')
+  async listTenantBillingSessions(@Param('id') id: string) {
+    return this.checkoutService.listCheckoutSessions(id);
+  }
+
+  // Support action — refund a specific completed checkout. Does not
+  // automatically reverse the tenant-facing effect (wallet credit / plan
+  // upgrade) — see CheckoutService.refundCheckoutSession for why.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
+  @Post('billing-sessions/:sessionId/refund')
+  async refundCheckoutSession(
+    @Param('sessionId') sessionId: string,
+    @Body() dto: RefundCheckoutSessionDto,
+  ) {
+    return this.checkoutService.refundCheckoutSession(
+      sessionId,
+      dto.amountCents,
+    );
   }
 }

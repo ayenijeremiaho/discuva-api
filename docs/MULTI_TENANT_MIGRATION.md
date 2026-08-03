@@ -179,8 +179,12 @@ export class TenantMiddleware implements NestMiddleware {
 
 Exempt routes (`TenantModule`'s `MiddlewareConsumer.exclude()`) — **must** include the `v1/` URI-versioning prefix,
 confirmed empirically that `exclude()`'s string patterns match the raw incoming path, prefix and all:
-`v1/platform/(.*)` (control-plane, always `public`), `v1/signup` (no tenant row exists yet by definition), and the
-unprefixed `@Version(VERSION_NEUTRAL)` routes `/`, `docs`, `health`.
+`v1/platform/(.*)` (control-plane, always `public`), `v1/signup` (no tenant row exists yet by definition),
+`v1/integrations/youtube/callback` (Google's WebSub hub calls this directly with no `Host` header identifying a
+tenant — same reasoning as `TenantYoutubeIntegration` living in `public`, §9 Phase 8b: the tenant has to be resolved
+*from* the payload, which can't happen if `TenantMiddleware` 404s the request before the handler ever sees it — this
+one was caught after the fact as a live regression, not designed in up front, exactly the kind of miss this exclude
+list has to be exhaustive about), and the unprefixed `@Version(VERSION_NEUTRAL)` routes `/`, `docs`, `health`.
 
 ### 4.4 Schema Switching — search_path Per Request, and Why Plain Repositories Don't See It
 
@@ -543,6 +547,12 @@ into an upgrade prompt rather than a generic error toast.
 
 ### 4.12 Communication Providers: SMS & Email — Multi-Provider, Tenant-Configurable
 
+**This section is the original design; both SMS and email BYOK have since shipped (§9 Phase 3) — see there for the
+actual final method signatures (`sendMail(options, credentials?)`, credentials last and optional, not
+`sendMail(credentials, options)` as first sketched below) and real `SmsWalletTransactionType` values (`debit`/`credit`,
+not `TOP_UP`/`DEBIT`/`REFUND`). Kept here unedited as the design rationale, since the reasoning below is still exactly
+why it was built this way.**
+
 Two related but separate asks, both resolved the same way: (1) more than one SMS provider over time, not just
 Termii, and (2) tenants configuring their **own** provider credentials — for both SMS and email — from their admin
 portal, not just SMS BYOK as originally scoped. Churches have a strong, legitimate preference for their own name as
@@ -704,11 +714,14 @@ The backend sets the cookie `Domain` attribute to the specific subdomain (not th
 
 ---
 
-## 6. PWA Migration
+## 6. PWA Migration (`Faithapp`)
 
-No changes needed beyond what the admin portal requires. The PWA runs in a browser, the subdomain is present on every fetch, and the Web App Manifest `start_url` already contains the correct subdomain at install time.
+**Corrected after auditing the actual codebase (2026-07) — the original claim below ("no changes needed") undercounted the work.** Tenant *resolution* genuinely needs nothing extra: the PWA runs in a browser, the subdomain is present on every fetch, and if a member navigates to `app.church-alpha.yourdomain.com` they're automatically in church Alpha's tenant — no church code, no custom header. But `Faithapp` has the exact same client-side gap as `Faithapp-admin` (§5), just never enumerated here: build-time branding env vars and a hardcoded non-tenant API base URL. Confirmed by grep, not assumed:
 
-If a member navigates to `app.church-alpha.yourdomain.com`, they are automatically in church Alpha's tenant. No church code, no custom header, no additional configuration.
+- `NEXT_PUBLIC_API_URL` — same single `baseURL` usage as `Faithapp-admin` (`utils/auth/axios-client.ts`), same bare-host value with no tenant subdomain. Needs the same fix (§5.1-equivalent: point at a real tenant subdomain).
+- Branding env vars (`NEXT_PUBLIC_CHURCH_NAME`, `NEXT_PUBLIC_CHURCH_TAGLINE`, `NEXT_PUBLIC_CHURCH_ADDRESS`, `NEXT_PUBLIC_LOGO_URL`, `NEXT_PUBLIC_CURRENCY_*`) read directly in 8 files: `app/layout.tsx`, `app/account/page.tsx`, `utils/currency.ts`, `components/layout/onboarding-page.tsx`, `components/layout/login-page.tsx`, `components/layout/loading.tsx`, `components/pwa/install-wall.tsx`, and `app/manifest.ts` (see below). Needs the same `TenantContext` + `GET /tenant/info` treatment as §5.1.
+- Cookie scoping: not applicable, same reason as `Faithapp-admin` — auth token lives in an in-memory `token-store.ts` (identical pattern in both apps), not a cookie the frontend manages.
+- **`app/manifest.ts` is a genuinely distinct problem, not just another env-var read.** It's a static Next.js route (`MetadataRoute.Manifest`) fetched directly by the browser via `<link rel="manifest">` before any client JS runs — it can't pull from a React context on mount the way the other 7 files can. Making the installed-PWA name/description tenant-aware requires either reading the `Host` header server-side (`next/headers`) inside `manifest.ts` and disabling static optimization for that route, or accepting a generic (non-branded) manifest and leaving per-tenant branding to the in-app UI only. Needs a decision, not just a mechanical swap.
 
 ---
 
@@ -755,62 +768,244 @@ The current single-tenant deployment's data becomes tenant 1 in the SaaS system.
 These phases are sequential. Each phase is a prerequisite for the next.
 
 ### Phase 1 — Tenant Infrastructure (Backend)
-- Add `public.tenants` and `public.platform_admins` tables
-- Install and configure `nestjs-cls`
-- Build tenant middleware (subdomain → schema resolution)
-- Implement `SET LOCAL search_path` inside a per-request transaction wrapper (§4.4 — not session-level `SET`, required
-  because `DATABASE_POOL` already defaults to `transaction` mode)
-- Add `GET /tenant/info` endpoint
-- Write integration tests for schema isolation
+
+**Shipped, re-audited 2026-08 against live code (no gaps found).**
+- ✅ `public.tenants` / `public.platform_admins` tables — `src/migrations/1790640000000-AddPlatformControlPlaneTables.ts`
+- ✅ `nestjs-cls` installed and configured (`src/app.module.ts`)
+- ✅ Tenant middleware (subdomain → schema resolution) — `src/tenant/middleware/tenant.middleware.ts`
+- ✅ `SET LOCAL search_path` inside a per-request transaction wrapper (§4.4)
+- ✅ `GET /tenant/info` endpoint — `src/tenant/controller/tenant-info.controller.ts`
+- ✅ Integration tests for schema isolation — `test/tenant-schema-isolation.e2e-spec.ts`
 
 ### Phase 2 — Cache & Queue Namespacing (Backend)
-- Add tenant prefix to all Redis cache keys via `CacheService.key()`
-- Add `tenantId`/`schemaName` to all Bull job payloads
-- Restore CLS context in all Bull processors
+
+**Shipped, re-audited 2026-08 — one naming correction to this doc, no code gap.**
+- ✅ Tenant prefix on all Redis cache keys — **correction:** not via a method literally named `CacheService.key()` (that
+  method is just a plain namespace/id/suffix concatenator). The actual tenant-scoping happens in a private
+  `scopedKey()` (`src/utility/service/cache.service.ts`) that every public method (`get`/`set`/`del`/`incr`/`has`/lock
+  methods) routes through, reading `tenantId` off CLS. Functionally correct, this doc's original wording just named
+  the wrong method.
+- ✅ `tenantId`/`schemaName`/`correlationId` on all Bull job payloads — every producer spreads
+  `buildJobEnvelope(cls)` (`src/tenant/utility/job-envelope.ts`)
+- ✅ CLS context restored in all Bull processors via `runInTenantContext()` (`src/tenant/utility/run-in-tenant-context.ts`) —
+  confirmed present in all 6 processor files (tithe, reconciliation, push-notification, post-event, audit-log, email)
 
 ### Phase 3 — Billing & Plan Infrastructure (Backend)
 
-> **`PaystackPaymentProvider` is deliberately deferred — `IPaymentProvider` stays interface-only for now.** Nothing
-> below actually needs a working payment integration: `PlanGuard` reads `subscriptions.plan_id`, full stop, and a
-> tenant can be moved onto Pro manually via the platform-admin escape hatch (`PATCH /platform/tenants/:id/plan`,
-> already scaffolded) for testing and for real comped upgrades alike. The only things that stay blocked are the
-> self-serve "pay to upgrade" checkout flow and SMS platform-wallet top-ups specifically — BYOK communication
-> providers (below) don't touch money at all and are unaffected. Build the concrete Paystack class whenever a real
-> business account is ready; nothing else in this phase, or in Phases 4–7, waits on it.
+**Partially shipped — re-audited 2026-08, real gaps found.** The schema/guard/plan-gate core is solid; the BYOK
+communication-provider write path and the frontend upgrade UX are not built, contrary to this doc's original
+checklist just listing them as flat TODOs with no status. Detail below, ordered by what's actually missing.
 
-- Add `public.plans` (with a `currency` column — the drafted "$39/mo" in the product paper doesn't specify one yet)
-  and `public.subscriptions` tables (§4.11)
-- Define the `IPaymentProvider` interface (§4.11) — same swappable-vendor pattern `ISmsProvider`/`IEmailProvider`
-  already use in this codebase. No concrete implementation yet; see note above.
-- Build `PlanGuard` + `@RequiresPlan(PlanFeature.X)` decorator (§4.11) — fully buildable and testable today
-- Apply plan gates to the modules the product paper marks Pro-only (Finance, SMS, Facility Rental, Games,
-  Volunteer, Asset Management, Incident Report, Audit, Service Programme, Service Rating, Sermon, bulk export)
-- Frontend: upgrade-prompt modal triggered on a `403` with the plan-gate error code
-- Add `public.communication_providers`, `public.tenant_communication_provider_configs`, `public.sms_wallets`,
-  `public.sms_wallet_transactions` (§4.12)
-- Evolve `ISmsProvider`/`IEmailProvider` to accept credentials per-call instead of constructor-injected (§4.12);
-  build the provider registry and the BYOK send path for both channels — none of this needs `IPaymentProvider` either
-- SMS platform-wallet debit path (atomic, by-segment) can be built now; wallet **top-up** specifically waits on a
-  real `IPaymentProvider` implementation, since it needs `createOneOffCheckout`
-- Frontend: "Communication Providers" settings section (add/update credentials per provider, per channel)
+> **`PaystackPaymentProvider`/`FlutterwavePaymentProvider` were deferred, now built (2026-08).** Nothing in this phase
+> ever *needed* a working payment integration to function: `PlanGuard` reads `subscriptions.plan_id`, full stop, and
+> a tenant can still be moved onto Pro manually via the platform-admin escape hatch
+> (`PATCH /platform/tenants/:id/plan`) for comped upgrades — that path is unaffected and still the fastest way to
+> unblock a specific tenant. What real payment providers unlock is the self-serve "pay to upgrade" checkout flow and
+> SMS wallet top-up specifically, both now live. See "Shipped, 2026-08 — Payment providers" below.
+
+**Shipped:**
+- ✅ `public.plans` / `public.subscriptions` tables (§4.11) — `src/migrations/1790640000000-AddPlatformControlPlaneTables.ts`
+- ✅ `IPaymentProvider` interface, correctly interface-only per the note above — `src/billing/interface/payment-provider.interface.ts`
+- ✅ `PlanGuard` + `@RequiresPlan(PlanFeature.X)` decorator (§4.11) — `src/billing/guard/plan.guard.ts`,
+  `src/billing/decorator/requires-plan.decorator.ts`
+- ✅ `public.communication_providers`, `public.tenant_communication_provider_configs` (with `credentials_encrypted
+  JSONB`), `public.sms_wallets`, `public.sms_wallet_transactions` (§4.12) — same migration file as above
+
+**Shipped, closed 2026-08:**
+- ✅ Plan gates now applied to all 12 Pro-only areas. `ServiceProgrammeController` and `ServiceSessionController`
+  gated at the class level with `@UseGuards(PlanGuard)` + `@RequiresPlan(PlanFeature.SERVICE_PROGRAMME)` — NestJS
+  composes class-level and method-level `@UseGuards()` rather than one overriding the other, so this applies on top
+  of each route's own `AdminGuard`/`JwtAuthGuard`/`ShareTokenGuard` without touching every method individually.
+  `attendance.controller.ts`'s `export-email`, `service-headcount.controller.ts`'s `export-email`, and
+  `service-session.controller.ts`'s `action-log/csv` all gated at the method level with
+  `@RequiresPlan(PlanFeature.BULK_EXPORT)` — on `action-log/csv` specifically this *overrides* (not adds to) the
+  class-level `SERVICE_PROGRAMME` requirement, since `Reflector#getAllAndOverride` checks handler metadata before
+  falling back to class metadata; accepted as a narrow, low-severity tradeoff (a tenant would need a valid session
+  code they have no legitimate way to obtain without `SERVICE_PROGRAMME` in the first place). Verified live against
+  a real tenant on both `free` (403 `PLAN_UPGRADE_REQUIRED`) and `pro` (200) — all four gates.
+  Also fixed a stale comment on `PlanGuard` itself claiming tenant context wasn't wired in yet (pre-Phase-8 leftover
+  — it's been fully active since Phase 8 landed).
+
+**Shipped, 2026-08 — BYOK write path, full send-path wiring, wallet debit (SMS only):**
+- ✅ **Tenant-facing write path** — `src/communication-provider/` (new module): `TenantCommunicationProviderController`
+  (`AdminGuard`, new `COMMUNICATION_PROVIDERS_READ`/`WRITE` permissions — existing tenants' `SuperAdmin` roles
+  backfilled via a new tenant-schema migration, `GrantCommunicationProviderPermissions`, same class of fix as
+  `feedback_permission_rename_needs_data_migration`) + `TenantCommunicationProviderService`. `GET
+  /communication-providers`, `PUT /communication-providers/:channel`, `PATCH
+  /communication-providers/:channel/:providerId`. Deliberately separate from `PlatformCommunicationProviderService`
+  (platform-admin-only, catalog + read-only) rather than extending it — different guard, different tenant, same
+  underlying (public-schema) entities.
+- ✅ **Encryption at rest** — `EncryptionService` (`src/utility/service/encryption.service.ts`), AES-256-GCM keyed by
+  new required env var `CREDENTIALS_ENCRYPTION_KEY` (hashed to 32 bytes, same `min(32)` convention as `JWT_SECRET`).
+  Verified live: raw DB read of `credentials_encrypted` after a real `PUT` shows genuine ciphertext, not the
+  plaintext submitted.
+- ✅ **`ISmsProvider` evolved to accept credentials per-call** — `send()`/`getBalance()`/`getMessageHistory()` all
+  take an optional `SmsProviderCredentials` (flat string map), `TermiiSmsProvider` resolves per-call credentials
+  over its own constructor-injected default. `IEmailProvider` deliberately NOT evolved this pass — see below.
+- ✅ **`SmsCredentialResolverService`** — `resolveCredentials()` (cached 300s per tenant+channel, decrypts on read,
+  returns `undefined` meaning "use platform default") and `debitForSend()` (atomic, row-locked `SmsWallet` update +
+  `SmsWalletTransaction` audit row, throws `403 INSUFFICIENT_SMS_BALANCE` if the tenant can't cover it). `SmsService`
+  resolves once per `send()` call, debits per-batch only when no BYOK config exists — a tenant with their own Termii
+  account never touches the wallet.
+- ✅ **`HttpExceptionFilter` fixed** — previously only ever read `.message` off an exception body, silently dropping
+  `PlanGuard`'s `code`/`requiredFeature` server-side (no frontend fix could have surfaced them regardless). Now
+  passes through any fields beyond the standard NestJS `{statusCode, message, error}` shape. Verified a plain
+  string-message exception is byte-for-byte unaffected.
+- ✅ **Upgrade-prompt modal, both frontends** — `Faithapp`'s `ApiError` class (`.status`/`.code`, `.message` unchanged
+  from before) and a new `planGateStore` (mirrors the existing `tokenStore` pattern) opened from exactly one place —
+  the axios response interceptor — the instant *any* API call anywhere returns `PLAN_UPGRADE_REQUIRED`. One modal
+  per app, mounted once at the root layout; no screen/call site ever checks for this error itself. Member wording
+  (`Faithapp`) points at the admin ("ask your admin about upgrading"); admin wording (`Faithapp-admin`) doesn't link
+  anywhere since no billing page exists yet.
+- ✅ **Verified end-to-end**: typecheck/lint/build clean across all 3 repos; backend suite 1251 tests
+  (13 new: `SmsService`, `TermiiSmsProvider`, `EncryptionService`); live — real `PUT`/`GET
+  /communication-providers` round-trip against a provisioned tenant, DB-level encryption confirmed, `PlanGuard` 403
+  → 200 transition re-confirmed after the exception-filter change. **Deliberately not** live-tested against the real
+  Termii API — `TERMII_API_KEY` in this environment is the pilot church's actual production credential; the
+  send/debit logic is covered by mocked unit tests instead, which is the correct way to test something with a real
+  paid third-party side effect.
+
+**Shipped, 2026-08 — Payment providers (Paystack + Flutterwave), email BYOK, wallet top-up, tenant profile write side:**
+- ✅ **`PaystackPaymentProvider` / `FlutterwavePaymentProvider`** — `src/billing/provider/` — both real, concrete
+  `IPaymentProvider` implementations, registered simultaneously (not one-platform-default-at-a-time like SMS/email)
+  via `PaymentProviderRegistryService`, which resolves by name (`?provider=paystack|flutterwave`) or
+  `DEFAULT_PAYMENT_PROVIDER`. Both lazily create (and persist onto `Plan.billingProviderPriceId`) a matching
+  provider-side plan/payment-plan the first time a `planId` is checked out against. Paystack's Initialize Transaction
+  takes `amount` in kobo (matches this codebase's existing cents/kobo convention); Flutterwave's Standard Payment
+  takes major currency units, so `FlutterwavePaymentProvider` divides by 100 at every boundary — the one
+  provider-specific gotcha worth knowing before touching either class.
+- ✅ **`BillingCheckoutSession`** (`public.billing_checkout_sessions`, `src/migrations/1790899200000-AddBillingCheckoutSessions.ts`)
+  — recorded at checkout-initiation time, primary-keyed by the provider's own reference/session id. This is the
+  source of truth CheckoutService's webhook handler resolves tenant/amount/intent from — a webhook payload is never
+  trusted for any of those three, only for "did this specific, already-recorded session succeed or fail."
+- ✅ **`CheckoutService`** (`src/billing/service/checkout.service.ts`) — `initiateSubscriptionCheckout()`,
+  `initiateWalletTopupCheckout()` (rejects with a clean 403 if `SMS_CREDIT_PRICE_KOBO` isn't configured — same
+  "pricing is data, not decided here yet" posture as `plans.priceCents` being 0 at launch, `docs/PRODUCT_STRATEGY.md`
+  §5), and `handleWebhookEvent()` — idempotent (row-locked, only applies a `charge.succeeded` once per session,
+  status-guarded against redelivery), activates a 30-day subscription period or credits the `SmsWallet` accordingly.
+- ✅ **Tenant-facing routes** — `GET /billing/summary`, `POST /billing/checkout/subscribe`,
+  `POST /billing/checkout/wallet-topup` (`AdminGuard`, new `BILLING_READ`/`BILLING_WRITE` permissions) —
+  `src/billing/controller/billing.controller.ts`.
+- ✅ **`POST /webhooks/billing`** — `@Public()`, dispatches to Paystack or Flutterwave by which of their two very
+  different signature headers is present (`x-paystack-signature` HMAC vs `verif-hash` shared-secret) — same
+  dispatch shape as the pre-existing (unimplemented) `VirtualAccountWebhookController`. Added to `TenantMiddleware`'s
+  exclude list proactively this time, having already been burned once by forgetting the equivalent YouTube entry.
+- ✅ **Email-side BYOK, shipped.** `IEmailProvider.sendMail()` now takes an optional `EmailProviderCredentials`
+  (mirrors `ISmsProvider`'s per-call-credentials shape). `EmailCredentialResolverService`
+  (`src/communication-provider/service/`) is the email counterpart to `SmsCredentialResolverService` — the one real
+  difference is it also returns *which* provider (`gmail` or `resend`) a tenant configured, since email has two
+  incompatible-credential-shape providers where SMS only ever has one. `EmailProcessor.handleSend` now wraps its
+  entire body in `runInTenantContext()` (previously only `onCompleted`/`onFailed` did) — resolving a tenant's BYOK
+  config has to happen *before* the send, not just before logging it afterward, which is exactly the "genuinely more
+  involved to wire safely" cost this doc originally flagged. `TenantCommunicationProviderConfig.senderIdentity` is
+  reused as the email "from" address for a BYOK tenant.
+- ✅ **Wallet top-up, shipped.** `POST /billing/checkout/wallet-topup` + the `charge.succeeded` webhook path above —
+  `SmsWalletTransactionType.CREDIT` (previously defined, unused) now has a real writer.
+- ✅ **Tenant profile self-service write side, shipped** (§Phase 6c's other deferred item) — `PATCH /tenant/info`
+  (`AdminGuard`, new `CHURCH_PROFILE_WRITE` permission) — `src/tenant/controller/tenant-info.controller.ts`. A church
+  admin can now edit their own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone` without
+  going through platform support. The `discovery-hub-platform` tenant-panel gap (rename-only field) is unrelated to
+  this endpoint's existence and still open.
+- ✅ **Verified live** against the `frontend-test` tenant and a throwaway provisioned branch tenant: real DB reads
+  confirming `BillingCheckoutSession`/`Subscription`/`SmsWallet` rows after a simulated `charge.succeeded`,
+  `getBillingSummary()` defaulting correctly, full branch invite → provision → accept → rollup round-trip (below).
+  **Deliberately not** live-tested against the real Paystack/Flutterwave/Resend/Gmail APIs — no sandbox credentials
+  in this environment, and `RESEND_API_KEY`/`EMAIL_USER` here are real production credentials; provider HTTP calls
+  and email sends are covered by mocked unit tests instead, the same discipline already applied to Termii.
+
+**Shipped, 2026-08 — self-serve cancel/downgrade, dunning safety net, branch plan sponsorship, refunds:**
+- ✅ **`POST /billing/cancel`** (`CheckoutService.cancelSubscription`) — the tenant-facing counterpart to the
+  platform-admin escape hatch. Still within a paid period: sets `cancelAtPeriodEnd`, tenant keeps access until it
+  ends. No period left: downgrades immediately. Best-effort calls the provider's own `cancelSubscription()` first —
+  a provider API failure never blocks the local downgrade, the tenant's intent wins regardless.
+- ✅ **`SubscriptionLapseScheduler`** (daily 04:00, distributed-lock guarded) — the dunning/failed-renewal safety net.
+  A voluntary `cancelAtPeriodEnd` lapse downgrades cleanly; any other lapse flips `status` to `PAST_DUE` (a real
+  value now, not just an unused enum member), emails the tenant, and gives a 7-day grace period before downgrading
+  to Free. **Known limitation, not silently accepted:** this only fully works once
+  `Subscription.billingProviderSubscriptionId` capture (below) is wired up — until then, a tenant whose real
+  provider auto-renewal webhook isn't recognized will also lapse here. Documented explicitly rather than pretending
+  it's solved; "retrying" a charge is the provider's own job, not this scheduler's.
+- ✅ **Branch plan sponsorship** (`TenantBranchInvite.sponsorPlan`, `Subscription.sponsoredByTenantId`) — answers the
+  plan-inheritance question this doc previously left open (§11.1): a parent can optionally comp a branch's plan at
+  invite time. Resolved at signup (`BranchInviteService.resolveInvite`), falls back to normal independent Free
+  signup if the parent is itself on Free. Excluded from `PlatformAnalyticsService`'s MRR (no real money backs it)
+  and blocks the branch from self-cancelling a plan that isn't theirs to cancel.
+- ✅ **Refunds** (platform-admin only) — `IPaymentProvider.refund()` on both providers (Flutterwave needs an extra
+  lookup step to resolve `tx_ref` to its own transaction id first), `POST /platform/billing-sessions/:sessionId/refund`.
+  Deliberately does not auto-reverse the tenant-facing effect (wallet credit, plan upgrade) — that needs a product
+  decision (can a wallet go negative?) this pass didn't take on.
+- ✅ **Verified live** — full app boot smoke test (caught nothing new this time, unlike the analytics pass, which
+  did), migration applied, 29 new tests, mocked provider HTTP calls (same no-real-external-side-effects discipline
+  as everywhere else).
+
+**Deliberately still not built — scope boundaries, not oversights:**
+- ❌ **No billing/plan settings UI anywhere.** A church admin still can't see their current plan, what Pro unlocks,
+  or request an upgrade/cancel through a screen — the modal tells them a feature is locked, it doesn't show them the
+  bigger picture, and there's no UI yet to call the checkout/cancel endpoints either. Backend is fully ready for this.
+- ❌ **`Subscription.billingProviderSubscriptionId` capture.** Set only by a provider's own subscription-lifecycle
+  webhook (Paystack `subscription.create`, Flutterwave's equivalent) — deliberately not wired this pass pending live
+  sandbox testing to confirm the exact payload shape rather than guessing at undocumented-to-this-session fields.
+  Until it's populated, `subscription.canceled` events are a safe no-op (nothing to look up), provider-portal-
+  initiated cancellations still need the platform-admin escape hatch to reflect manually, and
+  `SubscriptionLapseScheduler` (above) can't distinguish "genuinely lapsed" from "renewing fine, we just don't
+  recognize the webhook" — its documented known limitation. Renewal itself isn't otherwise affected — a fresh
+  `charge.succeeded` extends the period regardless of this field.
+- ❌ **True recurring-billing reconciliation.** Still a flat 30-day period per successful `charge.succeeded`, not
+  driven by the provider's own renewal/invoice lifecycle events.
 
 ### Phase 4 — Self-Serve Provisioning & Migration Tooling (Backend)
-- Build the shared provisioning service (schema create → migrate → seed → activate, §4.8)
-- Build public `POST /signup` endpoint calling the provisioning service synchronously, assigning plan = `free`
-- Build `provision:tenant` CLI script as a thin wrapper over the same service, for platform-admin/support use
-- Build `migration:run:all-tenants` script
-- Test self-serve signup and CLI provisioning end-to-end
+
+**Shipped, re-audited 2026-08 (no gaps found).**
+- ✅ Shared provisioning service (schema create → migrate → seed → activate, §4.8) — `TenantProvisioningService.provision()`
+- ✅ Public `POST /signup` endpoint, plan = `free` — `src/tenant/controller/signup.controller.ts`
+- ✅ `provision:tenant` CLI script, thin wrapper over the same service — `src/provision-tenant.ts`
+- ✅ `migration:run:all-tenants` script, bounded-concurrency runner — `src/migrate-all-tenants.ts`
+- ✅ End-to-end test covering full provisioning, re-provisioning rejection, and resuming a stalled provision —
+  `test/tenant-provisioning.e2e-spec.ts`
 
 ### Phase 5 — Platform Admin Module (Backend)
-- `src/platform-admin/` module with its own auth
-- Tenant CRUD, suspend, impersonation endpoints
-- Platform admin JWT with separate secret
+
+**Shipped, re-audited 2026-08 (no gaps found).** All 13 controller routes have real service implementations (no
+stubs), `PlatformAdminGuard` + its own `platform-admin-jwt` Passport strategy are wired with a genuinely separate
+secret, and every route matches TECH_DOC.md's documented table 1:1. One stale in-code comment on
+`PlatformTenantService.impersonateTenant` (claiming the token wasn't yet routable pre-Phase-8) has been corrected.
+- ✅ `src/platform-admin/` module with its own auth
+- ✅ Tenant CRUD, suspend, impersonation endpoints
+- ✅ Platform admin JWT with separate secret
 
 ### Phase 6 — Admin Frontend (`Faithapp-admin`)
+- Point `NEXT_PUBLIC_API_URL` at a real tenant subdomain (`utils/auth/axios-client.ts`'s single `baseURL` — currently a bare host, 404s under live `TenantMiddleware`)
 - Build `TenantContext` with `GET /tenant/info` fetch on mount
-- Replace all build-time env var branding reads with context reads
-- Scope auth cookies to subdomain
+- Replace build-time env var branding reads in `app/layout.tsx`, `app/change-password/page.tsx`, `utils/currency.ts`, `components/layout/side-bar.tsx`, `components/layout/login-page.tsx` with context reads
+- ~~Scope auth cookies to subdomain~~ — not applicable; access token lives in an in-memory `token-store.ts`, not a cookie, and the backend's `httpOnly` refresh cookie already has no `domain` attribute set (defaults to exact-host scoping, confirmed in `auth.controller.ts`)
 - Public signup page calling `POST /signup`
+
+### Phase 6b — Member PWA (`Faithapp`)
+- Same `NEXT_PUBLIC_API_URL` fix as Phase 6, in `utils/auth/axios-client.ts`
+- Same `TenantContext` + `GET /tenant/info`, replacing branding env-var reads in `app/layout.tsx`, `app/account/page.tsx`, `utils/currency.ts`, `components/layout/onboarding-page.tsx`, `components/layout/login-page.tsx`, `components/layout/loading.tsx`, `components/pwa/install-wall.tsx`
+- `app/manifest.ts` needs its own decision — static route fetched pre-JS by the browser, can't read a React context; either make it dynamic via `next/headers` or accept a generic (non-branded) install manifest
+- No cookie work, same reasoning as Phase 6
+
+**Shipped, re-audited 2026-08:** all of the above landed exactly as scoped. `app/manifest.ts` went with the dynamic option — `export const dynamic = "force-dynamic"` + `next/headers` reads the incoming `Host` header server-side and fetches the tenant's name directly (3s timeout, falls back to "Your Church" on any failure so a backend hiccup never breaks PWA installability). Verified live: `GET /manifest.webmanifest` with a tenant `Host` header returns that tenant's real name; a non-tenant host falls back cleanly. `currencySymbol`/`currencyLocale` in both `utils/currency.ts` files went from `const` to live, mutable ES-module bindings updated by `TenantProvider` — every existing `import { currencySymbol }` call site (7+ finance pages in `Faithapp-admin`) needed zero changes.
+
+### Phase 6c — Tenant Profile Field Completeness (Backend + Both Frontends)
+
+**Caught during Phase 6/6b review** — `CHURCH_TAGLINE`, `CHURCH_ADDRESS`, and `SUPPORT_EMAIL` were still being read from build-time env vars in `Faithapp` even after Phase 6b, because the `Tenant` entity itself never had columns for them — `GET /tenant/info` could only ever return what §4.1's original schema defined (`name`/`logoUrl`/`currency`/`timezone`). This was flagged as a "known gap, not an oversight" in the first pass of this doc; on reconsideration that framing was wrong — there was no reason these three couldn't be tenant data too, the schema had just never been extended to carry them.
+
+**Read side — shipped:**
+- `src/migrations/1790726400000-AddTenantProfileFields.ts` — adds nullable `tagline`, `address`, `support_email` to `tenants`
+- `Tenant` entity, `TenantInfoController`'s `GET /tenant/info` response, and both frontends' `TenantInfo` type all updated
+- `Faithapp`'s `login-page.tsx` (tagline, address) and `app/account/page.tsx` (support email) now read from `useTenant()` instead of env vars
+- **Deliberately no generic fallback for tagline/address** — every tenant provisioned so far has both `null` (signup doesn't collect them yet), and the old single-tenant hardcoded strings would now be actively wrong for every *other* tenant, not just generic. Both are hidden entirely in the UI when unset, rather than shown with a misleading default.
+- `NEXT_PUBLIC_SUPPORT_EMAIL` is the one exception that keeps a real fallback — "tenant hasn't set their own support contact yet, route to the platform's shared inbox" is a legitimate behavior, not misleading tenant-specific data
+- `UpdateTenantDto` (platform-admin) extended with all three fields, so there's at least an API-level way to populate them today — `Object.assign(tenant, dto)` in `PlatformTenantService.updateTenant` needed no changes to pick them up
+- Verified live: direct DB update of a real tenant's `tagline`/`address`/`support_email` immediately reflected correctly in `GET /tenant/info`
+
+**Write side — deliberately deferred, tracked here as a pending task, not built this pass:**
+- **No self-service editing exists for *any* tenant profile field** — not just these three, but the pre-existing `name`/`logoUrl`/`currency`/`timezone` too. The only way to change any of it today is `PATCH /platform/tenants/:id`, platform-admin-only, via the separate `discovery-hub-platform` operator tool. A church admin has no way to rename their own church, upload their own logo, or set a tagline without going through platform support.
+- **Needed:** a tenant-facing write endpoint (e.g. `PATCH /tenant/info` or under a new church-profile controller, `AdminGuard`-protected so any church admin can use it, not just platform admins) that lets a tenant update their own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`.
+- **Also needed:** the actual settings UI in `Faithapp-admin` to call it — doesn't exist yet either.
+- **Also missing (smaller):** the `discovery-hub-platform` tenant panel only exposes a rename field today (`app/tenants/tenant-detail-panel.tsx`) — `logoUrl`/`currency`/`timezone` were already backend-supported but never exposed there, and the same is now true of `tagline`/`address`/`supportEmail`. Worth extending alongside the self-service work above rather than as its own separate task, since it's the same category of "give someone an editing surface for these fields."
 
 ### Phase 7 — Platform Dashboard (`discovery-hub-platform`)
 - New Next.js app
@@ -818,11 +1013,40 @@ These phases are sequential. Each phase is a prerequisite for the next.
 - Platform admin auth flow
 - Impersonation flow
 
-**Shipped.** All four items wired to the real Phase 5 backend — tenant list with live health stats (plan, member
-count), a provisioning wizard, rename/suspend/reactivate/plan-change actions, and an impersonation flow that issues
-and displays the token (using it against a live tenant request still needs Phase 8's bridging decision, same
-caveat as §4.10). Not visually verified in a browser (no browser tooling available when this was built) — typecheck,
-lint, production build, and a live boot against the real backend (every route 200) all passed instead.
+**Shipped, re-audited 2026-08.** All four items wired to the real Phase 5 backend via `utils/api/platform-admin.ts` —
+tenant list with live health stats (plan, member count), a provisioning wizard, rename/suspend/reactivate/plan-change
+actions, and an impersonation flow that issues and displays the token. That token is now genuinely usable end-to-end
+(Phase 8's bridging landed) — the stale "not yet routable" caveat has been removed from the UI. Login flow confirmed
+real (`POST /platform/auth/login` → in-memory token store → axios bearer interceptor → 401 auto-clears + redirect).
+No TODOs, no mock data, one piece of dead code found (`components/layout/coming-soon.tsx`, unused, harmless). Not
+visually verified in a browser (no browser tooling available when this was built) — typecheck, lint, production
+build, and a live boot against the real backend (every route 200) all passed instead.
+
+### Phase 7b — Platform Analytics Backend (Shipped, 2026-08)
+
+Before this, `discovery-hub-platform` had **zero cross-tenant analytics** — `GET /platform/tenants` returns a flat
+per-tenant list (name, plan, member/event count), nothing ever summed across tenants, no landing dashboard (the root
+route just redirects straight into the tenant table). Confirmed by reading the actual frontend source directly, not
+assumed. This phase is the backend half of closing that gap — a real business-owner view of the whole platform, not
+just a per-church table.
+
+- ✅ **`PlatformAnalyticsService`** (`src/platform-admin/service/platform-analytics.service.ts`) + six new
+  `GET /platform/analytics/*` routes (`overview`, `growth`, `revenue`, `engagement`, `churn`, `adoption`) — see
+  TECH_DOC.md's "Platform Analytics" section for the full response shapes and query params.
+- ✅ **No new aggregation infrastructure** — every metric is a live query over data that already exists and is
+  already small: `tenant_rollups` (one row per tenant, already computed daily by `BranchRollupScheduler` for the
+  branch-hierarchy feature — engagement analytics reuses it directly rather than recomputing anything),
+  `subscriptions`, and `billing_checkout_sessions`. This was the single biggest design decision of this phase:
+  resist standing up a parallel analytics pipeline when the numbers a business owner actually wants (member counts,
+  attendance, giving) are already being computed for a different feature.
+- ✅ **`Subscription.canceledAt`** (`src/migrations/1791072000000-AddSubscriptionCanceledAt.ts`) — a small but
+  necessary addition: churn analytics needs a real "when was this canceled" timestamp, and `updatedAt` can't serve
+  that purpose (it moves on any field change, not just a cancellation). Set once, in
+  `CheckoutService.applySubscriptionCanceled()`.
+- ✅ **Verified live** — real DB round-trip against actual `tenants`/`subscriptions`/`billing_checkout_sessions`/
+  `tenant_rollups` rows, migrations applied to the dev DB, full test suite (15 new tests) green.
+- ❌ **Not built this pass:** the actual dashboard UI in `discovery-hub-platform` — headline stat cards, growth/
+  revenue/churn charts, adoption breakdown. Backend is fully ready; see the project todo list for the frontend item.
 
 ### Phase 8 — Live Bridging (Existing Client Migration Section Retired)
 - ~~Migrate existing church's data into tenant schema~~ — **not applicable.** There is no existing production
@@ -850,12 +1074,275 @@ lint, production build, and a live boot against the real backend (every route 20
   after both fixes.
 - Decommissioning an old deployment doesn't apply for the same fresh-rollout reason as above.
 
-### Phase 9 — Multi-Branch Hierarchy (Future, Post-Cutover)
-- Add `parent_tenant_id` to `public.tenants`
-- Add `public.tenant_rollups` control-plane table
-- Build per-tenant rollup cron job (Bull)
-- Build parent-side hierarchy/overview UI in the platform dashboard or admin portal
-- See §11 for the full design
+### Phase 8b — Tenant-Owned Integrations (Communication Provider BYOK + YouTube Live Detection)
+Follow-up to Phase 8: two features that were built tenant-blind before multi-tenancy existed and stayed that way
+through the cutover — each tenant needs its own credentials/config, not the platform's single set.
+
+- **Communication Providers (`src/communication-provider/`):** tenant self-service BYOK for SMS/email provider
+  credentials, encrypted at rest (`EncryptionService`, AES-256-GCM, `CREDENTIALS_ENCRYPTION_KEY`). See TECH_DOC.md
+  §"Communication Providers (Tenant Self-Service BYOK)" for the full route/entity breakdown. `SmsService` resolves a
+  tenant's own credentials first, falling back to the platform's default Termii credentials (with a wallet-credit
+  debit) when the tenant has none configured — same fallback shape as YouTube below.
+- **YouTube Live Detection (`src/integrations/youtube/`):** the deeper redesign of the two. Before this phase, the
+  channel id, API key, and WebSub subscription state were all single global values (`YOUTUBE_CHANNEL_ID` env var,
+  `OnModuleInit` boot-time subscribe, a singleton `youtube_integration_state` row in **every** tenant schema even
+  though only one config could ever be live platform-wide). Redesigned so channel id (required) and API key
+  (optional BYOK, falls back to the platform's `YOUTUBE_API_KEY`) are per-tenant, set via `PUT /v1/youtube-integration`.
+  - **Why the new state table (`tenant_youtube_integrations`) lives in `public`, not the tenant schema it replaced:**
+    a WebSub notification arrives from Google's hub with no `Host` header or any other tenant-identifying context —
+    only a channel id inside the Atom XML payload. "Which tenant does this channel belong to" has to be answerable
+    *before* the tenant is known, which per-tenant-schema data structurally can't support (same reasoning as
+    `TenantCommunicationProviderConfig`, §4.12). `channel_id` is `UNIQUE` across the whole table, which is exactly
+    what makes the webhook's tenant lookup a single indexed query.
+  - **Live regression caught during this phase, not designed in up front:** the webhook callback route
+    (`v1/integrations/youtube/callback`) had never been added to `TenantMiddleware`'s exclude list (§4.3) — a real
+    WebSub notification would have 404'd before reaching the handler, entirely silently, since the feature had never
+    actually been configured in any environment this code had run in. Fixed alongside the redesign.
+  - `YoutubeLiveDetectionService.handleNotification()` now resolves the owning tenant from the notified channel id,
+    then manually enters that tenant's CLS/transaction context (the same `cls.runWith(...) → txHost.withTransaction(...)
+    → SET LOCAL search_path` pattern `PlatformTenantService.impersonateTenant` already uses) before calling
+    `AnnouncementService.createSystemAnnouncement()` — a webhook has no request-scoped `TenantMiddleware` run to
+    inherit tenant context from, so it has to open one itself.
+  - `YoutubeSubscriptionScheduler`'s daily re-subscription now iterates every `isActive` tenant integration instead
+    of renewing one global subscription.
+  - See TECH_DOC.md §"YouTube Live Detection" for the full route/entity/flow breakdown.
+- Both were verified live against the `frontend-test` tenant: DB-level confirmation that credentials are actually
+  encrypted at rest (not just typed as encrypted), full read/write/toggle round-trip through the service layer, no
+  real external API calls triggered (WebSub env vars intentionally left unset locally; Termii's real API key was
+  never exercised against a live send).
+- Full verification pass: typecheck, full unit suite, lint all clean after both features.
+
+### Phase 9 — Multi-Branch Hierarchy Backend (Shipped, 2026-08)
+- ✅ `parent_tenant_id` added to `public.tenants` (nullable, self-referencing, `ON DELETE SET NULL`) —
+  `src/migrations/1790985600000-AddBranchHierarchy.ts` — same migration also adds `public.tenant_branch_invites`
+  and `public.tenant_rollups`.
+- ✅ **Branch invite flow** (`src/branch/service/branch-invite.service.ts`, §11.1) — parent admin
+  `POST /branch/invites` (email) generates a 32-byte opaque token (not a signed JWT — has to be looked up by value
+  later, not decoded), emails it (`EmailQueueService`, no template file — a short inline HTML message, proportionate
+  to a one-off transactional email), and records a `pending` row. `POST /signup` accepts an optional
+  `branchInviteToken`; `SignupController` resolves+validates it (pending, unexpired) *before* provisioning so a
+  bad/expired code fails fast without creating a tenant row, passes `parentTenantId` into
+  `TenantProvisioningService.provision()`, and only marks the invite `accepted` *after* provisioning actually
+  succeeds — a subdomain collision leaves the invite still usable for a retry, not burned.
+- ✅ **Rollup computation** (`src/branch/service/branch-rollup.service.ts`, §11.3) — `computeAndUpsertOne(tenant)`
+  manually enters that tenant's CLS/transaction context (identical mechanism to
+  `YoutubeLiveDetectionService`/`PlatformTenantService.impersonateTenant`), computes `memberCount` (active members),
+  `attendanceRate` (same PRESENT/LATE/ATTENDED_ONLINE-over-30-days definition `AttendanceService.getMyAttendanceSummary`
+  already uses per-member, aggregated church-wide here), and `totalGiving` (sum of `tithe_records.amount`) — all
+  three purely from that tenant's own schema — then upserts the public `tenant_rollups` row *outside* the tenant
+  context block, same convention as YouTube's own public-row update. `BranchRollupScheduler` runs this daily
+  (03:00 church time, distributed-lock guarded) for **every** active tenant, not just ones with a parent — a branch
+  invited later still needs history once linked.
+- ✅ **Parent-side overview** — `GET /branch/overview` (`BranchRollupService.getOverview()`) reads only
+  `tenants WHERE parent_tenant_id = :self` joined against `tenant_rollups` — no cross-schema/cross-shard read
+  anywhere, exactly as designed in §11.2. New `BRANCH_READ`/`BRANCH_WRITE` permissions
+  (`GET/POST/DELETE /branch/invites`, `GET /branch/overview`, `AdminGuard`).
+- ✅ **Verified live** against the `frontend-test` tenant: full round-trip — invite created, token resolved,
+  a throwaway tenant provisioned with `parentTenantId` set via `TenantProvisioningService.provision()` directly (not
+  real HTTP signup, since this was a verification script), invite marked accepted, rollup computed and correctly
+  reflecting the branch's actual member count, overview correctly joining the branch with its rollup. Email send
+  stubbed out for the run (real `RESEND_API_KEY` configured in this environment) — same discipline as Termii/Paystack.
+- ❌ **Not built this pass:** parent-side overview *UI* (platform dashboard or admin portal — undecided which, per
+  the original Phase 9 note) and any branch-invite-sending UI. Backend is fully ready for both.
+- See §11 for the full design this implements.
+
+### Phase 9b — Branch Trust: Sharing Consent & Un-linking (Shipped, 2026-08)
+
+A real gap flagged during product review: the instant a branch accepted an invite, its rollup (member count,
+attendance, **giving**) became visible to its parent via `GET /branch/overview` — no notice, no consent, no opt-out.
+Given how sensitive individual church finances are treated everywhere else in this codebase (dedicated `TITHE_READ`
+permission, PII-scrubbing conventions), silently exposing giving totals cross-tenant the moment an invite was
+accepted was worth fixing before this shipped any further.
+
+- ✅ **`tenants.share_data_with_parent`** (default `true`) / **`tenants.share_giving_with_parent`** (default
+  `false`, independent of the first) — `src/migrations/1791244800000-AddBranchSharingConsent.ts`. Self-service,
+  settable only by the branch's own admin (`GET`/`PATCH /branch/sharing-consent`), never the parent. Gates
+  *visibility* at `getOverview()`, not *computation* — `computeAndUpsertOne` still computes and stores every
+  branch's real numbers regardless, same as before; a branch's own rollup is its own data either way.
+  `shareDataWithParent` defaults on (being a branch structurally implies a reporting relationship); giving
+  specifically defaults off even when general sharing is on.
+- ✅ **Un-linking, either direction** — `DELETE /branch/:branchTenantId` (parent detaches one of its own branches)
+  and `POST /branch/leave` (branch leaves its own parent). Neither side of the relationship is permanently locked
+  into it. Both revoke a sponsored plan on the way out if the departing tenant was sponsored by the specific parent
+  being severed from (`revokeSponsorshipIfSponsoredBy`) — continuing free access sponsored by a parent it's no
+  longer affiliated with wouldn't make sense; a subscription sponsored by some *other* tenant is left alone.
+- ✅ **Verified live** — migration applied, full app boot smoke test, 23 new tests (`BranchRollupService`,
+  `BranchController`), lint/typecheck/full-suite clean (1408 tests).
+- See TECH_DOC.md's "Branch Hierarchy" section for the full route table and response shape.
+
+### Phase 9c — Email BYOK Expansion: Custom Domains + SendGrid + Mailgun (Shipped, 2026-08)
+
+Product question: can a tenant use their own email domain rather than being locked to the platform's Gmail
+mailbox, and could two more popular providers be added? Answered both without a migration to `communication_providers`'
+FK shape — `gmail`'s catalog id/class stayed unchanged, its BYOK credential handling was generalized instead.
+
+- ✅ **`GmailProvider` accepts optional `host`/`port`/`secure` overrides** in a tenant's BYOK credentials, on top of
+  the existing required `user`/`password`. Omitting them keeps the platform's own host/port/secure/service (just a
+  different mailbox); supplying `host` routes an entirely different mail server (Outlook/Office365, Zoho, a
+  tenant's own company server) and drops the `service` preset (a nodemailer shorthand a custom host wouldn't want
+  silently overriding explicit settings).
+- ✅ **`SmtpProvider`** (`providerId: 'smtp'`) — new, deliberately BYOK-only. Unlike every other provider there's no
+  sensible platform default for "arbitrary custom SMTP server"; choosing this provider *is* the tenant bringing
+  their own. Throws a clean error if called without full `{host, user, password}` credentials.
+- ✅ **`SendGridProvider`** (`providerId: 'sendgrid'`) and **`MailgunProvider`** (`providerId: 'mailgun'`) — new,
+  both call their REST APIs directly via native `fetch`, no SDK dependency. SendGrid: Bearer auth, JSON body.
+  Mailgun: HTTP Basic auth (`api:{key}` base64), `FormData` body, needs `{apiKey, domain}` — `MAILGUN_BASE_URL`
+  lets the EU region be selected without a code change.
+- ✅ **`src/migrations/1791331200000-AddEmailProviderCatalogEntries.ts`** — row-insert only (`smtp`, `sendgrid`,
+  `mailgun` into `communication_providers`), no schema change — exactly the "adding a provider is a row insert, not
+  a migration" pattern §4.12 already established for the original `termii`/`gmail`/`resend` seed.
+  `EmailProcessor.resolveProvider(providerId)` dispatches across all five by a switch, falling back to
+  `GmailProvider` for `gmail` or any unrecognized id.
+- ✅ **No controller/DTO/route changes anywhere** — the existing generic `/communication-providers` BYOK endpoints
+  (`UpsertProviderConfigDto.credentials: Record<string,string>`) already handle any catalog-registered provider
+  with any credential shape; this is purely new provider classes plus new catalog rows.
+- ✅ **Verified live** — migration applied, full app-boot smoke test, throwaway script round-tripped a real
+  `upsertConfig` → `resolveConfig` cycle for all three new providers against a real tenant (encrypted storage,
+  decrypted resolution, correct `providerId` routing — all confirmed, then rolled back with zero residue). 17 new
+  tests across `GmailProvider`/`SmtpProvider`/`SendGridProvider`/`MailgunProvider`/`EmailProcessor` specs,
+  lint/typecheck/full-suite clean (1425 tests). No real SendGrid/Mailgun/SMTP send was ever attempted — no sandbox
+  credentials exist for them, same discipline used for Paystack/Flutterwave/Termii throughout this project.
+- See TECH_DOC.md's "Communication Providers" section for the full provider/credential-shape table.
+
+### Phase 9d — Platform Admin RBAC + Onboarding (Shipped, 2026-08)
+
+§4.10's `PlatformAdmin` had no permission system at all since it was first built — `isActive: true` meant full
+access to every `/platform/*` route, `false` meant none, and the *only* way to create one was a hand-written SQL
+insert (there was never a CRUD surface for it). Fixed both gaps together, mirroring tenant-side `AdminRole`/`Admin`
+as closely as the two disjoint identity systems allow.
+
+- ✅ **`PlatformAdminRole`** (new entity + `platform_admin_roles` table) — `name`, `description`,
+  `permissions: string[]`, same shape as tenant `AdminRole`. `PlatformAdmin` gained a required
+  `platformAdminRoleId` FK (`onDelete: RESTRICT`).
+- ✅ **`PlatformAdminPermission`** (new enum, `src/platform-admin/enum/`) — twelve permissions across six groups
+  (tenants read/write/impersonate, plans, communication providers, billing, analytics, platform-admins), disjoint
+  from tenant-side `AdminPermission` even where a string value looks similar — the two guards/JWTs must never be
+  able to satisfy each other.
+- ✅ **`PlatformAdminGuard` now does double duty** — JWT validation (unchanged, via the `platform-admin-jwt`
+  Passport strategy) *and* permission checking, combined into one guard rather than split across a global guard +
+  a per-route guard the way tenant-side does it — `/platform/*` has no global-guard equivalent to lean on, since
+  every platform controller applies `PlatformAdminGuard` explicitly already. Permissions are loaded once, at JWT
+  validation time (`PlatformAdminAuthService.validateById` eager-loads the role relation), not a second DB
+  round-trip per request the way tenant-side `AdminGuard` does it.
+- ✅ **Every existing `/platform/*` route retrofitted** with `@RequiresPlatformPermission(...)` —
+  `PlatformAdminController`'s 15 routes individually, `PlatformAnalyticsController`'s 6 routes via one class-level
+  decorator (uniform permission across all of them).
+- ✅ **`PlatformAdminManagementController`/`PlatformAdminRoleController`** — full CRUD to onboard and manage
+  platform admins and the roles assigned to them (`/platform/admins`, `/platform/admin-roles`). No audit-log
+  tie-in (no tenant-scoped `audit_logs` table to write into from the control plane, and platform-admin actions
+  aren't audited anywhere else in this codebase either). `PATCH /platform/admins/:id` blocks an admin from
+  modifying their own record entirely — stricter than tenant-side, whose equivalent split this across two
+  endpoints (`update()` self-blocks, `revoke()` doesn't).
+- ✅ **`DefaultPlatformAdminSeed`** (`npm run seed:platform-admin`) — mirrors `src/seed.ts`/`DefaultAdminSeed`
+  exactly: `DEFAULT_PLATFORM_ADMIN_EMAIL`/`DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH` env vars, same
+  `npm run hash:password` to generate the hash, idempotent (skips if any `platform_admins` row already exists).
+  This is the answer to "how do you create the very first platform admin without a SQL console" — there was
+  genuinely no other way before this.
+- ✅ **Migration backfill** — `AddPlatformAdminRoles` seeds a `SuperAdmin` role with every permission and backfills
+  any pre-migration `platform_admins` row onto it (nullable column → backfill → `NOT NULL`, the standard safe
+  shape), so a hand-created admin from before this system existed keeps working with full access, not locked out.
+- ✅ **Tenant response shape tightened** (`PlatformTenantService`) — `createTenant`/`updateTenant`/`suspendTenant`
+  previously returned the raw `Tenant` entity, leaking `schemaName`/`clusterId`/`parentTenantId`/sharing-consent
+  columns that have no business being visible outside the service. All four tenant-returning methods now go
+  through one `toHealthShape()` builder, identical to what `GET /platform/tenants` already returned.
+- ✅ **Verified live** — migration applied (confirmed the existing hand-created `dev@platform.local` admin
+  correctly backfilled onto `SuperAdmin` with all 12 permissions), full app-boot smoke test, and a real
+  permission-denial round-trip against the live backend: created a role with only `tenants:read`, created an admin
+  with it, confirmed `GET /platform/tenants` succeeded while `PATCH /platform/tenants/:id`,
+  `GET /platform/analytics/overview`, and `POST /platform/admins` all correctly 403'd with
+  `"Missing required permission: ..."` — then confirmed the self-modification block on the SuperAdmin's own
+  record. 35 new tests (guard, both new services, both new controllers, the seed script) — a real test of the
+  guard's `canActivate()` logic itself, not just a controller method call bypassing it, since that exact class of
+  gap (controller-level unit tests never exercising the actual guard) is what let two real bugs ship silently
+  earlier in this same project. Full suite clean (1484 tests).
+- ✅ **discovery-hub-platform frontend built** — `/admins` and `/admin-roles` pages (onboard/edit-role/deactivate
+  admins; create/edit/delete roles with a grouped permission-checkbox picker). `AuthProvider` now fetches
+  `/platform/admins/me` and exposes `permissions`/`hasPermission()`; the sidebar and `withAuth()` (new
+  `requiredPermission` option) both read from it, so nav items and whole pages hide/403 for admins missing the
+  relevant permission instead of just the API silently rejecting the request underneath a rendered page.
+
+---
+
+### Phase 9e — Tenant Welcome / Set-Password Flow (Shipped, 2026-08)
+
+Provisioning a tenant via `POST /platform/tenants` previously required the platform admin to type in the new
+church's first admin password directly (`CreateTenantDto` extended `SignupDto`, so it inherited `adminPassword`) —
+and sent no email at all, leaving the platform admin to communicate that password to the church out-of-band
+themselves. Fixed both:
+
+- ✅ **`CreateTenantDto` rewritten**, no longer extending `SignupDto` — has no `adminPassword` field. The two DTOs
+  diverged enough (one collects a password from someone present to choose it, the other doesn't) that sharing a base
+  class meant fighting inherited required-field validators rather than benefiting from them.
+- ✅ **`TenantProvisioningService.provision()`** — `adminPasswordHash` is now optional on `ProvisionTenantParams`.
+  Self-serve `/signup` and branch-invite signup are unchanged (still supply their own hash, `changedPassword: true`,
+  no email). When omitted, `seedTenantAdmin()` generates a random password via
+  `UtilityService.generateRandomPassword()` (never revealed to anyone) with `changedPassword: false`, and generates a
+  6-digit OTP stored in `password_reset_otps` — the *same table and verification logic* the forgot-password flow
+  already uses (`AuthService.resetPassword`), just seeded at provisioning time instead of via a user-initiated
+  request. Deliberately reused rather than building a parallel token mechanism.
+- ✅ **48-hour OTP expiry** (`WELCOME_OTP_TTL_HOURS`), not the normal 15-minute forgot-password window — a new
+  tenant's first admin may not check email the same day. A 6-digit code living for two days is more brute-forceable
+  than one living for minutes, so `POST /auth/reset-password` picked up the same `@Throttle({5/min})` `forgot-password`
+  already had — it had none before this, a pre-existing gap this surfaced and closed for both flows.
+- ✅ **`tenant-welcome.html`** (new template) — warm, first-person "welcome to your new workspace" copy distinct
+  from the existing plain `welcome-admin.html` (which shows the admin's actual password in cleartext — a different,
+  pre-existing pattern, not reused here on purpose). Shows the OTP in a styled box (mirrors
+  `forgot-password-otp.html`) *and* a "Set My Password" button linking to
+  `{ADMIN_LOGIN_URL}/set-password?email=...&otp=...`, so the admin can either click through or type the code
+  manually.
+- ✅ **Faithapp-admin `/set-password` page** (new, unauthenticated) — reads `email`/`otp` from the URL, pre-fills
+  them, and calls the existing `POST /auth/reset-password` via `authService.resetPassword()` — no new backend
+  verification endpoint needed, this is the same call `ForgotPasswordModal`'s verify step already makes. On success,
+  routes to `/` to sign in.
+- ✅ **discovery-hub-platform's Add Tenant form** — password field removed; a short note now explains the new admin
+  gets a welcome email instead.
+- ✅ **Verified live** — provisioned a real test tenant with no `adminPassword` in the request, confirmed the welcome
+  email queued with a correctly-formed set-password link and a 6-digit OTP whose hash matched a fresh
+  `password_reset_otps` row, walked the `/set-password` link end-to-end to set a real password, then logged in with
+  it — full round trip, not just unit coverage. 1490 backend tests clean (was 1484 — 6 new, covering the
+  `adminPasswordHash`-omitted/-supplied/resuming branches of `seedTenantAdmin` and the welcome email's content).
+
+---
+
+### Phase 9f — Platform Admin Onboarding Follows the Same Welcome-Email Flow (Shipped, 2026-08)
+
+`POST /platform/admins` had the identical gap Phase 9e just closed for tenants — an existing platform admin typed a
+password directly into the "onboard admin" form on the new admin's behalf, no email sent, out-of-band communication
+left to whoever ran it. Closed the same way, adapted to platform admins having no underlying `Member`/tenant schema:
+
+- ✅ **New migration** (`AddPlatformAdminPasswordReset`) — `platform_admins.changed_password` (default `true`, so
+  every pre-existing row — bootstrap-seeded or human-password-typed — is unaffected; only the new onboarding path
+  sets it `false`) and a new `platform_admin_password_reset_otps` table (`public` schema, `platform_admin_id` FK
+  `ON DELETE CASCADE`) — kept separate from tenant-side's `password_reset_otps` rather than shared, consistent with
+  `PlatformAdmin`/`Member` being deliberately disjoint identity systems throughout this project.
+- ✅ **`CreatePlatformAdminDto`** — no `password` field. `PlatformAdminManagementService.create()` generates one via
+  `UtilityService.generateRandomPassword()` (never revealed), a 6-digit OTP (48h TTL — matches
+  `WELCOME_OTP_TTL_HOURS`'s tenant-side reasoning exactly), and fire-and-forgets a `platform-admin-welcome` email
+  with a `{PLATFORM_LOGIN_URL}/set-password?email=...&otp=...` link.
+- ✅ **`PlatformAdminAuthService` gained `forgotPassword`/`resetPassword`** — platform admins had *no* self-service
+  password reset at all before this (only login existed). Mirrors `AuthService`'s member-facing flow exactly: silent
+  on an unknown email, OTP hashed with argon2, 15-minute TTL for a self-requested reset (vs. the 48-hour welcome
+  one). `resetPassword` is the same endpoint for both a self-requested reset and a new admin's first-time setup.
+  `login()` now also returns `requiresPasswordChange: !admin.changedPassword`, matching the tenant-side login
+  response shape — informational only today, since a random unrevealed password can't practically be logged in
+  with, so nothing enforces it in the frontend the way Faithapp-admin's `/change-password` does for a *known*
+  temporary password.
+- ✅ **`POST /platform/auth/reset-password` rate-limited** (5/min) — new endpoint, added the throttle from day one
+  rather than retrofitting it the way tenant-side's equivalent needed to be.
+- ✅ **New `platform-admin-welcome.html` template** — same design system as `tenant-welcome.html`, but framed as
+  internal team onboarding ("You've been added as a platform admin") rather than a church's new workspace — no
+  `church_name`/`church_address` branding, since this is the vendor's own operator console, not tenant-facing.
+- ✅ **New `PLATFORM_LOGIN_URL` env var** — discovery-hub-platform's own base URL, the platform-side equivalent of
+  `ADMIN_LOGIN_URL`.
+- ✅ **discovery-hub-platform's Onboard Admin form** — password field removed, same explanatory note pattern as the
+  Add Tenant form. New `/set-password` page, styled to match this app's existing single-card `/login` page (not
+  Faithapp-admin's dark-panel split layout — the two apps have different login page designs).
+- ✅ **Verified live** — onboarded a real test platform admin with no password in the request, confirmed
+  `changedPassword: false`, a 48-hour OTP row, and the welcome email queued with the right subject/template;
+  completed the exact `POST /platform/auth/reset-password` call the new page makes, confirmed `changedPassword`
+  flipped to `true` and login returned `requiresPasswordChange: false`; also exercised `forgot-password` for both a
+  known admin (new unused OTP added, prior used one untouched) and an unknown email (identical generic response, no
+  leak); confirmed the OTP row cascade-deletes with its admin. 1498 backend tests clean (was 1490 — 8 new).
 
 ---
 
@@ -876,9 +1363,10 @@ The multi-tenancy layer is purely infrastructure. It runs before the existing re
 
 ---
 
-## 11. Multi-Branch Hierarchy & Cross-Tenant Reporting (Future, Post-Cutover)
+## 11. Multi-Branch Hierarchy & Cross-Tenant Reporting
 
-> **Status:** Scoped only, not started. Depends on Phases 1–7 above — a branch is a tenant, so this cannot exist before tenancy does.
+> **Status:** Backend shipped 2026-08 (§9 Phase 9). Parent-side overview/invite-sending UI is the only piece still
+> outstanding — everything below describes what was actually built, not a forward-looking plan.
 
 Many churches plant or oversee branch churches, each with its own workers, finances, and membership, while the parent church wants an oversight view of what's happening across its branches.
 
@@ -886,8 +1374,11 @@ Many churches plant or oversee branch churches, each with its own workers, finan
 
 A branch is onboarded the same way any tenant is (§4.8), plus a hierarchy link:
 
-1. The parent church's admin sends a branch invite (email) from a hierarchy-management view.
-2. The invited church goes through normal tenant provisioning (its own schema, its own admin).
+1. The parent church's admin sends a branch invite (email) — `POST /branch/invites`
+   (`src/branch/controller/branch.controller.ts`). No dedicated hierarchy-management UI exists yet; the endpoint is
+   ready for one.
+2. The invited church goes through normal tenant provisioning (its own schema, its own admin) — `POST /signup` with
+   the emailed invite code attached as `branchInviteToken`.
 3. On acceptance, the new tenant's `public.tenants` row is stamped with the parent's tenant id.
 4. Only after acceptance does any data begin syncing upstream — an unaccepted invite has no data visibility either direction.
 
@@ -895,6 +1386,17 @@ A branch is onboarded the same way any tenant is (§4.8), plus a hierarchy link:
 ALTER TABLE public.tenants
   ADD COLUMN parent_tenant_id UUID NULL REFERENCES public.tenants(id) ON DELETE SET NULL;
 ```
+
+Shipped exactly as designed here, plus two additions not originally scoped in this section:
+- A `public.tenant_branch_invites` table (id, `parent_tenant_id`, email, opaque `token`, `status`, `expires_at`,
+  `accepted_tenant_id`, `sponsor_plan`) — needed because the invited church has no tenant/schema of its own yet at
+  invite-creation time, the very thing the invite exists to eventually create, so it can't live anywhere but `public`.
+- **Plan sponsorship** (`sponsor_plan` on the invite, resolved to `Subscription.sponsoredByTenantId` at signup) —
+  this section originally left "does a branch inherit the parent's plan?" unanswered. Resolved as: the parent
+  chooses, per invite, via an optional `sponsorPlan` flag — not a platform-wide policy. `true` plus the parent
+  currently being on a paid plan means the branch is provisioned directly onto that plan, no checkout, sponsored by
+  the parent; anything else (flag omitted, or parent itself on Free) falls back to the normal independent Free-tier
+  signup. See §9 Phase 3's billing section for how sponsorship interacts with cancellation and MRR.
 
 Self-referencing and nullable so a flat parent → branch model costs nothing to represent today even though only one level is used initially. A multi-level hierarchy (branch-of-a-branch) is possible later with zero schema change.
 
@@ -921,12 +1423,13 @@ CREATE TABLE public.tenant_rollups (
 
 - A scheduled Bull cron job runs inside each tenant's own request/job context (already has `tenantId`/`schemaName` in CLS per §4.6), computes its own aggregates against its own shard, and **upserts its own row only** — `tenant_id = self`.
 - The parent's dashboard reads only from `public.tenant_rollups WHERE tenant_id IN (SELECT id FROM public.tenants WHERE parent_tenant_id = :parentId)`. It never reaches into a branch's schema or shard directly — there is no cross-tenant read path to get wrong, because there is no cross-tenant read at all.
-- A webhook-push variant (branch tenant `POST`s its rollup to a platform endpoint instead of writing to a shared table) is an equally valid alternative if push semantics are preferred over a shared table — functionally equivalent, pick whichever fits the deployment topology better when this is built.
+- A webhook-push variant (branch tenant `POST`s its rollup to a platform endpoint instead of writing to a shared table) is an equally valid alternative if push semantics are preferred over a shared table — functionally equivalent. **Shipped with the shared-table variant** (`BranchRollupScheduler` + `BranchRollupService.computeAndUpsertOne`/`getOverview`, §9 Phase 9) — the push variant remains a documented alternative, not something built.
 
 ### 11.4 Known Tradeoffs
 
 - **Eventually consistent, not live.** The parent's view is only as fresh as the last scheduled push. Acceptable — likely desirable — for a leadership rollup dashboard (member counts, attendance %, giving totals); would need rethinking if real-time expectations come up later.
 - **Aggregates only, not raw records.** Recommended: sync computed rollups (counts, rates, totals), never raw per-member rows. Simpler, and a branch's individual congregant data probably shouldn't be visible to a parent church's admins by default.
+- **Visibility is consent-gated, not automatic** (§9 Phase 9b, resolved — this bullet originally just flagged the concern speculatively). A branch's rollup is only visible to its parent if that branch's own admin has left `shareDataWithParent` on (default true) — and giving specifically is opt-in separately from everything else (default false), regardless of the main flag.
 - **Flat vs. multi-level hierarchy.** `parent_tenant_id` supports both; only flat parent→branch is planned for the first build.
 
 ---

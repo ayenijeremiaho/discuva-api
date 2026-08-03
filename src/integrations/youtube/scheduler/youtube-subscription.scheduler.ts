@@ -15,9 +15,12 @@ export class YoutubeSubscriptionScheduler {
     private readonly cacheService: CacheService,
   ) {}
 
-  // WebSub leases expire (~5-10 days) — re-subscribing daily keeps the
-  // subscription comfortably ahead of expiry regardless of the hub's actual
-  // grant, and is a no-op (fast, cheap) when not configured for this church.
+  // WebSub leases expire (~5-10 days) — re-subscribing daily keeps every
+  // active tenant's subscription comfortably ahead of expiry regardless of
+  // the hub's actual grant, and is a no-op (fast, cheap) when no tenant has
+  // configured this integration. One lock for the whole batch, not
+  // per-tenant — this guards against two app instances both running the
+  // cron, not against tenants racing each other.
   @Cron('0 2 * * *', { timeZone: CHURCH_TIMEZONE })
   async resubscribe(): Promise<void> {
     const acquired = await this.cacheService.acquireLock(RESUBSCRIBE_LOCK, 270);
@@ -27,6 +30,6 @@ export class YoutubeSubscriptionScheduler {
       );
       return;
     }
-    await this.youtubeSubscriptionService.subscribe();
+    await this.youtubeSubscriptionService.renewAllActive();
   }
 }

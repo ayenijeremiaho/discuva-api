@@ -26,6 +26,9 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import {
   AdminAttendanceHistoryQueryDto,
   AttendanceHistoryQueryDto,
@@ -110,8 +113,9 @@ export class AttendanceController {
     );
   }
 
-  @UseGuards(AdminGuard)
+  @UseGuards(AdminGuard, PlanGuard)
   @RequiresPermission(AdminPermission.ATTENDANCE_READ)
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
   @HttpCode(HttpStatus.OK)
   @Post('export-email')
   async emailExportHistory(

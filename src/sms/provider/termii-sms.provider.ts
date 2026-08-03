@@ -9,6 +9,7 @@ import {
   SmsBalance,
   SmsEncoding,
   SmsLogEntry,
+  SmsProviderCredentials,
   SmsSendResult,
 } from '../interface/sms-provider.interface';
 
@@ -19,20 +20,34 @@ export const TERMII_MAX_RECIPIENTS_PER_REQUEST = 100;
 @Injectable()
 export class TermiiSmsProvider implements ISmsProvider {
   private readonly logger = new Logger(TermiiSmsProvider.name);
-  private readonly apiKey: string;
-  private readonly senderId: string;
+  private readonly defaultApiKey: string;
+  private readonly defaultSenderId: string;
+  // Not tenant-specific even under BYOK — every Termii account (platform's
+  // own or a tenant's) talks to the same API host, only apiKey/senderId
+  // differ per credential set.
   private readonly baseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.apiKey = this.configService.get<string>('TERMII_API_KEY');
-    this.senderId = this.configService.get<string>('TERMII_SENDER_ID');
+    this.defaultApiKey = this.configService.get<string>('TERMII_API_KEY');
+    this.defaultSenderId = this.configService.get<string>('TERMII_SENDER_ID');
     this.baseUrl = this.configService.get<string>('TERMII_BASE_URL');
+  }
+
+  // `credentials` present means a tenant's own decrypted BYOK config
+  // (SmsCredentialResolverService) — falls back to this platform's own
+  // constructor-injected default (the pre-BYOK behavior) when absent.
+  private resolve(credentials?: SmsProviderCredentials) {
+    return {
+      apiKey: credentials?.apiKey || this.defaultApiKey,
+      senderId: credentials?.senderId || this.defaultSenderId,
+    };
   }
 
   async send(
     to: string[],
     message: string,
     encoding: SmsEncoding,
+    credentials?: SmsProviderCredentials,
   ): Promise<SmsSendResult> {
     if (to.length > TERMII_MAX_RECIPIENTS_PER_REQUEST) {
       throw new InternalServerErrorException(
@@ -40,12 +55,13 @@ export class TermiiSmsProvider implements ISmsProvider {
       );
     }
 
+    const { apiKey, senderId } = this.resolve(credentials);
     const isBulk = to.length > 1;
     const url = `${this.baseUrl}/api/sms/send${isBulk ? '/bulk' : ''}`;
     const body = {
-      api_key: this.apiKey,
+      api_key: apiKey,
       to: isBulk ? to : to[0],
-      from: this.senderId,
+      from: senderId,
       sms: message,
       type: encoding === 'unicode' ? 'unicode' : 'plain',
       channel: 'dnd',
@@ -71,8 +87,9 @@ export class TermiiSmsProvider implements ISmsProvider {
     };
   }
 
-  async getBalance(): Promise<SmsBalance> {
-    const url = `${this.baseUrl}/api/get-balance?api_key=${this.apiKey}`;
+  async getBalance(credentials?: SmsProviderCredentials): Promise<SmsBalance> {
+    const { apiKey } = this.resolve(credentials);
+    const url = `${this.baseUrl}/api/get-balance?api_key=${apiKey}`;
     const response = await fetch(url);
     const json: any = await response.json().catch(() => ({}));
 
@@ -89,8 +106,11 @@ export class TermiiSmsProvider implements ISmsProvider {
     };
   }
 
-  async getMessageHistory(): Promise<SmsLogEntry[]> {
-    const url = `${this.baseUrl}/api/sms/inbox?api_key=${this.apiKey}`;
+  async getMessageHistory(
+    credentials?: SmsProviderCredentials,
+  ): Promise<SmsLogEntry[]> {
+    const { apiKey } = this.resolve(credentials);
+    const url = `${this.baseUrl}/api/sms/inbox?api_key=${apiKey}`;
     const response = await fetch(url);
     const json: any = await response.json().catch(() => ({}));
 

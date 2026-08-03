@@ -10,6 +10,7 @@ import { TenantMiddleware } from './middleware/tenant.middleware';
 import { TenantInfoController } from './controller/tenant-info.controller';
 import { SignupController } from './controller/signup.controller';
 import { TenantProvisioningService } from './service/tenant-provisioning.service';
+import { BranchModule } from '../branch/branch.module';
 
 /**
  * Wired live (§9 Phase 8's "fresh rollout" variant — no existing church's
@@ -30,6 +31,20 @@ import { TenantProvisioningService } from './service/tenant-provisioning.service
  * - `v1/signup` — provisions a brand-new tenant; by definition there's no
  *   existing tenant row for its subdomain yet, so TenantMiddleware would
  *   always 404 it otherwise.
+ * - `v1/integrations/youtube/callback` — called directly by Google's
+ *   PubSubHubbub hub, not by any tenant's browser, so there's no Host
+ *   header carrying a tenant subdomain at all. YoutubeLiveDetectionService
+ *   resolves the owning tenant itself from the channel id in the
+ *   notification body and manually enters that tenant's context — the
+ *   same reason this route was silently 404ing in production before this
+ *   exclude was added (the feature was never configured in any environment
+ *   this ran in, so it went unnoticed).
+ * - `v1/webhooks/billing` — called directly by Paystack/Flutterwave, same
+ *   no-Host-header reasoning as the YouTube callback above.
+ *   CheckoutService resolves the owning tenant from its own
+ *   BillingCheckoutSession row, not from anything in the webhook payload
+ *   (docs/MULTI_TENANT_MIGRATION.md §9 Phase 3) — added proactively this
+ *   time, having already been burned once by forgetting it for YouTube.
  * - `/`, `docs`, `health` — @Version(VERSION_NEUTRAL) routes in
  *   AppController, hit by infra health checks against the bare host with
  *   no tenant subdomain at all — no `v1/` prefix on these specifically
@@ -42,7 +57,7 @@ import { TenantProvisioningService } from './service/tenant-provisioning.service
  * `/v1/platform/auth/login`, 404ing it exactly like a real tenant route.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Tenant])],
+  imports: [TypeOrmModule.forFeature([Tenant]), BranchModule],
   controllers: [TenantInfoController, SignupController],
   providers: [TenantMiddleware, TenantProvisioningService],
   exports: [TenantMiddleware, TenantProvisioningService],
@@ -54,6 +69,8 @@ export class TenantModule implements NestModule {
       .exclude(
         { path: 'v1/platform/(.*)', method: RequestMethod.ALL },
         { path: 'v1/signup', method: RequestMethod.ALL },
+        { path: 'v1/integrations/youtube/callback', method: RequestMethod.ALL },
+        { path: 'v1/webhooks/billing', method: RequestMethod.ALL },
         { path: '/', method: RequestMethod.GET },
         { path: 'docs', method: RequestMethod.GET },
         { path: 'health', method: RequestMethod.GET },

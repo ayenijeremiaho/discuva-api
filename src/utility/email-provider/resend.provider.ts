@@ -1,7 +1,13 @@
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Resend } from 'resend';
-import { IEmailProvider, SendMailOptions } from './email-provider.interface';
+import {
+  EmailProviderCredentials,
+  IEmailProvider,
+  SendMailOptions,
+} from './email-provider.interface';
 
+@Injectable()
 export class ResendProvider implements IEmailProvider {
   readonly providerName = 'resend';
   private readonly client: Resend;
@@ -10,14 +16,25 @@ export class ResendProvider implements IEmailProvider {
     this.client = new Resend(config.get<string>('RESEND_API_KEY'));
   }
 
-  async sendMail(options: SendMailOptions): Promise<void> {
+  // `credentials.apiKey` present means a tenant's own decrypted BYOK config
+  // — a fresh one-off client is built for that call rather than mutating
+  // the shared default one. Falls back to the constructor-injected default
+  // client (the pre-BYOK behavior) when absent.
+  async sendMail(
+    options: SendMailOptions,
+    credentials?: EmailProviderCredentials,
+  ): Promise<void> {
+    const client = credentials?.apiKey
+      ? new Resend(credentials.apiKey)
+      : this.client;
+
     const to = Array.isArray(options.to) ? options.to : [options.to];
     let cc: string[] | undefined;
     if (options.cc) {
       cc = Array.isArray(options.cc) ? options.cc : [options.cc];
     }
 
-    const { error } = await this.client.emails.send({
+    const { error } = await client.emails.send({
       from: options.from,
       to,
       cc,

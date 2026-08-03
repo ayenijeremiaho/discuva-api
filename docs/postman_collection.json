@@ -240,6 +240,16 @@
       "key": "platformPlanId",
       "value": "pro",
       "type": "string"
+    },
+    {
+      "key": "platformAdminRoleId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "platformAdminId",
+      "value": "",
+      "type": "string"
     }
   ],
   "auth": {
@@ -26296,7 +26306,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"churchName\": \"Beta Church\",\n  \"subdomain\": \"church-beta\",\n  \"adminFirstname\": \"Admin\",\n  \"adminLastname\": \"User\",\n  \"adminEmail\": \"admin@betachurch.org\",\n  \"adminPassword\": \"Sup3rSecret!\",\n  \"planId\": \"free\"\n}",
+              "raw": "{\n  \"churchName\": \"Beta Church\",\n  \"subdomain\": \"church-beta\",\n  \"adminFirstname\": \"Admin\",\n  \"adminLastname\": \"User\",\n  \"adminEmail\": \"admin@betachurch.org\",\n  \"planId\": \"free\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
@@ -26564,6 +26574,282 @@
               "path": ["platform", "tenants", "{{platformTenantId}}", "communication-providers"]
             },
             "description": "A tenant's active provider per channel + SMS wallet balance - never the raw encrypted credentials."
+          },
+          "response": []
+        },
+        {
+          "name": "List Platform Admin Roles",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admin-roles",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admin-roles"]
+            },
+            "description": "List all platform admin roles with their permission sets."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Platform Admin Role",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admin-roles/{{platformAdminRoleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admin-roles", "{{platformAdminRoleId}}"]
+            },
+            "description": "Get one platform admin role."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Platform Admin Role",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) pm.collectionVariables.set('platformAdminRoleId', res.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Support\",\n  \"description\": \"Read-only tenant support access\",\n  \"permissions\": [\"tenants:read\", \"plans:read\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admin-roles",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admin-roles"]
+            },
+            "description": "Create a platform admin role with a specific permission set (PlatformAdminPermission[])."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Platform Admin Role",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Read-only tenant support access, updated\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admin-roles/{{platformAdminRoleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admin-roles", "{{platformAdminRoleId}}"]
+            },
+            "description": "Edit a role's name/description/permissions."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Platform Admin Role",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admin-roles/{{platformAdminRoleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admin-roles", "{{platformAdminRoleId}}"]
+            },
+            "description": "Delete a role. 400s if any active platform admin is still assigned to it."
+          },
+          "response": []
+        },
+        {
+          "name": "List Platform Admins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admins",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admins"]
+            },
+            "description": "List platform admins with their role."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Platform Admin Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admins/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admins", "me"]
+            },
+            "description": "The calling platform admin's own record + permissions. No permission requirement beyond a valid token."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Platform Admin",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admins/{{platformAdminId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admins", "{{platformAdminId}}"]
+            },
+            "description": "Get one platform admin."
+          },
+          "response": []
+        },
+        {
+          "name": "Onboard Platform Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.id) pm.collectionVariables.set('platformAdminId', res.data.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new-admin@example.com\",\n  \"platformAdminRoleId\": \"{{platformAdminRoleId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admins",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admins"]
+            },
+            "description": "Onboard a new platform admin - { email, platformAdminRoleId }. No password field: a random one is generated internally (never revealed) and the new admin is emailed a welcome message with a set-password link - POST /platform/auth/reset-password completes it, same as the tenant-provisioning welcome flow."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Platform Admin",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/admins/{{platformAdminId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "admins", "{{platformAdminId}}"]
+            },
+            "description": "Change role and/or isActive. 403s if the target id is the caller's own record."
+          },
+          "response": []
+        },
+        {
+          "name": "Platform Admin Forgot Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@platform.example.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/auth/forgot-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "auth", "forgot-password"]
+            },
+            "description": "Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. Always returns the same generic message, whether or not the email matches an account."
+          },
+          "response": []
+        },
+        {
+          "name": "Platform Admin Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "auth": { "type": "noauth" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@platform.example.com\",\n  \"otp\": \"123456\",\n  \"newPassword\": \"NewSecure1!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/auth/reset-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "auth", "reset-password"]
+            },
+            "description": "Public, rate-limited (5/min). Verify the OTP and set a new password. Also how a newly-onboarded platform admin sets their initial password from the welcome email link."
           },
           "response": []
         }

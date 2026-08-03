@@ -66,6 +66,15 @@ export enum AdminPermission {
   VOLUNTEER_WRITE = 'volunteer:write',
   SMALL_GROUP_READ = 'small_group:read',
   SMALL_GROUP_WRITE = 'small_group:write',
+  COMMUNICATION_PROVIDERS_READ = 'communication_providers:read',
+  COMMUNICATION_PROVIDERS_WRITE = 'communication_providers:write',
+  YOUTUBE_INTEGRATION_READ = 'youtube_integration:read',
+  YOUTUBE_INTEGRATION_WRITE = 'youtube_integration:write',
+  CHURCH_PROFILE_WRITE = 'church_profile:write',
+  BILLING_READ = 'billing:read',
+  BILLING_WRITE = 'billing:write',
+  BRANCH_READ = 'branch:read',
+  BRANCH_WRITE = 'branch:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -136,6 +145,18 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.VOLUNTEER_WRITE]: 'Manage Volunteer Opportunities',
   [AdminPermission.SMALL_GROUP_READ]: 'View Fellowships',
   [AdminPermission.SMALL_GROUP_WRITE]: 'Manage Fellowships',
+  [AdminPermission.COMMUNICATION_PROVIDERS_READ]:
+    'View Communication Providers',
+  [AdminPermission.COMMUNICATION_PROVIDERS_WRITE]:
+    'Manage Communication Providers',
+  [AdminPermission.YOUTUBE_INTEGRATION_READ]: 'View YouTube Live Integration',
+  [AdminPermission.YOUTUBE_INTEGRATION_WRITE]:
+    'Manage YouTube Live Integration',
+  [AdminPermission.CHURCH_PROFILE_WRITE]: 'Edit Church Profile',
+  [AdminPermission.BILLING_READ]: 'View Plan & Billing',
+  [AdminPermission.BILLING_WRITE]: 'Manage Plan & Billing',
+  [AdminPermission.BRANCH_READ]: 'View Branch Overview',
+  [AdminPermission.BRANCH_WRITE]: 'Manage Branches',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -266,6 +287,24 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View fellowships, rosters, and attendance history',
   [AdminPermission.SMALL_GROUP_WRITE]:
     'Create, edit, and delete fellowships; assign leaders; remove members',
+  [AdminPermission.COMMUNICATION_PROVIDERS_READ]:
+    'View which SMS/email providers this church has configured',
+  [AdminPermission.COMMUNICATION_PROVIDERS_WRITE]:
+    "Set this church's own SMS/email provider credentials (BYOK) and enable or disable them",
+  [AdminPermission.YOUTUBE_INTEGRATION_READ]:
+    "View this church's YouTube live-detection integration status",
+  [AdminPermission.YOUTUBE_INTEGRATION_WRITE]:
+    "Set this church's YouTube channel and API key for automatic live-stream announcements, and enable or disable it",
+  [AdminPermission.CHURCH_PROFILE_WRITE]:
+    "Edit this church's own name, logo, tagline, address, support email, currency, and timezone",
+  [AdminPermission.BILLING_READ]:
+    "View this church's current plan, subscription status, and SMS wallet balance",
+  [AdminPermission.BILLING_WRITE]:
+    'Initiate a plan upgrade checkout or an SMS wallet top-up checkout',
+  [AdminPermission.BRANCH_READ]:
+    "View this church's branch hierarchy and each branch's rollup stats (member count, attendance, giving)",
+  [AdminPermission.BRANCH_WRITE]:
+    'Invite a new branch church and manage the branch hierarchy link',
 };
 
 export interface AdminPermissionGroupItem {
@@ -454,6 +493,23 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     [AdminPermission.SMALL_GROUP_READ, AdminPermission.SMALL_GROUP_WRITE],
     'small_groups',
   ),
+  buildGroup('Communication Providers', [
+    AdminPermission.COMMUNICATION_PROVIDERS_READ,
+    AdminPermission.COMMUNICATION_PROVIDERS_WRITE,
+  ]),
+  buildGroup('YouTube Integration', [
+    AdminPermission.YOUTUBE_INTEGRATION_READ,
+    AdminPermission.YOUTUBE_INTEGRATION_WRITE,
+  ]),
+  buildGroup('Church Profile', [AdminPermission.CHURCH_PROFILE_WRITE]),
+  buildGroup('Billing & Plan', [
+    AdminPermission.BILLING_READ,
+    AdminPermission.BILLING_WRITE,
+  ]),
+  buildGroup('Branches', [
+    AdminPermission.BRANCH_READ,
+    AdminPermission.BRANCH_WRITE,
+  ]),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,
     AdminPermission.ADMIN_READ,

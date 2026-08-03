@@ -24,11 +24,17 @@ export class TransformInterceptor<T>
 
     return next.handle().pipe(
       map((data) => {
-        const responseData = data ?? {};
+        // `null` is a deliberate "no resource yet" return value from several
+        // handlers (e.g. TenantYoutubeIntegrationService.get() when nothing's
+        // configured) — only a genuinely missing return value (`undefined`,
+        // e.g. a void handler) should default to `{}`. Coercing `null` to
+        // `{}` here used to silently turn every such "not configured" signal
+        // into a truthy empty object on the wire.
+        const responseData = data === undefined ? {} : data;
         const message = this.getDefaultMessage(statusCode);
-        const finalMessage = responseData.message || message;
+        const finalMessage = responseData?.message || message;
         const statusOverride =
-          typeof responseData.status === 'number' ? responseData.status : null;
+          typeof responseData?.status === 'number' ? responseData.status : null;
         const finalStatus = statusOverride ?? statusCode;
 
         if (responseData) {

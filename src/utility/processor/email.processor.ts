@@ -15,9 +15,15 @@ import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-t
 import { EmailLog } from '../entity/email-log.entity';
 import { IEmailProvider } from '../email-provider/email-provider.interface';
 import { EMAIL_PROVIDER_TOKEN } from '../email-provider/email-provider.token';
+import { GmailProvider } from '../email-provider/gmail.provider';
+import { ResendProvider } from '../email-provider/resend.provider';
+import { SmtpProvider } from '../email-provider/smtp.provider';
+import { SendGridProvider } from '../email-provider/sendgrid.provider';
+import { MailgunProvider } from '../email-provider/mailgun.provider';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
+import { EmailCredentialResolverService } from '../../communication-provider/service/email-credential-resolver.service';
 
 export interface EmailAttachment {
   filename: string;
@@ -33,44 +39,93 @@ export interface EmailJobData extends TenantJobEnvelope {
   attachments?: EmailAttachment[];
 }
 
+// Bull's return-value convention: handleSend's return becomes job.returnvalue,
+// readable in onCompleted — the only way to tell onCompleted/onFailed which
+// concrete provider actually handled this specific send, since that can vary
+// per tenant now (BYOK) and isn't knowable from the processor's own fixed
+// EMAIL_PROVIDER_TOKEN default alone.
+interface SendResult {
+  providerName: string;
+}
+
 @Injectable()
 @Processor('email')
 export class EmailProcessor {
   private readonly logger = new Logger(EmailProcessor.name);
-  private readonly fromAddress: string;
+  private readonly defaultFromAddress: string;
 
   constructor(
     private readonly configService: ConfigService,
     @InjectRepository(EmailLog)
     private readonly emailLogRepository: Repository<EmailLog>,
     @Inject(EMAIL_PROVIDER_TOKEN)
-    private readonly emailProvider: IEmailProvider,
+    private readonly defaultEmailProvider: IEmailProvider,
+    private readonly gmailProvider: GmailProvider,
+    private readonly resendProvider: ResendProvider,
+    private readonly smtpProvider: SmtpProvider,
+    private readonly sendGridProvider: SendGridProvider,
+    private readonly mailgunProvider: MailgunProvider,
+    private readonly emailCredentialResolverService: EmailCredentialResolverService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
-    this.fromAddress =
+    this.defaultFromAddress =
       this.configService.get<string>('EMAIL_FROM') ??
       this.configService.get<string>('EMAIL_USER');
   }
 
+  // Tenant context has to be entered here (not just in onCompleted/onFailed,
+  // the pre-BYOK behavior) because resolving a tenant's own BYOK config now
+  // has to happen before the send itself, not just before logging it
+  // afterward — the genuinely more involved wiring
+  // docs/MULTI_TENANT_MIGRATION.md §9 Phase 3 flagged email BYOK as needing,
+  // versus SMS which resolves synchronously within the original request.
   @Process('send')
-  async handleSend(job: Job<EmailJobData>): Promise<void> {
-    const { to, cc, subject, html, attachments } = job.data;
-    await this.emailProvider.sendMail({
-      from: this.fromAddress,
-      to,
-      cc,
-      subject,
-      html,
-      attachments,
+  async handleSend(job: Job<EmailJobData>): Promise<SendResult> {
+    return runInTenantContext(this.cls, this.txHost, job.data, async () => {
+      const { to, cc, subject, html, attachments } = job.data;
+      const config = await this.emailCredentialResolverService.resolveConfig();
+
+      const provider = config
+        ? this.resolveProvider(config.providerId)
+        : this.defaultEmailProvider;
+      const from = config?.senderIdentity || this.defaultFromAddress;
+
+      await provider.sendMail(
+        { from, to, cc, subject, html, attachments },
+        config?.credentials,
+      );
+      this.logger.debug(
+        `Email sent via ${provider.providerName}: "${subject}" to ${Array.isArray(to) ? to.join(', ') : to} (attempt ${job.attemptsMade + 1})`,
+      );
+
+      return { providerName: provider.providerName };
     });
-    this.logger.debug(
-      `Email sent: "${subject}" to ${Array.isArray(to) ? to.join(', ') : to} (attempt ${job.attemptsMade + 1})`,
-    );
+  }
+
+  // `gmail` is the fallback for any BYOK config whose providerId isn't one
+  // of the dedicated REST providers below — this covers `gmail` itself and
+  // any legacy/unrecognized providerId, matching the pre-expansion default.
+  private resolveProvider(providerId: string): IEmailProvider {
+    switch (providerId) {
+      case 'resend':
+        return this.resendProvider;
+      case 'smtp':
+        return this.smtpProvider;
+      case 'sendgrid':
+        return this.sendGridProvider;
+      case 'mailgun':
+        return this.mailgunProvider;
+      default:
+        return this.gmailProvider;
+    }
   }
 
   @OnQueueCompleted()
-  async onCompleted(job: Job<EmailJobData>): Promise<void> {
+  async onCompleted(
+    job: Job<EmailJobData>,
+    result: SendResult | undefined,
+  ): Promise<void> {
     return runInTenantContext(this.cls, this.txHost, job.data, async () => {
       const { to, subject } = job.data;
       const recipient = Array.isArray(to) ? to.join(', ') : to;
@@ -80,7 +135,8 @@ export class EmailProcessor {
           subject,
           status: 'sent',
           jobId: String(job.id),
-          provider: this.emailProvider.providerName,
+          provider:
+            result?.providerName ?? this.defaultEmailProvider.providerName,
           attemptsMade: job.attemptsMade,
         }),
       );
@@ -104,7 +160,7 @@ export class EmailProcessor {
           subject,
           status: 'failed',
           jobId: String(job.id),
-          provider: this.emailProvider.providerName,
+          provider: this.defaultEmailProvider.providerName,
           errorMessage: error.message,
           attemptsMade: job.attemptsMade,
         }),

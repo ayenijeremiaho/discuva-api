@@ -80,6 +80,23 @@ describe('TermiiSmsProvider', () => {
         InternalServerErrorException,
       );
     });
+
+    it("uses a tenant's own BYOK credentials over the platform default when given", async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ code: 'ok', message_id: 'abc' }),
+      } as any);
+
+      await provider.send(['+1'], 'Hi', 'plain', {
+        apiKey: 'tenant-own-key',
+        senderId: 'TenantChurch',
+      });
+
+      const [, options] = fetchSpy.mock.calls[0];
+      const body = JSON.parse((options as any).body);
+      expect(body.api_key).toBe('tenant-own-key');
+      expect(body.from).toBe('TenantChurch');
+    });
   });
 
   describe('getBalance', () => {

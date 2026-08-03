@@ -20,7 +20,6 @@ import { TenantProvisioningService } from '../../tenant/service/tenant-provision
 import { CacheService } from '../../utility/service/cache.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { JwtPayload } from '../../auth/interface/auth.interface';
-import { UtilityService } from '../../utility/service/utility.service';
 import { CreateTenantDto } from '../dto/create-tenant.dto';
 import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
@@ -30,6 +29,10 @@ export interface TenantWithHealth {
   id: string;
   subdomain: string;
   name: string;
+  logoUrl: string | null;
+  tagline: string | null;
+  address: string | null;
+  supportEmail: string | null;
   currency: string;
   timezone: string;
   isActive: boolean;
@@ -88,52 +91,47 @@ export class PlatformTenantService {
     const subByTenant = new Map(subscriptions.map((s) => [s.tenantId, s]));
 
     return Promise.all(
-      tenants.map(async (tenant) => {
-        const subscription = subByTenant.get(tenant.id);
-        const [memberCount, eventCount] = await Promise.all([
-          this.safeSchemaCount(tenant.schemaName, 'members'),
-          this.safeSchemaCount(tenant.schemaName, 'events'),
-        ]);
-        return {
-          id: tenant.id,
-          subdomain: tenant.subdomain,
-          name: tenant.name,
-          currency: tenant.currency,
-          timezone: tenant.timezone,
-          isActive: tenant.isActive,
-          createdAt: tenant.createdAt,
-          planId: subscription?.planId ?? null,
-          subscriptionStatus: subscription?.status ?? null,
-          memberCount,
-          eventCount,
-        };
-      }),
+      tenants.map((tenant) =>
+        this.toHealthShape(tenant, subByTenant.get(tenant.id)),
+      ),
     );
   }
 
-  async createTenant(dto: CreateTenantDto): Promise<Tenant> {
-    const adminPasswordHash = await UtilityService.hashValue(dto.adminPassword);
-    return this.provisioningService.provision({
+  // No adminPassword collected here — the platform admin isn't the one
+  // logging in as this tenant's first admin, so there's nobody present to
+  // choose one. provisioningService.provision() generates a random
+  // password internally (never revealed) and emails the new admin a
+  // set-password link instead (docs/MULTI_TENANT_MIGRATION.md §9 Phase 9e).
+  async createTenant(dto: CreateTenantDto): Promise<TenantWithHealth> {
+    const tenant = await this.provisioningService.provision({
       subdomain: dto.subdomain,
       churchName: dto.churchName,
       adminFirstname: dto.adminFirstname,
       adminLastname: dto.adminLastname,
       adminEmail: dto.adminEmail,
-      adminPasswordHash,
       planId: dto.planId ?? 'free',
     });
+    return this.toHealthShape(tenant);
   }
 
-  async updateTenant(id: string, dto: UpdateTenantDto): Promise<Tenant> {
+  async updateTenant(
+    id: string,
+    dto: UpdateTenantDto,
+  ): Promise<TenantWithHealth> {
     const tenant = await this.findTenantOrThrow(id);
     Object.assign(tenant, dto);
-    return this.tenantRepo.save(tenant);
+    const saved = await this.tenantRepo.save(tenant);
+    return this.toHealthShape(saved);
   }
 
-  async suspendTenant(id: string, dto: SuspendTenantDto): Promise<Tenant> {
+  async suspendTenant(
+    id: string,
+    dto: SuspendTenantDto,
+  ): Promise<TenantWithHealth> {
     const tenant = await this.findTenantOrThrow(id);
     tenant.isActive = dto.suspend === false;
-    return this.tenantRepo.save(tenant);
+    const saved = await this.tenantRepo.save(tenant);
+    return this.toHealthShape(saved);
   }
 
   async changeTenantPlan(
@@ -179,10 +177,8 @@ export class PlatformTenantService {
   // refresh token either — a support tool issuing indefinitely-renewable
   // access is a bigger footgun than one that expires and needs re-issuing.
   //
-  // Honest caveat: this token is only actually usable once TenantMiddleware
-  // resolves tenant context on live requests (§9 Phase 8) — not wired in
-  // yet, so nothing today would route a request using it to the right
-  // schema regardless of how correct the token itself is.
+  // TenantMiddleware is live (§9 Phase 8), so this token routes to the
+  // right tenant schema like any other tenant-facing request.
   async impersonateTenant(id: string): Promise<{ access_token: string }> {
     const tenant = await this.findTenantOrThrow(id);
     if (!tenant.isActive) {
@@ -215,6 +211,41 @@ export class PlatformTenantService {
     };
     return {
       access_token: await this.tenantJwtService.signAsync(payload),
+    };
+  }
+
+  // The single source of what a tenant looks like on the wire — every
+  // method that returns a tenant to a platform-admin caller goes through
+  // this, so none of them can drift into leaking raw Tenant columns
+  // (schemaName, clusterId, parentTenantId, sharing-consent flags, ...)
+  // that have no business being visible outside this service.
+  private async toHealthShape(
+    tenant: Tenant,
+    subscription?: Subscription,
+  ): Promise<TenantWithHealth> {
+    const sub =
+      subscription ??
+      (await this.subscriptionRepo.findOneBy({ tenantId: tenant.id }));
+    const [memberCount, eventCount] = await Promise.all([
+      this.safeSchemaCount(tenant.schemaName, 'members'),
+      this.safeSchemaCount(tenant.schemaName, 'events'),
+    ]);
+    return {
+      id: tenant.id,
+      subdomain: tenant.subdomain,
+      name: tenant.name,
+      logoUrl: tenant.logoUrl,
+      tagline: tenant.tagline,
+      address: tenant.address,
+      supportEmail: tenant.supportEmail,
+      currency: tenant.currency,
+      timezone: tenant.timezone,
+      isActive: tenant.isActive,
+      createdAt: tenant.createdAt,
+      planId: sub?.planId ?? null,
+      subscriptionStatus: sub?.status ?? null,
+      memberCount,
+      eventCount,
     };
   }
 

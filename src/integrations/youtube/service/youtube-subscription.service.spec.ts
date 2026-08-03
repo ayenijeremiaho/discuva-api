@@ -2,10 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { YoutubeSubscriptionService } from './youtube-subscription.service';
-import { YoutubeIntegrationState } from '../entity/youtube-integration-state.entity';
+import { TenantYoutubeIntegration } from '../entity/tenant-youtube-integration.entity';
 
-const mockStateRepo = {
+const mockIntegrationRepo = {
   findOne: jest.fn(),
+  find: jest.fn(),
   create: jest.fn(),
   save: jest.fn(),
 };
@@ -15,6 +16,12 @@ function mockConfig(values: Record<string, string | undefined>) {
     get: jest.fn((key: string) => values[key]),
   };
 }
+
+const CONFIGURED = {
+  YOUTUBE_WEBSUB_CALLBACK_URL:
+    'https://api.example.com/integrations/youtube/callback',
+  YOUTUBE_WEBSUB_SECRET: 'shh-secret',
+};
 
 describe('YoutubeSubscriptionService', () => {
   let service: YoutubeSubscriptionService;
@@ -29,67 +36,47 @@ describe('YoutubeSubscriptionService', () => {
         YoutubeSubscriptionService,
         { provide: ConfigService, useValue: mockConfig(configValues) },
         {
-          provide: getRepositoryToken(YoutubeIntegrationState),
-          useValue: mockStateRepo,
+          provide: getRepositoryToken(TenantYoutubeIntegration),
+          useValue: mockIntegrationRepo,
         },
       ],
     }).compile();
     service = module.get(YoutubeSubscriptionService);
   }
 
-  describe('isConfigured', () => {
-    it('returns false when channel id, callback url, or secret is missing', async () => {
+  describe('isWebSubConfigured', () => {
+    it('returns false when the callback url or secret is missing', async () => {
       await build({});
-      expect(service.isConfigured()).toBe(false);
+      expect(service.isWebSubConfigured()).toBe(false);
     });
 
-    it('returns false when the secret is missing even if channel and callback are set', async () => {
-      await build({
-        YOUTUBE_CHANNEL_ID: 'UC123',
-        YOUTUBE_WEBSUB_CALLBACK_URL:
-          'https://api.example.com/integrations/youtube/callback',
-      });
-      expect(service.isConfigured()).toBe(false);
-    });
-
-    it('returns true when channel, callback url, and secret are all set', async () => {
-      await build({
-        YOUTUBE_CHANNEL_ID: 'UC123',
-        YOUTUBE_WEBSUB_CALLBACK_URL:
-          'https://api.example.com/integrations/youtube/callback',
-        YOUTUBE_WEBSUB_SECRET: 'shh-secret',
-      });
-      expect(service.isConfigured()).toBe(true);
+    it('returns true when both callback url and secret are set — no channel id required at this level', async () => {
+      await build(CONFIGURED);
+      expect(service.isWebSubConfigured()).toBe(true);
     });
   });
 
   describe('subscribe', () => {
-    it('skips the WebSub request entirely when not configured', async () => {
+    it('skips the WebSub request entirely when not configured at the platform level', async () => {
       await build({});
       const fetchSpy = jest.spyOn(global, 'fetch');
 
-      await service.subscribe();
+      await service.subscribe('UC123');
 
       expect(fetchSpy).not.toHaveBeenCalled();
-      expect(mockStateRepo.save).not.toHaveBeenCalled();
+      expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
     });
 
-    it('posts a subscribe request with hub.secret and persists the new lease when configured', async () => {
-      await build({
-        YOUTUBE_CHANNEL_ID: 'UC123',
-        YOUTUBE_WEBSUB_CALLBACK_URL:
-          'https://api.example.com/integrations/youtube/callback',
-        YOUTUBE_WEBSUB_SECRET: 'shh-secret',
-      });
+    it('posts a subscribe request for the given channel and persists the new lease', async () => {
+      await build(CONFIGURED);
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         status: 202,
       } as Response);
-      mockStateRepo.findOne.mockResolvedValue(null);
-      mockStateRepo.create.mockImplementation((v) => v);
-      mockStateRepo.save.mockResolvedValue({});
+      mockIntegrationRepo.findOne.mockResolvedValue({ channelId: 'UC123' });
+      mockIntegrationRepo.save.mockResolvedValue({});
 
-      await service.subscribe();
+      await service.subscribe('UC123');
 
       expect(fetchSpy).toHaveBeenCalledWith(
         'https://pubsubhubbub.appspot.com/subscribe',
@@ -97,39 +84,86 @@ describe('YoutubeSubscriptionService', () => {
       );
       const [, options] = fetchSpy.mock.calls[0];
       expect(String(options?.body)).toContain('hub.secret=shh-secret');
-      expect(mockStateRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ channelId: 'UC123' }),
+      expect(String(options?.body)).toContain('hub.mode=subscribe');
+      expect(mockIntegrationRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ subscriptionExpiresAt: expect.any(Date) }),
       );
-      expect(mockStateRepo.save).toHaveBeenCalled();
     });
 
     it('does not persist state when the hub rejects the request', async () => {
-      await build({
-        YOUTUBE_CHANNEL_ID: 'UC123',
-        YOUTUBE_WEBSUB_CALLBACK_URL:
-          'https://api.example.com/integrations/youtube/callback',
-        YOUTUBE_WEBSUB_SECRET: 'shh-secret',
-      });
+      await build(CONFIGURED);
       jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: false,
         status: 400,
       } as Response);
 
-      await service.subscribe();
+      await service.subscribe('UC123');
 
-      expect(mockStateRepo.save).not.toHaveBeenCalled();
+      expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
     });
 
     it('swallows network errors without throwing', async () => {
-      await build({
-        YOUTUBE_CHANNEL_ID: 'UC123',
-        YOUTUBE_WEBSUB_CALLBACK_URL:
-          'https://api.example.com/integrations/youtube/callback',
-        YOUTUBE_WEBSUB_SECRET: 'shh-secret',
-      });
+      await build(CONFIGURED);
       jest.spyOn(global, 'fetch').mockRejectedValue(new Error('network down'));
 
-      await expect(service.subscribe()).resolves.toBeUndefined();
+      await expect(service.subscribe('UC123')).resolves.toBeUndefined();
+    });
+
+    it('silently no-ops when no integration row exists yet for the channel (nothing to update)', async () => {
+      await build(CONFIGURED);
+      jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+      mockIntegrationRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.subscribe('UC-unknown')).resolves.toBeUndefined();
+      expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('unsubscribe', () => {
+    it('posts an unsubscribe request and clears the lease', async () => {
+      await build(CONFIGURED);
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+      } as Response);
+      mockIntegrationRepo.findOne.mockResolvedValue({
+        channelId: 'UC123',
+        subscriptionExpiresAt: new Date(),
+      });
+      mockIntegrationRepo.save.mockResolvedValue({});
+
+      await service.unsubscribe('UC123');
+
+      const [, options] = fetchSpy.mock.calls[0];
+      expect(String(options?.body)).toContain('hub.mode=unsubscribe');
+      expect(mockIntegrationRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ subscriptionExpiresAt: null }),
+      );
+    });
+  });
+
+  describe('renewAllActive', () => {
+    it('subscribes every active integration', async () => {
+      await build(CONFIGURED);
+      mockIntegrationRepo.find.mockResolvedValue([
+        { channelId: 'UC1' },
+        { channelId: 'UC2' },
+      ]);
+      jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+      mockIntegrationRepo.findOne.mockResolvedValue({ channelId: 'UC1' });
+
+      await service.renewAllActive();
+
+      expect(mockIntegrationRepo.find).toHaveBeenCalledWith({
+        where: { isActive: true },
+      });
+      const fetchSpy = global.fetch as jest.Mock;
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it('does nothing when not configured at the platform level', async () => {
+      await build({});
+      await service.renewAllActive();
+      expect(mockIntegrationRepo.find).not.toHaveBeenCalled();
     });
   });
 });

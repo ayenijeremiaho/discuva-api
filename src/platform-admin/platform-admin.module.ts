@@ -5,18 +5,30 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import platformAdminJwtConfig from '../config/platform-admin-jwt.config';
 import { PlatformAdminController } from './controller/platform-admin.controller';
+import { PlatformAnalyticsController } from './controller/platform-analytics.controller';
+import { PlatformAdminRoleController } from './controller/platform-admin-role.controller';
+import { PlatformAdminManagementController } from './controller/platform-admin-management.controller';
 import { PlatformAdminAuthService } from './service/platform-admin-auth.service';
 import { PlatformTenantService } from './service/platform-tenant.service';
 import { PlatformPlanService } from './service/platform-plan.service';
 import { PlatformCommunicationProviderService } from './service/platform-communication-provider.service';
+import { PlatformAnalyticsService } from './service/platform-analytics.service';
+import { PlatformAdminRoleService } from './service/platform-admin-role.service';
+import { PlatformAdminManagementService } from './service/platform-admin-management.service';
 import { PlatformAdminJwtStrategy } from './strategy/platform-admin-jwt.strategy';
+import { PlatformAdminGuard } from './guard/platform-admin.guard';
+import { DefaultPlatformAdminSeed } from './seed/default-platform-admin.seed';
 import { PlatformAdmin } from './entity/platform-admin.entity';
+import { PlatformAdminRole } from './entity/platform-admin-role.entity';
+import { PlatformAdminPasswordResetOtp } from './entity/platform-admin-password-reset-otp.entity';
 import { CommunicationProvider } from './entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from './entity/tenant-communication-provider-config.entity';
 import { SmsWallet } from './entity/sms-wallet.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Plan } from '../billing/entity/plan.entity';
 import { Subscription } from '../billing/entity/subscription.entity';
+import { BillingCheckoutSession } from '../billing/entity/billing-checkout-session.entity';
+import { TenantRollup } from '../branch/entity/tenant-rollup.entity';
 import { TenantModule } from '../tenant/tenant.module';
 
 @Module({
@@ -26,22 +38,36 @@ import { TenantModule } from '../tenant/tenant.module';
     JwtModule.registerAsync(platformAdminJwtConfig.asProvider()),
     TypeOrmModule.forFeature([
       PlatformAdmin,
+      PlatformAdminRole,
+      PlatformAdminPasswordResetOtp,
       Tenant,
       Plan,
       Subscription,
       CommunicationProvider,
       TenantCommunicationProviderConfig,
       SmsWallet,
+      BillingCheckoutSession,
+      TenantRollup,
     ]),
     TenantModule,
   ],
-  controllers: [PlatformAdminController],
+  controllers: [
+    PlatformAdminController,
+    PlatformAnalyticsController,
+    PlatformAdminRoleController,
+    PlatformAdminManagementController,
+  ],
   providers: [
     PlatformAdminAuthService,
     PlatformAdminJwtStrategy,
+    PlatformAdminGuard,
     PlatformTenantService,
     PlatformPlanService,
     PlatformCommunicationProviderService,
+    PlatformAnalyticsService,
+    PlatformAdminRoleService,
+    PlatformAdminManagementService,
+    DefaultPlatformAdminSeed,
   ],
 })
 export class PlatformAdminModule {}

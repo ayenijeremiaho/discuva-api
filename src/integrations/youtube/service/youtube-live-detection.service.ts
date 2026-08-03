@@ -2,9 +2,15 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { YoutubeIntegrationState } from '../entity/youtube-integration-state.entity';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
+import { TenantYoutubeIntegration } from '../entity/tenant-youtube-integration.entity';
+import { Tenant } from '../../../tenant/entity/tenant.entity';
 import { AnnouncementService } from '../../../announcement/service/announcement.service';
 import { CacheService } from '../../../utility/service/cache.service';
+import { EncryptionService } from '../../../utility/service/encryption.service';
+import { AppClsStore } from '../../../tenant/interface/tenant-cls-store.interface';
 
 interface YoutubeVideosListResponse {
   items?: {
@@ -24,25 +30,30 @@ export class YoutubeLiveDetectionService {
 
   constructor(
     private readonly configService: ConfigService,
-    @InjectRepository(YoutubeIntegrationState)
-    private readonly stateRepo: Repository<YoutubeIntegrationState>,
+    @InjectRepository(TenantYoutubeIntegration)
+    private readonly integrationRepo: Repository<TenantYoutubeIntegration>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly announcementService: AnnouncementService,
     private readonly cacheService: CacheService,
+    private readonly encryptionService: EncryptionService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
-  // Called from the WebSub callback with the video id parsed out of the
-  // Atom feed notification. Never throws — the webhook handler must always
-  // ack quickly regardless of what happens here.
-  async handleNotification(videoId: string | null): Promise<void> {
-    if (!videoId) return;
+  // Called from the WebSub callback with both fields parsed out of the Atom
+  // feed notification body. Never throws — the webhook handler must always
+  // ack quickly regardless of what happens here. channelId is what makes
+  // this tenant-resolvable at all: the notification itself carries no Host
+  // header or anything else that would let TenantMiddleware do this for us
+  // (and this route is deliberately excluded from it — see
+  // TenantModule's exclude list).
+  async handleNotification(
+    videoId: string | null,
+    channelId: string | null,
+  ): Promise<void> {
+    if (!videoId || !channelId) return;
 
-    const channelId = this.configService.get<string>('YOUTUBE_CHANNEL_ID');
-    const apiKey = this.configService.get<string>('YOUTUBE_API_KEY');
-    if (!channelId || !apiKey) return;
-
-    // WebSub hubs routinely redeliver the same notification; without this,
-    // two concurrent deliveries can both pass the lastAnnouncedVideoId check
-    // below before either write lands, double-announcing the same stream.
     const lockKey = `lock:youtube-notification:${videoId}`;
     const acquired = await this.cacheService.acquireLock(
       lockKey,
@@ -56,37 +67,70 @@ export class YoutubeLiveDetectionService {
     }
 
     try {
-      let state = await this.stateRepo.findOne({ where: { channelId } });
-      if (state?.lastAnnouncedVideoId === videoId) return;
+      const integration = await this.integrationRepo.findOne({
+        where: { channelId, isActive: true },
+        select: {
+          id: true,
+          tenantId: true,
+          channelId: true,
+          apiKeyEncrypted: true,
+          lastAnnouncedVideoId: true,
+        },
+      });
+      if (!integration) {
+        this.logger.debug(
+          `Ignored YouTube notification for channel ${channelId} — no active tenant integration`,
+        );
+        return;
+      }
+      if (integration.lastAnnouncedVideoId === videoId) return;
 
-      const snippet = await this.fetchSnippet(videoId, apiKey);
-      if (!snippet || snippet.liveBroadcastContent !== 'live') return;
-      // The notification only carries a video id, not which channel it came
-      // from — without this check, any currently-live video id (reachable
-      // via the public webhook once past signature verification) would
-      // trigger a "we're live" push, not just this channel's own streams.
-      if (snippet.channelId !== channelId) {
+      const apiKey =
+        (integration.apiKeyEncrypted
+          ? this.encryptionService.decrypt(integration.apiKeyEncrypted)
+          : null) || this.configService.get<string>('YOUTUBE_API_KEY');
+      if (!apiKey) {
         this.logger.warn(
-          `Ignored live video ${videoId} — channel ${snippet.channelId} does not match configured channel ${channelId}`,
+          `No YouTube Data API key available (tenant nor platform default) for channel ${channelId}`,
         );
         return;
       }
 
+      const snippet = await this.fetchSnippet(videoId, apiKey);
+      if (!snippet || snippet.liveBroadcastContent !== 'live') return;
+      // The notification only carries a video id, not which channel it came
+      // from at the Data API layer — without this check, any currently-live
+      // video id (reachable via the public webhook once past signature
+      // verification) would trigger a "we're live" push for the wrong tenant.
+      if (snippet.channelId !== channelId) {
+        this.logger.warn(
+          `Ignored live video ${videoId} — channel ${snippet.channelId} does not match notified channel ${channelId}`,
+        );
+        return;
+      }
+
+      const tenant = await this.tenantRepo.findOneBy({
+        id: integration.tenantId,
+      });
+      if (!tenant) return; // tenant deleted/deactivated since the integration row was created
+
       const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-      await this.announcementService.createSystemAnnouncement(
-        `🔴 Live Now: ${snippet.title ?? 'Service'}`,
-        `We're live now — tap to watch.\n\n${watchUrl}`,
+      await this.cls.runWith(
+        { tenantId: tenant.id, schemaName: tenant.schemaName } as AppClsStore,
+        () =>
+          this.txHost.withTransaction(async () => {
+            await this.txHost.tx.query(
+              `SET LOCAL search_path TO "${tenant.schemaName}", public`,
+            );
+            await this.announcementService.createSystemAnnouncement(
+              `🔴 Live Now: ${snippet.title ?? 'Service'}`,
+              `We're live now — tap to watch.\n\n${watchUrl}`,
+            );
+          }),
       );
 
-      if (!state) {
-        state = this.stateRepo.create({
-          channelId,
-          lastAnnouncedVideoId: videoId,
-        });
-      } else {
-        state.lastAnnouncedVideoId = videoId;
-      }
-      await this.stateRepo.save(state);
+      integration.lastAnnouncedVideoId = videoId;
+      await this.integrationRepo.save(integration);
     } catch (err: any) {
       this.logger.warn(
         `Failed to process YouTube notification for video ${videoId}: ${err?.message ?? err}`,

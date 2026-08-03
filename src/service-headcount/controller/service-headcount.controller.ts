@@ -15,6 +15,9 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import {
   HeadcountPeriod,
   ServiceHeadcountService,
@@ -52,8 +55,10 @@ export class ServiceHeadcountController {
   }
 
   @Post('export-email')
+  @UseGuards(PlanGuard)
   @HttpCode(HttpStatus.OK)
   @RequiresPermission(AdminPermission.HEADCOUNT_READ)
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
   emailExport(
     @Body() dto: ExportHeadcountEmailDto,
     @CurrentAdmin() admin: Admin,

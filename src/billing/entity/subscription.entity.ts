@@ -35,4 +35,23 @@ export class Subscription extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   currentPeriodEnd: Date | null;
+
+  // Set exactly once, by CheckoutService.applySubscriptionCanceled — see
+  // the migration comment for why this can't just be `updatedAt`.
+  @Column({ type: 'timestamptz', nullable: true })
+  canceledAt: Date | null;
+
+  // Set by CheckoutService.cancelSubscription() when a tenant self-cancels
+  // mid-period — SubscriptionLapseScheduler downgrades them once
+  // currentPeriodEnd passes rather than immediately, so they keep the
+  // access they already paid for.
+  @Column({ default: false })
+  cancelAtPeriodEnd: boolean;
+
+  // Set when this tenant's plan was comped by a parent tenant at branch
+  // invite time (BranchInviteService's sponsorPlan option) rather than
+  // paid for independently. Excluded from PlatformAnalyticsService's MRR
+  // calculation — no real money backs a sponsored subscription.
+  @Column({ nullable: true })
+  sponsoredByTenantId: string | null;
 }

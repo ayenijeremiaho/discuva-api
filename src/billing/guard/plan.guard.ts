@@ -35,11 +35,11 @@ export class PlanGuard implements CanActivate {
     if (!required) return true;
 
     const tenantId = this.cls.get('tenantId');
-    // No tenant context yet — TenantMiddleware isn't wired into the live
-    // pipeline (docs/MULTI_TENANT_MIGRATION.md §9 Phase 8). Every request
-    // today belongs to the single pre-SaaS deployment, which keeps full
-    // access to every module exactly as it does now — this guard only
-    // starts restricting anything once a real tenant resolves.
+    // TenantMiddleware (§9 Phase 8) sets this for every tenant-scoped
+    // request, so in practice this only stays unset on routes excluded
+    // from it entirely (platform-admin, signup, health) — none of which
+    // carry @RequiresPlan anyway. Kept as a defensive fallback rather than
+    // an assumed-active bypass.
     if (!tenantId) return true;
 
     const features = await this.cacheService.getOrSet(

@@ -14,7 +14,8 @@ export type CloudinaryFolder =
   | 'finance-requests'
   | 'finance-proofs'
   | 'incident-images'
-  | 'profile-pictures';
+  | 'profile-pictures'
+  | 'church-logos';
 
 export interface CloudinaryUploadResult {
   secureUrl: string;

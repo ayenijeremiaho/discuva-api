@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SmsService } from './sms.service';
 import { SMS_PROVIDER } from '../interface/sms-provider.interface';
 import { TERMII_MAX_RECIPIENTS_PER_REQUEST } from '../provider/termii-sms.provider';
+import { SmsCredentialResolverService } from '../../communication-provider/service/sms-credential-resolver.service';
 
 describe('SmsService', () => {
   let service: SmsService;
@@ -10,13 +11,26 @@ describe('SmsService', () => {
     getBalance: jest.fn(),
     getMessageHistory: jest.fn(),
   };
+  // No BYOK configured by default — matches the common case, exercised by
+  // most of these tests: resolveCredentials() -> undefined means "use the
+  // platform default", which is what routes every send through debitForSend().
+  const mockCredentialResolver = {
+    resolveCredentials: jest.fn().mockResolvedValue(undefined),
+    debitForSend: jest.fn().mockResolvedValue(undefined),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockCredentialResolver.resolveCredentials.mockResolvedValue(undefined);
+    mockCredentialResolver.debitForSend.mockResolvedValue(undefined);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SmsService,
         { provide: SMS_PROVIDER, useValue: mockProvider },
+        {
+          provide: SmsCredentialResolverService,
+          useValue: mockCredentialResolver,
+        },
       ],
     }).compile();
     service = module.get<SmsService>(SmsService);
@@ -69,8 +83,41 @@ describe('SmsService', () => {
       const results = await service.send(to, 'Hello');
 
       expect(mockProvider.send).toHaveBeenCalledTimes(1);
-      expect(mockProvider.send).toHaveBeenCalledWith(to, 'Hello', 'plain');
+      expect(mockProvider.send).toHaveBeenCalledWith(
+        to,
+        'Hello',
+        'plain',
+        undefined,
+      );
       expect(results).toHaveLength(1);
+    });
+
+    it('debits the wallet by segments × recipients when using the platform default', async () => {
+      mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
+      const to = ['+1', '+2', '+3'];
+
+      await service.send(to, 'a'.repeat(161)); // 161 plain chars -> 2 segments
+
+      expect(mockCredentialResolver.debitForSend).toHaveBeenCalledWith(
+        6, // 2 segments × 3 recipients
+        expect.any(String),
+      );
+    });
+
+    it("uses the tenant's own BYOK credentials and skips the wallet debit entirely when configured", async () => {
+      mockCredentialResolver.resolveCredentials.mockResolvedValue({
+        apiKey: 'tenant-key',
+        senderId: 'TenantChurch',
+      });
+      mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
+
+      await service.send(['+1'], 'Hello');
+
+      expect(mockProvider.send).toHaveBeenCalledWith(['+1'], 'Hello', 'plain', {
+        apiKey: 'tenant-key',
+        senderId: 'TenantChurch',
+      });
+      expect(mockCredentialResolver.debitForSend).not.toHaveBeenCalled();
     });
 
     it('splits recipients into multiple batches over the per-request limit', async () => {

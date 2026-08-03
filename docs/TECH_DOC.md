@@ -553,7 +553,7 @@ failure). Used for debugging delivery issues and compliance — answers "was thi
 | jobId          | string      | Bull queue job ID — correlate with Redis for in-flight inspection        |
 | errorMessage   | text        | SMTP/API error on permanent failure; null on success                     |
 | attemptsMade   | int         | Number of send attempts before terminal outcome (max 5)                  |
-| provider       | varchar     | `gmail` or `resend` — which email provider delivered (or attempted) the message |
+| provider       | varchar     | `gmail` \| `smtp` \| `resend` \| `sendgrid` \| `mailgun` — which email provider delivered (or attempted) the message |
 | createdAt      | timestamptz | When the terminal outcome was recorded                                   |
 
 **Written by:** `@OnQueueCompleted` (status = `sent`) and `@OnQueueFailed` (status = `failed`, only on the final
@@ -1004,20 +1004,6 @@ Link-based sermon archive entry — no file uploads. See Sermon Module for the "
 | mixlrUrl    | varchar \| null | At least one of youtubeUrl/mixlrUrl required                   |
 | series      | varchar \| null | Indexed; plain string tag, filterable, not its own entity       |
 | createdBy   | Admin \| null   | ManyToOne, SET NULL on delete                                   |
-
----
-
-### YoutubeIntegrationState
-
-Singleton-per-channel durable state for the YouTube WebSub integration (see YouTube Live Detection above) — tracks
-the subscription lease and idempotency key, separate from `ChurchSetting` since this isn't an admin-toggleable module.
-
-| Field                  | Type            | Notes                                            |
-|------------------------|-----------------|---------------------------------------------------|
-| id                     | UUID            | PK                                                 |
-| channelId              | varchar, unique | The configured `YOUTUBE_CHANNEL_ID`                |
-| lastAnnouncedVideoId   | varchar \| null | Idempotency key — prevents double-announcing the same livestream |
-| subscriptionExpiresAt  | timestamptz \| null | Estimated WebSub lease expiry (informational; re-subscription runs daily regardless) |
 
 ---
 
@@ -1570,9 +1556,13 @@ without admin involvement, subject to a rate limit.
 1. `POST /auth/forgot-password` — rate-limited (default: 3 attempts per hour, configurable via env). Generates a 6-digit
    OTP, stores an Argon2 hash in `password_reset_otps`, and emails the code. Always returns the same success message to
    avoid leaking account existence.
-2. `POST /auth/reset-password` — verifies the OTP against the hash, checks expiry (default: 15 min), marks the OTP as
-   used, updates the password, **invalidates any existing session**, and emails a confirmation. On success the user must
-   log in fresh.
+2. `POST /auth/reset-password` — rate-limited (5 attempts/min, same as `forgot-password`). Verifies the OTP against
+   the hash, checks expiry (default: 15 min for a self-requested reset — longer for a tenant-welcome OTP, see below),
+   marks the OTP as used, updates the password, **invalidates any existing session**, and emails a confirmation. On
+   success the user must log in fresh.
+
+This endpoint is also how a brand-new tenant's first admin sets their initial password — see "Tenant Welcome / Set
+Password Flow" below.
 
 ### Self-Service Email Change Flow
 
@@ -1589,6 +1579,25 @@ ownership from scratch.
 2. `POST /auth/email-change/confirm` — accepts `{ otp }`. Verifies the OTP and expiry (`OTP_TTL_SECONDS`) against the
    caller's own most recent unused record, re-checks that `newEmail` is still unclaimed (`409` on a race), marks the
    record used, updates `member.email` to the stored `newEmail`, and emails a confirmation to the new address.
+
+### Tenant Welcome / Set Password Flow
+
+When a tenant is provisioned by a platform admin (`POST /platform/tenants`), nobody is present to type in that
+tenant's first admin's password the way a self-serve `POST /signup` caller does. `TenantProvisioningService.provision()`
+branches on whether `adminPasswordHash` was supplied:
+
+- **Self-serve signup / branch invite** (caller supplied a password): unchanged — `changedPassword: true`, no email.
+- **Platform-admin-provisioned** (`adminPasswordHash` omitted): `seedTenantAdmin()` generates a random password via
+  `UtilityService.generateRandomPassword()` and hashes it — this password is never revealed to anyone, including the
+  platform admin who triggered provisioning. `changedPassword: false`. It also generates a 6-digit OTP and stores its
+  hash in `password_reset_otps` (the same table the forgot-password flow uses) with a 48-hour expiry
+  (`WELCOME_OTP_TTL_HOURS`) — deliberately longer than the 15-minute forgot-password OTP, since a new admin may not
+  check their email the same day. Once the tenant is active, `provision()` fire-and-forgets a warm welcome email
+  (`tenant-welcome` template) to the new admin containing the OTP and a `Faithapp-admin`
+  `/set-password?email=...&otp=...` link. That page pre-fills the code and calls the existing
+  `POST /auth/reset-password` — the same endpoint and verification logic the forgot-password flow uses, just reached
+  from a different starting point. The longer OTP window is offset by rate-limiting `POST /auth/reset-password`
+  itself (5 attempts/min).
 
 ### Role Elevation
 
@@ -2207,15 +2216,19 @@ line in `SmsModule`, with no other call site changes.
 **Provider abstraction (`src/sms/interface/sms-provider.interface.ts`):**
 
 ```ts
+type SmsProviderCredentials = Record<string, string>; // e.g. Termii's { apiKey, senderId }
+
 interface SmsProvider {
-  send(to: string[], message: string, encoding: 'plain' | 'unicode'): Promise<{ messageId: string; status: string }>;
-  getBalance(): Promise<{ balance: number; currency: string }>;
-  getMessageHistory(): Promise<SmsLogEntry[]>;
+  send(to: string[], message: string, encoding: 'plain' | 'unicode', credentials?: SmsProviderCredentials): Promise<{ messageId: string; status: string }>;
+  getBalance(credentials?: SmsProviderCredentials): Promise<{ balance: number; currency: string }>;
+  getMessageHistory(credentials?: SmsProviderCredentials): Promise<SmsLogEntry[]>;
 }
 ```
 
 Registered under the `SMS_PROVIDER` DI token in `SmsModule`; `TermiiSmsProvider` is the current concrete
-implementation.
+implementation. `credentials` omitted means "use this provider's own platform-default credentials"
+(`TERMII_API_KEY`/`TERMII_SENDER_ID` below) — present means a tenant's own BYOK credentials, resolved per call by
+`SmsCredentialResolverService` (see Communication Providers below).
 
 **`SmsService`:**
 
@@ -2224,12 +2237,15 @@ implementation.
   documents as forcing UCS-2/unicode encoding even though they're otherwise ordinary ASCII punctuation:
   `; ^ { } \ [ ~ ] | € ' "` — in which case it's encoded `unicode` (70 chars/segment). Returns
   `{ segments, encoding, characterCount }`.
-- `send(to, message)` — batches `to` into groups of 100 (Termii's per-request recipient cap,
-  `TERMII_MAX_RECIPIENTS_PER_REQUEST`) and calls the provider once per batch. A failed batch is logged and skipped;
-  it does not abort the remaining batches.
-- `getLogs()` — pure passthrough to `provider.getMessageHistory()`. No local persistence: every call to
-  `GET /admin/sms/logs` re-fetches Termii's own message-history endpoint live, so this is always current but also
-  always network-dependent (no caching/sync job exists).
+- `send(to, message)` — resolves the caller's tenant credentials once (`SmsCredentialResolverService.resolveCredentials()`),
+  then batches `to` into groups of 100 (Termii's per-request recipient cap, `TERMII_MAX_RECIPIENTS_PER_REQUEST`) and
+  calls the provider once per batch. **If the tenant has no active BYOK config**, each batch first debits
+  `segments × batch.length` credits from the tenant's `SmsWallet` (throws `403 INSUFFICIENT_SMS_BALANCE` if it can't
+  cover the batch) before calling the provider with the platform's own default credentials — so a tenant with BYOK
+  configured never touches the wallet at all, they're billed by their own vendor directly. A failed batch (send
+  failure, or insufficient balance) is logged and skipped; it does not abort the remaining batches.
+- `getLogs()`/`getBalance()` — pure passthrough to the provider, using the same resolved credentials as `send()` (a
+  tenant with their own Termii account sees their own balance/history, not the platform's).
 
 **Message history (`TermiiSmsProvider.getMessageHistory`):** calls Termii's `GET /api/sms/inbox?api_key=...`
 (undocumented pagination or date-filter params — it's a flat array of every message on the account) and maps its
@@ -2245,11 +2261,273 @@ A non-array response body is treated as empty rather than thrown.
 | POST   | `/admin/sms/segment-count` | SMS_READ   | Body `{ message }` — returns `{ segments, encoding, characterCount }` without sending anything |
 | GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]`, not paginated or filtered server-side (Termii's endpoint doesn't support either); the frontend paginates/filters the returned array client-side |
 
-**Env vars:** `TERMII_API_KEY`, `TERMII_SENDER_ID`, `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — see
-Environment Variables.
+**Env vars:** `TERMII_API_KEY`, `TERMII_SENDER_ID`, `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — the
+platform-default credentials used for any tenant without their own BYOK config. See Environment Variables.
+
+### Communication Providers (Tenant Self-Service BYOK)
+
+Tenant-facing counterpart to Platform Admin's read-only/catalog-only communication-provider surface — this is what
+lets a church admin actually set their own SMS/email provider credentials (`docs/MULTI_TENANT_MIGRATION.md`
+§Phase 6c's deferred write side, now built). `src/communication-provider/`.
+
+**Encryption (`EncryptionService`, `src/utility/service/encryption.service.ts`):** AES-256-GCM, keyed by
+`CREDENTIALS_ENCRYPTION_KEY` (hashed via SHA-256 to a real 32-byte key — same `min(32)`-chars convention as
+`JWT_SECRET`, no fixed hex/base64 format required on the operator). Each encrypted value is a self-contained
+`iv:authTag:ciphertext` string (all base64) — nothing else needs to be stored alongside it to decrypt later.
+`encryptFields`/`decryptFields` apply this to every value in a flat credentials object, keeping field names
+(`apiKey`, `senderId`, etc.) intact and legible in the stored JSONB while no individual value is ever plaintext.
+**Rotating this key makes every previously-encrypted credential unreadable — there is no re-encryption tooling.**
+
+**Credential resolution + wallet debit (`SmsCredentialResolverService`):** `resolveCredentials()` looks up the
+current tenant's active `TenantCommunicationProviderConfig` for the `sms` channel (cached 300s per
+`(tenantId, channel)`, invalidated immediately on write), decrypts it, and returns it — or `undefined` if the tenant
+has no BYOK config, meaning "use the platform default". `debitForSend(credits, reference)` atomically decrements
+`SmsWallet.balanceCredits` inside a row-locked (`pessimistic_write`) transaction and appends a
+`SmsWalletTransaction` audit row — throws `403 INSUFFICIENT_SMS_BALANCE` if the tenant's balance can't cover it.
+
+**Email credential resolution (`EmailCredentialResolverService`):** same shape as the SMS resolver, `email` channel
+— `resolveConfig()` returns `{ providerId, credentials, senderIdentity }` (or `undefined` for "use platform
+default"), cached under the same `communication-provider-config:{tenantId}:{channel}` key pattern (so
+`TenantCommunicationProviderService`'s existing invalidation already covers this without any changes). No wallet —
+email at church-scale volumes is a rounding error on any provider's free tier, so there's no cost to meter
+(`docs/MULTI_TENANT_MIGRATION.md` §4.12). `providerId` matters here in a way it doesn't for SMS: each provider has an
+incompatible credential shape (`{user, password[, host, port, secure]}` for `gmail`/`smtp`, `{apiKey}` for
+`resend`/`sendgrid`, `{apiKey, domain}` for `mailgun`), so `EmailProcessor` has to know *which* concrete
+`IEmailProvider` to hand the decrypted credentials to, not just that BYOK credentials exist. `senderIdentity` doubles
+as the email "from" address for a BYOK tenant (falls back to the platform's `EMAIL_FROM`/`EMAIL_USER` when unset).
+
+**Email providers (`src/utility/email-provider/`):** five catalog entries, one `IEmailProvider` class each —
+
+| `providerId` | Class              | Credential shape                          | Platform default env vars                                    |
+|--------------|---------------------|--------------------------------------------|----------------------------------------------------------------|
+| `gmail`      | `GmailProvider`     | `{user, password[, host, port, secure]}`  | `EMAIL_HOST`/`EMAIL_PORT`/`EMAIL_SECURE`/`EMAIL_SERVICE`/`EMAIL_USER`/`EMAIL_PASSWORD` |
+| `smtp`       | `SmtpProvider`      | `{host, port?, secure?, user, password}`  | none — BYOK-only, throws if called without credentials         |
+| `resend`     | `ResendProvider`    | `{apiKey}`                                | `RESEND_API_KEY`                                                |
+| `sendgrid`   | `SendGridProvider`  | `{apiKey}`                                | `SENDGRID_API_KEY`                                              |
+| `mailgun`    | `MailgunProvider`   | `{apiKey, domain}`                        | `MAILGUN_API_KEY`/`MAILGUN_DOMAIN`/`MAILGUN_BASE_URL`           |
+
+`gmail`'s BYOK credentials accept an optional `host`/`port`/`secure` override on top of `user`/`password` — this is
+what actually lets a tenant route mail through a different domain (Outlook/Office365, Zoho, their own company mail
+server) rather than being locked to the platform's own SMTP settings; omitting them reuses the platform's own
+host/port/secure/service with just a different mailbox. `smtp` is for a tenant who wants to fully bring their own
+server with no platform fallback at all. `sendgrid`/`mailgun` call their REST APIs directly via native `fetch` (no
+SDK dependency) — SendGrid with Bearer auth, Mailgun with HTTP Basic auth and a `FormData` body; both throw a clean
+`500` if neither BYOK nor platform-default credentials are configured, rather than silently no-op-ing.
+
+**Routes prefix:** `/communication-providers` (`AdminGuard`, tenant-scoped — deliberately not under `/platform`,
+which is entirely excluded from `TenantMiddleware`)
+
+| Method | Path                                | Permission                    | Description |
+|--------|-------------------------------------|--------------------------------|--------------|
+| GET    | `/communication-providers`          | COMMUNICATION_PROVIDERS_READ  | `?channel=sms\|email` (optional) — returns `{ catalog, ownConfigs }`; `ownConfigs` never includes credentials |
+| PUT    | `/communication-providers/:channel` | COMMUNICATION_PROVIDERS_WRITE | Body `{ providerId, senderIdentity?, credentials: Record<string,string> }` — upserts this tenant's config for that channel, encrypting `credentials` before storage |
+| PATCH  | `/communication-providers/:channel/:providerId` | COMMUNICATION_PROVIDERS_WRITE | Body `{ isActive }` — enable/disable an already-configured provider without touching its stored credentials |
+
+**Env vars:** `CREDENTIALS_ENCRYPTION_KEY` (required, `min(32)` chars) — see Environment Variables.
+
+**Email BYOK send path (`EmailProcessor.handleSend`, `src/utility/processor/email.processor.ts`):** unlike SMS,
+which resolves credentials synchronously within the original request, an email send runs inside a Bull job — tenant
+context isn't ambient there, so `handleSend` wraps its entire body in `runInTenantContext()` (previously only
+`onCompleted`/`onFailed` did this, purely to log) before calling `EmailCredentialResolverService.resolveConfig()`.
+Resolves to the concrete `IEmailProvider` matching the tenant's `providerId` if BYOK-configured (falling back to
+`GmailProvider` for `gmail` or any unrecognized id), otherwise the platform's constructor-injected
+`EMAIL_PROVIDER_TOKEN` default. Which provider actually handled a given send is
+carried back via Bull's job-return-value convention (`job.returnvalue`) so `onCompleted` logs the real provider used
+to `EmailLog.provider`, not just the platform default — that can differ per send once BYOK is in play.
 
 **Announcement integration:** see "Optional SMS delivery" under Announcements Module — sending SMS on an
 announcement requires the `SMS_SEND` permission (distinct from `SMS_READ`, which only allows checking balance/cost).
+
+### Tenant Profile Self-Service (`src/tenant/`)
+
+`GET /tenant/info` (`@Public()`, still goes through `TenantMiddleware`) returns branding for the current subdomain —
+unchanged. `PATCH /tenant/info` (`AdminGuard`, new `CHURCH_PROFILE_WRITE` permission) is the tenant self-service
+write side (`docs/MULTI_TENANT_MIGRATION.md` §Phase 6c's deferred item, now built) — lets a church admin edit their
+own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone` without going through platform
+support, which was previously the only way to change any of it (`PATCH /platform/tenants/:id`, platform-admin-only).
+Body (`UpdateTenantProfileDto`) is a partial — every field optional, only provided fields are applied
+(`Object.assign`). Deliberately excludes `subdomain`, `schemaName`, `clusterId`, and `isActive` — platform-controlled,
+not something a church admin can change about their own tenant.
+
+**Logo upload (`POST /tenant/logo`, `DELETE /tenant/logo`, both `CHURCH_PROFILE_WRITE`):** `logoUrl` on
+`PATCH /tenant/info` only ever accepted an already-hosted URL — these two routes are the actual upload path, mirroring
+`MemberController`'s `POST members/me/photo` exactly (multer `FileInterceptor`, 3MB limit, image-mimetype-only
+filter, `CloudinaryService.uploadBuffer` into the `church-logos` folder). `Tenant.logoPublicId` (new column) tracks
+the Cloudinary asset id so a replace or removal can delete the previous asset — deletion always happens *after* the
+new row is saved, so a failed re-upload never leaves a tenant with no logo. All three routes (`PATCH /tenant/info`,
+`POST /tenant/logo`, `DELETE /tenant/logo`) return the same profile shape.
+
+### Billing & Checkout (`src/billing/`)
+
+Tenant self-service surface for the plan/subscription/wallet infrastructure described in
+`docs/MULTI_TENANT_MIGRATION.md` §4.11/§9 Phase 3 — view current plan and SMS wallet balance, and initiate a
+Paystack or Flutterwave checkout to upgrade the plan or top up the wallet. `PlanGuard` itself doesn't depend on any
+of this working — a tenant can always be moved onto Pro manually via the platform-admin escape hatch
+(`PATCH /platform/tenants/:id/plan`); this module is what lets a tenant do it themselves, and pay for it.
+
+**Two payment providers, registered simultaneously** (`PaymentProviderRegistryService`) — unlike SMS/email, where
+one platform-default concrete class is chosen once at boot, both `PaystackPaymentProvider` and
+`FlutterwavePaymentProvider` are always available; a checkout call picks one by name (`?provider=paystack` or
+`flutterwave` in the request body), defaulting to `DEFAULT_PAYMENT_PROVIDER` when unspecified. Both are platform-wide
+credentials, not tenant BYOK — unlike SMS/email/YouTube, these charges pay the *platform* (plan upgrades, wallet
+top-ups), so the merchant keys have to be the platform's own, never a tenant's.
+
+**Currency unit mismatch between the two providers, handled internally:** Paystack's Initialize Transaction takes
+`amount` in the currency's smallest unit (kobo for NGN) — matches this codebase's existing `priceCents`/`amountCents`
+convention, no conversion needed. Flutterwave's Standard Payment takes the *major* unit (naira) — every amount is
+divided by 100 before being sent to Flutterwave and multiplied back where relevant. Both providers lazily create (and
+persist onto `Plan.billingProviderPriceId`) a matching provider-side plan/payment-plan object the first time a
+`planId` is checked out against, rather than requiring one to be pre-created out of band.
+
+**`BillingCheckoutSession`** (`public.billing_checkout_sessions`) is recorded at checkout-*initiation* time, primary-
+keyed by the provider's own reference (Paystack `reference` / Flutterwave `tx_ref`) — this is the only thing a
+webhook payload is ever trusted for identity/amount against. `CheckoutService.handleWebhookEvent()` looks up this
+row by the reference the webhook echoes back; a reference with no matching `pending` row (unknown, already
+processed, or forged) is a safe no-op, never an error that could imply something was charged. Two intents:
+`subscription` (activates a 30-day period — see `SUBSCRIPTION_PERIOD_DAYS` — on `Subscription`, not true
+provider-driven recurring-billing reconciliation, deferred pending live sandbox testing) and `wallet_topup` (credits
+`SmsWallet.balanceCredits`, `SmsWalletTransactionType.CREDIT`).
+
+**Self-serve cancel/downgrade (`CheckoutService.cancelSubscription`):** the tenant-facing counterpart to the
+platform-admin escape hatch. Still within a paid period (`currentPeriodEnd` in the future): sets
+`Subscription.cancelAtPeriodEnd = true` and the tenant keeps their plan's features until that date —
+`SubscriptionLapseScheduler` (below) completes the downgrade once it passes, rather than yanking access from a
+period they already paid for. No active period left: downgrades immediately. Best-effort calls the provider's own
+`cancelSubscription()` first (via `billingProviderSubscriptionId`), but a provider API failure never blocks the
+local downgrade — the tenant's stated intent to stop wins regardless. Throws `400` if the tenant has no paid
+subscription, or if the plan is sponsored by a parent tenant (see Branch Hierarchy below — a sponsored plan isn't
+the branch's own to cancel).
+
+**Failed-renewal safety net (`SubscriptionLapseScheduler`, daily 04:00, distributed-lock guarded):** finds every
+`ACTIVE` subscription whose `currentPeriodEnd` has passed with no new `charge.succeeded` webhook extending it.
+`cancelAtPeriodEnd = true` (a voluntary cancellation reaching its natural end) downgrades immediately, no drama. Any
+other lapse is treated as a failed renewal: flips `status` to `PAST_DUE` (the "queryable payment-status field" the
+frontend can key a banner off — `SubscriptionStatus.PAST_DUE` existed as an enum value long before anything actually
+set it), emails the tenant's oldest active admin, and gives a `GRACE_PERIOD_DAYS` (7) window before finally
+downgrading to Free. **Known limitation, documented rather than silently accepted:** this is only fully accurate
+once `Subscription.billingProviderSubscriptionId` capture is wired up (still deferred, pending live sandbox
+testing) — until then, a tenant whose provider auto-renewal webhook this codebase doesn't yet recognize will also
+pass through PAST_DUE and eventually lapse here, even if they're genuinely still paying. "Retrying" a failing card
+is the provider's own responsibility (both Paystack and Flutterwave retry several times before giving up, well
+within the 7-day window) — this scheduler only reflects local state, it never re-attempts a charge itself.
+
+**Branch plan sponsorship (`Subscription.sponsoredByTenantId`):** set when a branch's plan was comped by its parent
+at invite time rather than paid independently — see Branch Hierarchy below. Deliberately excluded from
+`PlatformAnalyticsService`'s MRR calculation (no real money backs it) and blocks the branch's own admin from
+self-cancelling it (that's the parent's call, via the invite/hierarchy relationship, not a `POST /billing/cancel`
+on a plan they don't actually pay for).
+
+**Refunds (platform-admin only, not tenant-facing):** `IPaymentProvider.refund(providerReference, amountCents?)` —
+Paystack refunds by transaction reference directly; Flutterwave requires resolving the reference to its own numeric
+transaction id first (`GET /transactions?tx_ref=`), handled internally. `CheckoutService.refundCheckoutSession()`
+only allows refunding a `completed` session, marks it `BillingCheckoutStatus.REFUNDED`, and **deliberately does
+not** automatically claw back spent SMS credits or downgrade a plan — reversing either requires a product decision
+(can a wallet go negative? does downgrading strand data created on the paid tier?) this pass doesn't take on. A
+platform admin issuing a refund is expected to also apply the tenant-facing consequence manually via the existing
+escape hatches if warranted.
+
+**Routes** (`AdminGuard`, tenant-scoped, unless noted):
+
+| Method | Path                              | Permission     | Description |
+|--------|-----------------------------------|----------------|--------------|
+| GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, walletBalanceCredits, cancelAtPeriodEnd, sponsoredByParent }` |
+| GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, priceCents, currency, features }]`), ordered by price ascending — the only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
+| POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to |
+| POST   | `/billing/checkout/wallet-topup`  | BILLING_WRITE  | Body `{ creditsAmount, provider?, successUrl, cancelUrl }` — `403`s if `SMS_CREDIT_PRICE_KOBO` isn't configured |
+| POST   | `/billing/cancel`                  | BILLING_WRITE  | No body — cancels immediately or at period end depending on `currentPeriodEnd`; `400` if no paid/cancelable subscription |
+| POST   | `/webhooks/billing`                | No guard — provider webhook | `@Public()`, dispatches to Paystack or Flutterwave by which of their two signature headers is present (`x-paystack-signature` HMAC-SHA512 vs `verif-hash` shared-secret string compare) |
+| GET    | `/platform/tenants/:id/billing-sessions` | Platform admin | This tenant's checkout session history, newest first |
+| POST   | `/platform/billing-sessions/:sessionId/refund` | Platform admin | Body `{ amountCents? }` — omitted means a full refund |
+
+**Env vars:** `PAYSTACK_SECRET_KEY`, `PAYSTACK_BASE_URL`, `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_SECRET_HASH`,
+`FLUTTERWAVE_BASE_URL`, `DEFAULT_PAYMENT_PROVIDER`, `SMS_CREDIT_PRICE_KOBO` — see Environment Variables.
+
+**Not built yet:** automatic capture of `Subscription.billingProviderSubscriptionId` from a provider's own
+subscription-lifecycle webhook (see the dunning limitation note above — this is the same underlying gap); true
+recurring-billing reconciliation driven by the provider's own renewal events rather than the flat 30-day period.
+Billing/plan settings UI in `Faithapp-admin` (`/billing`) is built — plan picker, wallet top-up, cancel/downgrade,
+past-due banner, plan-inheritance indicator for a sponsored branch.
+
+### Branch Hierarchy (`src/branch/`)
+
+Lets a parent church invite another church to join as a branch, and see a rollup of its branches' member
+count/attendance/giving — `docs/MULTI_TENANT_MIGRATION.md` §11's "local compute, pushed rollups" design, now built.
+A branch is a tenant like any other (own schema, own admin, own everything) — the only difference is
+`tenants.parent_tenant_id` is set.
+
+**Onboarding:** parent admin `POST /branch/invites` (email) generates a 64-char opaque token (not a JWT — has to be
+looked up by value later, not decoded), emails it, and records a `pending` row in `tenant_branch_invites`
+(`public` schema — has to live there since the invited church has no tenant of its own yet, the very thing the
+invite exists to create). `POST /signup` accepts an optional `branchInviteToken`; `SignupController` resolves and
+validates it (pending, unexpired) *before* provisioning, so a bad/expired code fails fast without creating a tenant
+row, and only marks the invite `accepted` *after* provisioning actually succeeds — a subdomain collision leaves the
+invite still usable for a retry rather than burning it.
+
+**Plan sponsorship (`sponsorPlan`, optional on `POST /branch/invites`):** the parent's stated intent, carried on
+the invite row and resolved at signup time — `BranchInviteService.resolveInvite()` returns a `sponsoredPlanId` when
+`sponsorPlan` was true *and* the parent currently has a paid (non-`free`) subscription; a parent on Free has nothing
+to sponsor onto, so this silently falls back to the normal independent Free-tier signup rather than erroring. When
+set, `TenantProvisioningService.provision()` creates the branch's `Subscription` directly on that plan with
+`sponsoredByTenantId` pointing at the parent — no checkout, no independent payment. See Billing & Checkout above for
+how sponsorship affects cancellation (blocked — it isn't the branch's plan to cancel) and MRR (excluded).
+
+**Rollup computation (`BranchRollupScheduler`, daily 03:00 church time, distributed-lock guarded):** iterates every
+active tenant — not just ones with a parent, since a branch invited later still needs history once linked — and for
+each one manually enters that tenant's CLS/transaction context (`BranchRollupService.computeAndUpsertOne`, same
+mechanism as `YoutubeLiveDetectionService`/`PlatformTenantService.impersonateTenant`) to compute:
+
+| Field | Definition |
+|-------|------------|
+| `memberCount` | Count of `members` with `status = ACTIVE` |
+| `attendanceRate` | Same PRESENT/LATE/ATTENDED_ONLINE-over-a-window definition `AttendanceService.getMyAttendanceSummary` already uses per-member (ON_LEAVE excluded from both numerator and denominator), aggregated church-wide over the last 30 days instead. `null` when there are zero attendance rows in the window, not `0` |
+| `totalGiving` | Sum of `tithe_records.amount` |
+
+The public `tenant_rollups` row is upserted *outside* the tenant-context block (same convention as
+`YoutubeLiveDetectionService`'s own public-row update) using the plain, non-tenant-scoped repository.
+
+**Parent-side overview (`GET /branch/overview`):** reads only `tenants WHERE parent_tenant_id = :self` joined
+against `tenant_rollups` — never reaches into a branch's schema or shard directly, no cross-tenant read path exists
+in this class at all to get wrong (§11.2).
+
+**Sharing consent (`tenants.share_data_with_parent`, `tenants.share_giving_with_parent`):** without this, a
+branch's rollup became visible to its parent the instant an invite was accepted, with no notice or opt-out.
+Self-service, settable only by the branch's own admin via `GET`/`PATCH /branch/sharing-consent` — never by the
+parent. Gates *visibility* at `getOverview()`, not *computation* — `computeAndUpsertOne` still computes and stores
+every branch's real numbers regardless (a branch's own `tenant_rollups` row is its own data, useful for its own
+future views too); consent only controls what's exposed to a specific parent. `shareDataWithParent` defaults `true`
+(being a branch structurally implies a reporting relationship — that's the point of the feature, and the admin who
+accepted the invite already knows a parent relationship is being formed) and gates every stat when `false` (all
+fields `null`, `sharingEnabled: false` in the response — the parent still sees the branch exists, since they
+invited it, just not its numbers). `shareGivingWithParent` defaults `false` **regardless of the main flag** — giving
+specifically stays opt-in even when general sharing is on, matching how sensitive individual church finances are
+treated everywhere else in this codebase (dedicated `TITHE_READ` permission, PII-scrubbing conventions).
+
+**Un-linking (either side can end the relationship):** `DELETE /branch/:branchTenantId` (parent-initiated — detach
+one of *this tenant's own* branches, `404` if not actually linked to them) and `POST /branch/leave`
+(branch-initiated — the current tenant leaves its own parent, `400` if it has none). Neither side is permanently
+locked into a relationship it no longer wants. Both revoke a sponsored plan on the way out
+(`revokeSponsorshipIfSponsoredBy`) if the departing tenant's `Subscription.sponsoredByTenantId` matches the
+relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
+make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched.
+
+**Routes** (`AdminGuard`, tenant-scoped):
+
+| Method | Path                        | Permission     | Description |
+|--------|-----------------------------|----------------|--------------|
+| POST   | `/branch/invites`           | BRANCH_WRITE   | Body `{ email, sponsorPlan? }` — creates a pending invite, emails the invite code. `sponsorPlan: true` means the branch is provisioned onto the parent's current plan at signup, at no independent cost, if the parent is on a paid plan |
+| GET    | `/branch/invites`           | BRANCH_READ    | This tenant's own sent invites |
+| DELETE | `/branch/invites/:id`       | BRANCH_WRITE   | Revokes a `pending` invite — `400` if it's already accepted/revoked |
+| GET    | `/branch/overview`          | BRANCH_READ    | This tenant's branches, each joined with its latest rollup, filtered by each branch's own sharing consent |
+| GET    | `/branch/sharing-consent`   | BRANCH_READ    | This tenant's own `{ shareDataWithParent, shareGivingWithParent, parentTenantId, parentTenantName }` — the latter two are null when this tenant isn't a branch of anything, and are the only way for the frontend to know whether "Leave Parent" is relevant to show at all |
+| PATCH  | `/branch/sharing-consent`   | BRANCH_WRITE   | Body is a partial of `{ shareDataWithParent, shareGivingWithParent }` — only provided fields are applied; `parentTenantId`/`parentTenantName` are read-only and always echoed back |
+| DELETE | `/branch/:branchTenantId`   | BRANCH_WRITE   | Parent detaches one of its own branches — `404` if not linked to this tenant |
+| POST   | `/branch/leave`             | BRANCH_WRITE   | This tenant leaves its own parent — `400` if it has none |
+
+Branch hierarchy UI is built in `Faithapp-admin` (`/branch-hierarchy`) — invite-sending, branches overview with
+unlink, and a "this church" section showing sharing consent toggles + leave-parent, only shown when
+`parentTenantId` is actually set (see `GET /branch/sharing-consent` above). Multi-level hierarchy (branch-of-a-branch)
+is representable with zero further schema change (`parent_tenant_id` is self-referencing) but only flat parent → branch
+is exercised by anything built so far.
 
 ### Utility Module
 
@@ -2257,7 +2535,7 @@ Shared infrastructure used across the entire application.
 
 **Bull Board (queue dashboard):** Mounted at `GET /queues` on the NestJS HTTP server. Provides a standalone web UI showing all six queues (`email`, `push-notifications`, `follow-up`, `tithe`, `finance-reconciliation`, `audit-log`) with pending/active/completed/failed job counts and per-job retry controls. Protected by HTTP Basic Auth (`BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` env vars). If either env var is absent the dashboard is not mounted. Registered before Helmet so the `/queues` path is exempt from the strict Content Security Policy.
 
-**Email queue (`EmailQueueService` + `EmailProcessor`):** All outbound email goes through a Bull queue backed by Redis. `EmailQueueService.queueEmailWithTemplate()` compiles the HTML template using **Handlebars** and adds a job to the `email` queue. The active email provider is resolved at startup from `EMAIL_PROVIDER` and injected via `EMAIL_PROVIDER_TOKEN`. Two providers are available: `GmailProvider` (Nodemailer/SMTP) and `ResendProvider` (Resend SDK). Bull handles retries automatically — 5 attempts, 5-second fixed backoff. On success or permanent failure, a row is written to `email_logs` with the `provider` field set to whichever provider processed the job.
+**Email queue (`EmailQueueService` + `EmailProcessor`):** All outbound email goes through a Bull queue backed by Redis. `EmailQueueService.queueEmailWithTemplate()` compiles the HTML template using **Handlebars** and adds a job to the `email` queue. The platform-wide default email provider is resolved at startup from `EMAIL_PROVIDER` and injected via `EMAIL_PROVIDER_TOKEN`; per-send, `EmailProcessor` may instead resolve a tenant's own BYOK provider — see "Email BYOK send path" under Communication Providers above. Five providers are available — see the table under Communication Providers above — all accepting optional per-call BYOK credentials. Bull handles retries automatically — 5 attempts, 5-second fixed backoff. On success or permanent failure, a row is written to `email_logs` with the `provider` field set to whichever provider actually processed that specific job.
 
 **Email category gating:** `queueEmail*` methods accept an optional `category?: EmailCategory` argument. If no category is supplied the email always sends (used for security-critical auth emails: OTP, password reset, account locked, etc.). Optional categories are gated by boolean config flags (`EMAIL_*_ENABLED`); setting a flag to `false` suppresses that category without touching any call sites. Current categories:
 
@@ -2824,51 +3102,98 @@ module's existing `@RequiresModule('sermons')` check, since a note is the reques
 
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
-Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when the configured YouTube
-channel goes live and calls `AnnouncementService.createSystemAnnouncement()` automatically, no admin click needed.
-Entirely optional and env-var-gated: with `YOUTUBE_CHANNEL_ID`/`YOUTUBE_WEBSUB_CALLBACK_URL`/`YOUTUBE_WEBSUB_SECRET`
-unset, `YoutubeSubscriptionService.isConfigured()` is false, `subscribe()` skips (logged at debug level), and the
-webhook controller rejects everything it receives — nothing breaks for churches that don't set these vars, they just
-keep using the manual trigger. All three are required together, not just the first two: without a secret configured,
-`subscribe()` never registers a live WebSub subscription in the first place, so there's nothing legitimate for the
-callback to receive.
+Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when a tenant's configured
+YouTube channel goes live and calls `AnnouncementService.createSystemAnnouncement()` automatically, no admin click
+needed. Per-tenant BYOK, redesigned from an earlier single-global-channel version (`docs/MULTI_TENANT_MIGRATION.md`
+§9 Phase 8b) — every tenant sets their own channel (and optionally their own Data API key) via
+`PUT /v1/youtube-integration`; there is no platform-wide default channel.
+
+**Entity — `TenantYoutubeIntegration` (`tenant_youtube_integrations`, `public` schema, not tenant-schema):**
+
+| Field                    | Type                 | Notes |
+|--------------------------|----------------------|-------|
+| id                       | UUID                 | PK |
+| tenantId                 | UUID, unique         | FK → `tenants.id`, `CASCADE` — one integration per tenant |
+| channelId                | varchar, unique      | The tenant's YouTube channel id |
+| apiKeyEncrypted          | varchar \| null, `select: false` | AES-256-GCM (`EncryptionService`); `null` means "use the platform's `YOUTUBE_API_KEY`" |
+| lastAnnouncedVideoId     | varchar \| null      | Idempotency key — prevents double-announcing the same livestream |
+| subscriptionExpiresAt    | timestamptz \| null  | Estimated WebSub lease expiry (informational; re-subscription runs daily regardless) |
+| isActive                 | boolean, default true | Toggled via `PATCH /v1/youtube-integration` — subscribes/unsubscribes the WebSub lease accordingly |
+
+**Lives in `public`, not the tenant schema, on purpose:** a WebSub notification arrives from Google's hub with no
+`Host` header or any other tenant-identifying context — only a channel id inside the Atom XML payload. "Which tenant
+owns this channel" has to be answerable *before* the tenant is known, which per-tenant-schema data structurally can't
+support (same reasoning as `TenantCommunicationProviderConfig`, `docs/MULTI_TENANT_MIGRATION.md` §4.12).
+`channel_id` is `UNIQUE` across the whole table, which is exactly what makes the webhook's tenant lookup a single
+indexed query. Consequently `v1/integrations/youtube/callback` is excluded from `TenantMiddleware` (§4.3) — it's
+never resolved against a `Host` header, and tenant context for it is entered manually (below).
+
+**Platform-wide pieces (env vars, unchanged by the per-tenant redesign):** `YOUTUBE_WEBSUB_CALLBACK_URL` and
+`YOUTUBE_WEBSUB_SECRET` — the callback URL is one physical endpoint regardless of how many tenants use it, and the
+HMAC secret authenticates the hub itself, not any particular tenant. `YOUTUBE_API_KEY` is a platform-wide *fallback*
+only, used when a tenant configured a channel but not their own key. With `YOUTUBE_WEBSUB_CALLBACK_URL`/
+`YOUTUBE_WEBSUB_SECRET` unset, `YoutubeSubscriptionService.isWebSubConfigured()` is false and `subscribe()`/
+`unsubscribe()` are no-ops (logged at debug level) — nothing breaks for a deployment that hasn't set these, tenants
+just fall back to the Sermon Module's manual "Announce Live" trigger.
+
+**Tenant self-service routes** (`AdminGuard`, tenant-scoped — single resource per tenant, no `:id`/`:channel` param):
+
+| Method | Path                       | Permission                 | Description |
+|--------|-----------------------------|-----------------------------|--------------|
+| GET    | `/youtube-integration`      | YOUTUBE_INTEGRATION_READ   | Returns `{ channelId, hasOwnApiKey, isActive, subscriptionExpiresAt } \| null` — never the key itself |
+| PUT    | `/youtube-integration`      | YOUTUBE_INTEGRATION_WRITE  | Body `{ channelId, apiKey? }` — upserts this tenant's config, encrypting `apiKey` if given. Rejects (`409`) a `channelId` already owned by a different tenant. Switching channels unsubscribes the old one before subscribing the new one |
+| PATCH  | `/youtube-integration`      | YOUTUBE_INTEGRATION_WRITE  | Body `{ isActive }` — enable/disable without touching the stored channel/key; subscribes on enable, unsubscribes on disable |
 
 **WebSub (PubSubHubbub) flow:**
-1. On boot (`OnModuleInit`) and daily at 2am church time (`YoutubeSubscriptionScheduler`, distributed-lock guarded the
-   same way `FollowUpScheduler` is), `YoutubeSubscriptionService.subscribe()` POSTs a subscribe request to Google's
-   public hub (`https://pubsubhubbub.appspot.com/subscribe`) for the channel's video-feed topic, including
-   `hub.secret` (`YOUTUBE_WEBSUB_SECRET`) — the hub then HMAC-SHA1-signs every notification it sends with that secret.
-   The daily re-subscription exists because WebSub leases expire (~5-10 days) — re-subscribing daily keeps it
-   comfortably ahead of expiry regardless of what the hub actually grants.
-2. `GET integrations/youtube/callback` handles the hub's verification handshake — echoes back `hub.challenge` verbatim
-   (required by the WebSub spec) for `subscribe`/`unsubscribe` modes, `404` otherwise.
+1. Whenever a tenant's integration is created/enabled (`TenantYoutubeIntegrationService.upsert()`/`setActive(true)`),
+   `YoutubeSubscriptionService.subscribe(channelId)` POSTs a subscribe request to Google's public hub
+   (`https://pubsubhubbub.appspot.com/subscribe`) for that channel's video-feed topic, including `hub.secret`
+   (`YOUTUBE_WEBSUB_SECRET`) — the hub then HMAC-SHA1-signs every notification it sends with that secret. Daily at
+   2am church time, `YoutubeSubscriptionScheduler` (distributed-lock guarded the same way `FollowUpScheduler` is)
+   calls `renewAllActive()`, which re-subscribes every `isActive` tenant integration — WebSub leases expire
+   (~5-10 days), so daily renewal keeps every tenant comfortably ahead of expiry regardless of what the hub grants.
+2. `GET integrations/youtube/callback` handles the hub's verification handshake — echoes back `hub.challenge`
+   verbatim (required by the WebSub spec) for `subscribe`/`unsubscribe` modes, `404` otherwise.
 3. `POST integrations/youtube/callback` receives the actual "video published" notification — an Atom XML body
-   containing a `<yt:videoId>`. Before doing anything else, `YoutubeWebhookController` verifies the `X-Hub-Signature`
-   header (`sha1=<hex>`) against an HMAC-SHA1 of the raw body computed with `YOUTUBE_WEBSUB_SECRET`, using
-   `timingSafeEqual` — without this, the public callback URL would accept a forged POST with an arbitrary video id
-   from anyone who discovers it, triggering a fake "we're live" push to every member. A missing/mismatched signature,
-   or no secret configured at all, is dropped silently. The videoId is extracted via a small regex (a full XML parser
-   dependency wasn't worth adding for this one fixed field). Always acks fast (`204`, no body) regardless of what
-   happens next — `YoutubeLiveDetectionService.handleNotification()` runs without being awaited by the response.
+   containing both a `<yt:videoId>` and a `<yt:channelId>`. Before doing anything else, `YoutubeWebhookController`
+   verifies the `X-Hub-Signature` header (`sha1=<hex>`) against an HMAC-SHA1 of the raw body computed with
+   `YOUTUBE_WEBSUB_SECRET`, using `timingSafeEqual` — without this, the public callback URL would accept a forged
+   POST with an arbitrary video/channel id from anyone who discovers it, triggering a fake "we're live" push to a
+   tenant's members. A missing/mismatched signature, or no secret configured at all, is dropped silently. Both ids
+   are extracted via small regexes (a full XML parser dependency wasn't worth adding for two fixed fields). Always
+   acks fast (`204`, no body) regardless of what happens next —
+   `YoutubeLiveDetectionService.handleNotification(videoId, channelId)` runs without being awaited by the response.
 4. `YoutubeLiveDetectionService` takes a short Redis lock (`lock:youtube-notification:{videoId}`, 60s TTL) before
    doing anything else — WebSub hubs routinely redeliver the same notification, and without this, two concurrent
    deliveries could both pass the idempotency check below before either write lands, double-announcing the same
-   stream. It then checks `YoutubeIntegrationState.lastAnnouncedVideoId` for this channel (the actual idempotency
-   check — the same video can generate multiple WebSub pings across retries/redeliveries). If new, calls the YouTube
-   Data API (`videos.list?part=snippet`) to confirm `snippet.liveBroadcastContent === 'live'` — the WebSub ping alone
-   fires for regular uploads too, not just livestreams — **and** that `snippet.channelId` matches the configured
-   `YOUTUBE_CHANNEL_ID`, since the notification body only carries a video id, not which channel it came from. Only
-   then does it call `createSystemAnnouncement()` and persist the video id as the new `lastAnnouncedVideoId`.
+   stream. It looks up the `TenantYoutubeIntegration` owning the notified `channelId` (`isActive: true`) — an
+   unrecognized or inactive channel is dropped silently, no error. It then checks that integration's
+   `lastAnnouncedVideoId` (the actual idempotency check — the same video can generate multiple WebSub pings across
+   retries/redeliveries). If new, resolves the API key to use (the tenant's own decrypted key if configured,
+   otherwise the platform's `YOUTUBE_API_KEY`) and calls the YouTube Data API (`videos.list?part=snippet`) to confirm
+   `snippet.liveBroadcastContent === 'live'` — the WebSub ping alone fires for regular uploads too, not just
+   livestreams — **and** that `snippet.channelId` matches the notified channel id, since a forged/mismatched payload
+   could otherwise attribute someone else's video to this tenant's announcement. Only then does it look up the owning
+   `Tenant`, manually enter that tenant's CLS/transaction context (`cls.runWith({tenantId, schemaName}, () =>
+   txHost.withTransaction(async () => { SET LOCAL search_path; ... }))` — the same pattern
+   `PlatformTenantService.impersonateTenant` uses; a webhook has no request-scoped `TenantMiddleware` run to inherit
+   tenant context from, so it has to open one itself), call `createSystemAnnouncement()` inside it, and persist the
+   video id as the new `lastAnnouncedVideoId` on the (public-schema) integration row afterward.
 5. All external-call failures (hub POST, Data API call) are caught and logged as warnings, never thrown — a webhook
    handler that 500s risks the hub retrying or giving up on the subscription entirely.
 
-**Mixlr is not automated** — no confirmed public webhook/API was found; the manual "Announce Live" trigger remains
-the only path for Mixlr-only streams.
+**Mixlr is not automated** — it was never tightly coupled to begin with (a per-sermon manual URL field, already
+tenant-scoped) and no confirmed public webhook/API was found; the manual "Announce Live" trigger remains the only
+path for Mixlr-only streams. Facebook Live is not a built feature at all.
 
 **Routes:** `GET integrations/youtube/callback` — no guard, verified implicitly by the WebSub handshake itself
 (same trust model as the existing `POST webhooks/virtual-account-credit`). `POST integrations/youtube/callback` — no
 NestJS guard either, but is signature-verified in the controller itself as described above (a `Public()`-style route
-whose actual authentication is the HMAC check, not a bearer token).
+whose actual authentication is the HMAC check, not a bearer token). Both are excluded from `TenantMiddleware` (§4.3)
+since the hub never sends a `Host` header identifying a tenant.
+
+**Env vars:** `YOUTUBE_API_KEY` (optional, platform-wide fallback), `YOUTUBE_WEBSUB_CALLBACK_URL`,
+`YOUTUBE_WEBSUB_SECRET` — see Environment Variables.
 
 ### ServiceHeadcount Module
 
@@ -3433,6 +3758,18 @@ decorative: `JwtAuthGuard` is a global `APP_GUARD` that runs on every route rega
 applied, and a platform admin never has a tenant JWT to satisfy it. `@Public()` skips only that global guard;
 `PlatformAdminGuard` still independently protects every route except login.
 
+**Permissions (`PlatformAdminPermission`, `src/platform-admin/enum/`).** Every platform admin used to be binary —
+`isActive: true` meant full access to every `/platform/*` route, `false` meant none. `PlatformAdminRole` (mirrors
+tenant-side `AdminRole` exactly: `name`, `description`, `permissions: string[]`) now sits between them, and
+`PlatformAdminGuard` does double duty as both the JWT-validating guard *and* the permission-checking guard (unlike
+tenant-side, where a global `JwtAuthGuard` + a separate per-route `AdminGuard` split that job — `/platform/*` has no
+global-guard equivalent to lean on, since every platform controller applies `PlatformAdminGuard` explicitly). A
+platform admin's permissions are loaded once, at JWT-validation time (`PlatformAdminAuthService.validateById`
+eager-loads the `platformAdminRole` relation), not a second DB round-trip per request. `@RequiresPlatformPermission(...)`
+mirrors tenant-side `@RequiresPermission(...)` and is applied per-route (or once at class level when every route in
+a controller needs the same permission, e.g. `PlatformAnalyticsController`). Twelve permissions across six groups —
+see `PlatformAdminPermissionGroups` for the exact list, used to render a grouped permission picker.
+
 **Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant via
 schema-qualified reads — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
 that scales to thousands of tenants without revisiting. **`impersonate`** issues a short-lived, access-token-only
@@ -3441,13 +3778,19 @@ the code comment on `PlatformTenantService.impersonateTenant` for why. `TenantMi
 request pipeline (§5 Multi-Tenant Request Scoping below), so that token routes to the correct tenant schema like
 any other tenant-facing request.
 
+Every method that hands a tenant back to a platform-admin caller (`listTenants`, `createTenant`, `updateTenant`,
+`suspendTenant`) goes through one private `toHealthShape()` builder — previously `createTenant`/`updateTenant`/
+`suspendTenant` returned the raw `Tenant` entity via `tenantRepo.save()`, leaking internal columns
+(`schemaName`, `clusterId`, `parentTenantId`, `shareDataWithParent`/`shareGivingWithParent`) that have no business
+being visible outside this service. All four routes now return the identical curated shape.
+
 | Method | Route | Description |
 |--------|-------|-------------|
 | POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken }`. |
-| GET | `/platform/tenants` | List all tenants with plan/subscription status and live member/event counts. |
-| POST | `/platform/tenants` | Provision a new tenant — same `TenantProvisioningService` as self-serve `/signup`. |
-| PATCH | `/platform/tenants/:id` | Update name, logo, currency, timezone. |
-| PATCH | `/platform/tenants/:id/suspend` | `{ suspend?: boolean }`, default `true` — same route handles reactivation via `{ suspend: false }`. |
+| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), plan/subscription status, and live member/event counts. |
+| POST | `/platform/tenants` | Provision a new tenant — same `TenantProvisioningService` as self-serve `/signup`. Body has no `adminPassword` field (unlike `/signup`'s `SignupDto`) — the new admin gets a welcome email with a set-password link instead (see "Tenant Welcome / Set Password Flow" above). Returns the same shape as `GET /platform/tenants`' rows. |
+| PATCH | `/platform/tenants/:id` | Update name, logo, tagline, address, support email, currency, timezone. Returns the same shape as `GET /platform/tenants`' rows. |
+| PATCH | `/platform/tenants/:id/suspend` | `{ suspend?: boolean }`, default `true` — same route handles reactivation via `{ suspend: false }`. Returns the same shape as `GET /platform/tenants`' rows. |
 | PATCH | `/platform/tenants/:id/plan` | Manually change a tenant's plan — comps, support fixes. Invalidates `PlanGuard`'s cached feature list. |
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
 | GET | `/platform/plans` | List plan tiers. |
@@ -3457,8 +3800,101 @@ any other tenant-facing request.
 | GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
 | POST | `/platform/communication-providers` | Register a new provider — `{ id, channel, name }`. |
 | GET | `/platform/tenants/:id/communication-providers` | A tenant's active provider per channel + SMS wallet balance — never the raw encrypted credentials. |
+| GET | `/platform/analytics/overview`\|`/growth`\|`/revenue`\|`/engagement`\|`/churn`\|`/adoption` | Cross-tenant business metrics — see "Platform Analytics" below. |
+| GET | `/platform/tenants/:id/billing-sessions` | This tenant's checkout session history, newest first. |
+| POST | `/platform/billing-sessions/:sessionId/refund` | Refund a completed checkout via the original provider — see Billing & Checkout above. |
+| GET | `/platform/admin-roles` | List platform admin roles. |
+| GET | `/platform/admin-roles/:id` | Get one platform admin role. |
+| POST | `/platform/admin-roles` | Create a role — `{ name, description?, permissions: PlatformAdminPermission[] }`. |
+| PATCH | `/platform/admin-roles/:id` | Edit a role's name/description/permissions. |
+| DELETE | `/platform/admin-roles/:id` | Delete a role — `400` if any active platform admin is still assigned to it. |
+| GET | `/platform/admins` | List platform admins with their role. |
+| GET | `/platform/admins/me` | The calling platform admin's own record + permissions — no permission requirement beyond a valid token. |
+| GET | `/platform/admins/:id` | Get one platform admin. |
+| POST | `/platform/admins` | Onboard a new platform admin — `{ email, platformAdminRoleId }`. No password field — the new admin gets a welcome email with a set-password link instead (see below). |
+| PATCH | `/platform/admins/:id` | Change role and/or `isActive`. `403`s if `id` is the caller's own — see below. |
+| POST | `/platform/auth/forgot-password` | Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. |
+| POST | `/platform/auth/reset-password` | Public, rate-limited (5/min). Verify the OTP and set a new password — also how a newly-onboarded admin sets their initial one. |
 
 **Routes prefix:** `/platform`
+
+#### Platform Admin Management (`/platform/admins`, `/platform/admin-roles`)
+
+Onboarding/permission management for platform admins themselves — previously the *only* way to create one was a
+hand-written SQL insert (there was nothing else to onboard multiple platform admins with, and no way to scope any
+of them below full access). `PlatformAdminManagementService` (users) and `PlatformAdminRoleService` (roles) mirror
+`AdminService`/`AdminRoleService`'s tenant-side shape closely, with two differences: no audit-log tie-in (tenant-side
+logs into a tenant-scoped `audit_logs` table this control-plane has no equivalent of, and platform-admin actions
+aren't audited anywhere else in this codebase either), and platform admins have no underlying `Member` — creating
+one is a single step (`email` + `platformAdminRoleId`), not tenant-side's separate "create a member" → "grant them
+admin" two-step flow.
+
+`POST /platform/admins` takes no password — the onboarding admin isn't the one logging in as the new admin, so
+there's nobody present to choose one. `PlatformAdminManagementService.create()` generates a random password
+internally (never revealed to anyone, `changedPassword: false`), a 6-digit OTP stored in
+`platform_admin_password_reset_otps` (48-hour expiry — same tradeoff as the tenant-welcome flow, offset by rate-
+limiting `POST /platform/auth/reset-password`), and emails the new admin a `platform-admin-welcome` template with a
+`{PLATFORM_LOGIN_URL}/set-password?email=...&otp=...` link — the discovery-hub-platform equivalent of the tenant
+onboarding flow above, down to reusing the same OTP-verify-and-set-password shape
+(`PlatformAdminAuthService.forgotPassword`/`resetPassword`, its own OTP table rather than tenant-side's
+`password_reset_otps` since `PlatformAdmin` and `Member` are deliberately disjoint identity systems). Login also now
+returns `requiresPasswordChange: !admin.changedPassword`, mirroring the tenant-side login response shape, though
+nothing currently enforces it in the frontend — a random, unrevealed password can't be logged in with in practice,
+so the flag is informational/defense-in-depth, not an enforced gate.
+
+`PATCH /platform/admins/:id` blocks an admin from modifying their own record entirely (role *or* `isActive`) —
+stricter than tenant-side, whose `AdminService.update()` does the same self-block but `revoke()` is a separate,
+unguarded action. Combined here into one endpoint, so the self-block covers both. `PlatformAdminRoleService.delete()`
+mirrors tenant-side's exact business rule: blocked with `400` while any *active* admin is still assigned that role.
+
+**Bootstrap script — the first platform admin.** Mirrors `src/seed.ts`/`DefaultAdminSeed` exactly:
+`DefaultPlatformAdminSeed` (`src/platform-admin/seed/`), run via `npm run seed:platform-admin`
+(`node dist/seed-platform-admin` in prod), reads `DEFAULT_PLATFORM_ADMIN_EMAIL`/`DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH`
+(generate the hash with the same `npm run hash:password` — already fully generic, no platform-specific variant
+needed), skips if either is unset or if any `platform_admins` row already exists (idempotent — safe to leave in a
+deploy pipeline), and seeds the admin with a find-or-create `SuperAdmin` role holding every `PlatformAdminPermission`.
+The `AddPlatformAdminRoles` migration also seeds this same `SuperAdmin` role directly and backfills any
+pre-migration `platform_admins` row onto it — the seed script's `findOrCreateSuperAdmin()` is what a fresh
+environment without that migration history hits.
+
+#### Platform Analytics (`GET /platform/analytics/*`)
+
+Cross-tenant business metrics for whoever operates the platform itself — "how is the whole business doing," not any
+one church's data. `PlatformAnalyticsService` (`src/platform-admin/service/platform-analytics.service.ts`) is
+**deliberately every method a live query**, no new aggregation table or cron: `tenant_rollups`,
+`billing_checkout_sessions`, and `subscriptions` are already small (one row per tenant, or one row per checkout) at
+any realistic tenant count, so a `SUM`/`GROUP BY` at request time is cheap. Revisit only if tenant count genuinely
+grows large enough to matter.
+
+**Trend bucketing (`growth`/`revenue`/`churn`):** raw timestamped rows are fetched within a bounded window
+(`?months=`, default 12, max 36) and bucketed in-memory by `?period=daily|weekly|monthly` (default `monthly`) —
+same in-JS-bucketing convention `ServiceHeadcountService`'s own trend endpoint already established, not a SQL
+`date_trunc`. Weekly buckets label by the Sunday of that week; monthly buckets label `YYYY-MM`.
+
+**What's a real trend vs. a snapshot:** tenant signups (`growth`), revenue (`revenue`), and cancellations (`churn`)
+are genuine time series — `tenants.createdAt`, `billing_checkout_sessions.completedAt`, and
+`subscriptions.canceledAt` (added this pass — see below) are all real timestamps. Active-vs-suspended tenant counts
+are **not** a trend — `tenants.isActive` is a plain boolean with no historical event log behind it, so `growth`
+reports it as a current snapshot (`currentActiveTenants`/`currentSuspendedTenants`), not a fabricated time series.
+
+**`Subscription.canceledAt` (new column, `src/migrations/1791072000000-AddSubscriptionCanceledAt.ts`):** set exactly
+once, by `CheckoutService.applySubscriptionCanceled()`. Added specifically because `updatedAt` can't be trusted for
+"when this subscription was canceled" — it changes on *any* field update, not just a cancellation.
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/platform/analytics/overview` | `{ totalTenants, activeTenants, suspendedTenants, totalMembersPlatformWide, subscriptionsByPlan[], mrrCents }` — headline numbers |
+| GET | `/platform/analytics/growth` | `?period=&months=` — `{ period, signups: [{periodLabel, count}], currentActiveTenants, currentSuspendedTenants }` |
+| GET | `/platform/analytics/revenue` | `?period=&months=` — `{ period, mrrCents, revenueByProvider: [{provider, totalCents}], trend: [{periodLabel, subscriptionRevenueCents, walletTopupRevenueCents, totalCents}] }` — only `completed` `BillingCheckoutSession` rows count |
+| GET | `/platform/analytics/engagement` | `{ totalMembers, averageAttendanceRate, totalGiving, tenantsWithRollup, tenantsMissingRollup, oldestComputedAt, newestComputedAt }` — sourced entirely from `tenant_rollups` (§Branch Hierarchy); `oldest`/`newestComputedAt` signal staleness since the rollup cron runs once daily |
+| GET | `/platform/analytics/churn` | `?period=&months=` — `{ period, currentlyCanceled, currentlyPastDue, trend: [{periodLabel, canceledCount}] }` |
+| GET | `/platform/analytics/adoption` | `{ smsAdoption: {byokCount, totalTenants, ratePercent}, emailAdoption: {...}, planDistribution: [{planId, planName, count}] }` — BYOK adoption counts distinct tenants with an active `TenantCommunicationProviderConfig` per channel |
+
+**MRR calculation (`overview` and `revenue`):** `SUM(plan.priceCents)` over every `ACTIVE` subscription, joined to its
+plan — a tenant on the free plan contributes `0` naturally, no special-casing needed. This is *current* recurring
+revenue (what's active right now), distinct from `revenue`'s `trend`, which is realized revenue from completed
+checkouts over time — the two can disagree (e.g. a subscription active today whose original checkout completed
+outside the requested `?months=` window).
 
 ---
 
@@ -4148,10 +4584,12 @@ allowed to finish and NestJS lifecycle hooks (e.g. closing the DB pool, Redis, B
 exits. Relevant when the orchestrator sends `SIGTERM` on deploy/scale-down — without this, connections would be cut
 mid-request.
 
-**Provider webhooks bypass the global JWT guard:** `POST /webhooks/virtual-account-credit` and the YouTube WebSub
-callbacks (`GET`/`POST /integrations/youtube/callback`) are decorated `@Public()`. Providers never send a bearer
-token, so the global `JwtAuthGuard` would 401 them before their own signature verification (HMAC / `X-Hub-Signature`)
-ever runs. `@Public()` only opts a route out of JWT auth — it does not skip the handler's own signature check.
+**Provider webhooks bypass the global JWT guard:** `POST /webhooks/virtual-account-credit`, the YouTube WebSub
+callbacks (`GET`/`POST /integrations/youtube/callback`), and `POST /webhooks/billing` are decorated `@Public()`.
+Providers never send a bearer token, so the global `JwtAuthGuard` would 401 them before their own signature
+verification (HMAC / `X-Hub-Signature` / `x-paystack-signature` / `verif-hash`) ever runs. `@Public()` only opts a
+route out of JWT auth — it does not skip the handler's own signature check. `v1/webhooks/billing` is also excluded
+from `TenantMiddleware` (§4.3), same no-Host-header reasoning as the YouTube callback.
 
 **Migration history was squashed (2026-07-31):** the 107 incremental migrations that had accumulated since the
 project's first commit were replaced with a single `src/migrations/1790553600000-Baseline.ts`, generated via
@@ -4212,14 +4650,18 @@ loaded correctly before use.
 | `SESSION_MAX_AGE_DAYS`  | `30`                         | Absolute session lifetime in days — refresh rejected after this regardless of rotation |
 | `PLATFORM_ADMIN_JWT_SECRET` | — *(required, min 32 chars)* | Platform-admin token signing secret — deliberately separate from `JWT_SECRET` (§5 Platform Admin) |
 | `PLATFORM_ADMIN_JWT_EXPIRY_IN` | `1h`                  | Platform-admin token expiry |
+| `CREDENTIALS_ENCRYPTION_KEY` | — *(required, min 32 chars)* | Encrypts tenant BYOK SMS/email provider credentials at rest (§5 Communication Providers) — rotating this makes existing encrypted credentials unreadable |
 
 ### Email
 
-Set `EMAIL_PROVIDER` to choose between Gmail SMTP (`gmail`) and the Resend API (`resend`). Only the variables for the active provider are required at runtime.
+Set `EMAIL_PROVIDER` to choose the platform-wide default provider. This is only the fallback used when a tenant has
+no BYOK config of its own (see Communication Providers) — a tenant can independently pick any of the five providers
+below regardless of this setting. Only the variables for the active default provider are required at runtime;
+`SmtpProvider` has no platform default at all (BYOK-only).
 
 | Variable          | Default   | Description                                                           |
 |-------------------|-----------|-----------------------------------------------------------------------|
-| `EMAIL_PROVIDER`  | `gmail`   | Active provider: `gmail` \| `resend`                                  |
+| `EMAIL_PROVIDER`  | `gmail`   | Platform-default provider: `gmail` \| `resend`                       |
 | `EMAIL_FROM`      | —         | Sender address used for all outbound email (overrides `EMAIL_USER`)   |
 
 #### Gmail SMTP
@@ -4238,6 +4680,27 @@ Set `EMAIL_PROVIDER` to choose between Gmail SMTP (`gmail`) and the Resend API (
 | Variable         | Default | Description                         |
 |------------------|---------|-------------------------------------|
 | `RESEND_API_KEY` | —       | Resend API key (`re_*…`)            |
+
+#### Custom SMTP
+
+No platform-default env vars — this provider is BYOK-only (`providerId: 'smtp'`) and throws if called without a
+tenant's own `{host, port?, secure?, user, password}` credentials. Use this when a tenant wants to fully bring their
+own mail server; use `gmail`'s BYOK `host` override instead when they just want a different domain on otherwise
+platform-managed SMTP settings.
+
+#### SendGrid
+
+| Variable          | Default | Description                         |
+|--------------------|---------|-------------------------------------|
+| `SENDGRID_API_KEY` | —       | SendGrid API key, platform default  |
+
+#### Mailgun
+
+| Variable            | Default                        | Description                                              |
+|----------------------|---------------------------------|-----------------------------------------------------------|
+| `MAILGUN_API_KEY`    | —                               | Mailgun API key, platform default                         |
+| `MAILGUN_DOMAIN`     | —                               | Mailgun sending domain, platform default                  |
+| `MAILGUN_BASE_URL`   | `https://api.mailgun.net/v3`   | Override for the EU region (`https://api.eu.mailgun.net/v3`) |
 
 #### Email Category Gates
 
@@ -4334,6 +4797,8 @@ with application cache keys.
 |--------------------------------------------|-------------------------|-----------------------------------------------|
 | `DEFAULT_ADMIN_EMAIL`                      | —                       | Email for the seeded default admin account    |
 | `DEFAULT_ADMIN_PASSWORD`                   | —                       | Password for the seeded default admin account |
+| `DEFAULT_PLATFORM_ADMIN_EMAIL`             | —                       | Email for the seeded first platform admin (`npm run seed:platform-admin`) |
+| `DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH`     | —                       | Argon2 hash for the seeded first platform admin (generate via `npm run hash:password`) |
 | `DEFAULT_VENUE_NAME`                       | `RCCG Discovery Centre` | Name for the seeded default venue             |
 | `DEFAULT_VENUE_ADDRESS`                    | —                       | Street address for the seeded default venue   |
 | `DEFAULT_VENUE_LATITUDE`                   | —                       | WGS84 latitude of the default venue           |
@@ -4393,17 +4858,33 @@ Generate keys once with `npx web-push generate-vapid-keys` and store permanently
 | `TERMII_SENDER_ID`  | — *(optional)*                  | Termii sender ID shown as the SMS "from" name                    |
 | `TERMII_BASE_URL`   | `https://api.ng.termii.com`     | Termii API base URL                                               |
 
-### YouTube Live Detection (optional)
+### YouTube Live Detection (optional, platform-wide only)
 
-All three optional — leave unset to skip WebSub subscription entirely and rely on the Sermon Module's manual
-"Announce Live" trigger instead.
+Channel id and (optionally) a Data API key are **not** set here — they're per-tenant, via `PUT /v1/youtube-integration`
+(see "YouTube Live Detection" above). All three below are platform-wide and all optional — leave unset to skip WebSub
+subscription entirely and rely on the Sermon Module's manual "Announce Live" trigger instead.
 
 | Variable                       | Default          | Description                                                                 |
 |---------------------------------|------------------|--------------------------------------------------------------------------|
-| `YOUTUBE_API_KEY`              | — *(optional)*   | YouTube Data API v3 key — used to confirm a notified video is actually a live broadcast |
-| `YOUTUBE_CHANNEL_ID`           | — *(optional)*   | The channel to watch for livestreams                                       |
-| `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) |
-| `YOUTUBE_WEBSUB_SECRET`        | — *(optional)*   | Shared HMAC secret sent as `hub.secret` on subscribe; the hub signs every notification with it (`X-Hub-Signature`), which the callback verifies. Required alongside the other two — without it, `subscribe()` never registers a live subscription and the callback rejects everything it receives. |
+| `YOUTUBE_API_KEY`              | — *(optional)*   | Fallback YouTube Data API v3 key, used only for a tenant that configured a channel but not their own key |
+| `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) — one physical endpoint shared by every tenant |
+| `YOUTUBE_WEBSUB_SECRET`        | — *(optional)*   | Shared HMAC secret sent as `hub.secret` on subscribe; the hub signs every notification with it (`X-Hub-Signature`), which the callback verifies. Required alongside the callback URL — without it, `subscribe()` never registers a live subscription and the callback rejects everything it receives. |
+
+### Billing: Paystack / Flutterwave (optional, platform-wide)
+
+All optional — a provider whose secret key isn't set simply can't be selected as `?provider=` on a checkout call
+(`PaymentProviderRegistryService` throws a clean `400`, not a crash). Platform-wide, not tenant BYOK — see "Billing
+& Checkout" above for why.
+
+| Variable                     | Default                            | Description |
+|-------------------------------|-------------------------------------|--------------|
+| `PAYSTACK_SECRET_KEY`         | — *(optional)*                     | Paystack secret key, used both for API calls (`Authorization: Bearer`) and to compute the HMAC-SHA512 webhook signature |
+| `PAYSTACK_BASE_URL`           | `https://api.paystack.co`          | Paystack API base URL |
+| `FLUTTERWAVE_SECRET_KEY`      | — *(optional)*                     | Flutterwave secret key, used for API calls |
+| `FLUTTERWAVE_SECRET_HASH`     | — *(optional)*                     | Shared secret configured in the Flutterwave dashboard's webhook settings — compared verbatim against the `verif-hash` header, not an HMAC key |
+| `FLUTTERWAVE_BASE_URL`        | `https://api.flutterwave.com/v3`   | Flutterwave API base URL |
+| `DEFAULT_PAYMENT_PROVIDER`    | `paystack`                         | Which provider a checkout call uses when it doesn't specify `?provider=` explicitly |
+| `SMS_CREDIT_PRICE_KOBO`       | — *(optional)*                     | Price of one SMS wallet credit, in kobo (e.g. `100` = ₦1/credit). Unset means wallet top-up isn't configured yet — `POST /billing/checkout/wallet-topup` `403`s cleanly rather than charging an undefined amount |
 
 ---
 

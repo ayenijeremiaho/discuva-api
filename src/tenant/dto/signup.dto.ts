@@ -1,6 +1,7 @@
 import {
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Matches,
   MaxLength,
@@ -47,4 +48,13 @@ export class SignupDto {
     message: 'Password must contain at least one special character',
   })
   adminPassword: string;
+
+  // Present only when this signup is completing a branch invite
+  // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the
+  // invited church by BranchInviteService.createInvite. Omitted entirely
+  // for a normal, non-branch signup.
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  branchInviteToken?: string;
 }

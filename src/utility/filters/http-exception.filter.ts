@@ -20,16 +20,32 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message = 'Internal server error';
+    let message: string | string[] = 'Internal server error';
+    // Structured fields beyond the standard NestJS-generated
+    // {statusCode, message, error} shape — e.g. PlanGuard's `code`/
+    // `requiredFeature` on a 403 — so callers can branch on something more
+    // stable than matching the message string. Previously silently
+    // dropped: this filter only ever read `.message` off the exception
+    // body, no matter what else the thrower attached.
+    let extra: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
 
-      message =
-        typeof exceptionResponse === 'string'
-          ? exceptionResponse
-          : (exceptionResponse as any).message || exception.message;
+      if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else {
+        const body = exceptionResponse as Record<string, unknown>;
+        message = (body.message as string | string[]) || exception.message;
+        const {
+          statusCode: _statusCode,
+          message: _message,
+          error: _error,
+          ...rest
+        } = body;
+        extra = rest;
+      }
 
       if (Array.isArray(message)) {
         message = message[0];
@@ -63,6 +79,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       data: null,
       status,
       message,
+      ...extra,
     });
   }
 }

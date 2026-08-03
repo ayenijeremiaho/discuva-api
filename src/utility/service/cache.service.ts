@@ -91,10 +91,10 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Every Redis-touching method below routes its key through this, so no
-  // call site needs to remember to namespace by tenant itself. tenantId is
-  // 'global' until TenantMiddleware is wired into the live request pipeline
-  // (docs/MULTI_TENANT_MIGRATION.md §4.5) — today that's every request, so
-  // this is currently a no-op prefix, not a live behavior change.
+  // call site needs to remember to namespace by tenant itself. TenantMiddleware
+  // (docs/MULTI_TENANT_MIGRATION.md §4.3/§4.5) is live, so tenantId reflects
+  // the real tenant on every tenant-scoped request; falls back to 'global'
+  // only on tenant-excluded routes (platform-admin, signup, health checks).
   private scopedKey(key: string): string {
     const tenantId = this.cls.get('tenantId') ?? 'global';
     return `tenant:${tenantId}:${key}`;

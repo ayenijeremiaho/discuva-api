@@ -18,7 +18,8 @@ import { YoutubeWebhookController } from './youtube-webhook.controller';
 import { YoutubeLiveDetectionService } from '../service/youtube-live-detection.service';
 
 const SECRET = 'shh-secret';
-const BODY = '<feed><entry><yt:videoId>vid-1</yt:videoId></entry></feed>';
+const BODY =
+  '<feed><entry><yt:videoId>vid-1</yt:videoId><yt:channelId>UC123</yt:channelId></entry></feed>';
 
 function sign(body: string, secret: string): string {
   return `sha1=${createHmac('sha1', secret).update(body).digest('hex')}`;
@@ -61,11 +62,12 @@ describe('YoutubeWebhookController', () => {
   });
 
   describe('handleNotification', () => {
-    it('processes the notification when the signature matches', async () => {
+    it('processes the notification when the signature matches, extracting both video and channel ids', async () => {
       await build(SECRET);
       controller.handleNotification(req(BODY), sign(BODY, SECRET));
       expect(mockLiveDetectionService.handleNotification).toHaveBeenCalledWith(
         'vid-1',
+        'UC123',
       );
     });
 

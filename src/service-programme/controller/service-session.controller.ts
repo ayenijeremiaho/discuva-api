@@ -23,6 +23,9 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { ServiceSessionService } from '../service/service-session.service';
 import { ServiceSessionGateway } from '../gateway/service-session.gateway';
 import { ShareTokenGuard } from '../guard/share-token.guard';
@@ -35,6 +38,11 @@ import { ReorderLiveSlotsDto } from '../dto/reorder-live-slots.dto';
 import { CreateAccessGrantDto } from '../dto/create-access-grant.dto';
 import { VerifyAccessGrantDto } from '../dto/verify-access-grant.dto';
 
+// Same class-level PlanGuard stacking as ServiceProgrammeController — covers
+// every route here, including the share-token/unauthenticated "pm/*" live
+// display routes, which should be just as gated as the admin ones.
+@UseGuards(PlanGuard)
+@RequiresPlan(PlanFeature.SERVICE_PROGRAMME)
 @Controller('service-session')
 export class ServiceSessionController {
   constructor(
@@ -526,9 +534,13 @@ export class ServiceSessionController {
     return this.sessionSvc.getActionLog(sessionCode, user.id);
   }
 
+  // Method-level @RequiresPlan overrides (not adds to) the class-level
+  // SERVICE_PROGRAMME requirement above — this route only needs BULK_EXPORT
+  // specifically, matching the other bulk-export routes across the app.
   @Get(':sessionCode/action-log/csv')
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_READ)
+  @RequiresPlan(PlanFeature.BULK_EXPORT)
   async downloadActionLogCsv(
     @Param('sessionCode') sessionCode: string,
     @Res() res: Response,

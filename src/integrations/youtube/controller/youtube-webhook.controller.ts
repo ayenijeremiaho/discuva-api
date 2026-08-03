@@ -18,11 +18,13 @@ import { Request } from 'express';
 import { Public } from '../../../auth/decorator/public.decorator';
 import { YoutubeLiveDetectionService } from '../service/youtube-live-detection.service';
 
-// Matches the <yt:videoId>...</yt:videoId> element in the Atom feed
-// notification body — a regex is enough here since this is the one fixed
-// field we need, and pulling in an XML parser dependency for that alone
-// isn't worth it.
+// Matches the <yt:videoId>...</yt:videoId> and <yt:channelId>...</yt:channelId>
+// elements in the Atom feed notification body — regexes are enough here
+// since these are the two fixed fields we need (channelId is what makes a
+// notification tenant-resolvable at all, see YoutubeLiveDetectionService),
+// and pulling in an XML parser dependency for just two fields isn't worth it.
 const VIDEO_ID_PATTERN = /<yt:videoId>([^<]+)<\/yt:videoId>/;
+const CHANNEL_ID_PATTERN = /<yt:channelId>([^<]+)<\/yt:channelId>/;
 
 @Controller('integrations/youtube')
 export class YoutubeWebhookController {
@@ -71,7 +73,8 @@ export class YoutubeWebhookController {
       return;
     }
     const videoId = VIDEO_ID_PATTERN.exec(body)?.[1] ?? null;
-    this.youtubeLiveDetectionService.handleNotification(videoId);
+    const channelId = CHANNEL_ID_PATTERN.exec(body)?.[1] ?? null;
+    this.youtubeLiveDetectionService.handleNotification(videoId, channelId);
   }
 
   private isSignatureValid(body: string, signatureHeader?: string): boolean {

@@ -32,6 +32,11 @@ export const envValidationSchema = Joi.object({
   REFRESH_JWT_EXPIRY_IN: Joi.string().default('7d'),
   PLATFORM_ADMIN_JWT_SECRET: Joi.string().min(32).required(),
   PLATFORM_ADMIN_JWT_EXPIRY_IN: Joi.string().default('1h'),
+  // Symmetric key for encrypting tenant BYOK communication-provider
+  // credentials at rest (src/utility/service/encryption.service.ts) —
+  // hashed to a 32-byte AES-256 key, so same min-length convention as the
+  // JWT secrets above, no fixed hex/base64 format required.
+  CREDENTIALS_ENCRYPTION_KEY: Joi.string().min(32).required(),
 
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
@@ -51,8 +56,20 @@ export const envValidationSchema = Joi.object({
   // Resend provider
   RESEND_API_KEY: Joi.string().optional(),
 
+  // SendGrid provider — platform-default API key; tenants may override via
+  // their own BYOK credentials instead.
+  SENDGRID_API_KEY: Joi.string().optional(),
+
+  // Mailgun provider — platform-default API key/domain; MAILGUN_BASE_URL
+  // lets the EU region (api.eu.mailgun.net/v3) be selected without a code
+  // change.
+  MAILGUN_API_KEY: Joi.string().optional(),
+  MAILGUN_DOMAIN: Joi.string().optional(),
+  MAILGUN_BASE_URL: Joi.string().uri().optional(),
+
   LOGIN_URL: Joi.string().uri().required(),
   ADMIN_LOGIN_URL: Joi.string().uri().required(),
+  PLATFORM_LOGIN_URL: Joi.string().uri().required(),
   SUPPORT_FORM_URL: Joi.string().uri().optional(),
   EXPLAINER_VIDEO_ANDROID_URL: Joi.string().uri().optional(),
   EXPLAINER_VIDEO_IOS_URL: Joi.string().uri().optional(),
@@ -121,6 +138,8 @@ export const envValidationSchema = Joi.object({
   SESSION_MAX_AGE_DAYS: Joi.number().integer().min(1).default(30),
   DEFAULT_ADMIN_EMAIL: Joi.string().email().optional(),
   DEFAULT_ADMIN_PASSWORD_HASH: Joi.string().optional(),
+  DEFAULT_PLATFORM_ADMIN_EMAIL: Joi.string().email().optional(),
+  DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH: Joi.string().optional(),
   DEFAULT_VENUE_ADDRESS: Joi.string().default(
     '62 Igi Olugbin Street, Bariga. Lagos, Nigeria',
   ),
@@ -162,11 +181,34 @@ export const envValidationSchema = Joi.object({
   TERMII_SENDER_ID: Joi.string().optional(),
   TERMII_BASE_URL: Joi.string().uri().default('https://api.ng.termii.com'),
 
+  // Platform-wide fallback Data API key, used when a tenant hasn't set its
+  // own via PUT /v1/youtube-integration. Channel id has no platform-wide
+  // equivalent — it's always tenant-specific, set the same way.
   YOUTUBE_API_KEY: Joi.string().optional(),
-  YOUTUBE_CHANNEL_ID: Joi.string().optional(),
   YOUTUBE_WEBSUB_CALLBACK_URL: Joi.string().uri().optional(),
   // Shared HMAC secret sent as hub.secret on subscribe — the hub then signs
   // every notification with it (X-Hub-Signature), which is how the callback
   // tells a genuine hub delivery apart from a forged POST to the public URL.
   YOUTUBE_WEBSUB_SECRET: Joi.string().optional(),
+
+  // All optional — a deployment that hasn't set a given provider's keys
+  // simply can't be selected as ?provider= on a checkout call
+  // (PaymentProviderRegistryService throws a clean 400, not a crash).
+  PAYSTACK_SECRET_KEY: Joi.string().optional(),
+  PAYSTACK_BASE_URL: Joi.string().uri().default('https://api.paystack.co'),
+  FLUTTERWAVE_SECRET_KEY: Joi.string().optional(),
+  // Shared secret configured in the Flutterwave dashboard, compared
+  // verbatim against the verif-hash webhook header — not an HMAC key.
+  FLUTTERWAVE_SECRET_HASH: Joi.string().optional(),
+  FLUTTERWAVE_BASE_URL: Joi.string()
+    .uri()
+    .default('https://api.flutterwave.com/v3'),
+  DEFAULT_PAYMENT_PROVIDER: Joi.string()
+    .valid('paystack', 'flutterwave')
+    .default('paystack'),
+  // Price of one SMS wallet credit, in kobo — e.g. 100 = ₦1/credit. Unset
+  // means "wallet top-up not configured yet", same as plans.priceCents
+  // being 0 for both tiers at launch (docs/PRODUCT_STRATEGY.md §5: pricing
+  // is a draft hypothesis, not decided here).
+  SMS_CREDIT_PRICE_KOBO: Joi.number().integer().positive().optional(),
 }).options({ allowUnknown: true });
