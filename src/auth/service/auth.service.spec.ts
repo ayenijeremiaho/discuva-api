@@ -8,6 +8,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { AuthService } from './auth.service';
 import { AdminService } from '../../admin/service/admin.service';
 import { MemberService } from '../../member/service/member.service';
@@ -19,6 +21,7 @@ import { PasswordResetOtp } from '../entity/password-reset-otp.entity';
 import { DeviceResetOtp } from '../entity/device-reset-otp.entity';
 import { EmailChangeOtp } from '../entity/email-change-otp.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
@@ -29,6 +32,9 @@ import { PushNotificationService } from '../../push-notification/service/push-no
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
   sendEmail: jest.fn(),
+  resolveTenantLoginUrl: jest
+    .fn()
+    .mockResolvedValue('https://login.example.com'),
 };
 
 const mockAuditLogService = { log: jest.fn() };
@@ -76,6 +82,19 @@ const mockEmailChangeOtpRepository = {
 };
 
 const mockDepartmentLeadRepo = { exists: jest.fn().mockResolvedValue(false) };
+
+const mockTenantRepo = {
+  find: jest
+    .fn()
+    .mockResolvedValue([{ id: 't1', subdomain: 'a', schemaName: 'church_a' }]),
+};
+const mockCls = {
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
+};
 
 const mockAdminService = {
   findByMemberId: jest.fn(),
@@ -132,6 +151,9 @@ describe('AuthService', () => {
     mockConfigService.get.mockImplementation(
       (_key: string, defaultValue?: string) => defaultValue,
     );
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -161,7 +183,10 @@ describe('AuthService', () => {
           provide: getRepositoryToken(DepartmentLead),
           useValue: mockDepartmentLeadRepo,
         },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: PushNotificationService, useValue: mockPushService },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -749,6 +774,24 @@ describe('AuthService', () => {
 
       expect(mockOtpQb.execute).not.toHaveBeenCalled();
       expect(mockCacheService.releaseLock).not.toHaveBeenCalled();
+    });
+
+    it('runs the purge once per active tenant, entering each tenant context', async () => {
+      mockCacheService.acquireLock.mockResolvedValue(true);
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+
+      await service.purgeExpiredOtps();
+
+      expect(mockOtpQb.execute).toHaveBeenCalledTimes(2);
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_a", public',
+      );
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_b", public',
+      );
     });
   });
 

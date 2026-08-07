@@ -1,32 +1,39 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 import { SmsService } from './sms.service';
-import { SMS_PROVIDER } from '../interface/sms-provider.interface';
-import { TERMII_MAX_RECIPIENTS_PER_REQUEST } from '../provider/termii-sms.provider';
+import { SmsProviderRegistryService } from './sms-provider-registry.service';
 import { SmsCredentialResolverService } from '../../communication-provider/service/sms-credential-resolver.service';
 
 describe('SmsService', () => {
   let service: SmsService;
   const mockProvider = {
+    maxRecipientsPerRequest: 100,
     send: jest.fn(),
     getBalance: jest.fn(),
     getMessageHistory: jest.fn(),
   };
-  // No BYOK configured by default — matches the common case, exercised by
-  // most of these tests: resolveCredentials() -> undefined means "use the
-  // platform default", which is what routes every send through debitForSend().
+  const mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
+  // Pure BYOK — pure resolveConfig() returning a config means "tenant has
+  // an active SMS provider configured"; undefined means they don't, which
+  // every method must reject rather than silently falling back to anything.
   const mockCredentialResolver = {
-    resolveCredentials: jest.fn().mockResolvedValue(undefined),
-    debitForSend: jest.fn().mockResolvedValue(undefined),
+    resolveConfig: jest.fn().mockResolvedValue({
+      providerId: 'termii',
+      credentials: { apiKey: 'tenant-key', senderId: 'TenantChurch' },
+    }),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockCredentialResolver.resolveCredentials.mockResolvedValue(undefined);
-    mockCredentialResolver.debitForSend.mockResolvedValue(undefined);
+    mockRegistry.get.mockReturnValue(mockProvider);
+    mockCredentialResolver.resolveConfig.mockResolvedValue({
+      providerId: 'termii',
+      credentials: { apiKey: 'tenant-key', senderId: 'TenantChurch' },
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SmsService,
-        { provide: SMS_PROVIDER, useValue: mockProvider },
+        { provide: SmsProviderRegistryService, useValue: mockRegistry },
         {
           provide: SmsCredentialResolverService,
           useValue: mockCredentialResolver,
@@ -76,54 +83,51 @@ describe('SmsService', () => {
   });
 
   describe('send', () => {
-    it('sends a single batch when recipients are within the per-request limit', async () => {
+    it('throws ForbiddenException with SMS_PROVIDER_NOT_CONFIGURED when no active provider is configured', async () => {
+      mockCredentialResolver.resolveConfig.mockResolvedValue(undefined);
+
+      await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockProvider.send).not.toHaveBeenCalled();
+    });
+
+    it('dispatches to the provider resolved from the registry by providerId', async () => {
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
       const to = Array.from({ length: 5 }, (_, i) => `+23480000000${i}`);
 
       const results = await service.send(to, 'Hello');
 
+      expect(mockRegistry.get).toHaveBeenCalledWith('termii');
       expect(mockProvider.send).toHaveBeenCalledTimes(1);
-      expect(mockProvider.send).toHaveBeenCalledWith(
-        to,
-        'Hello',
-        'plain',
-        undefined,
-      );
+      expect(mockProvider.send).toHaveBeenCalledWith(to, 'Hello', 'plain', {
+        apiKey: 'tenant-key',
+        senderId: 'TenantChurch',
+      });
       expect(results).toHaveLength(1);
     });
 
-    it('debits the wallet by segments × recipients when using the platform default', async () => {
-      mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
-      const to = ['+1', '+2', '+3'];
-
-      await service.send(to, 'a'.repeat(161)); // 161 plain chars -> 2 segments
-
-      expect(mockCredentialResolver.debitForSend).toHaveBeenCalledWith(
-        6, // 2 segments × 3 recipients
-        expect.any(String),
-      );
-    });
-
-    it("uses the tenant's own BYOK credentials and skips the wallet debit entirely when configured", async () => {
-      mockCredentialResolver.resolveCredentials.mockResolvedValue({
-        apiKey: 'tenant-key',
-        senderId: 'TenantChurch',
+    it('routes to the tenant-selected vendor, not a hardcoded one', async () => {
+      mockCredentialResolver.resolveConfig.mockResolvedValue({
+        providerId: 'twilio',
+        credentials: {
+          accountSid: 'AC1',
+          authToken: 'secret',
+          fromNumber: '+1000',
+        },
       });
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
 
       await service.send(['+1'], 'Hello');
 
-      expect(mockProvider.send).toHaveBeenCalledWith(['+1'], 'Hello', 'plain', {
-        apiKey: 'tenant-key',
-        senderId: 'TenantChurch',
-      });
-      expect(mockCredentialResolver.debitForSend).not.toHaveBeenCalled();
+      expect(mockRegistry.get).toHaveBeenCalledWith('twilio');
     });
 
-    it('splits recipients into multiple batches over the per-request limit', async () => {
+    it('splits recipients into multiple batches using the resolved provider max', async () => {
+      mockProvider.maxRecipientsPerRequest = 100;
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
       const to = Array.from(
-        { length: TERMII_MAX_RECIPIENTS_PER_REQUEST + 10 },
+        { length: mockProvider.maxRecipientsPerRequest + 10 },
         (_, i) => `+234800000${i}`,
       );
 
@@ -131,17 +135,18 @@ describe('SmsService', () => {
 
       expect(mockProvider.send).toHaveBeenCalledTimes(2);
       expect(mockProvider.send.mock.calls[0][0]).toHaveLength(
-        TERMII_MAX_RECIPIENTS_PER_REQUEST,
+        mockProvider.maxRecipientsPerRequest,
       );
       expect(mockProvider.send.mock.calls[1][0]).toHaveLength(10);
     });
 
     it('does not let one failed batch stop the others', async () => {
+      mockProvider.maxRecipientsPerRequest = 100;
       mockProvider.send
         .mockRejectedValueOnce(new Error('boom'))
         .mockResolvedValueOnce({ messageId: '2', status: 'ok' });
       const to = Array.from(
-        { length: TERMII_MAX_RECIPIENTS_PER_REQUEST + 1 },
+        { length: mockProvider.maxRecipientsPerRequest + 1 },
         (_, i) => `+234800000${i}`,
       );
 
@@ -152,7 +157,12 @@ describe('SmsService', () => {
   });
 
   describe('getBalance', () => {
-    it('delegates to the provider', async () => {
+    it('throws ForbiddenException when no active provider is configured', async () => {
+      mockCredentialResolver.resolveConfig.mockResolvedValue(undefined);
+      await expect(service.getBalance()).rejects.toThrow(ForbiddenException);
+    });
+
+    it('delegates to the resolved provider', async () => {
       mockProvider.getBalance.mockResolvedValue({
         balance: 100,
         currency: 'NGN',
@@ -163,7 +173,12 @@ describe('SmsService', () => {
   });
 
   describe('getLogs', () => {
-    it('delegates to the provider, no local persistence', async () => {
+    it('throws ForbiddenException when no active provider is configured', async () => {
+      mockCredentialResolver.resolveConfig.mockResolvedValue(undefined);
+      await expect(service.getLogs()).rejects.toThrow(ForbiddenException);
+    });
+
+    it('delegates to the resolved provider, no local persistence', async () => {
       const logs = [
         {
           messageId: 'msg-1',

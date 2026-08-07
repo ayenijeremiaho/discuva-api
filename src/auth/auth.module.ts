@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { AuthService } from './service/auth.service';
 import { AuthController } from './controller/auth.controller';
@@ -14,6 +15,7 @@ import { PasswordResetOtp } from './entity/password-reset-otp.entity';
 import { DeviceResetOtp } from './entity/device-reset-otp.entity';
 import { EmailChangeOtp } from './entity/email-change-otp.entity';
 import { DepartmentLead } from '../department/entity/department-lead.entity';
+import { Tenant } from '../tenant/entity/tenant.entity';
 import jwtConfig from '../config/jwt.config';
 import refreshJwtConfig from '../config/refresh.jwt.config';
 import { MemberModule } from '../member/member.module';
@@ -29,6 +31,9 @@ import { UtilityModule } from '../utility/utility.module';
       EmailChangeOtp,
       DepartmentLead,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by AuthService.purgeExpiredOtps' forEachActiveTenant loop.
+    TypeOrmModule.forFeature([Tenant]),
     JwtModule.registerAsync(jwtConfig.asProvider()),
     ConfigModule.forFeature(jwtConfig),
     ConfigModule.forFeature(refreshJwtConfig),

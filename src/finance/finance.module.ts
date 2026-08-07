@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { Fund } from './entity/fund.entity';
@@ -17,7 +18,6 @@ import { RecurringEntry } from './entity/recurring-entry.entity';
 import { PettyCashReplenishment } from './entity/petty-cash-replenishment.entity';
 import { BulkUploadJob } from './entity/bulk-upload-job.entity';
 import { ReconciliationRow } from './entity/reconciliation-row.entity';
-import { MemberVirtualAccount } from './entity/member-virtual-account.entity';
 import { BankImportProfile } from './entity/bank-import-profile.entity';
 import { Member } from '../member/entity/member.entity';
 import { TitheRecord } from '../tithe/entity/tithe-record.entity';
@@ -59,6 +59,7 @@ import { GivingService } from './service/giving.service';
 import { FinanceMemberController } from './controller/finance-member.controller';
 import { UtilityModule } from '../utility/utility.module';
 import { AdminModule } from '../admin/admin.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -79,11 +80,13 @@ import { AdminModule } from '../admin/admin.module';
       PettyCashReplenishment,
       BulkUploadJob,
       ReconciliationRow,
-      MemberVirtualAccount,
       BankImportProfile,
       Member,
       TitheRecord,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by the finance schedulers' forEachActiveTenant loops.
+    TypeOrmModule.forFeature([Tenant]),
     BullModule.registerQueue({ name: RECONCILIATION_QUEUE }),
     UtilityModule,
     AdminModule,

@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../discuva-platform"
+		},
+		{
+			"path": "../discuva-member"
+		},
+		{
+			"path": "../discuva-admin"
+		},
+		{
+			"path": "../discuva-web"
+		}
+	],
+	"settings": {}
+}

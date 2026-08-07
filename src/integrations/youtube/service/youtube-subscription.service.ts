@@ -4,7 +4,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TenantYoutubeIntegration } from '../entity/tenant-youtube-integration.entity';
 
-const PUBSUBHUBBUB_URL = 'https://pubsubhubbub.appspot.com/subscribe';
 // The hub's own lease is typically 5-10 days; re-subscribing daily (see
 // YoutubeSubscriptionScheduler) keeps this comfortably ahead of expiry
 // regardless of what the hub actually grants.
@@ -87,7 +86,11 @@ export class YoutubeSubscriptionService {
         'hub.secret': secret,
       });
 
-      const response = await fetch(PUBSUBHUBBUB_URL, {
+      const hubUrl = this.configService.get<string>(
+        'PUBSUBHUBBUB_URL',
+        'https://pubsubhubbub.appspot.com/subscribe',
+      );
+      const response = await fetch(hubUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),

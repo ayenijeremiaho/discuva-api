@@ -2,12 +2,15 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { EventReminderService } from './event-reminder.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EventReminder } from '../entity/event-reminder.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Announcement } from '../../announcement/entity/announcement.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
 import {
@@ -88,6 +91,19 @@ const mockConfigService = {
   get: jest.fn().mockReturnValue('en-NG'),
 };
 
+const mockTenantRepo = {
+  find: jest
+    .fn()
+    .mockResolvedValue([{ id: 't1', subdomain: 'a', schemaName: 'church_a' }]),
+};
+const mockCls = {
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
+};
+
 describe('EventReminderService', () => {
   let service: EventReminderService;
 
@@ -96,6 +112,9 @@ describe('EventReminderService', () => {
     mockCacheService.acquireLock.mockResolvedValue(true);
     mockReminderRepo.createQueryBuilder.mockReturnValue(mockReminderQb);
     mockReminderQb.getMany.mockResolvedValue([]);
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -110,6 +129,7 @@ describe('EventReminderService', () => {
           provide: getRepositoryToken(Announcement),
           useValue: mockAnnouncementRepo,
         },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
@@ -117,6 +137,8 @@ describe('EventReminderService', () => {
           provide: PushNotificationService,
           useValue: { dispatchToMemberIds: jest.fn() },
         },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -278,6 +300,38 @@ describe('EventReminderService', () => {
       expect(mockCacheService.releaseLock).toHaveBeenCalledWith(
         'lock:dispatch-reminders',
       );
+    });
+
+    it('runs the due-reminder query once per active tenant, entering each tenant context', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      mockReminderQb.getMany.mockResolvedValue([]);
+
+      await service.dispatchDueReminders();
+
+      expect(mockReminderRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_a", public',
+      );
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_b", public',
+      );
+    });
+
+    it('continues past one tenant failing so the rest still get processed', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      mockReminderQb.getMany
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValue([]);
+
+      await expect(service.dispatchDueReminders()).resolves.toBeUndefined();
+      expect(mockReminderRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockCacheService.releaseLock).toHaveBeenCalled();
     });
   });
 });

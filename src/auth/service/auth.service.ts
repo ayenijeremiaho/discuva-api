@@ -13,6 +13,9 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService, ConfigType } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { randomInt, randomUUID } from 'node:crypto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -42,6 +45,9 @@ import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { Member } from '../../member/entity/member.entity';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 interface RotatedRefreshEntry {
   hash: string;
@@ -85,7 +91,11 @@ export class AuthService {
     private readonly emailChangeOtpRepository: Repository<EmailChangeOtp>,
     @InjectRepository(DepartmentLead)
     private readonly departmentLeadRepo: Repository<DepartmentLead>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly pushService: PushNotificationService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.otpTtlSeconds = this.configService.get<number>('OTP_TTL_SECONDS');
     this.otpMaxAttempts = this.configService.get<number>(
@@ -536,10 +546,7 @@ export class AuthService {
       member.email,
       `${firstName}, Your ${this.productName} Password Has Been Changed`,
       'password-changed',
-      {
-        name: firstName,
-        login_url: this.configService.get<string>('LOGIN_URL'),
-      },
+      { name: firstName },
     );
   }
 
@@ -632,10 +639,7 @@ export class AuthService {
       member.email,
       `${firstName}, Your Device Has Been Changed`,
       'device-reset-confirmation',
-      {
-        name: firstName,
-        login_url: this.configService.get<string>('LOGIN_URL'),
-      },
+      { name: firstName },
     );
   }
 
@@ -729,10 +733,7 @@ export class AuthService {
       record.newEmail,
       `${firstName}, Your Email Address Has Been Updated`,
       'email-changed-confirmation',
-      {
-        name: firstName,
-        login_url: this.configService.get<string>('LOGIN_URL'),
-      },
+      { name: firstName },
     );
   }
 
@@ -748,11 +749,24 @@ export class AuthService {
     }
     try {
       this.logger.log('Running scheduled purge of expired OTPs');
-      await this.otpRepository
-        .createQueryBuilder()
-        .delete()
-        .where('used_at IS NOT NULL OR expires_at < :now', { now: new Date() })
-        .execute();
+      const { succeeded, failed } = await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        async () => {
+          await this.otpRepository
+            .createQueryBuilder()
+            .delete()
+            .where('used_at IS NOT NULL OR expires_at < :now', {
+              now: new Date(),
+            })
+            .execute();
+        },
+      );
+      this.logger.log(
+        `OTP purge complete for ${succeeded} tenant(s), ${failed} failure(s)`,
+      );
     } finally {
       this.cacheService.releaseLock(AuthService.OTP_PURGE_LOCK);
     }
@@ -891,19 +905,19 @@ export class AuthService {
     memberId: string,
     surface: SessionSurface,
   ): void {
-    this.memberService
-      .getById(memberId)
-      .then((member) => {
+    Promise.all([
+      this.memberService.getById(memberId),
+      this.utilityService.resolveTenantLoginUrl(
+        surface === SessionSurface.ADMIN ? 'admin' : 'member',
+      ),
+    ])
+      .then(([member, login_url]) => {
         const name = UtilityService.capitalizeFirstLetter(member.firstname);
-        const loginUrl =
-          surface === SessionSurface.ADMIN
-            ? this.configService.get<string>('ADMIN_LOGIN_URL')
-            : this.configService.get<string>('LOGIN_URL');
         this.utilityService.sendEmailWithTemplate(
           member.email,
           `${name}, Security Alert — Your ${this.productName} Session Was Signed Out`,
           'session-security-alert',
-          { name, loginUrl },
+          { name, login_url },
         );
       })
       .catch((err) => {

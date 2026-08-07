@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
+import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bull';
+import { Repository } from 'typeorm';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as Handlebars from 'handlebars';
@@ -10,23 +12,24 @@ import { EmailAttachment, EmailJobData } from '../processor/email.processor';
 import { EmailCategory } from '../email-provider/email-category.enum';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
+import { CacheService } from './cache.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { buildTenantUrl } from '../../tenant/utility/tenant-url';
 
 @Injectable()
 export class EmailQueueService {
   private readonly logger = new Logger(EmailQueueService.name);
-  private readonly brandingData: Record<string, string>;
+  private readonly cacheTtl: number;
 
   constructor(
     @InjectQueue('email') private readonly emailQueue: Queue<EmailJobData>,
     private readonly config: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly cacheService: CacheService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepository: Repository<Tenant>,
   ) {
-    this.brandingData = {
-      church_name: this.config.get<string>('CHURCH_NAME'),
-      church_address: this.config.get<string>('CHURCH_ADDRESS'),
-      logo_url: this.config.get<string>('LOGO_URL'),
-      product_name: this.config.get<string>('PRODUCT_NAME'),
-    };
+    this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
 
   async queueEmail(
@@ -75,7 +78,7 @@ export class EmailQueueService {
     );
     try {
       const template = fs.readFileSync(templatePath, 'utf-8');
-      const html = this.compileTemplate(template, templateData);
+      const html = await this.compileTemplate(template, templateData);
       return this.queueEmail(to, subject, html, cc, undefined, category);
     } catch (error) {
       this.logger.error(`Failed to read template ${templateName}: ${error}`);
@@ -100,7 +103,7 @@ export class EmailQueueService {
     );
     try {
       const template = fs.readFileSync(templatePath, 'utf-8');
-      const html = this.compileTemplate(template, templateData);
+      const html = await this.compileTemplate(template, templateData);
       const emailAttachments: EmailAttachment[] = attachments.map((a) => ({
         filename: a.filename,
         content: a.content.toString('base64'),
@@ -151,7 +154,78 @@ export class EmailQueueService {
     return this.config.get<boolean>(flagMap[category]) !== false;
   }
 
-  private compileTemplate(template: string, data: Record<string, any>): string {
-    return Handlebars.compile(template)({ ...this.brandingData, ...data });
+  private async compileTemplate(
+    template: string,
+    data: Record<string, any>,
+  ): Promise<string> {
+    const brandingData = await this.resolveBrandingData();
+    return Handlebars.compile(template)({ ...brandingData, ...data });
+  }
+
+  // church_name/church_address/logo_url must come from the CURRENT tenant,
+  // not a single global value — this used to be computed once in the
+  // constructor from process.env, which meant every tenant's emails carried
+  // whichever church happened to be in .env at boot. product_name stays
+  // global (it's the SaaS product name, not a per-church value).
+  //
+  // support_email has no env fallback (unlike the fields above) — showing a
+  // wrong/generic contact address would be actively misleading, not just
+  // generic, so templates gate it behind {{#if support_email}} and simply
+  // omit the line when a tenant hasn't set one.
+  //
+  // login_url/admin_login_url: LOGIN_URL/ADMIN_LOGIN_URL are configured as
+  // bare, tenant-less base URLs (one build serves every tenant via wildcard
+  // subdomain — docs/MULTI_TENANT_MIGRATION.md §6), so every email carrying
+  // a login link needs its host rewritten to the current tenant's subdomain
+  // here, not left as the bare base URL every tenant would otherwise share.
+  private async resolveBrandingData(): Promise<Record<string, string>> {
+    const fallback = {
+      church_name: this.config.get<string>('CHURCH_NAME'),
+      church_address: this.config.get<string>('CHURCH_ADDRESS'),
+      logo_url: this.config.get<string>('LOGO_URL'),
+      product_name: this.config.get<string>('PRODUCT_NAME'),
+      login_url: this.config.get<string>('LOGIN_URL'),
+      admin_login_url: this.config.get<string>('ADMIN_LOGIN_URL'),
+    };
+
+    const tenant = await this.getCurrentTenant();
+    if (!tenant) return { ...fallback, support_email: '' };
+
+    return {
+      church_name: tenant.name || fallback.church_name,
+      church_address: tenant.address || fallback.church_address,
+      logo_url: tenant.logoUrl || fallback.logo_url,
+      product_name: fallback.product_name,
+      support_email: tenant.supportEmail ?? '',
+      login_url: buildTenantUrl(fallback.login_url, tenant.subdomain),
+      admin_login_url: buildTenantUrl(
+        fallback.admin_login_url,
+        tenant.subdomain,
+      ),
+    };
+  }
+
+  // Public escape hatch for the one call site (AuthService's session
+  // security alert) that has to pick between LOGIN_URL and ADMIN_LOGIN_URL
+  // itself based on which surface a session belongs to — every other caller
+  // just gets both via resolveBrandingData's auto-injected login_url/
+  // admin_login_url and never needs this directly.
+  async resolveTenantUrl(surface: 'member' | 'admin'): Promise<string> {
+    const base = this.config.get<string>(
+      surface === 'admin' ? 'ADMIN_LOGIN_URL' : 'LOGIN_URL',
+    );
+    const tenant = await this.getCurrentTenant();
+    return tenant ? buildTenantUrl(base, tenant.subdomain) : base;
+  }
+
+  private async getCurrentTenant(): Promise<Tenant | null> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return null;
+    const tenant = await this.cacheService.getOrSet(
+      `tenant-branding:${tenantId}`,
+      () => this.tenantRepository.findOneBy({ id: tenantId }),
+      this.cacheTtl,
+    );
+    return tenant ?? null;
   }
 }

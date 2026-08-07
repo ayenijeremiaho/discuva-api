@@ -3,25 +3,35 @@ import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ChurchClass } from './entity/church-class.entity';
 import { ClassEnrollment } from './entity/class-enrollment.entity';
 import { ClassType } from './entity/class-type.entity';
+import { Assignment } from './entity/assignment.entity';
+import { AssignmentSubmission } from './entity/assignment-submission.entity';
 import { ClassesService } from './service/classes.service';
 import { ClassTypesService } from './service/class-types.service';
+import { AssignmentService } from './service/assignment.service';
 import { ClassesController } from './controller/classes.controller';
 import { ClassTypesController } from './controller/class-types.controller';
+import { AssignmentController } from './controller/assignment.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
-    TenantTypeOrmModule.forFeature([ChurchClass, ClassEnrollment, ClassType]),
+    TenantTypeOrmModule.forFeature([
+      ChurchClass,
+      ClassEnrollment,
+      ClassType,
+      Assignment,
+      AssignmentSubmission,
+    ]),
     MemberModule,
     UtilityModule,
   ],
-  providers: [ClassesService, ClassTypesService],
+  providers: [ClassesService, ClassTypesService, AssignmentService],
   // ClassTypesController must be registered before ClassesController — Nest
   // registers routes in this array's order, and ClassesController's
   // GET /classes/:id would otherwise swallow GET /classes/types (matching
   // "types" as :id) since both are checked as plain 2-segment paths.
-  controllers: [ClassTypesController, ClassesController],
+  controllers: [ClassTypesController, ClassesController, AssignmentController],
   exports: [TenantTypeOrmModule, ClassesService, ClassTypesService],
 })
 export class ClassesModule {}

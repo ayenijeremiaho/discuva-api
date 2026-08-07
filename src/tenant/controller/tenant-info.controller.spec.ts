@@ -6,10 +6,19 @@ import { TenantInfoController } from './tenant-info.controller';
 import { Tenant } from '../entity/tenant.entity';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { CacheService } from '../../utility/service/cache.service';
+import { TenantAssetService } from '../service/tenant-asset.service';
 
 const mockTenantRepo = {
   findOneBy: jest.fn(),
   save: jest.fn(),
+};
+
+const mockCacheService = {
+  get: jest.fn().mockResolvedValue(undefined),
+  set: jest.fn().mockResolvedValue(undefined),
+  del: jest.fn().mockResolvedValue(1),
+  key: jest.fn().mockReturnValue('cache-key'),
 };
 
 const mockCls = {
@@ -19,6 +28,13 @@ const mockCls = {
 const mockCloudinaryService = {
   uploadBuffer: jest.fn(),
   deleteByPublicId: jest.fn(),
+};
+
+const mockTenantAssetService = {
+  getCatalog: jest.fn(),
+  getOverrides: jest.fn().mockResolvedValue({}),
+  setOverride: jest.fn(),
+  removeOverride: jest.fn(),
 };
 
 const baseTenant = {
@@ -40,13 +56,16 @@ describe('TenantInfoController', () => {
     jest.clearAllMocks();
     mockCls.get.mockReturnValue('tenant-1');
     mockTenantRepo.save.mockImplementation((t) => Promise.resolve(t));
+    mockTenantAssetService.getOverrides.mockResolvedValue({});
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TenantInfoController],
       providers: [
         { provide: ClsService, useValue: mockCls },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
+        { provide: CacheService, useValue: mockCacheService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        { provide: TenantAssetService, useValue: mockTenantAssetService },
       ],
     })
       .overrideGuard(AdminGuard)
@@ -56,9 +75,14 @@ describe('TenantInfoController', () => {
   });
 
   describe('getInfo', () => {
-    it('returns the current tenant branding fields', async () => {
+    it('returns the current tenant branding fields plus asset overrides', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
+      mockTenantAssetService.getOverrides.mockResolvedValue({
+        'login-backdrop': 'https://cdn.example.com/login.jpg',
+      });
+
       const result = await controller.getInfo();
+
       expect(result).toEqual({
         name: 'Test Church',
         logoUrl: null,
@@ -67,7 +91,11 @@ describe('TenantInfoController', () => {
         supportEmail: null,
         currency: 'NGN',
         timezone: 'UTC',
+        assets: { 'login-backdrop': 'https://cdn.example.com/login.jpg' },
       });
+      expect(mockTenantAssetService.getOverrides).toHaveBeenCalledWith(
+        'tenant-1',
+      );
     });
 
     it('throws NotFoundException when there is no tenant in CLS', async () => {
@@ -95,6 +123,9 @@ describe('TenantInfoController', () => {
       expect(result.tagline).toBe('New tagline');
       expect(result.supportEmail).toBe('help@example.com');
       expect(result.name).toBe('Test Church');
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'tenant-branding:tenant-1',
+      );
     });
 
     it('throws NotFoundException when there is no tenant in CLS', async () => {
@@ -141,6 +172,9 @@ describe('TenantInfoController', () => {
       );
       expect(mockCloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
       expect(result.logoUrl).toBe('https://cdn.example.com/logo.png');
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'tenant-branding:tenant-1',
+      );
     });
 
     it('deletes the previous asset after replacing an existing logo', async () => {
@@ -182,12 +216,70 @@ describe('TenantInfoController', () => {
         'image',
       );
       expect(result.logoUrl).toBeNull();
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'tenant-branding:tenant-1',
+      );
     });
 
     it('does not call Cloudinary delete when there was no logo', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
       await controller.removeLogo();
       expect(mockCloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getAssetCatalog', () => {
+    it('delegates to TenantAssetService', () => {
+      mockTenantAssetService.getCatalog.mockReturnValue([
+        { key: 'login-backdrop' },
+      ]);
+      expect(controller.getAssetCatalog()).toEqual([{ key: 'login-backdrop' }]);
+    });
+  });
+
+  describe('setAsset', () => {
+    const file = {
+      buffer: Buffer.from('fake-image'),
+      mimetype: 'image/png',
+    } as Express.Multer.File;
+
+    it('throws BadRequestException when no file is provided', async () => {
+      await expect(
+        controller.setAsset('login-backdrop', undefined),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('resolves the current tenant and delegates to TenantAssetService', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
+      mockTenantAssetService.setOverride.mockResolvedValue({
+        'login-backdrop': 'https://cdn.example.com/new-login.jpg',
+      });
+
+      const result = await controller.setAsset('login-backdrop', file);
+
+      expect(mockTenantAssetService.setOverride).toHaveBeenCalledWith(
+        'tenant-1',
+        'login-backdrop',
+        file,
+      );
+      expect(result).toEqual({
+        assets: { 'login-backdrop': 'https://cdn.example.com/new-login.jpg' },
+      });
+    });
+  });
+
+  describe('removeAsset', () => {
+    it('resolves the current tenant and delegates to TenantAssetService', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
+      mockTenantAssetService.removeOverride.mockResolvedValue({});
+
+      const result = await controller.removeAsset('login-backdrop');
+
+      expect(mockTenantAssetService.removeOverride).toHaveBeenCalledWith(
+        'tenant-1',
+        'login-backdrop',
+      );
+      expect(result).toEqual({ assets: {} });
     });
   });
 });

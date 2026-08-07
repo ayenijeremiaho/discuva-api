@@ -81,6 +81,8 @@ export interface SessionSlotReport {
   allocatedMinutes: number;
   actualSeconds: number | null;
   overrunSeconds: number | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
   status: string;
 }
 
@@ -171,6 +173,9 @@ export interface MyServiceHistoryEntry {
   topic: string | null;
   allocatedMinutes: number;
   actualSeconds: number | null;
+  overrunSeconds: number | null;
+  startedAt: Date | null;
+  completedAt: Date | null;
 }
 
 export interface MyServiceHistoryResult {
@@ -1565,6 +1570,8 @@ export class ServiceSessionService {
         allocatedMinutes: allocatedMins,
         actualSeconds: s.actualSeconds ?? null,
         overrunSeconds,
+        startedAt: s.startedAt ?? null,
+        completedAt: s.completedAt ?? null,
         status: s.status,
       };
     });
@@ -1841,16 +1848,23 @@ export class ServiceSessionService {
           slot.overriddenMember?.id ?? slot.programmeSlot?.member?.id;
         if (effectiveMemberId !== memberId) continue;
 
+        const allocatedMins =
+          slot.adjustedAllocatedMinutes ?? slot.programmeSlot.allocatedMinutes;
+
         entries.push({
           eventName: session.programme.serviceSlot.event?.name ?? null,
           serviceSlotName: session.programme.serviceSlot.name,
           sessionDate: session.startedAt,
           type: slot.programmeSlot.type,
           topic: slot.overriddenTopic ?? slot.programmeSlot.topic,
-          allocatedMinutes:
-            slot.adjustedAllocatedMinutes ??
-            slot.programmeSlot.allocatedMinutes,
+          allocatedMinutes: allocatedMins,
           actualSeconds: slot.actualSeconds,
+          overrunSeconds:
+            slot.actualSeconds == null
+              ? null
+              : Math.round(slot.actualSeconds - allocatedMins * 60),
+          startedAt: slot.startedAt,
+          completedAt: slot.completedAt,
         });
 
         const existing = bySlotTypeMap.get(slot.programmeSlot.type) ?? {

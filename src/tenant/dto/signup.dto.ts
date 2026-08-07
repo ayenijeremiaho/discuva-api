@@ -5,10 +5,16 @@ import {
   IsString,
   Matches,
   MaxLength,
-  MinLength,
 } from 'class-validator';
 import { NormalizeEmail } from '../../utility/decorators/normalize-email.decorator';
 
+// No password field, deliberately — the first admin never types a password
+// at signup. TenantProvisioningService generates one internally and emails
+// a set-password link once provisioning completes (the same mechanism
+// PlatformTenantService.createTenant already used), which doubles as email
+// verification: nobody can ever log in without proving control of the
+// inbox behind adminEmail. A password field here would let anyone submit
+// an email they don't own.
 export class SignupDto {
   @IsString()
   @IsNotEmpty()
@@ -37,17 +43,6 @@ export class SignupDto {
   @NormalizeEmail()
   @IsEmail({}, { message: 'Invalid email format' })
   adminEmail: string;
-
-  @IsNotEmpty()
-  @MinLength(8, { message: 'Password must be at least 8 characters long' })
-  @Matches(/[A-Z]/, {
-    message: 'Password must contain at least one uppercase letter',
-  })
-  @Matches(/\d/, { message: 'Password must contain at least one number' })
-  @Matches(/[@$!%*?&]/, {
-    message: 'Password must contain at least one special character',
-  })
-  adminPassword: string;
 
   // Present only when this signup is completing a branch invite
   // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the

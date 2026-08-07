@@ -439,7 +439,6 @@ export class SundaySchoolService {
 
     const memberIds = dto.attendances.map((e) => e.memberId);
 
-    // Early return if no attendances to mark
     if (memberIds.length === 0) {
       this.logger.log(`No attendance entries to mark for session ${sessionId}`);
       return [];

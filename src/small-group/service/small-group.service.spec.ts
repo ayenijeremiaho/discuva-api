@@ -341,10 +341,10 @@ describe('SmallGroupService', () => {
         id: 'group-1',
         leader: { id: 'leader-1' },
       });
-      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.find.mockResolvedValue([]);
       mockAttendanceRepo.create.mockImplementation((data) => data);
       mockAttendanceRepo.save.mockImplementation((data) =>
-        Promise.resolve({ id: 'att-1', ...data }),
+        Promise.resolve(data.map((d: object) => ({ id: 'att-1', ...d }))),
       );
 
       const result = await service.recordAttendance('group-1', 'leader-1', {
@@ -368,9 +368,10 @@ describe('SmallGroupService', () => {
       });
       const existing = {
         id: 'att-1',
+        member: { id: 'member-1' },
         status: SmallGroupAttendanceStatusEnum.ABSENT,
       };
-      mockAttendanceRepo.findOne.mockResolvedValue(existing);
+      mockAttendanceRepo.find.mockResolvedValue([existing]);
       mockAttendanceRepo.save.mockImplementation((data) =>
         Promise.resolve(data),
       );

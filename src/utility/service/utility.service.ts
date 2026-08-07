@@ -136,6 +136,13 @@ export class UtilityService {
     );
   }
 
+  // Delegates to EmailQueueService.resolveTenantUrl — see its own doc
+  // comment for why this exists alongside the auto-injected login_url/
+  // admin_login_url template variables.
+  public resolveTenantLoginUrl(surface: 'member' | 'admin'): Promise<string> {
+    return this.emailQueueService.resolveTenantUrl(surface);
+  }
+
   public sendEmailWithAttachment(
     to: string | [string],
     subject: string,

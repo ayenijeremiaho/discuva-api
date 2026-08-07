@@ -19,7 +19,7 @@ export const envValidationSchema = Joi.object({
   DATABASE_POOL_SIZE: Joi.number().default(50),
   DATABASE_POOL_MIN: Joi.number().default(10),
   DATABASE_POOL_LOG: Joi.boolean().default(false),
-  APP_NAME: Joi.string().default('discovery-hub-api'),
+  APP_NAME: Joi.string().default('discuva-api'),
   // TenantMiddleware strips this suffix off the request Host header to
   // find a tenant's subdomain (docs/MULTI_TENANT_MIGRATION.md §4.3).
   // 'localhost' in dev — *.localhost resolves to 127.0.0.1 in every modern
@@ -46,19 +46,20 @@ export const envValidationSchema = Joi.object({
   EMAIL_PROVIDER: Joi.string().valid('gmail', 'resend').default('gmail'),
   EMAIL_FROM: Joi.string().optional(),
 
-  // Gmail provider
   EMAIL_HOST: Joi.string().optional(),
   EMAIL_PORT: Joi.number().optional(),
   EMAIL_SECURE: Joi.boolean().default(false),
   EMAIL_USER: Joi.string().optional(),
   EMAIL_PASSWORD: Joi.string().optional(),
 
-  // Resend provider
   RESEND_API_KEY: Joi.string().optional(),
 
   // SendGrid provider — platform-default API key; tenants may override via
-  // their own BYOK credentials instead.
+  // their own BYOK credentials instead. SENDGRID_BASE_URL matches every
+  // sibling provider's own *_BASE_URL override (Mailgun/Paystack/Flutterwave)
+  // for region failover / test doubles.
   SENDGRID_API_KEY: Joi.string().optional(),
+  SENDGRID_BASE_URL: Joi.string().uri().optional(),
 
   // Mailgun provider — platform-default API key/domain; MAILGUN_BASE_URL
   // lets the EU region (api.eu.mailgun.net/v3) be selected without a code
@@ -87,6 +88,10 @@ export const envValidationSchema = Joi.object({
   CLOUDINARY_API_KEY: Joi.string().required(),
   CLOUDINARY_API_SECRET: Joi.string().required(),
 
+  SENTRY_DSN: Joi.string().allow('').optional(),
+  SENTRY_ENABLED: Joi.string().valid('true', 'false').default('true'),
+  SENTRY_ENVIRONMENT: Joi.string().optional(),
+
   POSTMAN_URL: Joi.string()
     .uri()
     .default(
@@ -98,7 +103,7 @@ export const envValidationSchema = Joi.object({
       'https://res.cloudinary.com/dap7jwvms/image/upload/v1781539923/DC_LOGO_aswzgi.png',
     ),
 
-  PRODUCT_NAME: Joi.string().default('Discovery Hub'),
+  PRODUCT_NAME: Joi.string().default('Discuva'),
   CHURCH_NAME: Joi.string().default('RCCG Discovery Centre'),
   CHURCH_TAGLINE: Joi.string().default(
     'Destinies discovered, Champions raised',
@@ -106,7 +111,6 @@ export const envValidationSchema = Joi.object({
   CHURCH_ADDRESS: Joi.string().default(
     '62 Igi Olugbin Street, Bariga. Lagos, Nigeria',
   ),
-  DEFAULT_VENUE_NAME: Joi.string().default('RCCG Discovery Centre'),
 
   CURRENCY_CODE: Joi.string().default('NGN'),
   CURRENCY_LOCALE: Joi.string().default('en-NG'),
@@ -134,24 +138,21 @@ export const envValidationSchema = Joi.object({
   ASSET_OVERDUE_NOTIFICATION_DAYS: Joi.string().default('1,3,7'),
   TITHE_PROOF_EXPIRY_DAYS: Joi.number().default(90),
   MAX_FILE_UPLOAD_BYTES: Joi.number().default(5 * 1024 * 1024),
+  MAX_CLASS_MATERIAL_UPLOAD_BYTES: Joi.number().default(10 * 1024 * 1024),
+  // Small-image convention shared by every logo/photo/avatar upload route —
+  // tenant logo, tenant custom asset images, member profile photo.
+  MAX_AVATAR_UPLOAD_BYTES: Joi.number().default(3 * 1024 * 1024),
+  // Finance request payment-proof attachments — deliberately its own var
+  // rather than reusing MAX_CLASS_MATERIAL_UPLOAD_BYTES (same 10MB value
+  // today, but semantically unrelated; coupling them would mean changing
+  // the class-material limit for one reason silently changes this too).
+  MAX_FINANCE_PROOF_UPLOAD_BYTES: Joi.number().default(10 * 1024 * 1024),
 
   SESSION_MAX_AGE_DAYS: Joi.number().integer().min(1).default(30),
   DEFAULT_ADMIN_EMAIL: Joi.string().email().optional(),
   DEFAULT_ADMIN_PASSWORD_HASH: Joi.string().optional(),
   DEFAULT_PLATFORM_ADMIN_EMAIL: Joi.string().email().optional(),
   DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH: Joi.string().optional(),
-  DEFAULT_VENUE_ADDRESS: Joi.string().default(
-    '62 Igi Olugbin Street, Bariga. Lagos, Nigeria',
-  ),
-  DEFAULT_VENUE_LATITUDE: Joi.number().default(6.5244),
-  DEFAULT_VENUE_LONGITUDE: Joi.number().default(3.3792),
-  DEFAULT_EVENT_CONFIG_NAME: Joi.string().default('Default Event Config'),
-  DEFAULT_EVENT_ALLOWED_DISTANCE_IN_METERS: Joi.number().default(100),
-
-  WORKER_CHECKIN_START_OFFSET_SECONDS: Joi.number().default(-1800),
-  WORKER_LATE_OFFSET_SECONDS: Joi.number().default(0),
-  MEMBER_CHECKIN_START_OFFSET_SECONDS: Joi.number().default(-900),
-  CHECKIN_STOP_OFFSET_SECONDS: Joi.number().default(3600),
 
   EMAIL_SERVICE: Joi.string().default('gmail'),
 
@@ -177,8 +178,9 @@ export const envValidationSchema = Joi.object({
   BULL_BOARD_USER: Joi.string().optional(),
   BULL_BOARD_PASSWORD: Joi.string().optional(),
 
-  TERMII_API_KEY: Joi.string().optional(),
-  TERMII_SENDER_ID: Joi.string().optional(),
+  // Pure BYOK — every tenant configures their own Termii/Twilio credentials
+  // under Communication Providers, there is no platform-default account.
+  // Only the API host itself (infrastructure, not a secret) is env-driven.
   TERMII_BASE_URL: Joi.string().uri().default('https://api.ng.termii.com'),
 
   // Platform-wide fallback Data API key, used when a tenant hasn't set its
@@ -190,6 +192,9 @@ export const envValidationSchema = Joi.object({
   // every notification with it (X-Hub-Signature), which is how the callback
   // tells a genuine hub delivery apart from a forged POST to the public URL.
   YOUTUBE_WEBSUB_SECRET: Joi.string().optional(),
+  PUBSUBHUBBUB_URL: Joi.string()
+    .uri()
+    .default('https://pubsubhubbub.appspot.com/subscribe'),
 
   // All optional — a deployment that hasn't set a given provider's keys
   // simply can't be selected as ?provider= on a checkout call
@@ -206,9 +211,7 @@ export const envValidationSchema = Joi.object({
   DEFAULT_PAYMENT_PROVIDER: Joi.string()
     .valid('paystack', 'flutterwave')
     .default('paystack'),
-  // Price of one SMS wallet credit, in kobo — e.g. 100 = ₦1/credit. Unset
-  // means "wallet top-up not configured yet", same as plans.priceCents
-  // being 0 for both tiers at launch (docs/PRODUCT_STRATEGY.md §5: pricing
-  // is a draft hypothesis, not decided here).
-  SMS_CREDIT_PRICE_KOBO: Joi.number().integer().positive().optional(),
+  // Billing-cycle policy constants — see CheckoutService/SubscriptionLapseScheduler.
+  SUBSCRIPTION_PERIOD_DAYS: Joi.number().integer().positive().default(30),
+  GRACE_PERIOD_DAYS: Joi.number().integer().positive().default(7),
 }).options({ allowUnknown: true });

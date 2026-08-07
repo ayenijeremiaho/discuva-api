@@ -1,3 +1,4 @@
+import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './utility/adapters/redis-io.adapter';
@@ -14,6 +15,7 @@ import { ExpressAdapter as BullBoardExpressAdapter } from '@bull-board/express';
 import { getQueueToken } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Request, Response, NextFunction } from 'express';
+import { createCorsOriginValidator } from './tenant/utility/cors-origin-validator';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
@@ -74,9 +76,8 @@ function registerGlobalInterceptors(app: INestApplication) {
 }
 
 function corsOptions() {
-  const origins = process.env.CORS_ORIGINS?.split(',').map((o) => o.trim());
   return {
-    origin: origins,
+    origin: createCorsOriginValidator(),
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
     preflightContinue: false,

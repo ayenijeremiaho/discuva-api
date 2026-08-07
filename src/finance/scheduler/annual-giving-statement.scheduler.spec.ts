@@ -1,16 +1,29 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { AnnualGivingStatementScheduler } from './annual-giving-statement.scheduler';
 import { Member } from '../../member/entity/member.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { PledgeContribution } from '../entity/pledge-contribution.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
 
 const mockCacheService = {
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
+};
+
+const mockTenantRepo = { find: jest.fn() };
+const mockCls = {
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
 };
 
 const mockUtilityService = {
@@ -18,7 +31,11 @@ const mockUtilityService = {
 };
 
 const mockConfigService = {
-  get: jest.fn((key: string) => (key === 'CURRENCY_CODE' ? 'NGN' : undefined)),
+  get: jest.fn(),
+};
+
+const mockTenantCurrencyService = {
+  resolveCurrencyCode: jest.fn().mockResolvedValue('NGN'),
 };
 
 const mockMemberRepo = {
@@ -58,9 +75,16 @@ describe('AnnualGivingStatementScheduler', () => {
           provide: getRepositoryToken(PledgeContribution),
           useValue: mockContributionRepo,
         },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: CacheService, useValue: mockCacheService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: TenantCurrencyService,
+          useValue: mockTenantCurrencyService,
+        },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -167,6 +191,64 @@ describe('AnnualGivingStatementScheduler', () => {
       expect(result.sent).toBe(false);
       expect(result.message).toContain('no recorded giving');
       expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sendAnnualStatements', () => {
+    beforeEach(() => {
+      mockConfigService.get.mockReturnValue(true);
+      mockTitheRecordRepo.createQueryBuilder.mockReturnValue(makeQb([]));
+      mockContributionRepo.createQueryBuilder.mockReturnValue(makeQb([]));
+      mockMemberRepo.findBy.mockResolvedValue([]);
+    });
+
+    it('runs the giving-totals query once per active tenant, entering each tenant context', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+
+      await scheduler.sendAnnualStatements();
+
+      expect(mockTitheRecordRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_a", public',
+      );
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_b", public',
+      );
+    });
+
+    it('does nothing when the feature flag is disabled', async () => {
+      mockConfigService.get.mockReturnValue(false);
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+      ]);
+
+      await scheduler.sendAnnualStatements();
+
+      expect(mockTenantRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('continues past one tenant failing so the rest still get processed', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      mockTitheRecordRepo.createQueryBuilder
+        .mockReturnValueOnce({
+          select: jest.fn().mockReturnThis(),
+          addSelect: jest.fn().mockReturnThis(),
+          innerJoin: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          groupBy: jest.fn().mockReturnThis(),
+          getRawMany: jest.fn().mockRejectedValue(new Error('boom')),
+        })
+        .mockReturnValue(makeQb([]));
+
+      await expect(scheduler.sendAnnualStatements()).resolves.toBeUndefined();
+      expect(mockCacheService.releaseLock).toHaveBeenCalled();
     });
   });
 });

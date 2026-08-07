@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { RentalFacility } from './entity/rental-facility.entity';
 import { RentalPricingTier } from './entity/rental-pricing-tier.entity';
@@ -18,6 +19,7 @@ import { RentalAdminController } from './controller/rental-admin.controller';
 import { RentalMemberController } from './controller/rental-member.controller';
 import { RentalStatusScheduler } from './scheduler/rental-status.scheduler';
 import { UtilityModule } from '../utility/utility.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -34,6 +36,9 @@ import { UtilityModule } from '../utility/utility.module';
       DepartmentLead,
       WorkerProfile,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by RentalStatusScheduler's forEachActiveTenant loop.
+    TypeOrmModule.forFeature([Tenant]),
     UtilityModule,
   ],
   providers: [

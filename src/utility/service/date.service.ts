@@ -247,23 +247,19 @@ export class DateService {
    * Format patterns for common use cases
    */
   static readonly PATTERNS = {
-    // Date only
     DATE: 'yyyy-MM-dd',
     DATE_LONG: 'EEEE, MMMM do, yyyy',
     DATE_MEDIUM: 'MMM d, yyyy',
     DATE_SHORT: 'MM/dd/yyyy',
 
-    // Time only
     TIME: 'HH:mm:ss',
     TIME_12H: 'h:mm:ss a',
     TIME_SHORT: 'h:mm a',
 
-    // Date and time
     DATETIME: 'yyyy-MM-dd HH:mm:ss',
     DATETIME_LONG: 'EEEE, MMMM do, yyyy h:mm:ss a',
     DATETIME_MEDIUM: 'MMM d, yyyy h:mm a',
 
-    // For email templates
     EMAIL_DATE: 'EEEE, MMMM d, yyyy',
     EMAIL_TIME: 'h:mm a',
   };

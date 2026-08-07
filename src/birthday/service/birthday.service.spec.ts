@@ -2,10 +2,13 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { BirthdayService } from './birthday.service';
 import { BirthdayWish } from '../entity/birthday-wish.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Announcement } from '../../announcement/entity/announcement.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SanitizationService } from '../../utility/service/sanitization.service';
 import { CacheService } from '../../utility/service/cache.service';
@@ -68,6 +71,19 @@ const mockConfigService = {
   get: jest.fn(),
 };
 
+const mockTenantRepo = {
+  find: jest
+    .fn()
+    .mockResolvedValue([{ id: 't1', subdomain: 'a', schemaName: 'church_a' }]),
+};
+const mockCls = {
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
+};
+
 const makeMember = (overrides: Partial<Member> = {}): Member =>
   ({
     id: 'member-1',
@@ -85,6 +101,9 @@ describe('BirthdayService', () => {
     jest.clearAllMocks();
     mockCacheService.acquireLock.mockResolvedValue(true);
     mockConfigService.get.mockReturnValue(20);
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -95,10 +114,13 @@ describe('BirthdayService', () => {
           provide: getRepositoryToken(Announcement),
           useValue: mockAnnouncementRepo,
         },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: SanitizationService, useValue: mockSanitizationService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -227,6 +249,26 @@ describe('BirthdayService', () => {
 
       expect(mockCacheService.releaseLock).toHaveBeenCalledWith(
         'lock:birthday-greetings',
+      );
+    });
+
+    it('runs the birthday query once per active tenant, entering each tenant context', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.triggerBirthdayGreetings();
+
+      expect(mockMemberRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_a", public',
+      );
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_b", public',
       );
     });
   });

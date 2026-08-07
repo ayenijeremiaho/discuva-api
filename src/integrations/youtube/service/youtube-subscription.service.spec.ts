@@ -11,9 +11,14 @@ const mockIntegrationRepo = {
   save: jest.fn(),
 };
 
+// Falls back to the real ConfigService.get(key, defaultValue) semantics —
+// so a defaulted read (e.g. PUBSUBHUBBUB_URL) doesn't silently resolve to
+// `undefined` just because this fixture doesn't set it explicitly.
 function mockConfig(values: Record<string, string | undefined>) {
   return {
-    get: jest.fn((key: string) => values[key]),
+    get: jest.fn(
+      (key: string, defaultValue?: string) => values[key] ?? defaultValue,
+    ),
   };
 }
 
@@ -87,6 +92,26 @@ describe('YoutubeSubscriptionService', () => {
       expect(String(options?.body)).toContain('hub.mode=subscribe');
       expect(mockIntegrationRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ subscriptionExpiresAt: expect.any(Date) }),
+      );
+    });
+
+    it('posts against a configured PUBSUBHUBBUB_URL override instead of the hardcoded default', async () => {
+      await build({
+        ...CONFIGURED,
+        PUBSUBHUBBUB_URL: 'https://hub.example-region.net/subscribe',
+      });
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 202,
+      } as Response);
+      mockIntegrationRepo.findOne.mockResolvedValue({ channelId: 'UC123' });
+      mockIntegrationRepo.save.mockResolvedValue({});
+
+      await service.subscribe('UC123');
+
+      expect(fetchSpy).toHaveBeenCalledWith(
+        'https://hub.example-region.net/subscribe',
+        expect.objectContaining({ method: 'POST' }),
       );
     });
 

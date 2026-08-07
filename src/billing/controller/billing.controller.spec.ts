@@ -7,7 +7,6 @@ const mockCheckoutService = {
   getBillingSummary: jest.fn(),
   listPlans: jest.fn(),
   initiateSubscriptionCheckout: jest.fn(),
-  initiateWalletTopupCheckout: jest.fn(),
   cancelSubscription: jest.fn(),
 };
 
@@ -54,26 +53,6 @@ describe('BillingController', () => {
       'pro',
       'admin@example.com',
       'paystack',
-      'https://a',
-      'https://b',
-    );
-  });
-
-  it('initiateWalletTopupCheckout passes the current admin email through', () => {
-    controller.initiateWalletTopupCheckout(
-      {
-        creditsAmount: 1000,
-        successUrl: 'https://a',
-        cancelUrl: 'https://b',
-      },
-      mockAdmin,
-    );
-    expect(
-      mockCheckoutService.initiateWalletTopupCheckout,
-    ).toHaveBeenCalledWith(
-      1000,
-      'admin@example.com',
-      undefined,
       'https://a',
       'https://b',
     );

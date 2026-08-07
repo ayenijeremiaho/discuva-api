@@ -2,8 +2,14 @@ import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Member } from '../../member/entity/member.entity';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { AnnouncementService } from '../../announcement/service/announcement.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
@@ -22,10 +28,14 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(Member)
     private readonly memberRepository: Repository<Member>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly announcementService: AnnouncementService,
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -74,44 +84,58 @@ export class MembershipAnniversaryService implements OnApplicationBootstrap {
     const year = today.getFullYear();
 
     try {
-      const celebrants = await this.memberRepository
-        .createQueryBuilder('m')
-        .where('m.dateJoinedChurch IS NOT NULL')
-        .andWhere('EXTRACT(MONTH FROM m.dateJoinedChurch) = :month', {
-          month,
-        })
-        .andWhere('EXTRACT(DAY FROM m.dateJoinedChurch) = :day', { day })
-        .andWhere('EXTRACT(YEAR FROM m.dateJoinedChurch) < :year', { year })
-        .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })
-        .andWhere(
-          '(m.anniversaryGreetedYear IS NULL OR m.anniversaryGreetedYear != :year)',
-          { year },
-        )
-        .getMany();
+      const { succeeded, failed } = await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        async () => {
+          const celebrants = await this.memberRepository
+            .createQueryBuilder('m')
+            .where('m.dateJoinedChurch IS NOT NULL')
+            .andWhere('EXTRACT(MONTH FROM m.dateJoinedChurch) = :month', {
+              month,
+            })
+            .andWhere('EXTRACT(DAY FROM m.dateJoinedChurch) = :day', { day })
+            .andWhere('EXTRACT(YEAR FROM m.dateJoinedChurch) < :year', {
+              year,
+            })
+            .andWhere('m.status = :status', {
+              status: MemberStatusEnum.ACTIVE,
+            })
+            .andWhere(
+              '(m.anniversaryGreetedYear IS NULL OR m.anniversaryGreetedYear != :year)',
+              { year },
+            )
+            .getMany();
 
-      if (celebrants.length === 0) return;
-
-      for (const member of celebrants) {
-        try {
-          // getUTCFullYear (not getFullYear) — dateJoinedChurch is a date-only
-          // column serialized at UTC midnight; reading it in a negative-offset
-          // local timezone would otherwise roll it back to the prior year.
-          const years =
-            year - new Date(member.dateJoinedChurch).getUTCFullYear();
-          await this.greetMember(member, years);
-          await this.memberRepository.update(member.id, {
-            anniversaryGreetedYear: year,
-          });
-          this.logger.log(
-            `Membership anniversary greeting sent to ${member.firstname} ${member.lastname} (${years} years)`,
-          );
-        } catch (err) {
-          this.logger.error(
-            `Membership anniversary greeting failed for member ${member.id}`,
-            err,
-          );
-        }
-      }
+          for (const member of celebrants) {
+            try {
+              // getUTCFullYear (not getFullYear) — dateJoinedChurch is a
+              // date-only column serialized at UTC midnight; reading it in a
+              // negative-offset local timezone would otherwise roll it back
+              // to the prior year.
+              const years =
+                year - new Date(member.dateJoinedChurch).getUTCFullYear();
+              await this.greetMember(member, years);
+              await this.memberRepository.update(member.id, {
+                anniversaryGreetedYear: year,
+              });
+              this.logger.log(
+                `Membership anniversary greeting sent to ${member.firstname} ${member.lastname} (${years} years)`,
+              );
+            } catch (err) {
+              this.logger.error(
+                `Membership anniversary greeting failed for member ${member.id}`,
+                err,
+              );
+            }
+          }
+        },
+      );
+      this.logger.log(
+        `Membership anniversary greetings complete for ${succeeded} tenant(s), ${failed} failure(s)`,
+      );
     } finally {
       this.cacheService.releaseLock(MembershipAnniversaryService.LOCK_KEY);
     }

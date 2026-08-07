@@ -100,7 +100,11 @@ export class MemberController {
   @Post('me/photo')
   @UseInterceptors(
     FileInterceptor('photo', {
-      limits: { fileSize: 3 * 1024 * 1024 },
+      limits: {
+        fileSize:
+          Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
+          3 * 1024 * 1024,
+      },
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.startsWith('image/')) {
           return cb(

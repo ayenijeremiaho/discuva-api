@@ -18,6 +18,16 @@ export const KNOWN_MODULES = [
     required: false,
   },
   { key: 'facility_rental', moduleName: 'Facility Rental', required: false },
+  // "tithe" is the stable internal key (stored per-tenant, referenced by
+  // @RequiresModule('tithe') across the tithe/finance/giving-checkout
+  // modules and by the TITHE_READ/TITHE_WRITE permission names) — never
+  // rename this without a data migration touching every tenant's stored
+  // enabled-modules list. Kept as "Tithe & Giving" to stay consistent with
+  // those permission labels ("View Tithe & Giving Records" etc.) rather
+  // than drifting to a different display word than the permission picker
+  // uses for the same capability. A church that doesn't use "tithe"
+  // terminology can already override this via church_module_settings.displayName
+  // (discuva-admin's Module Settings page supports a per-tenant rename).
   { key: 'tithe', moduleName: 'Tithe & Giving', required: false },
   { key: 'classes', moduleName: 'Training Classes', required: false },
   { key: 'announcements', moduleName: 'Announcements', required: false },
@@ -26,6 +36,8 @@ export const KNOWN_MODULES = [
   { key: 'service_ratings', moduleName: 'Service Ratings', required: false },
   { key: 'volunteering', moduleName: 'Volunteering', required: false },
   { key: 'small_groups', moduleName: 'Fellowships', required: false },
+  { key: 'forms', moduleName: 'Forms', required: false },
+  { key: 'social_media', moduleName: 'Social Media', required: false },
 ] as const;
 
 export type KnownModuleKey = (typeof KNOWN_MODULES)[number]['key'];

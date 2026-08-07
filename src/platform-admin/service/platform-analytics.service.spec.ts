@@ -9,6 +9,8 @@ import { BillingCheckoutSession } from '../../billing/entity/billing-checkout-se
 import { TenantRollup } from '../../branch/entity/tenant-rollup.entity';
 import { CommunicationProvider } from '../entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from '../entity/tenant-communication-provider-config.entity';
+import { TenantGivingProviderConfig } from '../../giving-checkout/entity/tenant-giving-provider-config.entity';
+import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
 
 function mockQB(raw: any) {
   return {
@@ -18,6 +20,8 @@ function mockQB(raw: any) {
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
     groupBy: jest.fn().mockReturnThis(),
+    addGroupBy: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
     getRawOne: jest.fn().mockResolvedValue(Array.isArray(raw) ? raw[0] : raw),
     getRawMany: jest.fn().mockResolvedValue(Array.isArray(raw) ? raw : [raw]),
   };
@@ -34,6 +38,11 @@ const mockCheckoutRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
 const mockRollupRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
 const mockProviderRepo = {};
 const mockProviderConfigRepo = { createQueryBuilder: jest.fn() };
+const mockGivingProviderConfigRepo = { createQueryBuilder: jest.fn() };
+const mockGivingCheckoutRepo = {
+  find: jest.fn(),
+  createQueryBuilder: jest.fn(),
+};
 
 describe('PlatformAnalyticsService', () => {
   let service: PlatformAnalyticsService;
@@ -62,6 +71,14 @@ describe('PlatformAnalyticsService', () => {
           provide: getRepositoryToken(TenantCommunicationProviderConfig),
           useValue: mockProviderConfigRepo,
         },
+        {
+          provide: getRepositoryToken(TenantGivingProviderConfig),
+          useValue: mockGivingProviderConfigRepo,
+        },
+        {
+          provide: getRepositoryToken(GivingCheckoutSession),
+          useValue: mockGivingCheckoutRepo,
+        },
       ],
     }).compile();
     service = module.get(PlatformAnalyticsService);
@@ -80,7 +97,16 @@ describe('PlatformAnalyticsService', () => {
             { planId: 'free', count: '5' },
           ]),
         )
-        .mockReturnValueOnce(mockQB({ total: '15000' }));
+        .mockReturnValueOnce(
+          mockQB([
+            {
+              priceCents: 15000,
+              discountType: null,
+              discountValue: null,
+              discountExpiresAt: null,
+            },
+          ]),
+        );
       mockPlanRepo.find.mockResolvedValue([
         { id: 'pro', name: 'Pro' },
         { id: 'free', name: 'Free' },
@@ -99,6 +125,36 @@ describe('PlatformAnalyticsService', () => {
         ],
         mrrCents: 15000,
       });
+    });
+
+    it('reduces MRR by an active, unexpired PERCENTAGE discount but ignores an expired one', async () => {
+      mockTenantRepo.count.mockResolvedValueOnce(2).mockResolvedValueOnce(2);
+      mockRollupRepo.createQueryBuilder.mockReturnValue(mockQB({ total: '0' }));
+      mockSubscriptionRepo.createQueryBuilder
+        .mockReturnValueOnce(mockQB([]))
+        .mockReturnValueOnce(
+          mockQB([
+            {
+              priceCents: 10000,
+              discountType: 'percentage',
+              discountValue: 20,
+              discountExpiresAt: null,
+            },
+            {
+              priceCents: 10000,
+              discountType: 'percentage',
+              discountValue: 50,
+              discountExpiresAt: new Date('2020-01-01'),
+            },
+          ]),
+        );
+      mockPlanRepo.find.mockResolvedValue([]);
+
+      const result = await service.getOverview();
+
+      // First row: 10000 * (1 - 0.2) = 8000. Second row's discount already
+      // expired, so it counts at the full 10000. Total: 18000.
+      expect(result.mrrCents).toBe(18000);
     });
   });
 
@@ -135,9 +191,16 @@ describe('PlatformAnalyticsService', () => {
   });
 
   describe('getRevenue', () => {
-    it('splits revenue by provider and buckets subscription vs wallet top-up revenue by month', async () => {
+    it('splits revenue by provider and buckets subscription revenue by month', async () => {
       mockSubscriptionRepo.createQueryBuilder.mockReturnValue(
-        mockQB({ total: '20000' }),
+        mockQB([
+          {
+            priceCents: 20000,
+            discountType: null,
+            discountValue: null,
+            discountExpiresAt: null,
+          },
+        ]),
       );
       mockCheckoutRepo.createQueryBuilder.mockReturnValue(
         mockQB([
@@ -150,11 +213,6 @@ describe('PlatformAnalyticsService', () => {
           type: 'subscription',
           amountCents: 500000,
           completedAt: new Date('2026-06-10'),
-        },
-        {
-          type: 'wallet_topup',
-          amountCents: 100000,
-          completedAt: new Date('2026-06-15'),
         },
       ]);
 
@@ -169,8 +227,7 @@ describe('PlatformAnalyticsService', () => {
         {
           periodLabel: '2026-06',
           subscriptionRevenueCents: 500000,
-          walletTopupRevenueCents: 100000,
-          totalCents: 600000,
+          totalCents: 500000,
         },
       ]);
     });
@@ -243,11 +300,14 @@ describe('PlatformAnalyticsService', () => {
   });
 
   describe('getAdoption', () => {
-    it('computes BYOK adoption rate per channel and plan distribution across all subscriptions', async () => {
+    it('computes BYOK adoption rate per channel (incl. giving) and plan distribution across all subscriptions', async () => {
       mockTenantRepo.count.mockResolvedValue(10);
       mockProviderConfigRepo.createQueryBuilder
         .mockReturnValueOnce(mockQB({ count: '3' })) // sms
         .mockReturnValueOnce(mockQB({ count: '1' })); // email
+      mockGivingProviderConfigRepo.createQueryBuilder.mockReturnValueOnce(
+        mockQB({ count: '2' }),
+      ); // giving
       mockSubscriptionRepo.createQueryBuilder.mockReturnValue(
         mockQB([
           { planId: 'free', count: '7' },
@@ -271,6 +331,11 @@ describe('PlatformAnalyticsService', () => {
         totalTenants: 10,
         ratePercent: 10,
       });
+      expect(result.givingAdoption).toEqual({
+        byokCount: 2,
+        totalTenants: 10,
+        ratePercent: 20,
+      });
       expect(result.planDistribution).toEqual([
         { planId: 'free', planName: 'Free', count: 7 },
         { planId: 'pro', planName: 'Pro', count: 3 },
@@ -282,11 +347,120 @@ describe('PlatformAnalyticsService', () => {
       mockProviderConfigRepo.createQueryBuilder
         .mockReturnValueOnce(mockQB({ count: '0' }))
         .mockReturnValueOnce(mockQB({ count: '0' }));
+      mockGivingProviderConfigRepo.createQueryBuilder.mockReturnValueOnce(
+        mockQB({ count: '0' }),
+      );
       mockSubscriptionRepo.createQueryBuilder.mockReturnValue(mockQB([]));
       mockPlanRepo.find.mockResolvedValue([]);
 
       const result = await service.getAdoption();
       expect(result.smsAdoption.ratePercent).toBe(0);
+      expect(result.givingAdoption.ratePercent).toBe(0);
+    });
+  });
+
+  describe('getGiving', () => {
+    it('never blends currencies — totals, byProvider, and byTenant are each grouped by currency', async () => {
+      mockGivingCheckoutRepo.createQueryBuilder
+        .mockReturnValueOnce(
+          mockQB([
+            { currency: 'NGN', total: '750000', count: '3' },
+            { currency: 'USD', total: '5000', count: '1' },
+          ]),
+        ) // totals
+        .mockReturnValueOnce(
+          mockQB([
+            {
+              provider: 'paystack',
+              currency: 'NGN',
+              total: '750000',
+              count: '3',
+            },
+            { provider: 'stripe', currency: 'USD', total: '5000', count: '1' },
+          ]),
+        ) // byProvider
+        .mockReturnValueOnce(
+          mockQB([
+            {
+              tenantId: 'tenant-1',
+              tenantName: 'Grace Chapel',
+              provider: 'paystack',
+              currency: 'NGN',
+              total: '750000',
+              count: '3',
+            },
+          ]),
+        ); // byTenant
+      mockGivingCheckoutRepo.find.mockResolvedValue([
+        {
+          currency: 'NGN',
+          amountCents: 500000,
+          completedAt: new Date('2026-06-10'),
+        },
+        {
+          currency: 'NGN',
+          amountCents: 250000,
+          completedAt: new Date('2026-06-15'),
+        },
+      ]);
+
+      const result = await service.getGiving('monthly', 12);
+
+      expect(result.totals).toEqual([
+        { currency: 'NGN', totalAmountCents: 750000, count: 3 },
+        { currency: 'USD', totalAmountCents: 5000, count: 1 },
+      ]);
+      expect(result.byProvider).toEqual([
+        {
+          provider: 'paystack',
+          currency: 'NGN',
+          totalAmountCents: 750000,
+          count: 3,
+        },
+        {
+          provider: 'stripe',
+          currency: 'USD',
+          totalAmountCents: 5000,
+          count: 1,
+        },
+      ]);
+      expect(result.byTenant).toEqual([
+        {
+          tenantId: 'tenant-1',
+          tenantName: 'Grace Chapel',
+          provider: 'paystack',
+          currency: 'NGN',
+          totalAmountCents: 750000,
+          count: 3,
+        },
+      ]);
+      expect(result.trend).toEqual([
+        {
+          periodLabel: '2026-06',
+          currency: 'NGN',
+          totalAmountCents: 750000,
+          count: 2,
+        },
+      ]);
+    });
+
+    it('only counts COMPLETED sessions and excludes trend points older than the window', async () => {
+      mockGivingCheckoutRepo.createQueryBuilder
+        .mockReturnValueOnce(mockQB([]))
+        .mockReturnValueOnce(mockQB([]))
+        .mockReturnValueOnce(mockQB([]));
+      const old = new Date();
+      old.setFullYear(old.getFullYear() - 5);
+      mockGivingCheckoutRepo.find.mockResolvedValue([
+        { currency: 'NGN', amountCents: 100000, completedAt: old },
+      ]);
+
+      const result = await service.getGiving('monthly', 12);
+
+      expect(result.trend).toEqual([]);
+      expect(mockGivingCheckoutRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: 'completed' } }),
+      );
     });
   });
 });

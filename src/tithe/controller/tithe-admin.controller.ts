@@ -36,7 +36,6 @@ import {
   MatchUnmatchedDto,
   UpdateTitheAccountDto,
 } from '../dto/tithe.dto';
-import { VirtualAccountService } from '../../finance/service/virtual-account.service';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 
@@ -44,10 +43,7 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 @UseGuards(JwtAuthGuard, AdminGuard, ModuleEnabledGuard)
 @Controller('admin/tithes')
 export class TitheAdminController {
-  constructor(
-    private readonly titheService: TitheService,
-    private readonly virtualAccountService: VirtualAccountService,
-  ) {}
+  constructor(private readonly titheService: TitheService) {}
 
   // ── Tithe Accounts ────────────────────────────────────────────────────────
 
@@ -295,17 +291,5 @@ export class TitheAdminController {
       'Content-Length': buffer.length,
     });
     res.end(buffer);
-  }
-
-  // ── Virtual Accounts ──────────────────────────────────────────────────────
-
-  @RequiresPermission(AdminPermission.TITHE_WRITE)
-  @Patch('virtual-accounts/:id/deactivate')
-  @HttpCode(HttpStatus.OK)
-  deactivateVirtualAccount(
-    @Param('id', ParseUUIDPipe) id: string,
-    @CurrentAdmin() admin: Admin,
-  ) {
-    return this.virtualAccountService.deactivate(id, admin);
   }
 }

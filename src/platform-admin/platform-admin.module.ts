@@ -12,6 +12,7 @@ import { PlatformAdminAuthService } from './service/platform-admin-auth.service'
 import { PlatformTenantService } from './service/platform-tenant.service';
 import { PlatformPlanService } from './service/platform-plan.service';
 import { PlatformCommunicationProviderService } from './service/platform-communication-provider.service';
+import { PlatformGivingProviderService } from './service/platform-giving-provider.service';
 import { PlatformAnalyticsService } from './service/platform-analytics.service';
 import { PlatformAdminRoleService } from './service/platform-admin-role.service';
 import { PlatformAdminManagementService } from './service/platform-admin-management.service';
@@ -23,13 +24,16 @@ import { PlatformAdminRole } from './entity/platform-admin-role.entity';
 import { PlatformAdminPasswordResetOtp } from './entity/platform-admin-password-reset-otp.entity';
 import { CommunicationProvider } from './entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from './entity/tenant-communication-provider-config.entity';
-import { SmsWallet } from './entity/sms-wallet.entity';
+import { GivingProvider } from '../giving-checkout/entity/giving-provider.entity';
+import { TenantGivingProviderConfig } from '../giving-checkout/entity/tenant-giving-provider-config.entity';
+import { GivingCheckoutSession } from '../giving-checkout/entity/giving-checkout-session.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Plan } from '../billing/entity/plan.entity';
 import { Subscription } from '../billing/entity/subscription.entity';
 import { BillingCheckoutSession } from '../billing/entity/billing-checkout-session.entity';
 import { TenantRollup } from '../branch/entity/tenant-rollup.entity';
 import { TenantModule } from '../tenant/tenant.module';
+import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.entity';
 
 @Module({
   imports: [
@@ -45,9 +49,12 @@ import { TenantModule } from '../tenant/tenant.module';
       Subscription,
       CommunicationProvider,
       TenantCommunicationProviderConfig,
-      SmsWallet,
+      GivingProvider,
+      TenantGivingProviderConfig,
+      GivingCheckoutSession,
       BillingCheckoutSession,
       TenantRollup,
+      TenantOnboardingEvent,
     ]),
     TenantModule,
   ],
@@ -64,6 +71,7 @@ import { TenantModule } from '../tenant/tenant.module';
     PlatformTenantService,
     PlatformPlanService,
     PlatformCommunicationProviderService,
+    PlatformGivingProviderService,
     PlatformAnalyticsService,
     PlatformAdminRoleService,
     PlatformAdminManagementService,

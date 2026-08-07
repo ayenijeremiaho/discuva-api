@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 import { PrayerProgram } from './entity/prayer-program.entity';
 import { PrayerScheduleConfig } from './entity/prayer-schedule-config.entity';
 import { PrayerDayConfig } from './entity/prayer-day-config.entity';
@@ -33,6 +35,9 @@ import { AdminModule } from '../admin/admin.module';
       Member,
       DepartmentLead,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by PrayerReminderScheduler's forEachActiveTenant loop.
+    TypeOrmModule.forFeature([Tenant]),
     UtilityModule,
     AdminModule,
   ],

@@ -75,6 +75,10 @@ export enum AdminPermission {
   BILLING_WRITE = 'billing:write',
   BRANCH_READ = 'branch:read',
   BRANCH_WRITE = 'branch:write',
+  FORMS_READ = 'forms:read',
+  FORMS_WRITE = 'forms:write',
+  SOCIAL_MEDIA_READ = 'social_media:read',
+  SOCIAL_MEDIA_WRITE = 'social_media:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -157,6 +161,10 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.BILLING_WRITE]: 'Manage Plan & Billing',
   [AdminPermission.BRANCH_READ]: 'View Branch Overview',
   [AdminPermission.BRANCH_WRITE]: 'Manage Branches',
+  [AdminPermission.FORMS_READ]: 'View Forms & Submissions',
+  [AdminPermission.FORMS_WRITE]: 'Build & Manage Forms',
+  [AdminPermission.SOCIAL_MEDIA_READ]: 'View Social Media Accounts & Posts',
+  [AdminPermission.SOCIAL_MEDIA_WRITE]: 'Connect Accounts & Publish Posts',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -226,7 +234,7 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
   [AdminPermission.TITHE_READ]:
     'View individual member tithe records, giving history, and annual giving statements',
   [AdminPermission.TITHE_WRITE]:
-    'Confirm tithe records, manage tithe accounts, deactivate member virtual accounts, and manage virtual account providers',
+    'Confirm tithe records and manage tithe accounts',
   [AdminPermission.FOLLOW_UP_READ]: 'View follow-up tasks and their progress',
   [AdminPermission.FOLLOW_UP_WRITE]:
     'Create and assign follow-up tasks to workers',
@@ -298,13 +306,21 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
   [AdminPermission.CHURCH_PROFILE_WRITE]:
     "Edit this church's own name, logo, tagline, address, support email, currency, and timezone",
   [AdminPermission.BILLING_READ]:
-    "View this church's current plan, subscription status, and SMS wallet balance",
+    "View this church's current plan and subscription status",
   [AdminPermission.BILLING_WRITE]:
-    'Initiate a plan upgrade checkout or an SMS wallet top-up checkout',
+    'Initiate a plan upgrade checkout or cancel the current subscription',
   [AdminPermission.BRANCH_READ]:
     "View this church's branch hierarchy and each branch's rollup stats (member count, attendance, giving)",
   [AdminPermission.BRANCH_WRITE]:
     'Invite a new branch church and manage the branch hierarchy link',
+  [AdminPermission.FORMS_READ]:
+    'View forms and their submissions, and export submissions as CSV',
+  [AdminPermission.FORMS_WRITE]:
+    'Create, edit, and delete forms and their fields',
+  [AdminPermission.SOCIAL_MEDIA_READ]:
+    'View connected social media accounts and post history',
+  [AdminPermission.SOCIAL_MEDIA_WRITE]:
+    'Connect/disconnect social accounts, compose posts, and publish to multiple platforms at once',
 };
 
 export interface AdminPermissionGroupItem {
@@ -510,6 +526,16 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     AdminPermission.BRANCH_READ,
     AdminPermission.BRANCH_WRITE,
   ]),
+  buildGroup(
+    'Forms',
+    [AdminPermission.FORMS_READ, AdminPermission.FORMS_WRITE],
+    'forms',
+  ),
+  buildGroup(
+    'Social Media',
+    [AdminPermission.SOCIAL_MEDIA_READ, AdminPermission.SOCIAL_MEDIA_WRITE],
+    'social_media',
+  ),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,
     AdminPermission.ADMIN_READ,

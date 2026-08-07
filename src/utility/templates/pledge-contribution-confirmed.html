@@ -186,7 +186,7 @@
       <table class="email-content" width="100%" cellpadding="0" cellspacing="0" role="presentation">
         <tr>
           <td class="email-masthead">
-            <img src="https://i.ibb.co/cX1MnZ5z/DC-LOGO.png" alt="Logo"
+            <img src="{{logo_url}}" alt="Logo"
                  style="width: 100px; height: 50px; vertical-align: middle; margin-right: 8px;" />
             <div style="margin-top: 10px;">{{ church_name }}</div>
           </td>
@@ -238,7 +238,7 @@
               <tr>
                 <td class="content-cell" align="center" style="padding: 30px 40px;">
                   <p class="sub" style="text-align: center;">
-                    {{ church_name }}<br>{{ church_address }}
+                    {{ church_name }}<br>{{ church_address }}{{#if support_email}}<br>Need help? Contact us at {{ support_email }}{{/if}}
                   </p>
                 </td>
               </tr>

@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { ServiceProgrammeReminderScheduler } from './service-programme-reminder.scheduler';
 import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
@@ -7,10 +9,24 @@ import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 
 const mockCacheService = {
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
+};
+
+const mockTenantRepo = {
+  find: jest
+    .fn()
+    .mockResolvedValue([{ id: 't1', subdomain: 'a', schemaName: 'church_a' }]),
+};
+const mockCls = {
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
 };
 
 const mockSlotQb = {
@@ -55,6 +71,9 @@ describe('ServiceProgrammeReminderScheduler', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCacheService.acquireLock.mockResolvedValue(true);
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -63,8 +82,11 @@ describe('ServiceProgrammeReminderScheduler', () => {
           provide: getRepositoryToken(ServiceProgrammeSlot),
           useValue: mockSlotRepo,
         },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: EmailQueueService, useValue: mockEmailQueueService },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -125,9 +147,43 @@ describe('ServiceProgrammeReminderScheduler', () => {
 
   it('releases the lock even when the query fails', async () => {
     mockSlotQb.getMany.mockRejectedValue(new Error('db down'));
-    await expect(scheduler.sendUpcomingSlotReminders()).rejects.toThrow(
-      'db down',
+    await expect(
+      scheduler.sendUpcomingSlotReminders(),
+    ).resolves.toBeUndefined();
+    expect(mockCacheService.releaseLock).toHaveBeenCalled();
+  });
+
+  it('runs the slot query once per active tenant, entering each tenant context', async () => {
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+      { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+    ]);
+    mockSlotQb.getMany.mockResolvedValue([]);
+
+    await scheduler.sendUpcomingSlotReminders();
+
+    expect(mockSlotRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+    expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+      'SET LOCAL search_path TO "church_a", public',
     );
+    expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+      'SET LOCAL search_path TO "church_b", public',
+    );
+  });
+
+  it('continues past one tenant failing so the rest still get processed', async () => {
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+      { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+    ]);
+    mockSlotQb.getMany
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValue([]);
+
+    await expect(
+      scheduler.sendUpcomingSlotReminders(),
+    ).resolves.toBeUndefined();
+    expect(mockSlotRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
     expect(mockCacheService.releaseLock).toHaveBeenCalled();
   });
 });

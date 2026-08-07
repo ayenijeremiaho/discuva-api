@@ -47,7 +47,6 @@ export enum ExternalPayeeType {
 export enum JournalEntrySource {
   MANUAL = 'MANUAL',
   CSV_IMPORT = 'CSV_IMPORT',
-  VIRTUAL_ACCOUNT = 'VIRTUAL_ACCOUNT',
   PAYMENT_GATEWAY = 'PAYMENT_GATEWAY',
 }
 
@@ -150,13 +149,7 @@ export enum ReconciliationRowStatus {
 
 export enum TitheSource {
   MANUAL_PROOF = 'MANUAL_PROOF',
-  VIRTUAL_ACCOUNT = 'VIRTUAL_ACCOUNT',
   PAYMENT_GATEWAY = 'PAYMENT_GATEWAY',
-}
-
-export enum VirtualAccountProvider {
-  PAYSTACK = 'PAYSTACK',
-  FLUTTERWAVE = 'FLUTTERWAVE',
 }
 
 export enum AmountConvention {

@@ -9,6 +9,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { BirthdayWish } from '../entity/birthday-wish.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Announcement } from '../../announcement/entity/announcement.entity';
@@ -22,6 +25,9 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { PastorTypeEnum } from '../../member/enums/pastor-type.enum';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 export interface BirthdayCelebrant {
   id: string;
@@ -48,10 +54,14 @@ export class BirthdayService implements OnApplicationBootstrap {
     private readonly memberRepository: Repository<Member>,
     @InjectRepository(Announcement)
     private readonly announcementRepository: Repository<Announcement>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepository: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly sanitizationService: SanitizationService,
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   private static readonly LOCK_KEY = 'lock:birthday-greetings';
@@ -92,45 +102,53 @@ export class BirthdayService implements OnApplicationBootstrap {
       return;
     }
 
-    const today = new Date();
-    const month = today.getMonth() + 1;
-    const day = today.getDate();
-    const year = today.getFullYear();
-
-    const birthdayMembers = await this.memberRepository
-      .createQueryBuilder('m')
-      .where('m.birthMonth = :month', { month })
-      .andWhere('m.birthDay = :day', { day })
-      .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })
-      .andWhere(
-        '(m.birthdayGreetedYear IS NULL OR m.birthdayGreetedYear != :year)',
-        { year },
-      )
-      .getMany();
-
     try {
-      if (birthdayMembers.length === 0) return;
+      await forEachActiveTenant(
+        this.tenantRepository,
+        this.cls,
+        this.txHost,
+        this.logger,
+        async () => {
+          const today = new Date();
+          const month = today.getMonth() + 1;
+          const day = today.getDate();
+          const year = today.getFullYear();
 
-      const endOfDay = new Date(today);
-      endOfDay.setHours(23, 59, 59, 999);
+          const birthdayMembers = await this.memberRepository
+            .createQueryBuilder('m')
+            .where('m.birthMonth = :month', { month })
+            .andWhere('m.birthDay = :day', { day })
+            .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })
+            .andWhere(
+              '(m.birthdayGreetedYear IS NULL OR m.birthdayGreetedYear != :year)',
+              { year },
+            )
+            .getMany();
 
-      for (const member of birthdayMembers) {
-        try {
-          await this.createBirthdayAnnouncement(member, endOfDay);
-          await this.memberRepository.update(member.id, {
-            birthdayGreetedYear: year,
-          });
-          this.sendBirthdayEmail(member);
-          this.logger.log(
-            `Birthday greetings sent to ${member.firstname} ${member.lastname}`,
-          );
-        } catch (err) {
-          this.logger.error(
-            `Birthday greeting failed for member ${member.id}`,
-            err,
-          );
-        }
-      }
+          if (birthdayMembers.length === 0) return;
+
+          const endOfDay = new Date(today);
+          endOfDay.setHours(23, 59, 59, 999);
+
+          for (const member of birthdayMembers) {
+            try {
+              await this.createBirthdayAnnouncement(member, endOfDay);
+              await this.memberRepository.update(member.id, {
+                birthdayGreetedYear: year,
+              });
+              this.sendBirthdayEmail(member);
+              this.logger.log(
+                `Birthday greetings sent to ${member.firstname} ${member.lastname}`,
+              );
+            } catch (err) {
+              this.logger.error(
+                `Birthday greeting failed for member ${member.id}`,
+                err,
+              );
+            }
+          }
+        },
+      );
     } finally {
       this.cacheService.releaseLock(BirthdayService.LOCK_KEY);
     }

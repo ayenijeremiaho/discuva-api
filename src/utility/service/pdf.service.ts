@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import {
@@ -15,6 +18,24 @@ import { Event as ChurchEvent } from '../../event/entity/event.entity';
 import { ServiceSlotTypeLabels } from '../../service-programme/enum/service-slot-type.enum';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { Member } from '../../member/entity/member.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { CacheService } from './cache.service';
+
+// Threaded as an explicit parameter through every draw* method that needs
+// it, never read off `this` — PdfService is a singleton, and two concurrent
+// requests for different tenants interleaving around an `await` could
+// otherwise stomp on a shared instance field mid-render (see
+// EmailQueueService.resolveBrandingData for the same constraint, solved the
+// same way — this is the same fix, just needing parameter-threading instead
+// of a single call site since jsPDF drawing is spread across many methods).
+interface PdfBranding {
+  churchName: string;
+  churchAddress: string;
+  churchTagline: string;
+  currencyCode: string;
+  currencyLocale: string;
+}
 
 const DARK = '#121212';
 const MUTED = '#8A817C';
@@ -30,91 +51,131 @@ const CONTENT_W = PAGE_W - MARGIN * 2;
 
 @Injectable()
 export class PdfService {
-  private readonly churchName: string;
-  private readonly churchAddress: string;
-  private readonly churchTagline: string;
-  private readonly currencyCode: string;
-  private readonly currencyLocale: string;
+  private readonly cacheTtl: number;
 
-  constructor(private readonly config: ConfigService) {
-    this.churchName = this.config.get<string>('CHURCH_NAME');
-    this.churchAddress = this.config.get<string>('CHURCH_ADDRESS');
-    this.churchTagline = this.config.get<string>('CHURCH_TAGLINE');
-    this.currencyCode = this.config.get<string>('CURRENCY_CODE');
-    this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
+  constructor(
+    private readonly config: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly cacheService: CacheService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepository: Repository<Tenant>,
+  ) {
+    this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
 
-  generateSessionReport(report: SessionReport): Promise<Buffer> {
+  // Shares the same `tenant-branding:${tenantId}` cache entry
+  // EmailQueueService populates — same underlying Tenant row, so no reason
+  // for a second cache key/DB round trip. currencyLocale has no tenant-scoped
+  // equivalent (Tenant has no locale column) and stays a pure global default.
+  private async resolveBranding(): Promise<PdfBranding> {
+    const fallback: PdfBranding = {
+      churchName: this.config.get<string>('CHURCH_NAME'),
+      churchAddress: this.config.get<string>('CHURCH_ADDRESS'),
+      churchTagline: this.config.get<string>('CHURCH_TAGLINE'),
+      currencyCode: this.config.get<string>('CURRENCY_CODE'),
+      currencyLocale: this.config.get<string>('CURRENCY_LOCALE'),
+    };
+
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return fallback;
+
+    const tenant = await this.cacheService.getOrSet(
+      `tenant-branding:${tenantId}`,
+      () => this.tenantRepository.findOneBy({ id: tenantId }),
+      this.cacheTtl,
+    );
+    if (!tenant) return fallback;
+
+    return {
+      churchName: tenant.name || fallback.churchName,
+      churchAddress: tenant.address || fallback.churchAddress,
+      churchTagline: tenant.tagline || fallback.churchTagline,
+      currencyCode: tenant.currency || fallback.currencyCode,
+      currencyLocale: fallback.currencyLocale,
+    };
+  }
+
+  async generateSessionReport(report: SessionReport): Promise<Buffer> {
+    const branding = await this.resolveBranding();
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    this.drawSessionReport(doc, report);
-    return Promise.resolve(Buffer.from(doc.output('arraybuffer')));
+    this.drawSessionReport(doc, report, branding);
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
-  generateFullEventReport(report: FullEventReport): Promise<Buffer> {
+  async generateFullEventReport(report: FullEventReport): Promise<Buffer> {
+    const branding = await this.resolveBranding();
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    this.drawFullEventReport(doc, report);
-    return Promise.resolve(Buffer.from(doc.output('arraybuffer')));
+    this.drawFullEventReport(doc, report, branding);
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
-  generateTitheStatement(
+  async generateTitheStatement(
     member: Member,
     records: TitheRecord[],
     period?: { from?: string; to?: string },
   ): Promise<Buffer> {
+    const branding = await this.resolveBranding();
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    this.drawTitheStatement(doc, member, records, period);
-    return Promise.resolve(Buffer.from(doc.output('arraybuffer')));
+    this.drawTitheStatement(doc, member, records, branding, period);
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
-  generateEventSummaryReport(report: FullEventReport): Promise<Buffer> {
+  async generateEventSummaryReport(report: FullEventReport): Promise<Buffer> {
+    const branding = await this.resolveBranding();
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    this.drawEventSummaryReport(doc, report);
-    return Promise.resolve(Buffer.from(doc.output('arraybuffer')));
+    this.drawEventSummaryReport(doc, report, branding);
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
-  generateProgrammeDraft(programme: ServiceProgramme): Promise<Buffer> {
+  async generateProgrammeDraft(programme: ServiceProgramme): Promise<Buffer> {
+    const branding = await this.resolveBranding();
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    this.drawProgrammeDraft(doc, programme);
-    return Promise.resolve(Buffer.from(doc.output('arraybuffer')));
+    this.drawProgrammeDraft(doc, programme, branding);
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
-  generateEventProgramme(
+  async generateEventProgramme(
     event: ChurchEvent,
     sections: Array<{ slot: ServiceSlot; programme: ServiceProgramme | null }>,
   ): Promise<Buffer> {
+    const branding = await this.resolveBranding();
     const doc = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4',
     });
-    this.drawEventProgramme(doc, event, sections);
-    return Promise.resolve(Buffer.from(doc.output('arraybuffer')));
+    this.drawEventProgramme(doc, event, sections, branding);
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
   // ─── Session report ──────────────────────────────────────────────────────
 
-  private drawSessionReport(doc: jsPDF, report: SessionReport): void {
-    let y = this.drawPageHeader(doc, 'Service Session Report');
+  private drawSessionReport(
+    doc: jsPDF,
+    report: SessionReport,
+    branding: PdfBranding,
+  ): void {
+    let y = this.drawPageHeader(doc, 'Service Session Report', branding);
 
     y = this.drawAccentBand(
       doc,
@@ -153,7 +214,9 @@ export class PdfService {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [['#', 'Topic', 'Speaker', 'Allocated', 'Actual', 'Overrun']],
+      head: [
+        ['#', 'Topic', 'Speaker', 'Time', 'Allocated', 'Actual', 'Overrun'],
+      ],
       body: report.slots.map((slot) => {
         let overrun = '—';
         if (slot.overrunSeconds != null) {
@@ -164,6 +227,7 @@ export class PdfService {
           String(slot.position + 1),
           this.slotTopicLabel(slot),
           slot.speakerName ?? '—',
+          this.fmtSlotTimeRange(slot),
           slot.allocatedMinutes == null ? '—' : `${slot.allocatedMinutes} min`,
           slot.actualSeconds == null
             ? '—'
@@ -173,12 +237,13 @@ export class PdfService {
       }),
 
       columnStyles: {
-        0: { cellWidth: 10 },
-        1: { cellWidth: 52 },
-        2: { cellWidth: 38 },
-        3: { cellWidth: 22 },
-        4: { cellWidth: 22 },
-        5: { cellWidth: 30 },
+        0: { cellWidth: 8 },
+        1: { cellWidth: 40 },
+        2: { cellWidth: 30 },
+        3: { cellWidth: 32 },
+        4: { cellWidth: 18 },
+        5: { cellWidth: 18 },
+        6: { cellWidth: 28 },
       },
       headStyles: {
         fillColor: ACCENT,
@@ -191,7 +256,7 @@ export class PdfService {
       didParseCell: (data) => {
         if (
           data.section === 'body' &&
-          data.column.index === 5 &&
+          data.column.index === 6 &&
           typeof data.cell.raw === 'string' &&
           data.cell.raw.startsWith('+')
         ) {
@@ -255,7 +320,7 @@ export class PdfService {
         : cursorY;
     this.drawTimeSummaryBand(doc, summaryY, report);
 
-    this.drawPageFooter(doc);
+    this.drawPageFooter(doc, branding);
   }
 
   // ─── Tithe statement ─────────────────────────────────────────────────────
@@ -264,9 +329,10 @@ export class PdfService {
     doc: jsPDF,
     member: Member,
     records: TitheRecord[],
+    branding: PdfBranding,
     period?: { from?: string; to?: string },
   ): void {
-    let y = this.drawPageHeader(doc, 'Tithe Statement');
+    let y = this.drawPageHeader(doc, 'Tithe Statement', branding);
 
     const total = records.reduce((sum, r) => sum + Number(r.amount), 0);
 
@@ -299,8 +365,10 @@ export class PdfService {
       ['Phone', member.phoneNumber ?? '—'],
       ['Total Records', `${records.length}`],
       [
-        `Total Paid (${this.currencyCode})`,
-        total.toLocaleString(this.currencyLocale, { minimumFractionDigits: 2 }),
+        `Total Paid (${branding.currencyCode})`,
+        total.toLocaleString(branding.currencyLocale, {
+          minimumFractionDigits: 2,
+        }),
       ],
     ]);
 
@@ -316,7 +384,13 @@ export class PdfService {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
       head: [
-        ['Month', 'Date', `Amount (${this.currencyCode})`, 'Bank', 'Reference'],
+        [
+          'Month',
+          'Date',
+          `Amount (${branding.currencyCode})`,
+          'Bank',
+          'Reference',
+        ],
       ],
       body: records.map((r) => {
         const [yr, mo] = r.paymentDate.split('-').map(Number);
@@ -327,7 +401,7 @@ export class PdfService {
         return [
           monthName,
           r.paymentDate,
-          Number(r.amount).toLocaleString(this.currencyLocale, {
+          Number(r.amount).toLocaleString(branding.currencyLocale, {
             minimumFractionDigits: 2,
           }),
           r.bankName ?? '—',
@@ -338,7 +412,7 @@ export class PdfService {
         [
           'Total',
           '',
-          `${this.currencyCode} ${total.toLocaleString(this.currencyLocale, { minimumFractionDigits: 2 })}`,
+          `${branding.currencyCode} ${total.toLocaleString(branding.currencyLocale, { minimumFractionDigits: 2 })}`,
           '',
           '',
         ],
@@ -373,19 +447,23 @@ export class PdfService {
       },
     });
 
-    this.drawPageFooter(doc);
+    this.drawPageFooter(doc, branding);
   }
 
   // ─── Full event report ────────────────────────────────────────────────────
 
-  private drawFullEventReport(doc: jsPDF, report: FullEventReport): void {
+  private drawFullEventReport(
+    doc: jsPDF,
+    report: FullEventReport,
+    branding: PdfBranding,
+  ): void {
     const [yr, mo, dy] = report.eventDate.split('-').map(Number);
     const eventDateFormatted = new Date(yr, mo - 1, dy).toLocaleDateString(
       'en-GB',
       { day: '2-digit', month: 'long', year: 'numeric' },
     );
 
-    let y = this.drawPageHeader(doc, 'Sunday Service Report');
+    let y = this.drawPageHeader(doc, 'Sunday Service Report', branding);
     y = this.drawAccentBand(doc, y, report.eventName, eventDateFormatted);
     y += 6;
 
@@ -509,7 +587,9 @@ export class PdfService {
       autoTable(doc, {
         startY: y,
         margin: { left: MARGIN, right: MARGIN },
-        head: [['#', 'Topic', 'Speaker', 'Allocated', 'Actual', 'Overrun']],
+        head: [
+          ['#', 'Topic', 'Speaker', 'Time', 'Allocated', 'Actual', 'Overrun'],
+        ],
         body: r.slots.map((slot) => {
           let overrun = '—';
           if (slot.overrunSeconds != null) {
@@ -520,6 +600,7 @@ export class PdfService {
             String(slot.position + 1),
             this.slotTopicLabel(slot),
             slot.speakerName ?? '—',
+            this.fmtSlotTimeRange(slot),
             slot.allocatedMinutes == null
               ? '—'
               : `${slot.allocatedMinutes} min`,
@@ -530,12 +611,13 @@ export class PdfService {
           ];
         }),
         columnStyles: {
-          0: { cellWidth: 10 },
-          1: { cellWidth: 52 },
-          2: { cellWidth: 38 },
-          3: { cellWidth: 22 },
-          4: { cellWidth: 22 },
-          5: { cellWidth: 30 },
+          0: { cellWidth: 8 },
+          1: { cellWidth: 40 },
+          2: { cellWidth: 30 },
+          3: { cellWidth: 32 },
+          4: { cellWidth: 18 },
+          5: { cellWidth: 18 },
+          6: { cellWidth: 28 },
         },
         headStyles: {
           fillColor: ACCENT,
@@ -548,7 +630,7 @@ export class PdfService {
         didParseCell: (data) => {
           if (
             data.section === 'body' &&
-            data.column.index === 5 &&
+            data.column.index === 6 &&
             typeof data.cell.raw === 'string' &&
             data.cell.raw.startsWith('+')
           ) {
@@ -605,12 +687,16 @@ export class PdfService {
       y = this.drawTimeSummaryBand(doc, bandY, r) + 8;
     }
 
-    this.drawPageFooter(doc);
+    this.drawPageFooter(doc, branding);
   }
 
   // ─── Event summary report ─────────────────────────────────────────────────
 
-  private drawEventSummaryReport(doc: jsPDF, report: FullEventReport): void {
+  private drawEventSummaryReport(
+    doc: jsPDF,
+    report: FullEventReport,
+    branding: PdfBranding,
+  ): void {
     const [yr, mo, dy] = report.eventDate.split('-').map(Number);
     const eventDateFormatted = new Date(yr, mo - 1, dy).toLocaleDateString(
       'en-GB',
@@ -623,12 +709,12 @@ export class PdfService {
       .setFont('helvetica', 'bold')
       .setFontSize(9)
       .setTextColor(WHITE)
-      .text(this.churchName, MARGIN, 10);
+      .text(branding.churchName, MARGIN, 10);
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
       .setTextColor(ACCENT)
-      .text(this.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
+      .text(branding.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
 
     doc
       .setFont('helvetica', 'bold')
@@ -800,7 +886,7 @@ export class PdfService {
       },
     });
 
-    this.drawPageFooter(doc);
+    this.drawPageFooter(doc, branding);
   }
 
   private fmtSecsMM(seconds: number): string {
@@ -856,7 +942,11 @@ export class PdfService {
 
   // ─── Programme draft ─────────────────────────────────────────────────────
 
-  private drawProgrammeDraft(doc: jsPDF, programme: ServiceProgramme): void {
+  private drawProgrammeDraft(
+    doc: jsPDF,
+    programme: ServiceProgramme,
+    branding: PdfBranding,
+  ): void {
     const slot = programme.serviceSlot;
     const event = slot?.event;
     const dateLabel = event?.eventDate
@@ -875,6 +965,7 @@ export class PdfService {
       doc,
       slot?.name ?? 'Service Programme',
       dateLabel,
+      branding,
     );
     this.drawOrderOfServiceTable(
       doc,
@@ -883,7 +974,7 @@ export class PdfService {
       slot?.startTime ?? null,
       sorted,
     );
-    this.drawPageFooter(doc);
+    this.drawPageFooter(doc, branding);
   }
 
   // ─── Full event programme ────────────────────────────────────────────────
@@ -892,6 +983,7 @@ export class PdfService {
     doc: jsPDF,
     event: ChurchEvent,
     sections: Array<{ slot: ServiceSlot; programme: ServiceProgramme | null }>,
+    branding: PdfBranding,
   ): void {
     const dateLabel = event.eventDate
       ? new Date(event.eventDate).toLocaleDateString('en-GB', {
@@ -902,7 +994,7 @@ export class PdfService {
         })
       : '—';
 
-    let y = this.drawOrderOfServiceHeader(doc, event.name, dateLabel);
+    let y = this.drawOrderOfServiceHeader(doc, event.name, dateLabel, branding);
 
     for (const { slot, programme } of sections) {
       if (y > 230) {
@@ -928,7 +1020,7 @@ export class PdfService {
       y += 6;
     }
 
-    this.drawPageFooter(doc);
+    this.drawPageFooter(doc, branding);
   }
 
   // ─── Shared order-of-service helpers ─────────────────────────────────────
@@ -937,6 +1029,7 @@ export class PdfService {
     doc: jsPDF,
     title: string,
     dateLabel: string,
+    branding: PdfBranding,
   ): number {
     doc.setFillColor(DARK);
     doc.rect(0, 0, PAGE_W, 22, 'F');
@@ -944,12 +1037,12 @@ export class PdfService {
       .setFont('helvetica', 'bold')
       .setFontSize(9)
       .setTextColor(WHITE)
-      .text(this.churchName, MARGIN, 10);
+      .text(branding.churchName, MARGIN, 10);
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
       .setTextColor(ACCENT)
-      .text(this.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
+      .text(branding.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
 
     doc
       .setFont('helvetica', 'bold')
@@ -1197,7 +1290,11 @@ export class PdfService {
 
   // ─── Shared layout helpers ────────────────────────────────────────────────
 
-  private drawPageHeader(doc: jsPDF, title: string): number {
+  private drawPageHeader(
+    doc: jsPDF,
+    title: string,
+    branding: PdfBranding,
+  ): number {
     doc.setFillColor(DARK);
     doc.rect(0, 0, PAGE_W, 22, 'F');
 
@@ -1205,13 +1302,13 @@ export class PdfService {
       .setFont('helvetica', 'bold')
       .setFontSize(9)
       .setTextColor(WHITE)
-      .text(this.churchName, MARGIN, 10);
+      .text(branding.churchName, MARGIN, 10);
 
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
       .setTextColor(ACCENT)
-      .text(this.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
+      .text(branding.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
 
     doc
       .setFont('helvetica', 'bold')
@@ -1457,7 +1554,7 @@ export class PdfService {
     return y + h;
   }
 
-  private drawPageFooter(doc: jsPDF): void {
+  private drawPageFooter(doc: jsPDF, branding: PdfBranding): void {
     const pageCount = doc.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
       doc.setPage(i);
@@ -1470,7 +1567,11 @@ export class PdfService {
         .setFont('helvetica', 'normal')
         .setFontSize(7.5)
         .setTextColor(MUTED)
-        .text(`${this.churchName} · ${this.churchAddress}`, MARGIN, pageH - 10);
+        .text(
+          `${branding.churchName} · ${branding.churchAddress}`,
+          MARGIN,
+          pageH - 10,
+        );
       doc.text(`Page ${i} of ${pageCount}`, PAGE_W - MARGIN, pageH - 10, {
         align: 'right',
       });
@@ -1491,6 +1592,13 @@ export class PdfService {
       minute: '2-digit',
       hour12: true,
     });
+  }
+
+  private fmtSlotTimeRange(slot: SessionSlotReport): string {
+    if (!slot.startedAt) return '—';
+    const start = this.fmtTime(slot.startedAt);
+    if (!slot.completedAt) return `${start} –`;
+    return `${start} – ${this.fmtTime(slot.completedAt)}`;
   }
 
   private fmtMonthShort(ym: string): string {

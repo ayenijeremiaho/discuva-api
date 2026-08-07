@@ -12,6 +12,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, DataSource, In, QueryFailedError, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Attendance } from '../entity/attendance.entity';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import {
@@ -106,6 +108,7 @@ export class AttendanceService {
     private readonly excelService: ExcelService,
     private readonly emailQueueService: EmailQueueService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -217,6 +220,12 @@ export class AttendanceService {
     return { message: 'Check-in successful' };
   }
 
+  // Called from AttendanceJobService's @Cron via forEachActiveTenant, which
+  // has already entered this tenant's CLS/transaction context — deliberately
+  // uses the ambient this.txHost.tx manager rather than opening its own
+  // this.dataSource.transaction(...), which would start an independent
+  // transaction (likely a different pooled connection) that never sees the
+  // outer SET LOCAL search_path and would silently write to the wrong schema.
   async markAbsentees(): Promise<void> {
     this.logger.log('Running absence marking job...');
 
@@ -228,56 +237,55 @@ export class AttendanceService {
 
     this.logger.log(`Processing ${events.length} event(s) for absence marking`);
 
-    await this.dataSource.transaction(async (manager) => {
-      for (const event of events) {
-        this.logger.log(`Processing event: ${event.name} (${event.id})`);
+    const manager = this.txHost.tx;
+    for (const event of events) {
+      this.logger.log(`Processing event: ${event.name} (${event.id})`);
 
-        const [absentMembers, absentWorkers] = await Promise.all([
-          this.memberService.getMembersNotCheckedInForEvent(event.id),
-          this.memberService.getWorkersNotCheckedInForEvent(event.id),
-        ]);
+      const [absentMembers, absentWorkers] = await Promise.all([
+        this.memberService.getMembersNotCheckedInForEvent(event.id),
+        this.memberService.getWorkersNotCheckedInForEvent(event.id),
+      ]);
 
-        const records: Partial<Attendance>[] = [];
+      const records: Partial<Attendance>[] = [];
 
-        for (const m of absentMembers) {
-          records.push(
-            this.buildAbsenceRecord(m, event, MemberRoleEnum.MEMBER, false),
-          );
-        }
-
-        const onLeaveIds = await this.getBatchApprovedLeave(
-          absentWorkers.map((w) => w.id),
-          event,
-        );
-        for (const w of absentWorkers) {
-          records.push(
-            this.buildAbsenceRecord(
-              w,
-              event,
-              MemberRoleEnum.WORKER,
-              onLeaveIds.has(w.id),
-            ),
-          );
-        }
-
-        if (records.length > 0) {
-          await manager.save(Attendance, records);
-          this.logger.log(
-            `Marked ${records.length} absence(s) for event "${event.name}"`,
-          );
-        }
-
-        await manager.update(Event, event.id, { attendanceMarked: true });
-        this.followUpQueue.add(
-          POST_EVENT_JOB,
-          { eventId: event.id, ...buildJobEnvelope(this.cls) },
-          {
-            attempts: 2,
-            backoff: { type: 'fixed', delay: 5000 },
-          },
+      for (const m of absentMembers) {
+        records.push(
+          this.buildAbsenceRecord(m, event, MemberRoleEnum.MEMBER, false),
         );
       }
-    });
+
+      const onLeaveIds = await this.getBatchApprovedLeave(
+        absentWorkers.map((w) => w.id),
+        event,
+      );
+      for (const w of absentWorkers) {
+        records.push(
+          this.buildAbsenceRecord(
+            w,
+            event,
+            MemberRoleEnum.WORKER,
+            onLeaveIds.has(w.id),
+          ),
+        );
+      }
+
+      if (records.length > 0) {
+        await manager.save(Attendance, records);
+        this.logger.log(
+          `Marked ${records.length} absence(s) for event "${event.name}"`,
+        );
+      }
+
+      await manager.update(Event, event.id, { attendanceMarked: true });
+      this.followUpQueue.add(
+        POST_EVENT_JOB,
+        { eventId: event.id, ...buildJobEnvelope(this.cls) },
+        {
+          attempts: 2,
+          backoff: { type: 'fixed', delay: 5000 },
+        },
+      );
+    }
 
     this.logger.log('Absence marking job complete');
   }

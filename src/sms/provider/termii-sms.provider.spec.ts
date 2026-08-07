@@ -5,11 +5,10 @@ import { TermiiSmsProvider } from './termii-sms.provider';
 
 describe('TermiiSmsProvider', () => {
   let provider: TermiiSmsProvider;
+  const credentials = { apiKey: 'tenant-key', senderId: 'TenantChurch' };
   const mockConfigService = {
     get: jest.fn((key: string) => {
       const values: Record<string, string> = {
-        TERMII_API_KEY: 'test-key',
-        TERMII_SENDER_ID: 'TestChurch',
         TERMII_BASE_URL: 'https://api.ng.termii.com',
       };
       return values[key];
@@ -39,7 +38,12 @@ describe('TermiiSmsProvider', () => {
           Promise.resolve({ code: 'ok', message_id: 'abc', message: 'Sent' }),
       } as any);
 
-      const result = await provider.send(['+2348012345678'], 'Hi', 'plain');
+      const result = await provider.send(
+        ['+2348012345678'],
+        'Hi',
+        'plain',
+        credentials,
+      );
 
       const [url, options] = fetchSpy.mock.calls[0];
       expect(url).toBe('https://api.ng.termii.com/api/sms/send');
@@ -54,7 +58,7 @@ describe('TermiiSmsProvider', () => {
         json: () => Promise.resolve({ code: 'ok', message_id: 'abc' }),
       } as any);
 
-      await provider.send(['+1', '+2'], 'Hi', 'plain');
+      await provider.send(['+1', '+2'], 'Hi', 'plain', credentials);
 
       const [url, options] = fetchSpy.mock.calls[0];
       expect(url).toBe('https://api.ng.termii.com/api/sms/send/bulk');
@@ -69,19 +73,19 @@ describe('TermiiSmsProvider', () => {
           Promise.resolve({ code: 'error', message: 'Insufficient balance' }),
       } as any);
 
-      await expect(provider.send(['+1'], 'Hi', 'plain')).rejects.toThrow(
-        InternalServerErrorException,
-      );
+      await expect(
+        provider.send(['+1'], 'Hi', 'plain', credentials),
+      ).rejects.toThrow(InternalServerErrorException);
     });
 
     it('rejects a batch larger than the per-request recipient limit', async () => {
       const tooMany = Array.from({ length: 101 }, (_, i) => `+${i}`);
-      await expect(provider.send(tooMany, 'Hi', 'plain')).rejects.toThrow(
-        InternalServerErrorException,
-      );
+      await expect(
+        provider.send(tooMany, 'Hi', 'plain', credentials),
+      ).rejects.toThrow(InternalServerErrorException);
     });
 
-    it("uses a tenant's own BYOK credentials over the platform default when given", async () => {
+    it("sends with the tenant's own BYOK credentials", async () => {
       const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         json: () => Promise.resolve({ code: 'ok', message_id: 'abc' }),
@@ -106,7 +110,7 @@ describe('TermiiSmsProvider', () => {
         json: () => Promise.resolve({ balance: 785.57, currency: 'NGN' }),
       } as any);
 
-      const result = await provider.getBalance();
+      const result = await provider.getBalance(credentials);
 
       expect(result).toEqual({ balance: 785.57, currency: 'NGN' });
     });
@@ -117,7 +121,7 @@ describe('TermiiSmsProvider', () => {
         json: () => Promise.resolve({}),
       } as any);
 
-      await expect(provider.getBalance()).rejects.toThrow(
+      await expect(provider.getBalance(credentials)).rejects.toThrow(
         InternalServerErrorException,
       );
     });
@@ -141,7 +145,7 @@ describe('TermiiSmsProvider', () => {
           ]),
       } as any);
 
-      const result = await provider.getMessageHistory();
+      const result = await provider.getMessageHistory(credentials);
 
       expect(result).toEqual([
         {
@@ -162,7 +166,7 @@ describe('TermiiSmsProvider', () => {
         json: () => Promise.resolve({ unexpected: 'shape' }),
       } as any);
 
-      const result = await provider.getMessageHistory();
+      const result = await provider.getMessageHistory(credentials);
 
       expect(result).toEqual([]);
     });
@@ -173,7 +177,7 @@ describe('TermiiSmsProvider', () => {
         json: () => Promise.resolve({}),
       } as any);
 
-      await expect(provider.getMessageHistory()).rejects.toThrow(
+      await expect(provider.getMessageHistory(credentials)).rejects.toThrow(
         InternalServerErrorException,
       );
     });

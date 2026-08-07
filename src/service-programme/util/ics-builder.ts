@@ -18,7 +18,7 @@ export function buildServiceSlotIcs(params: IcsEventParams): Buffer {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Discovery Hub//Service Programme//EN',
+    'PRODID:-//Discuva//Service Programme//EN',
     'BEGIN:VEVENT',
     `UID:${params.uid}@service-programme`,
     `DTSTAMP:${toIcsUtc(new Date())}`,

@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Budget } from '../entity/budget.entity';
 import { JournalEntryLine } from '../entity/journal-entry-line.entity';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -12,6 +14,9 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { CacheService } from '../../utility/service/cache.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { JournalEntryStatus } from '../enum/finance.enum';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class BudgetAlertScheduler {
@@ -25,9 +30,12 @@ export class BudgetAlertScheduler {
     private readonly lineRepo: Repository<JournalEntryLine>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
-    private readonly configService: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -39,7 +47,13 @@ export class BudgetAlertScheduler {
     if (!acquired) return;
 
     try {
-      await this.runAlerts();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runAlerts(),
+      );
     } finally {
       this.cacheService.releaseLock(BudgetAlertScheduler.LOCK_KEY);
     }
@@ -131,7 +145,6 @@ export class BudgetAlertScheduler {
     actuals: number,
     thresholdPct: number,
   ): void {
-    const adminLoginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
     const utilizationPct = Math.round((actuals / Number(budget.amount)) * 100);
     const isExhausted = thresholdPct >= 100;
 
@@ -151,7 +164,6 @@ export class BudgetAlertScheduler {
           startDate: budget.startDate,
           endDate: budget.endDate,
           isExhausted,
-          admin_login_url: adminLoginUrl,
         },
         undefined,
         EmailCategory.FINANCE_ALERTS,

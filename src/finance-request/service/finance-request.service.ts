@@ -24,13 +24,13 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { ExcelService } from '../../utility/service/excel.service';
+import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 
 @Injectable()
 export class FinanceRequestService {
   private readonly logger = new Logger(FinanceRequestService.name);
-  private readonly currencyCode: string;
   private readonly currencyLocale: string;
 
   constructor(
@@ -45,8 +45,8 @@ export class FinanceRequestService {
     private readonly cloudinaryService: CloudinaryService,
     private readonly excelService: ExcelService,
     private readonly config: ConfigService,
+    private readonly tenantCurrencyService: TenantCurrencyService,
   ) {
-    this.currencyCode = this.config.get<string>('CURRENCY_CODE');
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
   }
 
@@ -202,13 +202,16 @@ export class FinanceRequestService {
     departmentId?: string,
     search?: string,
   ): Promise<Buffer> {
-    const requests = await this.buildRequestsQb(
-      status,
-      categoryId,
-      memberId,
-      departmentId,
-      search,
-    ).getMany();
+    const [requests, currencyCode] = await Promise.all([
+      this.buildRequestsQb(
+        status,
+        categoryId,
+        memberId,
+        departmentId,
+        search,
+      ).getMany(),
+      this.tenantCurrencyService.resolveCurrencyCode(),
+    ]);
     return this.excelService.buildWorkbook(
       'Finance Requests',
       [
@@ -216,7 +219,7 @@ export class FinanceRequestService {
         { header: 'Email', key: 'email', width: 30 },
         { header: 'Department', key: 'department', width: 22 },
         { header: 'Category', key: 'category', width: 20 },
-        { header: `Amount (${this.currencyCode})`, key: 'amount', width: 18 },
+        { header: `Amount (${currencyCode})`, key: 'amount', width: 18 },
         { header: 'Status', key: 'status', width: 14 },
         { header: 'Reason', key: 'reason', width: 40 },
         { header: 'Reviewed By', key: 'reviewedBy', width: 24 },
@@ -388,15 +391,18 @@ export class FinanceRequestService {
   // ── Notifications ─────────────────────────────────────────────────────────
 
   private async notifyFinanceTeam(request: FinanceRequest): Promise<void> {
-    const admins = await this.adminRepo
-      .createQueryBuilder('a')
-      .innerJoinAndSelect('a.member', 'm')
-      .innerJoin('a.adminRole', 'r')
-      .where('a.isActive = true')
-      .andWhere(':perm = ANY(r.permissions)', {
-        perm: AdminPermission.FINANCE_WRITE,
-      })
-      .getMany();
+    const [admins, currencyCode] = await Promise.all([
+      this.adminRepo
+        .createQueryBuilder('a')
+        .innerJoinAndSelect('a.member', 'm')
+        .innerJoin('a.adminRole', 'r')
+        .where('a.isActive = true')
+        .andWhere(':perm = ANY(r.permissions)', {
+          perm: AdminPermission.FINANCE_WRITE,
+        })
+        .getMany(),
+      this.tenantCurrencyService.resolveCurrencyCode(),
+    ]);
 
     for (const admin of admins) {
       if (!admin.member?.email) continue;
@@ -405,7 +411,7 @@ export class FinanceRequestService {
         'New Finance Request Pending Review',
         'finance-request-submitted',
         {
-          amount: `${this.currencyCode} ${Number(request.amount).toLocaleString(this.currencyLocale)}`,
+          amount: `${currencyCode} ${Number(request.amount).toLocaleString(this.currencyLocale)}`,
           reason: request.reason,
           requestId: request.id,
         },
@@ -417,10 +423,13 @@ export class FinanceRequestService {
     request: FinanceRequest,
     event: 'approved' | 'rejected' | 'proof',
   ): Promise<void> {
-    const hod = await this.requestRepo.findOne({
-      where: { id: request.id },
-      relations: ['requestedBy'],
-    });
+    const [hod, currencyCode] = await Promise.all([
+      this.requestRepo.findOne({
+        where: { id: request.id },
+        relations: ['requestedBy'],
+      }),
+      this.tenantCurrencyService.resolveCurrencyCode(),
+    ]);
     if (!hod?.requestedBy?.email) return;
 
     const templates: Record<string, string> = {
@@ -441,7 +450,7 @@ export class FinanceRequestService {
       templates[event],
       {
         name: UtilityService.capitalizeFirstLetter(hod.requestedBy.firstname),
-        amount: `${this.currencyCode} ${Number(request.amount).toLocaleString(this.currencyLocale)}`,
+        amount: `${currencyCode} ${Number(request.amount).toLocaleString(this.currencyLocale)}`,
         reason: request.reason,
         rejectionReason: request.rejectionReason ?? '',
         proofUrl: request.proofUrl ?? '',

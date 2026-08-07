@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
 import { Admin } from '../entity/admin.entity';
 import { AdminRoleService } from './admin-role.service';
 import { GrantAdminDto, UpdateAdminUserDto } from '../dto/admin-user.dto';
@@ -26,7 +25,6 @@ export class AdminService {
     private readonly memberService: MemberService,
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
-    private readonly configService: ConfigService,
   ) {}
 
   async grant(dto: GrantAdminDto, actorId: string): Promise<Admin> {
@@ -187,7 +185,6 @@ export class AdminService {
 
   private sendAdminWelcomeEmail(email: string, firstname: string): void {
     const name = UtilityService.capitalizeFirstLetter(firstname ?? 'Admin');
-    const loginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
     this.utilityService.sendEmailWithTemplate(
       email,
       'Your Admin Account Has Been Created',
@@ -196,7 +193,6 @@ export class AdminService {
         name,
         email,
         password: 'Your existing account password',
-        login_url: loginUrl,
       },
     );
   }

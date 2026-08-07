@@ -317,7 +317,6 @@ export class ChildrenChurchService {
 
     if (!children.length) return { updated: 0 };
 
-    // Snapshot current occupancy per class group
     const occupancy = new Map<string, number>(
       classGroups.map((cg) => [cg.id, 0]),
     );

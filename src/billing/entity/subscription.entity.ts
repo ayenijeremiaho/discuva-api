@@ -1,6 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { SubscriptionStatus } from '../enum/subscription-status.enum';
+import { DiscountType } from '../enum/discount-type.enum';
 
 // Control-plane table — lives in `public`, never a `search_path` target.
 // One row per tenant (tenantId is unique): upgrade/downgrade is a planId
@@ -54,4 +55,29 @@ export class Subscription extends BaseEntity {
   // calculation — no real money backs a sponsored subscription.
   @Column({ nullable: true })
   sponsoredByTenantId: string | null;
+
+  // Manual internal comp set by a platform admin (PlatformTenantService's
+  // applyDiscount/removeDiscount) — deliberately never touches checkout or
+  // any payment-provider API (contrast sponsoredByTenantId, which blocks
+  // checkout entirely). Paystack/Flutterwave recurring charges are driven
+  // by a provider-side Plan object keyed on plan.billingProviderPriceId,
+  // not a per-transaction amount override, so a discount here can't change
+  // what the provider actually auto-renews at without creating a distinct
+  // provider Plan per discount tier — out of scope for an internal comp.
+  // Its effect is bookkeeping only: factored into PlatformAnalyticsService's
+  // MRR so reported revenue reflects the comp, and shown back to whoever
+  // set it. discountValue is a percentage (1-100) for PERCENTAGE or cents
+  // for FIXED_AMOUNT, per discountType.
+  @Column({ nullable: true })
+  discountType: DiscountType | null;
+
+  @Column({ type: 'int', nullable: true })
+  discountValue: number | null;
+
+  @Column({ nullable: true })
+  discountReason: string | null;
+
+  // null = permanent until a platform admin explicitly removes it.
+  @Column({ type: 'timestamptz', nullable: true })
+  discountExpiresAt: Date | null;
 }

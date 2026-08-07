@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { ServiceSlotTypeLabels } from '../enum/service-slot-type.enum';
@@ -10,6 +13,9 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { CacheService } from '../../utility/service/cache.service';
 import { buildServiceSlotIcs } from '../util/ics-builder';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 const REMINDER_LOCK = 'lock:service-programme-reminder';
 const REMINDER_WINDOW_START_HOURS = 24;
@@ -22,8 +28,12 @@ export class ServiceProgrammeReminderScheduler {
   constructor(
     @InjectRepository(ServiceProgrammeSlot)
     private readonly slotRepo: Repository<ServiceProgrammeSlot>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly emailQueueService: EmailQueueService,
     private readonly cacheService: CacheService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron('0 9 * * *', { timeZone: CHURCH_TIMEZONE })
@@ -36,7 +46,13 @@ export class ServiceProgrammeReminderScheduler {
       return;
     }
     try {
-      await this.runReminders();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runReminders(),
+      );
     } finally {
       this.cacheService.releaseLock(REMINDER_LOCK);
     }

@@ -12,6 +12,8 @@ import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Cron } from '@nestjs/schedule';
 import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import * as ExcelJS from 'exceljs';
 import { TitheAccount } from '../entity/tithe-account.entity';
 import { TitheUploadBatch } from '../entity/tithe-upload-batch.entity';
@@ -51,6 +53,8 @@ import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 const TITHE_PROOF_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -100,6 +104,8 @@ export class TitheService {
     private readonly proofRepo: Repository<TithePaymentProof>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     @InjectQueue(TITHE_QUEUE)
     private readonly titheQueue: Queue,
     private readonly utilityService: UtilityService,
@@ -110,6 +116,7 @@ export class TitheService {
     private readonly excelService: ExcelService,
     private readonly config: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
     this.proofExpiryDays = this.config.get<number>('TITHE_PROOF_EXPIRY_DAYS');
@@ -871,23 +878,34 @@ export class TitheService {
     if (!acquired) return;
 
     try {
-      const expired = await this.proofRepo.find({
-        where: { expiresAt: LessThanOrEqual(new Date()) },
-      });
-      if (expired.length === 0) return;
+      const { succeeded, failed } = await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        async () => {
+          const expired = await this.proofRepo.find({
+            where: { expiresAt: LessThanOrEqual(new Date()) },
+          });
+          if (expired.length === 0) return;
 
-      for (const proof of expired) {
-        await this.cloudinaryService.deleteByPublicId(
-          proof.publicId,
-          proof.resourceType,
-        );
-        await this.proofRepo.remove(proof);
-      }
+          for (const proof of expired) {
+            await this.cloudinaryService.deleteByPublicId(
+              proof.publicId,
+              proof.resourceType,
+            );
+            await this.proofRepo.remove(proof);
+          }
 
-      this.auditLogService.log('TITHE_PROOF_EXPIRED_PURGED', {
-        metadata: { count: expired.length },
-      });
-      this.logger.log(`Purged ${expired.length} expired tithe proof(s)`);
+          this.auditLogService.log('TITHE_PROOF_EXPIRED_PURGED', {
+            metadata: { count: expired.length },
+          });
+          this.logger.log(`Purged ${expired.length} expired tithe proof(s)`);
+        },
+      );
+      this.logger.log(
+        `Tithe proof purge complete for ${succeeded} tenant(s), ${failed} failure(s)`,
+      );
     } finally {
       this.cacheService.releaseLock(TitheService.PROOF_CLEANUP_LOCK);
     }

@@ -41,7 +41,13 @@ export class FinanceWorkerController {
   @Post('requests')
   @UseInterceptors(
     FileInterceptor('attachment', {
-      limits: { fileSize: 10 * 1024 * 1024 },
+      limits: {
+        fileSize:
+          Number.parseInt(
+            process.env.MAX_FINANCE_PROOF_UPLOAD_BYTES ?? '',
+            10,
+          ) || 10 * 1024 * 1024,
+      },
       fileFilter: (_req, file, cb) => {
         const allowed = [
           'application/pdf',

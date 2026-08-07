@@ -17,13 +17,10 @@ import {
 
 // Paystack/Flutterwave never send a bearer token — the global JwtAuthGuard
 // would 401 them before this handler's own signature check ever runs (same
-// @Public() + own-signature-verification shape as
-// VirtualAccountWebhookController and YoutubeWebhookController). A single
-// route handles both providers, distinguished by which of their two very
-// different signature headers is present — Paystack signs with
-// x-paystack-signature (HMAC), Flutterwave with verif-hash (shared secret) —
-// exactly mirroring the header-presence dispatch already used by
-// VirtualAccountWebhookController for the same two providers.
+// @Public() + own-signature-verification shape as YoutubeWebhookController).
+// A single route handles both providers, distinguished by which of their two
+// very different signature headers is present — Paystack signs with
+// x-paystack-signature (HMAC), Flutterwave with verif-hash (shared secret).
 @Controller('webhooks/billing')
 export class BillingWebhookController {
   constructor(private readonly checkoutService: CheckoutService) {}

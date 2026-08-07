@@ -9,8 +9,6 @@ import { Plan } from '../entity/plan.entity';
 import { Subscription } from '../entity/subscription.entity';
 import { SubscriptionStatus } from '../enum/subscription-status.enum';
 import { BillingCheckoutSession } from '../entity/billing-checkout-session.entity';
-import { SmsWallet } from '../../platform-admin/entity/sms-wallet.entity';
-import { SmsWalletTransaction } from '../../platform-admin/entity/sms-wallet-transaction.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { PaymentProviderRegistryService } from './payment-provider-registry.service';
 
@@ -28,8 +26,6 @@ const mockCheckoutRepo = {
   findOneBy: jest.fn(),
   find: jest.fn(),
 };
-const mockWalletRepo = { findOneBy: jest.fn() };
-
 const mockManager = {
   findOne: jest.fn(),
   save: jest.fn(),
@@ -58,7 +54,15 @@ const mockProvider = {
 const mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
 
 async function buildService(
-  configGet: (key: string) => unknown = () => undefined,
+  // Defaults to real ConfigService.get(key, defaultValue) semantics —
+  // returns whatever default the call site asked for — so a service field
+  // computed from a defaulted config value (e.g. subscriptionPeriodDays)
+  // doesn't silently end up `undefined` in every test that doesn't
+  // override configGet for that specific key.
+  configGet: (key: string, defaultValue?: unknown) => unknown = (
+    _key,
+    defaultValue,
+  ) => defaultValue,
 ): Promise<CheckoutService> {
   const module: TestingModule = await Test.createTestingModule({
     providers: [
@@ -78,8 +82,6 @@ async function buildService(
         provide: getRepositoryToken(BillingCheckoutSession),
         useValue: mockCheckoutRepo,
       },
-      { provide: getRepositoryToken(SmsWallet), useValue: mockWalletRepo },
-      { provide: getRepositoryToken(SmsWalletTransaction), useValue: {} },
     ],
   }).compile();
   return module.get(CheckoutService);
@@ -123,33 +125,26 @@ describe('CheckoutService', () => {
   });
 
   describe('getBillingSummary', () => {
-    it('defaults to the free plan and zero balance when nothing is configured', async () => {
+    it('defaults to the free plan when nothing is configured', async () => {
       mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
-      mockWalletRepo.findOneBy.mockResolvedValue(null);
       mockPlanRepo.findOneBy.mockResolvedValue({ id: 'free', name: 'Free' });
 
       const result = await service.getBillingSummary();
       expect(result).toEqual(
-        expect.objectContaining({
-          planId: 'free',
-          planName: 'Free',
-          walletBalanceCredits: 0,
-        }),
+        expect.objectContaining({ planId: 'free', planName: 'Free' }),
       );
     });
 
-    it('reflects an active paid subscription and wallet balance', async () => {
+    it('reflects an active paid subscription', async () => {
       mockSubscriptionRepo.findOneBy.mockResolvedValue({
         planId: 'pro',
         status: SubscriptionStatus.ACTIVE,
         currentPeriodEnd: new Date('2026-09-01'),
       });
-      mockWalletRepo.findOneBy.mockResolvedValue({ balanceCredits: 500 });
       mockPlanRepo.findOneBy.mockResolvedValue({ id: 'pro', name: 'Pro' });
 
       const result = await service.getBillingSummary();
       expect(result.planId).toBe('pro');
-      expect(result.walletBalanceCredits).toBe(500);
     });
   });
 
@@ -203,55 +198,6 @@ describe('CheckoutService', () => {
     });
   });
 
-  describe('initiateWalletTopupCheckout', () => {
-    it('throws ForbiddenException when SMS_CREDIT_PRICE_KOBO is not configured', async () => {
-      await expect(
-        service.initiateWalletTopupCheckout(
-          100,
-          'admin@example.com',
-          undefined,
-          'https://a',
-          'https://b',
-        ),
-      ).rejects.toThrow(ForbiddenException);
-    });
-
-    it('computes amountCents from credits and records a pending wallet_topup session', async () => {
-      const svc = await buildService((key) =>
-        key === 'SMS_CREDIT_PRICE_KOBO' ? 100 : undefined,
-      );
-      mockTenantRepo.findOneByOrFail.mockResolvedValue({
-        id: 'tenant-1',
-        name: 'Test Church',
-      });
-      mockProvider.createOneOffCheckout.mockResolvedValue({
-        checkoutUrl: 'https://pay',
-        providerSessionId: 'topup_abc',
-      });
-
-      const result = await svc.initiateWalletTopupCheckout(
-        1000,
-        'admin@example.com',
-        undefined,
-        'https://a',
-        'https://b',
-      );
-
-      expect(mockProvider.createOneOffCheckout).toHaveBeenCalledWith(
-        expect.objectContaining({ amountCents: 100000 }),
-      );
-      expect(mockCheckoutRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'topup_abc',
-          type: 'wallet_topup',
-          creditsAmount: 1000,
-          amountCents: 100000,
-        }),
-      );
-      expect(result.checkoutUrl).toBe('https://pay');
-    });
-  });
-
   describe('handleWebhookEvent', () => {
     it('is a safe no-op when the session reference is unknown (already processed or forged)', async () => {
       mockProvider.verifyAndParseWebhook.mockReturnValue({
@@ -294,40 +240,61 @@ describe('CheckoutService', () => {
           tenantId: 'tenant-1',
           planId: 'pro',
           status: SubscriptionStatus.ACTIVE,
+          currentPeriodEnd: expect.any(Date),
         }),
       );
+      const savedSub = mockManager.save.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as { status?: string })?.status ===
+          SubscriptionStatus.ACTIVE,
+      )[0];
+      expect(Number.isNaN(savedSub.currentPeriodEnd.getTime())).toBe(false);
+      const expectedDays = Math.round(
+        (savedSub.currentPeriodEnd.getTime() - Date.now()) /
+          (24 * 60 * 60 * 1000),
+      );
+      expect(expectedDays).toBe(30); // default SUBSCRIPTION_PERIOD_DAYS
       expect(mockCacheService.del).toHaveBeenCalledWith(
         'plan-features:tenant-1',
       );
     });
 
-    it('credits the SMS wallet on charge.succeeded for a pending wallet_topup session', async () => {
+    it('honors a configured SUBSCRIPTION_PERIOD_DAYS override instead of the hardcoded default', async () => {
+      const overriddenService = await buildService((key, defaultValue) =>
+        key === 'SUBSCRIPTION_PERIOD_DAYS' ? 14 : defaultValue,
+      );
       mockProvider.verifyAndParseWebhook.mockReturnValue({
         type: 'charge.succeeded',
-        providerReference: 'topup_abc',
+        providerReference: 'sub_abc',
         raw: {},
       });
       mockManager.findOne
         .mockResolvedValueOnce({
-          id: 'topup_abc',
+          id: 'sub_abc',
           tenantId: 'tenant-1',
-          type: 'wallet_topup',
-          creditsAmount: 1000,
+          type: 'subscription',
+          planId: 'pro',
           provider: 'paystack',
           status: 'pending',
-        }) // BillingCheckoutSession lookup
-        .mockResolvedValueOnce({ tenantId: 'tenant-1', balanceCredits: 200 }); // existing wallet
+        })
+        .mockResolvedValueOnce(null);
 
-      await service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig');
+      await overriddenService.handleWebhookEvent(
+        'paystack',
+        Buffer.from('{}'),
+        'sig',
+      );
 
-      expect(mockManager.save).toHaveBeenCalledWith(
-        SmsWallet,
-        expect.objectContaining({ tenantId: 'tenant-1', balanceCredits: 1200 }),
+      const savedSub = mockManager.save.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as { status?: string })?.status ===
+          SubscriptionStatus.ACTIVE,
+      )[0];
+      const days = Math.round(
+        (savedSub.currentPeriodEnd.getTime() - Date.now()) /
+          (24 * 60 * 60 * 1000),
       );
-      expect(mockManager.save).toHaveBeenCalledWith(
-        SmsWalletTransaction,
-        expect.objectContaining({ credits: 1000, balanceAfter: 1200 }),
-      );
+      expect(days).toBe(14);
     });
 
     it('marks the session failed on charge.failed', async () => {
@@ -419,7 +386,6 @@ describe('CheckoutService', () => {
       });
       mockSubscriptionRepo.save.mockResolvedValue({});
       mockPlanRepo.findOneBy.mockResolvedValue({ id: 'pro', name: 'Pro' });
-      mockWalletRepo.findOneBy.mockResolvedValue(null);
 
       await service.cancelSubscription();
 
@@ -440,7 +406,6 @@ describe('CheckoutService', () => {
       });
       mockSubscriptionRepo.save.mockResolvedValue({});
       mockPlanRepo.findOneBy.mockResolvedValue({ id: 'free', name: 'Free' });
-      mockWalletRepo.findOneBy.mockResolvedValue(null);
 
       await service.cancelSubscription();
 
@@ -469,7 +434,6 @@ describe('CheckoutService', () => {
       });
       mockSubscriptionRepo.save.mockResolvedValue({});
       mockPlanRepo.findOneBy.mockResolvedValue({ id: 'free', name: 'Free' });
-      mockWalletRepo.findOneBy.mockResolvedValue(null);
 
       await expect(service.cancelSubscription()).resolves.toBeDefined();
       expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(

@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   NotFoundException,
+  Param,
   Patch,
   Post,
   UploadedFile,
@@ -23,6 +24,8 @@ import { Tenant } from '../entity/tenant.entity';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { CacheService } from '../../utility/service/cache.service';
+import { TenantAssetService } from '../service/tenant-asset.service';
 
 // Bypasses JWT auth but still goes through TenantMiddleware — the frontend
 // calls this on mount to get branding for the current subdomain before a
@@ -32,8 +35,10 @@ export class TenantInfoController {
   constructor(
     private readonly cls: ClsService<AppClsStore>,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly cacheService: CacheService,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
+    private readonly tenantAssetService: TenantAssetService,
   ) {}
 
   @Public()
@@ -53,6 +58,7 @@ export class TenantInfoController {
     const tenant = await this.currentTenantOrThrow();
     Object.assign(tenant, dto);
     await this.tenantRepository.save(tenant);
+    this.cacheService.del(`tenant-branding:${tenant.id}`);
     return this.toProfile(tenant);
   }
 
@@ -65,7 +71,11 @@ export class TenantInfoController {
   @Post('logo')
   @UseInterceptors(
     FileInterceptor('logo', {
-      limits: { fileSize: 3 * 1024 * 1024 },
+      limits: {
+        fileSize:
+          Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
+          3 * 1024 * 1024,
+      },
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.startsWith('image/')) {
           return cb(
@@ -92,6 +102,7 @@ export class TenantInfoController {
     tenant.logoUrl = uploaded.secureUrl;
     tenant.logoPublicId = uploaded.publicId;
     await this.tenantRepository.save(tenant);
+    this.cacheService.del(`tenant-branding:${tenant.id}`);
 
     if (previousPublicId) {
       this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
@@ -109,6 +120,7 @@ export class TenantInfoController {
     tenant.logoUrl = null;
     tenant.logoPublicId = null;
     await this.tenantRepository.save(tenant);
+    this.cacheService.del(`tenant-branding:${tenant.id}`);
 
     if (previousPublicId) {
       this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
@@ -117,7 +129,59 @@ export class TenantInfoController {
     return this.toProfile(tenant);
   }
 
-  private toProfile(tenant: Tenant) {
+  // Read-only for every caller (member app renders from this, no editing
+  // capability here beyond upload/revert below) — the catalog of what CAN
+  // be overridden, independent of whether this tenant has overridden it.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
+  @Get('assets/catalog')
+  getAssetCatalog() {
+    return this.tenantAssetService.getCatalog();
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
+  @Post('assets/:key')
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: {
+        fileSize:
+          Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
+          3 * 1024 * 1024,
+      },
+      fileFilter: (_req, file, cb) => {
+        if (!file.mimetype.startsWith('image/')) {
+          return cb(
+            new BadRequestException('Only image files are allowed'),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  async setAsset(
+    @Param('key') key: string,
+    @UploadedFile() image?: Express.Multer.File,
+  ) {
+    if (!image) throw new BadRequestException('No image file provided');
+    const tenant = await this.currentTenantOrThrow();
+    return {
+      assets: await this.tenantAssetService.setOverride(tenant.id, key, image),
+    };
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
+  @Delete('assets/:key')
+  async removeAsset(@Param('key') key: string) {
+    const tenant = await this.currentTenantOrThrow();
+    return {
+      assets: await this.tenantAssetService.removeOverride(tenant.id, key),
+    };
+  }
+
+  private async toProfile(tenant: Tenant) {
     return {
       name: tenant.name,
       logoUrl: tenant.logoUrl,
@@ -126,6 +190,7 @@ export class TenantInfoController {
       supportEmail: tenant.supportEmail,
       currency: tenant.currency,
       timezone: tenant.timezone,
+      assets: await this.tenantAssetService.getOverrides(tenant.id),
     };
   }
 

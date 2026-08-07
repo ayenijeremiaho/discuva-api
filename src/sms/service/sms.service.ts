@@ -1,20 +1,20 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import {
-  ISmsProvider,
-  SMS_PROVIDER,
   SmsBalance,
   SmsEncoding,
   SmsLogEntry,
   SmsSendResult,
 } from '../interface/sms-provider.interface';
-import { TERMII_MAX_RECIPIENTS_PER_REQUEST } from '../provider/termii-sms.provider';
+import { SmsProviderRegistryService } from './sms-provider-registry.service';
 import { SmsCredentialResolverService } from '../../communication-provider/service/sms-credential-resolver.service';
 
 // Characters Termii documents as forcing UCS-2/unicode encoding (70 chars per
 // segment instead of 160) even though some of these are otherwise ordinary
 // ASCII punctuation — this list is billing-relevant, not just Unicode-aware.
 const GSM7_SPECIAL_CHARS = /[;^{}\\[~\]|€'"]/;
+
+const NOT_CONFIGURED_MESSAGE =
+  'No SMS provider configured. Set up your SMS provider under Communication Providers before sending SMS.';
 
 export interface SegmentCalculation {
   segments: number;
@@ -35,7 +35,7 @@ export class SmsService {
   private readonly logger = new Logger(SmsService.name);
 
   constructor(
-    @Inject(SMS_PROVIDER) private readonly provider: ISmsProvider,
+    private readonly smsProviderRegistry: SmsProviderRegistryService,
     private readonly credentialResolver: SmsCredentialResolverService,
   ) {}
 
@@ -50,27 +50,26 @@ export class SmsService {
     return { segments, encoding, characterCount };
   }
 
-  // Whether a tenant's own BYOK credentials (their own Termii account, no
-  // wallet involved) or this platform's default (billed against the
-  // tenant's prepaid SmsWallet, one debit per batch actually attempted) get
-  // used is resolved once per send — not per recipient, per message.
+  // Pure BYOK — no platform default, no wallet debit. A tenant with no
+  // active SMS provider configured simply can't send until they set one up.
   async send(to: string[], message: string): Promise<SmsSendResult[]> {
-    const { segments, encoding } = this.calculateSegments(message);
-    const credentials = await this.credentialResolver.resolveCredentials();
-    const batches = chunk(to, TERMII_MAX_RECIPIENTS_PER_REQUEST);
+    const config = await this.credentialResolver.resolveConfig();
+    if (!config) {
+      throw new ForbiddenException({
+        message: NOT_CONFIGURED_MESSAGE,
+        code: 'SMS_PROVIDER_NOT_CONFIGURED',
+      });
+    }
+
+    const provider = this.smsProviderRegistry.get(config.providerId);
+    const { encoding } = this.calculateSegments(message);
+    const batches = chunk(to, provider.maxRecipientsPerRequest);
     const results: SmsSendResult[] = [];
-    const reference = randomUUID();
 
     for (const batch of batches) {
       try {
-        if (!credentials) {
-          await this.credentialResolver.debitForSend(
-            segments * batch.length,
-            reference,
-          );
-        }
         results.push(
-          await this.provider.send(batch, message, encoding, credentials),
+          await provider.send(batch, message, encoding, config.credentials),
         );
       } catch (err: any) {
         this.logger.error(
@@ -82,12 +81,26 @@ export class SmsService {
   }
 
   async getBalance(): Promise<SmsBalance> {
-    const credentials = await this.credentialResolver.resolveCredentials();
-    return this.provider.getBalance(credentials);
+    const config = await this.credentialResolver.resolveConfig();
+    if (!config) {
+      throw new ForbiddenException({
+        message: NOT_CONFIGURED_MESSAGE,
+        code: 'SMS_PROVIDER_NOT_CONFIGURED',
+      });
+    }
+    const provider = this.smsProviderRegistry.get(config.providerId);
+    return provider.getBalance(config.credentials);
   }
 
   async getLogs(): Promise<SmsLogEntry[]> {
-    const credentials = await this.credentialResolver.resolveCredentials();
-    return this.provider.getMessageHistory(credentials);
+    const config = await this.credentialResolver.resolveConfig();
+    if (!config) {
+      throw new ForbiddenException({
+        message: NOT_CONFIGURED_MESSAGE,
+        code: 'SMS_PROVIDER_NOT_CONFIGURED',
+      });
+    }
+    const provider = this.smsProviderRegistry.get(config.providerId);
+    return provider.getMessageHistory(config.credentials);
   }
 }

@@ -34,10 +34,10 @@ dies with the same disk the primary DB does).
 pg_dump \
   --host="$DATABASE_HOST" --port="$DATABASE_PORT" \
   --username="$DATABASE_USER" --dbname="$DATABASE_NAME" \
-  --format=custom --file="discovery-hub-$(date +%Y%m%d).dump"
+  --format=custom --file="discuva-$(date +%Y%m%d).dump"
 
 # Ship it off-host immediately after — e.g. to S3/GCS/Backblaze:
-# aws s3 cp discovery-hub-$(date +%Y%m%d).dump s3://your-backup-bucket/postgres/
+# aws s3 cp discuva-$(date +%Y%m%d).dump s3://your-backup-bucket/postgres/
 
 # Prune anything older than 30 days on the remote store.
 ```
@@ -53,7 +53,7 @@ pg_restore \
   --host="$DATABASE_HOST" --port="$DATABASE_PORT" \
   --username="$DATABASE_USER" --dbname="$DATABASE_NAME" \
   --clean --if-exists \
-  discovery-hub-20260101.dump
+  discuva-20260101.dump
 ```
 
 `--clean --if-exists` drops existing objects before recreating them, so this is safe to run against an empty or

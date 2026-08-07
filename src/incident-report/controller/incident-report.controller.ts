@@ -34,7 +34,11 @@ export class IncidentReportController {
   @Post()
   @UseInterceptors(
     FilesInterceptor('images', 5, {
-      limits: { fileSize: 5 * 1024 * 1024 },
+      limits: {
+        fileSize:
+          Number.parseInt(process.env.MAX_FILE_UPLOAD_BYTES ?? '', 10) ||
+          5 * 1024 * 1024,
+      },
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.startsWith('image/')) {
           return cb(

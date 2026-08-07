@@ -27,6 +27,8 @@ import { PdfService } from '../../utility/service/pdf.service';
 import { ExcelService } from '../../utility/service/excel.service';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 
@@ -34,6 +36,17 @@ const mockClsService = {
   get: jest.fn(),
   isActive: jest.fn().mockReturnValue(false),
   getId: jest.fn(),
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+
+const mockTenantRepo = {
+  find: jest
+    .fn()
+    .mockResolvedValue([{ id: 't1', subdomain: 'a', schemaName: 'church_a' }]),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
 };
 
 const mockAccountRepo = {
@@ -193,6 +206,9 @@ describe('TitheService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -229,6 +245,8 @@ describe('TitheService', () => {
         { provide: ExcelService, useValue: mockExcelService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockClsService },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -902,6 +920,41 @@ describe('TitheService', () => {
         'TITHE_PROOF_EXPIRED_PURGED',
         expect.any(Object),
       );
+      expect(mockCacheService.releaseLock).toHaveBeenCalled();
+    });
+
+    it('runs the purge once per active tenant, entering each tenant context', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      mockCacheService.acquireLock.mockResolvedValue(true);
+      mockProofRepo.find.mockResolvedValue([]);
+
+      await service.purgeExpiredProofs();
+
+      expect(mockProofRepo.find).toHaveBeenCalledTimes(2);
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_a", public',
+      );
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_b", public',
+      );
+    });
+
+    it('continues purging other tenants when one tenant fails', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      mockCacheService.acquireLock.mockResolvedValue(true);
+      mockProofRepo.find
+        .mockRejectedValueOnce(new Error('db error'))
+        .mockResolvedValueOnce([]);
+
+      await service.purgeExpiredProofs();
+
+      expect(mockProofRepo.find).toHaveBeenCalledTimes(2);
       expect(mockCacheService.releaseLock).toHaveBeenCalled();
     });
   });

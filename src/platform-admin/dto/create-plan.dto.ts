@@ -3,6 +3,7 @@ import {
   IsIn,
   IsInt,
   IsNotEmpty,
+  IsObject,
   IsOptional,
   IsString,
   Matches,
@@ -35,4 +36,12 @@ export class CreatePlanDto {
   @IsArray()
   @IsIn(Object.values(PlanFeature), { each: true })
   features?: PlanFeature[];
+
+  // Map of PlanFeature -> max lifetime uses per tenant. Keys/values are
+  // deep-validated in PlatformPlanService (a valid PlanFeature per key, a
+  // positive integer per value) rather than here — class-validator has no
+  // clean built-in for "record of enum to positive int".
+  @IsOptional()
+  @IsObject()
+  featureLimits?: Record<string, number>;
 }

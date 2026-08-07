@@ -10,6 +10,7 @@ import { EnrollmentStatusEnum } from '../enum/enrollment-status.enum';
 import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 
 const makeQb = () => ({
   where: jest.fn().mockReturnThis(),
@@ -63,6 +64,11 @@ const mockConfigService = {
   get: jest.fn(),
 };
 
+const mockCloudinaryService = {
+  uploadBuffer: jest.fn(),
+  deleteByPublicId: jest.fn(),
+};
+
 describe('ClassesService', () => {
   let service: ClassesService;
 
@@ -81,6 +87,7 @@ describe('ClassesService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: CloudinaryService, useValue: mockCloudinaryService },
       ],
     }).compile();
 
@@ -781,6 +788,68 @@ describe('ClassesService', () => {
       const result = await service.issueCertificate('enroll-1', {}, 'admin-1');
 
       expect(result.certificateNumber).toBeNull();
+    });
+  });
+
+  describe('uploadMaterial', () => {
+    it('uploads to the class-materials Cloudinary folder and returns the secure URL', async () => {
+      mockCloudinaryService.uploadBuffer.mockResolvedValue({
+        secureUrl: 'https://res.cloudinary.com/x/class-materials/123.pdf',
+        publicId: 'class-materials/123',
+        resourceType: 'raw',
+      });
+
+      const result = await service.uploadMaterial({
+        buffer: Buffer.from('pdf-bytes'),
+        mimetype: 'application/pdf',
+      } as Express.Multer.File);
+
+      expect(mockCloudinaryService.uploadBuffer).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'class-materials',
+        undefined,
+        'application/pdf',
+      );
+      expect(result).toEqual({
+        url: 'https://res.cloudinary.com/x/class-materials/123.pdf',
+      });
+    });
+  });
+
+  describe('getMaterialLibrary', () => {
+    it('groups distinct document URLs by the class names that use them', async () => {
+      mockClassRepo.find.mockResolvedValue([
+        { name: 'New Believers 1', documentUrl: 'https://x/manual.pdf' },
+        { name: 'New Believers 2', documentUrl: 'https://x/manual.pdf' },
+        { name: 'Water Baptism', documentUrl: 'https://x/baptism.pdf' },
+        { name: 'Untitled Class', documentUrl: null },
+      ]);
+
+      const result = await service.getMaterialLibrary();
+
+      expect(result).toEqual(
+        expect.arrayContaining([
+          {
+            documentUrl: 'https://x/manual.pdf',
+            usedByClassNames: ['New Believers 1', 'New Believers 2'],
+          },
+          {
+            documentUrl: 'https://x/baptism.pdf',
+            usedByClassNames: ['Water Baptism'],
+          },
+        ]),
+      );
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns an empty array when no class has material yet', async () => {
+      mockClassRepo.find.mockResolvedValue([
+        { name: 'Untitled Class', documentUrl: null },
+      ]);
+
+      const result = await service.getMaterialLibrary();
+
+      expect(result).toEqual([]);
     });
   });
 });

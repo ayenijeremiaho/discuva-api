@@ -9,13 +9,10 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { GameService, GameSessionStatePayload } from '../service/game.service';
+import { createCorsOriginValidator } from '../../tenant/utility/cors-origin-validator';
 
 interface JoinSessionPayload {
   sessionCode: string;
-}
-
-function corsOrigins(): string[] | undefined {
-  return process.env.CORS_ORIGINS?.split(',').map((o) => o.trim());
 }
 
 // Read-only broadcast channel, mirrors ServiceSessionGateway exactly — the
@@ -25,7 +22,7 @@ function corsOrigins(): string[] | undefined {
 // scored/audited actions bypass the REST+guard layer.
 @WebSocketGateway({
   namespace: '/game-session',
-  cors: { origin: corsOrigins() },
+  cors: { origin: createCorsOriginValidator() },
 })
 export class GameSessionGateway implements OnGatewayInit {
   @WebSocketServer()

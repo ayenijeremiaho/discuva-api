@@ -11,8 +11,15 @@ import {
   BillingCheckoutType,
 } from '../../billing/entity/billing-checkout-session.entity';
 import { TenantRollup } from '../../branch/entity/tenant-rollup.entity';
+import { DiscountType } from '../../billing/enum/discount-type.enum';
+import { computeEffectivePriceCents } from '../../billing/util/discount.util';
 import { CommunicationProvider } from '../entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from '../entity/tenant-communication-provider-config.entity';
+import { TenantGivingProviderConfig } from '../../giving-checkout/entity/tenant-giving-provider-config.entity';
+import {
+  GivingCheckoutSession,
+  GivingCheckoutStatus,
+} from '../../giving-checkout/entity/giving-checkout-session.entity';
 import { AnalyticsPeriod } from '../dto/analytics-trend-query.dto';
 
 export interface PlanCount {
@@ -48,7 +55,6 @@ export interface GrowthAnalytics {
 export interface RevenueTrendPoint {
   periodLabel: string;
   subscriptionRevenueCents: number;
-  walletTopupRevenueCents: number;
   totalCents: number;
 }
 
@@ -95,7 +101,44 @@ export interface ChannelAdoption {
 export interface AdoptionAnalytics {
   smsAdoption: ChannelAdoption;
   emailAdoption: ChannelAdoption;
+  givingAdoption: ChannelAdoption;
   planDistribution: PlanCount[];
+}
+
+// Amounts are deliberately never blended across currencies (a tenant on
+// Stripe giving in USD summed against one on Paystack giving in NGN would
+// be a meaningless number) — every breakdown below is grouped by currency
+// alongside whatever else it's grouped by, never just a single top-level
+// total.
+export interface GivingAmountByCurrency {
+  currency: string;
+  totalAmountCents: number;
+  count: number;
+}
+
+export interface GivingByProvider extends GivingAmountByCurrency {
+  provider: string;
+}
+
+export interface GivingByTenant extends GivingAmountByCurrency {
+  tenantId: string;
+  tenantName: string;
+  provider: string;
+}
+
+export interface GivingTrendPoint extends GivingAmountByCurrency {
+  periodLabel: string;
+}
+
+export interface GivingAnalytics {
+  period: AnalyticsPeriod;
+  // All-time (not window-limited by `months`) — the trend below is the
+  // windowed breakdown, same split as getRevenue's mrrCents (all-time
+  // snapshot) vs. trend (windowed).
+  totals: GivingAmountByCurrency[];
+  byProvider: GivingByProvider[];
+  byTenant: GivingByTenant[];
+  trend: GivingTrendPoint[];
 }
 
 // Deliberately no new aggregation table/cron — every method here is a live
@@ -119,6 +162,10 @@ export class PlatformAnalyticsService {
     private readonly providerRepo: Repository<CommunicationProvider>,
     @InjectRepository(TenantCommunicationProviderConfig)
     private readonly providerConfigRepo: Repository<TenantCommunicationProviderConfig>,
+    @InjectRepository(TenantGivingProviderConfig)
+    private readonly givingProviderConfigRepo: Repository<TenantGivingProviderConfig>,
+    @InjectRepository(GivingCheckoutSession)
+    private readonly givingCheckoutRepo: Repository<GivingCheckoutSession>,
   ) {}
 
   private periodLabel(date: Date, period: AnalyticsPeriod): string {
@@ -148,16 +195,39 @@ export class PlatformAnalyticsService {
 
   // Excludes sponsored subscriptions (a branch riding its parent's plan for
   // free, docs/MULTI_TENANT_MIGRATION.md §11.1) — no real money backs those,
-  // so counting them would overstate actual recurring revenue.
+  // so counting them would overstate actual recurring revenue. Internal
+  // comps (Subscription.discountType) aren't excluded the same way — some
+  // real money may still be flowing — so each row's effective (discounted)
+  // price is summed in JS via the same computeEffectivePriceCents helper
+  // CheckoutService's billing summary uses, rather than a raw SQL SUM.
   private async mrrCents(): Promise<number> {
-    const row = await this.subscriptionRepo
+    const rows = await this.subscriptionRepo
       .createQueryBuilder('sub')
       .innerJoin(Plan, 'plan', 'plan.id = sub.planId')
-      .select('COALESCE(SUM(plan.priceCents), 0)', 'total')
+      .select('plan.priceCents', 'priceCents')
+      .addSelect('sub.discountType', 'discountType')
+      .addSelect('sub.discountValue', 'discountValue')
+      .addSelect('sub.discountExpiresAt', 'discountExpiresAt')
       .where('sub.status = :status', { status: SubscriptionStatus.ACTIVE })
       .andWhere('sub.sponsoredByTenantId IS NULL')
-      .getRawOne<{ total: string }>();
-    return Number.parseInt(row?.total ?? '0', 10);
+      .getRawMany<{
+        priceCents: number;
+        discountType: DiscountType | null;
+        discountValue: number | null;
+        discountExpiresAt: Date | null;
+      }>();
+
+    return rows.reduce(
+      (total, row) =>
+        total +
+        computeEffectivePriceCents(Number(row.priceCents), {
+          discountType: row.discountType,
+          discountValue:
+            row.discountValue == null ? null : Number(row.discountValue),
+          discountExpiresAt: row.discountExpiresAt,
+        }),
+      0,
+    );
   }
 
   async getOverview(): Promise<PlatformOverview> {
@@ -256,22 +326,13 @@ export class PlatformAnalyticsService {
       }),
     ]);
 
-    const bucketMap = new Map<
-      string,
-      { subscriptionRevenueCents: number; walletTopupRevenueCents: number }
-    >();
+    const bucketMap = new Map<string, { subscriptionRevenueCents: number }>();
     for (const session of sessions) {
       if (!session.completedAt || session.completedAt < since) continue;
+      if (session.type !== BillingCheckoutType.SUBSCRIPTION) continue;
       const label = this.periodLabel(session.completedAt, period);
-      const bucket = bucketMap.get(label) ?? {
-        subscriptionRevenueCents: 0,
-        walletTopupRevenueCents: 0,
-      };
-      if (session.type === BillingCheckoutType.SUBSCRIPTION) {
-        bucket.subscriptionRevenueCents += session.amountCents;
-      } else {
-        bucket.walletTopupRevenueCents += session.amountCents;
-      }
+      const bucket = bucketMap.get(label) ?? { subscriptionRevenueCents: 0 };
+      bucket.subscriptionRevenueCents += session.amountCents;
       bucketMap.set(label, bucket);
     }
 
@@ -280,8 +341,7 @@ export class PlatformAnalyticsService {
       .map(([periodLabel, b]) => ({
         periodLabel,
         subscriptionRevenueCents: b.subscriptionRevenueCents,
-        walletTopupRevenueCents: b.walletTopupRevenueCents,
-        totalCents: b.subscriptionRevenueCents + b.walletTopupRevenueCents,
+        totalCents: b.subscriptionRevenueCents,
       }));
 
     return {
@@ -388,13 +448,34 @@ export class PlatformAnalyticsService {
     };
   }
 
+  private async givingAdoption(totalTenants: number): Promise<ChannelAdoption> {
+    // No `channel` column to filter on here (unlike communication
+    // providers) — giving-checkout only ever has the one implicit channel.
+    const row = await this.givingProviderConfigRepo
+      .createQueryBuilder('config')
+      .select('COUNT(DISTINCT config.tenantId)', 'count')
+      .where('config.isActive = true')
+      .getRawOne<{ count: string }>();
+
+    const byokCount = Number.parseInt(row?.count ?? '0', 10);
+    return {
+      byokCount,
+      totalTenants,
+      ratePercent:
+        totalTenants === 0
+          ? 0
+          : Math.round((byokCount / totalTenants) * 10000) / 100,
+    };
+  }
+
   async getAdoption(): Promise<AdoptionAnalytics> {
     const totalTenants = await this.tenantRepo.count();
 
-    const [smsAdoption, emailAdoption, planCounts, planNames] =
+    const [smsAdoption, emailAdoption, givingAdoption, planCounts, planNames] =
       await Promise.all([
         this.channelAdoption('sms', totalTenants),
         this.channelAdoption('email', totalTenants),
+        this.givingAdoption(totalTenants),
         this.subscriptionRepo
           .createQueryBuilder('sub')
           .select('sub.planId', 'planId')
@@ -407,11 +488,139 @@ export class PlatformAnalyticsService {
     return {
       smsAdoption,
       emailAdoption,
+      givingAdoption,
       planDistribution: planCounts.map((r) => ({
         planId: r.planId,
         planName: planNames.get(r.planId) ?? r.planId,
         count: Number.parseInt(r.count, 10),
       })),
+    };
+  }
+
+  // "Full overview" for platform support — total giving-checkout volume
+  // across every tenant, split by provider and by tenant, never blended
+  // across currencies. Deliberately a live query over
+  // giving_checkout_sessions (same "no new aggregation table" reasoning as
+  // the rest of this service) — completed sessions only, everything else
+  // (pending/failed) never represents money that actually moved.
+  async getGiving(
+    period: AnalyticsPeriod,
+    months: number,
+  ): Promise<GivingAnalytics> {
+    const since = this.monthsAgo(months);
+
+    const [totalsRaw, byProviderRaw, byTenantRaw, sessions] = await Promise.all(
+      [
+        this.givingCheckoutRepo
+          .createQueryBuilder('s')
+          .select('s.currency', 'currency')
+          .addSelect('COALESCE(SUM(s.amountCents), 0)', 'total')
+          .addSelect('COUNT(*)', 'count')
+          .where('s.status = :status', {
+            status: GivingCheckoutStatus.COMPLETED,
+          })
+          .groupBy('s.currency')
+          .getRawMany<{ currency: string; total: string; count: string }>(),
+        this.givingCheckoutRepo
+          .createQueryBuilder('s')
+          .select('s.provider', 'provider')
+          .addSelect('s.currency', 'currency')
+          .addSelect('COALESCE(SUM(s.amountCents), 0)', 'total')
+          .addSelect('COUNT(*)', 'count')
+          .where('s.status = :status', {
+            status: GivingCheckoutStatus.COMPLETED,
+          })
+          .groupBy('s.provider')
+          .addGroupBy('s.currency')
+          .getRawMany<{
+            provider: string;
+            currency: string;
+            total: string;
+            count: string;
+          }>(),
+        this.givingCheckoutRepo
+          .createQueryBuilder('s')
+          .innerJoin(Tenant, 'tenant', 'tenant.id = s.tenantId')
+          .select('s.tenantId', 'tenantId')
+          .addSelect('tenant.name', 'tenantName')
+          .addSelect('s.provider', 'provider')
+          .addSelect('s.currency', 'currency')
+          .addSelect('COALESCE(SUM(s.amountCents), 0)', 'total')
+          .addSelect('COUNT(*)', 'count')
+          .where('s.status = :status', {
+            status: GivingCheckoutStatus.COMPLETED,
+          })
+          .groupBy('s.tenantId')
+          .addGroupBy('tenant.name')
+          .addGroupBy('s.provider')
+          .addGroupBy('s.currency')
+          .orderBy('total', 'DESC')
+          .getRawMany<{
+            tenantId: string;
+            tenantName: string;
+            provider: string;
+            currency: string;
+            total: string;
+            count: string;
+          }>(),
+        this.givingCheckoutRepo.find({
+          where: { status: GivingCheckoutStatus.COMPLETED },
+          order: { completedAt: 'ASC' },
+        }),
+      ],
+    );
+
+    const bucketMap = new Map<
+      string,
+      Map<string, { totalAmountCents: number; count: number }>
+    >();
+    for (const session of sessions) {
+      if (!session.completedAt || session.completedAt < since) continue;
+      const label = this.periodLabel(session.completedAt, period);
+      const byCurrency = bucketMap.get(label) ?? new Map();
+      const bucket = byCurrency.get(session.currency) ?? {
+        totalAmountCents: 0,
+        count: 0,
+      };
+      bucket.totalAmountCents += session.amountCents;
+      bucket.count += 1;
+      byCurrency.set(session.currency, bucket);
+      bucketMap.set(label, byCurrency);
+    }
+
+    const trend: GivingTrendPoint[] = [...bucketMap.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .flatMap(([periodLabel, byCurrency]) =>
+        [...byCurrency.entries()].map(([currency, b]) => ({
+          periodLabel,
+          currency,
+          totalAmountCents: b.totalAmountCents,
+          count: b.count,
+        })),
+      );
+
+    return {
+      period,
+      totals: totalsRaw.map((r) => ({
+        currency: r.currency,
+        totalAmountCents: Number.parseInt(r.total, 10),
+        count: Number.parseInt(r.count, 10),
+      })),
+      byProvider: byProviderRaw.map((r) => ({
+        provider: r.provider,
+        currency: r.currency,
+        totalAmountCents: Number.parseInt(r.total, 10),
+        count: Number.parseInt(r.count, 10),
+      })),
+      byTenant: byTenantRaw.map((r) => ({
+        tenantId: r.tenantId,
+        tenantName: r.tenantName,
+        provider: r.provider,
+        currency: r.currency,
+        totalAmountCents: Number.parseInt(r.total, 10),
+        count: Number.parseInt(r.count, 10),
+      })),
+      trend,
     };
   }
 }

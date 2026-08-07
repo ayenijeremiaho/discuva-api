@@ -1,8 +1,10 @@
 import {
+  ForbiddenException,
   Injectable,
   Logger,
   NestMiddleware,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,6 +16,7 @@ import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-t
 import { Tenant } from '../entity/tenant.entity';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { extractSubdomain } from '../utility/extract-subdomain';
+import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 
 const VALID_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
 
@@ -63,13 +66,41 @@ export class TenantMiddleware implements NestMiddleware {
       throw new NotFoundException('Tenant not found');
     }
 
-    const tenant = await this.tenantRepository.findOneBy({
-      subdomain,
-      isActive: true,
-    });
+    // Not filtered by isActive here — a row that exists but isn't active
+    // yet needs a different response than one that never existed at all
+    // (see the branches below), which a single findOneBy({ isActive: true })
+    // can't distinguish: both would 404 identically otherwise.
+    const tenant = await this.tenantRepository.findOneBy({ subdomain });
 
     if (!tenant) {
       throw new NotFoundException('Tenant not found');
+    }
+
+    if (tenant.onboardingStatus !== TenantOnboardingStatus.ACTIVE) {
+      if (
+        tenant.onboardingStatus === TenantOnboardingStatus.PENDING ||
+        tenant.onboardingStatus === TenantOnboardingStatus.PROVISIONING
+      ) {
+        throw new ServiceUnavailableException(
+          'This workspace is still being set up. Please check back in a moment.',
+        );
+      }
+      // FAILED — a genuine setup problem, not something a visitor can fix
+      // by waiting. Deliberately no technical detail here; that's what
+      // GET /platform/tenants/:id/onboarding-events is for.
+      throw new ServiceUnavailableException(
+        'There was a problem setting up this workspace. Please contact support.',
+      );
+    }
+
+    // onboardingStatus reaching ACTIVE never reverts — a previously-active
+    // tenant with isActive now false was suspended by a platform admin
+    // (PlatformTenantService.suspendTenant), a distinct case from "still
+    // provisioning" that deserves its own message, not a generic 404.
+    if (!tenant.isActive) {
+      throw new ForbiddenException(
+        'This account has been suspended. Please contact support.',
+      );
     }
 
     if (!VALID_SCHEMA_NAME.test(tenant.schemaName)) {

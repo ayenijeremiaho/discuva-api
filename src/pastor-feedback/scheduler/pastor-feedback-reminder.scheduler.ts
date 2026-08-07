@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Department } from '../../department/entity/department.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { DepartmentLeadTypeEnum } from '../../department/enums/department-lead-type.enum';
@@ -10,6 +13,9 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class PastorFeedbackReminderScheduler {
@@ -22,8 +28,12 @@ export class PastorFeedbackReminderScheduler {
     private readonly leadRepo: Repository<DepartmentLead>,
     @InjectRepository(PastorFeedback)
     private readonly feedbackRepo: Repository<PastorFeedback>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly pushService: PushNotificationService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   // Monday 9am — the "has last week's feedback been submitted" condition is
@@ -31,27 +41,35 @@ export class PastorFeedbackReminderScheduler {
   // whose rows pre-exist and just get a boolean flipped).
   @Cron('0 9 * * 1', { timeZone: CHURCH_TIMEZONE })
   async sendReminders(): Promise<void> {
-    const weekOf = this.toDateStr(this.previousWeekMonday(new Date()));
+    await forEachActiveTenant(
+      this.tenantRepo,
+      this.cls,
+      this.txHost,
+      this.logger,
+      async () => {
+        const weekOf = this.toDateStr(this.previousWeekMonday(new Date()));
 
-    const departments = await this.departmentRepo.find();
-    if (!departments.length) return;
+        const departments = await this.departmentRepo.find();
+        if (!departments.length) return;
 
-    const submitted = await this.feedbackRepo.find({
-      where: { weekOf },
-      relations: ['department'],
-    });
-    const submittedDeptIds = new Set(submitted.map((f) => f.department.id));
-    const pending = departments.filter((d) => !submittedDeptIds.has(d.id));
+        const submitted = await this.feedbackRepo.find({
+          where: { weekOf },
+          relations: ['department'],
+        });
+        const submittedDeptIds = new Set(submitted.map((f) => f.department.id));
+        const pending = departments.filter((d) => !submittedDeptIds.has(d.id));
 
-    for (const department of pending) {
-      try {
-        await this.remindDepartment(department, weekOf);
-      } catch (err) {
-        this.logger.error(
-          `Failed to send feedback reminder for department ${department.id}: ${err}`,
-        );
-      }
-    }
+        for (const department of pending) {
+          try {
+            await this.remindDepartment(department, weekOf);
+          } catch (err) {
+            this.logger.error(
+              `Failed to send feedback reminder for department ${department.id}: ${err}`,
+            );
+          }
+        }
+      },
+    );
   }
 
   private async remindDepartment(

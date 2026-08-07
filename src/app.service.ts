@@ -52,7 +52,7 @@ export class AppService {
   }
 
   private wrap(content: string): string {
-    const product = this.config.get<string>('PRODUCT_NAME') ?? 'Discovery Hub';
+    const product = this.config.get<string>('PRODUCT_NAME') ?? 'Discuva';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>

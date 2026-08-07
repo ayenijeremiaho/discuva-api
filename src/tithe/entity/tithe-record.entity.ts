@@ -10,7 +10,6 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TitheUploadBatch } from './tithe-upload-batch.entity';
 import { TitheSource } from '../../finance/enum/finance.enum';
-import { MemberVirtualAccount } from '../../finance/entity/member-virtual-account.entity';
 
 @Entity({ name: 'tithe_records' })
 @Index('IDX_tithe_records_member_payment', ['member', 'paymentDate'])
@@ -48,11 +47,4 @@ export class TitheRecord extends BaseEntity {
 
   @Column({ type: 'varchar', nullable: true, name: 'payment_channel' })
   paymentChannel: string | null;
-
-  @ManyToOne(() => MemberVirtualAccount, {
-    nullable: true,
-    onDelete: 'SET NULL',
-  })
-  @JoinColumn({ name: 'virtual_account_id' })
-  virtualAccount: MemberVirtualAccount | null;
 }

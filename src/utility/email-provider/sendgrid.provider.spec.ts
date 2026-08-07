@@ -44,6 +44,31 @@ describe('SendGridProvider', () => {
     expect(body.from).toEqual({ email: 'platform@example.com' });
   });
 
+  it('sends against SENDGRID_BASE_URL when configured, instead of the hardcoded default', async () => {
+    mockConfig = {
+      get: jest.fn((key: string) => {
+        const values: Record<string, unknown> = {
+          SENDGRID_API_KEY: 'platform-key',
+          SENDGRID_BASE_URL: 'https://sendgrid.example-region.net',
+        };
+        return values[key];
+      }),
+    } as any;
+    provider = new SendGridProvider(mockConfig);
+
+    await provider.sendMail({
+      from: 'platform@example.com',
+      to: 'member@example.com',
+      subject: 'Hi',
+      html: '<p>hi</p>',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://sendgrid.example-region.net/v3/mail/send',
+      expect.anything(),
+    );
+  });
+
   it('uses the tenant BYOK API key when given', async () => {
     await provider.sendMail(
       {

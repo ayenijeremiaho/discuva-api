@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ServiceProgramme } from './entity/service-programme.entity';
 import { ServiceProgrammeSlot } from './entity/service-programme-slot.entity';
@@ -21,6 +22,7 @@ import { NamedAccessGuard } from './guard/named-access.guard';
 import { ServiceProgrammeReminderScheduler } from './scheduler/service-programme-reminder.scheduler';
 import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -37,6 +39,9 @@ import { DepartmentModule } from '../department/department.module';
       Member,
       WorkerProfile,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by ServiceProgrammeReminderScheduler's forEachActiveTenant loop.
+    TypeOrmModule.forFeature([Tenant]),
     UtilityModule,
     DepartmentModule,
   ],

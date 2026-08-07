@@ -4,15 +4,19 @@ import { PlatformAdminAuthService } from '../service/platform-admin-auth.service
 import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
+import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { CheckoutService } from '../../billing/service/checkout.service';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 
-// Scoped to the two billing-support routes added this pass — the rest of
+// Scoped to the billing/giving-support routes added this pass — the rest of
 // this controller predates unit-test coverage in this codebase and isn't
 // this change's concern.
 const mockCheckoutService = {
   listCheckoutSessions: jest.fn(),
   refundCheckoutSession: jest.fn(),
+};
+const mockGivingProviderService = {
+  getTenantGivingProviders: jest.fn(),
 };
 const mockAuthService = {
   forgotPassword: jest.fn(),
@@ -31,6 +35,10 @@ describe('PlatformAdminController (billing support routes)', () => {
         { provide: PlatformTenantService, useValue: {} },
         { provide: PlatformPlanService, useValue: {} },
         { provide: PlatformCommunicationProviderService, useValue: {} },
+        {
+          provide: PlatformGivingProviderService,
+          useValue: mockGivingProviderService,
+        },
         { provide: CheckoutService, useValue: mockCheckoutService },
       ],
     })
@@ -61,6 +69,13 @@ describe('PlatformAdminController (billing support routes)', () => {
       'sess-1',
       undefined,
     );
+  });
+
+  it('getTenantGivingProviders delegates to PlatformGivingProviderService', async () => {
+    await controller.getTenantGivingProviders('tenant-1');
+    expect(
+      mockGivingProviderService.getTenantGivingProviders,
+    ).toHaveBeenCalledWith('tenant-1');
   });
 
   it('forgotPassword delegates to PlatformAdminAuthService and returns a generic message', async () => {

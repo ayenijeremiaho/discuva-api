@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { ConfigModule } from '@nestjs/config';
@@ -21,6 +22,7 @@ import {
 import { FollowUpScheduler } from './scheduler/follow-up.scheduler';
 import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -36,6 +38,9 @@ import { DepartmentModule } from '../department/department.module';
       Admin,
       AdminRole,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by FollowUpScheduler's forEachActiveTenant loops.
+    TypeOrmModule.forFeature([Tenant]),
     BullModule.registerQueue({
       name: FOLLOW_UP_QUEUE,
       settings: {

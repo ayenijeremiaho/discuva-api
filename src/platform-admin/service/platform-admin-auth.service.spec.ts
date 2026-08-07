@@ -26,7 +26,7 @@ const mockOtpRepo = {
 };
 const mockJwtService = { signAsync: jest.fn().mockResolvedValue('signed-jwt') };
 const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
-const mockConfigService = { get: jest.fn().mockReturnValue('Discovery Hub') };
+const mockConfigService = { get: jest.fn().mockReturnValue('Discuva') };
 
 describe('PlatformAdminAuthService', () => {
   let service: PlatformAdminAuthService;

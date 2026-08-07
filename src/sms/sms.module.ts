@@ -3,7 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { SmsService } from './service/sms.service';
 import { SmsController } from './controller/sms.controller';
 import { TermiiSmsProvider } from './provider/termii-sms.provider';
-import { SMS_PROVIDER } from './interface/sms-provider.interface';
+import { TwilioSmsProvider } from './provider/twilio-sms.provider';
+import { SmsProviderRegistryService } from './service/sms-provider-registry.service';
 import { CommunicationProviderModule } from '../communication-provider/communication-provider.module';
 
 @Module({
@@ -11,9 +12,9 @@ import { CommunicationProviderModule } from '../communication-provider/communica
   controllers: [SmsController],
   providers: [
     SmsService,
-    // Swapping SMS vendors later means changing only this one line — every
-    // consumer injects SMS_PROVIDER through the interface, never this class.
-    { provide: SMS_PROVIDER, useClass: TermiiSmsProvider },
+    TermiiSmsProvider,
+    TwilioSmsProvider,
+    SmsProviderRegistryService,
   ],
   exports: [SmsService],
 })

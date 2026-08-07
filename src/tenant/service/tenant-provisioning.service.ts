@@ -21,6 +21,13 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { RESERVED_SUBDOMAINS } from '../utility/extract-subdomain';
 import { subdomainToSchemaName } from '../utility/schema-name';
+import { buildTenantUrl } from '../utility/tenant-url';
+import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
+import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
+import {
+  TenantOnboardingEvent,
+  TenantOnboardingEventType,
+} from '../entity/tenant-onboarding-event.entity';
 
 // How long a provisioning-time welcome OTP stays valid — deliberately much
 // longer than OTP_TTL_SECONDS' normal 15-minute forgot-password window,
@@ -73,38 +80,83 @@ export class TenantProvisioningService {
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(Subscription)
     private readonly subscriptionRepo: Repository<Subscription>,
+    @InjectRepository(TenantOnboardingEvent)
+    private readonly eventRepo: Repository<TenantOnboardingEvent>,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
   ) {}
 
-  async provision(params: ProvisionTenantParams): Promise<Tenant> {
-    const subdomain = params.subdomain.toLowerCase();
-    if (RESERVED_SUBDOMAINS.has(subdomain)) {
+  // Find-or-create the Tenant row only — split out of provision() so the
+  // two HTTP callers (SignupController, PlatformTenantService.createTenant)
+  // can get a real tenant.id + onboardingStatus back immediately, before
+  // handing the rest of provisioning off to TenantProvisioningProcessor.
+  // Safe to call again for the same subdomain — provision() already relies
+  // on this being idempotent (resuming a crashed partial provision).
+  async ensurePendingTenant(
+    subdomain: string,
+    churchName: string,
+    parentTenantId?: string,
+  ): Promise<Tenant> {
+    const normalized = subdomain.toLowerCase();
+    if (RESERVED_SUBDOMAINS.has(normalized)) {
       throw new ConflictException(
-        `"${subdomain}" is a reserved subdomain and can't be used.`,
+        `"${normalized}" is a reserved subdomain and can't be used.`,
       );
     }
 
-    let tenant = await this.tenantRepo.findOneBy({ subdomain });
-    if (tenant?.isActive) {
+    const existing = await this.tenantRepo.findOneBy({
+      subdomain: normalized,
+    });
+    if (existing?.isActive) {
       throw new ConflictException('This subdomain is already in use.');
     }
-    if (!tenant) {
-      tenant = await this.tenantRepo.save(
-        this.tenantRepo.create({
-          subdomain,
-          schemaName: subdomainToSchemaName(subdomain),
-          name: params.churchName,
-          isActive: false,
-          parentTenantId: params.parentTenantId ?? null,
-        }),
-      );
-      this.logger.log(
-        `Tenant row created for "${subdomain}" (schema ${tenant.schemaName}), not yet active`,
-      );
-    }
+    if (existing) return existing;
+
+    const tenant = await this.tenantRepo.save(
+      this.tenantRepo.create({
+        subdomain: normalized,
+        schemaName: subdomainToSchemaName(normalized),
+        name: churchName,
+        isActive: false,
+        onboardingStatus: TenantOnboardingStatus.PENDING,
+        parentTenantId: parentTenantId ?? null,
+      }),
+    );
+    this.logger.log(
+      `Tenant row created for "${normalized}" (schema ${tenant.schemaName}), not yet active`,
+    );
+    return tenant;
+  }
+
+  // Records a platform-level onboarding-lifecycle event — distinct from
+  // AuditLogService (tenant-scoped, lives in each church's own schema),
+  // since these events happen before/independent of any tenant schema
+  // existing. See TenantOnboardingEvent's own class comment.
+  async recordEvent(
+    tenantId: string,
+    event: TenantOnboardingEventType,
+    actorType: TenantOnboardingActorType,
+    options: { actorId?: string; metadata?: Record<string, unknown> } = {},
+  ): Promise<void> {
+    await this.eventRepo.save(
+      this.eventRepo.create({
+        tenant: { id: tenantId } as Tenant,
+        event,
+        actorType,
+        actorId: options.actorId ?? null,
+        metadata: options.metadata ?? null,
+      }),
+    );
+  }
+
+  async provision(params: ProvisionTenantParams): Promise<Tenant> {
+    let tenant = await this.ensurePendingTenant(
+      params.subdomain,
+      params.churchName,
+      params.parentTenantId,
+    );
 
     await this.ensureSchemaExists(tenant.schemaName);
     await this.runTenantMigrations(tenant.schemaName);
@@ -124,7 +176,7 @@ export class TenantProvisioningService {
       this.sendWelcomeEmail(tenant, params, welcomeOtp);
     }
 
-    this.logger.log(`Tenant "${subdomain}" provisioned and activated`);
+    this.logger.log(`Tenant "${tenant.subdomain}" provisioned and activated`);
     return tenant;
   }
 
@@ -288,7 +340,10 @@ export class TenantProvisioningService {
     const firstName = UtilityService.capitalizeFirstLetter(
       params.adminFirstname,
     );
-    const adminLoginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
+    const adminLoginUrl = buildTenantUrl(
+      this.configService.get<string>('ADMIN_LOGIN_URL'),
+      tenant.subdomain,
+    );
     const productName = this.configService.get<string>('PRODUCT_NAME');
     const setPasswordUrl = `${adminLoginUrl}/set-password?email=${encodeURIComponent(params.adminEmail)}&otp=${otp}`;
 

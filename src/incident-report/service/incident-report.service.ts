@@ -211,7 +211,6 @@ export class IncidentReportService {
       .map((a) => a.member?.email)
       .filter((e): e is string => !!e);
 
-    const adminLoginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
     for (const email of recipients) {
       this.utilityService.sendEmailWithTemplate(
         email,
@@ -221,7 +220,6 @@ export class IncidentReportService {
           title: report.title,
           location: report.location ?? 'Not specified',
           reportId: report.id,
-          admin_login_url: adminLoginUrl,
         },
         undefined,
         EmailCategory.INCIDENT_REPORT,

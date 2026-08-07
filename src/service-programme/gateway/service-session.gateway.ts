@@ -12,13 +12,10 @@ import {
   ServiceSessionService,
   SessionStatePayload,
 } from '../service/service-session.service';
+import { createCorsOriginValidator } from '../../tenant/utility/cors-origin-validator';
 
 interface JoinSessionPayload {
   sessionCode: string;
-}
-
-function corsOrigins(): string[] | undefined {
-  return process.env.CORS_ORIGINS?.split(',').map((o) => o.trim());
 }
 
 // Read-only broadcast channel — joining a room only requires knowing the
@@ -28,7 +25,7 @@ function corsOrigins(): string[] | undefined {
 // authenticated/ShareTokenGuard/NamedAccessGuard-gated REST endpoints.
 @WebSocketGateway({
   namespace: '/service-session',
-  cors: { origin: corsOrigins() },
+  cors: { origin: createCorsOriginValidator() },
 })
 export class ServiceSessionGateway implements OnGatewayInit {
   @WebSocketServer()

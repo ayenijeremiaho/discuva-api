@@ -3,14 +3,21 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Member } from '../../member/entity/member.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { PledgeContribution } from '../entity/pledge-contribution.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
 import { PledgeContributionStatus } from '../enum/finance.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class AnnualGivingStatementScheduler {
@@ -24,9 +31,14 @@ export class AnnualGivingStatementScheduler {
     private readonly titheRecordRepo: Repository<TitheRecord>,
     @InjectRepository(PledgeContribution)
     private readonly contributionRepo: Repository<PledgeContribution>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly cacheService: CacheService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly tenantCurrencyService: TenantCurrencyService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron('0 8 1 1 *', { timeZone: CHURCH_TIMEZONE })
@@ -41,7 +53,13 @@ export class AnnualGivingStatementScheduler {
     if (!acquired) return;
 
     try {
-      await this.run();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.run(),
+      );
     } finally {
       this.cacheService.releaseLock(AnnualGivingStatementScheduler.LOCK_KEY);
     }
@@ -61,7 +79,10 @@ export class AnnualGivingStatementScheduler {
         message: `You have no recorded giving for ${year} yet.`,
       };
 
-    const member = await this.memberRepo.findOne({ where: { id: memberId } });
+    const [member, currencyCode] = await Promise.all([
+      this.memberRepo.findOne({ where: { id: memberId } }),
+      this.tenantCurrencyService.resolveCurrencyCode(),
+    ]);
     if (!member)
       return {
         sent: false,
@@ -79,7 +100,7 @@ export class AnnualGivingStatementScheduler {
         year,
         total: Number(row.total).toFixed(2),
         lineCount: Number(row.lineCount),
-        currency: this.configService.get<string>('CURRENCY_CODE'),
+        currency: currencyCode,
       },
     );
     return {
@@ -102,6 +123,10 @@ export class AnnualGivingStatementScheduler {
       status: MemberStatusEnum.ACTIVE,
     });
     const memberMap = new Map(members.map((m) => [m.id, m]));
+    // Resolved once per tenant, not per member — the caller (sendAnnualStatements)
+    // wraps this in forEachActiveTenant, so CLS/search_path is already the
+    // current tenant's when this runs.
+    const currencyCode = await this.tenantCurrencyService.resolveCurrencyCode();
 
     let sent = 0;
     for (const row of givingRows) {
@@ -117,7 +142,7 @@ export class AnnualGivingStatementScheduler {
             year: previousYear,
             total: Number(row.total).toFixed(2),
             lineCount: Number(row.lineCount),
-            currency: this.configService.get<string>('CURRENCY_CODE'),
+            currency: currencyCode,
           },
         );
         sent++;

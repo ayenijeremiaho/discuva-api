@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { ClsService } from 'nestjs-cls';
+import { ConfigService } from '@nestjs/config';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Subscription } from '../entity/subscription.entity';
@@ -14,16 +15,6 @@ import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 
 const LOCK_KEY = 'lock:subscription-lapse-check';
-// How long a lapsed-but-not-voluntarily-canceled subscription stays
-// PAST_DUE before being downgraded — a real automatic provider renewal
-// charge succeeding within this window clears PAST_DUE the normal way
-// (a fresh charge.succeeded webhook re-activates the subscription via
-// CheckoutService.applyChargeSucceeded, same as any other successful
-// charge). "Retrying" the charge itself is the provider's own
-// responsibility, not this scheduler's — Paystack/Flutterwave both retry a
-// failing card several times before truly giving up, well within this
-// window.
-const GRACE_PERIOD_DAYS = 7;
 
 // Safety net for renewals this codebase can't yet fully verify — see the
 // class-level limitation note below before changing GRACE_PERIOD_DAYS or
@@ -31,6 +22,16 @@ const GRACE_PERIOD_DAYS = 7;
 @Injectable()
 export class SubscriptionLapseScheduler {
   private readonly logger = new Logger(SubscriptionLapseScheduler.name);
+  // How long a lapsed-but-not-voluntarily-canceled subscription stays
+  // PAST_DUE before being downgraded — a real automatic provider renewal
+  // charge succeeding within this window clears PAST_DUE the normal way
+  // (a fresh charge.succeeded webhook re-activates the subscription via
+  // CheckoutService.applyChargeSucceeded, same as any other successful
+  // charge). "Retrying" the charge itself is the provider's own
+  // responsibility, not this scheduler's — Paystack/Flutterwave both retry a
+  // failing card several times before truly giving up, well within this
+  // window.
+  private readonly gracePeriodDays: number;
 
   constructor(
     @InjectRepository(Subscription)
@@ -41,7 +42,13 @@ export class SubscriptionLapseScheduler {
     private readonly emailQueueService: EmailQueueService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.gracePeriodDays = this.configService.get<number>(
+      'GRACE_PERIOD_DAYS',
+      7,
+    );
+  }
 
   // KNOWN LIMITATION, not silently swept under the rug: this scheduler
   // treats "currentPeriodEnd has passed with no new charge.succeeded
@@ -86,7 +93,7 @@ export class SubscriptionLapseScheduler {
     for (const sub of pastDue) {
       if (!sub.currentPeriodEnd) continue;
       const graceDeadline = new Date(sub.currentPeriodEnd);
-      graceDeadline.setDate(graceDeadline.getDate() + GRACE_PERIOD_DAYS);
+      graceDeadline.setDate(graceDeadline.getDate() + this.gracePeriodDays);
       if (now < graceDeadline) continue;
 
       try {
@@ -114,8 +121,8 @@ export class SubscriptionLapseScheduler {
     await this.notifyTenant(
       sub.tenantId,
       'We could not confirm your latest subscription payment',
-      `<p>We couldn't confirm your latest payment for your Discovery Hub subscription.</p>
-       <p>Your account keeps its current features for now, but will be downgraded to the Free plan in ${GRACE_PERIOD_DAYS} days if this isn't resolved.</p>
+      `<p>We couldn't confirm your latest payment for your Discuva subscription.</p>
+       <p>Your account keeps its current features for now, but will be downgraded to the Free plan in ${this.gracePeriodDays} days if this isn't resolved.</p>
        <p>If you believe this is an error, please contact support.</p>`,
     );
   }
@@ -137,7 +144,7 @@ export class SubscriptionLapseScheduler {
     await this.notifyTenant(
       sub.tenantId,
       'Your subscription has been downgraded to Free',
-      `<p>Your Discovery Hub subscription has been downgraded to the Free plan${
+      `<p>Your Discuva subscription has been downgraded to the Free plan${
         reason === 'tenant requested cancellation'
           ? ' as requested'
           : ' because we could not confirm payment'

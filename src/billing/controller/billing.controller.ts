@@ -5,17 +5,13 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { CheckoutService } from '../service/checkout.service';
-import {
-  InitiateSubscriptionCheckoutDto,
-  InitiateWalletTopupCheckoutDto,
-} from '../dto/checkout.dto';
+import { InitiateSubscriptionCheckoutDto } from '../dto/checkout.dto';
 
 // Tenant-facing (AdminGuard) billing surface — view current plan/subscription
-// status/wallet balance, and initiate a Paystack or Flutterwave checkout to
-// upgrade the plan or top up the SMS wallet. Actual activation/crediting
-// happens off the BillingWebhookController once the provider confirms
-// payment, not here — these routes only ever return a checkoutUrl to
-// redirect the admin to.
+// status, and initiate a Paystack or Flutterwave checkout to upgrade the
+// plan. Actual activation happens off the BillingWebhookController once the
+// provider confirms payment, not here — these routes only ever return a
+// checkoutUrl to redirect the admin to.
 @UseGuards(AdminGuard)
 @Controller('billing')
 export class BillingController {
@@ -44,21 +40,6 @@ export class BillingController {
   ) {
     return this.checkoutService.initiateSubscriptionCheckout(
       dto.planId,
-      admin.member.email,
-      dto.provider,
-      dto.successUrl,
-      dto.cancelUrl,
-    );
-  }
-
-  @RequiresPermission(AdminPermission.BILLING_WRITE)
-  @Post('checkout/wallet-topup')
-  initiateWalletTopupCheckout(
-    @Body() dto: InitiateWalletTopupCheckoutDto,
-    @CurrentAdmin() admin: Admin,
-  ) {
-    return this.checkoutService.initiateWalletTopupCheckout(
-      dto.creditsAmount,
       admin.member.email,
       dto.provider,
       dto.successUrl,

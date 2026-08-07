@@ -3,8 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { CommunicationProvider } from '../../platform-admin/entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from '../../platform-admin/entity/tenant-communication-provider-config.entity';
@@ -33,6 +33,7 @@ export class TenantCommunicationProviderService {
     private readonly cls: ClsService<AppClsStore>,
     private readonly encryptionService: EncryptionService,
     private readonly cacheService: CacheService,
+    @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(CommunicationProvider)
     private readonly providerRepo: Repository<CommunicationProvider>,
     @InjectRepository(TenantCommunicationProviderConfig)
@@ -82,6 +83,36 @@ export class TenantCommunicationProviderService {
     return { catalog, ownConfigs };
   }
 
+  // A tenant can have exactly one active vendor per channel at a time — the
+  // credential resolvers (SmsCredentialResolverService,
+  // EmailCredentialResolverService) each pick a single `isActive = true` row
+  // per channel, and with more than one active that pick would be
+  // arbitrary. Called inside the same transaction as the row being
+  // activated so the switch is atomic, not "deactivate everything, then
+  // hope the activate step also succeeds."
+  private async deactivateSiblings(
+    manager: EntityManager,
+    tenantId: string,
+    channel: 'sms' | 'email',
+    keepProviderId: string,
+  ): Promise<void> {
+    const siblingProviders = await this.providerRepo.find({
+      where: { channel },
+    });
+    const siblingIds = siblingProviders
+      .map((p) => p.id)
+      .filter((id) => id !== keepProviderId);
+    if (siblingIds.length === 0) return;
+
+    await manager
+      .createQueryBuilder()
+      .update(TenantCommunicationProviderConfig)
+      .set({ isActive: false })
+      .where('tenantId = :tenantId', { tenantId })
+      .andWhere('providerId IN (:...siblingIds)', { siblingIds })
+      .execute();
+  }
+
   async upsertConfig(
     channel: 'sms' | 'email',
     dto: UpsertProviderConfigDto,
@@ -110,9 +141,13 @@ export class TenantCommunicationProviderService {
     );
     config.senderIdentity = dto.senderIdentity ?? null;
     config.isActive = true;
-    await this.configRepo.save(config);
 
-    // SmsCredentialResolverService (and its future email counterpart) cache
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(config);
+      await this.deactivateSiblings(manager, tenantId, channel, dto.providerId);
+    });
+
+    // SmsCredentialResolverService (and its email counterpart) cache
     // resolved credentials per (tenant, channel) — invalidate immediately so
     // a just-saved credential is used on the very next send, not after
     // whatever TTL that cache uses expires.
@@ -149,7 +184,14 @@ export class TenantCommunicationProviderService {
       );
     }
     config.isActive = isActive;
-    await this.configRepo.save(config);
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.save(config);
+      if (isActive) {
+        await this.deactivateSiblings(manager, tenantId, channel, providerId);
+      }
+    });
+
     this.cacheService.del(this.cacheKey(tenantId, channel));
 
     return {

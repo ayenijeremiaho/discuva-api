@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { MaintenanceSchedule } from '../entity/maintenance-schedule.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
@@ -10,6 +12,9 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class MaintenanceReminderScheduler {
@@ -21,9 +26,12 @@ export class MaintenanceReminderScheduler {
     private readonly scheduleRepo: Repository<MaintenanceSchedule>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
-    private readonly configService: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -35,7 +43,13 @@ export class MaintenanceReminderScheduler {
     if (!acquired) return;
 
     try {
-      await this.runReminders();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runReminders(),
+      );
     } finally {
       this.cacheService.releaseLock(MaintenanceReminderScheduler.LOCK_KEY);
     }
@@ -119,7 +133,6 @@ export class MaintenanceReminderScheduler {
     schedule: MaintenanceSchedule,
     timing: string,
   ): void {
-    const adminLoginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
     for (const email of recipients) {
       this.utilityService.sendEmailWithTemplate(
         email,
@@ -133,7 +146,6 @@ export class MaintenanceReminderScheduler {
           nextDueAt: schedule.nextDueAt,
           timing,
           isOverdue: false,
-          admin_login_url: adminLoginUrl,
         },
         undefined,
         EmailCategory.ASSET_ALERTS,
@@ -146,7 +158,6 @@ export class MaintenanceReminderScheduler {
     schedule: MaintenanceSchedule,
     daysOverdue: number,
   ): void {
-    const adminLoginUrl = this.configService.get<string>('ADMIN_LOGIN_URL');
     for (const email of recipients) {
       this.utilityService.sendEmailWithTemplate(
         email,
@@ -161,7 +172,6 @@ export class MaintenanceReminderScheduler {
           timing: `${daysOverdue} day${daysOverdue === 1 ? '' : 's'} overdue`,
           isOverdue: true,
           daysOverdue,
-          admin_login_url: adminLoginUrl,
         },
         undefined,
         EmailCategory.ASSET_ALERTS,

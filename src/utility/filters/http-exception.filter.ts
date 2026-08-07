@@ -8,6 +8,7 @@ import {
   PayloadTooLargeException,
 } from '@nestjs/common';
 import { Response } from 'express';
+import * as Sentry from '@sentry/node';
 
 const MULTER_FILE_TOO_LARGE_MESSAGE = 'File too large';
 
@@ -64,6 +65,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
       if (status >= 500) {
         this.logger.error(`[${status}] ${message}`, exception.stack);
+        Sentry.captureException(exception);
       } else {
         this.logger.warn(`[${status}] ${message}`);
       }
@@ -73,6 +75,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           ? exception.stack
           : JSON.stringify(exception);
       this.logger.error('Unhandled exception', stack);
+      Sentry.captureException(exception);
     }
 
     response.status(status).json({

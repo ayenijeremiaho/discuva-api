@@ -46,4 +46,9 @@ export class PlatformAnalyticsController {
   getAdoption() {
     return this.analyticsService.getAdoption();
   }
+
+  @Get('giving')
+  getGiving(@Query() query: AnalyticsTrendQueryDto) {
+    return this.analyticsService.getGiving(query.period, query.months);
+  }
 }

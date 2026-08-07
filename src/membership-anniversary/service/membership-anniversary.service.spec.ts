@@ -12,8 +12,11 @@ jest.mock('../../utility/service/sanitization.service', () => ({
   })),
 }));
 
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { MembershipAnniversaryService } from './membership-anniversary.service';
 import { Member } from '../../member/entity/member.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { AnnouncementService } from '../../announcement/service/announcement.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -46,6 +49,19 @@ const mockCacheService = {
 
 const mockAuditLogService = { log: jest.fn() };
 
+const mockTenantRepo = {
+  find: jest
+    .fn()
+    .mockResolvedValue([{ id: 't1', subdomain: 'a', schemaName: 'church_a' }]),
+};
+const mockCls = {
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
+const mockTxHost = {
+  tx: { query: jest.fn() },
+  withTransaction: jest.fn((fn: () => unknown) => fn()),
+};
+
 const CURRENT_YEAR = new Date().getFullYear();
 
 const makeMember = (overrides: Partial<Member> = {}): Member =>
@@ -66,15 +82,21 @@ describe('MembershipAnniversaryService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCacheService.acquireLock.mockResolvedValue(true);
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MembershipAnniversaryService,
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: AnnouncementService, useValue: mockAnnouncementService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -200,6 +222,26 @@ describe('MembershipAnniversaryService', () => {
 
       expect(mockCacheService.releaseLock).toHaveBeenCalledWith(
         'lock:membership-anniversary-greetings',
+      );
+    });
+
+    it('runs the celebrant query once per active tenant, entering each tenant context', async () => {
+      mockTenantRepo.find.mockResolvedValue([
+        { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+        { id: 't2', subdomain: 'b', schemaName: 'church_b' },
+      ]);
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.triggerAnniversaryGreetings();
+
+      expect(mockMemberRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_a", public',
+      );
+      expect(mockTxHost.tx.query).toHaveBeenCalledWith(
+        'SET LOCAL search_path TO "church_b", public',
       );
     });
   });

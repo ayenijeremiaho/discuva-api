@@ -1,5 +1,6 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
+import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 
 // Control-plane table — lives in `public`, never a `search_path` target.
 // See docs/MULTI_TENANT_MIGRATION.md §4.1.
@@ -48,6 +49,14 @@ export class Tenant extends BaseEntity {
 
   @Column({ default: true })
   isActive: boolean;
+
+  // Orthogonal to isActive — isActive means "currently allowed to serve
+  // live traffic" (also flipped by platform-admin suspend/reactivate, see
+  // PlatformTenantService.suspendTenant); this only ever moves forward
+  // once through the provisioning lifecycle and never changes on
+  // suspend/reactivate. See TenantProvisioningProcessor.
+  @Column({ default: TenantOnboardingStatus.PENDING })
+  onboardingStatus: TenantOnboardingStatus;
 
   // Self-referencing and nullable — a flat parent -> branch model, though
   // only one level is used today; a multi-level hierarchy (branch-of-a-

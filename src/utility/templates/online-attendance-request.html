@@ -193,7 +193,7 @@
                     <h1>Did You Join Us Online, {{ name }}?</h1>
                     <p>We noticed you didn't check in physically for <strong>{{ eventName }}</strong>. Did you join us
                       online?</p>
-                    <p>If you attended online, please confirm your attendance using the Discovery Hub app within the
+                    <p>If you attended online, please confirm your attendance using the Discuva app within the
                       next <strong>{{ windowHours }} hour(s)</strong>.</p>
 
                     <table class="body-action" align="center" width="100%" cellpadding="0" cellspacing="0"
@@ -209,7 +209,7 @@
                       the button above.</p>
 
                     <p style="margin-top: 35px; color: #8A817C;">God bless you,<br><span
-                      style="color: #121212; font-weight: 500;">{{ church_name }} Dev Team</span></p>
+                      style="color: #121212; font-weight: 500;">{{ church_name }}</span></p>
                   </div>
                 </td>
               </tr>
@@ -223,7 +223,7 @@
               <tr>
                 <td class="content-cell" align="center" style="padding: 30px 40px;">
                   <p class="sub" style="text-align: center;">
-                    {{ church_name }}<br>{{ church_address }}
+                    {{ church_name }}<br>{{ church_address }}{{#if support_email}}<br>Need help? Contact us at {{ support_email }}{{/if}}
                   </p>
                 </td>
               </tr>

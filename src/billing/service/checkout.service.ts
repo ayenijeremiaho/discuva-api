@@ -12,11 +12,6 @@ import { ClsService } from 'nestjs-cls';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { CacheService } from '../../utility/service/cache.service';
-import { SmsWallet } from '../../platform-admin/entity/sms-wallet.entity';
-import {
-  SmsWalletTransaction,
-  SmsWalletTransactionType,
-} from '../../platform-admin/entity/sms-wallet-transaction.entity';
 import { Plan } from '../entity/plan.entity';
 import { Subscription } from '../entity/subscription.entity';
 import { SubscriptionStatus } from '../enum/subscription-status.enum';
@@ -32,7 +27,6 @@ export interface BillingSummary {
   planName: string;
   subscriptionStatus: SubscriptionStatus;
   currentPeriodEnd: Date | null;
-  walletBalanceCredits: number;
   // True once cancelSubscription() has been called but the tenant is still
   // within a period they already paid for — the frontend should show
   // "cancels on {currentPeriodEnd}" rather than an immediate downgrade.
@@ -44,19 +38,18 @@ export interface BillingSummary {
   sponsoredByParent: boolean;
 }
 
-// Subscription renewal in this pass is a flat +30-day period per successful
-// charge, not true provider-driven recurring billing reconciliation (which
-// would need live sandbox testing against Paystack/Flutterwave's actual
-// subscription-lifecycle webhook payloads to get exactly right — deferred,
-// same "don't guess at a shape you can't verify" discipline as everywhere
-// else in this codebase). A tenant is re-charged and this period extended
-// again the next time their subscription's own webhook fires a fresh
-// charge.succeeded for the same reference pattern.
-const SUBSCRIPTION_PERIOD_DAYS = 30;
-
 @Injectable()
 export class CheckoutService {
   private readonly logger = new Logger(CheckoutService.name);
+  // Subscription renewal in this pass is a flat period per successful
+  // charge, not true provider-driven recurring billing reconciliation (which
+  // would need live sandbox testing against Paystack/Flutterwave's actual
+  // subscription-lifecycle webhook payloads to get exactly right — deferred,
+  // same "don't guess at a shape you can't verify" discipline as everywhere
+  // else in this codebase). A tenant is re-charged and this period extended
+  // again the next time their subscription's own webhook fires a fresh
+  // charge.succeeded for the same reference pattern.
+  private readonly subscriptionPeriodDays: number;
 
   constructor(
     private readonly cls: ClsService<AppClsStore>,
@@ -70,9 +63,12 @@ export class CheckoutService {
     private readonly subscriptionRepo: Repository<Subscription>,
     @InjectRepository(BillingCheckoutSession)
     private readonly checkoutRepo: Repository<BillingCheckoutSession>,
-    @InjectRepository(SmsWallet)
-    private readonly walletRepo: Repository<SmsWallet>,
-  ) {}
+  ) {
+    this.subscriptionPeriodDays = this.configService.get<number>(
+      'SUBSCRIPTION_PERIOD_DAYS',
+      30,
+    );
+  }
 
   private currentTenantId(): string {
     const tenantId = this.cls.get('tenantId');
@@ -91,10 +87,7 @@ export class CheckoutService {
 
   async getBillingSummary(): Promise<BillingSummary> {
     const tenantId = this.currentTenantId();
-    const [subscription, wallet] = await Promise.all([
-      this.subscriptionRepo.findOneBy({ tenantId }),
-      this.walletRepo.findOneBy({ tenantId }),
-    ]);
+    const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
 
     const planId = subscription?.planId ?? 'free';
     const plan = await this.planRepo.findOneBy({ id: planId });
@@ -104,7 +97,6 @@ export class CheckoutService {
       planName: plan?.name ?? planId,
       subscriptionStatus: subscription?.status ?? SubscriptionStatus.ACTIVE,
       currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
-      walletBalanceCredits: wallet?.balanceCredits ?? 0,
       cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
       sponsoredByParent: !!subscription?.sponsoredByTenantId,
     };
@@ -213,61 +205,6 @@ export class CheckoutService {
     return { checkoutUrl: session.checkoutUrl };
   }
 
-  async initiateWalletTopupCheckout(
-    creditsAmount: number,
-    email: string,
-    providerName: string | undefined,
-    successUrl: string,
-    cancelUrl: string,
-  ): Promise<{ checkoutUrl: string }> {
-    if (creditsAmount <= 0) {
-      throw new BadRequestException('creditsAmount must be positive.');
-    }
-
-    const pricePerCreditKobo = this.configService.get<number>(
-      'SMS_CREDIT_PRICE_KOBO',
-    );
-    if (!pricePerCreditKobo) {
-      throw new ForbiddenException(
-        'SMS wallet top-up is not configured on this platform yet.',
-      );
-    }
-
-    const tenantId = this.currentTenantId();
-    const amountCents = creditsAmount * pricePerCreditKobo;
-    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
-    const provider = this.paymentProviderRegistry.get(providerName);
-    const customer = await provider.createCustomer({
-      id: tenant.id,
-      name: tenant.name,
-      email,
-    });
-    const session = await provider.createOneOffCheckout({
-      tenantId,
-      providerCustomerId: customer.providerCustomerId,
-      email,
-      amountCents,
-      description: `${creditsAmount} SMS credits`,
-      successUrl,
-      cancelUrl,
-    });
-
-    await this.checkoutRepo.save(
-      this.checkoutRepo.create({
-        id: session.providerSessionId,
-        tenantId,
-        type: BillingCheckoutType.WALLET_TOPUP,
-        creditsAmount,
-        amountCents,
-        currency: 'NGN',
-        provider: provider.providerName,
-        status: BillingCheckoutStatus.PENDING,
-      }),
-    );
-
-    return { checkoutUrl: session.checkoutUrl };
-  }
-
   // Entry point for BillingWebhookController — verifies the signature (via
   // the named provider's own verifyAndParseWebhook, which throws on a bad
   // signature) then applies the effect. Every branch below resolves the
@@ -325,34 +262,13 @@ export class CheckoutService {
         }
         const currentPeriodEnd = new Date();
         currentPeriodEnd.setDate(
-          currentPeriodEnd.getDate() + SUBSCRIPTION_PERIOD_DAYS,
+          currentPeriodEnd.getDate() + this.subscriptionPeriodDays,
         );
         subscription.planId = session.planId!;
         subscription.status = SubscriptionStatus.ACTIVE;
         subscription.paymentProvider = session.provider;
         subscription.currentPeriodEnd = currentPeriodEnd;
         await manager.save(subscription);
-      } else if (session.type === BillingCheckoutType.WALLET_TOPUP) {
-        const wallet = await manager.findOne(SmsWallet, {
-          where: { tenantId: session.tenantId },
-          lock: { mode: 'pessimistic_write' },
-        });
-        const balanceBefore = wallet?.balanceCredits ?? 0;
-        const balanceAfter = balanceBefore + session.creditsAmount!;
-        await manager.save(SmsWallet, {
-          tenantId: session.tenantId,
-          balanceCredits: balanceAfter,
-        });
-        await manager.save(
-          SmsWalletTransaction,
-          manager.create(SmsWalletTransaction, {
-            tenantId: session.tenantId,
-            type: SmsWalletTransactionType.CREDIT,
-            credits: session.creditsAmount!,
-            balanceAfter,
-            reference: session.id,
-          }),
-        );
       }
     });
 
@@ -392,15 +308,12 @@ export class CheckoutService {
   }
 
   // Platform-admin-only (PlatformAdminController) — a tenant never triggers
-  // this themselves. Deliberately does NOT claw back SMS credits already
-  // spent from a refunded wallet top-up, or downgrade a plan from a
-  // refunded subscription checkout — either requires a product decision
-  // (can a wallet balance go negative? does downgrading strand data a
-  // tenant has since created on the paid tier?) this pass doesn't take on.
-  // A platform admin issuing a refund is expected to also apply the
-  // tenant-facing consequence manually via the existing escape hatches
-  // (PATCH /platform/tenants/:id/plan, or a manual SmsWalletTransaction
-  // DEBIT) if warranted.
+  // this themselves. Deliberately does NOT downgrade a plan from a refunded
+  // subscription checkout — that requires a product decision (does
+  // downgrading strand data a tenant has since created on the paid tier?)
+  // this pass doesn't take on. A platform admin issuing a refund is expected
+  // to also apply the tenant-facing consequence manually via the existing
+  // escape hatch (PATCH /platform/tenants/:id/plan) if warranted.
   async refundCheckoutSession(
     sessionId: string,
     amountCents?: number,

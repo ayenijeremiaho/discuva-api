@@ -2,12 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { PrayerRosterEntry } from '../entity/prayer-roster-entry.entity';
 import { PrayerMeetingStatus, PrayerRosterStatus } from '../enum/prayer.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class PrayerReminderScheduler {
@@ -16,8 +22,12 @@ export class PrayerReminderScheduler {
   constructor(
     @InjectRepository(PrayerRosterEntry)
     private readonly rosterRepo: Repository<PrayerRosterEntry>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly pushService: PushNotificationService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -26,8 +36,19 @@ export class PrayerReminderScheduler {
     const twoDaysAhead = new Date(today);
     twoDaysAhead.setDate(today.getDate() + 2);
 
-    await this.sendTwoDayReminders(twoDaysAhead);
-    await this.sendDayOfReminders(today);
+    const { succeeded, failed } = await forEachActiveTenant(
+      this.tenantRepo,
+      this.cls,
+      this.txHost,
+      this.logger,
+      async () => {
+        await this.sendTwoDayReminders(twoDaysAhead);
+        await this.sendDayOfReminders(today);
+      },
+    );
+    this.logger.log(
+      `Prayer reminders complete for ${succeeded} tenant(s), ${failed} failure(s)`,
+    );
   }
 
   private async sendTwoDayReminders(targetDate: Date): Promise<void> {

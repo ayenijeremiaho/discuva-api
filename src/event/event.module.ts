@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Event } from './entity/event.entity';
 import { EventConfig } from './entity/event-config.entity';
@@ -12,9 +13,9 @@ import { EventConfigController } from './controller/event-config.controller';
 import { EventReminderController } from './controller/event-reminder.controller';
 import { UtilityModule } from '../utility/utility.module';
 import { VenueModule } from '../venue/venue.module';
-import { DefaultEventConfigSeed } from './seed/default-event-config-seed.service';
 import { MemberModule } from '../member/member.module';
 import { AnnouncementModule } from '../announcement/announcement.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -24,6 +25,9 @@ import { AnnouncementModule } from '../announcement/announcement.module';
       ServiceSlot,
       EventReminder,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by EventReminderService.dispatchDueReminders' forEachActiveTenant loop.
+    TypeOrmModule.forFeature([Tenant]),
     UtilityModule,
     VenueModule,
     MemberModule,
@@ -34,12 +38,7 @@ import { AnnouncementModule } from '../announcement/announcement.module';
     EventConfigController,
     EventReminderController,
   ],
-  providers: [
-    EventService,
-    EventConfigService,
-    DefaultEventConfigSeed,
-    EventReminderService,
-  ],
+  providers: [EventService, EventConfigService, EventReminderService],
   exports: [TenantTypeOrmModule, EventService, EventConfigService],
 })
 export class EventModule {}

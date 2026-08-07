@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -8,8 +9,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ClassesService } from '../service/classes.service';
 import {
   CreateChurchClassDto,
@@ -77,6 +81,53 @@ export class ClassesController {
   @Get('my/enrollments')
   getMyEnrollments(@CurrentUser() user: MemberAuth) {
     return this.classesService.getMyEnrollments(user.id);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post('materials/upload')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize:
+          Number.parseInt(
+            process.env.MAX_CLASS_MATERIAL_UPLOAD_BYTES ?? '',
+            10,
+          ) || 10 * 1024 * 1024,
+      },
+      fileFilter: (_req, file, cb) => {
+        const allowed = [
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/vnd.ms-powerpoint',
+          'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        ];
+        if (
+          !allowed.includes(file.mimetype) &&
+          !file.mimetype.startsWith('image/')
+        ) {
+          return cb(
+            new BadRequestException(
+              'Only PDF, Word, PowerPoint, or image files are allowed',
+            ),
+            false,
+          );
+        }
+        cb(null, true);
+      },
+    }),
+  )
+  uploadMaterial(@UploadedFile() file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('No file provided');
+    return this.classesService.uploadMaterial(file);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_READ)
+  @Get('materials/library')
+  getMaterialLibrary() {
+    return this.classesService.getMaterialLibrary();
   }
 
   @Get(':id')

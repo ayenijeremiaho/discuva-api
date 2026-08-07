@@ -7,9 +7,9 @@
 
 ## 1. Business Model & Repo Strategy
 
-**Decision (2026-08, supersedes the original open-source + private-fork plan):** Discovery Hub ships as a single
-freemium SaaS product, one repo, no self-hosted tier. There is no `discovery-hub-cloud` fork and no upstream/downstream
-sync discipline to maintain — `discovery-hub` itself becomes the SaaS backend, and multi-tenancy is infrastructure
+**Decision (2026-08, supersedes the original open-source + private-fork plan):** Discuva ships as a single
+freemium SaaS product, one repo, no self-hosted tier. There is no `discuva-cloud` fork and no upstream/downstream
+sync discipline to maintain — `discuva-api` itself becomes the SaaS backend, and multi-tenancy is infrastructure
 added directly into it per §4.
 
 | Tier | Audience | Hosting |
@@ -25,9 +25,9 @@ The frontends follow the same single-repo model:
 
 | App | Repo | Audience |
 |---|---|---|
-| Admin Portal | `Faithapp-admin` | Church admins/workers (all tiers) |
-| Member PWA | `Faithapp` | Church members (all tiers) |
-| Platform Dashboard | `discovery-hub-platform` (new) | Platform operators only — never church-facing |
+| Admin Portal | `discuva-admin` (formerly `Faithapp-admin`) | Church admins/workers (all tiers) |
+| Member PWA | `discuva-member` (formerly `Faithapp`) | Church members (all tiers) |
+| Platform Dashboard | `discuva-platform` (new) | Platform operators only — never church-facing |
 
 ---
 
@@ -75,7 +75,7 @@ A church code / custom header would only be needed if a native iOS/Android app w
 
 ---
 
-## 4. Backend Migration (`discovery-hub`)
+## 4. Backend Migration (`discuva-api`)
 
 All changes are **additive**. No existing entity, service, controller, or guard needs to be modified. The multi-tenant layer sits underneath the existing business logic.
 
@@ -388,7 +388,7 @@ This iterates `public.tenants`, sets `search_path` to each schema, and applies p
 
 ### 4.10 Platform Admin Module
 
-A new NestJS module at `src/platform-admin/`. Its guards check for a `platform_admin` JWT claim. All its services operate directly on `public` schema tables (`tenants`, `platform_admins`, `plans`, `subscriptions`, `communication_providers`, `tenant_communication_provider_configs`, `sms_wallets`) — they never touch tenant schemas.
+A new NestJS module at `src/platform-admin/`. Its guards check for a `platform_admin` JWT claim. All its services operate directly on `public` schema tables (`tenants`, `platform_admins`, `plans`, `subscriptions`, `communication_providers`, `tenant_communication_provider_configs`) — they never touch tenant schemas.
 
 Capabilities:
 - `GET /platform/tenants` — list all tenants with health stats
@@ -402,16 +402,17 @@ Capabilities:
   (§4.11's "data, not code" point — this is the UI for that)
 - `GET /platform/communication-providers` / `POST /platform/communication-providers` — list/register available
   SMS and email providers platform-wide (§4.12)
-- `GET /platform/tenants/:id/communication-providers` — view a tenant's active provider per channel and SMS wallet
-  balance, for support cases
+- `GET /platform/tenants/:id/communication-providers` — view a tenant's active provider per channel, for support
+  cases
 - `POST /platform/auth/login` — platform admin login (separate JWT, separate secret)
 - `POST /platform/tenants/:id/impersonate` — issue a scoped token to support a tenant
 
 ### 4.11 Billing & Plan Tiers
 
 > **Payment provider decision changed after review.** Not using Stripe, at least for launch — this codebase already
-> has a real precedent for the alternative: the finance module's virtual-account feature bills through Paystack and
-> Flutterwave today (`VirtualAccountProvider` enum, `member-virtual-account.entity.ts`). Subscription billing follows
+> has a real precedent for the alternative: the finance module's virtual-account feature was scaffolded to bill
+> through Paystack and Flutterwave, though it was later deleted unimplemented (§9 Phase 9h) in favor of a tenant-owned
+> checkout flow instead. Subscription billing follows
 > the same instinct: an abstraction with a swappable concrete implementation, not a Stripe-specific integration.
 
 Both tables live in `public`, alongside `tenants` and `platform_admins` — control-plane, never a `search_path`
@@ -495,7 +496,7 @@ export interface IPaymentProvider {
     description: string;
     successUrl: string;
     cancelUrl: string;
-  }): Promise<CheckoutSession>; // used by the SMS wallet top-up flow, §4.12
+  }): Promise<CheckoutSession>; // general-purpose one-off charge; the SMS wallet top-up flow this originally described (§4.12) was removed in §9 Phase 9g — SMS is pure BYOK now
   cancelSubscription(providerSubscriptionId: string): Promise<void>;
   verifyAndParseWebhook(rawBody: Buffer, signatureHeader: string): NormalizedPaymentEvent;
 }
@@ -505,11 +506,11 @@ export const PAYMENT_PROVIDER = 'PAYMENT_PROVIDER';
 
 Every provider's webhook payload shape is different — `verifyAndParseWebhook` is where that gets normalized into
 one common `NormalizedPaymentEvent` shape, so the webhook controller and everything downstream of it (updating
-`subscriptions.status`, crediting a wallet) never branches on which provider is active. **First concrete
-implementation: `PaystackPaymentProvider`** — Paystack already has a working relationship with this codebase (the
-virtual-account feature) and standard Nigerian-market support Stripe currently lacks. A second implementation
-(Flutterwave, or Stripe later if the product expands beyond its initial market) is a new class implementing the
-same interface plus a DI binding change — the same one-line swap `SmsModule` already does for `SMS_PROVIDER`.
+`subscriptions.status`) never branches on which provider is active. **First concrete
+implementation: `PaystackPaymentProvider`** — Paystack already had a working relationship with this codebase (the
+finance module's virtual-account scaffold, since deleted — §9 Phase 9h) and standard Nigerian-market support Stripe
+currently lacks. A second implementation (Flutterwave, or Kora/Stripe later — see §9 Phase 9h) is a new class
+implementing the same interface plus a registry entry, the same shape `PaymentProviderRegistryService` already uses.
 
 **Feature gating follows the exact pattern `AdminPermission`/`@RequiresPermission` already uses in this codebase** —
 same shape, different axis (plan tier, not admin role):
@@ -551,7 +552,10 @@ into an upgrade prompt rather than a generic error toast.
 actual final method signatures (`sendMail(options, credentials?)`, credentials last and optional, not
 `sendMail(credentials, options)` as first sketched below) and real `SmsWalletTransactionType` values (`debit`/`credit`,
 not `TOP_UP`/`DEBIT`/`REFUND`). Kept here unedited as the design rationale, since the reasoning below is still exactly
-why it was built this way.**
+why it was built this way — with one exception: `sms_wallets`/`sms_wallet_transactions` and everything below
+describing them (the platform-default Termii fallback, the debit-by-segment logic, the top-up flow) were removed
+entirely in §9 Phase 9g — SMS is pure BYOK now, no platform-default path exists for it. Email's platform-default
+fallback (no wallet, per "Why email doesn't need a wallet and SMS does" below) is unaffected and still accurate.**
 
 Two related but separate asks, both resolved the same way: (1) more than one SMS provider over time, not just
 Termii, and (2) tenants configuring their **own** provider credentials — for both SMS and email — from their admin
@@ -674,7 +678,7 @@ and email credentials — no exception for "it's just an email provider key."
 `verifyAndParseWebhook`) on payment success → `TOP_UP` transaction row → balance increment. Same webhook handler as
 the subscription flow, a different `NormalizedPaymentEvent.type`.
 
-**Admin portal surface (`Faithapp-admin`):** a new settings section — "Communication Providers" or similar — where a
+**Admin portal surface (`discuva-admin`):** a new settings section — "Communication Providers" or similar — where a
 tenant admin sees the available providers per channel (from `public.communication_providers`, filtered to
 `is_active`), can add/update their own credentials for any of them, and picks which one (if any) is active. Absence
 of any active row is a valid, supported state — it just means "use the platform default," not an error state the
@@ -682,7 +686,7 @@ UI needs to nag about.
 
 ---
 
-## 5. Frontend Migration (`Faithapp-admin`)
+## 5. Frontend Migration (`discuva-admin`)
 
 ### 5.1 Dynamic Tenant Branding
 
@@ -714,20 +718,20 @@ The backend sets the cookie `Domain` attribute to the specific subdomain (not th
 
 ---
 
-## 6. PWA Migration (`Faithapp`)
+## 6. PWA Migration (`discuva-member`)
 
-**Corrected after auditing the actual codebase (2026-07) — the original claim below ("no changes needed") undercounted the work.** Tenant *resolution* genuinely needs nothing extra: the PWA runs in a browser, the subdomain is present on every fetch, and if a member navigates to `app.church-alpha.yourdomain.com` they're automatically in church Alpha's tenant — no church code, no custom header. But `Faithapp` has the exact same client-side gap as `Faithapp-admin` (§5), just never enumerated here: build-time branding env vars and a hardcoded non-tenant API base URL. Confirmed by grep, not assumed:
+**Corrected after auditing the actual codebase (2026-07) — the original claim below ("no changes needed") undercounted the work.** Tenant *resolution* genuinely needs nothing extra: the PWA runs in a browser, the subdomain is present on every fetch, and if a member navigates to `app.church-alpha.yourdomain.com` they're automatically in church Alpha's tenant — no church code, no custom header. But `discuva-member` has the exact same client-side gap as `discuva-admin` (§5), just never enumerated here: build-time branding env vars and a hardcoded non-tenant API base URL. Confirmed by grep, not assumed:
 
-- `NEXT_PUBLIC_API_URL` — same single `baseURL` usage as `Faithapp-admin` (`utils/auth/axios-client.ts`), same bare-host value with no tenant subdomain. Needs the same fix (§5.1-equivalent: point at a real tenant subdomain).
+- `NEXT_PUBLIC_API_URL` — same single `baseURL` usage as `discuva-admin` (`utils/auth/axios-client.ts`), same bare-host value with no tenant subdomain. Needs the same fix (§5.1-equivalent: point at a real tenant subdomain).
 - Branding env vars (`NEXT_PUBLIC_CHURCH_NAME`, `NEXT_PUBLIC_CHURCH_TAGLINE`, `NEXT_PUBLIC_CHURCH_ADDRESS`, `NEXT_PUBLIC_LOGO_URL`, `NEXT_PUBLIC_CURRENCY_*`) read directly in 8 files: `app/layout.tsx`, `app/account/page.tsx`, `utils/currency.ts`, `components/layout/onboarding-page.tsx`, `components/layout/login-page.tsx`, `components/layout/loading.tsx`, `components/pwa/install-wall.tsx`, and `app/manifest.ts` (see below). Needs the same `TenantContext` + `GET /tenant/info` treatment as §5.1.
-- Cookie scoping: not applicable, same reason as `Faithapp-admin` — auth token lives in an in-memory `token-store.ts` (identical pattern in both apps), not a cookie the frontend manages.
+- Cookie scoping: not applicable, same reason as `discuva-admin` — auth token lives in an in-memory `token-store.ts` (identical pattern in both apps), not a cookie the frontend manages.
 - **`app/manifest.ts` is a genuinely distinct problem, not just another env-var read.** It's a static Next.js route (`MetadataRoute.Manifest`) fetched directly by the browser via `<link rel="manifest">` before any client JS runs — it can't pull from a React context on mount the way the other 7 files can. Making the installed-PWA name/description tenant-aware requires either reading the `Host` header server-side (`next/headers`) inside `manifest.ts` and disabling static optimization for that route, or accepting a generic (non-branded) manifest and leaving per-tenant branding to the in-app UI only. Needs a decision, not just a mechanical swap.
 
 ---
 
-## 7. Platform SuperAdmin Dashboard (`discovery-hub-platform`)
+## 7. Platform SuperAdmin Dashboard (`discuva-platform`)
 
-A separate Next.js application deployed at `platform.yourdomain.com`. Completely isolated from `Faithapp-admin`. Platform admins authenticate against `public.platform_admins`, not against any tenant schema.
+A separate Next.js application deployed at `platform.yourdomain.com`. Completely isolated from `discuva-admin`. Platform admins authenticate against `public.platform_admins`, not against any tenant schema.
 
 ### Features
 
@@ -738,7 +742,7 @@ A separate Next.js application deployed at `platform.yourdomain.com`. Completely
 | Tenant detail | Edit name, logo, currency, timezone; suspend/reactivate |
 | Billing | View plan, subscription status, `past_due` flags; manual plan override (comps, support fixes) |
 | Plans | Create/edit plan tiers and their `features` array (§4.11) — no deploy needed to add a tier or change what a tier unlocks |
-| Communication Providers | Register available SMS/email providers platform-wide (§4.12); per-tenant, view which provider each channel is on (BYOK vs. platform default), SMS wallet balances, investigate low-balance or send-failure support cases |
+| Communication Providers | Register available SMS/email providers platform-wide (§4.12); per-tenant, view which provider each channel is on (BYOK, or platform default for email — SMS has no platform default, pure BYOK), investigate send-failure support cases |
 | Impersonation | Issue a scoped support token to log into a church's admin portal |
 | Migrations | View migration status per tenant; trigger migration runs |
 | Platform admins | Manage platform operator accounts |
@@ -851,11 +855,11 @@ checklist just listing them as flat TODOs with no status. Detail below, ordered 
   `PlanGuard`'s `code`/`requiredFeature` server-side (no frontend fix could have surfaced them regardless). Now
   passes through any fields beyond the standard NestJS `{statusCode, message, error}` shape. Verified a plain
   string-message exception is byte-for-byte unaffected.
-- ✅ **Upgrade-prompt modal, both frontends** — `Faithapp`'s `ApiError` class (`.status`/`.code`, `.message` unchanged
+- ✅ **Upgrade-prompt modal, both frontends** — `discuva-member`'s `ApiError` class (`.status`/`.code`, `.message` unchanged
   from before) and a new `planGateStore` (mirrors the existing `tokenStore` pattern) opened from exactly one place —
   the axios response interceptor — the instant *any* API call anywhere returns `PLAN_UPGRADE_REQUIRED`. One modal
   per app, mounted once at the root layout; no screen/call site ever checks for this error itself. Member wording
-  (`Faithapp`) points at the admin ("ask your admin about upgrading"); admin wording (`Faithapp-admin`) doesn't link
+  (`discuva-member`) points at the admin ("ask your admin about upgrading"); admin wording (`discuva-admin`) doesn't link
   anywhere since no billing page exists yet.
 - ✅ **Verified end-to-end**: typecheck/lint/build clean across all 3 repos; backend suite 1251 tests
   (13 new: `SmsService`, `TermiiSmsProvider`, `EncryptionService`); live — real `PUT`/`GET
@@ -904,7 +908,7 @@ checklist just listing them as flat TODOs with no status. Detail below, ordered 
 - ✅ **Tenant profile self-service write side, shipped** (§Phase 6c's other deferred item) — `PATCH /tenant/info`
   (`AdminGuard`, new `CHURCH_PROFILE_WRITE` permission) — `src/tenant/controller/tenant-info.controller.ts`. A church
   admin can now edit their own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone` without
-  going through platform support. The `discovery-hub-platform` tenant-panel gap (rename-only field) is unrelated to
+  going through platform support. The `discuva-platform` tenant-panel gap (rename-only field) is unrelated to
   this endpoint's existence and still open.
 - ✅ **Verified live** against the `frontend-test` tenant and a throwaway provisioned branch tenant: real DB reads
   confirming `BillingCheckoutSession`/`Subscription`/`SmsWallet` rows after a simulated `charge.succeeded`,
@@ -973,41 +977,41 @@ secret, and every route matches TECH_DOC.md's documented table 1:1. One stale in
 - ✅ Tenant CRUD, suspend, impersonation endpoints
 - ✅ Platform admin JWT with separate secret
 
-### Phase 6 — Admin Frontend (`Faithapp-admin`)
+### Phase 6 — Admin Frontend (`discuva-admin`)
 - Point `NEXT_PUBLIC_API_URL` at a real tenant subdomain (`utils/auth/axios-client.ts`'s single `baseURL` — currently a bare host, 404s under live `TenantMiddleware`)
 - Build `TenantContext` with `GET /tenant/info` fetch on mount
 - Replace build-time env var branding reads in `app/layout.tsx`, `app/change-password/page.tsx`, `utils/currency.ts`, `components/layout/side-bar.tsx`, `components/layout/login-page.tsx` with context reads
 - ~~Scope auth cookies to subdomain~~ — not applicable; access token lives in an in-memory `token-store.ts`, not a cookie, and the backend's `httpOnly` refresh cookie already has no `domain` attribute set (defaults to exact-host scoping, confirmed in `auth.controller.ts`)
 - Public signup page calling `POST /signup`
 
-### Phase 6b — Member PWA (`Faithapp`)
+### Phase 6b — Member PWA (`discuva-member`)
 - Same `NEXT_PUBLIC_API_URL` fix as Phase 6, in `utils/auth/axios-client.ts`
 - Same `TenantContext` + `GET /tenant/info`, replacing branding env-var reads in `app/layout.tsx`, `app/account/page.tsx`, `utils/currency.ts`, `components/layout/onboarding-page.tsx`, `components/layout/login-page.tsx`, `components/layout/loading.tsx`, `components/pwa/install-wall.tsx`
 - `app/manifest.ts` needs its own decision — static route fetched pre-JS by the browser, can't read a React context; either make it dynamic via `next/headers` or accept a generic (non-branded) install manifest
 - No cookie work, same reasoning as Phase 6
 
-**Shipped, re-audited 2026-08:** all of the above landed exactly as scoped. `app/manifest.ts` went with the dynamic option — `export const dynamic = "force-dynamic"` + `next/headers` reads the incoming `Host` header server-side and fetches the tenant's name directly (3s timeout, falls back to "Your Church" on any failure so a backend hiccup never breaks PWA installability). Verified live: `GET /manifest.webmanifest` with a tenant `Host` header returns that tenant's real name; a non-tenant host falls back cleanly. `currencySymbol`/`currencyLocale` in both `utils/currency.ts` files went from `const` to live, mutable ES-module bindings updated by `TenantProvider` — every existing `import { currencySymbol }` call site (7+ finance pages in `Faithapp-admin`) needed zero changes.
+**Shipped, re-audited 2026-08:** all of the above landed exactly as scoped. `app/manifest.ts` went with the dynamic option — `export const dynamic = "force-dynamic"` + `next/headers` reads the incoming `Host` header server-side and fetches the tenant's name directly (3s timeout, falls back to "Your Church" on any failure so a backend hiccup never breaks PWA installability). Verified live: `GET /manifest.webmanifest` with a tenant `Host` header returns that tenant's real name; a non-tenant host falls back cleanly. `currencySymbol`/`currencyLocale` in both `utils/currency.ts` files went from `const` to live, mutable ES-module bindings updated by `TenantProvider` — every existing `import { currencySymbol }` call site (7+ finance pages in `discuva-admin`) needed zero changes.
 
 ### Phase 6c — Tenant Profile Field Completeness (Backend + Both Frontends)
 
-**Caught during Phase 6/6b review** — `CHURCH_TAGLINE`, `CHURCH_ADDRESS`, and `SUPPORT_EMAIL` were still being read from build-time env vars in `Faithapp` even after Phase 6b, because the `Tenant` entity itself never had columns for them — `GET /tenant/info` could only ever return what §4.1's original schema defined (`name`/`logoUrl`/`currency`/`timezone`). This was flagged as a "known gap, not an oversight" in the first pass of this doc; on reconsideration that framing was wrong — there was no reason these three couldn't be tenant data too, the schema had just never been extended to carry them.
+**Caught during Phase 6/6b review** — `CHURCH_TAGLINE`, `CHURCH_ADDRESS`, and `SUPPORT_EMAIL` were still being read from build-time env vars in `discuva-member` even after Phase 6b, because the `Tenant` entity itself never had columns for them — `GET /tenant/info` could only ever return what §4.1's original schema defined (`name`/`logoUrl`/`currency`/`timezone`). This was flagged as a "known gap, not an oversight" in the first pass of this doc; on reconsideration that framing was wrong — there was no reason these three couldn't be tenant data too, the schema had just never been extended to carry them.
 
 **Read side — shipped:**
 - `src/migrations/1790726400000-AddTenantProfileFields.ts` — adds nullable `tagline`, `address`, `support_email` to `tenants`
 - `Tenant` entity, `TenantInfoController`'s `GET /tenant/info` response, and both frontends' `TenantInfo` type all updated
-- `Faithapp`'s `login-page.tsx` (tagline, address) and `app/account/page.tsx` (support email) now read from `useTenant()` instead of env vars
+- `discuva-member`'s `login-page.tsx` (tagline, address) and `app/account/page.tsx` (support email) now read from `useTenant()` instead of env vars
 - **Deliberately no generic fallback for tagline/address** — every tenant provisioned so far has both `null` (signup doesn't collect them yet), and the old single-tenant hardcoded strings would now be actively wrong for every *other* tenant, not just generic. Both are hidden entirely in the UI when unset, rather than shown with a misleading default.
 - `NEXT_PUBLIC_SUPPORT_EMAIL` is the one exception that keeps a real fallback — "tenant hasn't set their own support contact yet, route to the platform's shared inbox" is a legitimate behavior, not misleading tenant-specific data
 - `UpdateTenantDto` (platform-admin) extended with all three fields, so there's at least an API-level way to populate them today — `Object.assign(tenant, dto)` in `PlatformTenantService.updateTenant` needed no changes to pick them up
 - Verified live: direct DB update of a real tenant's `tagline`/`address`/`support_email` immediately reflected correctly in `GET /tenant/info`
 
 **Write side — deliberately deferred, tracked here as a pending task, not built this pass:**
-- **No self-service editing exists for *any* tenant profile field** — not just these three, but the pre-existing `name`/`logoUrl`/`currency`/`timezone` too. The only way to change any of it today is `PATCH /platform/tenants/:id`, platform-admin-only, via the separate `discovery-hub-platform` operator tool. A church admin has no way to rename their own church, upload their own logo, or set a tagline without going through platform support.
+- **No self-service editing exists for *any* tenant profile field** — not just these three, but the pre-existing `name`/`logoUrl`/`currency`/`timezone` too. The only way to change any of it today is `PATCH /platform/tenants/:id`, platform-admin-only, via the separate `discuva-platform` operator tool. A church admin has no way to rename their own church, upload their own logo, or set a tagline without going through platform support.
 - **Needed:** a tenant-facing write endpoint (e.g. `PATCH /tenant/info` or under a new church-profile controller, `AdminGuard`-protected so any church admin can use it, not just platform admins) that lets a tenant update their own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`.
-- **Also needed:** the actual settings UI in `Faithapp-admin` to call it — doesn't exist yet either.
-- **Also missing (smaller):** the `discovery-hub-platform` tenant panel only exposes a rename field today (`app/tenants/tenant-detail-panel.tsx`) — `logoUrl`/`currency`/`timezone` were already backend-supported but never exposed there, and the same is now true of `tagline`/`address`/`supportEmail`. Worth extending alongside the self-service work above rather than as its own separate task, since it's the same category of "give someone an editing surface for these fields."
+- **Also needed:** the actual settings UI in `discuva-admin` to call it — doesn't exist yet either.
+- **Also missing (smaller):** the `discuva-platform` tenant panel only exposes a rename field today (`app/tenants/tenant-detail-panel.tsx`) — `logoUrl`/`currency`/`timezone` were already backend-supported but never exposed there, and the same is now true of `tagline`/`address`/`supportEmail`. Worth extending alongside the self-service work above rather than as its own separate task, since it's the same category of "give someone an editing surface for these fields."
 
-### Phase 7 — Platform Dashboard (`discovery-hub-platform`)
+### Phase 7 — Platform Dashboard (`discuva-platform`)
 - New Next.js app
 - Tenant list, provisioning wizard, health stats
 - Platform admin auth flow
@@ -1024,7 +1028,7 @@ build, and a live boot against the real backend (every route 200) all passed ins
 
 ### Phase 7b — Platform Analytics Backend (Shipped, 2026-08)
 
-Before this, `discovery-hub-platform` had **zero cross-tenant analytics** — `GET /platform/tenants` returns a flat
+Before this, `discuva-platform` had **zero cross-tenant analytics** — `GET /platform/tenants` returns a flat
 per-tenant list (name, plan, member/event count), nothing ever summed across tenants, no landing dashboard (the root
 route just redirects straight into the tenant table). Confirmed by reading the actual frontend source directly, not
 assumed. This phase is the backend half of closing that gap — a real business-owner view of the whole platform, not
@@ -1045,7 +1049,7 @@ just a per-church table.
   `CheckoutService.applySubscriptionCanceled()`.
 - ✅ **Verified live** — real DB round-trip against actual `tenants`/`subscriptions`/`billing_checkout_sessions`/
   `tenant_rollups` rows, migrations applied to the dev DB, full test suite (15 new tests) green.
-- ❌ **Not built this pass:** the actual dashboard UI in `discovery-hub-platform` — headline stat cards, growth/
+- ❌ **Not built this pass:** the actual dashboard UI in `discuva-platform` — headline stat cards, growth/
   revenue/churn charts, adoption breakdown. Backend is fully ready; see the project todo list for the frontend item.
 
 ### Phase 8 — Live Bridging (Existing Client Migration Section Retired)
@@ -1255,7 +1259,7 @@ as closely as the two disjoint identity systems allow.
   guard's `canActivate()` logic itself, not just a controller method call bypassing it, since that exact class of
   gap (controller-level unit tests never exercising the actual guard) is what let two real bugs ship silently
   earlier in this same project. Full suite clean (1484 tests).
-- ✅ **discovery-hub-platform frontend built** — `/admins` and `/admin-roles` pages (onboard/edit-role/deactivate
+- ✅ **discuva-platform frontend built** — `/admins` and `/admin-roles` pages (onboard/edit-role/deactivate
   admins; create/edit/delete roles with a grouped permission-checkbox picker). `AuthProvider` now fetches
   `/platform/admins/me` and exposes `permissions`/`hasPermission()`; the sidebar and `withAuth()` (new
   `requiredPermission` option) both read from it, so nav items and whole pages hide/403 for admins missing the
@@ -1290,11 +1294,11 @@ themselves. Fixed both:
   `forgot-password-otp.html`) *and* a "Set My Password" button linking to
   `{ADMIN_LOGIN_URL}/set-password?email=...&otp=...`, so the admin can either click through or type the code
   manually.
-- ✅ **Faithapp-admin `/set-password` page** (new, unauthenticated) — reads `email`/`otp` from the URL, pre-fills
+- ✅ **discuva-admin `/set-password` page** (new, unauthenticated) — reads `email`/`otp` from the URL, pre-fills
   them, and calls the existing `POST /auth/reset-password` via `authService.resetPassword()` — no new backend
   verification endpoint needed, this is the same call `ForgotPasswordModal`'s verify step already makes. On success,
   routes to `/` to sign in.
-- ✅ **discovery-hub-platform's Add Tenant form** — password field removed; a short note now explains the new admin
+- ✅ **discuva-platform's Add Tenant form** — password field removed; a short note now explains the new admin
   gets a welcome email instead.
 - ✅ **Verified live** — provisioned a real test tenant with no `adminPassword` in the request, confirmed the welcome
   email queued with a correctly-formed set-password link and a 6-digit OTP whose hash matched a fresh
@@ -1325,24 +1329,189 @@ left to whoever ran it. Closed the same way, adapted to platform admins having n
   one). `resetPassword` is the same endpoint for both a self-requested reset and a new admin's first-time setup.
   `login()` now also returns `requiresPasswordChange: !admin.changedPassword`, matching the tenant-side login
   response shape — informational only today, since a random unrevealed password can't practically be logged in
-  with, so nothing enforces it in the frontend the way Faithapp-admin's `/change-password` does for a *known*
+  with, so nothing enforces it in the frontend the way discuva-admin's `/change-password` does for a *known*
   temporary password.
 - ✅ **`POST /platform/auth/reset-password` rate-limited** (5/min) — new endpoint, added the throttle from day one
   rather than retrofitting it the way tenant-side's equivalent needed to be.
 - ✅ **New `platform-admin-welcome.html` template** — same design system as `tenant-welcome.html`, but framed as
   internal team onboarding ("You've been added as a platform admin") rather than a church's new workspace — no
   `church_name`/`church_address` branding, since this is the vendor's own operator console, not tenant-facing.
-- ✅ **New `PLATFORM_LOGIN_URL` env var** — discovery-hub-platform's own base URL, the platform-side equivalent of
+- ✅ **New `PLATFORM_LOGIN_URL` env var** — discuva-platform's own base URL, the platform-side equivalent of
   `ADMIN_LOGIN_URL`.
-- ✅ **discovery-hub-platform's Onboard Admin form** — password field removed, same explanatory note pattern as the
+- ✅ **discuva-platform's Onboard Admin form** — password field removed, same explanatory note pattern as the
   Add Tenant form. New `/set-password` page, styled to match this app's existing single-card `/login` page (not
-  Faithapp-admin's dark-panel split layout — the two apps have different login page designs).
+  discuva-admin's dark-panel split layout — the two apps have different login page designs).
 - ✅ **Verified live** — onboarded a real test platform admin with no password in the request, confirmed
   `changedPassword: false`, a 48-hour OTP row, and the welcome email queued with the right subject/template;
   completed the exact `POST /platform/auth/reset-password` call the new page makes, confirmed `changedPassword`
   flipped to `true` and login returned `requiresPasswordChange: false`; also exercised `forgot-password` for both a
   known admin (new unused OTP added, prior used one untouched) and an unknown email (identical generic response, no
   leak); confirmed the OTP row cascade-deletes with its admin. 1498 backend tests clean (was 1490 — 8 new).
+
+---
+
+### Phase 9g — SMS Pure BYOK: Wallet Removal + Twilio (Shipped, 2026-08)
+
+The platform-run `SmsWallet` (prepaid credit balance, billed in kobo, fallback to a platform-default Termii account)
+made SMS feel Nigeria-specific even though the rest of the platform is built for churches "across Africa and
+beyond." Removed entirely in favor of pure BYOK — every tenant configures and activates their own SMS provider, no
+platform fallback exists. Added Twilio as a second SMS vendor to prove the provider abstraction actually supports
+more than one, and seeded `sendgrid` (Twilio's real email product — separately credentialed from Twilio's SMS API,
+so two catalog rows, not one shared "Twilio" entry) into the communication-providers catalog, since
+`SendGridProvider` already existed in code but was never seeded and so was never tenant-selectable.
+
+- ✅ **`SmsWallet`/`SmsWalletTransaction` dropped** — entities deleted, `debitForSend()` removed from
+  `SmsCredentialResolverService`, `initiateWalletTopupCheckout()`/`POST /billing/checkout/wallet-topup` removed from
+  `CheckoutService`/`BillingController`, `BillingCheckoutType.WALLET_TOPUP` removed (`BillingCheckoutType` is just
+  `SUBSCRIPTION` now), `BillingSummary.walletBalanceCredits` removed. New migration
+  (`RemoveSmsWalletAndSeedTwilioProviders`) drops `sms_wallets`/`sms_wallet_transactions` and
+  `billing_checkout_sessions.credits_amount` (dead once `WALLET_TOPUP` was the only writer of it).
+- ✅ **`SmsService.send()`/`getBalance()`/`getLogs()` now throw `403 SMS_PROVIDER_NOT_CONFIGURED`** when a tenant has
+  no active SMS provider — no more silent fallback to a platform default. `SmsCredentialResolverService.resolveConfig()`
+  returns `{ providerId, credentials }` (previously just credentials) so the caller knows *which* vendor to dispatch
+  to, not just that BYOK credentials exist — matching the shape `EmailCredentialResolverService` already used.
+- ✅ **`SmsProviderRegistryService`** (`src/sms/service/`) — same shape as `PaymentProviderRegistryService`: every
+  registered `ISmsProvider` (`termii`, `twilio`) live simultaneously in a `Map`, `SmsService` resolves by the
+  tenant's active `providerId`. Replaces the old single-class `SMS_PROVIDER` DI token binding in `SmsModule`.
+- ✅ **`TwilioSmsProvider`** — Twilio's Messages API has no bulk-send endpoint (unlike Termii's true bulk request),
+  so it issues one `POST` per recipient via `Promise.all`, joining the returned `sid`s for `messageId`.
+  `ISmsProvider` gained `maxRecipientsPerRequest` (Termii 100, Twilio 20 — a concurrency cap, not a vendor limit)
+  so `SmsService`'s batching uses the resolved provider's own value instead of a hardcoded Termii constant.
+- ✅ **One active provider per channel, enforced server-side** — `TenantCommunicationProviderService.upsertConfig()`/
+  `setActive()` (when activating) now run inside a transaction that also deactivates every other provider already
+  active on that same channel for the tenant. Previously nothing stopped a tenant from having two `isActive: true`
+  rows for the same channel, which made `SmsCredentialResolverService`/`EmailCredentialResolverService`'s
+  single-row `.getOne()` pick arbitrary.
+- ✅ **`sendgrid` seeded into `communication_providers`** (`email` channel, catalog name `SendGrid (Twilio)`) —
+  `SendGridProvider` was already a complete `IEmailProvider` implementation but had no catalog row, so no tenant
+  could actually select it via `PUT /communication-providers/email`.
+- ✅ **`TERMII_API_KEY`/`TERMII_SENDER_ID`/`SMS_CREDIT_PRICE_KOBO` env vars removed** — no platform-default SMS
+  credentials exist anymore, and there's no wallet left to price credits for. `TERMII_BASE_URL` stays (Termii's API
+  host is infrastructure, not a secret, and every tenant's Termii account — BYOK — talks to the same host).
+- ✅ **discuva-admin's `/billing` page** — SMS Wallet card and top-up form removed; **discuva-platform**'s tenant
+  detail panel and analytics dashboard — `smsWalletBalance`/`walletTopupRevenueCents` removed, revenue chart is a
+  single-series `BarChart` now (subscriptions only) instead of a two-segment `StackedBarChart`.
+- ✅ **Verified live** — 144 backend test suites / 1722 tests clean, `tsc --noEmit` and `nest build` clean;
+  discuva-admin and discuva-platform both `tsc --noEmit` and `next build` clean.
+
+---
+
+### Phase 9h — Virtual-Account Giving Scaffold Deleted (Shipped, 2026-08)
+
+The dedicated-bank-account-per-member giving mechanism (entity, service, webhook controller) referenced throughout
+this doc as design precedent was never actually implemented — every `VirtualAccountService` method threw
+`NotImplementedException`, and the member app's card was labeled "Coming Soon." Deleted entirely rather than
+finished, in favor of a tenant-owned checkout flow instead: the member is redirected to the church's own hosted
+checkout page (BYOK Paystack/Flutterwave/Kora/Stripe credentials, same shape as Communication Providers' BYOK
+pattern) rather than being issued a dedicated account number to transfer into. Every checkout session will record
+which member initiated it (mirroring how `BillingCheckoutSession` already records which tenant did) so giving can be
+tied back to a member the same "the webhook only ever confirms a row we already wrote" way tenant billing already
+is — not yet built, this phase is the deletion only.
+
+- ✅ **Deleted:** `MemberVirtualAccount` entity, `VirtualAccountService` (stub), `VirtualAccountWebhookController`,
+  `RequestVirtualAccountDto`, `VirtualAccountProvider` enum. `TitheSource.VIRTUAL_ACCOUNT` and
+  `JournalEntrySource.VIRTUAL_ACCOUNT` removed (their `PAYMENT_GATEWAY` siblings remain — the value the checkout
+  flow will use once built). `TitheRecord.virtualAccount` relation removed. Member/admin routes removed
+  (`POST/GET tithes/me/virtual-account(s)`, `PATCH admin/tithes/virtual-accounts/:id/deactivate`,
+  `POST webhooks/virtual-account-credit`).
+- ✅ **New tenant migration** (`DropMemberVirtualAccounts`) drops `member_virtual_accounts` and
+  `tithe_records.virtual_account_id` — the table never held a real row in any environment this migrated through, so
+  there's nothing to carry forward (same "never configured beyond scaffolding" situation as
+  `DropYoutubeIntegrationState` earlier in this phase list).
+- ✅ **discuva-member:** `VirtualAccountCard` and its "Coming Soon" BVN form deleted from the Give tab;
+  `useTithes()` no longer exposes `virtualAccount`/`createVirtualAccount`; the FAQ entry explaining the
+  not-yet-available dedicated account number removed. **discuva-admin:** `TitheSource`/`JournalEntrySource` type
+  unions and the tithe-source badge label updated to match.
+- ✅ **Verified live** — full backend suite, `tsc --noEmit`, and `nest build` clean; discuva-member and
+  discuva-admin both `tsc --noEmit` and `next build` clean.
+
+---
+
+### Phase 9i — Giving Checkout: Tenant-Owned Paystack/Flutterwave/Kora/Stripe (Shipped, 2026-08)
+
+The tenant-owned checkout flow promised in Phase 9h's deletion note, now built — a member pays the church directly
+via a hosted checkout page, using the church's *own* Paystack/Flutterwave/Korapay/Stripe merchant account, never a
+platform one. New top-level module (`src/giving-checkout/`), same shape as Communication Providers' BYOK pattern
+throughout: pure BYOK, no platform-default credentials, "one active provider at a time" enforced identically. Full
+design/route/entity breakdown in TECH_DOC.md § "Giving Checkout (Tenant-Owned, BYOK)".
+
+- ✅ **`IGivingProvider` + `GivingProviderRegistryService`** — same registry shape as
+  `PaymentProviderRegistryService`/`SmsProviderRegistryService`, all four vendors live simultaneously,
+  credentials always passed per call (never `ConfigService`-injected, since every tenant brings their own account).
+- ✅ **Four real provider classes**, one `fetch`-based `IGivingProvider` implementation each: `PaystackGivingProvider`,
+  `FlutterwaveGivingProvider` (both BYOK counterparts of billing's existing platform-keyed classes — same API
+  shapes), plus two genuinely new integrations written against each vendor's documented API — `KoraGivingProvider`
+  (Korapay's Initialize Charge, major-unit amount, HMAC-SHA256 webhook signature over the `data` object only) and
+  `StripeGivingProvider` (Checkout Sessions, form-urlencoded body — Stripe's API is the one vendor in this codebase
+  that isn't JSON — smallest-unit amount, HMAC-SHA256 `t=…,v1=…` timestamped webhook signature over a distinct
+  webhook-signing secret). Kora/Stripe haven't been exercised against live sandbox credentials yet — written to
+  match documented API shape, same "verify before a tenant relies on it in production" caveat as Paystack/
+  Flutterwave's own deferred subscription-webhook gaps elsewhere in this doc.
+- ✅ **Three new control-plane entities** — `GivingProvider` (catalog), `TenantGivingProviderConfig` (BYOK
+  credentials, `EncryptionService` AES-256-GCM, `select: false`), `GivingCheckoutSession` (mirrors
+  `BillingCheckoutSession` exactly — primary keyed by the provider's own reference, recorded at
+  checkout-*initiation* time, the only thing a webhook payload is ever trusted for identity/amount against).
+  Deliberately `public` schema, not `finance_*`/tenant-scoped — the inbound webhook has zero tenant (schema)
+  context, only a `:tenantId` path param, so these must be resolvable before any tenant context exists at all.
+- ✅ **The one genuinely new piece of infrastructure** (flagged as such before building started, not just another
+  BYOK-rows repeat): tenant-scoped webhook routing. `POST /webhooks/giving/:tenantId/:provider` — unlike billing's
+  single shared platform-wide route (one Paystack secret, one Flutterwave secret to check against), this resolves a
+  *specific tenant's own* stored credentials from the `:tenantId` path param before verifying anything, then
+  manually enters that tenant's schema (`Tenant.schemaName` lookup + `runInTenantContext()`, the same mechanism Bull
+  processors use, applied here to a public HTTP request for the first time) purely to write the resulting
+  `TitheRecord`. Excluded from `TenantMiddleware` (`v1/webhooks/giving/(.*)`) — same no-Host-header reasoning as the
+  billing webhook and YouTube callback before it.
+- ✅ **Member tied to every checkout, as promised in Phase 9h** — `GivingCheckoutSession.memberId` recorded at
+  initiation, read back off that row (never the webhook payload) when the resulting `TitheRecord` is created —
+  `source: PAYMENT_GATEWAY`, `externalReference` = the session id, `paymentChannel` = the provider id.
+- ✅ **discuva-admin: new `/giving-providers` settings page** (`TITHE_READ`/`TITHE_WRITE`, added to the System nav
+  group, module-gated on `tithe`) — same generic catalog + BYOK credential form + active-toggle UI as Communication
+  Providers, provider-specific credential fields (Paystack/Kora: secret key only; Flutterwave: secret key + webhook
+  hash; Stripe: secret key + webhook signing secret).
+- ✅ **discuva-member: "Give via Checkout" card** in the Give tab, above the existing static-account transfer
+  instructions — entirely absent (not just disabled) unless a tenant has an active giving provider configured;
+  amount + optional fund/account picker, redirects to the provider's hosted checkout page. Return handling
+  (`?checkout=success|cancelled`) shows an optimistic confirmation and schedules a refetch a few seconds out, since
+  the checkout session only flips to `COMPLETED` (and the `TitheRecord` only exists) once the provider's own webhook
+  actually lands, which may lag the redirect.
+- ✅ **Verified live** — 150 backend test suites / 1758 tests clean (was 143/1718 — 7 new suites, 40 new tests),
+  `tsc --noEmit` and `nest build` clean; discuva-admin and discuva-member both `tsc --noEmit` and `next build` clean.
+
+---
+
+### Phase 9j — Platform-Admin Giving Overview (Shipped, 2026-08)
+
+The "full overview" half of Phase 9i's promise — platform support needed visibility across every tenant's
+giving-checkout activity, not just each church's own. Mirrors the existing Communication Providers/Billing
+platform-support surfaces exactly: a per-tenant support lookup plus a cross-tenant analytics endpoint.
+
+- ✅ **`PlatformGivingProviderService`** (new, `src/platform-admin/service/`) — `getTenantGivingProviders(tenantId)`,
+  same shape as `PlatformCommunicationProviderService.getTenantProviders()`. Wired to
+  `GET /platform/tenants/:id/giving-providers` (`BILLING_READ` — reused rather than adding a dedicated permission
+  for one lookup, since giving-checkout is a money concern from the platform's perspective).
+- ✅ **`PlatformAnalyticsService.getGiving(period, months)`** — new `GET /platform/analytics/giving` route. Every
+  breakdown (`totals`, `byProvider`, `byTenant`, `trend`) is grouped by `currency`, never blended — a completed
+  Stripe (USD) session summed against a completed Paystack (NGN) one into one number would be a real, easy-to-miss
+  correctness bug in a money-adjacent feature, so this was treated with the same rigor as the per-vendor
+  amount-unit handling in Phase 9i itself. `totals`/`byProvider`/`byTenant` are all-time; `trend` is windowed by
+  `months` (same split as `getRevenue`'s `mrrCents` vs. `trend`). `byTenant` is the literal "every tenant, full
+  overview" ask — sorted by volume descending, joined to `Tenant.name`.
+- ✅ **`AdoptionAnalytics` gained `givingAdoption`** — distinct-tenant count with an active
+  `TenantGivingProviderConfig`, same `ChannelAdoption` shape as `smsAdoption`/`emailAdoption` (no `channel` filter
+  needed — giving-checkout has only the one implicit channel).
+- ✅ **discuva-platform:** tenant detail panel gained a "Giving Provider" section (mirrors "Communication
+  Providers" exactly — lazy-loaded on demand, never shows credentials); analytics page gained a "Giving Checkout"
+  Section (currency-grouped totals, by-provider and by-tenant breakdowns) and a third `ChannelAdoption` bar in the
+  existing "BYOK Adoption" panel.
+- ✅ **Default module display label reconsidered, then kept as-is.** Briefly renamed `KNOWN_MODULES`'s `tithe` key's
+  `moduleName` (and two discuva-admin nav/page labels) from "Tithe & Giving" to "Giving" over a concern that not
+  every congregation uses "tithe" terminology — reverted after noting the `TITHE_READ`/`TITHE_WRITE` permission
+  labels ("View Tithe & Giving Records" etc.) already say "Tithe," so a nav/module label saying something different
+  for the same capability would be its own new inconsistency. A per-tenant override already exists
+  (`church_module_settings.displayName`, discuva-admin's Module Settings page) for a church that wants different
+  wording — that's the intended mechanism for this, not changing the platform default.
+- ✅ **Verified live** — full backend suite, `tsc --noEmit`, and `nest build` clean; discuva-admin and
+  discuva-platform both `tsc --noEmit` and `next build` clean.
 
 ---
 
@@ -1458,7 +1627,7 @@ Every tenant carries a `cluster_id` from day one (§4.1, defaulted to `'default'
 
 ## 13. AI Contributor Guidelines
 
-These rules apply specifically to AI coding agents (including Claude Code sessions) working in `discovery-hub` on this migration:
+These rules apply specifically to AI coding agents (including Claude Code sessions) working in `discuva-api` on this migration:
 
 - **Never introduce tenant-aware business logic.** If a service, controller, or entity needs to know about `tenantId`, `schemaName`, or `clusterId` directly, that's a sign the change belongs in the infrastructure layer (middleware/interceptor/CLS), not business logic. Push back on a request that would add this rather than implementing it as asked.
 - **Never bypass the CLS-based tenant context** (§4.2) to "simplify" a one-off script or job — every DB-touching code path, including ad-hoc scripts, must go through the same per-request-transaction + `SET LOCAL search_path` mechanism (§4.4) as normal requests.

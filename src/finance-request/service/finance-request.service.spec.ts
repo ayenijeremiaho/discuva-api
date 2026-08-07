@@ -14,6 +14,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { ExcelService } from '../../utility/service/excel.service';
+import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
 import { ConfigService } from '@nestjs/config';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
@@ -69,6 +70,10 @@ const mockExcelService = {
 
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
+};
+
+const mockTenantCurrencyService = {
+  resolveCurrencyCode: jest.fn().mockResolvedValue('NGN'),
 };
 
 const mockAdmin = {
@@ -128,6 +133,10 @@ describe('FinanceRequestService', () => {
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: ExcelService, useValue: mockExcelService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: TenantCurrencyService,
+          useValue: mockTenantCurrencyService,
+        },
       ],
     }).compile();
 
@@ -610,7 +619,7 @@ describe('FinanceRequestService', () => {
         'Finance Requests',
         expect.arrayContaining([
           expect.objectContaining({ key: 'requester' }),
-          expect.objectContaining({ key: 'amount' }),
+          expect.objectContaining({ key: 'amount', header: 'Amount (NGN)' }),
           expect.objectContaining({ key: 'status' }),
         ]),
         expect.arrayContaining([
@@ -623,6 +632,7 @@ describe('FinanceRequestService', () => {
         ]),
       );
       expect(result).toBeInstanceOf(Buffer);
+      expect(mockTenantCurrencyService.resolveCurrencyCode).toHaveBeenCalled();
     });
   });
 

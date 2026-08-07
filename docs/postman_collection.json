@@ -3839,7 +3839,7 @@
     },
     {
       "name": "Departments",
-      "description": "Church departments (Ushering, Choir, Sunday School, etc.) that workers are assigned to.\n\n**Access:** Admin-only for create/update/delete/assign-lead. Any authenticated user can list departments and read department details. Department leads (HOD/D-HOD) can view their own department summary.\n\n**Key concepts:**\n- Each department has a `capabilities` array (`DepartmentCapability[]`) that gates module access — e.g. a department holding `MANAGE_SUNDAY_SCHOOL` grants its workers access to the Sunday School module. A department can hold zero, one, or several capabilities. Call `GET /departments/capabilities` for the full fixed list with human-readable labels.\n- Workers have a **primary** department and an optional **secondary** department (via WorkerProfile).\n- Department leads (`type: head` or `type: assistant`) are assigned from workers whose primary department matches. They unlock the department summary and can view department-level attendance and leave.\n\n**Typical flow:**\n1. Create department (`POST /departments`) with an optional `capabilities` array\n2. Promote members to workers and assign them to this department\n3. Assign a HOD via `POST /departments/assign-lead` (type: head)\n4. HOD can view `GET /departments/my/summary` for their team stats",
+      "description": "Church departments (Ushering, Choir, Sunday School, etc.) that workers are assigned to.\n\n**Access:** Admin-only for create/update/delete/assign-lead. Any authenticated user can list departments and read department details. Department leads (HOD/D-HOD) can view their own department summary.\n\n**Key concepts:**\n- Each department has a `capabilities` array (`DepartmentCapability[]`) that gates module access \u2014 e.g. a department holding `MANAGE_SUNDAY_SCHOOL` grants its workers access to the Sunday School module. A department can hold zero, one, or several capabilities. Call `GET /departments/capabilities` for the full fixed list with human-readable labels.\n- Workers have a **primary** department and an optional **secondary** department (via WorkerProfile).\n- Department leads (`type: head` or `type: assistant`) are assigned from workers whose primary department matches. They unlock the department summary and can view department-level attendance and leave.\n\n**Typical flow:**\n1. Create department (`POST /departments`) with an optional `capabilities` array\n2. Promote members to workers and assign them to this department\n3. Assign a HOD via `POST /departments/assign-lead` (type: head)\n4. HOD can view `GET /departments/my/summary` for their team stats",
       "item": [
         {
           "name": "Get Department Capabilities",
@@ -12608,59 +12608,6 @@
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Payment proof not found\"\n}"
             }
           ]
-        },
-        {
-          "name": "Deactivate Member Virtual Account",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/admin/tithes/virtual-accounts/:id/deactivate",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "admin",
-                "tithes",
-                "virtual-accounts",
-                ":id",
-                "deactivate"
-              ],
-              "variable": [
-                {
-                  "key": "id",
-                  "value": "",
-                  "description": "UUID of the MemberVirtualAccount to deactivate"
-                }
-              ]
-            },
-            "description": "AdminGuard (TITHE_WRITE). Marks the virtual account as inactive and records who deactivated it and when. The member can request a new account for the same provider afterwards."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"3f8a1b2c-...\",\n  \"isActive\": false,\n  \"deactivatedAt\": \"2026-06-22T09:00:00.000Z\"\n}"
-            },
-            {
-              "name": "404 Not Found",
-              "status": "Not Found",
-              "code": 404,
-              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Virtual account not found.\"\n}"
-            },
-            {
-              "name": "400 Bad Request \u2014 already inactive",
-              "status": "Bad Request",
-              "code": 400,
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Virtual account is already inactive.\"\n}"
-            }
-          ]
         }
       ]
     },
@@ -12921,136 +12868,52 @@
               "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
             }
           ]
-        },
-        {
-          "name": "Request Virtual Account",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              },
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"provider\": \"PAYSTACK\",\n  \"bvn\": \"22222222222\"\n}"
-            },
-            "url": {
-              "raw": "{{baseUrl}}/tithes/me/virtual-account",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "tithes",
-                "me",
-                "virtual-account"
-              ]
-            },
-            "description": "JwtAuthGuard. Creates a dedicated virtual bank account with the chosen provider (PAYSTACK or FLUTTERWAVE). BVN/NIN are forwarded to the provider API and never stored. One active account per provider per member \u2014 returns 409 if one already exists."
-          },
-          "response": [
-            {
-              "name": "201 Created",
-              "status": "Created",
-              "code": 201,
-              "body": "{\n  \"id\": \"3f8a1b2c-...\",\n  \"provider\": \"PAYSTACK\",\n  \"bankName\": \"Wema Bank\",\n  \"accountNumber\": \"9912345678\",\n  \"accountName\": \"ADA LOVELACE\",\n  \"isActive\": true,\n  \"createdAt\": \"2026-06-22T08:00:00.000Z\"\n}"
-            },
-            {
-              "name": "409 Conflict \u2014 active account exists",
-              "status": "Conflict",
-              "code": 409,
-              "body": "{\n  \"statusCode\": 409,\n  \"message\": \"An active PAYSTACK virtual account already exists for this member.\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "List My Virtual Accounts",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{accessToken}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/tithes/me/virtual-accounts",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "tithes",
-                "me",
-                "virtual-accounts"
-              ]
-            },
-            "description": "JwtAuthGuard. Returns all virtual accounts (active and inactive) belonging to the authenticated member, ordered newest first."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "[\n  {\n    \"id\": \"3f8a1b2c-...\",\n    \"provider\": \"PAYSTACK\",\n    \"bankName\": \"Wema Bank\",\n    \"accountNumber\": \"9912345678\",\n    \"accountName\": \"ADA LOVELACE\",\n    \"isActive\": true,\n    \"createdAt\": \"2026-06-22T08:00:00.000Z\"\n  }\n]"
-            }
-          ]
         }
       ]
     },
     {
       "name": "Webhooks",
-      "description": "Provider webhook receivers. These endpoints have no JWT guard \u2014 they are verified by HMAC signature.\n\n**Virtual account credit:** Paystack sends `x-paystack-signature` (HMAC-SHA512); Flutterwave sends `verif-hash`. Both use the `VIRTUAL_ACCOUNT_WEBHOOK_SECRET` env var. Duplicate credits (same `external_reference`) are silently ignored.",
+      "description": "Provider webhook receivers. These endpoints have no JWT guard \u2014 they are verified by HMAC signature.",
       "item": [
         {
-          "name": "Virtual Account Credit (Provider Webhook)",
+          "name": "Giving Checkout Webhook (Provider)",
           "request": {
             "method": "POST",
             "header": [
               {
-                "key": "x-paystack-signature",
-                "value": "<hmac-sha512-hex>",
-                "description": "Paystack HMAC signature. Use verif-hash header instead for Flutterwave."
-              },
-              {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "x-paystack-signature",
+                "value": "<hmac-sha512-of-body>",
+                "description": "Paystack. Flutterwave sends verif-hash instead, Korapay sends x-korapay-signature, Stripe sends stripe-signature \u2014 whichever header the :provider in the URL corresponds to is the one actually read."
               }
             ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"event\": \"dedicatedaccount.assign.success\",\n  \"data\": {\n    \"virtual_account\": { \"account_ref\": \"<providerRef>\" },\n    \"amount\": 5000,\n    \"transaction_ref\": \"txn_abc123\",\n    \"payment_channel\": \"BANK_TRANSFER\"\n  }\n}"
-            },
             "url": {
-              "raw": "{{baseUrl}}/webhooks/virtual-account-credit",
+              "raw": "{{baseUrl}}/webhooks/giving/{{tenantId}}/paystack",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "webhooks",
-                "virtual-account-credit"
+                "giving",
+                "{{tenantId}}",
+                "paystack"
               ]
             },
-            "description": "No auth guard \u2014 HMAC-SHA512 verified. Looks up the virtual account by providerRef, creates a TitheRecord with source=VIRTUAL_ACCOUNT, and returns 200. Idempotent on external_reference."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": ""
-            },
-            {
-              "name": "403 Forbidden \u2014 bad signature",
-              "status": "Forbidden",
-              "code": 403,
-              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Invalid webhook signature.\"\n}"
+            "description": "No JWT guard \u2014 verified instead by whichever signature scheme :provider uses. :tenantId is how this resolves which church's own BYOK credentials to verify against and complete the checkout for \u2014 there is no Host header/subdomain on a provider webhook call. Looks up the matching GivingCheckoutSession by the event's own reference (never trusts the payload for identity/amount), marks it COMPLETED, and creates a TitheRecord (source: PAYMENT_GATEWAY) in that tenant's own schema.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event\": \"charge.success\",\n  \"data\": {\n    \"reference\": \"giving_1a2b3c4d-5e6f-7890-abcd-ef1234567890\",\n    \"amount\": 500000,\n    \"status\": \"success\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
-          ]
+          },
+          "response": []
         }
       ]
     },
@@ -13140,7 +13003,7 @@
                 "callback"
               ]
             },
-            "description": "Fired by the hub whenever the channel publishes/updates a video (not necessarily a livestream). No JWT guard — verified instead by HMAC-SHA1 signature (X-Hub-Signature, using YOUTUBE_WEBSUB_SECRET), same trust model as the Virtual Account Credit webhook. Always acks 204 immediately regardless of signature validity (never leaks whether verification passed); on a valid signature, the video-id is checked against the YouTube Data API in the background to confirm it's actually live (and on this configured channel) before announcing."
+            "description": "Fired by the hub whenever the channel publishes/updates a video (not necessarily a livestream). No JWT guard \u2014 verified instead by HMAC-SHA1 signature (X-Hub-Signature, using YOUTUBE_WEBSUB_SECRET), same trust model as the billing webhook's own signature verification. Always acks 204 immediately regardless of signature validity (never leaks whether verification passed); on a valid signature, the video-id is checked against the YouTube Data API in the background to confirm it's actually live (and on this configured channel) before announcing."
           },
           "response": [
             {
@@ -20290,11 +20153,17 @@
                 "members"
               ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
               ]
             },
-            "description": "Paginated (PaginationResponseDto — { data, page, limit, totalCount, totalPages }), ordered by created_at ASC (join order)."
+            "description": "Paginated (PaginationResponseDto \u2014 { data, page, limit, totalCount, totalPages }), ordered by created_at ASC (join order)."
           }
         },
         {
@@ -20345,11 +20214,17 @@
                 "attendance"
               ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
               ]
             },
-            "description": "Paginated (PaginationResponseDto — { data, page, limit, totalCount, totalPages }), ordered by meeting_date DESC."
+            "description": "Paginated (PaginationResponseDto \u2014 { data, page, limit, totalCount, totalPages }), ordered by meeting_date DESC."
           }
         }
       ]
@@ -21605,7 +21480,7 @@
                 "journal-entries"
               ]
             },
-            "description": "FINANCE_WRITE. Creates a PENDING_APPROVAL entry. Debits must equal credits (within 0.01). source: MANUAL|CSV_IMPORT|VIRTUAL_ACCOUNT|PAYMENT_GATEWAY. entryType: STANDARD|OPENING_BALANCE|REVERSAL|RECURRING.",
+            "description": "FINANCE_WRITE. Creates a PENDING_APPROVAL entry. Debits must equal credits (within 0.01). source: MANUAL|CSV_IMPORT|PAYMENT_GATEWAY. entryType: STANDARD|OPENING_BALANCE|REVERSAL|RECURRING.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"date\": \"2026-06-01\",\n  \"description\": \"Sunday offering June 1\",\n  \"source\": \"MANUAL\",\n  \"entryType\": \"STANDARD\",\n  \"accountingPeriodId\": \"{{periodId}}\",\n  \"idempotencyKey\": \"{{$guid}}\",\n  \"lines\": [\n    {\n      \"accountId\": \"{{accountId}}\",\n      \"entryType\": \"DEBIT\",\n      \"amount\": 50000\n    },\n    {\n      \"accountId\": \"{{incomeAccountId}}\",\n      \"entryType\": \"CREDIT\",\n      \"amount\": 50000\n    }\n  ],\n  \"links\": [\n    {\n      \"linkType\": \"SERVICE\",\n      \"role\": \"FOR_SERVICE\",\n      \"serviceEventId\": \"{{serviceEventId}}\"\n    }\n  ]\n}",
@@ -23619,6 +23494,107 @@
               "body": "{\n  \"totalIncome\": {\n    \"currentMonth\": 850000.0,\n    \"previousMonth\": 720000.0,\n    \"changePercent\": 18.1\n  },\n  \"totalExpenses\": {\n    \"currentMonth\": 245000.0,\n    \"previousMonth\": 210000.0,\n    \"changePercent\": 16.7\n  },\n  \"cashPosition\": 2500000.0,\n  \"pendingApprovals\": 3,\n  \"overdueRecurring\": 0,\n  \"openPeriod\": {\n    \"id\": \"p1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n    \"year\": 2026,\n    \"month\": 7,\n    \"status\": \"OPEN\",\n    \"closedAt\": null,\n    \"closedBy\": null,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n}"
             }
           ]
+        },
+        {
+          "name": "List Giving Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving-providers"
+              ]
+            },
+            "description": "TITHE_READ. Returns { catalog, ownConfigs } \u2014 catalog is the platform-wide vendor list (paystack, flutterwave, kora, stripe), ownConfigs is this tenant's own BYOK config summary for each configured one. Never includes credentials."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"catalog\": [\n    { \"id\": \"paystack\", \"name\": \"Paystack\", \"isActive\": true },\n    { \"id\": \"flutterwave\", \"name\": \"Flutterwave\", \"isActive\": true },\n    { \"id\": \"kora\", \"name\": \"Korapay\", \"isActive\": true },\n    { \"id\": \"stripe\", \"name\": \"Stripe\", \"isActive\": true }\n  ],\n  \"ownConfigs\": [\n    { \"providerId\": \"paystack\", \"providerName\": \"Paystack\", \"isActive\": true }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Set Giving Provider Credentials",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving-providers/paystack",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving-providers",
+                "paystack"
+              ]
+            },
+            "description": "TITHE_WRITE. Body shape is provider-specific \u2014 Paystack/Kora: { secretKey }; Flutterwave: { secretKey, secretHash }; Stripe: { secretKey, webhookSecret }. Upserting always activates this provider and deactivates any other one already active for this tenant \u2014 only one giving provider can be active at a time.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credentials\": {\n    \"secretKey\": \"sk_live_xxxxxxxxxxxx\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"providerId\": \"paystack\",\n  \"providerName\": \"Paystack\",\n  \"isActive\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Set Giving Provider Active",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving-providers/paystack",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving-providers",
+                "paystack"
+              ]
+            },
+            "description": "TITHE_WRITE. Enable/disable an already-configured provider without touching its stored credentials. Enabling deactivates any other provider already active for this tenant.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ]
     },
@@ -23893,6 +23869,90 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"sent\": false,\n  \"year\": 2025,\n  \"total\": 0,\n  \"message\": \"You have no recorded giving for 2025 yet.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Active Giving Provider",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving/checkout/provider",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving",
+                "checkout",
+                "provider"
+              ]
+            },
+            "description": "Whether to show a \"Give via Checkout\" option at all \u2014 returns { providerId, providerName } or null. Null means the church hasn't configured (or activated) a giving provider yet; there is no platform default."
+          },
+          "response": [
+            {
+              "name": "200 OK \u2014 configured",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"providerId\": \"paystack\",\n  \"providerName\": \"Paystack\"\n}"
+            },
+            {
+              "name": "200 OK \u2014 not configured",
+              "status": "OK",
+              "code": 200,
+              "body": "null"
+            }
+          ]
+        },
+        {
+          "name": "Initiate Giving Checkout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving/checkout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving",
+                "checkout"
+              ]
+            },
+            "description": "titheAccountId is optional (earmarks which fund/account this is for \u2014 purely informational, also determines the checkout currency; omitted means CURRENCY_CODE). Returns a checkoutUrl to redirect the member to. 403 GIVING_PROVIDER_NOT_CONFIGURED if the church has no active giving provider.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amountCents\": 500000,\n  \"titheAccountId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"successUrl\": \"https://church.discuva.org/giving?checkout=success\",\n  \"cancelUrl\": \"https://church.discuva.org/giving?checkout=cancelled\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"checkoutUrl\": \"https://checkout.paystack.com/abcxyz123\"\n}"
             }
           ]
         }
@@ -26246,18 +26306,33 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"admin@platform.example.com\",\n  \"password\": \"ChangeMe123!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/auth/login",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "auth", "login"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "auth",
+                "login"
+              ]
             },
             "description": "Platform admin login. Returns { accessToken }. Not the same identity system as member/admin login - see public.platform_admins."
           },
@@ -26270,12 +26345,23 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants"
+              ]
             },
             "description": "List all tenants with plan/subscription status and live member/event counts (schema-qualified reads)."
           },
@@ -26298,21 +26384,39 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"churchName\": \"Beta Church\",\n  \"subdomain\": \"church-beta\",\n  \"adminFirstname\": \"Admin\",\n  \"adminLastname\": \"User\",\n  \"adminEmail\": \"admin@betachurch.org\",\n  \"planId\": \"free\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants"
+              ]
             },
             "description": "Provision a new tenant - same TenantProvisioningService as self-serve POST /signup (platform-admin/support use)."
           },
@@ -26323,21 +26427,40 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Beta Church (Renamed)\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants", "{{platformTenantId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}"
+              ]
             },
             "description": "Update name, logo, currency, or timezone."
           },
@@ -26348,21 +26471,41 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/suspend",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants", "{{platformTenantId}}", "suspend"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "suspend"
+              ]
             },
             "description": "Suspends by default. Same route reactivates via { \"suspend\": false }."
           },
@@ -26373,21 +26516,41 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"suspend\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/suspend",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants", "{{platformTenantId}}", "suspend"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "suspend"
+              ]
             }
           },
           "response": []
@@ -26397,21 +26560,41 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"planId\": \"{{platformPlanId}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/plan",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants", "{{platformTenantId}}", "plan"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "plan"
+              ]
             },
             "description": "Manual plan override (comps, support fixes) - invalidates PlanGuard's cached feature list for this tenant."
           },
@@ -26424,12 +26607,25 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/impersonate",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants", "{{platformTenantId}}", "impersonate"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "impersonate"
+              ]
             },
             "description": "Issues a short-lived, access-token-only JWT for that tenant's admin (no refresh token, no session record). Only routable to the right schema once TenantMiddleware is live - see MULTI_TENANT_MIGRATION.md section 9 Phase 8."
           },
@@ -26442,12 +26638,23 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/plans",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "plans"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "plans"
+              ]
             }
           },
           "response": []
@@ -26457,21 +26664,39 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/plans",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "plans"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "plans"
+              ]
             }
           },
           "response": []
@@ -26481,21 +26706,40 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"priceCents\": 75000\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/plans/enterprise",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "plans", "enterprise"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "plans",
+                "enterprise"
+              ]
             }
           },
           "response": []
@@ -26507,12 +26751,23 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/subscriptions",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "subscriptions"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "subscriptions"
+              ]
             },
             "description": "Spot past_due churn risk across all tenants."
           },
@@ -26525,12 +26780,23 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/communication-providers",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "communication-providers"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "communication-providers"
+              ]
             }
           },
           "response": []
@@ -26540,21 +26806,39 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"id\": \"flutterwave-sms\",\n  \"channel\": \"sms\",\n  \"name\": \"Flutterwave SMS\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/communication-providers",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "communication-providers"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "communication-providers"
+              ]
             }
           },
           "response": []
@@ -26566,14 +26850,58 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/communication-providers",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "tenants", "{{platformTenantId}}", "communication-providers"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "communication-providers"
+              ]
             },
-            "description": "A tenant's active provider per channel + SMS wallet balance - never the raw encrypted credentials."
+            "description": "A tenant's active provider per channel - never the raw encrypted credentials."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tenant Giving Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/giving-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "giving-providers"
+              ]
+            },
+            "description": "BILLING_READ. This tenant's configured giving-checkout provider(s) and active status \u2014 never the raw encrypted credentials. Only one provider can be active at a time."
           },
           "response": []
         },
@@ -26584,12 +26912,23 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admin-roles",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admin-roles"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admin-roles"
+              ]
             },
             "description": "List all platform admin roles with their permission sets."
           },
@@ -26602,12 +26941,24 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admin-roles/{{platformAdminRoleId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admin-roles", "{{platformAdminRoleId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admin-roles",
+                "{{platformAdminRoleId}}"
+              ]
             },
             "description": "Get one platform admin role."
           },
@@ -26630,21 +26981,39 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Support\",\n  \"description\": \"Read-only tenant support access\",\n  \"permissions\": [\"tenants:read\", \"plans:read\"]\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admin-roles",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admin-roles"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admin-roles"
+              ]
             },
             "description": "Create a platform admin role with a specific permission set (PlatformAdminPermission[])."
           },
@@ -26655,21 +27024,40 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"description\": \"Read-only tenant support access, updated\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admin-roles/{{platformAdminRoleId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admin-roles", "{{platformAdminRoleId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admin-roles",
+                "{{platformAdminRoleId}}"
+              ]
             },
             "description": "Edit a role's name/description/permissions."
           },
@@ -26682,12 +27070,24 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admin-roles/{{platformAdminRoleId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admin-roles", "{{platformAdminRoleId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admin-roles",
+                "{{platformAdminRoleId}}"
+              ]
             },
             "description": "Delete a role. 400s if any active platform admin is still assigned to it."
           },
@@ -26700,12 +27100,23 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admins",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admins"
+              ]
             },
             "description": "List platform admins with their role."
           },
@@ -26718,12 +27129,24 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admins/me",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admins", "me"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admins",
+                "me"
+              ]
             },
             "description": "The calling platform admin's own record + permissions. No permission requirement beyond a valid token."
           },
@@ -26736,12 +27159,24 @@
             "header": [],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admins/{{platformAdminId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admins", "{{platformAdminId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admins",
+                "{{platformAdminId}}"
+              ]
             },
             "description": "Get one platform admin."
           },
@@ -26764,21 +27199,39 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"new-admin@example.com\",\n  \"platformAdminRoleId\": \"{{platformAdminRoleId}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admins",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admins"
+              ]
             },
             "description": "Onboard a new platform admin - { email, platformAdminRoleId }. No password field: a random one is generated internally (never revealed) and the new admin is emailed a welcome message with a set-password link - POST /platform/auth/reset-password completes it, same as the tenant-provisioning welcome flow."
           },
@@ -26789,21 +27242,40 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "auth": {
               "type": "bearer",
-              "bearer": [{ "key": "token", "value": "{{platformAccessToken}}", "type": "string" }]
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
             },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isActive\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/admins/{{platformAdminId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "admins", "{{platformAdminId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "admins",
+                "{{platformAdminId}}"
+              ]
             },
             "description": "Change role and/or isActive. 403s if the target id is the caller's own record."
           },
@@ -26814,18 +27286,33 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"admin@platform.example.com\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/auth/forgot-password",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "auth", "forgot-password"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "auth",
+                "forgot-password"
+              ]
             },
             "description": "Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. Always returns the same generic message, whether or not the email matches an account."
           },
@@ -26836,22 +27323,84 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"admin@platform.example.com\",\n  \"otp\": \"123456\",\n  \"newPassword\": \"NewSecure1!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/auth/reset-password",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "auth", "reset-password"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "auth",
+                "reset-password"
+              ]
             },
             "description": "Public, rate-limited (5/min). Verify the OTP and set a new password. Also how a newly-onboarded platform admin sets their initial password from the welcome email link."
           },
           "response": []
+        },
+        {
+          "name": "Get Analytics \u2014 Giving",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/analytics/giving?period=monthly&months=12",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "analytics",
+                "giving"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "monthly"
+                },
+                {
+                  "key": "months",
+                  "value": "12"
+                }
+              ]
+            },
+            "description": "ANALYTICS_READ. Cross-tenant giving-checkout overview \u2014 completed sessions only. Every breakdown (totals, byProvider, byTenant, trend) is grouped by currency, never blended (a USD tenant summed against an NGN one would be meaningless). totals/byProvider/byTenant are all-time; trend is windowed by months. byTenant is sorted by volume descending."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"period\": \"monthly\",\n  \"totals\": [\n    { \"currency\": \"NGN\", \"totalAmountCents\": 7500000, \"count\": 12 }\n  ],\n  \"byProvider\": [\n    { \"provider\": \"paystack\", \"currency\": \"NGN\", \"totalAmountCents\": 7500000, \"count\": 12 }\n  ],\n  \"byTenant\": [\n    {\n      \"tenantId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"tenantName\": \"Grace Chapel\",\n      \"provider\": \"paystack\",\n      \"currency\": \"NGN\",\n      \"totalAmountCents\": 7500000,\n      \"count\": 12\n    }\n  ],\n  \"trend\": [\n    { \"periodLabel\": \"2026-07\", \"currency\": \"NGN\", \"totalAmountCents\": 7500000, \"count\": 12 }\n  ]\n}"
+            }
+          ]
         }
       ]
     }

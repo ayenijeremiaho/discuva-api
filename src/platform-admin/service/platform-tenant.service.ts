@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -13,10 +14,14 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
+import { SubscriptionStatus } from '../../billing/enum/subscription-status.enum';
 import { Plan } from '../../billing/entity/plan.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { TenantProvisioningService } from '../../tenant/service/tenant-provisioning.service';
+import { TenantOnboardingStatus } from '../../tenant/enum/tenant-onboarding-status.enum';
+import { TenantOnboardingActorType } from '../../tenant/enum/tenant-onboarding-actor-type.enum';
+import { TenantOnboardingEvent } from '../../tenant/entity/tenant-onboarding-event.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { JwtPayload } from '../../auth/interface/auth.interface';
@@ -24,6 +29,8 @@ import { CreateTenantDto } from '../dto/create-tenant.dto';
 import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
+import { ApplyDiscountDto } from '../dto/apply-discount.dto';
+import { DiscountType } from '../../billing/enum/discount-type.enum';
 
 export interface TenantWithHealth {
   id: string;
@@ -36,9 +43,14 @@ export interface TenantWithHealth {
   currency: string;
   timezone: string;
   isActive: boolean;
+  onboardingStatus: TenantOnboardingStatus;
   createdAt: Date;
   planId: string | null;
   subscriptionStatus: string | null;
+  discountType: DiscountType | null;
+  discountValue: number | null;
+  discountReason: string | null;
+  discountExpiresAt: Date | null;
   memberCount: number | null;
   eventCount: number | null;
 }
@@ -63,6 +75,8 @@ export class PlatformTenantService {
     private readonly subscriptionRepo: Repository<Subscription>,
     @InjectRepository(Plan)
     private readonly planRepo: Repository<Plan>,
+    @InjectRepository(TenantOnboardingEvent)
+    private readonly onboardingEventRepo: Repository<TenantOnboardingEvent>,
     private readonly provisioningService: TenantProvisioningService,
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
@@ -99,19 +113,75 @@ export class PlatformTenantService {
 
   // No adminPassword collected here — the platform admin isn't the one
   // logging in as this tenant's first admin, so there's nobody present to
-  // choose one. provisioningService.provision() generates a random
-  // password internally (never revealed) and emails the new admin a
-  // set-password link instead (docs/MULTI_TENANT_MIGRATION.md §9 Phase 9e).
-  async createTenant(dto: CreateTenantDto): Promise<TenantWithHealth> {
-    const tenant = await this.provisioningService.provision({
-      subdomain: dto.subdomain,
-      churchName: dto.churchName,
-      adminFirstname: dto.adminFirstname,
-      adminLastname: dto.adminLastname,
-      adminEmail: dto.adminEmail,
-      planId: dto.planId ?? 'free',
-    });
+  // choose one. TenantProvisioningService generates a random password
+  // internally (never revealed) and emails the new admin a set-password
+  // link instead (docs/MULTI_TENANT_MIGRATION.md §9 Phase 9e).
+  //
+  // Runs inline, not on the queue — unlike self-serve signup, this is a
+  // deliberate action by a trusted, authenticated platform admin, not a
+  // public unauthenticated form. There's no fraud-review gate that would
+  // block a not-yet-provisioned tenant from going further, and CREATE
+  // SCHEMA + migrations + seeding is fast enough that the admin can just
+  // wait for the response.
+  async createTenant(
+    dto: CreateTenantDto,
+    actorId: string,
+  ): Promise<TenantWithHealth> {
+    const pending = await this.provisioningService.ensurePendingTenant(
+      dto.subdomain,
+      dto.churchName,
+    );
+
+    await this.provisioningService.recordEvent(
+      pending.id,
+      'PLATFORM_ADMIN_INITIATED',
+      TenantOnboardingActorType.PLATFORM_ADMIN,
+      { actorId },
+    );
+
+    let tenant: Tenant;
+    try {
+      tenant = await this.provisioningService.provision({
+        subdomain: dto.subdomain,
+        churchName: dto.churchName,
+        adminFirstname: dto.adminFirstname,
+        adminLastname: dto.adminLastname,
+        adminEmail: dto.adminEmail,
+        planId: dto.planId ?? 'free',
+      });
+    } catch (err) {
+      await this.tenantRepo.update(pending.id, {
+        onboardingStatus: TenantOnboardingStatus.FAILED,
+      });
+      await this.provisioningService.recordEvent(
+        pending.id,
+        'PROVISIONING_FAILED',
+        TenantOnboardingActorType.PLATFORM_ADMIN,
+        { actorId, metadata: { error: (err as Error).message } },
+      );
+      throw err;
+    }
+
+    tenant.onboardingStatus = TenantOnboardingStatus.ACTIVE;
+    tenant = await this.tenantRepo.save(tenant);
+    await this.provisioningService.recordEvent(
+      tenant.id,
+      'PROVISIONING_COMPLETED',
+      TenantOnboardingActorType.PLATFORM_ADMIN,
+      { actorId },
+    );
+
     return this.toHealthShape(tenant);
+  }
+
+  async getOnboardingEvents(
+    tenantId: string,
+  ): Promise<TenantOnboardingEvent[]> {
+    await this.findTenantOrThrow(tenantId);
+    return this.onboardingEventRepo.find({
+      where: { tenant: { id: tenantId } },
+      order: { createdAt: 'ASC' },
+    });
   }
 
   async updateTenant(
@@ -121,6 +191,10 @@ export class PlatformTenantService {
     const tenant = await this.findTenantOrThrow(id);
     Object.assign(tenant, dto);
     const saved = await this.tenantRepo.save(tenant);
+    // EmailQueueService caches this tenant's branding under the same key —
+    // an admin edit here must invalidate it or emails keep the old
+    // name/logo/address for up to the cache TTL.
+    this.cacheService.del(`tenant-branding:${tenant.id}`);
     return this.toHealthShape(saved);
   }
 
@@ -149,9 +223,15 @@ export class PlatformTenantService {
       subscription = this.subscriptionRepo.create({
         tenantId: tenant.id,
         planId: dto.planId,
+        status: SubscriptionStatus.ACTIVE,
       });
     } else {
       subscription.planId = dto.planId;
+      // A platform admin overriding the plan is a deliberate grant of
+      // access — a tenant stuck CANCELED/PAST_DUE from a lapsed provider
+      // subscription must regain access immediately, not stay locked out
+      // until the next billing-provider webhook happens to fire.
+      subscription.status = SubscriptionStatus.ACTIVE;
     }
     const saved = await this.subscriptionRepo.save(subscription);
 
@@ -160,6 +240,56 @@ export class PlatformTenantService {
     // plan's access for up to the cache TTL.
     await this.cacheService.del(`plan-features:${tenant.id}`);
     return saved;
+  }
+
+  // Internal comp only — never touches checkout or a payment provider (see
+  // subscription.entity.ts's discountType comment). Requires an existing
+  // subscription row; changeTenantPlan (or provisioning, which always
+  // creates one) must run first.
+  async applyDiscount(
+    id: string,
+    dto: ApplyDiscountDto,
+  ): Promise<Subscription> {
+    const tenant = await this.findTenantOrThrow(id);
+    if (
+      dto.discountType === DiscountType.PERCENTAGE &&
+      dto.discountValue > 100
+    ) {
+      throw new BadRequestException('A percentage discount cannot exceed 100.');
+    }
+
+    const subscription = await this.subscriptionRepo.findOneBy({
+      tenantId: tenant.id,
+    });
+    if (!subscription) {
+      throw new NotFoundException(
+        'Tenant has no subscription to apply a discount to.',
+      );
+    }
+
+    subscription.discountType = dto.discountType;
+    subscription.discountValue = dto.discountValue;
+    subscription.discountReason = dto.discountReason ?? null;
+    subscription.discountExpiresAt = dto.discountExpiresAt
+      ? new Date(dto.discountExpiresAt)
+      : null;
+    return this.subscriptionRepo.save(subscription);
+  }
+
+  async removeDiscount(id: string): Promise<Subscription> {
+    const tenant = await this.findTenantOrThrow(id);
+    const subscription = await this.subscriptionRepo.findOneBy({
+      tenantId: tenant.id,
+    });
+    if (!subscription) {
+      throw new NotFoundException('Tenant has no subscription.');
+    }
+
+    subscription.discountType = null;
+    subscription.discountValue = null;
+    subscription.discountReason = null;
+    subscription.discountExpiresAt = null;
+    return this.subscriptionRepo.save(subscription);
   }
 
   // Issues a short-lived, ACCESS-TOKEN-ONLY JWT scoped to this tenant's
@@ -241,9 +371,14 @@ export class PlatformTenantService {
       currency: tenant.currency,
       timezone: tenant.timezone,
       isActive: tenant.isActive,
+      onboardingStatus: tenant.onboardingStatus,
       createdAt: tenant.createdAt,
       planId: sub?.planId ?? null,
       subscriptionStatus: sub?.status ?? null,
+      discountType: sub?.discountType ?? null,
+      discountValue: sub?.discountValue ?? null,
+      discountReason: sub?.discountReason ?? null,
+      discountExpiresAt: sub?.discountExpiresAt ?? null,
       memberCount,
       eventCount,
     };

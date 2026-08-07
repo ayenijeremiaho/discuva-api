@@ -62,7 +62,10 @@ import { BillingModule } from './billing/billing.module';
 import { TenantModule } from './tenant/tenant.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { CommunicationProviderModule } from './communication-provider/communication-provider.module';
+import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
 import { BranchModule } from './branch/branch.module';
+import { FormsModule } from './forms/forms.module';
+import { SocialMediaModule } from './social-media/social-media.module';
 
 @Module({
   imports: [
@@ -213,7 +216,10 @@ import { BranchModule } from './branch/branch.module';
     TenantModule,
     PlatformAdminModule,
     CommunicationProviderModule,
+    GivingCheckoutModule,
     BranchModule,
+    FormsModule,
+    SocialMediaModule,
     EnumsModule,
     TitheModule,
     FinanceRequestModule,

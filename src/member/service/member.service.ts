@@ -130,7 +130,6 @@ export class MemberService {
         name: firstName,
         email: saved.email,
         password: tempPassword,
-        login_url: this.configService.get<string>('LOGIN_URL'),
         churchName: this.churchName,
         churchAddress: this.churchAddress,
       },
@@ -222,7 +221,6 @@ export class MemberService {
       'welcome-worker',
       {
         name: `${firstName} ${member.lastname[0].toUpperCase()}.`,
-        login_url: this.configService.get<string>('LOGIN_URL'),
         username: member.email,
         explainer_video_android_url: this.configService.get<string>(
           'EXPLAINER_VIDEO_ANDROID_URL',
@@ -330,7 +328,6 @@ export class MemberService {
           'welcome-worker',
           {
             name: `${firstName} ${member.lastname[0].toUpperCase()}.`,
-            login_url: this.configService.get<string>('LOGIN_URL'),
             username: member.email,
             explainer_video_android_url: this.configService.get<string>(
               'EXPLAINER_VIDEO_ANDROID_URL',
@@ -788,7 +785,6 @@ export class MemberService {
         'account-reactivated',
         {
           name: firstName,
-          login_url: this.configService.get<string>('LOGIN_URL'),
           churchName: this.churchName,
           churchAddress: this.churchAddress,
         },
@@ -819,7 +815,6 @@ export class MemberService {
       {
         name: firstName,
         newPassword,
-        login_url: this.configService.get<string>('LOGIN_URL'),
         churchName: this.churchName,
         churchAddress: this.churchAddress,
       },
@@ -860,7 +855,6 @@ export class MemberService {
       'password-changed',
       {
         name: firstName,
-        login_url: this.configService.get<string>('LOGIN_URL'),
         churchName: this.churchName,
         churchAddress: this.churchAddress,
       },

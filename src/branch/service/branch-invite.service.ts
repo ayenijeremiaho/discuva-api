@@ -89,7 +89,7 @@ export class BranchInviteService {
     this.emailQueueService.queueEmail(
       email,
       `You've been invited to join ${parentTenant.name} as a branch`,
-      `<p>${parentTenant.name} has invited your church to join as a branch on Discovery Hub.</p>
+      `<p>${parentTenant.name} has invited your church to join as a branch on Discuva.</p>
        <p>When creating your church account, enter this invite code:</p>
        <p style="font-size:1.2em;font-weight:bold;letter-spacing:1px;">${token}</p>
        <p>This code expires in ${INVITE_EXPIRY_DAYS} days.</p>

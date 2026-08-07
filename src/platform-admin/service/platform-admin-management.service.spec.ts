@@ -23,9 +23,7 @@ const mockRoleService = { getById: jest.fn() };
 const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
 const mockConfigService = {
   get: jest.fn((key: string) =>
-    key === 'PLATFORM_LOGIN_URL'
-      ? 'https://platform.example.com'
-      : 'Discovery Hub',
+    key === 'PLATFORM_LOGIN_URL' ? 'https://platform.example.com' : 'Discuva',
   ),
 };
 

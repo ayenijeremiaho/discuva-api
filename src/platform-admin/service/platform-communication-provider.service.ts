@@ -7,7 +7,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { CommunicationProvider } from '../entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from '../entity/tenant-communication-provider-config.entity';
-import { SmsWallet } from '../entity/sms-wallet.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
 
@@ -26,8 +25,6 @@ export class PlatformCommunicationProviderService {
     private readonly providerRepo: Repository<CommunicationProvider>,
     @InjectRepository(TenantCommunicationProviderConfig)
     private readonly tenantProviderConfigRepo: Repository<TenantCommunicationProviderConfig>,
-    @InjectRepository(SmsWallet)
-    private readonly smsWalletRepo: Repository<SmsWallet>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
@@ -50,19 +47,17 @@ export class PlatformCommunicationProviderService {
 
   // Never returns credentialsEncrypted — the entity's own `select: false`
   // already keeps it out of a plain find(), and this method doesn't
-  // addSelect it back in. Support cases need "which provider, BYOK or not,
-  // wallet balance" (§7), never the raw secret.
-  async getTenantProviders(tenantId: string): Promise<{
-    providers: TenantProviderSummary[];
-    smsWalletBalance: number | null;
-  }> {
+  // addSelect it back in. Support cases need "which provider, BYOK or not"
+  // (§7), never the raw secret.
+  async getTenantProviders(
+    tenantId: string,
+  ): Promise<{ providers: TenantProviderSummary[] }> {
     const tenant = await this.tenantRepo.findOneBy({ id: tenantId });
     if (!tenant) throw new NotFoundException('Tenant not found');
 
-    const [configs, wallet] = await Promise.all([
-      this.tenantProviderConfigRepo.find({ where: { tenantId } }),
-      this.smsWalletRepo.findOneBy({ tenantId }),
-    ]);
+    const configs = await this.tenantProviderConfigRepo.find({
+      where: { tenantId },
+    });
 
     const providerIds = configs.map((c) => c.providerId);
     const providers = providerIds.length
@@ -79,7 +74,6 @@ export class PlatformCommunicationProviderService {
         senderIdentity: config.senderIdentity,
         isActive: config.isActive,
       })),
-      smsWalletBalance: wallet?.balanceCredits ?? null,
     };
   }
 }

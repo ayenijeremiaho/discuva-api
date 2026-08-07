@@ -18,9 +18,12 @@ function toAddressList(
 export class SendGridProvider implements IEmailProvider {
   readonly providerName = 'sendgrid';
   private readonly defaultApiKey: string;
+  private readonly baseUrl: string;
 
   constructor(private readonly config: ConfigService) {
     this.defaultApiKey = config.get<string>('SENDGRID_API_KEY');
+    this.baseUrl =
+      config.get<string>('SENDGRID_BASE_URL') || 'https://api.sendgrid.com';
   }
 
   async sendMail(
@@ -37,7 +40,7 @@ export class SendGridProvider implements IEmailProvider {
     const to = toAddressList(options.to);
     const cc = toAddressList(options.cc);
 
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    const response = await fetch(`${this.baseUrl}/v3/mail/send`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,

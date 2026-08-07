@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { TitheAccount } from './entity/tithe-account.entity';
@@ -15,9 +16,7 @@ import { UtilityModule } from '../utility/utility.module';
 import { AdminModule } from '../admin/admin.module';
 import { Admin } from '../admin/entity/admin.entity';
 import { Member } from '../member/entity/member.entity';
-import { MemberVirtualAccount } from '../finance/entity/member-virtual-account.entity';
-import { VirtualAccountService } from '../finance/service/virtual-account.service';
-import { VirtualAccountWebhookController } from '../finance/controller/virtual-account-webhook.controller';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -30,17 +29,15 @@ import { VirtualAccountWebhookController } from '../finance/controller/virtual-a
       TithePaymentProof,
       Member,
       Admin,
-      MemberVirtualAccount,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by TitheService.purgeExpiredProofs' forEachActiveTenant loop.
+    TypeOrmModule.forFeature([Tenant]),
     BullModule.registerQueue({ name: TITHE_QUEUE }),
     UtilityModule,
     AdminModule,
   ],
-  controllers: [
-    TitheAdminController,
-    TitheMemberController,
-    VirtualAccountWebhookController,
-  ],
-  providers: [TitheService, TitheProcessor, VirtualAccountService],
+  controllers: [TitheAdminController, TitheMemberController],
+  providers: [TitheService, TitheProcessor],
 })
 export class TitheModule {}

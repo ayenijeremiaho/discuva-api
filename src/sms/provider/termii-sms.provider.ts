@@ -13,41 +13,27 @@ import {
   SmsSendResult,
 } from '../interface/sms-provider.interface';
 
-// Termii caps a single bulk-send request at 100 recipients — callers of
-// SmsService must batch larger recipient lists themselves.
+// Termii caps a single bulk-send request at 100 recipients — SmsService's
+// chunk() batches larger recipient lists using this value.
 export const TERMII_MAX_RECIPIENTS_PER_REQUEST = 100;
 
 @Injectable()
 export class TermiiSmsProvider implements ISmsProvider {
   private readonly logger = new Logger(TermiiSmsProvider.name);
-  private readonly defaultApiKey: string;
-  private readonly defaultSenderId: string;
-  // Not tenant-specific even under BYOK — every Termii account (platform's
-  // own or a tenant's) talks to the same API host, only apiKey/senderId
-  // differ per credential set.
+  readonly maxRecipientsPerRequest = TERMII_MAX_RECIPIENTS_PER_REQUEST;
+  // API host is Termii infrastructure, not a secret — every tenant's Termii
+  // account (BYOK) talks to the same host, only apiKey/senderId differ.
   private readonly baseUrl: string;
 
   constructor(private readonly configService: ConfigService) {
-    this.defaultApiKey = this.configService.get<string>('TERMII_API_KEY');
-    this.defaultSenderId = this.configService.get<string>('TERMII_SENDER_ID');
     this.baseUrl = this.configService.get<string>('TERMII_BASE_URL');
-  }
-
-  // `credentials` present means a tenant's own decrypted BYOK config
-  // (SmsCredentialResolverService) — falls back to this platform's own
-  // constructor-injected default (the pre-BYOK behavior) when absent.
-  private resolve(credentials?: SmsProviderCredentials) {
-    return {
-      apiKey: credentials?.apiKey || this.defaultApiKey,
-      senderId: credentials?.senderId || this.defaultSenderId,
-    };
   }
 
   async send(
     to: string[],
     message: string,
     encoding: SmsEncoding,
-    credentials?: SmsProviderCredentials,
+    credentials: SmsProviderCredentials,
   ): Promise<SmsSendResult> {
     if (to.length > TERMII_MAX_RECIPIENTS_PER_REQUEST) {
       throw new InternalServerErrorException(
@@ -55,7 +41,7 @@ export class TermiiSmsProvider implements ISmsProvider {
       );
     }
 
-    const { apiKey, senderId } = this.resolve(credentials);
+    const { apiKey, senderId } = credentials;
     const isBulk = to.length > 1;
     const url = `${this.baseUrl}/api/sms/send${isBulk ? '/bulk' : ''}`;
     const body = {
@@ -87,8 +73,8 @@ export class TermiiSmsProvider implements ISmsProvider {
     };
   }
 
-  async getBalance(credentials?: SmsProviderCredentials): Promise<SmsBalance> {
-    const { apiKey } = this.resolve(credentials);
+  async getBalance(credentials: SmsProviderCredentials): Promise<SmsBalance> {
+    const { apiKey } = credentials;
     const url = `${this.baseUrl}/api/get-balance?api_key=${apiKey}`;
     const response = await fetch(url);
     const json: any = await response.json().catch(() => ({}));
@@ -107,9 +93,9 @@ export class TermiiSmsProvider implements ISmsProvider {
   }
 
   async getMessageHistory(
-    credentials?: SmsProviderCredentials,
+    credentials: SmsProviderCredentials,
   ): Promise<SmsLogEntry[]> {
-    const { apiKey } = this.resolve(credentials);
+    const { apiKey } = credentials;
     const url = `${this.baseUrl}/api/sms/inbox?api_key=${apiKey}`;
     const response = await fetch(url);
     const json: any = await response.json().catch(() => ({}));

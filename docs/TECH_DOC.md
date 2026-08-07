@@ -1,4 +1,4 @@
-# Discovery Hub — Technical Documentation
+# Discuva — Technical Documentation
 
 ## Table of Contents
 
@@ -1582,22 +1582,87 @@ ownership from scratch.
 
 ### Tenant Welcome / Set Password Flow
 
-When a tenant is provisioned by a platform admin (`POST /platform/tenants`), nobody is present to type in that
-tenant's first admin's password the way a self-serve `POST /signup` caller does. `TenantProvisioningService.provision()`
-branches on whether `adminPasswordHash` was supplied:
+Neither public entry point — self-serve `POST /signup` nor platform-admin `POST /platform/tenants` — collects a
+password for the tenant's first admin. `SignupDto` has no `adminPassword` field at all: letting an unauthenticated
+signup form set a password directly would mean anyone could submit an email address they don't own, with no proof of
+control over that inbox. `TenantProvisioningService.provision()`/`seedTenantAdmin()` still branches on whether
+`adminPasswordHash` was supplied, but in practice only one caller ever supplies it today — the `provision:tenant` CLI
+script (`src/provision-tenant.ts`), an internal ops tool run by trusted staff, not a public HTTP surface:
 
-- **Self-serve signup / branch invite** (caller supplied a password): unchanged — `changedPassword: true`, no email.
-- **Platform-admin-provisioned** (`adminPasswordHash` omitted): `seedTenantAdmin()` generates a random password via
-  `UtilityService.generateRandomPassword()` and hashes it — this password is never revealed to anyone, including the
-  platform admin who triggered provisioning. `changedPassword: false`. It also generates a 6-digit OTP and stores its
-  hash in `password_reset_otps` (the same table the forgot-password flow uses) with a 48-hour expiry
-  (`WELCOME_OTP_TTL_HOURS`) — deliberately longer than the 15-minute forgot-password OTP, since a new admin may not
-  check their email the same day. Once the tenant is active, `provision()` fire-and-forgets a warm welcome email
-  (`tenant-welcome` template) to the new admin containing the OTP and a `Faithapp-admin`
-  `/set-password?email=...&otp=...` link. That page pre-fills the code and calls the existing
+- **No `adminPasswordHash` supplied** (both `POST /signup` and `POST /platform/tenants`, i.e. the normal case):
+  `seedTenantAdmin()` generates a random password via `UtilityService.generateRandomPassword()` and hashes it — this
+  password is never revealed to anyone, including the caller who triggered provisioning. `changedPassword: false`. It
+  also generates a 6-digit OTP and stores its hash in `password_reset_otps` (the same table the forgot-password flow
+  uses) with a 48-hour expiry (`WELCOME_OTP_TTL_HOURS`) — deliberately longer than the 15-minute forgot-password OTP,
+  since a new admin may not check their email the same day. Once the tenant is active, `provision()` fire-and-forgets
+  a warm welcome email (`tenant-welcome` template) to the new admin containing the OTP and a `discuva-admin`
+  (formerly `Faithapp-admin`) `/set-password?email=...&otp=...` link. That page pre-fills the code and calls the existing
   `POST /auth/reset-password` — the same endpoint and verification logic the forgot-password flow uses, just reached
   from a different starting point. The longer OTP window is offset by rate-limiting `POST /auth/reset-password`
-  itself (5 attempts/min).
+  itself (5 attempts/min). Clicking that link and setting a password is also, in effect, email verification — nobody
+  can ever log in to a self-serve-signed-up tenant without proving control of the inbox behind `adminEmail`.
+- **`adminPasswordHash` supplied** (CLI only): `changedPassword: true`, no OTP generated, no welcome email sent.
+
+### Async Tenant Provisioning + Onboarding State Machine
+
+`TenantProvisioningService.provision()` (`CREATE SCHEMA` + run the tenant migration set + seed the first admin +
+create a `Subscription`) runs **async, on a Bull queue** (`TENANT_PROVISIONING_QUEUE`,
+`TenantProvisioningProcessor`) for self-serve `POST /signup` only. `POST /platform/tenants` runs it **inline** —
+see "Platform-admin tenant creation is synchronous" below for why the two callers deliberately differ. `provision()`
+itself is unchanged either way and still callable directly (the `provision:tenant` CLI script does) — it's already
+idempotent (checks existing state before acting at every step), which is what makes it safe for the queue to retry
+and safe to re-run by hand after a synchronous failure.
+
+**`Tenant.onboardingStatus`** (`PENDING | PROVISIONING | ACTIVE | FAILED`) is orthogonal to `isActive` — `isActive`
+still means "currently allowed to serve live traffic" (also flipped by `PlatformTenantService.suspendTenant`);
+`onboardingStatus` only ever moves forward through the lifecycle once and never changes on suspend/reactivate.
+
+**Self-serve signup flow (async):**
+1. `TenantProvisioningService.ensurePendingTenant(subdomain, churchName, parentTenantId?)` — the find-or-create part
+   of the old `provision()`, now its own method — creates the `Tenant` row (`onboardingStatus: PENDING`) or returns
+   the existing one if resuming. Callable standalone specifically so `SignupController` gets a real `tenant.id` back
+   before handing off to the queue.
+2. `recordEvent(tenantId, 'SIGNUP_INITIATED', SELF_SERVE)` — see the audit trail note below.
+3. A `TENANT_PROVISIONING_JOB` is enqueued (`ProvisionTenantParams` + `tenantId` + `actorType`/`actorId` +
+   `branchInviteToken`), `attempts: 3, backoff: { type: 'exponential', delay: 5000 }` (this codebase's standard
+   retry convention, e.g. `TitheProcessor`).
+4. `TenantProvisioningProcessor` sets `onboardingStatus = PROVISIONING`, records `PROVISIONING_STARTED`, calls
+   `provision()` (unchanged), then on success sets `onboardingStatus = ACTIVE` (`provision()` already flips
+   `isActive`), records `PROVISIONING_COMPLETED`, and consumes the branch invite (`BranchInviteService.markAccepted`,
+   moved here from `SignupController` since the controller no longer awaits completion). On permanent failure (all 3
+   attempts exhausted, via `@OnQueueFailed()`) sets `onboardingStatus = FAILED` and records `PROVISIONING_FAILED`
+   with the error message in `metadata`.
+5. `GET /signup/:tenantId/status` (`@Public()`) — polled by the caller until `status` is `ACTIVE` (or `FAILED`).
+   Unauthenticated by design, same reasoning as `POST /signup` itself; excluded from `TenantMiddleware` alongside it
+   in `TenantModule` (a caller may not be on the tenant's own subdomain yet — e.g. a marketing site). **Confirmed
+   live** this exclude needs a named path parameter (`v1/signup/:tenantId/status`), not a bare `(.*)` wildcard
+   mid-path — this project's `path-to-regexp` version throws `PathError` on boot for that shape; only a suffix
+   wildcard like `v1/platform/(.*)` is accepted.
+
+**Platform-admin tenant creation is synchronous.** `PlatformTenantService.createTenant()` calls
+`ensurePendingTenant()` + `recordEvent('PLATFORM_ADMIN_INITIATED', PLATFORM_ADMIN, { actorId })`, then calls
+`provision()` directly and awaits it inline — no queue, no polling. On success it sets `onboardingStatus = ACTIVE`
+and records `PROVISIONING_COMPLETED`; on failure it sets `onboardingStatus = FAILED`, records
+`PROVISIONING_FAILED` with the error in `metadata`, and rethrows so the platform admin sees the real error
+immediately instead of a silently-stuck `PENDING` row. This was deliberately reverted from an earlier async design:
+unlike self-serve signup, this is a trusted, authenticated action by a platform admin, there's no fraud-review gate
+that would need to sit between "created" and "actually provisioned," and `CREATE SCHEMA` + migrations + seeding is
+fast enough that the admin can just wait for the response.
+
+**Platform-level audit trail (`TenantOnboardingEvent`, `tenant_onboarding_events`):** distinct from
+`AuditLogService`, which is tenant-scoped (lives in each church's own schema, actor FKs to that tenant's own
+`Member`) and can't record an event from before/independent of any tenant schema existing. A small, purpose-built,
+`public`-schema table instead: `tenant` (FK, cascade), `event` (`SIGNUP_INITIATED | PLATFORM_ADMIN_INITIATED |
+PROVISIONING_STARTED | PROVISIONING_COMPLETED | PROVISIONING_FAILED`), `actorType` (`SELF_SERVE | PLATFORM_ADMIN |
+SYSTEM`), `actorId` (nullable — the platform admin's id when `actorType = PLATFORM_ADMIN`), `metadata` (nullable
+jsonb). Written via `TenantProvisioningService.recordEvent()` — no separate service, it's a simple insert-only log.
+Viewable per-tenant via `GET /platform/tenants/:id/onboarding-events` (`TENANTS_READ` permission). The
+platform-admin path never emits `PROVISIONING_STARTED` — there's no meaningful gap between "initiated" and
+"started" when both happen inline in the same request.
+
+**Response shape:** `POST /signup` returns a `PENDING` tenant immediately (poll `GET /signup/:tenantId/status` for
+completion). `POST /platform/tenants` returns the tenant already `ACTIVE` — same shape `GET /platform/tenants`'
+rows use, no polling needed.
 
 ### Role Elevation
 
@@ -1612,7 +1677,7 @@ key. This is a full replacement of the earlier `Department.key`-based system: `k
 validated against nothing but a preset-suggestion enum) has been removed entirely, in favor of `capabilities` — a
 fixed, code-defined, multi-value list. The old system conflated "this department's organizational label" with "what
 it unlocks," forcing an admin to type a magic string that had to exactly match hardcoded values scattered across both
-the backend and Faithapp mobile, and could only ever grant one capability per department. Capabilities decouple these:
+the backend and discuva-member mobile, and could only ever grant one capability per department. Capabilities decouple these:
 a department can be named anything, and separately be given any combination of capabilities via checkboxes in the
 admin UI.
 
@@ -1638,7 +1703,7 @@ admin UI.
   and calling the service would mean a redundant query.
 - `GET /auth/me` computes a flat `capabilities: DepartmentCapability[]` field on `MemberDto`
   (`@Transform`, same pattern as `pastorType`) — a deduped union of the primary and secondary department's
-  capabilities. Faithapp mobile checks this one field (`profile?.capabilities?.includes("X")`) instead of
+  capabilities. discuva-member mobile checks this one field (`profile?.capabilities?.includes("X")`) instead of
   independently re-deriving the primary-or-secondary union at every call site.
 - HOD (head-of-department) assignment is always restricted to the worker's **primary** department (unrelated to
   capabilities).
@@ -1676,6 +1741,22 @@ no `/etc/hosts` changes), then wraps the entire rest of the request — guards, 
 DB transaction with `SET LOCAL search_path` set to that tenant's schema. Full design in
 `docs/MULTI_TENANT_MIGRATION.md` §4.3/§4.4.
 
+**Distinct error responses per tenant state, not a single generic 404:** the tenant lookup is `findOneBy({
+subdomain })`, deliberately not filtered by `isActive`, so a row that exists but isn't (yet, or anymore) usable gets
+a response that actually explains why, using `onboardingStatus` (see "Async Tenant Provisioning + Onboarding State
+Machine" above) to disambiguate:
+- No `Tenant` row at all for the subdomain → `404 Tenant not found` (unchanged).
+- `onboardingStatus` is `PENDING`/`PROVISIONING` → `503`, "This workspace is still being set up. Please check back
+  in a moment." — this is the common case for a subdomain hit moments after signup, before the queue has finished.
+- `onboardingStatus` is `FAILED` → `503`, "There was a problem setting up this workspace. Please contact support." —
+  deliberately no technical detail in the public response; `GET /platform/tenants/:id/onboarding-events` is where
+  that lives.
+- `onboardingStatus` is `ACTIVE` but `isActive` is `false` → `403`, "This account has been suspended. Please contact
+  support." `onboardingStatus` never reverts once `ACTIVE`, so this combination only ever means
+  `PlatformTenantService.suspendTenant` was used — a materially different situation from "still provisioning" that
+  a flat `isActive` check couldn't previously tell apart (both 404'd identically before this).
+- `onboardingStatus === ACTIVE && isActive === true` → proceeds normally, as before.
+
 **For any new module with tenant-owned tables:** register entities with `TenantTypeOrmModule.forFeature([...])`
 (`src/tenant/utility/tenant-typeorm.module.ts`), not `TypeOrmModule.forFeature([...])`. Plain `TypeOrmModule`
 repositories never see the tenant transaction regardless of request scoping — this is a `@nestjs-cls/transactional`
@@ -1683,6 +1764,55 @@ limitation, not a bug to work around per-call. `TenantTypeOrmModule` is a drop-i
 token, so `@InjectRepository(Entity)` call sites in services need no changes. Only genuinely global, `public`-only
 tables (`Tenant`, `PlatformAdmin`, `Plan`/`Subscription`, and similar control-plane entities) should keep plain
 `TypeOrmModule.forFeature()`.
+
+**Scheduler tenant iteration (`forEachActiveTenant`):** `@Cron()`-decorated methods run with no CLS context at all —
+there's no HTTP request for `TenantMiddleware` to hook into. A tenant-scoped repository called from inside a
+scheduler with no CLS context silently falls back to the plain `public`-search-path manager instead of throwing, so
+without doing anything about it a scheduler processes whatever stale/orphaned rows happen to sit in `public`, not
+any real tenant's data. Every scheduler that touches tenant-scoped data fetches every active `Tenant` and re-enters
+that tenant's context once per tenant via the shared helper `forEachActiveTenant(tenantRepo, cls, txHost, logger,
+fn)` (`src/tenant/utility/for-each-active-tenant.ts`), which wraps the existing `runInTenantContext()` helper (the
+same one `EmailProcessor` already used) in a fetch-loop-catch: `fn` runs once per active tenant inside that tenant's
+`cls.runWith(...)` + `SET LOCAL search_path` transaction, and one tenant throwing is caught and logged without
+stopping the rest of the batch. Any distributed Redis lock a scheduler already had (e.g. `lock:pledge-reminders`)
+still wraps the *whole* `@Cron` method across all tenants, unchanged — it guards against two app instances racing,
+not tenants racing each other. A service that opens its own `dataSource.transaction()` inside a scheduler needs
+extra care: a fresh top-level transaction doesn't inherit the outer `SET LOCAL search_path` (likely a different
+pooled connection) and would silently write to the wrong schema — such call sites are rewritten to use the ambient
+`this.txHost.tx` manager instead (see `AttendanceService.markAbsentees()` and `RecurringEntryScheduler`, the latter
+wrapping each recurring entry in its own Postgres `SAVEPOINT` so one entry's failure doesn't abort the whole
+tenant's batch). `BranchRollupScheduler` predates this helper and hand-rolls the identical fetch-loop pattern
+itself; `YoutubeSubscriptionScheduler` and `SubscriptionLapseScheduler`'s top-level query are exempt because their
+data is genuinely control-plane (`public`-schema), not tenant-owned.
+
+**CORS origin validation (`createCorsOriginValidator`):** wildcard-subdomain tenancy means the set of valid frontend
+origins is unbounded — a new tenant's subdomain is valid to call the API the moment it's provisioned, so a static
+`CORS_ORIGINS` allowlist can never enumerate them all (and previously didn't try to — it silently rejected every
+tenant subdomain origin that wasn't hand-added to the list, a real bug, not just a gap). `src/main.ts`'s
+`app.enableCors()`, `ServiceSessionGateway`, and `GameSessionGateway` all now validate the incoming `Origin` header
+dynamically via the shared `createCorsOriginValidator()` (`src/tenant/utility/cors-origin-validator.ts`): allow if
+the origin's hostname equals `APP_BASE_DOMAIN` or ends in `.${APP_BASE_DOMAIN}` — the exact same suffix logic
+`extractSubdomain()` uses for tenant resolution, so "is this origin allowed to call the API" and "does this host
+resolve to a tenant" can never disagree — with a small explicit `CORS_ORIGINS` allowlist checked first for origins
+that don't fit the pattern (a separate marketing site, API docs, internal ops tooling). Requests with no `Origin`
+header (curl, server-to-server calls, mobile apps) are always allowed, matching the previous behavior. **Custom
+domains** (a tenant's own domain, e.g. `giving.theirchurch.org`) don't end in `APP_BASE_DOMAIN` and are rejected by
+this check today — deliberately deferred, same as `tenant_domains` itself (see Custom Domains note below); adding
+support means a second branch in `createCorsOriginValidator()` checking a *cached* set of verified custom domains
+before falling through to reject (must stay cached, not a live DB query — this runs on every request/connection).
+
+**Custom domains (deferred, not built):** `docs/MULTI_TENANT_MIGRATION.md` earmarks a future `tenant_domains` table
+for letting a church map their own domain (`giving.theirchurch.org`) to their tenant, instead of only
+`their-church.<APP_BASE_DOMAIN>`. Not built — subdomain routing is sufficient for now. When it is: (1) resolve the
+custom domain to the tenant's canonical `subdomain` via a new lightweight public endpoint, cached client-side, so
+`getTenantApiBaseUrl()` (every frontend) can build `<subdomain>.<api-host>` exactly as it does today — no changes
+needed to CLS/`SET LOCAL search_path`/tenant-scoped repos, all of that stays subdomain-keyed; (2) a domain must be
+DNS-verified (TXT record token, or requiring it already point at this infrastructure) before being trusted — a row
+in the table must never be sufficient on its own, since nothing stops a tenant from entering a domain they don't
+control; (3) TLS is an infrastructure decision independent of this codebase — a single wildcard cert covers every
+subdomain automatically, but each custom domain needs its own certificate (e.g. a reverse proxy that automates
+ACME/Let's Encrypt on demand, or requiring the tenant sit behind a proxy like Cloudflare that terminates TLS for
+them) — nothing here provisions that.
 
 ### Auth Module
 
@@ -1861,13 +1991,13 @@ UI.
 
 **`GET /modules/state`** (`JwtAuthGuard`, any authenticated member/worker/admin) is the one shared source of truth
 for "is module X on," returning `{ key, enabled, displayName }[]` for every known module (`displayName` falls back
-to the module's default label). Both Faithapp-admin's sidebar and Faithapp mobile's Explore/Ministry/Leadership
+to the module's default label). Both discuva-admin's sidebar and discuva-member mobile's Explore/Ministry/Leadership
 tiles read from this single endpoint (`useModuleState()` hook, near-identical implementation in both frontends)
 rather than each frontend independently guessing module state — the same duplication risk already seen once with
-Faithapp-admin's hardcoded permission-group list (see Admin Module's `AdminPermissionGroups` note below).
+discuva-admin's hardcoded permission-group list (see Admin Module's `AdminPermissionGroups` note below).
 
 **`AdminPermissionGroups` visibility tied to module state:** each `AdminPermissionGroup` (see `AdminPermission` enum
-reference) optionally carries a `moduleKey`. Faithapp-admin's role-permission picker (`app/admin-management/page.tsx`)
+reference) optionally carries a `moduleKey`. discuva-admin's role-permission picker (`app/admin-management/page.tsx`)
 and the read-only permission display (`app/profile/page.tsx`) both filter `PERMISSION_GROUPS`/`AdminPermissionGroups`
 through `isModuleEnabled(group.moduleKey)` before rendering — an admin is never offered permissions for a feature
 that's disabled for their church. Core, non-toggleable groups (Members, Events & Venues, Departments, Attendance,
@@ -1893,7 +2023,7 @@ its slot times (e.g. editing a slot's time left the event's dates stale), which 
 
 Each slot can have multiple reminder schedules via sub-resource `/events/slots/:slotId/reminders` (admin-only). See EventReminder model.
 
-**Admin frontend UX (`Faithapp-admin`, `app/events/page.tsx`):** since the event's date range is entirely derived from its slots' times (no manual override, per above), the create/edit form's `SlotRow` sets `min` on the datetime-local inputs (a slot's End Time can't be earlier than its own Start Time; each slot after the first has its Start Time's `min` set to the previous slot's End Time, since slots run in sequence) — but `min` on `type="datetime-local"` only reliably restricts the browser's *calendar* date view; the time-of-day spinner on an already-valid date isn't blocked interactively in Chrome/most browsers, only flagged `:invalid` on blur/submit, which read as "not working" for the time portion. `updateSlot()` therefore also clamps values in JS the instant they change: a slot's End Time snaps forward to match its Start Time if set earlier, a slot's Start Time snaps forward to the previous slot's End Time if set earlier (pulling its own End Time along if that would now precede it), and moving a slot's End Time later pulls the next slot's Start Time forward with it if it would otherwise fall behind. `min` is kept alongside this for the calendar-level hint; the JS clamp is what actually prevents an invalid time-of-day from sticking. Neither replaces backend validation, which still governs what's actually accepted on submit.
+**Admin frontend UX (`discuva-admin`, `app/events/page.tsx`):** since the event's date range is entirely derived from its slots' times (no manual override, per above), the create/edit form's `SlotRow` sets `min` on the datetime-local inputs (a slot's End Time can't be earlier than its own Start Time; each slot after the first has its Start Time's `min` set to the previous slot's End Time, since slots run in sequence) — but `min` on `type="datetime-local"` only reliably restricts the browser's *calendar* date view; the time-of-day spinner on an already-valid date isn't blocked interactively in Chrome/most browsers, only flagged `:invalid` on blur/submit, which read as "not working" for the time portion. `updateSlot()` therefore also clamps values in JS the instant they change: a slot's End Time snaps forward to match its Start Time if set earlier, a slot's Start Time snaps forward to the previous slot's End Time if set earlier (pulling its own End Time along if that would now precede it), and moving a slot's End Time later pulls the next slot's Start Time forward with it if it would otherwise fall behind. `min` is kept alongside this for the calendar-level hint; the JS clamp is what actually prevents an invalid time-of-day from sticking. Neither replaces backend validation, which still governs what's actually accepted on submit.
 
 **Reminder dispatch (cron `*/15 * * * *`):** Queries `EventReminder` rows where `enabled = true`, `lastSentAt IS NULL`, `fireAt <= now`, and `slot.startTime > now`. The filter runs entirely in SQL — `fireAt` is pre-computed at reminder creation (and recalculated if `intervalPreset` is updated). When a slot is deleted or recreated (e.g., event update), its reminders are cascade-deleted. On `create`, `fireAt = slot.startTime − preset_minutes`. On `update` with a new `intervalPreset`, `fireAt` is recalculated from the existing slot's `startTime`.
 
@@ -1968,7 +2098,7 @@ workers only, minimal fields, capped results) that it doesn't reopen a general m
 the same query `GET /attendances/history` already runs (no pagination), builds an `.xlsx`, and emails it via the
 `report-export` template.
 
-**Leaderboard chart (Faithapp-admin, `app/attendance/page.tsx`):** the Leaderboard tab has a Table/Chart toggle —
+**Leaderboard chart (discuva-admin, `app/attendance/page.tsx`):** the Leaderboard tab has a Table/Chart toggle —
 Chart renders a horizontal present/absent bar per worker via the same `components/charts/bar-chart.tsx` wrapper
 introduced for the headcount trends charts. No new backend aggregation — `GET /attendances/leaderboard` was already
 aggregate-shaped (`presentCount`/`absentCount` per worker).
@@ -2081,9 +2211,43 @@ Tracks member progress through structured church programs. The module, route pat
 **Certificates:** A `COMPLETED` enrollment can be marked as having received a certificate via `PATCH classes/enrollments/:id/certificate` (optional `certificateNumber`) — see the `ClassEnrollment` entity section above.
 
 **Study material (`ChurchClass.documentUrl`):** optional, admin-set link to the class's syllabus/manual (Google
-Drive, PDF link, etc.) — validated as a URL (`@IsUrl()`), not a file upload. Settable at create or update
-(`POST`/`PATCH classes`). Rendered as a "View Study Material" link on the admin detail panel and the member-facing
-class detail page (`Faithapp` mobile).
+Drive, PDF link, etc.) — validated as a URL (`@IsUrl()`) at the DTO level, but the URL itself can come from three
+places: a plain external link typed in directly, a fresh upload (`POST classes/materials/upload`, multipart, field
+name `file`), or reusing a URL already in use by another class (`GET classes/materials/library` — distinct
+`documentUrl`s across all classes, each with the list of class names currently using it, so the admin doesn't
+re-upload the same manual per class type). Upload accepts PDF, Word, PowerPoint, or image mimetypes; size is capped
+by `MAX_CLASS_MATERIAL_UPLOAD_BYTES` (env var, default 10 MB — separate from the app-wide `MAX_FILE_UPLOAD_BYTES`
+default of 5 MB since course material tends to run larger than proofs/images). Uploaded files land in Cloudinary's
+`class-materials` folder. Whichever source produced the URL, it's set the same way afterward — `documentUrl` on
+`POST`/`PATCH classes`.
+
+**Assignments (`Assignment`/`AssignmentSubmission`, tables `assignments`/`assignment_submissions`):** each
+`ChurchClass` can have any number of assignments. An assignment has `title`, optional `instructions`, `maxScore`
+(default 100), optional `dueDate`, and `isPublished` (default `true` — an unpublished assignment is an admin-only
+draft, invisible to students and not submittable). A student submits free-text `content` against a published
+assignment; one submission per member per assignment (`UNIQUE(assignment_id, member_id)`) — resubmitting before
+grading overwrites the existing row (`submittedAt` bumped), but once graded (`gradedAt` set) further resubmission
+is rejected with `400`, so a grade can't be silently invalidated by a late edit. Grading (`PATCH
+classes/assignments/submissions/:submissionId/grade`) sets `score` (validated `<= assignment.maxScore`, `400`
+otherwise), optional `feedback`, and stamps `gradedBy` (the grading `Admin`, resolved via `@CurrentAdmin()` — not
+the JWT's member id) + `gradedAt`. `gradedBy` is `SET NULL` on admin deletion, mirroring the `reviewedBy` pattern
+used by tithe/finance proof review.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| POST   | `/classes/:classId/assignments`                          | AdminGuard (CLASSES_WRITE) | Create an assignment for a class |
+| GET    | `/classes/:classId/assignments`                          | AdminGuard (CLASSES_READ)  | All assignments for a class, including unpublished drafts |
+| GET    | `/classes/:classId/assignments/available`                | JwtAuthGuard               | Published assignments only, each merged with the caller's own `mySubmission` (`null` if not yet submitted) |
+| PATCH  | `/classes/assignments/:assignmentId`                     | AdminGuard (CLASSES_WRITE) | Partial update |
+| DELETE | `/classes/assignments/:assignmentId`                     | AdminGuard (CLASSES_WRITE) | Cascades submissions |
+| POST   | `/classes/assignments/:assignmentId/submit`              | JwtAuthGuard               | Create or (if ungraded) overwrite the caller's own submission |
+| GET    | `/classes/assignments/:assignmentId/submissions`         | AdminGuard (CLASSES_READ)  | Paginated (`?page=&limit=`), for grading |
+| PATCH  | `/classes/assignments/submissions/:submissionId/grade`   | AdminGuard (CLASSES_WRITE) | `{ score, feedback? }` |
+| POST   | `/classes/materials/upload`                              | AdminGuard (CLASSES_WRITE) | Multipart, field `file` → `{ url }` |
+| GET    | `/classes/materials/library`                             | AdminGuard (CLASSES_READ)  | `{ documentUrl, usedByClassNames }[]` — for the "reuse a previous upload" picker |
+
+Assignments reuse the existing `classes:read`/`classes:write` permissions rather than adding new ones — managing
+assignments is the same admin surface as managing the classes they belong to.
 
 **Routes prefix:** `/classes`, `/classes/types`
 
@@ -2209,26 +2373,29 @@ via `Set`. Phone-only entries have no "active" concept; they're included as-is.
 
 ### SMS Module
 
-Provider-agnostic SMS sending, currently backed by Termii. Consumers (e.g. `AnnouncementService`) depend only on
-`SmsService`/`SmsProvider` — swapping vendors means writing a new class implementing `SmsProvider` and changing one
-line in `SmsModule`, with no other call site changes.
+Provider-agnostic SMS sending — pure BYOK, no platform-default account and no prepaid credit balance. A tenant must
+configure and activate their own SMS provider (Communication Providers below) before they can send at all; there is
+no fallback. This is deliberate: a platform-run wallet billed in Naira only ever made sense for Nigerian tenants —
+BYOK lets a tenant in any country pick whichever SMS vendor actually serves them and pay that vendor directly.
 
 **Provider abstraction (`src/sms/interface/sms-provider.interface.ts`):**
 
 ```ts
-type SmsProviderCredentials = Record<string, string>; // e.g. Termii's { apiKey, senderId }
+type SmsProviderCredentials = Record<string, string>; // e.g. Termii's { apiKey, senderId }, Twilio's { accountSid, authToken, fromNumber }
 
-interface SmsProvider {
-  send(to: string[], message: string, encoding: 'plain' | 'unicode', credentials?: SmsProviderCredentials): Promise<{ messageId: string; status: string }>;
-  getBalance(credentials?: SmsProviderCredentials): Promise<{ balance: number; currency: string }>;
-  getMessageHistory(credentials?: SmsProviderCredentials): Promise<SmsLogEntry[]>;
+interface ISmsProvider {
+  readonly maxRecipientsPerRequest: number; // Termii: 100 (true bulk endpoint); Twilio: 20 (concurrency cap, no bulk endpoint)
+  send(to: string[], message: string, encoding: 'plain' | 'unicode', credentials: SmsProviderCredentials): Promise<{ messageId: string; status: string }>;
+  getBalance(credentials: SmsProviderCredentials): Promise<{ balance: number; currency: string }>;
+  getMessageHistory(credentials: SmsProviderCredentials): Promise<SmsLogEntry[]>;
 }
 ```
 
-Registered under the `SMS_PROVIDER` DI token in `SmsModule`; `TermiiSmsProvider` is the current concrete
-implementation. `credentials` omitted means "use this provider's own platform-default credentials"
-(`TERMII_API_KEY`/`TERMII_SENDER_ID` below) — present means a tenant's own BYOK credentials, resolved per call by
-`SmsCredentialResolverService` (see Communication Providers below).
+`SmsProviderRegistryService` (`src/sms/service/sms-provider-registry.service.ts`, same shape as billing's
+`PaymentProviderRegistryService`) holds every registered vendor simultaneously — `termii` → `TermiiSmsProvider`,
+`twilio` → `TwilioSmsProvider` — and `SmsService` resolves which one to use per call from the tenant's active
+`TenantCommunicationProviderConfig.providerId`, never a hardcoded class. Adding a vendor is a new `ISmsProvider`
+class, a line in the registry, and a `communication_providers` catalog row — no other call site changes.
 
 **`SmsService`:**
 
@@ -2237,32 +2404,33 @@ implementation. `credentials` omitted means "use this provider's own platform-de
   documents as forcing UCS-2/unicode encoding even though they're otherwise ordinary ASCII punctuation:
   `; ^ { } \ [ ~ ] | € ' "` — in which case it's encoded `unicode` (70 chars/segment). Returns
   `{ segments, encoding, characterCount }`.
-- `send(to, message)` — resolves the caller's tenant credentials once (`SmsCredentialResolverService.resolveCredentials()`),
-  then batches `to` into groups of 100 (Termii's per-request recipient cap, `TERMII_MAX_RECIPIENTS_PER_REQUEST`) and
-  calls the provider once per batch. **If the tenant has no active BYOK config**, each batch first debits
-  `segments × batch.length` credits from the tenant's `SmsWallet` (throws `403 INSUFFICIENT_SMS_BALANCE` if it can't
-  cover the batch) before calling the provider with the platform's own default credentials — so a tenant with BYOK
-  configured never touches the wallet at all, they're billed by their own vendor directly. A failed batch (send
-  failure, or insufficient balance) is logged and skipped; it does not abort the remaining batches.
-- `getLogs()`/`getBalance()` — pure passthrough to the provider, using the same resolved credentials as `send()` (a
-  tenant with their own Termii account sees their own balance/history, not the platform's).
+- `send(to, message)` — resolves the caller's active SMS config once
+  (`SmsCredentialResolverService.resolveConfig()`); if the tenant has none configured, throws
+  `403 SMS_PROVIDER_NOT_CONFIGURED` immediately, before attempting anything. Otherwise looks up the matching
+  `ISmsProvider` from the registry and batches `to` into groups of that provider's own
+  `maxRecipientsPerRequest`. A failed batch is logged and skipped; it does not abort the remaining batches.
+- `getLogs()`/`getBalance()` — same resolve-or-403 pattern, then pure passthrough to the resolved provider (a
+  tenant sees their own vendor's balance/history, never the platform's — there isn't one).
 
 **Message history (`TermiiSmsProvider.getMessageHistory`):** calls Termii's `GET /api/sms/inbox?api_key=...`
 (undocumented pagination or date-filter params — it's a flat array of every message on the account) and maps its
 raw field names (`receiver`, `message`, `status`, `sms_type`, `message_id`, `created_at`, `sender?`) to the
 provider-agnostic `SmsLogEntry` shape (`recipient`, `message`, `status`, `type`, `messageId`, `sentAt`, `sender?`).
-A non-array response body is treated as empty rather than thrown.
+A non-array response body is treated as empty rather than thrown. `TwilioSmsProvider` has no native bulk-send
+endpoint, so it issues one `POST` per recipient (`Promise.all`, capped by `maxRecipientsPerRequest`) and joins the
+returned `sid`s with a comma for `messageId`.
 
 **Routes prefix:** `/admin/sms` (`AdminGuard`)
 
 | Method | Path                       | Permission | Description                                                            |
 |--------|----------------------------|------------|--------------------------------------------------------------------------|
-| GET    | `/admin/sms/balance`       | SMS_READ   | Returns `{ balance, currency }` from the provider                        |
+| GET    | `/admin/sms/balance`       | SMS_READ   | Returns `{ balance, currency }` from the tenant's active provider — `403 SMS_PROVIDER_NOT_CONFIGURED` if none is active |
 | POST   | `/admin/sms/segment-count` | SMS_READ   | Body `{ message }` — returns `{ segments, encoding, characterCount }` without sending anything |
-| GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]`, not paginated or filtered server-side (Termii's endpoint doesn't support either); the frontend paginates/filters the returned array client-side |
+| GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]`, not paginated or filtered server-side; the frontend paginates/filters the returned array client-side |
 
-**Env vars:** `TERMII_API_KEY`, `TERMII_SENDER_ID`, `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — the
-platform-default credentials used for any tenant without their own BYOK config. See Environment Variables.
+**Env vars:** `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — Termii's API host is infrastructure, not a
+secret, so it stays env-driven even under pure BYOK; every tenant's Termii account (BYOK) talks to the same host.
+No platform-default credentials exist for any SMS vendor. See Environment Variables.
 
 ### Communication Providers (Tenant Self-Service BYOK)
 
@@ -2278,12 +2446,11 @@ lets a church admin actually set their own SMS/email provider credentials (`docs
 (`apiKey`, `senderId`, etc.) intact and legible in the stored JSONB while no individual value is ever plaintext.
 **Rotating this key makes every previously-encrypted credential unreadable — there is no re-encryption tooling.**
 
-**Credential resolution + wallet debit (`SmsCredentialResolverService`):** `resolveCredentials()` looks up the
+**Credential resolution (`SmsCredentialResolverService`):** pure BYOK, no wallet. `resolveConfig()` looks up the
 current tenant's active `TenantCommunicationProviderConfig` for the `sms` channel (cached 300s per
-`(tenantId, channel)`, invalidated immediately on write), decrypts it, and returns it — or `undefined` if the tenant
-has no BYOK config, meaning "use the platform default". `debitForSend(credits, reference)` atomically decrements
-`SmsWallet.balanceCredits` inside a row-locked (`pessimistic_write`) transaction and appends a
-`SmsWalletTransaction` audit row — throws `403 INSUFFICIENT_SMS_BALANCE` if the tenant's balance can't cover it.
+`(tenantId, channel)`, invalidated immediately on write), decrypts it, and returns `{ providerId, credentials }` —
+or `undefined` if the tenant has no active SMS provider configured, which `SmsService` treats as "can't send"
+(`403 SMS_PROVIDER_NOT_CONFIGURED`), never as "use a default."
 
 **Email credential resolution (`EmailCredentialResolverService`):** same shape as the SMS resolver, `email` channel
 — `resolveConfig()` returns `{ providerId, credentials, senderIdentity }` (or `undefined` for "use platform
@@ -2296,15 +2463,22 @@ incompatible credential shape (`{user, password[, host, port, secure]}` for `gma
 `IEmailProvider` to hand the decrypted credentials to, not just that BYOK credentials exist. `senderIdentity` doubles
 as the email "from" address for a BYOK tenant (falls back to the platform's `EMAIL_FROM`/`EMAIL_USER` when unset).
 
-**Email providers (`src/utility/email-provider/`):** five catalog entries, one `IEmailProvider` class each —
+**Email providers (`src/utility/email-provider/`):** five implemented `IEmailProvider` classes; only `gmail`,
+`resend`, and `sendgrid` are seeded into the `communication_providers` catalog (`smtp`/`mailgun` exist in code but
+aren't tenant-selectable yet — add a catalog row to turn one on) —
 
 | `providerId` | Class              | Credential shape                          | Platform default env vars                                    |
 |--------------|---------------------|--------------------------------------------|----------------------------------------------------------------|
 | `gmail`      | `GmailProvider`     | `{user, password[, host, port, secure]}`  | `EMAIL_HOST`/`EMAIL_PORT`/`EMAIL_SECURE`/`EMAIL_SERVICE`/`EMAIL_USER`/`EMAIL_PASSWORD` |
 | `smtp`       | `SmtpProvider`      | `{host, port?, secure?, user, password}`  | none — BYOK-only, throws if called without credentials         |
 | `resend`     | `ResendProvider`    | `{apiKey}`                                | `RESEND_API_KEY`                                                |
-| `sendgrid`   | `SendGridProvider`  | `{apiKey}`                                | `SENDGRID_API_KEY`                                              |
+| `sendgrid`   | `SendGridProvider`  | `{apiKey}`                                | `SENDGRID_API_KEY`/`SENDGRID_BASE_URL`                          |
 | `mailgun`    | `MailgunProvider`   | `{apiKey, domain}`                        | `MAILGUN_API_KEY`/`MAILGUN_DOMAIN`/`MAILGUN_BASE_URL`           |
+
+`sendgrid` is Twilio's actual email product (SendGrid) — catalog name `SendGrid (Twilio)` — registered alongside
+`twilio` (SMS) so a tenant who wants Twilio across both channels can, using each product's own real credential shape
+(they're genuinely separately-credentialed even though one company owns both, so this is two catalog rows, not one
+shared "Twilio" entry).
 
 `gmail`'s BYOK credentials accept an optional `host`/`port`/`secure` override on top of `user`/`password` — this is
 what actually lets a tenant route mail through a different domain (Outlook/Office365, Zoho, their own company mail
@@ -2320,8 +2494,14 @@ which is entirely excluded from `TenantMiddleware`)
 | Method | Path                                | Permission                    | Description |
 |--------|-------------------------------------|--------------------------------|--------------|
 | GET    | `/communication-providers`          | COMMUNICATION_PROVIDERS_READ  | `?channel=sms\|email` (optional) — returns `{ catalog, ownConfigs }`; `ownConfigs` never includes credentials |
-| PUT    | `/communication-providers/:channel` | COMMUNICATION_PROVIDERS_WRITE | Body `{ providerId, senderIdentity?, credentials: Record<string,string> }` — upserts this tenant's config for that channel, encrypting `credentials` before storage |
+| PUT    | `/communication-providers/:channel` | COMMUNICATION_PROVIDERS_WRITE | Body `{ providerId, senderIdentity?, credentials: Record<string,string> }` — upserts this tenant's config for that channel (always activating it), encrypting `credentials` before storage |
 | PATCH  | `/communication-providers/:channel/:providerId` | COMMUNICATION_PROVIDERS_WRITE | Body `{ isActive }` — enable/disable an already-configured provider without touching its stored credentials |
+
+**Only one active provider per channel:** both `PUT` and `PATCH` (when activating) run inside a transaction that also
+deactivates every other provider already active on that same channel for the tenant
+(`TenantCommunicationProviderService.deactivateSiblings`) — `SmsCredentialResolverService`/`EmailCredentialResolverService`
+each pick a single `isActive = true` row per channel, so allowing more than one active at a time would make that
+pick arbitrary. Turning a provider *off* never touches its siblings.
 
 **Env vars:** `CREDENTIALS_ENCRYPTION_KEY` (required, `min(32)` chars) — see Environment Variables.
 
@@ -2357,20 +2537,55 @@ the Cloudinary asset id so a replace or removal can delete the previous asset �
 new row is saved, so a failed re-upload never leaves a tenant with no logo. All three routes (`PATCH /tenant/info`,
 `POST /tenant/logo`, `DELETE /tenant/logo`) return the same profile shape.
 
+**Mobile app appearance (`tenant_asset_overrides`):** the member PWA (`discuva-member`) ships a bundled
+default hero/backdrop image for every screen — `KNOWN_ASSETS`
+(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (24 keys today,
+e.g. `login-backdrop`, `home-door-welcome`, `giving-backdrop`), each mapped to the screen(s) it actually renders on
+in the mobile app. A church can override any of these with its own image; anything left unset silently falls back
+to the app's own bundled default — that fallback resolution happens **client-side** in discuva-member, not
+here. This backend only ever knows what's been explicitly overridden.
+
+- `GET /tenant/info`'s response gained an `assets: Record<assetKey, imageUrl>` field — only overridden keys appear
+  in it, never the full catalog and never a default. Bundled into the same call the member app already makes on
+  startup rather than a second round trip.
+- `GET /tenant/assets/catalog` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — the fixed `KNOWN_ASSETS` list with
+  labels/descriptions, for the admin appearance-settings page to render without duplicating the catalog
+  client-side.
+- `POST /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — upload/replace the override for one asset key.
+  Same upload shape as logo upload (multer, 3MB limit, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
+  the `tenant-assets` Cloudinary folder this time). `:key` is validated against `KNOWN_ASSETS` in
+  `TenantAssetService`, not at the DB level, so the catalog can grow without a migration. Same "new asset saved
+  before the old one is deleted" ordering as logo upload.
+- `DELETE /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — removes the override row and the Cloudinary
+  asset, reverting that screen to the app's bundled default. A no-op (still `200`, still deletes nothing) if no
+  override existed for that key.
+
+`TenantAssetOverride` lives in `public` (`tenant_asset_overrides`, FK to `tenants.id` `ON DELETE CASCADE`), not a
+per-tenant schema — this is the same category of data as `Tenant.logoUrl` (self-service branding a church sets
+once and rarely touches), not operational data needing schema isolation. One row per `(tenant, assetKey)`,
+enforced with a unique constraint.
+
+The admin-side crop tool (discuva-admin's Appearance settings page) guides toward each asset's actual render
+ratio before upload, but nothing here enforces it server-side — every one of these images renders with
+`object-cover` inside a fixed-size container in the member app, so a mismatched upload crops awkwardly rather than
+breaking layout.
+
 ### Billing & Checkout (`src/billing/`)
 
-Tenant self-service surface for the plan/subscription/wallet infrastructure described in
-`docs/MULTI_TENANT_MIGRATION.md` §4.11/§9 Phase 3 — view current plan and SMS wallet balance, and initiate a
-Paystack or Flutterwave checkout to upgrade the plan or top up the wallet. `PlanGuard` itself doesn't depend on any
-of this working — a tenant can always be moved onto Pro manually via the platform-admin escape hatch
-(`PATCH /platform/tenants/:id/plan`); this module is what lets a tenant do it themselves, and pay for it.
+Tenant self-service surface for the plan/subscription infrastructure described in
+`docs/MULTI_TENANT_MIGRATION.md` §4.11/§9 Phase 3 — view current plan/subscription status and initiate a Paystack or
+Flutterwave checkout to upgrade the plan. `PlanGuard` itself doesn't depend on any of this working — a tenant can
+always be moved onto Pro manually via the platform-admin escape hatch (`PATCH /platform/tenants/:id/plan`); this
+module is what lets a tenant do it themselves, and pay for it. (SMS billing lives entirely outside this module now —
+see SMS Module above for why.)
 
-**Two payment providers, registered simultaneously** (`PaymentProviderRegistryService`) — unlike SMS/email, where
-one platform-default concrete class is chosen once at boot, both `PaystackPaymentProvider` and
-`FlutterwavePaymentProvider` are always available; a checkout call picks one by name (`?provider=paystack` or
-`flutterwave` in the request body), defaulting to `DEFAULT_PAYMENT_PROVIDER` when unspecified. Both are platform-wide
-credentials, not tenant BYOK — unlike SMS/email/YouTube, these charges pay the *platform* (plan upgrades, wallet
-top-ups), so the merchant keys have to be the platform's own, never a tenant's.
+**Two payment providers, registered simultaneously** (`PaymentProviderRegistryService`) — unlike email, where one
+platform-default concrete class is chosen once at boot (SMS has no platform default at all, pure BYOK — see SMS
+Module above), both `PaystackPaymentProvider` and `FlutterwavePaymentProvider` are always available; a checkout call
+picks one by name (`?provider=paystack` or `flutterwave` in the request body), defaulting to
+`DEFAULT_PAYMENT_PROVIDER` when unspecified. Both are platform-wide credentials, not tenant BYOK — unlike
+SMS/email/YouTube, these charges pay the *platform* (plan upgrades), so the merchant keys have to be the platform's
+own, never a tenant's.
 
 **Currency unit mismatch between the two providers, handled internally:** Paystack's Initialize Transaction takes
 `amount` in the currency's smallest unit (kobo for NGN) — matches this codebase's existing `priceCents`/`amountCents`
@@ -2383,10 +2598,11 @@ persist onto `Plan.billingProviderPriceId`) a matching provider-side plan/paymen
 keyed by the provider's own reference (Paystack `reference` / Flutterwave `tx_ref`) — this is the only thing a
 webhook payload is ever trusted for identity/amount against. `CheckoutService.handleWebhookEvent()` looks up this
 row by the reference the webhook echoes back; a reference with no matching `pending` row (unknown, already
-processed, or forged) is a safe no-op, never an error that could imply something was charged. Two intents:
+processed, or forged) is a safe no-op, never an error that could imply something was charged. One intent today:
 `subscription` (activates a 30-day period — see `SUBSCRIPTION_PERIOD_DAYS` — on `Subscription`, not true
-provider-driven recurring-billing reconciliation, deferred pending live sandbox testing) and `wallet_topup` (credits
-`SmsWallet.balanceCredits`, `SmsWalletTransactionType.CREDIT`).
+provider-driven recurring-billing reconciliation, deferred pending live sandbox testing). A `wallet_topup` intent
+existed pre-BYOK (funded a prepaid `SmsWallet` debited per SMS sent) — removed along with the wallet itself once SMS
+went pure BYOK (§ SMS Module); `BillingCheckoutType` only has `SUBSCRIPTION` now.
 
 **Self-serve cancel/downgrade (`CheckoutService.cancelSubscription`):** the tenant-facing counterpart to the
 platform-admin escape hatch. Still within a paid period (`currentPeriodEnd` in the future): sets
@@ -2421,32 +2637,64 @@ on a plan they don't actually pay for).
 Paystack refunds by transaction reference directly; Flutterwave requires resolving the reference to its own numeric
 transaction id first (`GET /transactions?tx_ref=`), handled internally. `CheckoutService.refundCheckoutSession()`
 only allows refunding a `completed` session, marks it `BillingCheckoutStatus.REFUNDED`, and **deliberately does
-not** automatically claw back spent SMS credits or downgrade a plan — reversing either requires a product decision
-(can a wallet go negative? does downgrading strand data created on the paid tier?) this pass doesn't take on. A
-platform admin issuing a refund is expected to also apply the tenant-facing consequence manually via the existing
-escape hatches if warranted.
+not** automatically downgrade a plan — that requires a product decision (does downgrading strand data created on the
+paid tier?) this pass doesn't take on. A platform admin issuing a refund is expected to also apply the tenant-facing
+consequence manually via the existing escape hatch if warranted.
 
 **Routes** (`AdminGuard`, tenant-scoped, unless noted):
 
 | Method | Path                              | Permission     | Description |
 |--------|-----------------------------------|----------------|--------------|
-| GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, walletBalanceCredits, cancelAtPeriodEnd, sponsoredByParent }` |
+| GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, cancelAtPeriodEnd, sponsoredByParent }` |
 | GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, priceCents, currency, features }]`), ordered by price ascending — the only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
 | POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to |
-| POST   | `/billing/checkout/wallet-topup`  | BILLING_WRITE  | Body `{ creditsAmount, provider?, successUrl, cancelUrl }` — `403`s if `SMS_CREDIT_PRICE_KOBO` isn't configured |
 | POST   | `/billing/cancel`                  | BILLING_WRITE  | No body — cancels immediately or at period end depending on `currentPeriodEnd`; `400` if no paid/cancelable subscription |
 | POST   | `/webhooks/billing`                | No guard — provider webhook | `@Public()`, dispatches to Paystack or Flutterwave by which of their two signature headers is present (`x-paystack-signature` HMAC-SHA512 vs `verif-hash` shared-secret string compare) |
 | GET    | `/platform/tenants/:id/billing-sessions` | Platform admin | This tenant's checkout session history, newest first |
 | POST   | `/platform/billing-sessions/:sessionId/refund` | Platform admin | Body `{ amountCents? }` — omitted means a full refund |
 
 **Env vars:** `PAYSTACK_SECRET_KEY`, `PAYSTACK_BASE_URL`, `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_SECRET_HASH`,
-`FLUTTERWAVE_BASE_URL`, `DEFAULT_PAYMENT_PROVIDER`, `SMS_CREDIT_PRICE_KOBO` — see Environment Variables.
+`FLUTTERWAVE_BASE_URL`, `DEFAULT_PAYMENT_PROVIDER`, `SUBSCRIPTION_PERIOD_DAYS` (default
+`30`, `CheckoutService`'s flat renewal period), `GRACE_PERIOD_DAYS` (default `7`, `SubscriptionLapseScheduler`'s
+PAST_DUE window before downgrading to Free) — see Environment Variables.
 
 **Not built yet:** automatic capture of `Subscription.billingProviderSubscriptionId` from a provider's own
 subscription-lifecycle webhook (see the dunning limitation note above — this is the same underlying gap); true
 recurring-billing reconciliation driven by the provider's own renewal events rather than the flat 30-day period.
-Billing/plan settings UI in `Faithapp-admin` (`/billing`) is built — plan picker, wallet top-up, cancel/downgrade,
-past-due banner, plan-inheritance indicator for a sponsored branch.
+Billing/plan settings UI in `discuva-admin` (`/billing`) is built — plan picker, cancel/downgrade, past-due banner,
+plan-inheritance indicator for a sponsored branch. (SMS wallet top-up UI was removed along with the wallet itself —
+SMS billing is now entirely the tenant's own vendor relationship, outside this app.)
+
+**Plan feature gating (`PlanGuard`) — boolean gate plus an optional numeric cap:** any route decorated
+`@RequiresPlan(PlanFeature.X)` first checks `Plan.features` membership (unchanged boolean gate, cached under
+`plan-features:${tenantId}` for 300s) and throws `403 { code: 'PLAN_UPGRADE_REQUIRED' }` if the feature isn't
+included. If the feature *is* included and the plan additionally has a numeric limit configured for it
+(`Plan.featureLimits`, a `jsonb` map of `PlanFeature` → max lifetime uses, admin-editable via
+`PATCH /platform/plans/:id` — absent key means unlimited), the guard atomically checks-and-increments a per-tenant
+lifetime counter (`FeatureUsageService.tryConsume`, backed by `public.feature_usages`, one row per
+`(tenantId, feature)`, a single conditional `INSERT ... ON CONFLICT ... WHERE count < limit` so concurrent requests
+can't both slip through) and throws the same `PLAN_UPGRADE_REQUIRED` 403 once the cap is hit. The slot is consumed
+*before* the route handler runs (not after it succeeds) — the simplest mechanism that works for every
+`@RequiresPlan` route with zero per-feature integration code, at the accepted cost of occasionally spending a use on
+a request that later fails for an unrelated reason (e.g. a validation error inside the handler). Usage counts are
+lifetime and never reset by a plan change — upgrading past a cap and later downgrading back below it still reflects
+prior usage rather than granting a fresh allowance. `GET /platform/plans` / `POST /platform/plans` /
+`PATCH /platform/plans/:id` all accept `featureLimits` alongside the existing `features` array;
+`PlatformPlanService` deep-validates it (each key must be a real `PlanFeature`, each value a positive integer).
+
+**Internal comps/discounts (`Subscription.discountType`/`discountValue`/`discountReason`/`discountExpiresAt`):** a
+platform-admin-only manual comp, set via `PATCH /platform/tenants/:id/discount` and cleared via
+`DELETE /platform/tenants/:id/discount` (both `TENANTS_WRITE`, both require an existing `Subscription` row — apply
+`PATCH /platform/tenants/:id/plan` first if the tenant has none yet). `discountType` is `percentage` (1–100,
+validated server-side) or `fixed_amount` (cents); `discountExpiresAt` is optional — `null` means permanent until
+explicitly removed. Deliberately **never touches checkout or a payment provider** — same spirit as
+`sponsoredByTenantId` above, and for the same structural reason: Paystack/Flutterwave recurring charges are driven
+by a provider-side Plan object keyed on `Plan.billingProviderPriceId`, not a per-transaction amount override, so a
+discount here can't change what a provider actually auto-renews at without creating a distinct provider Plan per
+discount tier (out of scope for an internal comp). Its effect is bookkeeping only: `PlatformAnalyticsService.mrrCents()`
+sums each active, non-sponsored subscription's *effective* (discounted) price via the shared
+`computeEffectivePriceCents()` helper (`src/billing/util/discount.util.ts`) rather than the raw `Plan.priceCents`, so
+reported MRR reflects comps; `GET /platform/tenants` also returns the four discount fields per tenant for display.
 
 ### Branch Hierarchy (`src/branch/`)
 
@@ -2459,9 +2707,10 @@ A branch is a tenant like any other (own schema, own admin, own everything) — 
 looked up by value later, not decoded), emails it, and records a `pending` row in `tenant_branch_invites`
 (`public` schema — has to live there since the invited church has no tenant of its own yet, the very thing the
 invite exists to create). `POST /signup` accepts an optional `branchInviteToken`; `SignupController` resolves and
-validates it (pending, unexpired) *before* provisioning, so a bad/expired code fails fast without creating a tenant
-row, and only marks the invite `accepted` *after* provisioning actually succeeds — a subdomain collision leaves the
-invite still usable for a retry rather than burning it.
+validates it (pending, unexpired) *before* enqueueing provisioning, so a bad/expired code fails fast without
+creating a tenant row. `TenantProvisioningProcessor` only marks the invite `accepted` *after* provisioning actually
+succeeds (see "Async Tenant Provisioning + Onboarding State Machine" above) — a subdomain collision or any other
+provisioning failure leaves the invite still usable for a retry rather than burning it.
 
 **Plan sponsorship (`sponsorPlan`, optional on `POST /branch/invites`):** the parent's stated intent, carried on
 the invite row and resolved at signup time — `BranchInviteService.resolveInvite()` returns a `sponsoredPlanId` when
@@ -2523,11 +2772,120 @@ make sense. A subscription sponsored by some *other* tenant (not the one being u
 | DELETE | `/branch/:branchTenantId`   | BRANCH_WRITE   | Parent detaches one of its own branches — `404` if not linked to this tenant |
 | POST   | `/branch/leave`             | BRANCH_WRITE   | This tenant leaves its own parent — `400` if it has none |
 
-Branch hierarchy UI is built in `Faithapp-admin` (`/branch-hierarchy`) — invite-sending, branches overview with
+Branch hierarchy UI is built in `discuva-admin` (`/branch-hierarchy`) — invite-sending, branches overview with
 unlink, and a "this church" section showing sharing consent toggles + leave-parent, only shown when
 `parentTenantId` is actually set (see `GET /branch/sharing-consent` above). Multi-level hierarchy (branch-of-a-branch)
 is representable with zero further schema change (`parent_tenant_id` is self-referencing) but only flat parent → branch
 is exercised by anything built so far.
+
+### Forms (`src/forms/`)
+
+Admin-built dynamic forms — not tied to any one use case (events, surveys, sign-ups all reuse the same builder). A
+form has a `visibility` of `MEMBERS` or `PUBLIC`, an optional link to an `Event`, and an ordered list of fields
+(`TEXT`, `NUMBER`, `EMAIL`, `PHONE`, `TEXTAREA`, `DATE`, `DROPDOWN`, `CHECKBOX` — the latter two carry an `options`
+array). A `PUBLIC` form is fillable with no login at all — the whole point of making it public — while `MEMBERS`
+forms require an authenticated member/worker token.
+
+**Auto-fill:** a field can carry an `autoFillKey` (`FIRST_NAME`/`LAST_NAME`/`EMAIL`/`PHONE_NUMBER`) — the
+member-facing "get form for filling" endpoint resolves these against the logged-in member's own profile and
+returns them as `suggestedValues` alongside the field definitions, so the frontend can pre-fill without needing its
+own copy of the mapping logic. Never applies to public/anonymous fills — there's no member to infer from.
+
+**Submissions are keyed by field id inside a `jsonb` blob** (`FormSubmission.answers: Record<fieldId, value>`),
+not a normalized per-answer table — editing or removing a field later never requires migrating past submissions; a
+removed field just leaves a harmless orphaned key behind in old submissions' JSON, still readable/exportable.
+
+**Field diff-sync on update:** `PATCH /forms/:id`'s `fields` array is diffed against the form's existing fields —
+an incoming field with an `id` updates that row in place (keeping the id stable so existing submissions' answer
+keys stay meaningful), one without an `id` is a new field, and an existing row missing from the incoming array is
+deleted. Omitting `fields` entirely from the PATCH body leaves them untouched.
+
+**Answer validation happens server-side against the form's actual field definitions**, not via a fixed DTO shape
+(`SubmitFormDto.answers` is just `Record<string, unknown>` — the schema is per-form, not knowable at compile time):
+required fields must be present and non-empty, and `DROPDOWN`/`CHECKBOX` values must be one of the field's
+configured `options`.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| POST   | `/forms`                            | AdminGuard (FORMS_WRITE) | Create a form with its fields in one call |
+| GET    | `/forms`                            | AdminGuard (FORMS_READ)  | List all forms — unpaginated, same policy as departments/event-configs |
+| GET    | `/forms/:id`                        | AdminGuard (FORMS_READ)  | Get one form with fields |
+| PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above) |
+| DELETE | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Cascades fields + submissions |
+| GET    | `/forms/:id/submissions`            | AdminGuard (FORMS_READ)  | Paginated (`?page=&limit=`) — this list is attendance-scale, unlike the forms list itself |
+| GET    | `/forms/:id/submissions/export`     | AdminGuard (FORMS_READ)  | CSV, one column per field (ordered), `Submitted By` shows the member's name or "Public" |
+| GET    | `/forms/:id/analytics`              | AdminGuard (FORMS_READ)  | At-a-glance summary across all submissions, computed per field type (see below) |
+| GET    | `/forms/member`                     | JwtAuthGuard             | Forms visible to the caller (`isActive`, `MEMBERS` or `PUBLIC`) — optional `?eventId=` filter |
+| GET    | `/forms/member/:id`                 | JwtAuthGuard             | Form fields + `suggestedValues` auto-filled from the caller's own profile |
+| POST   | `/forms/member/:id/submit`          | JwtAuthGuard             | `memberId` comes from the token, never the body |
+| GET    | `/forms/public/:id`                 | Public, `404` unless `isActive && visibility === PUBLIC` | No tenant subdomain restriction beyond the usual Host-header resolution |
+| POST   | `/forms/public/:id/submit`          | Public, rate-limited (5/min) | `memberId` is always `null` — an open, unauthenticated write endpoint, throttled from day one rather than retrofitted |
+
+`forms` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`) like most feature modules in this app —
+disabling it 403s all three controllers, including the public one.
+
+**Analytics** (`GET /forms/:id/analytics`, a Google-Forms-style summary, not raw rows): computed in-memory per
+field from every submission's `answers[fieldId]`, shaped by that field's type — `DROPDOWN`/`CHECKBOX` get a
+per-option `{count, percentage}` breakdown (`CHECKBOX` counts every selected value, since one submission can pick
+several options); `NUMBER` gets `{average, min, max}`; every other type (`TEXT`, `EMAIL`, `PHONE`, `TEXTAREA`,
+`DATE`) gets up to the 20 most recent non-blank answers as `sampleAnswers`, since there's no meaningful aggregate
+for free text. Blank/null/undefined answers are excluded from `responseCount` and every computation — a field
+added after some submissions already exist doesn't drag its stats toward zero.
+
+### Social Media Module (`src/social-media/`)
+
+Central, tenant-scoped connector framework for cross-posting to a church's social accounts from one compose box —
+currently the **architecture only**: no platform has live OAuth wired in yet, deliberately. Every account starts
+(and stays) `isConnected: false`, and every publish attempt against it fails honestly rather than pretending to
+succeed — see "Why no live platforms yet" below.
+
+**Entities:**
+
+- `SocialAccount` (`social_accounts`) — `platform` (`SocialPlatform`: `FACEBOOK`/`INSTAGRAM`/`X`/`YOUTUBE`/`TIKTOK`),
+  `displayName`, `externalAccountId` (nullable — populated once a real OAuth flow exists to produce one),
+  `isConnected` (always `false` today), `connectedAt`/`connectedBy` (nullable, for when connecting becomes real).
+- `SocialPost` (`social_posts`) — `content`, optional `imageUrl`, `status` (`SocialPostStatus`: `DRAFT` →
+  `PUBLISHING` → `PUBLISHED`/`PARTIALLY_PUBLISHED`/`FAILED`), `createdBy` (nullable FK → `admins`, `SET NULL`),
+  `publishedAt`.
+- `SocialPostTarget` (`social_post_targets`) — one row per `(post, account)` pair, so a single post's per-platform
+  outcome is tracked independently rather than collapsed into one post-level status: `status`
+  (`SocialPostTargetStatus`: `PENDING`/`SUCCESS`/`FAILED`), `errorMessage`, `publishedAt`.
+
+**The publisher extension point** (`publisher/social-platform-publisher.interface.ts`): `SocialPlatformPublisher`
+is a one-method interface (`publish(account, post): Promise<{success, error?, externalPostId?}>`). Every platform
+resolves to `NotConnectedPublisher` via `SocialPublisherRegistry` today, which always returns
+`{success: false, error: "<PLATFORM> isn't connected yet — ..."}`. Wiring in a real platform later (Meta Graph API,
+X API, etc.) means implementing this interface once and swapping that platform's entry in the registry's map —
+`SocialPostService` and the controller never change.
+
+**Why no live platforms yet:** each platform is a separate OAuth app registration, a different API surface, and in
+X's case a paid API tier — a real scope decision, not a technical default. This session shipped the full compose →
+target-selection → publish-attempt → per-target-result UX so it's ready to point at real credentials the moment
+that's decided, without ever telling an admin a post went out when it didn't.
+
+**Publish semantics (`SocialPostService.publish`):** every target is attempted independently — one platform
+failing never blocks the others. The post's overall `status` is derived from how many targets actually succeeded:
+`FAILED` if none did, `PUBLISHED` if all did, `PARTIALLY_PUBLISHED` otherwise. `publishedAt` on the post is set
+whenever at least one target succeeded.
+
+**Deleting a post** is only allowed while `DRAFT` or fully `FAILED` — a `PUBLISHED`/`PARTIALLY_PUBLISHED`/
+`PUBLISHING` post's target history is kept, not deletable, since it's the record of what was actually attempted.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| POST   | `/social-media/accounts`          | AdminGuard (SOCIAL_MEDIA_WRITE) | Register an account to post to; `isConnected` is always `false` on create |
+| GET    | `/social-media/accounts`          | AdminGuard (SOCIAL_MEDIA_READ)  | List all registered accounts |
+| DELETE | `/social-media/accounts/:id`      | AdminGuard (SOCIAL_MEDIA_WRITE) | Remove an account |
+| POST   | `/social-media/posts`             | AdminGuard (SOCIAL_MEDIA_WRITE) | `{content, imageUrl?, targetAccountIds: string[]}` — creates a `DRAFT` with one `PENDING` target per account |
+| GET    | `/social-media/posts`             | AdminGuard (SOCIAL_MEDIA_READ)  | Paginated (`?page=&limit=`) |
+| GET    | `/social-media/posts/:id`         | AdminGuard (SOCIAL_MEDIA_READ)  | One post with its targets and each target's account |
+| POST   | `/social-media/posts/:id/publish` | AdminGuard (SOCIAL_MEDIA_WRITE) | Attempts every target; see publish semantics above |
+| DELETE | `/social-media/posts/:id`         | AdminGuard (SOCIAL_MEDIA_WRITE) | `DRAFT`/`FAILED` only |
+
+`social_media` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`). New `social_media:read`/
+`social_media:write` permissions, backfilled onto existing `SuperAdmin` roles by
+`GrantSocialMediaPermissions1791504000000` (same class of fix as `GrantFormsPermissions` — a brand-new permission
+is only auto-granted to a SuperAdmin role at the moment that role is *created*).
 
 ### Utility Module
 
@@ -2536,6 +2894,21 @@ Shared infrastructure used across the entire application.
 **Bull Board (queue dashboard):** Mounted at `GET /queues` on the NestJS HTTP server. Provides a standalone web UI showing all six queues (`email`, `push-notifications`, `follow-up`, `tithe`, `finance-reconciliation`, `audit-log`) with pending/active/completed/failed job counts and per-job retry controls. Protected by HTTP Basic Auth (`BULL_BOARD_USER` / `BULL_BOARD_PASSWORD` env vars). If either env var is absent the dashboard is not mounted. Registered before Helmet so the `/queues` path is exempt from the strict Content Security Policy.
 
 **Email queue (`EmailQueueService` + `EmailProcessor`):** All outbound email goes through a Bull queue backed by Redis. `EmailQueueService.queueEmailWithTemplate()` compiles the HTML template using **Handlebars** and adds a job to the `email` queue. The platform-wide default email provider is resolved at startup from `EMAIL_PROVIDER` and injected via `EMAIL_PROVIDER_TOKEN`; per-send, `EmailProcessor` may instead resolve a tenant's own BYOK provider — see "Email BYOK send path" under Communication Providers above. Five providers are available — see the table under Communication Providers above — all accepting optional per-call BYOK credentials. Bull handles retries automatically — 5 attempts, 5-second fixed backoff. On success or permanent failure, a row is written to `email_logs` with the `provider` field set to whichever provider actually processed that specific job.
+
+**Per-tenant branding (`church_name`/`church_address`/`logo_url`/`support_email`):** resolved fresh per email by `EmailQueueService.resolveBrandingData()`, not read once at boot — the HTML is fully rendered before the job is queued, so this happens at enqueue time via `cls.get('tenantId')` → `Tenant` row lookup, cached under `tenant-branding:${tenantId}` (`CACHE_TTL_REFERENCE_SECONDS`, same TTL/pattern as `PlanGuard`'s `plan-features:${tenantId}` cache). Any write to a tenant's name/logo/tagline/address (`PATCH /tenant/info`, `POST`/`DELETE /tenant/logo`, platform-admin's `PATCH /platform/tenants/:id`) must invalidate this same key or emails keep stale branding for up to the TTL — all four call sites already do. A tenant field left unset (`null`) falls back to that one field's `CHURCH_NAME`/`CHURCH_ADDRESS`/`LOGO_URL` env default, not the whole record — except `support_email`, which has no env fallback at all (empty string when unset) since a wrong/generic contact address would be actively misleading, not just generic; the 43 member/worker-facing templates that reference it gate the line behind `{{#if support_email}}` so it's simply omitted rather than showing nothing useful. `product_name` always comes from `PRODUCT_NAME` (the SaaS product name) regardless of tenant — it's platform-wide, not per-church. **Bug fixed (2026-08-04):** five templates (`tithe-proof-{confirmed,declined,submitted}`, `pledge-contribution-{confirmed,declined}`) had a hardcoded external logo URL instead of `{{logo_url}}` — every tenant's emails from those five showed the same wrong logo, not their own. `annual-giving-statement.html` had no logo image at all. Both fixed; all 61 templates now reference `{{logo_url}}`. **Formerly a known gap, now fixed:** every `@Cron` scheduler in the codebase that touches tenant-scoped data (`FollowUpScheduler` included) now wraps its per-run body in `forEachActiveTenant()` (`src/tenant/utility/for-each-active-tenant.ts`), which fetches every active `Tenant` and re-enters that tenant's CLS/`SET LOCAL search_path` context (via the existing `runInTenantContext()` helper) once per tenant before running the body — so branding, currency, and every other tenant-scoped lookup inside a scheduled job now resolves correctly per tenant instead of falling back to env defaults or reading the wrong schema. One tenant's failure is caught and logged per-tenant so it doesn't stop the rest of the batch. Only `YoutubeSubscriptionScheduler` (genuinely control-plane data) and `SubscriptionLapseScheduler`'s top-level query (also control-plane) are exempt.
+
+**Tenant-aware login URLs (`login_url`/`admin_login_url`, added 2026-08-04):** `LOGIN_URL`/`ADMIN_LOGIN_URL` are configured as bare, tenant-less base URLs (one build/config serves every tenant via wildcard subdomain — see "Domain map" below) — every caller used to read them straight from `ConfigService` and pass the bare value into a template, which meant every tenant's login links pointed at the same non-tenant-scoped host. `resolveBrandingData()` now also auto-injects `login_url`/`admin_login_url` into every email, rewritten to carry the current tenant's subdomain via `buildTenantUrl()` (`src/tenant/utility/tenant-url.ts` — inserts the subdomain as the leftmost host label, mirrors `discuva-admin/utils/tenant/api-base-url.ts`'s client-side equivalent exactly). All ~17 call sites that used to compute these themselves (`AuthService`, `AdminService`, `MemberService`, `MemberImportService`, `IncidentReportService`, and four schedulers) were simplified to rely on the auto-injected value instead — a call site should never read `LOGIN_URL`/`ADMIN_LOGIN_URL` from `ConfigService` directly. The one exception is `AuthService.sendSessionSecurityAlert()`, which has to pick between the two based on which surface (member/admin) a session belongs to — it calls `UtilityService.resolveTenantLoginUrl('member' | 'admin')` (delegates to `EmailQueueService.resolveTenantUrl()`) directly instead. `TenantProvisioningService.sendWelcomeEmail()`'s set-password link is a separate case again — it builds its URL from the `Tenant` object already in hand (`buildTenantUrl(ADMIN_LOGIN_URL, tenant.subdomain)`) rather than through CLS, since it can run from a Bull job or a synchronous platform-admin call with no tenant CLS context active. `PLATFORM_LOGIN_URL` is deliberately untouched — platform admins aren't tied to any tenant.
+
+### Domain map (discuva.org)
+
+| Host | App | Notes |
+|---|---|---|
+| `discuva.org`, `www.discuva.org` | Homepage/marketing + self-serve signup | Bare root — `extractSubdomain` returns `null`, so tenant-aware URL helpers fall back to the bare base URL here too. |
+| `platform.discuva.org` | discuva-platform | `platform` is in `RESERVED_SUBDOMAINS` on both frontend and backend — no tenant can ever claim it. |
+| `{tenant}.discuva.org` | discuva-member + discuva-admin | Both apps have to answer on the same host — `extractSubdomain` rejects multi-level subdomains (`admin.church-alpha.discuva.org` is not a valid tenant host), so the member/admin split has to happen by path at an edge router in front of both, not by a second subdomain level. Not yet built. |
+| `api.discuva.org`, `*.api.discuva.org` | discuva-api (backend) | Backend `APP_BASE_DOMAIN` = `api.discuva.org` — a separate wildcard zone from the frontend's, since `discuva-admin/utils/tenant/api-base-url.ts` calls `{tenant}.api.discuva.org`, not `{tenant}.discuva.org`. |
+
+Two DNS zones need wildcard coverage: `*.discuva.org` (frontends) and `*.api.discuva.org` (backend). `LOGIN_URL`/`ADMIN_LOGIN_URL` should be configured against the `discuva.org` zone (frontend hosts), not the `api.` zone.
 
 **Email category gating:** `queueEmail*` methods accept an optional `category?: EmailCategory` argument. If no category is supplied the email always sends (used for security-critical auth emails: OTP, password reset, account locked, etc.). Optional categories are gated by boolean config flags (`EMAIL_*_ENABLED`); setting a flag to `false` suppresses that category without touching any call sites. Current categories:
 
@@ -2665,7 +3038,7 @@ a staff member has opened the window on the session.
 PDF link, etc.) — validated as a URL (`@IsUrl()`), settable only at session creation (`POST .../sessions`), same as
 the pre-existing `notes` field — neither has an update-after-creation route. Set via either the worker/teacher
 controller (mobile) or the admin controller; both share `CreateSundaySchoolSessionDto`. Surfaced as "View Lesson
-Material" on the teacher's roster panel (`Faithapp` mobile) and via a small link icon in the admin sessions table.
+Material" on the teacher's roster panel (`discuva-member` mobile) and via a small link icon in the admin sessions table.
 
 **Routes prefix:** `/sunday-school` (worker/member routes) and `/admin/sunday-school` (admin routes)
 
@@ -2760,7 +3133,130 @@ Full double-entry accounting system for the church. All financial data is fund-s
 
 **Void / reversal pattern:** Voiding a posted entry does NOT delete it. A new reversing entry (equal and opposite lines) is created with `entryType = REVERSAL` and both entries remain in the ledger. The original entry status becomes `VOIDED`. Voiding an entry in a CLOSED accounting period throws `400 Bad Request`.
 
-**Tithe virtual accounts:** Members can request a dedicated bank account from a supported provider (Paystack / Flutterwave). BVN / NIN details are forwarded to the provider API and never stored in this database. One active account per provider per member. Admin-only deactivation. A new account for the same provider can only be created after the previous one is deactivated. Provider webhooks auto-create `TitheRecord` with `source = VIRTUAL_ACCOUNT` and link to the `MemberVirtualAccount` row.
+**Tithe virtual accounts — removed.** A dedicated-bank-account-per-member giving mechanism was scaffolded (entity,
+stub service, webhook controller) but never implemented beyond `NotImplementedException` on every method, and the
+member app's card was labeled "Coming Soon." Deleted entirely rather than finished — replaced by the tenant-owned
+Giving Checkout flow below.
+
+### Giving Checkout (Tenant-Owned, BYOK) — `src/giving-checkout/`
+
+A member pays the church directly via a hosted checkout page — Paystack, Flutterwave, Korapay, or Stripe, using the
+*church's own* merchant credentials, never a platform account. Pure BYOK, same shape as Communication Providers: no
+platform default exists, so the "Give via Checkout" option is simply absent from the member app until a tenant
+configures and activates one provider.
+
+**Provider abstraction (`src/giving-checkout/interface/giving-provider.interface.ts`):**
+
+```ts
+type GivingProviderCredentials = Record<string, string>; // e.g. Paystack's { secretKey }, Stripe's { secretKey, webhookSecret }
+
+interface IGivingProvider {
+  readonly providerName: string;
+  createCheckoutSession(params: {
+    amountCents: number; currency: string; payerEmail: string; payerName: string;
+    reference: string; successUrl: string; cancelUrl: string; credentials: GivingProviderCredentials;
+  }): Promise<{ checkoutUrl: string }>;
+  verifyAndParseWebhook(rawBody: Buffer, signatureHeader: string, credentials: GivingProviderCredentials): NormalizedGivingEvent;
+}
+```
+
+`GivingProviderRegistryService` (same shape as `PaymentProviderRegistryService`/`SmsProviderRegistryService`) holds
+all four vendors live simultaneously; `GivingCheckoutService` resolves which one to use per call from the tenant's
+active `TenantGivingProviderConfig.providerId`. Credentials are always passed as a call parameter, never injected
+from `ConfigService` — there is no platform merchant account behind any of these.
+
+**The four providers** (`src/giving-checkout/provider/`) —
+
+| `providerId`  | Class                     | Credential shape                    | Amount unit sent to vendor          |
+|---------------|----------------------------|--------------------------------------|---------------------------------------|
+| `paystack`    | `PaystackGivingProvider`   | `{ secretKey }`                     | Smallest unit (kobo) — `amountCents` as-is |
+| `flutterwave` | `FlutterwaveGivingProvider`| `{ secretKey, secretHash }`         | Major unit (naira) — `amountCents / 100` |
+| `kora`        | `KoraGivingProvider`       | `{ secretKey }`                     | Major unit (naira) — `amountCents / 100` |
+| `stripe`      | `StripeGivingProvider`     | `{ secretKey, webhookSecret }`      | Smallest unit (cents) — `amountCents` as-is |
+
+Webhook signature verification differs per vendor: Paystack HMAC-SHA512 over the raw body
+(`x-paystack-signature`); Flutterwave a direct shared-secret string compare (`verif-hash`, not an HMAC); Korapay
+HMAC-SHA256 over just the `data` object, not the full envelope (`x-korapay-signature`); Stripe HMAC-SHA256 over
+`${timestamp}.${rawBody}` using a signing secret distinct from the API key, header format `t=…,v1=…`
+(`Stripe-Signature`). Each is entirely self-verifying — none of the shared "never trust the payload" discipline
+below depends on which scheme a given vendor uses.
+
+**Entities — all control-plane** (`public`, never a `search_path` target — same reasoning as
+`TenantCommunicationProviderConfig`/`BillingCheckoutSession`: the inbound webhook has no Host header/subdomain to
+resolve a tenant from, only a `:tenantId` path param, so these must be resolvable with zero tenant (schema) context):
+
+- **`GivingProvider`** (`giving_providers`) — platform-wide catalog, mirrors `CommunicationProvider`.
+- **`TenantGivingProviderConfig`** (`tenant_giving_provider_configs`) — one row per (tenant, provider),
+  `credentialsEncrypted` (jsonb, `select: false`, `EncryptionService` AES-256-GCM — same encryption as
+  Communication Providers), `isActive`. **Only one provider active per tenant at a time**, enforced the identical
+  way as Communication Providers: `TenantGivingProviderService.upsertConfig()`/`setActive()` (when activating) run
+  inside a transaction that also deactivates every other config row for that tenant.
+- **`GivingCheckoutSession`** (`giving_checkout_sessions`) — mirrors `BillingCheckoutSession` exactly: primary
+  keyed by the provider's own reference, recorded at checkout-*initiation* time (before the member ever reaches the
+  provider's hosted page) — the webhook only ever confirms/denies a session this row already describes, never a
+  source of truth for amount/member/tenant identity itself. `memberId`/`titheAccountId` are plain UUID columns, not
+  FK-enforced relations — `Member`/`TitheAccount` live in the tenant's own schema, which a public-schema table can't
+  foreign-key into.
+
+**Checkout initiation (`GivingCheckoutService.initiateCheckout`, member-facing, normal in-app request — tenant
+context already resolved by `TenantMiddleware`):** resolves the tenant's active config (cached 300s per tenant,
+invalidated on write — identical pattern to `SmsCredentialResolverService`), throws `403
+GIVING_PROVIDER_NOT_CONFIGURED` if none is active, looks up the member for email/name, resolves currency from the
+optional `titheAccountId` (falls back to `CURRENCY_CODE`), generates a `giving_{uuid}` reference, and calls the
+resolved provider. Saves a `PENDING` `GivingCheckoutSession` row before returning `{ checkoutUrl }`.
+
+**Webhook handling (`GivingCheckoutService.handleWebhook`, `POST /webhooks/giving/:tenantId/:provider`,
+`@Public()`, excluded from `TenantMiddleware`):** no CLS/tenant context exists at all when this fires — `tenantId`
+comes straight from the path param. Looks up that tenant's *own* active config for `:provider` first (verified
+credentials before anything else is trusted), decrypts, resolves the `IGivingProvider`, and calls
+`verifyAndParseWebhook()` (throws on a bad signature). A non-`charge.succeeded` event marks the matching session
+`FAILED` and returns — never an error response, so the provider doesn't retry forever. On success: row-locks the
+`PENDING` `GivingCheckoutSession` by the event's own reference (idempotent against webhook redelivery — a second
+delivery for an already-`COMPLETED` session finds nothing to lock, safe no-op), flips it to `COMPLETED`, looks up
+the `Tenant` row for its `schemaName`, then `runInTenantContext()`s into that tenant's own schema purely to write
+the resulting `TitheRecord` (`source: PAYMENT_GATEWAY`, `externalReference` = the session id, `paymentChannel` =
+the provider id, `batch: null` — same "webhook-created records have no batch" shape as reconciliation-imported
+rows). This is the only place SMS/email BYOK's "resolve credentials, dispatch to the right vendor class" pattern
+and the tenant-context-entry pattern (normally only seen in Bull processors, via `runInTenantContext`) are combined
+in the same request.
+
+**Routes:**
+
+| Method | Path                                       | Auth                     | Permission        | Description |
+|--------|----------------------------------------------|---------------------------|--------------------|--------------|
+| GET    | `/finance/giving-providers`                 | `AdminGuard`, tenant-scoped | `TITHE_READ`      | `{ catalog, ownConfigs }` — `ownConfigs` never includes credentials |
+| PUT    | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ credentials }` — upserts and activates, deactivating any other active provider |
+| PATCH  | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ isActive }` — enable/disable without touching stored credentials |
+| GET    | `/finance/giving/checkout/provider`         | Member JWT                | —                  | `{ providerId, providerName } \| null` — whether to show "Give via Checkout" at all |
+| POST   | `/finance/giving/checkout`                  | Member JWT                | —                  | Body `{ amountCents, titheAccountId?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` |
+| POST   | `/webhooks/giving/:tenantId/:provider`      | None (per-vendor signature) | —                | Provider webhook — creates a `TitheRecord` on a verified successful charge |
+
+Both `finance/giving-providers` and `finance/giving/checkout` are gated behind `@RequiresModule('tithe')` —
+disabled entirely if a church has turned off the Tithe & Giving module.
+
+**Platform-admin visibility (`PlatformGivingProviderService`, `PlatformAnalyticsService.getGiving`):** the platform
+operator's own "full overview" across every tenant, mirroring Communication Providers' and Billing's existing
+platform-support surfaces —
+
+| Method | Path                                        | Permission     | Description |
+|--------|-----------------------------------------------|-----------------|--------------|
+| GET    | `/platform/tenants/:id/giving-providers`     | `BILLING_READ`  | This tenant's configured giving provider(s) and active status — never credentials. Reuses `BILLING_READ` (giving-checkout is a money concern) rather than adding a dedicated permission for one lookup. |
+| GET    | `/platform/analytics/giving`                 | `ANALYTICS_READ`| `?period=&months=` — `{ period, totals, byProvider, byTenant, trend }`, every array grouped by `currency` — completed sessions only, **never blended across currencies** (a Stripe/USD tenant summed against a Paystack/NGN one would be meaningless). `totals` is all-time; `trend` is windowed by `months`. |
+
+`PlatformAnalyticsService.getAdoption()` also gained `givingAdoption: ChannelAdoption` (distinct-tenant count with
+an active `TenantGivingProviderConfig`, no `channel` filter needed unlike SMS/email since giving-checkout has only
+the one implicit channel) — same shape as the existing `smsAdoption`/`emailAdoption`.
+
+**Env vars:** none — pure BYOK, no platform-default credentials for any of the four vendors, so nothing is
+env-driven here at all (contrast SMS's `TERMII_BASE_URL`, which stays env-driven only because it's infrastructure,
+not a secret — none of these four vendors have an equivalent fixed-but-non-secret host worth externalizing).
+
+**Not built yet:** Kora/Stripe integrations are written against each vendor's documented API shape but have not
+been exercised against live sandbox credentials (same "documented reasoning, not guessed silently" caveat already
+attached to Paystack/Flutterwave's own subscription-webhook gaps elsewhere in this doc) — worth a live smoke test
+before a tenant relies on either in production. discuva-admin's Giving Providers settings page, discuva-member's
+"Give via Checkout" card, and discuva-platform's tenant-detail "Giving Provider" panel + analytics "Giving Checkout"
+section are all built.
 
 **CSV reconciliation (bank statement import):**
 
@@ -2791,9 +3287,9 @@ Admin-configurable profile endpoints (`FINANCE_RECONCILE` permission):
 
 `fetchMemberTotals()` sums directly from the actual giving records — `TitheRecord` (all of a member's tithes in the date range) plus `PledgeContribution` with `status = CONFIRMED` (joined through `Pledge` for `member_id`) — merged in-memory by member. This intentionally does **not** go through `finance_journal_entry_links`: that link table is only ever populated by fully-manual journal entry creation (`JournalEntryService`) — bank reconciliation, offering auto-journal, and tithe recording never create one — so a link-based total would be 0 or wildly incomplete for almost every member. `GET /admin/finance/reports/member-giving` (an admin-facing report, distinct from this member-facing statement) still uses the `finance_journal_entry_links` path deliberately — it's a strict "show me actual posted GL lines linked to this member" audit view, not a giving total, and carries the same underlying limitation by design until/unless tithes and offerings get their own automatic journal-linking.
 
-The `annual-giving-statement.html` template was also silently rendering with a blank church name/address and no currency symbol — it referenced `{{ churchName }}`/`{{ churchAddress }}` (camelCase) and `{{ currency }}`, but `EmailQueueService.compileTemplate()` only ever injects `church_name`/`church_address`/`logo_url` (snake_case) globally, and the scheduler never passed `currency`. Handlebars renders unresolved variables as an empty string, not literal `{{ }}` text, so this went unnoticed. Fixed: template now references the snake_case globals, and both `sendForMember()` and `run()` pass `currency: configService.get('CURRENCY_CODE')`.
+The `annual-giving-statement.html` template was also silently rendering with a blank church name/address and no currency symbol — it referenced `{{ churchName }}`/`{{ churchAddress }}` (camelCase) and `{{ currency }}`, but `EmailQueueService.compileTemplate()` only ever injects `church_name`/`church_address`/`logo_url` (snake_case), and the scheduler never passed `currency`. Handlebars renders unresolved variables as an empty string, not literal `{{ }}` text, so this went unnoticed. Fixed: template now references the snake_case globals, and both `sendForMember()` and `run()` pass `currency: configService.get('CURRENCY_CODE')`.
 
-**Recurring entry scheduler:** Runs daily at 08:00 (Redis lock). For each active `RecurringEntry` where `nextDueAt ≤ now`, generates a `PENDING_APPROVAL` journal entry in the current month's open accounting period and advances `nextDueAt` to the next due date. The journal entry creation, line saves, and `nextDueAt` update all run inside a single `dataSource.transaction()` — a crash mid-write cannot leave a journal entry with no lines.
+**Recurring entry scheduler:** Runs daily at 08:00 (Redis lock), looping per active tenant via `forEachActiveTenant()`. For each active `RecurringEntry` where `nextDueAt ≤ now`, generates a `PENDING_APPROVAL` journal entry in the current month's open accounting period and advances `nextDueAt` to the next due date. The journal entry creation, line saves, and `nextDueAt` update run against the ambient per-tenant transaction (`this.txHost.tx`, already holding the correct `SET LOCAL search_path`) rather than opening a fresh `dataSource.transaction()`, which would silently write to the wrong schema — each entry is still wrapped in its own Postgres `SAVEPOINT`/`RELEASE`/`ROLLBACK TO SAVEPOINT` so one entry's failure rolls back in isolation instead of aborting the rest of that tenant's batch.
 
 **Vehicle-specific asset fields:** Two new optional fields added to `assets` table:
 - `insurance_expiry` (date) — insurance policy expiry date
@@ -2812,7 +3308,7 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 | `FINANCE_RECONCILE` | Upload CSV bank statements, confirm/skip reconciliation rows, close/reopen accounting periods, reconcile offerings |
 | `FINANCE_REPORT` | Access all 8 finance reporting endpoints |
 | `TITHE_READ` | View individual member tithe records, giving history, annual giving statements |
-| `TITHE_WRITE` | Manage tithe accounts, virtual accounts, deactivate member virtual accounts |
+| `TITHE_WRITE` | Manage tithe accounts and this church's giving-checkout provider credentials |
 
 **Routes prefix (admin):** `/admin/finance/...`
 
@@ -2897,28 +3393,21 @@ Returns a point-in-time snapshot:
 - `totalOutstandingPledges` / `activePledgeCount` — sum and count of `ACTIVE` pledges
 - `generatedAt` — server timestamp
 
-**Virtual account endpoints:**
-
-| Method | Path | Auth | Permission | Description |
-|---|---|---|---|---|
-| `POST` | `/tithes/me/virtual-account` | Member JWT | — | Request a new virtual bank account from a provider |
-| `GET` | `/tithes/me/virtual-accounts` | Member JWT | — | List all virtual accounts for the authenticated member |
-| `PATCH` | `/admin/tithes/virtual-accounts/:id/deactivate` | Admin JWT | `TITHE_WRITE` | Deactivate a member's virtual account |
-| `POST` | `/webhooks/virtual-account-credit` | None (HMAC) | — | Provider webhook — creates `TitheRecord` with `source = VIRTUAL_ACCOUNT` |
-
-The webhook is unauthenticated but verified with an HMAC-SHA512 signature against `VIRTUAL_ACCOUNT_WEBHOOK_SECRET`. Signature is read from `x-paystack-signature` (Paystack) or `verif-hash` (Flutterwave) headers. Duplicate credits are ignored via idempotency on `external_reference`.
-
 **Environment variables added:**
 
 | Variable | Default | Description |
 |---|---|---|
 | `ASSET_OVERDUE_NOTIFICATION_DAYS` | `1,3,7` | Comma-separated days-overdue thresholds for checkout reminders. Empty string disables. |
-| `VIRTUAL_ACCOUNT_WEBHOOK_SECRET` | *(required)* | HMAC-SHA512 secret for verifying provider webhook calls |
-| `PAYSTACK_SECRET_KEY` | *(optional)* | Paystack secret key; required if using Paystack as a virtual account provider |
-| `FLUTTERWAVE_SECRET_KEY` | *(optional)* | Flutterwave secret key; required if using Flutterwave as a virtual account provider |
 | `ANNUAL_GIVING_STATEMENT_ENABLED` | `false` | Set to `true` to enable the Jan 1 batch annual giving statement emails to all members |
 
-**Entities:** `finance_funds`, `finance_accounting_periods`, `finance_accounts`, `finance_external_payees`, `finance_journal_entries`, `finance_journal_entry_lines`, `finance_journal_entry_links`, `finance_offerings`, `finance_budgets`, `finance_pledge_campaigns`, `finance_pledges`, `finance_recurring_entries`, `finance_petty_cash_replenishments`, `finance_bulk_upload_jobs`, `finance_reconciliation_rows`, `finance_bank_import_profiles`, `member_virtual_accounts`. New FK on `finance_offerings`: `reconciled_by_id`. New FK on `finance_bulk_upload_jobs`: `profile_id`. New columns on `tithe_records`: `source`, `external_reference`, `payment_channel`, `virtual_account_id`; `batch_id` is now nullable (webhook-created records have no batch). New columns on `assets`: `insurance_expiry`, `roadworthiness_expiry`, plus 8 notification-timestamp columns (`insurance_notified_*`, `roadworthiness_notified_*`).
+**Entities:** `finance_funds`, `finance_accounting_periods`, `finance_accounts`, `finance_external_payees`, `finance_journal_entries`, `finance_journal_entry_lines`, `finance_journal_entry_links`, `finance_offerings`, `finance_budgets`, `finance_pledge_campaigns`, `finance_pledges`, `finance_recurring_entries`, `finance_petty_cash_replenishments`, `finance_bulk_upload_jobs`, `finance_reconciliation_rows`, `finance_bank_import_profiles`. New FK on `finance_offerings`: `reconciled_by_id`. New FK on `finance_bulk_upload_jobs`: `profile_id`. New columns on `tithe_records`: `source`, `external_reference`, `payment_channel`; `batch_id` is now nullable (webhook-created records have no batch). New columns on `assets`: `insurance_expiry`, `roadworthiness_expiry`, plus 8 notification-timestamp columns (`insurance_notified_*`, `roadworthiness_notified_*`).
+
+Giving Checkout's three entities (`giving_providers`, `tenant_giving_provider_configs`, `giving_checkout_sessions`
+— §9 Phase 9h) are deliberately **not** `finance_*`-prefixed despite living under `src/giving-checkout/` — they're
+control-plane (`public` schema), same category as `communication_providers`/`billing_checkout_sessions`, not
+tenant-schema `finance_*` data.
+
+`member_virtual_accounts` (and `tithe_records.virtual_account_id`) existed here through `1784592000000-CreateMemberVirtualAccountsAndTitheSource` but were dropped by tenant migration `1792108800000-DropMemberVirtualAccounts` — see "Tithe virtual accounts — removed" above.
 
 **Migrations:**
 - `1783641600000-CreateFinanceFunds`
@@ -3187,7 +3676,7 @@ tenant-scoped) and no confirmed public webhook/API was found; the manual "Announ
 path for Mixlr-only streams. Facebook Live is not a built feature at all.
 
 **Routes:** `GET integrations/youtube/callback` — no guard, verified implicitly by the WebSub handshake itself
-(same trust model as the existing `POST webhooks/virtual-account-credit`). `POST integrations/youtube/callback` — no
+(same trust model as `POST webhooks/billing`'s own signature verification). `POST integrations/youtube/callback` — no
 NestJS guard either, but is signature-verified in the controller itself as described above (a `Public()`-style route
 whose actual authentication is the HMAC check, not a bearer token). Both are excluded from `TenantMiddleware` (§4.3)
 since the hub never sends a `Host` header identifying a tenant.
@@ -3211,7 +3700,7 @@ Records and retrieves physical attendance counts for services, broken down by de
 
 **Email export (`POST /service-headcount/export-email`):** Reuses the same filtered query as the flat `GET /service-headcount` list (no pagination), builds an `.xlsx` via the shared `ExcelService.buildWorkbook`, and queues it as an email attachment via `EmailQueueService.queueEmailWithTemplateAndAttachments` using the shared `report-export` template (`src/utility/templates/report-export.html`, reused by every report's export endpoint — not headcount-specific). Deliberately one-off: no recurring/scheduled export exists or is planned as part of this feature.
 
-**Trends charts (Faithapp-admin, `app/service-headcount/page.tsx`):** the Trends tab has a Chart/Table toggle (defaults to Chart) consuming the same `GET /service-headcount/trends` response the table already used — no new backend endpoint, since `HeadcountTrendPoint` already carries every field the reference dashboard needed (`maleAdults`/`femaleAdults`/`teenagers`/`children`/`serviceSlotName`/`periodLabel`/`total`). Renders via three new reusable wrapper components (`components/charts/bar-chart.tsx`, `pie-chart.tsx`, `trend-line-chart.tsx`, thin wrappers over the new `recharts` dependency): a total-attendance trend line across period buckets, a per-service total bar chart, a gender-split pie chart, and a teens-vs-children bar chart — all aggregated client-side from the same trends payload. Fixed a pre-existing bug while wiring this up: the frontend's `Period` type allowed `"yearly"`, which isn't a value the backend's `HeadcountPeriod` recognizes — since the controller doesn't validate/whitelist the query param, selecting "Yearly" silently fell through to quarterly bucketing server-side. Now `"weekly" | "monthly" | "quarterly"` on both sides.
+**Trends charts (discuva-admin, `app/service-headcount/page.tsx`):** the Trends tab has a Chart/Table toggle (defaults to Chart) consuming the same `GET /service-headcount/trends` response the table already used — no new backend endpoint, since `HeadcountTrendPoint` already carries every field the reference dashboard needed (`maleAdults`/`femaleAdults`/`teenagers`/`children`/`serviceSlotName`/`periodLabel`/`total`). Renders via three new reusable wrapper components (`components/charts/bar-chart.tsx`, `pie-chart.tsx`, `trend-line-chart.tsx`, thin wrappers over the new `recharts` dependency): a total-attendance trend line across period buckets, a per-service total bar chart, a gender-split pie chart, and a teens-vs-children bar chart — all aggregated client-side from the same trends payload. Fixed a pre-existing bug while wiring this up: the frontend's `Period` type allowed `"yearly"`, which isn't a value the backend's `HeadcountPeriod` recognizes — since the controller doesn't validate/whitelist the query param, selecting "Yearly" silently fell through to quarterly bucketing server-side. Now `"weekly" | "monthly" | "quarterly"` on both sides.
 
 **Routes prefix:** `/service-headcount`
 
@@ -3365,7 +3854,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - **Live updates moved from per-client polling to Socket.IO push (`ServiceSessionGateway`, namespace `/service-session`)** — the original design had all four views (Dashboard, Programme Manager, Presentation, Audience) independently polling `GET /service-session/:code/state` every 1.5–3s. That cost scales with `sessions × viewers-per-session`, not `sessions` — and the Audience view has no cap on viewers at all (any number of congregants can open it on their own phone), so a single popular session's Audience traffic alone could dwarf everything else on a busy Sunday. The gateway and its Redis-backed adapter (`RedisIoAdapter`, `@socket.io/redis-adapter`, wired at bootstrap in `main.ts` for horizontal fan-out across multiple app instances) already existed from an earlier phase but had zero consumers and an incomplete broadcast payload; this phase completed the wiring:
   - `broadcastState(sessionCode, state: SessionStatePayload)` now emits the *exact* payload `GET /state` returns (`anchor`, `session`, `effectiveSlots`, `cautionThresholdRatio` — previously only `anchor`/`session` were sent, missing the slot data every view actually renders from). Every mutating controller method (`advance`, `rewind`, `pause`, `resume`, `adjustTime`, `reorderLiveSlots`, `overrideSlot`, `end`, and all `pm/*` equivalents) re-fetches full state via `getState()` and broadcasts it to room `session:${sessionCode}` after the mutation commits.
   - `joinSession`/`leaveSession` gate room membership by validating the session code exists (`getState()` succeeds) before joining — previously any client could join any room, including nonexistent ones, with zero validation. This is a read-only channel with the same trust model as the public REST routes it replaces (session code = read credential); no write actions happen over the socket.
-  - CORS on the gateway now reads `CORS_ORIGINS` (same env var as the HTTP API) instead of the previous wide-open `origin: '*'`.
+  - CORS on the gateway is validated dynamically via `createCorsOriginValidator()` (same shared validator as the HTTP API, see §Multi-Tenant Request Scoping's "CORS origin validation" note) instead of the previous wide-open `origin: '*'`.
   - Frontend: `hooks/use-live-session-socket.ts` connects to the namespace, joins the session's room, and calls back into each view's `setPayload` on every `session:state` event. Each of the four views kept only a much slower (30s) safety-net `setInterval` poll as a fallback for the rare case a broadcast is missed during a disconnect/reconnect or a backend restart — this is a defense-in-depth measure, not the primary update path anymore. The socket origin is derived from `NEXT_PUBLIC_API_URL`'s origin (stripping the versioned `/v1` path — Socket.IO attaches to the raw HTTP server, not the REST prefix).
   - The per-IP `@Throttle({ limit: 300, ttl: 60_000 })` override on `GET :code/state`/`GET :code/slots/:position` is left in place for the initial load and safety-net poll, but is no longer the thing standing between this module and a real capacity problem — it never bounded aggregate load across many distinct viewer IPs in the first place.
 - The presentation view's countdown has three visual states: normal (white) → **caution** ("Wrapping Up", amber, pulsing) once remaining time drops to `SERVICE_SLOT_CAUTION_THRESHOLD_RATIO` (env, default `0.25`, i.e. the last 25% of the slot's allocated time) → **overtime** ("Time's Up", red, pulsing) once elapsed exceeds the allocation, after which the display counts up (`+MM:SS`). The ratio is resolved server-side and returned as `cautionThresholdRatio` on `GET /service-session/:code/state`, so the frontend has a single source of truth rather than duplicating the value in its own env config. See `SlotTimerDisplay` (frontend). The presentation page also supports a keyboard shortcut (`F`) to toggle browser fullscreen via the Fullscreen API.
@@ -3394,8 +3883,8 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
   - **"Copy from…"** in the active service's header lets you duplicate another already-configured service's full item list (including backups) into the current one in one action — the order of service is usually similar across a multi-service Sunday even though the ministers differ, so this is duplicate-then-edit rather than a shared/master list (each service's items stay fully independent once copied; editing one afterward never affects the other). Prompts for confirmation only if the target service already has items, since that copy would overwrite them.
   - **"Apply template…"** sits next to "Copy from…" in the same header — applying a saved `ServiceProgrammeTemplate` (previously only usable via `applyTemplate()` on an already-created programme, a second trip after creation) now populates the active service's local draft list directly at creation time, client-side, the same way "Copy from…" does (`templateSlotToDraftItem()` converts the template's `ServiceProgrammeSlot[]` into the local `DraftItem[]` shape). Same overwrite-confirmation rule as "Copy from…". `applyTemplate()`/`ApplyTemplateModal` are unchanged and still available on an already-created programme via `ProgrammeDetailPanel`'s "Template" button — this is an additional, earlier entry point, not a replacement.
   - `DraftItemRow`'s secondary line (speaker/duration) uses each slot type's `cfg.text` colour (e.g. `text-amber-800` for Speaker) instead of a flat grey — that per-type colour token existed in `SLOT_TYPE_CONFIG` already but was unused; pairing it with the matching `cfg.bg` tint (e.g. `bg-amber-50`) gives correct, type-appropriate contrast instead of one grey that read as low-contrast against every row colour.
-  - **"My Upcoming Assignments"** — previously a member/worker's only signal that they were scheduled was the one-off `service-slot-assigned` email; there was no way to look it up later. `GET /service-programme/my-assignments` (`getMyUpcomingAssignments()` in `ServiceProgrammeService`) fixes this on the read side: any authenticated member/worker can pull their own upcoming slots — as primary or backup — across every not-yet-completed programme. This is admin-portal-agnostic (`JwtAuthGuard` only, no admin permission), consumed by the **member-facing** app (`Faithapp`, a separate Next.js PWA from the admin portal `Faithapp-admin`) rather than the admin dashboard — `hooks/use-my-assignments.ts` there fetches it and `components/layout/home.tsx` renders a horizontally-scrolling "My Upcoming Assignments" card row on the member home screen (dark cards matching the existing hero's palette), shown only when the member actually has something coming up.
-  - **Real-time "my slot" view + personal service history** — two more member-facing additions alongside "My Upcoming Assignments" in `Faithapp`: (1) once a member's upcoming assignment's programme goes LIVE, its card becomes tappable (pulsing "Live" badge) and links to `/my-assignment/:sessionCode`, a page backed by `GET /service-session/:sessionCode/my-status` (`getMyLiveStatus()`) — shows a live countdown to their turn, an "you're up now" banner once it arrives, an "your part is complete" state afterward, and the full running order with their own row highlighted; the countdown ticks locally client-side between 8s polls using the same `fetchedAt` + elapsed-time technique the admin Live Session Dashboard already uses, rather than polling more aggressively. (2) `/service-history` (`hooks/use-my-service-history.ts` → `GET /service-session/my-history`) — a paginated list of the member's own completed slots with total time served and a per-slot-type breakdown, linked from Profile's Worker Operations section. Both reuse existing server-side logic rather than introducing new authorization concepts: `getMyLiveStatus` never exposes other members' identities (only role/position/timing derived values), and `getMyServiceHistory`'s effective-speaker crediting rule is identical to `getAnalytics`'s `memberId` filter, so the two can never disagree about who gets credit for a slot.
+  - **"My Upcoming Assignments"** — previously a member/worker's only signal that they were scheduled was the one-off `service-slot-assigned` email; there was no way to look it up later. `GET /service-programme/my-assignments` (`getMyUpcomingAssignments()` in `ServiceProgrammeService`) fixes this on the read side: any authenticated member/worker can pull their own upcoming slots — as primary or backup — across every not-yet-completed programme. This is admin-portal-agnostic (`JwtAuthGuard` only, no admin permission), consumed by the **member-facing** app (`discuva-member`, a separate Next.js PWA from the admin portal `discuva-admin`) rather than the admin dashboard — `hooks/use-my-assignments.ts` there fetches it and `components/layout/home.tsx` renders a horizontally-scrolling "My Upcoming Assignments" card row on the member home screen (dark cards matching the existing hero's palette), shown only when the member actually has something coming up.
+  - **Real-time "my slot" view + personal service history** — two more member-facing additions alongside "My Upcoming Assignments" in `discuva-member`: (1) once a member's upcoming assignment's programme goes LIVE, its card becomes tappable (pulsing "Live" badge) and links to `/my-assignment/:sessionCode`, a page backed by `GET /service-session/:sessionCode/my-status` (`getMyLiveStatus()`) — shows a live countdown to their turn, an "you're up now" banner once it arrives, an "your part is complete" state afterward, and the full running order with their own row highlighted; the countdown ticks locally client-side between 8s polls using the same `fetchedAt` + elapsed-time technique the admin Live Session Dashboard already uses, rather than polling more aggressively. (2) `/service-history` (`hooks/use-my-service-history.ts` → `GET /service-session/my-history`) — a paginated list of the member's own completed slots with total time served and a per-slot-type breakdown, linked from Profile's Worker Operations section. Both reuse existing server-side logic rather than introducing new authorization concepts: `getMyLiveStatus` never exposes other members' identities (only role/position/timing derived values), and `getMyServiceHistory`'s effective-speaker crediting rule is identical to `getAnalytics`'s `memberId` filter, so the two can never disagree about who gets credit for a slot.
   - **Analytics tab** — a third tab alongside Programmes/Templates (`AnalyticsTab` in `app/service-programme/page.tsx`) surfaces `GET /service-session/analytics`, which existed on the backend fully built but had no frontend caller before this. Filterable by date range and service slot name; renders summary cards (completed sessions, avg completion rate, total overrun slots, total pause time — all derived client-side from the `sessions` array) plus three tables: per-slot-type stats (avg actual vs. allocated time, overrun counts), top speakers (by total/avg time on the mic), and recent completed sessions. Gives an admin running several services a week visibility into load-balancing and pacing without opening individual session reports one at a time. **Defaults to a bounded ~180-day lookback** (`ServiceSessionService.defaultAnalyticsFrom()`) when `from` is omitted, instead of the 6-way-joined query scanning every COMPLETED session ever recorded — the tab's own `from`/`to` inputs are pre-populated with this same 180-day window on first load so the shown range is never silently narrower than what the UI displays; an explicit `from` (however old) is always honored as-is.
     - Fixed: the "Service Slot Name" (and date-range) filters silently did nothing — `load()` was wrapped in `useCallback(..., [fetchAnalytics])`, missing `from`/`to`/`serviceSlotName` from its dependency array, so the memoized closure always read the empty strings captured on first render regardless of what was typed. Fixed by including them in the deps; the initial-mount fetch now runs from a plain `useEffect(() => { load(); }, [])` instead of depending on `load` itself, so typing a filter doesn't trigger a fetch on every keystroke — only clicking "Load" (`onClick={load}`) does, now with the current input values.
     - Fixed (backend): even once the frontend closure bug was fixed, the filter still only matched a session's sub-service label (`serviceSlot.name`, e.g. "First Service") — typing the service's actual name (the parent Event's name, e.g. "Sunday Service") matched nothing, since `event` was never joined into the analytics query at all. `fetchAnalytics()` now joins `serviceSlot.event` and matches `(serviceSlot.name ILIKE :name OR event.name ILIKE :name)`, so either name works. Frontend field relabelled "Service Slot Name" → "Service Name" to match.
@@ -3425,7 +3914,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - Server event `session:error` → `{ message: string }`, emitted only on a failed `joinSession`.
 - No authentication is required to join a room — session code is the read credential, matching the trust model of the public REST routes this channel replaces for live viewers. No write actions happen over the socket.
 - **Redis adapter:** `@socket.io/redis-adapter` (`RedisIoAdapter`) is used instead of the default in-memory adapter. Events broadcast on one backend instance are forwarded to all other instances via Redis pub/sub, making horizontal scaling safe.
-- **CORS:** reads `CORS_ORIGINS` (same env var as the HTTP API's `app.enableCors()`), not a wide-open `origin: '*'`.
+- **CORS:** validated via `createCorsOriginValidator()` (same shared validator as the HTTP API's `app.enableCors()`), not a wide-open `origin: '*'`.
 
 **Routes prefix:** `/service-programme`, `/service-session`
 
@@ -3524,7 +4013,7 @@ Note: `games/sessions/:code/state` on the participant controller below is `@Publ
 
 **Routes prefix:** `/admin/games`, `/games`
 
-**Admin frontend UX (`Faithapp-admin`):** mirrors the service-programme live-session split between a control surface
+**Admin frontend UX (`discuva-admin`):** mirrors the service-programme live-session split between a control surface
 and a screen-safe display, rather than the one page both were previously crammed into. `app/games/present/[code]`
 (`withAuth`, `games:write`) is the host's control panel — question preview, the ticking countdown, Next
 Question/End Session, leaderboard — plus a "Copy Link"/"Open Screen" action for the presentation view. That view
@@ -3543,7 +4032,7 @@ card, which previously only said "Session Ended" with no indication of which gam
 the game's title and a warmer "That's a wrap" framing, plus (on the control panel) the leaderboard's #1 entry inline
 ("`{name}` takes the win with `{score}` pts!").
 
-**Member-facing player (`Faithapp` mobile, `components/layout/game-session.tsx`, `hooks/use-game-session.ts`):** this
+**Member-facing player (`discuva-member` mobile, `components/layout/game-session.tsx`, `hooks/use-game-session.ts`):** this
 surface fetches the same public `GameSessionStatePayload` but polls it on its own schedule (`LIVE_POLL_MS` = 2s while
 a question is active, no socket) rather than sharing the admin/screen views' socket-driven state — it had fallen out
 of sync with the countdown fix above (rendering the raw `secondsRemaining` snapshot, only visibly updating once per
@@ -3596,7 +4085,7 @@ stays small since most ratings have no comment.
 matching row into memory to sum/count in application code — this endpoint is unbounded by design (any date range,
 any event), so aggregating in Postgres keeps it flat as ratings accumulate instead of degrading linearly.
 
-**Mobile comment capture (`Faithapp`, `components/layout/attendance.tsx`):** the star-tap itself still submits
+**Mobile comment capture (`discuva-member`, `components/layout/attendance.tsx`):** the star-tap itself still submits
 instantly with no comment (unchanged, one-tap). Once rated, an "Add a note" affordance appears — expands a small
 textarea, and sending it re-calls `submitRating` with the same rating plus the comment (an upsert, so no separate
 endpoint). Previously nothing in the UI ever sent a comment, so the admin moderation feed above was unreachable in
@@ -3647,7 +4136,7 @@ member-facing "browse open opportunities" feed, hit on every load, served by a c
 `IDX_volunteer_opportunities_status_date ON volunteer_opportunities (status, date)` index (in addition to the
 original date-only index from the marketplace's initial migration).
 
-**Mobile pagination (`Faithapp`, `hooks/use-volunteer.ts`):** the backend route was already properly paginated
+**Mobile pagination (`discuva-member`, `hooks/use-volunteer.ts`):** the backend route was already properly paginated
 (`page`/`limit`); the mobile hook previously just hardcoded `limit=50` and never advanced past page 1, silently
 truncating the browse list once a church had more than 50 concurrently-open opportunities. Now tracks `page`/
 `totalPages` and exposes `goToPage`, rendered as the same prev/next pager `components/layout/sermons.tsx` already
@@ -3707,7 +4196,7 @@ unbounded — `getAttendanceHistory` in particular grows forever (one row per me
 group), against the documented pagination policy. Both now take `page`/`limit` and return the standard
 `PaginationResponseDto` shape (`{ data, page, limit, totalCount, totalPages }`) instead of a bare array — a breaking
 response-shape change for `GET admin/small-groups/:id/members` and `GET admin/small-groups/:id/attendance`, updated
-on the only consumer (`Faithapp-admin/app/small-groups/page.tsx`, `hooks/use-small-groups.ts`) to unwrap
+on the only consumer (`discuva-admin/app/small-groups/page.tsx`, `hooks/use-small-groups.ts`) to unwrap
 `res.data.data.data` and render the shared `PaginationBar` per tab, same pattern the groups list itself already
 used. Backed by two new composite indexes (`ORDER BY meeting_date DESC`/`created_at ASC` within a group, previously
 only covered by the single-column `group_id` index):
@@ -3748,7 +4237,7 @@ cancel-don't-delete one.
 The SaaS control plane for the multi-tenant/freemium platform — see `docs/MULTI_TENANT_MIGRATION.md` for the full
 design. Entirely separate from everything else in this document: it operates on `public` schema tables
 (`tenants`, `platform_admins`, `plans`, `subscriptions`, `communication_providers`,
-`tenant_communication_provider_configs`, `sms_wallets`) that describe *tenants themselves*, never a tenant's own
+`tenant_communication_provider_configs`) that describe *tenants themselves*, never a tenant's own
 business data, and authenticates against a completely disjoint identity system (`PlatformAdmin`, not `Member`/`Admin`).
 
 **Auth:** `PlatformAdminGuard` (validates the `platform-admin-jwt` Passport strategy, signed with
@@ -3787,19 +4276,22 @@ being visible outside this service. All four routes now return the identical cur
 | Method | Route | Description |
 |--------|-------|-------------|
 | POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken }`. |
-| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), plan/subscription status, and live member/event counts. |
-| POST | `/platform/tenants` | Provision a new tenant — same `TenantProvisioningService` as self-serve `/signup`. Body has no `adminPassword` field (unlike `/signup`'s `SignupDto`) — the new admin gets a welcome email with a set-password link instead (see "Tenant Welcome / Set Password Flow" above). Returns the same shape as `GET /platform/tenants`' rows. |
+| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), `onboardingStatus`, plan/subscription status, and live member/event counts. |
+| POST | `/platform/tenants` | Provisions a new tenant inline (`TenantProvisioningService.provision()`, not the queue self-serve `/signup` uses — see "Async Tenant Provisioning + Onboarding State Machine" above). Body has no password field, same as `/signup`'s `SignupDto` — the new admin gets a welcome email with a set-password link instead (see "Tenant Welcome / Set Password Flow" above). Returns the tenant already `onboardingStatus: ACTIVE`, same shape as `GET /platform/tenants`' rows. |
+| GET | `/platform/tenants/:id/onboarding-events` | The platform-level onboarding audit trail for one tenant, oldest first — see "Async Tenant Provisioning + Onboarding State Machine" above. |
 | PATCH | `/platform/tenants/:id` | Update name, logo, tagline, address, support email, currency, timezone. Returns the same shape as `GET /platform/tenants`' rows. |
 | PATCH | `/platform/tenants/:id/suspend` | `{ suspend?: boolean }`, default `true` — same route handles reactivation via `{ suspend: false }`. Returns the same shape as `GET /platform/tenants`' rows. |
-| PATCH | `/platform/tenants/:id/plan` | Manually change a tenant's plan — comps, support fixes. Invalidates `PlanGuard`'s cached feature list. |
+| PATCH | `/platform/tenants/:id/plan` | Manually change a tenant's plan — comps, support fixes. Sets `Subscription.status` to `active` regardless of its prior value, so a `canceled`/`past_due` tenant regains access immediately rather than waiting on the next billing-provider webhook. Invalidates `PlanGuard`'s cached feature list. |
+| PATCH | `/platform/tenants/:id/discount` | Apply an internal comp — `{ discountType: 'percentage' \| 'fixed_amount', discountValue, discountReason?, discountExpiresAt? }`. Requires an existing subscription. Never touches checkout/a payment provider — see Billing & Checkout above. |
+| DELETE | `/platform/tenants/:id/discount` | Clear a tenant's discount. |
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
 | GET | `/platform/plans` | List plan tiers. |
 | POST | `/platform/plans` | Create a plan tier. |
-| PATCH | `/platform/plans/:id` | Edit a plan tier's price/currency/features. |
+| PATCH | `/platform/plans/:id` | Edit a plan tier's price/currency/features/`featureLimits` (numeric usage cap per `PlanFeature` — see Billing & Checkout above). |
 | GET | `/platform/subscriptions` | List all subscriptions — spot `past_due` churn risk. |
 | GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
 | POST | `/platform/communication-providers` | Register a new provider — `{ id, channel, name }`. |
-| GET | `/platform/tenants/:id/communication-providers` | A tenant's active provider per channel + SMS wallet balance — never the raw encrypted credentials. |
+| GET | `/platform/tenants/:id/communication-providers` | A tenant's active provider per channel — never the raw encrypted credentials. |
 | GET | `/platform/analytics/overview`\|`/growth`\|`/revenue`\|`/engagement`\|`/churn`\|`/adoption` | Cross-tenant business metrics — see "Platform Analytics" below. |
 | GET | `/platform/tenants/:id/billing-sessions` | This tenant's checkout session history, newest first. |
 | POST | `/platform/billing-sessions/:sessionId/refund` | Refund a completed checkout via the original provider — see Billing & Checkout above. |
@@ -3834,7 +4326,7 @@ there's nobody present to choose one. `PlatformAdminManagementService.create()` 
 internally (never revealed to anyone, `changedPassword: false`), a 6-digit OTP stored in
 `platform_admin_password_reset_otps` (48-hour expiry — same tradeoff as the tenant-welcome flow, offset by rate-
 limiting `POST /platform/auth/reset-password`), and emails the new admin a `platform-admin-welcome` template with a
-`{PLATFORM_LOGIN_URL}/set-password?email=...&otp=...` link — the discovery-hub-platform equivalent of the tenant
+`{PLATFORM_LOGIN_URL}/set-password?email=...&otp=...` link — the discuva-platform equivalent of the tenant
 onboarding flow above, down to reusing the same OTP-verify-and-set-password shape
 (`PlatformAdminAuthService.forgotPassword`/`resetPassword`, its own OTP table rather than tenant-side's
 `password_reset_otps` since `PlatformAdmin` and `Member` are deliberately disjoint identity systems). Login also now
@@ -3885,7 +4377,7 @@ once, by `CheckoutService.applySubscriptionCanceled()`. Added specifically becau
 |--------|-------|-------------|
 | GET | `/platform/analytics/overview` | `{ totalTenants, activeTenants, suspendedTenants, totalMembersPlatformWide, subscriptionsByPlan[], mrrCents }` — headline numbers |
 | GET | `/platform/analytics/growth` | `?period=&months=` — `{ period, signups: [{periodLabel, count}], currentActiveTenants, currentSuspendedTenants }` |
-| GET | `/platform/analytics/revenue` | `?period=&months=` — `{ period, mrrCents, revenueByProvider: [{provider, totalCents}], trend: [{periodLabel, subscriptionRevenueCents, walletTopupRevenueCents, totalCents}] }` — only `completed` `BillingCheckoutSession` rows count |
+| GET | `/platform/analytics/revenue` | `?period=&months=` — `{ period, mrrCents, revenueByProvider: [{provider, totalCents}], trend: [{periodLabel, subscriptionRevenueCents, totalCents}] }` — only `completed` `BillingCheckoutSession` rows count (subscriptions only — `wallet_topup` no longer exists as a checkout type) |
 | GET | `/platform/analytics/engagement` | `{ totalMembers, averageAttendanceRate, totalGiving, tenantsWithRollup, tenantsMissingRollup, oldestComputedAt, newestComputedAt }` — sourced entirely from `tenant_rollups` (§Branch Hierarchy); `oldest`/`newestComputedAt` signal staleness since the rollup cron runs once daily |
 | GET | `/platform/analytics/churn` | `?period=&months=` — `{ period, currentlyCanceled, currentlyPastDue, trend: [{periodLabel, canceledCount}] }` |
 | GET | `/platform/analytics/adoption` | `{ smsAdoption: {byokCount, totalTenants, ratePercent}, emailAdoption: {...}, planDistribution: [{planId, planName, count}] }` — BYOK adoption counts distinct tenants with an active `TenantCommunicationProviderConfig` per channel |
@@ -4584,12 +5076,15 @@ allowed to finish and NestJS lifecycle hooks (e.g. closing the DB pool, Redis, B
 exits. Relevant when the orchestrator sends `SIGTERM` on deploy/scale-down — without this, connections would be cut
 mid-request.
 
-**Provider webhooks bypass the global JWT guard:** `POST /webhooks/virtual-account-credit`, the YouTube WebSub
-callbacks (`GET`/`POST /integrations/youtube/callback`), and `POST /webhooks/billing` are decorated `@Public()`.
-Providers never send a bearer token, so the global `JwtAuthGuard` would 401 them before their own signature
-verification (HMAC / `X-Hub-Signature` / `x-paystack-signature` / `verif-hash`) ever runs. `@Public()` only opts a
-route out of JWT auth — it does not skip the handler's own signature check. `v1/webhooks/billing` is also excluded
-from `TenantMiddleware` (§4.3), same no-Host-header reasoning as the YouTube callback.
+**Provider webhooks bypass the global JWT guard:** the YouTube WebSub
+callbacks (`GET`/`POST /integrations/youtube/callback`), `POST /webhooks/billing`, and
+`POST /webhooks/giving/:tenantId/:provider` are decorated `@Public()`. Providers never send a bearer token, so the
+global `JwtAuthGuard` would 401 them before their own signature verification (HMAC / `X-Hub-Signature` /
+`x-paystack-signature` / `verif-hash` / `x-korapay-signature` / `Stripe-Signature`) ever runs. `@Public()` only opts
+a route out of JWT auth — it does not skip the handler's own signature check. All three are also excluded from
+`TenantMiddleware` (§4.3) — same no-Host-header reasoning, though the giving webhook is the one exception with an
+actual tenant identifier on the route itself (`:tenantId`), since unlike billing's single shared platform-wide
+route, each tenant has their own BYOK giving-checkout credentials to resolve.
 
 **Migration history was squashed (2026-07-31):** the 107 incremental migrations that had accumulated since the
 project's first commit were replaced with a single `src/migrations/1790553600000-Baseline.ts`, generated via
@@ -4607,20 +5102,52 @@ to a real environment.
 |----------------|----------------|----------------------------------------------|
 | `NODE_ENV`     | `development`  | `development` \| `production` \| `test`      |
 | `PORT`         | `3000`         | HTTP port the server listens on              |
-| `CORS_ORIGINS` | — *(required)* | Comma-separated list of allowed CORS origins |
-| `APP_NAME`     | `discovery-hub-api` | Service name used in logs and process identification |
+| `CORS_ORIGINS` | — *(required)* | Comma-separated extra CORS allowlist for origins outside `APP_BASE_DOMAIN` (marketing site, docs, ops tooling) — every subdomain of `APP_BASE_DOMAIN` is allowed dynamically regardless of this list, see "CORS origin validation" under Multi-Tenant Request Scoping |
+| `APP_NAME`     | `discuva-api` | Service name used in logs and process identification |
 | `APP_BASE_DOMAIN` | `localhost` | Suffix `TenantMiddleware` strips from the `Host` header to find a tenant's subdomain (§5 Multi-Tenant Request Scoping) — `*.localhost` resolves to `127.0.0.1` with no `/etc/hosts` changes, so the default works out of the box in dev |
 
-### Branding (used in email templates)
+### Branding (used in email templates and generated PDFs)
 
-These are read through `ConfigService` at constructor time — **not** from bare `process.env` — so `.env` files are
-loaded correctly before use.
+`PRODUCT_NAME` is genuinely platform-wide (the SaaS product name) and is always read from here. `CHURCH_NAME`/
+`CHURCH_ADDRESS`/`CHURCH_TAGLINE`/`LOGO_URL`/`CURRENCY_CODE` are now only the **fallback** for a tenant that hasn't
+set its own `name`/`address`/`tagline`/`logoUrl`/`currency` (per-field, not all-or-nothing) — see
+`EmailQueueService.resolveBrandingData()`, `PdfService.resolveBranding()`, and `TenantCurrencyService.resolveCurrencyCode()`
+under Utility/Infrastructure above. All three share the same `tenant-branding:${tenantId}` cache entry (one Tenant
+lookup serves all three). `TenantCurrencyService` is also used by `FinanceRequestService` (Excel export header,
+approve/reject/submitted notification emails) and `AnnualGivingStatementScheduler` — both `sendForMember()` (the
+on-demand `POST /finance/me/giving-statement/send` path, which always has real CLS context from its HTTP caller)
+and the nightly `@Cron` path, `run()`, which now resolves each active tenant's own currency correctly since
+`sendAnnualStatements()` wraps `run()` in `forEachActiveTenant()` (see "Scheduler tenant iteration" under
+Multi-Tenant Request Scoping) — every `@Cron` scheduler that touches tenant-scoped data now loops per tenant.
+`CURRENCY_LOCALE` has no tenant-scoped equivalent (`Tenant` has no locale column) and stays a pure global default —
+used by `PdfService` for number formatting and, unrelatedly, by `EventReminderService`/`TitheService` for date/time
+formatting (those two never touched currency, so needed no change).
 
-| Variable         | Default                                         | Description                              |
-|------------------|-------------------------------------------------|------------------------------------------|
-| `PRODUCT_NAME`   | `Discovery Hub`                                 | Product name shown in email subjects     |
-| `CHURCH_NAME`    | `RCCG Discovery Centre`                         | Church/org name shown in email templates |
-| `CHURCH_ADDRESS` | `62 Igi Olugbin Street, Bariga. Lagos, Nigeria` | Church address shown in email templates  |
+| Variable         | Default                                         | Description                                              |
+|------------------|-------------------------------------------------|-----------------------------------------------------------|
+| `PRODUCT_NAME`   | `Discuva`                                       | Product name shown in email subjects — always global      |
+| `CHURCH_NAME`    | `RCCG Discovery Centre`                         | Fallback when a tenant's own `name` is unset               |
+| `CHURCH_ADDRESS` | `62 Igi Olugbin Street, Bariga. Lagos, Nigeria` | Fallback when a tenant's own `address` is unset             |
+| `CHURCH_TAGLINE` | `Destinies discovered, Champions raised`        | Fallback when a tenant's own `tagline` is unset — PDFs only |
+| `LOGO_URL`       | Cloudinary default logo asset                   | Fallback when a tenant's own `logoUrl` is unset              |
+| `CURRENCY_CODE`  | `NGN`                                           | Fallback when a tenant's own `currency` is unset            |
+| `CURRENCY_LOCALE`| `en-NG`                                         | Always global — no tenant-scoped equivalent exists          |
+
+### Error Tracking (Sentry)
+
+Optional. `src/instrument.ts` is imported as the very first line of `main.ts` (before any other import — required
+for the SDK's automatic instrumentation of `http`/`pg`/etc. to attach before those modules are first loaded
+elsewhere in the dependency graph) and calls `Sentry.init()` only when both `SENTRY_DSN` is set and
+`SENTRY_ENABLED` is `true`. `HttpExceptionFilter` (the single global exception filter) calls
+`Sentry.captureException()` only for 5xx responses and genuinely unhandled (non-`HttpException`) errors — routine
+4xx validation/auth errors are never reported, matching the filter's existing `error`/`warn` log-level split.
+`Sentry.captureException()` is safe to call even when `init()` never ran (unset DSN) — it's a no-op, not a crash.
+
+| Variable             | Default       | Description                                                                              |
+|-----------------------|---------------|-------------------------------------------------------------------------------------------|
+| `SENTRY_DSN`          | — *(unset)*   | Sentry project DSN. Unset disables error reporting entirely — the default for local dev.  |
+| `SENTRY_ENABLED`      | `true`        | Separate kill switch on top of `SENTRY_DSN` — set to `false` to mute reporting without removing the DSN. |
+| `SENTRY_ENVIRONMENT`  | `NODE_ENV`    | Sentry environment tag. Falls back to `NODE_ENV`, then `'development'`.                   |
 
 ### Database
 
@@ -4690,9 +5217,10 @@ platform-managed SMTP settings.
 
 #### SendGrid
 
-| Variable          | Default | Description                         |
-|--------------------|---------|-------------------------------------|
-| `SENDGRID_API_KEY` | —       | SendGrid API key, platform default  |
+| Variable            | Default                    | Description                             |
+|----------------------|-----------------------------|------------------------------------------|
+| `SENDGRID_API_KEY`  | —                           | SendGrid API key, platform default        |
+| `SENDGRID_BASE_URL` | `https://api.sendgrid.com` | Override for region failover / test doubles — matches every sibling provider's own `*_BASE_URL` convention |
 
 #### Mailgun
 
@@ -4799,16 +5327,15 @@ with application cache keys.
 | `DEFAULT_ADMIN_PASSWORD`                   | —                       | Password for the seeded default admin account |
 | `DEFAULT_PLATFORM_ADMIN_EMAIL`             | —                       | Email for the seeded first platform admin (`npm run seed:platform-admin`) |
 | `DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH`     | —                       | Argon2 hash for the seeded first platform admin (generate via `npm run hash:password`) |
-| `DEFAULT_VENUE_NAME`                       | `RCCG Discovery Centre` | Name for the seeded default venue             |
-| `DEFAULT_VENUE_ADDRESS`                    | —                       | Street address for the seeded default venue   |
-| `DEFAULT_VENUE_LATITUDE`                   | —                       | WGS84 latitude of the default venue           |
-| `DEFAULT_VENUE_LONGITUDE`                  | —                       | WGS84 longitude of the default venue          |
-| `DEFAULT_EVENT_CONFIG_NAME`                | —                       | Name for the seeded default event config      |
-| `DEFAULT_EVENT_ALLOWED_DISTANCE_IN_METERS` | `100`                   | Default allowed check-in radius (metres)      |
-| `WORKER_CHECKIN_START_OFFSET_SECONDS`      | `-1800`                 | Workers can check in 30 min before start      |
-| `WORKER_LATE_OFFSET_SECONDS`               | `0`                     | Workers arriving after `startTime` are LATE   |
-| `MEMBER_CHECKIN_START_OFFSET_SECONDS`      | `-900`                  | Members can check in 15 min before start      |
-| `CHECKIN_STOP_OFFSET_SECONDS`              | `3600`                  | Check-in closes 1 hr after start              |
+
+**Removed:** `DEFAULT_VENUE_NAME`/`DEFAULT_VENUE_ADDRESS`/`DEFAULT_VENUE_LATITUDE`/`DEFAULT_VENUE_LONGITUDE`/
+`DEFAULT_EVENT_CONFIG_NAME`/`DEFAULT_EVENT_ALLOWED_DISTANCE_IN_METERS`/`WORKER_CHECKIN_START_OFFSET_SECONDS`/
+`WORKER_LATE_OFFSET_SECONDS`/`MEMBER_CHECKIN_START_OFFSET_SECONDS`/`CHECKIN_STOP_OFFSET_SECONDS` — these only ever
+fed `DefaultEventConfigSeed`, a boot-time seed that ran outside any tenant CLS context and wrote into orphaned
+`public.venues`/`public.event_config` rows no live tenant schema ever reads (each tenant gets its own `venues`/
+`event_config` rows via `TenantSchemaGenesis`/normal admin setup instead). Confirmed dead — deleted along with the
+seed service rather than fixed. The four checkin-offset names now live only as columns on the tenant-scoped
+`EventConfig` entity (`workerCheckinStartOffsetSeconds` etc.), editable per-tenant via `EventConfigController`.
 
 ### Cloudinary (file uploads)
 
@@ -4819,7 +5346,10 @@ Used for finance request attachments and payment proofs.
 | `CLOUDINARY_CLOUD_NAME`      | — *(required)* | Cloudinary account cloud name                                              |
 | `CLOUDINARY_API_KEY`         | — *(required)* | Cloudinary API key                                                         |
 | `CLOUDINARY_API_SECRET`      | — *(required)* | Cloudinary API secret                                                      |
-| `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | Global hard ceiling for all file uploads (bytes). Registered via `MulterModule` in `AppModule`; individual endpoints may enforce a stricter limit. |
+| `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | `MulterModule`-wide default (`AppModule`) and the limit for routes with no more specific category below — incident report photos, member bulk-import spreadsheets |
+| `MAX_CLASS_MATERIAL_UPLOAD_BYTES` | `10485760` | Training class study material uploads (`ClassesController`) |
+| `MAX_AVATAR_UPLOAD_BYTES`    | `3145728`      | Small-image convention shared by tenant logo, tenant custom asset images, and member profile photo (`TenantInfoController`, `MemberController`) |
+| `MAX_FINANCE_PROOF_UPLOAD_BYTES` | `10485760` | Finance request payment-proof attachments (`FinanceWorkerController`) — its own var rather than reusing `MAX_CLASS_MATERIAL_UPLOAD_BYTES`, despite the same default value, since the two are semantically unrelated |
 | `TITHE_PROOF_EXPIRY_DAYS`    | `90`           | Days after which a tithe payment proof is purged from Cloudinary and DB    |
 | `ASSET_OVERDUE_NOTIFICATION_DAYS` | `1,3,7`   | Comma-separated day thresholds for overdue checkout reminders. Leave empty to disable. |
 
@@ -4850,13 +5380,15 @@ Generate keys once with `npx web-push generate-vapid-keys` and store permanently
 | `BULL_BOARD_USER`    | —       | Username for the Bull Board queue dashboard at `/queues`. If unset, dashboard is not mounted.      |
 | `BULL_BOARD_PASSWORD`| —       | Password for the Bull Board queue dashboard. Required alongside `BULL_BOARD_USER`.                 |
 
-### SMS (Termii)
+### SMS
+
+Pure BYOK (see SMS Module above) — no platform-default credentials for any SMS vendor, so there's nothing here for
+Twilio at all (its `accountSid`/`authToken`/`fromNumber` only ever exist as a tenant's own encrypted BYOK config).
+Termii's API host is the one exception: infrastructure, not a secret, so it stays env-driven.
 
 | Variable            | Default                        | Description                                                    |
 |---------------------|---------------------------------|------------------------------------------------------------------|
-| `TERMII_API_KEY`    | — *(optional)*                  | Termii API key                                                    |
-| `TERMII_SENDER_ID`  | — *(optional)*                  | Termii sender ID shown as the SMS "from" name                    |
-| `TERMII_BASE_URL`   | `https://api.ng.termii.com`     | Termii API base URL                                               |
+| `TERMII_BASE_URL`   | `https://api.ng.termii.com`     | Termii API base URL — same for every tenant's Termii account, BYOK or not |
 
 ### YouTube Live Detection (optional, platform-wide only)
 
@@ -4869,6 +5401,7 @@ subscription entirely and rely on the Sermon Module's manual "Announce Live" tri
 | `YOUTUBE_API_KEY`              | — *(optional)*   | Fallback YouTube Data API v3 key, used only for a tenant that configured a channel but not their own key |
 | `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) — one physical endpoint shared by every tenant |
 | `YOUTUBE_WEBSUB_SECRET`        | — *(optional)*   | Shared HMAC secret sent as `hub.secret` on subscribe; the hub signs every notification with it (`X-Hub-Signature`), which the callback verifies. Required alongside the callback URL — without it, `subscribe()` never registers a live subscription and the callback rejects everything it receives. |
+| `PUBSUBHUBBUB_URL`             | `https://pubsubhubbub.appspot.com/subscribe` | Google's PubSubHubbub hub endpoint `YoutubeSubscriptionService` posts subscribe/unsubscribe requests to |
 
 ### Billing: Paystack / Flutterwave (optional, platform-wide)
 
@@ -4884,7 +5417,8 @@ All optional — a provider whose secret key isn't set simply can't be selected 
 | `FLUTTERWAVE_SECRET_HASH`     | — *(optional)*                     | Shared secret configured in the Flutterwave dashboard's webhook settings — compared verbatim against the `verif-hash` header, not an HMAC key |
 | `FLUTTERWAVE_BASE_URL`        | `https://api.flutterwave.com/v3`   | Flutterwave API base URL |
 | `DEFAULT_PAYMENT_PROVIDER`    | `paystack`                         | Which provider a checkout call uses when it doesn't specify `?provider=` explicitly |
-| `SMS_CREDIT_PRICE_KOBO`       | — *(optional)*                     | Price of one SMS wallet credit, in kobo (e.g. `100` = ₦1/credit). Unset means wallet top-up isn't configured yet — `POST /billing/checkout/wallet-topup` `403`s cleanly rather than charging an undefined amount |
+| `SUBSCRIPTION_PERIOD_DAYS`    | `30`                                | Flat renewal period `CheckoutService.applyChargeSucceeded()` extends `currentPeriodEnd` by per successful charge |
+| `GRACE_PERIOD_DAYS`           | `7`                                 | How long `SubscriptionLapseScheduler` keeps a `PAST_DUE` subscription's features before downgrading to Free |
 
 ---
 

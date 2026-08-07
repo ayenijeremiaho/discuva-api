@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ConfigService } from '@nestjs/config';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { PledgeService } from '../service/pledge.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
@@ -8,6 +12,9 @@ import { Pledge } from '../entity/pledge.entity';
 import { PledgeFrequency } from '../enum/finance.enum';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class PledgeReminderScheduler {
@@ -16,9 +23,12 @@ export class PledgeReminderScheduler {
 
   constructor(
     private readonly pledgeService: PledgeService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
-    private readonly configService: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -30,7 +40,13 @@ export class PledgeReminderScheduler {
     if (!acquired) return;
 
     try {
-      await this.runReminders();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runReminders(),
+      );
     } finally {
       this.cacheService.releaseLock(PledgeReminderScheduler.LOCK_KEY);
     }
@@ -83,8 +99,6 @@ export class PledgeReminderScheduler {
         ? `Pledge Payment Due Today: ${pledge.campaign?.name}`
         : `Pledge Payment Due in 7 Days: ${pledge.campaign?.name}`;
 
-    const loginUrl = this.configService.get<string>('LOGIN_URL');
-
     this.utilityService.sendEmailWithTemplate(
       email,
       subject,
@@ -100,7 +114,6 @@ export class PledgeReminderScheduler {
           : diffDays === 0
             ? 'due today'
             : 'due in 7 days',
-        login_url: loginUrl,
       },
       undefined,
       EmailCategory.FINANCE_ALERTS,

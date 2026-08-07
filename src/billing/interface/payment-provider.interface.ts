@@ -62,7 +62,9 @@ export interface IPaymentProvider {
     cancelUrl: string;
   }): Promise<CheckoutSession>;
 
-  // Used by the SMS wallet top-up flow (§4.12).
+  // General-purpose one-off charge — used by CheckoutService for any
+  // non-recurring platform charge (there is none today; the SMS wallet
+  // top-up flow this originally served was removed in §9 Phase 9g).
   createOneOffCheckout(params: {
     tenantId: string;
     providerCustomerId: string;

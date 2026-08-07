@@ -10,6 +10,7 @@ const mockAnalyticsService = {
   getEngagement: jest.fn(),
   getChurn: jest.fn(),
   getAdoption: jest.fn(),
+  getGiving: jest.fn(),
 };
 
 describe('PlatformAnalyticsController', () => {
@@ -57,5 +58,10 @@ describe('PlatformAnalyticsController', () => {
   it('getAdoption delegates with no params', () => {
     controller.getAdoption();
     expect(mockAnalyticsService.getAdoption).toHaveBeenCalledWith();
+  });
+
+  it('getGiving passes through the period/months query', () => {
+    controller.getGiving({ period: 'weekly', months: 3 });
+    expect(mockAnalyticsService.getGiving).toHaveBeenCalledWith('weekly', 3);
   });
 });

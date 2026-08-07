@@ -22,7 +22,13 @@ import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { ConfigService } from '@nestjs/config';
+
+export interface ClassMaterialLibraryEntry {
+  documentUrl: string;
+  usedByClassNames: string[];
+}
 
 export interface ClassEnrollmentBreakdown {
   classId: string;
@@ -50,6 +56,7 @@ export class ClassesService {
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -586,6 +593,40 @@ export class ClassesService {
       `Certificate issued for enrollment ${enrollmentId} (class "${enrollment.churchClass.name}")`,
     );
     return saved;
+  }
+
+  async uploadMaterial(file: Express.Multer.File): Promise<{ url: string }> {
+    const uploaded = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      'class-materials',
+      undefined,
+      file.mimetype,
+    );
+    return { url: uploaded.secureUrl };
+  }
+
+  // Lets the admin UI offer "reuse a previous upload" instead of
+  // re-uploading the same syllabus/manual for every class it applies to —
+  // just the distinct documentUrls already in use, grouped by which
+  // classes reference each one, since ChurchClass.documentUrl has no
+  // separate library table backing it.
+  async getMaterialLibrary(): Promise<ClassMaterialLibraryEntry[]> {
+    const classes = await this.classRepo.find({
+      select: ['name', 'documentUrl'],
+    });
+    const withMaterial = classes.filter((c) => !!c.documentUrl);
+
+    const byUrl = new Map<string, string[]>();
+    for (const c of withMaterial) {
+      const names = byUrl.get(c.documentUrl!) ?? [];
+      names.push(c.name);
+      byUrl.set(c.documentUrl!, names);
+    }
+
+    return [...byUrl.entries()].map(([documentUrl, usedByClassNames]) => ({
+      documentUrl,
+      usedByClassNames,
+    }));
   }
 
   private async getClassOrThrow(id: string): Promise<ChurchClass> {

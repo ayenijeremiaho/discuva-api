@@ -8,6 +8,9 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { EventReminder } from '../entity/event-reminder.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { Member } from '../../member/entity/member.entity';
@@ -26,6 +29,9 @@ import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 @Injectable()
 export class EventReminderService {
@@ -42,10 +48,14 @@ export class EventReminderService {
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(Announcement)
     private readonly announcementRepo: Repository<Announcement>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
     private readonly config: ConfigService,
     private readonly pushService: PushNotificationService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
   }
@@ -152,23 +162,33 @@ export class EventReminderService {
     }
 
     try {
-      const now = new Date();
-
-      const toFire = await this.reminderRepo
-        .createQueryBuilder('r')
-        .innerJoinAndSelect('r.serviceSlot', 'slot')
-        .leftJoinAndSelect('r.department', 'dept')
-        .where('r.enabled = true')
-        .andWhere('r.lastSentAt IS NULL')
-        .andWhere('r.fireAt <= :now', { now })
-        .andWhere('slot.startTime > :now', { now })
-        .getMany();
-
-      for (const reminder of toFire) {
-        await this.fireReminder(reminder, now);
-      }
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runReminderDispatch(),
+      );
     } finally {
       this.cacheService.releaseLock(EventReminderService.LOCK_KEY);
+    }
+  }
+
+  private async runReminderDispatch(): Promise<void> {
+    const now = new Date();
+
+    const toFire = await this.reminderRepo
+      .createQueryBuilder('r')
+      .innerJoinAndSelect('r.serviceSlot', 'slot')
+      .leftJoinAndSelect('r.department', 'dept')
+      .where('r.enabled = true')
+      .andWhere('r.lastSentAt IS NULL')
+      .andWhere('r.fireAt <= :now', { now })
+      .andWhere('slot.startTime > :now', { now })
+      .getMany();
+
+    for (const reminder of toFire) {
+      await this.fireReminder(reminder, now);
     }
   }
 

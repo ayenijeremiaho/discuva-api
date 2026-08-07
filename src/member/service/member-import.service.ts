@@ -441,7 +441,6 @@ export class MemberImportService {
             name: firstName,
             email: savedMember.email,
             password: tempPassword,
-            login_url: this.configService.get<string>('LOGIN_URL'),
             churchName: this.churchName,
             churchAddress: this.churchAddress,
           },

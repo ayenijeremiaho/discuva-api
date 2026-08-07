@@ -261,33 +261,32 @@ export class SmallGroupService {
   ): Promise<SmallGroupAttendance[]> {
     await this.assertIsGroupLeader(groupId, leaderMemberId);
 
-    const saved: SmallGroupAttendance[] = [];
-    for (const entry of dto.records) {
-      const existing = await this.attendanceRepo.findOne({
-        where: {
-          group: { id: groupId },
-          member: { id: entry.memberId },
-          meetingDate: dto.meetingDate,
-        },
-      });
+    // One query for all existing rows for this meeting, keyed by member id,
+    // instead of a find+save round trip per record — a fellowship's roster
+    // can be dozens of members.
+    const existingRows = await this.attendanceRepo.find({
+      where: { group: { id: groupId }, meetingDate: dto.meetingDate },
+      relations: ['member'],
+    });
+    const existingByMemberId = new Map(
+      existingRows.map((row) => [row.member.id, row]),
+    );
 
+    const toSave = dto.records.map((entry) => {
+      const existing = existingByMemberId.get(entry.memberId);
       if (existing) {
         existing.status = entry.status;
-        saved.push(await this.attendanceRepo.save(existing));
-      } else {
-        saved.push(
-          await this.attendanceRepo.save(
-            this.attendanceRepo.create({
-              group: { id: groupId } as SmallGroup,
-              member: { id: entry.memberId } as Member,
-              meetingDate: dto.meetingDate,
-              status: entry.status,
-            }),
-          ),
-        );
+        return existing;
       }
-    }
-    return saved;
+      return this.attendanceRepo.create({
+        group: { id: groupId } as SmallGroup,
+        member: { id: entry.memberId } as Member,
+        meetingDate: dto.meetingDate,
+        status: entry.status,
+      });
+    });
+
+    return this.attendanceRepo.save(toSave);
   }
 
   private async assertIsGroupMember(

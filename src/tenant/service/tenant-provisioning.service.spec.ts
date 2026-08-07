@@ -8,6 +8,9 @@ import { Tenant } from '../entity/tenant.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
 import { Member } from '../../member/entity/member.entity';
 import { UtilityService } from '../../utility/service/utility.service';
+import { TenantOnboardingEvent } from '../entity/tenant-onboarding-event.entity';
+import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
+import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
 
 const mockTenantRepo = {
   findOneBy: jest.fn(),
@@ -19,11 +22,15 @@ const mockSubscriptionRepo = {
   save: jest.fn(),
   create: jest.fn((v) => v),
 };
+const mockEventRepo = {
+  save: jest.fn(),
+  create: jest.fn((v) => v),
+};
 const mockDataSource = { query: jest.fn() };
 const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
 const mockConfigService = {
   get: jest.fn((key: string) =>
-    key === 'ADMIN_LOGIN_URL' ? 'https://admin.example.com' : 'Discovery Hub',
+    key === 'ADMIN_LOGIN_URL' ? 'https://admin.example.com' : 'Discuva',
   ),
 };
 
@@ -70,6 +77,10 @@ describe('TenantProvisioningService', () => {
           provide: getRepositoryToken(Subscription),
           useValue: mockSubscriptionRepo,
         },
+        {
+          provide: getRepositoryToken(TenantOnboardingEvent),
+          useValue: mockEventRepo,
+        },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
         { provide: UtilityService, useValue: mockUtilityService },
@@ -100,7 +111,7 @@ describe('TenantProvisioningService', () => {
     name: 'Test Church',
   } as Tenant;
 
-  describe('seedTenantAdmin — no adminPasswordHash supplied (platform-admin path)', () => {
+  describe('seedTenantAdmin — no adminPasswordHash supplied (signup and platform-admin paths)', () => {
     it('generates a random password, seeds a welcome OTP, and returns it', async () => {
       const otp = await (service as any).seedTenantAdmin(
         baseTenant,
@@ -127,7 +138,7 @@ describe('TenantProvisioningService', () => {
   });
 
   describe('sendWelcomeEmail', () => {
-    it('emails the new admin a set-password link built from ADMIN_LOGIN_URL', () => {
+    it('emails the new admin a set-password link carrying the tenant subdomain', () => {
       (service as any).sendWelcomeEmail(baseTenant, baseParams, '123456');
 
       expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
@@ -137,13 +148,13 @@ describe('TenantProvisioningService', () => {
         expect.objectContaining({
           email: baseParams.adminEmail,
           otp: '123456',
-          set_password_url: `https://admin.example.com/set-password?email=${encodeURIComponent(baseParams.adminEmail)}&otp=123456`,
+          set_password_url: `https://${baseTenant.subdomain}.admin.example.com/set-password?email=${encodeURIComponent(baseParams.adminEmail)}&otp=123456`,
         }),
       );
     });
   });
 
-  describe('seedTenantAdmin — adminPasswordHash supplied (self-serve signup / branch invite)', () => {
+  describe('seedTenantAdmin — adminPasswordHash supplied (provision-tenant CLI only)', () => {
     it('uses the caller-supplied hash, sets changedPassword true, and generates no OTP', async () => {
       const otp = await (service as any).seedTenantAdmin(baseTenant, {
         ...baseParams,
@@ -187,6 +198,98 @@ describe('TenantProvisioningService', () => {
         service.provision({ ...baseParams, subdomain: 'admin' }),
       ).rejects.toThrow('reserved subdomain');
       expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('ensurePendingTenant', () => {
+    it('rejects a reserved subdomain before touching the database', async () => {
+      await expect(
+        service.ensurePendingTenant('admin', 'Test Church'),
+      ).rejects.toThrow('reserved subdomain');
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the subdomain is already in use by an active tenant', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        isActive: true,
+      });
+
+      await expect(
+        service.ensurePendingTenant('test-church', 'Test Church'),
+      ).rejects.toThrow('already in use');
+      expect(mockTenantRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('returns the existing row unchanged when one already exists but is not yet active (resuming a partial provision)', async () => {
+      const existing = {
+        id: 'tenant-1',
+        subdomain: 'test-church',
+        isActive: false,
+        onboardingStatus: TenantOnboardingStatus.PROVISIONING,
+      };
+      mockTenantRepo.findOneBy.mockResolvedValue(existing);
+
+      const result = await service.ensurePendingTenant(
+        'test-church',
+        'Test Church',
+      );
+
+      expect(result).toBe(existing);
+      expect(mockTenantRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('creates a new PENDING tenant row when none exists', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(null);
+
+      const result = await service.ensurePendingTenant(
+        'Test-Church',
+        'Test Church',
+        'parent-1',
+      );
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subdomain: 'test-church',
+          isActive: false,
+          onboardingStatus: TenantOnboardingStatus.PENDING,
+          parentTenantId: 'parent-1',
+        }),
+      );
+      expect(result.subdomain).toBe('test-church');
+    });
+  });
+
+  describe('recordEvent', () => {
+    it('saves a TenantOnboardingEvent row with the given event/actor/metadata', async () => {
+      await service.recordEvent(
+        'tenant-1',
+        'PROVISIONING_COMPLETED',
+        TenantOnboardingActorType.SYSTEM,
+        { actorId: 'admin-1', metadata: { note: 'done' } },
+      );
+
+      expect(mockEventRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenant: { id: 'tenant-1' },
+          event: 'PROVISIONING_COMPLETED',
+          actorType: TenantOnboardingActorType.SYSTEM,
+          actorId: 'admin-1',
+          metadata: { note: 'done' },
+        }),
+      );
+    });
+
+    it('defaults actorId/metadata to null when not provided', async () => {
+      await service.recordEvent(
+        'tenant-1',
+        'SIGNUP_INITIATED',
+        TenantOnboardingActorType.SELF_SERVE,
+      );
+
+      expect(mockEventRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ actorId: null, metadata: null }),
+      );
     });
   });
 });

@@ -18,7 +18,9 @@ import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
 
-const MEMBER_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
+const MEMBER_IMPORT_MAX_BYTES =
+  Number.parseInt(process.env.MAX_FILE_UPLOAD_BYTES ?? '', 10) ||
+  5 * 1024 * 1024;
 
 @UseGuards(AdminGuard)
 @Controller('members/bulk-import')

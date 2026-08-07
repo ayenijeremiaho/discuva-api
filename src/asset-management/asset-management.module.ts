@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Asset } from './entity/asset.entity';
 import { MaintenanceSchedule } from './entity/maintenance-schedule.entity';
@@ -17,6 +18,7 @@ import { VehicleExpiryAlertScheduler } from './scheduler/vehicle-expiry-alert.sc
 import { OverdueCheckoutScheduler } from './scheduler/overdue-checkout.scheduler';
 import { UtilityModule } from '../utility/utility.module';
 import { AdminModule } from '../admin/admin.module';
+import { Tenant } from '../tenant/entity/tenant.entity';
 
 @Module({
   imports: [
@@ -30,6 +32,9 @@ import { AdminModule } from '../admin/admin.module';
       Member,
       DepartmentLead,
     ]),
+    // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
+    // by the asset-management schedulers' forEachActiveTenant loops.
+    TypeOrmModule.forFeature([Tenant]),
     UtilityModule,
     AdminModule,
   ],

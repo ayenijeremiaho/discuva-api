@@ -3,6 +3,9 @@ import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { FollowUpTask } from '../entity/follow-up-task.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FollowUpTaskStatusEnum } from '../enums/follow-up.enum';
@@ -11,6 +14,9 @@ import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 const OPEN_STATUSES = [
   FollowUpTaskStatusEnum.PENDING,
@@ -30,9 +36,13 @@ export class FollowUpScheduler {
     private readonly taskRepo: Repository<FollowUpTask>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
     private readonly emailQueueService: EmailQueueService,
     private readonly configService: ConfigService,
     private readonly cacheService: CacheService,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.staleDays = this.configService.get<number>('FOLLOW_UP_STALE_DAYS', 7);
@@ -48,7 +58,13 @@ export class FollowUpScheduler {
       return;
     }
     try {
-      await this.runEscalation();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runEscalation(),
+      );
     } finally {
       this.cacheService.releaseLock(ESCALATION_LOCK);
     }
@@ -161,7 +177,13 @@ export class FollowUpScheduler {
       return;
     }
     try {
-      await this.runStaleCheck();
+      await forEachActiveTenant(
+        this.tenantRepo,
+        this.cls,
+        this.txHost,
+        this.logger,
+        () => this.runStaleCheck(),
+      );
     } finally {
       this.cacheService.releaseLock(STALE_LOCK);
     }

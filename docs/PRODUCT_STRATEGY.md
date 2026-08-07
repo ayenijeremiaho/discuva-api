@@ -1,4 +1,4 @@
-# Discovery Hub — Product Strategy
+# Discuva — Product Strategy
 
 > **Status:** Draft, first pass — pricing numbers and a few open questions marked below are hypotheses to validate,
 > not final decisions. Technical implementation of everything here is specified in
@@ -8,12 +8,12 @@
 
 ## 1. Executive Summary
 
-Discovery Hub is a church management platform — attendance, membership, finance, small groups, events, evangelism
+Discuva is a church management platform — attendance, membership, finance, small groups, events, evangelism
 tracking, and a dozen other operational modules a growing church needs, in one system instead of five disconnected
 spreadsheets and apps. It has been built and refined against one real congregation's actual day-to-day operation for
 several months, which is a genuine asset: the feature set isn't speculative, it's been pressure-tested.
 
-**The decision this paper documents:** Discovery Hub launches as a single-repo, freemium SaaS product — not an
+**The decision this paper documents:** Discuva launches as a single-repo, freemium SaaS product — not an
 open-source, self-hosted tool. There is no benefit to asking a church's volunteer IT person to run a Postgres
 instance, manage backups, and apply migrations. The value is in "sign up, your church is running in under a minute,"
 not in a self-hosting story that adds ops burden to exactly the kind of organization least equipped to carry it.
@@ -36,7 +36,7 @@ Existing church management software (ChMS) mostly falls into two camps:
 | Flat enterprise pricing | Church Community Builder, Breeze | Flat monthly, but no free tier | No low-risk way for a small or new church to try it — first touch is a sales conversation or a card number |
 | Limited free tier | ChurchTrac | Free tier exists but capped/feature-thin | Free tier isn't generous enough to be a real product on its own |
 
-Discovery Hub's positioning: **unlimited people on the free tier, forever — pay only for advanced operational
+Discuva's positioning: **unlimited people on the free tier, forever — pay only for advanced operational
 modules.** No competitor in this space credibly offers "bring your whole congregation, any size, for free." That's
 the headline, and it's true precisely because the monetization axis is *features*, not *headcount* — see §4.
 
@@ -86,7 +86,7 @@ need a third, higher-touch tier when it's addressed, not a retrofit of Free/Pro.
 |---|---|
 | **Finance & Accounting** | The flagship differentiator. Full double-entry ledger — funds, chart of accounts, budgets, journal entries with approval workflow, tithe records with bank-statement reconciliation, pledge campaigns, petty cash, external payees, accounting periods, financial reports. This is genuinely sophisticated software (on par with small-business accounting tools) that only a church with real financial operations needs — exactly the signal that a church can afford to pay. |
 | **SMS Broadcast** | Has a real per-message cost regardless of plan (see §5's metering note) — gating it protects margin as much as it drives upgrades. |
-| **Facility Rental** | Revenue-generating for the church itself; reasonable that Discovery Hub takes a cut of the value it helps create. |
+| **Facility Rental** | Revenue-generating for the church itself; reasonable that Discuva takes a cut of the value it helps create. |
 | **Games** (live quiz/engagement) | Nice-to-have engagement feature, natural upsell, not core operations. |
 | **Volunteer Marketplace** | Operational sophistication signal — a church coordinating volunteer sign-ups at scale is past the "just getting started" phase. |
 | **Asset & Inventory Management** | Operational, not ministry-critical. |
@@ -133,15 +133,15 @@ point, aimed at denominational orgs) — is *not* designed or priced here; it's 
 above isn't mistaken for the final shape of the product.
 
 **Payment processing: Paystack, not Stripe, chosen for standard Nigerian-market support Stripe currently lacks —
-but abstracted behind a provider interface, not hardwired.** This mirrors a pattern already proven elsewhere in the
-codebase (tithe virtual accounts already bill through Paystack and Flutterwave). Adding a second processor later
-(Flutterwave, or an international one if the product ever expands beyond its initial market) is a new class behind
+but abstracted behind a provider interface, not hardwired.** Proven with subscription billing itself: Paystack and
+Flutterwave are both live, registered simultaneously behind `IPaymentProvider` (`PaymentProviderRegistryService`).
+Adding a processor later (Kora, Stripe if the product ever expands beyond its initial market) is a new class behind
 the same interface, not a rearchitecture. Full design in `MULTI_TENANT_MIGRATION.md` §4.11.
 
 **Communication providers: platform-managed by default, bring-your-own-key as a first-class alternative, and not
 limited to one provider per channel.** Two things churches specifically want that shape this: their own name as the
 sender (not a shared platform identity) on SMS and email both, and the ability to add credentials for whichever
-provider they already use, from their own settings — not just whatever Discovery Hub picked. Neither is a
+provider they already use, from their own settings — not just whatever Discuva picked. Neither is a
 later/enterprise add-on; both ship at launch. Full design in `MULTI_TENANT_MIGRATION.md` §4.12. In short:
 - **Platform default** — SMS debits a prepaid credit balance (by segment) through the platform's own provider
   (Termii at launch, more addable later); email sends free through the platform's own default provider. Zero setup,
@@ -149,7 +149,7 @@ later/enterprise add-on; both ship at launch. Full design in `MULTI_TENANT_MIGRA
 - **BYOK, per provider, per channel** — a tenant can add their own credentials for any registered SMS or email
   provider (starting with Termii for SMS, Gmail/Resend for email — more providers addable without a rearchitecture,
   same "data, not code" principle as the plan tiers above) and have sends go out under their own name. No wallet
-  involved for that channel, no cost to Discovery Hub, their credential encrypted at rest, never plaintext.
+  involved for that channel, no cost to Discuva, their credential encrypted at rest, never plaintext.
 - SMS needs the wallet because Termii has a real per-message cost; email doesn't, because typical church volume is a
   rounding error on providers' free tiers — no wallet built for email unless that stops being true.
 

@@ -1,4 +1,4 @@
-# Discovery Hub — Standing Rules
+# Discuva — Standing Rules
 
 ## Definition of Done (MANDATORY — every task)
 

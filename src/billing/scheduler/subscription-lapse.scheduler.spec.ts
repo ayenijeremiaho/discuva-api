@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
+import { ConfigService } from '@nestjs/config';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { SubscriptionLapseScheduler } from './subscription-lapse.scheduler';
 import { Subscription } from '../entity/subscription.entity';
@@ -17,6 +18,9 @@ const mockCls = { runWith: jest.fn((_store, fn) => fn()) };
 const mockTxHost = {
   tx: { query: jest.fn(), findOne: jest.fn() },
   withTransaction: jest.fn((fn) => fn()),
+};
+const mockConfigService = {
+  get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
 };
 
 describe('SubscriptionLapseScheduler', () => {
@@ -47,6 +51,7 @@ describe('SubscriptionLapseScheduler', () => {
         { provide: EmailQueueService, useValue: mockEmailQueueService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
     scheduler = module.get(SubscriptionLapseScheduler);
@@ -141,6 +146,43 @@ describe('SubscriptionLapseScheduler', () => {
         planId: 'free',
         status: SubscriptionStatus.CANCELED,
       }),
+    );
+  });
+
+  it('honors a configured GRACE_PERIOD_DAYS override instead of the hardcoded default', async () => {
+    mockConfigService.get.mockImplementation((key: string) =>
+      key === 'GRACE_PERIOD_DAYS' ? 3 : undefined,
+    );
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        SubscriptionLapseScheduler,
+        {
+          provide: getRepositoryToken(Subscription),
+          useValue: mockSubscriptionRepo,
+        },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        { provide: CacheService, useValue: mockCacheService },
+        { provide: EmailQueueService, useValue: mockEmailQueueService },
+        { provide: ClsService, useValue: mockCls },
+        { provide: TransactionHost, useValue: mockTxHost },
+        { provide: ConfigService, useValue: mockConfigService },
+      ],
+    }).compile();
+    const overriddenScheduler = module.get(SubscriptionLapseScheduler);
+
+    const fourDaysAgo = new Date();
+    fourDaysAgo.setDate(fourDaysAgo.getDate() - 4); // past the 3-day override
+    mockSubscriptionRepo.find
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { tenantId: 'tenant-1', currentPeriodEnd: fourDaysAgo },
+      ]);
+    mockSubscriptionRepo.save.mockResolvedValue({});
+
+    await overriddenScheduler.processLapsedSubscriptions();
+
+    expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ status: SubscriptionStatus.CANCELED }),
     );
   });
 

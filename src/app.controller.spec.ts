@@ -9,7 +9,7 @@ const mockDataSource = { query: jest.fn().mockResolvedValue([]) };
 const mockCacheService = { ping: jest.fn().mockResolvedValue(undefined) };
 const CONFIG_DEFAULTS: Record<string, string> = {
   POSTMAN_URL: 'https://postman.example.com',
-  PRODUCT_NAME: 'Discovery Hub',
+  PRODUCT_NAME: 'Discuva',
   CHURCH_NAME: 'RCCG Discovery Centre',
   CHURCH_ADDRESS: '62 Igi Olugbin Street, Bariga. Lagos, Nigeria',
 };
@@ -45,7 +45,7 @@ describe('AppController', () => {
         'text/html; charset=utf-8',
       );
       expect(mockRes.end).toHaveBeenCalledWith(
-        expect.stringContaining('Discovery Hub'),
+        expect.stringContaining('Discuva'),
       );
     });
 

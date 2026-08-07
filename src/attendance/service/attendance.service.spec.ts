@@ -29,6 +29,7 @@ import { DepartmentCapability } from '../../department/enums/department-capabili
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { getQueueToken } from '@nestjs/bull';
 import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { FOLLOW_UP_QUEUE } from '../../follow-up/processor/post-event.processor';
 
 const mockFollowUpQueue = {
@@ -107,6 +108,9 @@ const mockDataSource = {
   createQueryBuilder: jest.fn(),
   query: jest.fn(),
 };
+
+const mockTxManager = { save: jest.fn(), update: jest.fn() };
+const mockTxHost = { tx: mockTxManager };
 
 const mockDepartmentService = {
   getDepartmentIdForLead: jest.fn(),
@@ -214,6 +218,7 @@ describe('AttendanceService', () => {
         { provide: ExcelService, useValue: mockExcelService },
         { provide: EmailQueueService, useValue: mockEmailQueueService },
         { provide: ClsService, useValue: mockClsService },
+        { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
 
@@ -461,7 +466,7 @@ describe('AttendanceService', () => {
 
       await service.markAbsentees();
 
-      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+      expect(mockTxManager.save).not.toHaveBeenCalled();
     });
 
     it('should create absence records per event and mark event as processed', async () => {
@@ -483,15 +488,8 @@ describe('AttendanceService', () => {
         absentWorkers,
       );
 
-      const managerSave = jest.fn().mockResolvedValue(undefined);
-      const managerUpdate = jest.fn().mockResolvedValue(undefined);
-      mockDataSource.transaction.mockImplementation(async (cb: any) => {
-        await cb({
-          save: managerSave,
-          update: managerUpdate,
-          createQueryBuilder: () => makeQb(),
-        });
-      });
+      mockTxManager.save.mockResolvedValue(undefined);
+      mockTxManager.update.mockResolvedValue(undefined);
       // mock leave query (no workers on leave)
       mockDataSource.createQueryBuilder = jest.fn().mockReturnValue({
         ...makeQb(),
@@ -500,7 +498,7 @@ describe('AttendanceService', () => {
 
       await service.markAbsentees();
 
-      expect(managerSave).toHaveBeenCalledWith(
+      expect(mockTxManager.save).toHaveBeenCalledWith(
         Attendance,
         expect.arrayContaining([
           expect.objectContaining({
@@ -515,9 +513,11 @@ describe('AttendanceService', () => {
           }),
         ]),
       );
-      expect(managerUpdate).toHaveBeenCalledWith(expect.anything(), 'event-1', {
-        attendanceMarked: true,
-      });
+      expect(mockTxManager.update).toHaveBeenCalledWith(
+        expect.anything(),
+        'event-1',
+        { attendanceMarked: true },
+      );
     });
 
     it('should mark worker ON_LEAVE when approved leave covers event date', async () => {
@@ -532,11 +532,8 @@ describe('AttendanceService', () => {
         { id: 'worker-2' },
       ]);
 
-      const managerSave = jest.fn().mockResolvedValue(undefined);
-      const managerUpdate = jest.fn().mockResolvedValue(undefined);
-      mockDataSource.transaction.mockImplementation(async (cb: any) => {
-        await cb({ save: managerSave, update: managerUpdate });
-      });
+      mockTxManager.save.mockResolvedValue(undefined);
+      mockTxManager.update.mockResolvedValue(undefined);
       mockDataSource.createQueryBuilder = jest.fn().mockReturnValue({
         ...makeQb(),
         getRawMany: jest.fn().mockResolvedValue([{ memberId: 'worker-2' }]),
@@ -544,7 +541,7 @@ describe('AttendanceService', () => {
 
       await service.markAbsentees();
 
-      expect(managerSave).toHaveBeenCalledWith(
+      expect(mockTxManager.save).toHaveBeenCalledWith(
         Attendance,
         expect.arrayContaining([
           expect.objectContaining({ status: AttendanceStatusEnum.ON_LEAVE }),

@@ -17,7 +17,6 @@ export class SanitizationService {
   private readonly purify: typeof DOMPurify;
 
   constructor() {
-    // Create a window object for DOMPurify to use
     const window = new JSDOM('').window;
     this.purify = DOMPurify(window);
   }
@@ -127,10 +126,8 @@ export class SanitizationService {
     if (!url) return null;
 
     try {
-      // Basic URL validation
       const parsed = new URL(url);
 
-      // Block potentially dangerous protocols
       const dangerousProtocols = ['javascript:', 'data:', 'vbscript:', 'file:'];
       if (
         dangerousProtocols.some((proto) => parsed.protocol.startsWith(proto))
@@ -153,7 +150,6 @@ export class SanitizationService {
   sanitizeFilename(filename: string): string {
     if (!filename) return filename;
 
-    // Remove path information
     return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
@@ -166,7 +162,6 @@ export class SanitizationService {
   sanitizeCss(css: string): string {
     if (!css) return css;
 
-    // Remove potentially dangerous CSS
     return css
       .replace(/expression\s*\(/gi, '')
       .replace(/url\s*\(/gi, '')

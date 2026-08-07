@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -13,11 +14,14 @@ import { Throttle } from '@nestjs/throttler';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 import { Public } from '../../auth/decorator/public.decorator';
 import { RequiresPlatformPermission } from '../decorator/requires-platform-permission.decorator';
+import { CurrentPlatformAdmin } from '../decorator/current-platform-admin.decorator';
+import { PlatformAdminAuth } from '../interface/platform-admin-auth.interface';
 import { PlatformAdminPermission } from '../enum/platform-admin-permission.enum';
 import { PlatformAdminAuthService } from '../service/platform-admin-auth.service';
 import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
+import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
 import {
   PlatformAdminForgotPasswordDto,
@@ -27,6 +31,7 @@ import { CreateTenantDto } from '../dto/create-tenant.dto';
 import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
+import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
@@ -53,6 +58,7 @@ export class PlatformAdminController {
     private readonly tenantService: PlatformTenantService,
     private readonly planService: PlatformPlanService,
     private readonly communicationProviderService: PlatformCommunicationProviderService,
+    private readonly givingProviderService: PlatformGivingProviderService,
     private readonly checkoutService: CheckoutService,
   ) {}
 
@@ -92,8 +98,18 @@ export class PlatformAdminController {
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Post('tenants')
-  async provisionTenant(@Body() dto: CreateTenantDto) {
-    return this.tenantService.createTenant(dto);
+  async provisionTenant(
+    @Body() dto: CreateTenantDto,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+  ) {
+    return this.tenantService.createTenant(dto, admin.id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('tenants/:id/onboarding-events')
+  async getOnboardingEvents(@Param('id') id: string) {
+    return this.tenantService.getOnboardingEvents(id);
   }
 
   @UseGuards(PlatformAdminGuard)
@@ -118,6 +134,20 @@ export class PlatformAdminController {
     @Body() dto: ChangeTenantPlanDto,
   ) {
     return this.tenantService.changeTenantPlan(id, dto);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Patch('tenants/:id/discount')
+  async applyDiscount(@Param('id') id: string, @Body() dto: ApplyDiscountDto) {
+    return this.tenantService.applyDiscount(id, dto);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Delete('tenants/:id/discount')
+  async removeDiscount(@Param('id') id: string) {
+    return this.tenantService.removeDiscount(id);
   }
 
   @UseGuards(PlatformAdminGuard)
@@ -191,9 +221,20 @@ export class PlatformAdminController {
     return this.checkoutService.listCheckoutSessions(id);
   }
 
+  // Giving-checkout is money the tenant receives directly (not platform
+  // revenue), but it's still a billing/money concern from the platform's
+  // support perspective — reuses BILLING_READ rather than adding a new
+  // permission just for this one lookup.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('tenants/:id/giving-providers')
+  async getTenantGivingProviders(@Param('id') id: string) {
+    return this.givingProviderService.getTenantGivingProviders(id);
+  }
+
   // Support action — refund a specific completed checkout. Does not
-  // automatically reverse the tenant-facing effect (wallet credit / plan
-  // upgrade) — see CheckoutService.refundCheckoutSession for why.
+  // automatically reverse the tenant-facing effect (plan upgrade) — see
+  // CheckoutService.refundCheckoutSession for why.
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
   @Post('billing-sessions/:sessionId/refund')

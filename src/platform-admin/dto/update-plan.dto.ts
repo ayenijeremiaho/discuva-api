@@ -2,6 +2,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -26,4 +27,8 @@ export class UpdatePlanDto {
   @IsArray()
   @IsIn(Object.values(PlanFeature), { each: true })
   features?: PlanFeature[];
+
+  @IsOptional()
+  @IsObject()
+  featureLimits?: Record<string, number>;
 }
