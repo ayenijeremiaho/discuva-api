@@ -1,6 +1,7 @@
 import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import {
   FLUTTERWAVE_PROVIDER_NAME,
+  KORA_PROVIDER_NAME,
   PAYSTACK_PROVIDER_NAME,
 } from '../interface/payment-provider.interface';
 
@@ -10,7 +11,7 @@ export class InitiateSubscriptionCheckoutDto {
   planId: string;
 
   @IsOptional()
-  @IsIn([PAYSTACK_PROVIDER_NAME, FLUTTERWAVE_PROVIDER_NAME])
+  @IsIn([PAYSTACK_PROVIDER_NAME, FLUTTERWAVE_PROVIDER_NAME, KORA_PROVIDER_NAME])
   provider?: string;
 
   @IsString()

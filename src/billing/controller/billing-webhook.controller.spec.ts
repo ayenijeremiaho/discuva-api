@@ -30,7 +30,7 @@ describe('BillingWebhookController', () => {
   });
 
   it('dispatches to flutterwave when verif-hash is present', async () => {
-    await controller.handleWebhook(req(), undefined, 'hash-value');
+    await controller.handleWebhook(req(), undefined, 'hash-value', undefined);
     expect(mockCheckoutService.handleWebhookEvent).toHaveBeenCalledWith(
       'flutterwave',
       expect.any(Buffer),
@@ -38,13 +38,27 @@ describe('BillingWebhookController', () => {
     );
   });
 
-  it('does nothing when neither signature header is present', async () => {
-    await controller.handleWebhook(req(), undefined, undefined);
+  it('dispatches to kora when x-korapay-signature is present', async () => {
+    await controller.handleWebhook(req(), undefined, undefined, 'kora-sig');
+    expect(mockCheckoutService.handleWebhookEvent).toHaveBeenCalledWith(
+      'kora',
+      expect.any(Buffer),
+      'kora-sig',
+    );
+  });
+
+  it('does nothing when no signature header is present', async () => {
+    await controller.handleWebhook(req(), undefined, undefined, undefined);
     expect(mockCheckoutService.handleWebhookEvent).not.toHaveBeenCalled();
   });
 
-  it('prefers paystack when both headers are somehow present', async () => {
-    await controller.handleWebhook(req(), 'sig-value', 'hash-value');
+  it('prefers paystack when multiple headers are somehow present', async () => {
+    await controller.handleWebhook(
+      req(),
+      'sig-value',
+      'hash-value',
+      'kora-sig',
+    );
     expect(mockCheckoutService.handleWebhookEvent).toHaveBeenCalledWith(
       'paystack',
       expect.any(Buffer),

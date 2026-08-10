@@ -8,6 +8,7 @@ import { FeatureUsage } from './entity/feature-usage.entity';
 import { PlanGuard } from './guard/plan.guard';
 import { PaystackPaymentProvider } from './provider/paystack-payment.provider';
 import { FlutterwavePaymentProvider } from './provider/flutterwave-payment.provider';
+import { KoraPaymentProvider } from './provider/kora-payment.provider';
 import { PaymentProviderRegistryService } from './service/payment-provider-registry.service';
 import { CheckoutService } from './service/checkout.service';
 import { FeatureUsageService } from './service/feature-usage.service';
@@ -36,6 +37,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
     PlanGuard,
     PaystackPaymentProvider,
     FlutterwavePaymentProvider,
+    KoraPaymentProvider,
     PaymentProviderRegistryService,
     CheckoutService,
     FeatureUsageService,

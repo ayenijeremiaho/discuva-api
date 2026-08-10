@@ -96,3 +96,4 @@ export interface IPaymentProvider {
 // endpoints.
 export const PAYSTACK_PROVIDER_NAME = 'paystack';
 export const FLUTTERWAVE_PROVIDER_NAME = 'flutterwave';
+export const KORA_PROVIDER_NAME = 'kora';

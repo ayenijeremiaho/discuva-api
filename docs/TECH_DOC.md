@@ -2620,20 +2620,35 @@ always be moved onto Pro manually via the platform-admin escape hatch (`PATCH /p
 module is what lets a tenant do it themselves, and pay for it. (SMS billing lives entirely outside this module now —
 see SMS Module above for why.)
 
-**Two payment providers, registered simultaneously** (`PaymentProviderRegistryService`) — unlike email, where one
+**Three payment providers, registered simultaneously** (`PaymentProviderRegistryService`) — unlike email, where one
 platform-default concrete class is chosen once at boot (SMS has no platform default at all, pure BYOK — see SMS
-Module above), both `PaystackPaymentProvider` and `FlutterwavePaymentProvider` are always available; a checkout call
-picks one by name (`?provider=paystack` or `flutterwave` in the request body), defaulting to
-`DEFAULT_PAYMENT_PROVIDER` when unspecified. Both are platform-wide credentials, not tenant BYOK — unlike
-SMS/email/YouTube, these charges pay the *platform* (plan upgrades), so the merchant keys have to be the platform's
-own, never a tenant's.
+Module above), `PaystackPaymentProvider`, `FlutterwavePaymentProvider`, and `KoraPaymentProvider` are always
+available; a checkout call picks one by name (`?provider=paystack`/`flutterwave`/`kora` in the request body),
+defaulting to `DEFAULT_PAYMENT_PROVIDER` when unspecified. All three are platform-wide credentials, not tenant
+BYOK — unlike SMS/email/YouTube, these charges pay the *platform* (plan upgrades), so the merchant keys have to be
+the platform's own, never a tenant's. This is the platform-billing counterpart to the tenant-facing, fully-BYOK
+giving/tithe system (`src/giving-checkout/`, which also supports Kora — `KoraGivingProvider` — plus Stripe); the two
+systems share no config or code, only the same proven Korapay request/webhook-signing shape.
 
-**Currency unit mismatch between the two providers, handled internally:** Paystack's Initialize Transaction takes
+**Currency unit mismatch between the providers, handled internally:** Paystack's Initialize Transaction takes
 `amount` in the currency's smallest unit (kobo for NGN) — matches this codebase's existing `priceCents`/`amountCents`
-convention, no conversion needed. Flutterwave's Standard Payment takes the *major* unit (naira) — every amount is
-divided by 100 before being sent to Flutterwave and multiplied back where relevant. Both providers lazily create (and
-persist onto `Plan.billingProviderPriceId`) a matching provider-side plan/payment-plan object the first time a
-`planId` is checked out against, rather than requiring one to be pre-created out of band.
+convention, no conversion needed. Flutterwave's Standard Payment and Korapay's Initialize Charge both take the
+*major* unit (naira) — every amount is divided by 100 before being sent and multiplied back where relevant. Paystack
+and Flutterwave both lazily create (and persist onto `Plan.billingProviderPriceId`) a matching provider-side
+plan/payment-plan object the first time a `planId` is checked out against, rather than requiring one to be
+pre-created out of band.
+
+**Kora has no verified recurring-subscription API — a real capability gap, documented rather than papered over.**
+Unlike Paystack (`plan` + Initialize Transaction) and Flutterwave (`payment-plans` + `payment_plan`), Korapay has no
+confirmed subscription/plan product; `KoraPaymentProvider.createSubscriptionCheckout` is a single charge for the
+plan's price (same mechanism as `createOneOffCheckout`), not an auto-renewing subscription. Concretely: a tenant on
+Paystack/Flutterwave may be silently re-charged by the provider's own recurring engine when their period ends (see
+`SubscriptionLapseScheduler` below); a tenant on Kora never will be — they always fall through to the normal
+failed-renewal flow (`PAST_DUE` email → grace period → downgrade) and must complete a fresh checkout to renew.
+`KoraPaymentProvider.cancelSubscription` is correspondingly a documented no-op (nothing server-side to cancel), and
+`refund()` throws rather than calling an unverified endpoint — Korapay's real refund API shape hasn't been confirmed
+against sandbox behavior the way `/charges/initialize` and its webhook signing have (proven first in
+`KoraGivingProvider`). Don't set `DEFAULT_PAYMENT_PROVIDER=kora` without accounting for this.
 
 **`BillingCheckoutSession`** (`public.billing_checkout_sessions`) is recorded at checkout-*initiation* time, primary-
 keyed by the provider's own reference (Paystack `reference` / Flutterwave `tx_ref`) — this is the only thing a
@@ -2676,7 +2691,10 @@ on a plan they don't actually pay for).
 
 **Refunds (platform-admin only, not tenant-facing):** `IPaymentProvider.refund(providerReference, amountCents?)` —
 Paystack refunds by transaction reference directly; Flutterwave requires resolving the reference to its own numeric
-transaction id first (`GET /transactions?tx_ref=`), handled internally. `CheckoutService.refundCheckoutSession()`
+transaction id first (`GET /transactions?tx_ref=`), handled internally. Kora's `refund()` throws unconditionally —
+not implemented against a verified endpoint (see above) — so `refundCheckoutSession()` on a Kora-paid session fails
+loudly rather than silently no-op'ing; refund a Kora charge directly in the Korapay dashboard instead until this is
+built. `CheckoutService.refundCheckoutSession()`
 only allows refunding a `completed` session, marks it `BillingCheckoutStatus.REFUNDED`, and **deliberately does
 not** automatically downgrade a plan — that requires a product decision (does downgrading strand data created on the
 paid tier?) this pass doesn't take on. A platform admin issuing a refund is expected to also apply the tenant-facing

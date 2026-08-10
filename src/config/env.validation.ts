@@ -209,8 +209,12 @@ export const envValidationSchema = Joi.object({
   FLUTTERWAVE_BASE_URL: Joi.string()
     .uri()
     .default('https://api.flutterwave.com/v3'),
+  KORA_SECRET_KEY: Joi.string().optional(),
+  KORA_BASE_URL: Joi.string()
+    .uri()
+    .default('https://api.korapay.com/merchant/api/v1'),
   DEFAULT_PAYMENT_PROVIDER: Joi.string()
-    .valid('paystack', 'flutterwave')
+    .valid('paystack', 'flutterwave', 'kora')
     .default('paystack'),
   // Billing-cycle policy constants — see CheckoutService/SubscriptionLapseScheduler.
   SUBSCRIPTION_PERIOD_DAYS: Joi.number().integer().positive().default(30),
