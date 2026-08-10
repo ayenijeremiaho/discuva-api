@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
+import { ConfigService } from '@nestjs/config';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TenantInfoController } from './tenant-info.controller';
 import { Tenant } from '../entity/tenant.entity';
@@ -37,6 +38,12 @@ const mockTenantAssetService = {
   removeOverride: jest.fn(),
 };
 
+const mockConfigService = {
+  get: jest
+    .fn()
+    .mockReturnValue('https://cdn.example.com/platform-default-logo.png'),
+};
+
 const baseTenant = {
   id: 'tenant-1',
   name: 'Test Church',
@@ -57,6 +64,9 @@ describe('TenantInfoController', () => {
     mockCls.get.mockReturnValue('tenant-1');
     mockTenantRepo.save.mockImplementation((t) => Promise.resolve(t));
     mockTenantAssetService.getOverrides.mockResolvedValue({});
+    mockConfigService.get.mockReturnValue(
+      'https://cdn.example.com/platform-default-logo.png',
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TenantInfoController],
@@ -64,6 +74,7 @@ describe('TenantInfoController', () => {
         { provide: ClsService, useValue: mockCls },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: ConfigService, useValue: mockConfigService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: TenantAssetService, useValue: mockTenantAssetService },
       ],
@@ -75,7 +86,7 @@ describe('TenantInfoController', () => {
   });
 
   describe('getInfo', () => {
-    it('returns the current tenant branding fields plus asset overrides', async () => {
+    it('falls back to the LOGO_URL env default when the tenant has no logo of its own', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
       mockTenantAssetService.getOverrides.mockResolvedValue({
         'login-backdrop': 'https://cdn.example.com/login.jpg',
@@ -85,7 +96,7 @@ describe('TenantInfoController', () => {
 
       expect(result).toEqual({
         name: 'Test Church',
-        logoUrl: null,
+        logoUrl: 'https://cdn.example.com/platform-default-logo.png',
         tagline: null,
         address: null,
         supportEmail: null,
@@ -96,6 +107,17 @@ describe('TenantInfoController', () => {
       expect(mockTenantAssetService.getOverrides).toHaveBeenCalledWith(
         'tenant-1',
       );
+    });
+
+    it("prefers the tenant's own uploaded logo over the LOGO_URL default", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        logoUrl: 'https://cdn.example.com/own-logo.png',
+      });
+
+      const result = await controller.getInfo();
+
+      expect(result.logoUrl).toBe('https://cdn.example.com/own-logo.png');
     });
 
     it('throws NotFoundException when there is no tenant in CLS', async () => {
@@ -215,7 +237,11 @@ describe('TenantInfoController', () => {
         'church-logos/old',
         'image',
       );
-      expect(result.logoUrl).toBeNull();
+      // The response falls back to LOGO_URL once the tenant's own logo is
+      // cleared — null is the DB column value, not what callers see.
+      expect(result.logoUrl).toBe(
+        'https://cdn.example.com/platform-default-logo.png',
+      );
       expect(mockCacheService.del).toHaveBeenCalledWith(
         'tenant-branding:tenant-1',
       );

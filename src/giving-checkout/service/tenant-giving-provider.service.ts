@@ -52,8 +52,13 @@ export class TenantGivingProviderService {
   // Catalog (every registered giving vendor) plus this tenant's own config
   // summary for each — never the credentials themselves,
   // `credentialsEncrypted` has `select: false` and this method never
-  // selects it back in regardless.
+  // selects it back in regardless. `tenantId` rides along so the frontend
+  // can build this tenant's own webhook URL
+  // (v1/webhooks/giving/:tenantId/:providerId) to hand to Paystack/
+  // Flutterwave/etc — nothing else on this tenant-scoped API surface
+  // otherwise exposes the tenant's own id to itself.
   async listProviders(): Promise<{
+    tenantId: string;
     catalog: GivingProvider[];
     ownConfigs: GivingProviderConfigSummary[];
   }> {
@@ -68,7 +73,7 @@ export class TenantGivingProviderService {
       isActive: c.isActive,
     }));
 
-    return { catalog, ownConfigs };
+    return { tenantId, catalog, ownConfigs };
   }
 
   // A tenant can have exactly one active giving vendor at a time — mirrors

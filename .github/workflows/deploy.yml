@@ -1,0 +1,101 @@
+# Destination: discuva-api/.github/workflows/deploy.yml
+# (local folder discuva-api ↔ GitHub repo ayenijeremiaho/discovery-hub)
+#
+# No build-args here — discuva-api's Dockerfile takes none that matter
+# (only a cosmetic `PORT` ARG that just affects the EXPOSE metadata, not
+# runtime binding — the app reads PORT from the container's runtime env at
+# `docker run`/compose time instead, via env_file: env/api.env on the
+# droplet). All of discuva-api's real config is runtime env, not build-time.
+#
+# KNOWN GAP this workflow deliberately does NOT try to paper over: pending
+# `public`-schema migrations run automatically on boot (`migrationsRun: true`
+# in db.config.ts) — but tenant-schema migrations across ALL existing
+# tenants do NOT run automatically; that's the separate
+# `npm run migration:run:all-tenants` script, and it only exists as a
+# ts-node script with no compiled/:prod variant, so it cannot run inside
+# this repo's own production image (which prunes devDependencies including
+# ts-node). Run it manually after a deploy that includes a new tenant-schema
+# migration — see the Production Deployment Commands section. This is
+# flagged, not silently worked around, per your instruction not to touch
+# application code without approval.
+name: Build and Deploy discuva-api
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Also deploy to production after building"
+        type: boolean
+        default: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/discuva-api
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      short_sha: ${{ steps.sha.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.sha.outputs.short_sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.deploy
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      # flyctl deploy --image needs to `docker pull` the GHCR image locally
+      # before it can push it into Fly's own registry — it doesn't fetch it
+      # server-side, so the runner needs its own GHCR login here too (a
+      # fresh runner, separate job from build-and-push).
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # No --remote-only / --build flags anywhere here — Fly's own
+      # remote-builder machine is never invoked. This just retags the
+      # already-built GHCR image into registry.fly.io and creates a new
+      # release from it.
+      - name: Deploy prebuilt image to Fly.io
+        run: |
+          flyctl deploy \
+            --config fly.toml \
+            --app discuva-api \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short_sha }} \
+            --strategy rolling
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

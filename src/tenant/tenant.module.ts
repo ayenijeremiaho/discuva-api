@@ -6,6 +6,10 @@ import {
 } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bull';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule } from '@nestjs/config';
+import jwtConfig from '../config/jwt.config';
+import refreshJwtConfig from '../config/refresh.jwt.config';
 import { Tenant } from './entity/tenant.entity';
 import { TenantAssetOverride } from './entity/tenant-asset-override.entity';
 import { TenantOnboardingEvent } from './entity/tenant-onboarding-event.entity';
@@ -86,6 +90,16 @@ import { BranchModule } from '../branch/branch.module';
     ]),
     BullModule.registerQueue({ name: TENANT_PROVISIONING_QUEUE }),
     BranchModule,
+    // Independent registration from AuthModule's own (same jwtConfig/
+    // refreshJwtConfig factories, same secrets) — TenantMiddleware needs to
+    // verify a JWT's tenant claim itself, before any guard runs, so it
+    // can't just depend on AuthModule's AuthGuard/strategies having already
+    // done that. Importing AuthModule wholesale here would risk a circular
+    // dependency for no benefit; this is the same "any module can
+    // independently register the same JwtModule config" pattern
+    // JwtStrategy already relies on.
+    JwtModule.registerAsync(jwtConfig.asProvider()),
+    ConfigModule.forFeature(refreshJwtConfig),
   ],
   controllers: [TenantInfoController, SignupController],
   providers: [

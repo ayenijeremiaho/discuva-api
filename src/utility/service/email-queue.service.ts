@@ -14,7 +14,7 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { CacheService } from './cache.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
-import { buildTenantUrl } from '../../tenant/utility/tenant-url';
+import { buildAdminUrl, buildTenantUrl } from '../../tenant/utility/tenant-url';
 
 @Injectable()
 export class EmailQueueService {
@@ -173,11 +173,14 @@ export class EmailQueueService {
   // generic, so templates gate it behind {{#if support_email}} and simply
   // omit the line when a tenant hasn't set one.
   //
-  // login_url/admin_login_url: LOGIN_URL/ADMIN_LOGIN_URL are configured as
-  // bare, tenant-less base URLs (one build serves every tenant via wildcard
-  // subdomain — docs/MULTI_TENANT_MIGRATION.md §6), so every email carrying
-  // a login link needs its host rewritten to the current tenant's subdomain
-  // here, not left as the bare base URL every tenant would otherwise share.
+  // login_url: LOGIN_URL is a bare, tenant-less base URL (discuva-member is
+  // on a real wildcard — one build serves every tenant, subdomain inserted
+  // at send time). admin_login_url is different: discuva-admin is a single
+  // fixed host with NO wildcard (docs/MULTI_TENANT_MIGRATION.md Phase 9l),
+  // so its tenant identifier travels as a `subdomain` query param instead
+  // (buildAdminUrl) — discuva-admin's login form reads and pre-fills its
+  // "Church Subdomain" field from it, rather than the URL's host carrying
+  // it the way member's does.
   private async resolveBrandingData(): Promise<Record<string, string>> {
     const fallback = {
       church_name: this.config.get<string>('CHURCH_NAME'),
@@ -198,10 +201,9 @@ export class EmailQueueService {
       product_name: fallback.product_name,
       support_email: tenant.supportEmail ?? '',
       login_url: buildTenantUrl(fallback.login_url, tenant.subdomain),
-      admin_login_url: buildTenantUrl(
-        fallback.admin_login_url,
-        tenant.subdomain,
-      ),
+      admin_login_url: buildAdminUrl(fallback.admin_login_url, '', {
+        subdomain: tenant.subdomain,
+      }),
     };
   }
 
@@ -211,10 +213,14 @@ export class EmailQueueService {
   // just gets both via resolveBrandingData's auto-injected login_url/
   // admin_login_url and never needs this directly.
   async resolveTenantUrl(surface: 'member' | 'admin'): Promise<string> {
-    const base = this.config.get<string>(
-      surface === 'admin' ? 'ADMIN_LOGIN_URL' : 'LOGIN_URL',
-    );
     const tenant = await this.getCurrentTenant();
+    if (surface === 'admin') {
+      const base = this.config.get<string>('ADMIN_LOGIN_URL');
+      return tenant
+        ? buildAdminUrl(base, '', { subdomain: tenant.subdomain })
+        : base;
+    }
+    const base = this.config.get<string>('LOGIN_URL');
     return tenant ? buildTenantUrl(base, tenant.subdomain) : base;
   }
 

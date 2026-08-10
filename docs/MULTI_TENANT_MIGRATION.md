@@ -1477,6 +1477,22 @@ design/route/entity breakdown in TECH_DOC.md § "Giving Checkout (Tenant-Owned, 
 - ✅ **Verified live** — 150 backend test suites / 1758 tests clean (was 143/1718 — 7 new suites, 40 new tests),
   `tsc --noEmit` and `nest build` clean; discuva-admin and discuva-member both `tsc --noEmit` and `next build` clean.
 
+### Phase 9i addendum — Webhook URL surfaced in the Giving Providers UI (Shipped, 2026-08)
+
+Prompted by a direct question: a tenant configuring BYOK credentials had no way to know the callback URL to paste
+into their own Paystack/Flutterwave/Kora/Stripe dashboard — `GET /finance/giving-providers` didn't return the
+tenant's own id, and nothing on the page displayed the `/webhooks/giving/:tenantId/:provider` URL at all.
+
+- ✅ **`TenantGivingProviderService.listProviders()`** now also returns `tenantId` (`this.cls.get('tenantId')`,
+  already resolved every call — no new query) alongside `catalog`/`ownConfigs`.
+- ✅ **discuva-admin:** each provider's Configure/Edit Credentials panel gained a read-only, copyable "Webhook URL"
+  field, built client-side as `buildGivingWebhookUrl(tenantId, providerId)` = `NEXT_PUBLIC_API_URL +
+  /webhooks/giving/{tenantId}/{providerId}` — deliberately the bare `NEXT_PUBLIC_API_URL`, not
+  `getTenantApiBaseUrl()`'s subdomain-prefixed variant, since the webhook route is excluded from `TenantMiddleware`
+  and has no subdomain to resolve a tenant from.
+- ✅ **Verified live** — full backend suite (152/1792) clean, `tsc --noEmit`/`nest build` clean; discuva-admin
+  `tsc --noEmit`, `eslint`, `next build`, and full Jest suite (204 tests) all clean.
+
 ---
 
 ### Phase 9j — Platform-Admin Giving Overview (Shipped, 2026-08)
@@ -1512,6 +1528,159 @@ platform-support surfaces exactly: a per-tenant support lookup plus a cross-tena
   wording — that's the intended mechanism for this, not changing the platform default.
 - ✅ **Verified live** — full backend suite, `tsc --noEmit`, and `nest build` clean; discuva-admin and
   discuva-platform both `tsc --noEmit` and `next build` clean.
+
+### Phase 9k — Link an Existing Tenant as a Branch (Shipped, 2026-08)
+
+Closes a real gap Phase 9/9b's invite flow couldn't cover: two churches that are **already** separate, fully-onboarded
+tenants had no way to become parent/branch after the fact — the invite flow only works for a church that doesn't have
+a tenant yet, since it's built around a signup-time token. Prompted by a direct question ("can a church connect to
+another sub church after it has been onboarding?") — answer at the time was no, this phase is the fix.
+
+- ✅ **`TenantBranchLinkRequest`** (new, `public` schema, `tenant_branch_link_requests`) — sibling control-plane table
+  to `tenant_branch_invites`, keyed on `targetTenantId` instead of an email+token pair since the target tenant
+  already exists to be looked up directly by subdomain. Status: `pending`/`accepted`/`declined`/`revoked`.
+- ✅ **`BranchLinkRequestService`** (new) — `createLinkRequest(targetSubdomain, sponsorPlan?)` (parent-side),
+  `listOutgoing()`/`listIncoming()` (both enriched with tenant names/subdomain, not raw entities),
+  `revokeLinkRequest(id)` (parent-side), `acceptLinkRequest(id)`/`declineLinkRequest(id)` (**target-side only** — the
+  parent cannot accept on the target's behalf, same "write intent first, mutate state only on confirmed action"
+  discipline as everywhere else BYOK/checkout-shaped in this codebase). Wired onto the existing `BranchController`
+  (`AdminGuard` + `BRANCH_READ`/`BRANCH_WRITE`, no new permission needed) under `/branch/link-requests/*`.
+- ✅ **Sponsorship reused, not reinvented.** `sponsorPlan` on the request has the exact same semantics as
+  `TenantBranchInvite.sponsorPlan` (Phase 9), just applied at accept time instead of signup time — if the parent
+  currently has a paid plan, the target's *existing* `Subscription` row is switched onto it
+  (`planId`/`status: ACTIVE`/`sponsoredByTenantId`); if the parent is on Free, sponsorship is silently skipped (not
+  an error) rather than blocking the link itself. Unlink/leave (`unlinkBranch`/`leaveParent`,
+  `revokeSponsorshipIfSponsoredBy`) already handle reversal correctly regardless of whether the branch was linked via
+  invite or link request — neither method cares how `parentTenantId` got set.
+- ✅ **Notification pattern reused from `SubscriptionLapseScheduler`.** Both flows need to email an admin in a tenant
+  this service has no ambient CLS context for (the target on request creation, the parent on accept/decline) — reused
+  `SubscriptionLapseScheduler.findAdminEmail`'s "oldest active `Admin`, ordered by `createdAt`" query shape, but
+  through the shared `runInTenantContext` helper (Phase 9i's convention) rather than duplicating the inline
+  `cls.runWith`/`SET LOCAL search_path` pattern a third time.
+- ✅ **Confirmed, no change needed: a parent can have any number of branches.** `getOverview()`/`listOutgoing()` were
+  already plain unbounded `WHERE parentTenantId = :self` queries — nothing in this codebase caps branch count.
+- ✅ **Migration:** `1792368000000-AddTenantBranchLinkRequests.ts` — new table + two indexes
+  (`parent_tenant_id`, `target_tenant_id`).
+- ✅ **discuva-admin:** `/branch-hierarchy` gained "Link an Existing Church" (subdomain + sponsor-plan checkbox),
+  "Sent Link Requests" (with revoke), and "Incoming Link Requests" (accept/decline) sections in `useBranch`/`page.tsx`.
+- ✅ **Verified live** — full backend suite, `tsc --noEmit`, and `nest build` clean; discuva-admin `tsc --noEmit` and
+  `next build` clean.
+
+### Phase 9l — discuva-admin on a Fixed Host: JWT-Based Tenant Resolution (Shipped, 2026-08)
+
+Surfaced while planning production DNS: discuva-admin and discuva-member both resolve the current tenant entirely
+client-side from `window.location.hostname`, which only works when the hostname itself carries a tenant subdomain.
+That's fine for discuva-member (a real per-tenant wildcard, `{tenant}.discuva.org`) but structurally impossible for
+discuva-admin at a single shared production host (`admin.discuva.org`) — `extractSubdomain()` would return `null`
+there every time (`admin` is a reserved word specifically so no tenant could collide with it), and
+`TenantMiddleware` hard-404s the instant that happens, *before* any guard or controller runs — so even
+`POST /auth/admin-login` itself was Host-header-dependent, not just routes past login.
+
+- ✅ **`JwtPayload` gains optional `tenantId`/`schemaName`** (`src/auth/interface/auth.interface.ts`) — populated
+  only for `SessionSurface.ADMIN` tokens, read from CLS (`AuthService.generateTokens()`) at sign time, where it's
+  already correct regardless of how tenant was resolved for that request. Member tokens never carry this — member's
+  Host-header flow is completely untouched.
+- ✅ **`TenantMiddleware` fallback resolution**, only reached when Host-header resolution fails: (1) a verified JWT
+  claim, checked against the `Authorization: Bearer` header then the `refresh_token` cookie (own secret,
+  `REFRESH_JWT_SECRET`) — covers every authenticated request including a bare `/v1/auth/refresh` call; (2) an
+  explicit `X-Tenant-Subdomain` header, sent only on the login request itself (no token exists yet) — untrusted the
+  way the JWT claim is, but safe: a wrong value only ever fails login against the wrong schema, never grants access.
+  `TenantModule` now independently registers `JwtModule`/`refreshJwtConfig` (same secrets `AuthModule` already
+  uses) rather than importing `AuthModule` wholesale, avoiding a circular dependency for no benefit.
+- ✅ **discuva-admin:** login form gained a required "Church Subdomain" field (remembered in `localStorage` for
+  returning users), sent as `X-Tenant-Subdomain` on `POST /auth/admin-login` only. No other request needed a
+  change — the existing `Authorization: Bearer` header on every authenticated call is exactly what
+  `TenantMiddleware`'s new fallback needs; `getTenantApiBaseUrl()`'s existing subdomain-prepending logic is left
+  in place (harmless no-op on a fixed host, still works for local dev against a real subdomain).
+- ✅ **Verified live against the real dev database** (not just mocks) — self-signed JWTs matching the app's own
+  `JWT_SECRET`, sent against a Host header resolving to nothing: a `tenantId`-carrying token correctly loaded that
+  tenant's real admin profile (200, correct data); a wrong-secret or nonexistent-tenant token correctly 404'd; a
+  valid token for one tenant plus a forged `X-Tenant-Subdomain` for another correctly used the JWT claim, ignoring
+  the header entirely (proves the untrusted header can never override an authenticated session's real tenant).
+  152 backend suites / 1799 tests, `tsc --noEmit`, `nest build`, and discuva-admin's `tsc --noEmit`/`eslint`/
+  `next build`/full Jest suite (204 tests) all clean.
+- ✅ **Production DNS simplified as a result** — `admin.discuva.org` no longer needs a wildcard (`*.admin.discuva.org`)
+  the way an earlier draft of this deployment assumed; it's a single, plain host, same as `platform.discuva.org` and
+  `api.discuva.org`. Only `*.discuva.org` (discuva-member) still needs wildcard DNS/TLS coverage. See
+  `docs/TECH_DOC.md`'s "Domain map" for the corrected table.
+
+### Phase 9l addendum — Branding Fetch, Email Links, and forgot/reset-password (Shipped, 2026-08)
+
+Two follow-on gaps surfaced by direct questions after Phase 9l shipped, both stemming from the same root fact
+(discuva-admin has no Host-header tenant of its own before login) but not covered by the JWT-claim fix, which only
+applies once a token exists:
+
+- ✅ **`TenantProvider` (discuva-admin) never attempts `GET /tenant/info` while unauthenticated.** It used to fire
+  unconditionally on every mount — including the login and set-password screens — which always 404'd on the fixed
+  host (no Host-header tenant, no JWT yet either) and left `tenant` silently `null`. Now gated on
+  `tokenStore.get()?.accessToken`, and subscribed to `tokenStore`'s existing pub/sub so it re-fetches on login/a
+  successful silent refresh and clears on logout, not just once on mount. **discuva-admin's login page was
+  simplified to match** — no longer reads `useTenant()` at all; it's unconditionally generic (product name only, no
+  church name/logo), rather than a dynamic value that was always going to resolve to the same fallback anyway.
+- ✅ **`admin_login_url` fixed everywhere it's used, not just re-pointed.** `buildTenantUrl()` (subdomain-prepended
+  host) is correct for `login_url` (discuva-member's real wildcard) but was *also* being used for `admin_login_url`
+  in `EmailQueueService.resolveBrandingData()`/`resolveTenantUrl()` and
+  `TenantProvisioningService.sendWelcomeEmail()` — producing a `{subdomain}.admin.discuva.org` link in every admin
+  welcome email, session-security alert, and five other notification templates (incident reports, budget alerts,
+  asset maintenance/warranty/vehicle-expiry reminders) that would never have resolved once the wildcard was
+  dropped. New `buildAdminUrl()` (`src/tenant/utility/tenant-url.ts`) adds the subdomain as a `?subdomain=` query
+  param instead of a host label, and replaces (rather than appends onto) the base path when one is given — the
+  latter also fixed a pre-existing `/login/set-password` double-path bug in the old string-concatenation version of
+  the welcome email link, unrelated to this phase but caught while rewriting it properly.
+- ✅ **`POST /auth/forgot-password`/`reset-password` gained the same `X-Tenant-Subdomain` fallback as admin-login**
+  — both are `@Public()`, not excluded from `TenantMiddleware`, and hit `PasswordResetOtp` (tenant-schema-scoped,
+  same as `Member`/`Admin`), so both needed it for the exact same reason login did. discuva-admin's login-page
+  "Forgot Password" modal now takes the church subdomain from the login form's own field (already in scope, no
+  second prompt); the standalone `/set-password` page (reached from the welcome email, genuinely pre-auth, no
+  login form in scope) gets its own field, pre-filled from the email link's new `?subdomain=` param — same pattern
+  `email`/`otp` already used — falling back to the same `localStorage`-remembered value login uses if that param is
+  ever missing.
+- ✅ **Verified** — full backend suite (152 suites / 1803 tests, up from 1799 — 4 new: `buildAdminUrl` direct
+  coverage plus the three call-site tests updated for the new URL shape), `tsc --noEmit`, `nest build`; discuva-admin
+  `tsc --noEmit`, `eslint`, full Jest suite (204 tests), `next build` all clean.
+
+### Phase 9m — Extend JWT-Based Tenant Resolution to discuva-member (Shipped, 2026-08)
+
+Raised while evaluating hosting platforms whose per-app routing can't replicate a Caddy-style path-split on a
+shared wildcard host: discuva-member's *own* hosting was never the problem (it's a real per-tenant wildcard,
+`{tenant}.discuva.org`, and `TenantMiddleware` resolves that from the Host header exactly as before) — the problem
+was that its *API calls* were tied to sharing that same wildcard host with the backend. Removing that coupling
+means discuva-member's API traffic can move to the same dedicated `api.discuva.org` every other app already calls,
+with no router in front of it splitting by path.
+
+- ✅ **The `SessionSurface.ADMIN`-only gate on JWT tenant claims is removed.** `AuthService.generateTokens()`
+  (`src/auth/service/auth.service.ts`) now embeds `tenantId`/`schemaName` on every token, member and admin alike —
+  both were already correct in CLS at sign time, the gate was only ever there because admin was the sole
+  fixed-host case at the time. `JwtPayload`'s doc comment (`src/auth/interface/auth.interface.ts`) updated to
+  match.
+- ✅ **`TenantMiddleware`'s Bearer-header fallback now tries both JWT secrets, not just the access one.**
+  discuva-admin's refresh flow sends its refresh token via an httpOnly cookie; discuva-member's sends it via the
+  `Authorization: Bearer` header instead (`RefreshJwtStrategy` already accepted both transports — this was an
+  existing, unrelated design decision, not something added for this phase). A Bearer header can therefore
+  legitimately carry either token type, each signed with a different secret, so
+  `resolveTenantIdFromAuthorizationHeader` now verifies against the access secret first, then
+  `jwtRefreshConfig.secret`, before giving up — needed specifically for a bare `POST /auth/refresh` call from
+  discuva-member, which carries no Host-header subdomain and (being the refresh call itself) no cookie either.
+- ✅ **discuva-member:** `utils/tenant/api-base-url.ts` — `getTenantApiBaseUrl()` (host-rewriting, prepended the
+  subdomain onto `NEXT_PUBLIC_API_URL`'s hostname) replaced with `getCurrentTenantSubdomain()`, which just returns
+  the subdomain string via the same unchanged `extractSubdomain()`. `utils/auth/axios-client.ts` — `baseURL` stays
+  the bare `NEXT_PUBLIC_API_URL` from `axios.create()` for every request (no more per-request host rewrite); the
+  request interceptor, `doRefresh()`, and `notifyLogoutBestEffort()` all now attach `X-Tenant-Subdomain` (when
+  derivable) alongside the existing `Authorization: Bearer` header — belt-and-suspenders for `doRefresh()`
+  specifically, since that call's own Bearer header is the refresh token the dual-secret fix above exists to
+  handle. `app/manifest.ts`'s `fetchTenantBranding()` (a server-side, pre-auth call with no JWT available yet) —
+  no more manual `{subdomain}.{host}` URL construction; calls the bare API host and sends the derived subdomain as
+  `X-Tenant-Subdomain` instead, the same pre-auth fallback login already relies on. No other discuva-member file
+  needed changes — everything else goes through the shared `api` axios client and inherits this transitively.
+- ✅ **The giving-webhook callback URL tenants configure at Paystack/Flutterwave needed no change.**
+  `GivingWebhookController` (`src/giving-checkout/controller/giving-webhook.controller.ts`) was already excluded
+  from `TenantMiddleware` entirely and resolves tenant from a `:tenantId` path segment, not the Host header or any
+  token — external payment providers can't send either. `buildGivingWebhookUrl()` (discuva-admin) already built
+  off the bare `NEXT_PUBLIC_API_URL` with `tenantId` in the path.
+- ✅ **Verified** — full backend suite (152 suites / 1804 tests, up from 1803 — 1 new: dual-secret Bearer-header
+  fallback), `tsc --noEmit`, `eslint`, `nest build` all clean. discuva-member `tsc --noEmit`, `eslint`, `next
+  build`, and full Jest suite (271 tests, 5 pre-existing failures in `parse-local-time.test.ts` unrelated to this
+  change — timezone-offset-dependent assertions that don't hold outside UTC) all clean.
 
 ---
 

@@ -1,0 +1,48 @@
+# Fly.io app config for discuva-api.
+#
+# No [build] section on purpose — this app is never built by Fly. CI builds
+# the image on GitHub Actions and pushes it to GHCR; the deploy workflow
+# runs `flyctl deploy --image ghcr.io/<owner>/discuva-api:<sha>`, which just
+# pulls that already-built image (via the runner's GHCR login) and pushes it
+# into Fly's registry — Fly's own remote-builder machine is never invoked,
+# which is the whole point (it's billed separately from app compute).
+#
+# One-time setup, not done by this file or CI:
+#   fly apps create discuva-api
+#   fly secrets set DATABASE_URL=... REDIS_URL=... JWT_SECRET=... \
+#     REFRESH_JWT_SECRET=... VAPID_PRIVATE_KEY=... VAPID_PUBLIC_KEY=... \
+#     VAPID_SUBJECT=... <every other REQUIRED var in .env.example>
+#   fly certs add api.discuva.org
+# `fly secrets set` values never appear in this file, CI logs, or the repo —
+# they're stored encrypted by Fly and injected into the machine at runtime.
+app = "discuva-api"
+primary_region = "<FLY_REGION>" # TODO: set to whichever Fly region is nearest your Neon/Upstash region — cross-region DB calls add real latency to every request.
+
+kill_signal = "SIGINT"
+kill_timeout = "10s"
+
+[experimental]
+  auto_rollback = true
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1 # keeps at least one warm instance — avoids a cold-start hit on every tenant's API traffic. Socket.IO gateways (service-session, game-session) also don't need Fly's sticky-session support: RedisIoAdapter already makes the API horizontally scalable across machines.
+  processes = ["app"]
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "15s"
+    method = "GET"
+    timeout = "5s"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb" # bump if migrations or report-generation endpoints OOM under real tenant load — no measured baseline yet.

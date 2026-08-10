@@ -1741,6 +1741,46 @@ no `/etc/hosts` changes), then wraps the entire rest of the request — guards, 
 DB transaction with `SET LOCAL search_path` set to that tenant's schema. Full design in
 `docs/MULTI_TENANT_MIGRATION.md` §4.3/§4.4.
 
+**Fallback resolution for a fixed, non-wildcard host (added 2026-08, extended to discuva-member 2026-08):**
+discuva-admin is deployed at a single `admin.discuva.org` origin shared by every tenant, not a per-tenant wildcard —
+`admin` is in `RESERVED_SUBDOMAINS` (`src/tenant/utility/extract-subdomain.ts`) specifically so no tenant could
+ever collide with it, but that also means `extractSubdomain()` always returns `null` there: there is no subdomain
+in the Host header to strip. discuva-member has a real per-tenant wildcard for its own hosting
+(`{tenant}.discuva.org`, resolved the normal Host-header way, unchanged) but its *API calls* target the separate,
+dedicated `api.discuva.org` host every other app calls directly — same problem, different reason: the Host header
+`TenantMiddleware` sees on that call carries no subdomain either. When that happens, `TenantMiddleware` tries two
+fallbacks, in order, before giving up with the same `404 Tenant not found` as before:
+1. **A verified JWT tenant claim.** Every access/refresh token, both surfaces, embeds `tenantId`/`schemaName` in
+   the payload at sign time (`AuthService.generateTokens()`, reading `cls.get('tenantId')`/`cls.get('schemaName')`
+   — already correctly set for that request by whichever mechanism resolved it, Host header or this same fallback
+   on the login request itself). `TenantMiddleware` checks the `Authorization: Bearer` header first — trying the
+   access secret, then `REFRESH_JWT_SECRET`, since a Bearer header can legitimately carry either token type
+   (discuva-admin's refresh flow sends its refresh token via an httpOnly cookie; discuva-member's sends it via this
+   same header instead, a pre-existing `RefreshJwtStrategy` design, not something added for this) — then the
+   `refresh_token` httpOnly cookie (verified with `REFRESH_JWT_SECRET`) as a second fallback. Covers every
+   authenticated request, including a bare `/v1/auth/refresh` call from either app. This is genuinely safe against
+   spoofing: the claim only exists inside a JWT whose signature already proves it came from this server, at a
+   moment CLS already held the correct tenant — there's no way for a client to write an arbitrary `tenantId` into a
+   token it can't forge the signature for.
+2. **`X-Tenant-Subdomain` header.** discuva-admin sends it on every pre-auth request where no token exists yet:
+   `POST /v1/auth/admin-login` (needs to know which tenant's `Member`/`Admin` tables to check credentials against
+   before it can issue anything), and `POST /v1/auth/forgot-password`/`reset-password` (same reasoning —
+   `PasswordResetOtp` is tenant-schema-scoped too, and both the "Forgot password" flow on the login screen and the
+   first-time `/set-password` flow reached from a welcome email are equally pre-auth). discuva-member sends it on
+   *every* request to `api.discuva.org` (derived from its own Host header via `getCurrentTenantSubdomain()`,
+   `utils/tenant/api-base-url.ts`), not just pre-auth ones — harmless to include always, and it's what
+   `app/manifest.ts`'s server-side, pre-auth `GET /tenant/info` call for PWA branding relies on, since no JWT
+   exists there yet either. This header is **not** cryptographically trusted the way the JWT claim is — it's
+   exactly as trustworthy as a user typing a workspace URL: a wrong or malicious value just resolves to the wrong
+   (or a nonexistent) tenant's schema, where the supplied email/OTP/session simply won't match any real row, so it
+   can never grant access to anything, only ever fail against the wrong place. On an authenticated discuva-member
+   request it's redundant with (and always loses to) the JWT claim above — sent anyway for the handful of pre-auth
+   calls that need it, and it's simpler to attach unconditionally than to special-case which requests do.
+
+Both fallbacks are skipped entirely — not even attempted — whenever the Host header itself already resolved a
+subdomain, so discuva-member's own hosting (as opposed to its outgoing API calls) is completely unaffected; this
+exists purely to make a fixed, non-wildcard destination host work for the two kinds of traffic that need one.
+
 **Distinct error responses per tenant state, not a single generic 404:** the tenant lookup is `findOneBy({
 subdomain })`, deliberately not filtered by `isActive`, so a row that exists but isn't (yet, or anymore) usable gets
 a response that actually explains why, using `onboardingStatus` (see "Async Tenant Provisioning + Onboarding State
@@ -1805,8 +1845,9 @@ before falling through to reject (must stay cached, not a live DB query — this
 for letting a church map their own domain (`giving.theirchurch.org`) to their tenant, instead of only
 `their-church.<APP_BASE_DOMAIN>`. Not built — subdomain routing is sufficient for now. When it is: (1) resolve the
 custom domain to the tenant's canonical `subdomain` via a new lightweight public endpoint, cached client-side, so
-`getTenantApiBaseUrl()` (every frontend) can build `<subdomain>.<api-host>` exactly as it does today — no changes
-needed to CLS/`SET LOCAL search_path`/tenant-scoped repos, all of that stays subdomain-keyed; (2) a domain must be
+discuva-member's `getCurrentTenantSubdomain()` (`utils/tenant/api-base-url.ts`) can resolve it to the same
+subdomain it already sends as `X-Tenant-Subdomain` today — no changes needed to CLS/`SET LOCAL search_path`/
+tenant-scoped repos, all of that stays subdomain-keyed; (2) a domain must be
 DNS-verified (TXT record token, or requiring it already point at this infrastructure) before being trusted — a row
 in the table must never be sufficient on its own, since nothing stops a tenant from entering a domain they don't
 control; (3) TLS is an infrastructure decision independent of this codebase — a single wildcard cert covers every
@@ -2759,24 +2800,74 @@ locked into a relationship it no longer wants. Both revoke a sponsored plan on t
 relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
 make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched.
 
+**Linking an already-onboarded tenant as a branch (`TenantBranchLinkRequest`, `src/branch/service/branch-link-request.service.ts`):**
+the invite flow above only covers a church that doesn't have a tenant yet — it can't be reused for two churches that
+are *already* separate, fully-onboarded tenants, since there's no signup step left to attach a token to. This is a
+two-sided negotiation between two existing tenants instead: a would-be parent's admin sends a request naming the
+target's subdomain (`POST /branch/link-requests`), and nothing about either tenant changes until the **target's own
+admin**, from inside their own tenant context, explicitly accepts or declines it (`POST
+/branch/link-requests/:id/accept`/`/decline`) — the parent cannot accept on the target's behalf, mirroring the same
+"write intent first, mutate state only on confirmed action" discipline used everywhere else BYOK/checkout-shaped
+flows appear in this codebase. `TenantBranchLinkRequest` (`public` schema, `tenant_branch_link_requests`) is the
+sibling control-plane table to `tenant_branch_invites`, keyed on `targetTenantId` instead of an email+token pair
+since the target already exists to be looked up directly.
+
+Validation at creation time: target subdomain must resolve to a real tenant, a tenant can't link itself
+(`target.id === parentTenantId`), the target can't already have a parent, and only one `pending` request between a
+given parent/target pair may exist at a time. On accept, `target.parentTenantId` is set directly (no provisioning
+involved — the target tenant already exists) and, if `sponsorPlan` was requested and the parent currently has a paid
+plan, the target's *existing* `Subscription` row is switched onto the parent's plan
+(`planId`/`status: ACTIVE`/`cancelAtPeriodEnd: false`/`sponsoredByTenantId`) — same fallback as
+`BranchInviteService.resolveInvite` if the parent is on Free (silently skipped, not an error, since `sponsorPlan` was
+only ever a request). Both sides get a best-effort email notification (target on request creation, parent on
+accept/decline) via the same manually-entered tenant-context pattern `SubscriptionLapseScheduler.findAdminEmail`
+already uses (looks up the tenant's oldest active `Admin`, ordered by `createdAt`) — reused here through the shared
+`runInTenantContext` helper rather than duplicated inline, since the recipient's admin row lives in a schema this
+service has no ambient CLS context for.
+
+A parent can have any number of branches — `getOverview()`/`listOutgoing()` are both plain unbounded
+`WHERE parentTenantId = :self` queries, and nothing in this feature restricts branch count.
+
+`GET /branch/link-requests/outgoing`/`/incoming` return `BranchLinkRequestView`, not the raw entity — the entity
+only stores `parentTenantId`/`targetTenantId` UUIDs, so both list reads batch-fetch the referenced `Tenant` rows
+(one `IN` query per list call) and enrich each row with `parentTenantName`/`targetTenantName`/`targetTenantSubdomain`
+before returning, the same way `BranchInviteService`'s invites are already human-readable via the invite's own
+`email` column.
+
+**Un-linking (either side can end the relationship):** `DELETE /branch/:branchTenantId` (parent-initiated — detach
+one of *this tenant's own* branches, `404` if not actually linked to them) and `POST /branch/leave`
+(branch-initiated — the current tenant leaves its own parent, `400` if it has none). Neither side is permanently
+locked into a relationship it no longer wants. Both revoke a sponsored plan on the way out
+(`revokeSponsorshipIfSponsoredBy`) if the departing tenant's `Subscription.sponsoredByTenantId` matches the
+relationship being severed — continuing free access sponsored by a parent it's no longer affiliated with wouldn't
+make sense. A subscription sponsored by some *other* tenant (not the one being unlinked from) is left untouched. This
+applies identically regardless of whether the branch was linked via invite or via a link request — `unlinkBranch`/
+`leaveParent` only look at `Tenant.parentTenantId`/`Subscription.sponsoredByTenantId`, not how the link was formed.
+
 **Routes** (`AdminGuard`, tenant-scoped):
 
-| Method | Path                        | Permission     | Description |
-|--------|-----------------------------|----------------|--------------|
-| POST   | `/branch/invites`           | BRANCH_WRITE   | Body `{ email, sponsorPlan? }` — creates a pending invite, emails the invite code. `sponsorPlan: true` means the branch is provisioned onto the parent's current plan at signup, at no independent cost, if the parent is on a paid plan |
-| GET    | `/branch/invites`           | BRANCH_READ    | This tenant's own sent invites |
-| DELETE | `/branch/invites/:id`       | BRANCH_WRITE   | Revokes a `pending` invite — `400` if it's already accepted/revoked |
-| GET    | `/branch/overview`          | BRANCH_READ    | This tenant's branches, each joined with its latest rollup, filtered by each branch's own sharing consent |
-| GET    | `/branch/sharing-consent`   | BRANCH_READ    | This tenant's own `{ shareDataWithParent, shareGivingWithParent, parentTenantId, parentTenantName }` — the latter two are null when this tenant isn't a branch of anything, and are the only way for the frontend to know whether "Leave Parent" is relevant to show at all |
-| PATCH  | `/branch/sharing-consent`   | BRANCH_WRITE   | Body is a partial of `{ shareDataWithParent, shareGivingWithParent }` — only provided fields are applied; `parentTenantId`/`parentTenantName` are read-only and always echoed back |
-| DELETE | `/branch/:branchTenantId`   | BRANCH_WRITE   | Parent detaches one of its own branches — `404` if not linked to this tenant |
-| POST   | `/branch/leave`             | BRANCH_WRITE   | This tenant leaves its own parent — `400` if it has none |
+| Method | Path                              | Permission     | Description |
+|--------|-----------------------------------|----------------|--------------|
+| POST   | `/branch/invites`                 | BRANCH_WRITE   | Body `{ email, sponsorPlan? }` — creates a pending invite, emails the invite code. `sponsorPlan: true` means the branch is provisioned onto the parent's current plan at signup, at no independent cost, if the parent is on a paid plan |
+| GET    | `/branch/invites`                 | BRANCH_READ    | This tenant's own sent invites |
+| DELETE | `/branch/invites/:id`             | BRANCH_WRITE   | Revokes a `pending` invite — `400` if it's already accepted/revoked |
+| GET    | `/branch/overview`                | BRANCH_READ    | This tenant's branches, each joined with its latest rollup, filtered by each branch's own sharing consent |
+| GET    | `/branch/sharing-consent`         | BRANCH_READ    | This tenant's own `{ shareDataWithParent, shareGivingWithParent, parentTenantId, parentTenantName }` — the latter two are null when this tenant isn't a branch of anything, and are the only way for the frontend to know whether "Leave Parent" is relevant to show at all |
+| PATCH  | `/branch/sharing-consent`         | BRANCH_WRITE   | Body is a partial of `{ shareDataWithParent, shareGivingWithParent }` — only provided fields are applied; `parentTenantId`/`parentTenantName` are read-only and always echoed back |
+| DELETE | `/branch/:branchTenantId`         | BRANCH_WRITE   | Parent detaches one of its own branches — `404` if not linked to this tenant |
+| POST   | `/branch/leave`                   | BRANCH_WRITE   | This tenant leaves its own parent — `400` if it has none |
+| POST   | `/branch/link-requests`           | BRANCH_WRITE   | Body `{ targetSubdomain, sponsorPlan? }` — sends a link request to an already-onboarded tenant. `404` if the subdomain doesn't resolve, `400` if self-link/target already has a parent/a pending request already exists |
+| GET    | `/branch/link-requests/outgoing`  | BRANCH_READ    | Link requests this tenant has sent, as a would-be parent |
+| DELETE | `/branch/link-requests/:id`       | BRANCH_WRITE   | Parent revokes its own `pending` request — `400` if no longer pending |
+| GET    | `/branch/link-requests/incoming`  | BRANCH_READ    | Link requests sent TO this tenant by a would-be parent |
+| POST   | `/branch/link-requests/:id/accept`| BRANCH_WRITE   | Target accepts — sets `parentTenantId`, applies sponsorship if requested and the parent is on a paid plan. `400` if not pending or this tenant already has a parent |
+| POST   | `/branch/link-requests/:id/decline`| BRANCH_WRITE  | Target declines — `400` if no longer pending |
 
 Branch hierarchy UI is built in `discuva-admin` (`/branch-hierarchy`) — invite-sending, branches overview with
-unlink, and a "this church" section showing sharing consent toggles + leave-parent, only shown when
-`parentTenantId` is actually set (see `GET /branch/sharing-consent` above). Multi-level hierarchy (branch-of-a-branch)
-is representable with zero further schema change (`parent_tenant_id` is self-referencing) but only flat parent → branch
-is exercised by anything built so far.
+unlink, link-request sending/incoming-review, and a "this church" section showing sharing consent toggles +
+leave-parent, only shown when `parentTenantId` is actually set (see `GET /branch/sharing-consent` above).
+Multi-level hierarchy (branch-of-a-branch) is representable with zero further schema change (`parent_tenant_id` is
+self-referencing) but only flat parent → branch is exercised by anything built so far.
 
 ### Forms (`src/forms/`)
 
@@ -2897,18 +2988,29 @@ Shared infrastructure used across the entire application.
 
 **Per-tenant branding (`church_name`/`church_address`/`logo_url`/`support_email`):** resolved fresh per email by `EmailQueueService.resolveBrandingData()`, not read once at boot — the HTML is fully rendered before the job is queued, so this happens at enqueue time via `cls.get('tenantId')` → `Tenant` row lookup, cached under `tenant-branding:${tenantId}` (`CACHE_TTL_REFERENCE_SECONDS`, same TTL/pattern as `PlanGuard`'s `plan-features:${tenantId}` cache). Any write to a tenant's name/logo/tagline/address (`PATCH /tenant/info`, `POST`/`DELETE /tenant/logo`, platform-admin's `PATCH /platform/tenants/:id`) must invalidate this same key or emails keep stale branding for up to the TTL — all four call sites already do. A tenant field left unset (`null`) falls back to that one field's `CHURCH_NAME`/`CHURCH_ADDRESS`/`LOGO_URL` env default, not the whole record — except `support_email`, which has no env fallback at all (empty string when unset) since a wrong/generic contact address would be actively misleading, not just generic; the 43 member/worker-facing templates that reference it gate the line behind `{{#if support_email}}` so it's simply omitted rather than showing nothing useful. `product_name` always comes from `PRODUCT_NAME` (the SaaS product name) regardless of tenant — it's platform-wide, not per-church. **Bug fixed (2026-08-04):** five templates (`tithe-proof-{confirmed,declined,submitted}`, `pledge-contribution-{confirmed,declined}`) had a hardcoded external logo URL instead of `{{logo_url}}` — every tenant's emails from those five showed the same wrong logo, not their own. `annual-giving-statement.html` had no logo image at all. Both fixed; all 61 templates now reference `{{logo_url}}`. **Formerly a known gap, now fixed:** every `@Cron` scheduler in the codebase that touches tenant-scoped data (`FollowUpScheduler` included) now wraps its per-run body in `forEachActiveTenant()` (`src/tenant/utility/for-each-active-tenant.ts`), which fetches every active `Tenant` and re-enters that tenant's CLS/`SET LOCAL search_path` context (via the existing `runInTenantContext()` helper) once per tenant before running the body — so branding, currency, and every other tenant-scoped lookup inside a scheduled job now resolves correctly per tenant instead of falling back to env defaults or reading the wrong schema. One tenant's failure is caught and logged per-tenant so it doesn't stop the rest of the batch. Only `YoutubeSubscriptionScheduler` (genuinely control-plane data) and `SubscriptionLapseScheduler`'s top-level query (also control-plane) are exempt.
 
-**Tenant-aware login URLs (`login_url`/`admin_login_url`, added 2026-08-04):** `LOGIN_URL`/`ADMIN_LOGIN_URL` are configured as bare, tenant-less base URLs (one build/config serves every tenant via wildcard subdomain — see "Domain map" below) — every caller used to read them straight from `ConfigService` and pass the bare value into a template, which meant every tenant's login links pointed at the same non-tenant-scoped host. `resolveBrandingData()` now also auto-injects `login_url`/`admin_login_url` into every email, rewritten to carry the current tenant's subdomain via `buildTenantUrl()` (`src/tenant/utility/tenant-url.ts` — inserts the subdomain as the leftmost host label, mirrors `discuva-admin/utils/tenant/api-base-url.ts`'s client-side equivalent exactly). All ~17 call sites that used to compute these themselves (`AuthService`, `AdminService`, `MemberService`, `MemberImportService`, `IncidentReportService`, and four schedulers) were simplified to rely on the auto-injected value instead — a call site should never read `LOGIN_URL`/`ADMIN_LOGIN_URL` from `ConfigService` directly. The one exception is `AuthService.sendSessionSecurityAlert()`, which has to pick between the two based on which surface (member/admin) a session belongs to — it calls `UtilityService.resolveTenantLoginUrl('member' | 'admin')` (delegates to `EmailQueueService.resolveTenantUrl()`) directly instead. `TenantProvisioningService.sendWelcomeEmail()`'s set-password link is a separate case again — it builds its URL from the `Tenant` object already in hand (`buildTenantUrl(ADMIN_LOGIN_URL, tenant.subdomain)`) rather than through CLS, since it can run from a Bull job or a synchronous platform-admin call with no tenant CLS context active. `PLATFORM_LOGIN_URL` is deliberately untouched — platform admins aren't tied to any tenant.
+**Tenant-aware login URLs (`login_url`/`admin_login_url`, added 2026-08-04, `admin_login_url` mechanism changed 2026-08 — Phase 9l):** `LOGIN_URL`/`ADMIN_LOGIN_URL` are configured as bare base URLs — every caller used to read them straight from `ConfigService` and pass the bare value into a template, which meant every tenant's login links pointed at the same non-tenant-scoped host. `resolveBrandingData()` auto-injects both into every email, but the two now use **different** rewriting mechanisms, not the same one:
+- `login_url` (discuva-member — a real per-tenant wildcard): `buildTenantUrl()` (`src/tenant/utility/tenant-url.ts`) inserts the subdomain as the leftmost host label — `https://discuva.org/login` → `https://church-alpha.discuva.org/login`.
+- `admin_login_url` (discuva-admin — a single fixed host, no wildcard): `buildAdminUrl()` (same file) instead adds the subdomain as a `?subdomain=` query param, since there's no per-tenant host to prepend it onto anymore — `https://admin.discuva.org/login` → `https://admin.discuva.org/login?subdomain=church-alpha`. discuva-admin's login/set-password forms read this param to pre-fill their "Church Subdomain" field.
+
+All ~17 call sites that used to compute these themselves (`AuthService`, `AdminService`, `MemberService`, `MemberImportService`, `IncidentReportService`, and four schedulers) were simplified to rely on the auto-injected value instead — a call site should never read `LOGIN_URL`/`ADMIN_LOGIN_URL` from `ConfigService` directly. The one exception is `AuthService.sendSessionSecurityAlert()`, which has to pick between the two based on which surface (member/admin) a session belongs to — it calls `UtilityService.resolveTenantLoginUrl('member' | 'admin')` (delegates to `EmailQueueService.resolveTenantUrl()`, which internally branches to `buildTenantUrl`/`buildAdminUrl` the same way `resolveBrandingData()` does) directly instead. `TenantProvisioningService.sendWelcomeEmail()`'s set-password link is a separate case again — it builds its URL from the `Tenant` object already in hand (`buildAdminUrl(ADMIN_LOGIN_URL, '/set-password', { email, otp, subdomain: tenant.subdomain })`) rather than through CLS, since it can run from a Bull job or a synchronous platform-admin call with no tenant CLS context active; the `path` argument *replaces* `ADMIN_LOGIN_URL`'s own path rather than appending onto it, which also incidentally fixed a pre-existing `/login/set-password` double-path bug the old string-concatenation version had. `PLATFORM_LOGIN_URL` is deliberately untouched — platform admins aren't tied to any tenant.
 
 ### Domain map (discuva.org)
 
 | Host | App | Notes |
 |---|---|---|
 | `discuva.org`, `www.discuva.org` | Homepage/marketing + self-serve signup | Bare root — `extractSubdomain` returns `null`, so tenant-aware URL helpers fall back to the bare base URL here too. |
-| `platform.discuva.org` | discuva-platform | `platform` is in `RESERVED_SUBDOMAINS` on both frontend and backend — no tenant can ever claim it. |
-| `{tenant}.discuva.org` | discuva-member + discuva-admin | Both apps have to answer on the same host — `extractSubdomain` rejects multi-level subdomains (`admin.church-alpha.discuva.org` is not a valid tenant host), so the member/admin split has to happen by path at an edge router in front of both, not by a second subdomain level. Not yet built. |
-| `api.discuva.org`, `*.api.discuva.org` | discuva-api (backend) | Backend `APP_BASE_DOMAIN` = `api.discuva.org` — a separate wildcard zone from the frontend's, since `discuva-admin/utils/tenant/api-base-url.ts` calls `{tenant}.api.discuva.org`, not `{tenant}.discuva.org`. |
+| `platform.discuva.org` | discuva-platform | `platform` is in `RESERVED_SUBDOMAINS` on both frontend and backend — no tenant can ever claim it. No tenant logic in this app at all (confirmed: no `middleware.ts`, no Host-header parsing anywhere) — every route it calls is `/v1/platform/*`, already excluded from `TenantMiddleware`. |
+| `{tenant}.discuva.org` | discuva-member | Real per-tenant wildcard for the app's *own hosting* — `extractSubdomain` resolves it the normal way, unchanged. discuva-member's *outgoing* API calls no longer need to share this host: they target `api.discuva.org` directly, carrying the subdomain as an `X-Tenant-Subdomain` header (pre-auth) or a JWT tenant claim (authenticated) instead of via the URL's own hostname (Phase 9m). No router/path-split needed in front of this host anymore. |
+| `admin.discuva.org` | discuva-admin | **Fixed, single origin — no wildcard needed.** See "Fallback resolution for a fixed, non-wildcard host" above: tenant identity travels in the JWT (post-login) or an explicit `X-Tenant-Subdomain` header (login only), not the hostname, so this app doesn't need — and structurally can't use — a per-tenant subdomain of its own. |
+| `api.discuva.org` | discuva-api | Reachable directly by every app, always — discuva-admin's and discuva-member's tenant resolution both work over this fixed host (see "Fallback resolution for a fixed, non-wildcard host" above), plus discuva-platform, discuva-web's `POST /v1/signup`, third-party webhook URLs (Paystack/Flutterwave/YouTube dashboards), health/docs. |
 
-Two DNS zones need wildcard coverage: `*.discuva.org` (frontends) and `*.api.discuva.org` (backend). `LOGIN_URL`/`ADMIN_LOGIN_URL` should be configured against the `discuva.org` zone (frontend hosts), not the `api.` zone.
+Only **one** DNS zone needs wildcard coverage — `*.discuva.org`, and only for discuva-member's own hosting, not for
+any traffic bound for the API. `admin.discuva.org` and `api.discuva.org` are both plain, single DNS records, and
+neither needs a router in front of it splitting by path — a design an earlier draft of this table used to describe,
+which existed only to work around discuva-admin and discuva-member both needing to reach the API without a
+subdomain of their own to carry a tenant on. `LOGIN_URL` should be configured against the `discuva.org` zone;
+`ADMIN_LOGIN_URL` against `admin.discuva.org` (no longer the `discuva.org` zone — the admin app moved to its own
+dedicated host).
 
 **Email category gating:** `queueEmail*` methods accept an optional `category?: EmailCategory` argument. If no category is supplied the email always sends (used for security-critical auth emails: OTP, password reset, account locked, etc.). Optional categories are gated by boolean config flags (`EMAIL_*_ENABLED`); setting a flag to `false` suppresses that category without touching any call sites. Current categories:
 
@@ -3224,7 +3326,7 @@ in the same request.
 
 | Method | Path                                       | Auth                     | Permission        | Description |
 |--------|----------------------------------------------|---------------------------|--------------------|--------------|
-| GET    | `/finance/giving-providers`                 | `AdminGuard`, tenant-scoped | `TITHE_READ`      | `{ catalog, ownConfigs }` — `ownConfigs` never includes credentials |
+| GET    | `/finance/giving-providers`                 | `AdminGuard`, tenant-scoped | `TITHE_READ`      | `{ tenantId, catalog, ownConfigs }` — `ownConfigs` never includes credentials. `tenantId` lets the frontend build this tenant's own webhook URL (`{apiHost}/v1/webhooks/giving/:tenantId/:provider`, no subdomain — see webhook route below) to hand to Paystack/Flutterwave/etc, since nothing else on this tenant-scoped surface otherwise exposes the tenant's own id to itself |
 | PUT    | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ credentials }` — upserts and activates, deactivating any other active provider |
 | PATCH  | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ isActive }` — enable/disable without touching stored credentials |
 | GET    | `/finance/giving/checkout/provider`         | Member JWT                | —                  | `{ providerId, providerName } \| null` — whether to show "Give via Checkout" at all |
@@ -3233,6 +3335,11 @@ in the same request.
 
 Both `finance/giving-providers` and `finance/giving/checkout` are gated behind `@RequiresModule('tithe')` —
 disabled entirely if a church has turned off the Tithe & Giving module.
+
+`discuva-admin`'s Giving Providers page shows a read-only, copyable "Webhook URL" field per provider (inside the
+same Configure/Edit Credentials panel as the credential inputs) — built client-side from `tenantId` (now returned
+above) and `NEXT_PUBLIC_API_URL`, deliberately **not** `getTenantApiBaseUrl()`'s subdomain-prefixed variant, since
+the webhook route itself has no subdomain to resolve a tenant from.
 
 **Platform-admin visibility (`PlatformGivingProviderService`, `PlatformAnalyticsService.getGiving`):** the platform
 operator's own "full overview" across every tenant, mirroring Communication Providers' and Billing's existing

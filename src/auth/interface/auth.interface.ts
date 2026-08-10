@@ -6,6 +6,20 @@ export interface JwtPayload {
   role: MemberRoleEnum;
   aud: SessionSurface;
   jti: string;
+  // Set on every token, both surfaces — lets TenantMiddleware resolve a
+  // tenant for a request whose Host header carries no subdomain: either
+  // discuva-admin's fixed admin.discuva.org origin (shared by every
+  // tenant, no wildcard at all), or discuva-member's calls to the
+  // dedicated api.discuva.org (a real per-tenant wildcard, but a separate
+  // one from where its API calls actually land — see TenantMiddleware's
+  // own doc comment for why this is safe: the claim is read from an
+  // already-verified JWT signature, never trusted from a raw
+  // client-supplied header). discuva-member's OWN hosting still resolves
+  // its identity from a real Host header, same as always — this claim only
+  // matters for the API-call side, not how the member app itself is
+  // reached.
+  tenantId?: string;
+  schemaName?: string;
 }
 
 export interface JwtResponse {

@@ -21,7 +21,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { RESERVED_SUBDOMAINS } from '../utility/extract-subdomain';
 import { subdomainToSchemaName } from '../utility/schema-name';
-import { buildTenantUrl } from '../utility/tenant-url';
+import { buildAdminUrl } from '../utility/tenant-url';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
 import {
@@ -340,12 +340,17 @@ export class TenantProvisioningService {
     const firstName = UtilityService.capitalizeFirstLetter(
       params.adminFirstname,
     );
-    const adminLoginUrl = buildTenantUrl(
-      this.configService.get<string>('ADMIN_LOGIN_URL'),
-      tenant.subdomain,
-    );
+    // discuva-admin has no per-tenant subdomain of its own to encode this
+    // in (fixed host — see buildAdminUrl's own doc comment); `subdomain`
+    // rides as a query param instead, which the set-password page reads to
+    // pre-fill its "Church Subdomain" field the same way it already
+    // pre-fills email/otp.
     const productName = this.configService.get<string>('PRODUCT_NAME');
-    const setPasswordUrl = `${adminLoginUrl}/set-password?email=${encodeURIComponent(params.adminEmail)}&otp=${otp}`;
+    const setPasswordUrl = buildAdminUrl(
+      this.configService.get<string>('ADMIN_LOGIN_URL'),
+      '/set-password',
+      { email: params.adminEmail, otp, subdomain: tenant.subdomain },
+    );
 
     this.utilityService.sendEmailWithTemplate(
       params.adminEmail,

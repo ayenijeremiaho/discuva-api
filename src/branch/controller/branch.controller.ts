@@ -14,8 +14,10 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { BranchInviteService } from '../service/branch-invite.service';
 import { BranchRollupService } from '../service/branch-rollup.service';
+import { BranchLinkRequestService } from '../service/branch-link-request.service';
 import { CreateBranchInviteDto } from '../dto/create-branch-invite.dto';
 import { UpdateSharingConsentDto } from '../dto/update-sharing-consent.dto';
+import { CreateBranchLinkRequestDto } from '../dto/create-branch-link-request.dto';
 
 // Tenant-facing (AdminGuard) — a parent church's own admin sends/manages
 // branch invites and views its branches' rollup stats; a branch's own admin
@@ -27,6 +29,7 @@ export class BranchController {
   constructor(
     private readonly branchInviteService: BranchInviteService,
     private readonly branchRollupService: BranchRollupService,
+    private readonly branchLinkRequestService: BranchLinkRequestService,
   ) {}
 
   @RequiresPermission(AdminPermission.BRANCH_WRITE)
@@ -79,5 +82,48 @@ export class BranchController {
   @Post('leave')
   leaveParent() {
     return this.branchRollupService.leaveParent();
+  }
+
+  // Parent-initiated — request to link an already-onboarded, standalone
+  // tenant as a branch (the invite flow above only covers a church that
+  // doesn't have a tenant yet). Nothing changes until the target accepts.
+  @RequiresPermission(AdminPermission.BRANCH_WRITE)
+  @Post('link-requests')
+  createLinkRequest(@Body() dto: CreateBranchLinkRequestDto) {
+    return this.branchLinkRequestService.createLinkRequest(
+      dto.targetSubdomain,
+      dto.sponsorPlan,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.BRANCH_READ)
+  @Get('link-requests/outgoing')
+  listOutgoingLinkRequests() {
+    return this.branchLinkRequestService.listOutgoing();
+  }
+
+  @RequiresPermission(AdminPermission.BRANCH_WRITE)
+  @Delete('link-requests/:id')
+  revokeLinkRequest(@Param('id', ParseUUIDPipe) id: string) {
+    return this.branchLinkRequestService.revokeLinkRequest(id);
+  }
+
+  // Target-side — requests sent TO this tenant by a would-be parent.
+  @RequiresPermission(AdminPermission.BRANCH_READ)
+  @Get('link-requests/incoming')
+  listIncomingLinkRequests() {
+    return this.branchLinkRequestService.listIncoming();
+  }
+
+  @RequiresPermission(AdminPermission.BRANCH_WRITE)
+  @Post('link-requests/:id/accept')
+  acceptLinkRequest(@Param('id', ParseUUIDPipe) id: string) {
+    return this.branchLinkRequestService.acceptLinkRequest(id);
+  }
+
+  @RequiresPermission(AdminPermission.BRANCH_WRITE)
+  @Post('link-requests/:id/decline')
+  declineLinkRequest(@Param('id', ParseUUIDPipe) id: string) {
+    return this.branchLinkRequestService.declineLinkRequest(id);
   }
 }

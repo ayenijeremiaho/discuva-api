@@ -9,6 +9,7 @@ interface RedisOptions {
   port: number;
   password?: string;
   db?: number;
+  tls?: boolean;
 }
 
 export class RedisIoAdapter extends IoAdapter {
@@ -17,7 +18,8 @@ export class RedisIoAdapter extends IoAdapter {
 
   constructor(app: INestApplicationContext, options: RedisOptions) {
     super(app);
-    this.pubClient = new Redis(options);
+    const { tls, ...rest } = options;
+    this.pubClient = new Redis({ ...rest, ...(tls && { tls: {} }) });
     this.subClient = this.pubClient.duplicate();
   }
 

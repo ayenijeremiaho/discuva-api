@@ -859,6 +859,21 @@ export class AuthService {
       jti: randomUUID(),
     };
 
+    // Every token carries the tenant it was issued for — the CLS values are
+    // already correctly set by this point (TenantMiddleware resolved them,
+    // however it resolved them, before this request ever reached the
+    // controller) — see TenantMiddleware's own doc comment for why this is
+    // what lets discuva-admin's fixed host and discuva-member's dedicated
+    // api.discuva.org calls both work per-tenant without a Host-header
+    // subdomain on the request that actually carries them. Applies
+    // regardless of surface: discuva-member still resolves ITS OWN
+    // identity from a real per-tenant Host header (unaffected, that's
+    // display/branding, not this), but its outgoing API calls no longer
+    // need to share that subdomain with the request destination the way
+    // they used to.
+    payload.tenantId = this.cls.get('tenantId');
+    payload.schemaName = this.cls.get('schemaName');
+
     const [[access_token, refresh_token], currentHash] = await Promise.all([
       Promise.all([
         this.jwtService.signAsync(payload),

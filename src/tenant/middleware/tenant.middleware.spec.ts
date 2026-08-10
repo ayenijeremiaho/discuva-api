@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import {
   ForbiddenException,
   NotFoundException,
@@ -11,6 +12,7 @@ import {
 import { TenantMiddleware } from './tenant.middleware';
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
+import refreshJwtConfig from '../../config/refresh.jwt.config';
 
 const mockTenantRepo = { findOneBy: jest.fn() };
 const mockCls = { set: jest.fn() };
@@ -20,9 +22,29 @@ const mockTxHost = {
   tx: mockTx,
   withTransaction: jest.fn((fn: () => unknown) => fn()),
 };
+const mockJwtService = { verifyAsync: jest.fn() };
+const mockJwtRefreshConfig = { secret: 'refresh-secret' };
 
-function makeReq(hostname: string) {
-  return { hostname } as any;
+function makeReq(
+  hostname: string,
+  opts: {
+    authorization?: string;
+    refreshCookie?: string;
+    tenantSubdomainHeader?: string;
+  } = {},
+) {
+  return {
+    hostname,
+    headers: {
+      ...(opts.authorization && { authorization: opts.authorization }),
+      ...(opts.tenantSubdomainHeader && {
+        'x-tenant-subdomain': opts.tenantSubdomainHeader,
+      }),
+    },
+    cookies: opts.refreshCookie
+      ? { refresh_token: opts.refreshCookie }
+      : undefined,
+  } as any;
 }
 
 // Minimal EventEmitter-shaped res stub — real TenantMiddleware waits on
@@ -53,6 +75,8 @@ describe('TenantMiddleware', () => {
         { provide: ClsService, useValue: mockCls },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: TransactionHost, useValue: mockTxHost },
+        { provide: JwtService, useValue: mockJwtService },
+        { provide: refreshJwtConfig.KEY, useValue: mockJwtRefreshConfig },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
       ],
     }).compile();
@@ -153,5 +177,176 @@ describe('TenantMiddleware', () => {
     expect(mockTx.query).toHaveBeenCalledWith(
       'SET LOCAL search_path TO "church_a", public',
     );
+  });
+
+  describe('fallback resolution for a Host header with no subdomain', () => {
+    it('resolves the tenant from a verified Bearer access-token claim', async () => {
+      mockJwtService.verifyAsync.mockResolvedValueOnce({
+        sub: 'member-1',
+        tenantId: 't1',
+      });
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 't1',
+        subdomain: 'church-a',
+        schemaName: 'church_a',
+        clusterId: 'default',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+
+      await middleware.use(
+        makeReq('admin.localhost', { authorization: 'Bearer valid-token' }),
+        res,
+        next,
+      );
+
+      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
+        'valid-token',
+        undefined,
+      );
+      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({ id: 't1' });
+      expect(mockCls.set).toHaveBeenCalledWith('tenantId', 't1');
+      expect(next).toHaveBeenCalled();
+    });
+
+    it("resolves a REFRESH token sent via the Authorization header (discuva-member's mobile-style /auth/refresh, no cookie) by retrying with the refresh secret", async () => {
+      mockJwtService.verifyAsync.mockImplementation(
+        async (_token: string, options?: { secret?: string }) => {
+          if (options?.secret === 'refresh-secret') {
+            return { sub: 'member-1', tenantId: 't1' };
+          }
+          throw new Error('invalid signature for access secret');
+        },
+      );
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 't1',
+        subdomain: 'church-a',
+        schemaName: 'church_a',
+        clusterId: 'default',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+
+      await middleware.use(
+        makeReq('admin.localhost', {
+          authorization: 'Bearer refresh-token-not-access-token',
+        }),
+        res,
+        next,
+      );
+
+      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
+        'refresh-token-not-access-token',
+        undefined,
+      );
+      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
+        'refresh-token-not-access-token',
+        { secret: 'refresh-secret' },
+      );
+      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({ id: 't1' });
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('falls through to the refresh-token cookie, verified with the refresh secret, when no access token resolves anything', async () => {
+      mockJwtService.verifyAsync.mockImplementation(
+        async (_token: string, options?: { secret?: string }) => {
+          if (options?.secret === 'refresh-secret') {
+            return { sub: 'member-1', tenantId: 't1' };
+          }
+          throw new Error('invalid signature');
+        },
+      );
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 't1',
+        subdomain: 'church-a',
+        schemaName: 'church_a',
+        clusterId: 'default',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+
+      await middleware.use(
+        makeReq('admin.localhost', { refreshCookie: 'refresh-jwt' }),
+        res,
+        next,
+      );
+
+      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith('refresh-jwt', {
+        secret: 'refresh-secret',
+      });
+      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({ id: 't1' });
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('falls through to X-Tenant-Subdomain when no token is present at all (the login request)', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 't1',
+        subdomain: 'church-a',
+        schemaName: 'church_a',
+        clusterId: 'default',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+
+      await middleware.use(
+        makeReq('admin.localhost', { tenantSubdomainHeader: 'Church-A' }),
+        res,
+        next,
+      );
+
+      expect(mockJwtService.verifyAsync).not.toHaveBeenCalled();
+      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({
+        subdomain: 'church-a',
+      });
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when the token is invalid AND no X-Tenant-Subdomain header is present', async () => {
+      mockJwtService.verifyAsync.mockRejectedValue(new Error('bad token'));
+      const next = jest.fn();
+
+      await expect(
+        middleware.use(
+          makeReq('admin.localhost', { authorization: 'Bearer garbage' }),
+          makeRes(),
+          next,
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('never consults the fallback path when the Host header already resolved a subdomain', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 't1',
+        subdomain: 'church-a',
+        schemaName: 'church_a',
+        clusterId: 'default',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+
+      await middleware.use(
+        makeReq('church-a.localhost', {
+          authorization: 'Bearer should-be-ignored',
+        }),
+        res,
+        next,
+      );
+
+      expect(mockJwtService.verifyAsync).not.toHaveBeenCalled();
+      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({
+        subdomain: 'church-a',
+      });
+    });
   });
 });

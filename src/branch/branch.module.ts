@@ -4,6 +4,7 @@ import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Subscription } from '../billing/entity/subscription.entity';
 import { TenantBranchInvite } from './entity/tenant-branch-invite.entity';
+import { TenantBranchLinkRequest } from './entity/tenant-branch-link-request.entity';
 import { TenantRollup } from './entity/tenant-rollup.entity';
 import { Member } from '../member/entity/member.entity';
 import { Attendance } from '../attendance/entity/attendance.entity';
@@ -11,6 +12,7 @@ import { TitheRecord } from '../tithe/entity/tithe-record.entity';
 import { BranchController } from './controller/branch.controller';
 import { BranchInviteService } from './service/branch-invite.service';
 import { BranchRollupService } from './service/branch-rollup.service';
+import { BranchLinkRequestService } from './service/branch-link-request.service';
 import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
 
 @Module({
@@ -19,6 +21,7 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     TypeOrmModule.forFeature([
       Tenant,
       TenantBranchInvite,
+      TenantBranchLinkRequest,
       TenantRollup,
       Subscription,
     ]),
@@ -29,7 +32,12 @@ import { BranchRollupScheduler } from './scheduler/branch-rollup.scheduler';
     TenantTypeOrmModule.forFeature([Member, Attendance, TitheRecord]),
   ],
   controllers: [BranchController],
-  providers: [BranchInviteService, BranchRollupService, BranchRollupScheduler],
+  providers: [
+    BranchInviteService,
+    BranchRollupService,
+    BranchLinkRequestService,
+    BranchRollupScheduler,
+  ],
   exports: [BranchInviteService],
 })
 export class BranchModule {}

@@ -90,6 +90,7 @@ const mockTenantRepo = {
 };
 const mockCls = {
   runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+  get: jest.fn(),
 };
 const mockTxHost = {
   tx: { query: jest.fn() },
@@ -385,6 +386,37 @@ describe('AuthService', () => {
       );
     });
 
+    it('embeds tenant claims on a member-surface token too — discuva-member calls a dedicated API host, not a tenant-carrying one', async () => {
+      mockJwtService.signAsync.mockResolvedValue('signed-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+      mockCls.get.mockImplementation((key: string) =>
+        key === 'tenantId'
+          ? 'tenant-1'
+          : key === 'schemaName'
+            ? 'church_alpha'
+            : undefined,
+      );
+
+      await service.login(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        'device-abc',
+      );
+
+      expect(mockJwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          schemaName: 'church_alpha',
+        }),
+      );
+    });
+
     it('should throw ForbiddenException when a different device is already registered', async () => {
       mockMemberService.getByIdWithCredentials.mockResolvedValueOnce({
         id: 'member-1',
@@ -486,6 +518,38 @@ describe('AuthService', () => {
         access_token: 'admin-token',
         token_type: 'Bearer',
       });
+    });
+
+    it('embeds the current tenantId/schemaName from CLS in the signed payload', async () => {
+      mockAdminService.findByMemberId.mockResolvedValue({
+        id: 'admin-1',
+        isActive: true,
+      });
+      mockJwtService.signAsync.mockResolvedValue('admin-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+      mockCls.get.mockImplementation((key: string) =>
+        key === 'tenantId'
+          ? 'tenant-1'
+          : key === 'schemaName'
+            ? 'church_alpha'
+            : undefined,
+      );
+
+      await service.adminLogin({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        requiresPasswordChange: false,
+        surface: SessionSurface.ADMIN,
+      });
+
+      expect(mockJwtService.signAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          schemaName: 'church_alpha',
+        }),
+      );
     });
   });
 

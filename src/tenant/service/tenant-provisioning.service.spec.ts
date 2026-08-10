@@ -138,7 +138,7 @@ describe('TenantProvisioningService', () => {
   });
 
   describe('sendWelcomeEmail', () => {
-    it('emails the new admin a set-password link carrying the tenant subdomain', () => {
+    it('emails the new admin a set-password link carrying the tenant subdomain as a query param, not a subdomain host (discuva-admin has no wildcard)', () => {
       (service as any).sendWelcomeEmail(baseTenant, baseParams, '123456');
 
       expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
@@ -148,7 +148,7 @@ describe('TenantProvisioningService', () => {
         expect.objectContaining({
           email: baseParams.adminEmail,
           otp: '123456',
-          set_password_url: `https://${baseTenant.subdomain}.admin.example.com/set-password?email=${encodeURIComponent(baseParams.adminEmail)}&otp=123456`,
+          set_password_url: `https://admin.example.com/set-password?email=${encodeURIComponent(baseParams.adminEmail)}&otp=123456&subdomain=${baseTenant.subdomain}`,
         }),
       );
     });

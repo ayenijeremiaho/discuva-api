@@ -184,6 +184,7 @@ import { SocialMediaModule } from './social-media/social-media.module';
           port: config.get<number>('REDIS_PORT', 6379),
           password: config.get<string>('REDIS_PASSWORD') || undefined,
           db: config.get<number>('REDIS_DB', 0),
+          ...(config.get<boolean>('REDIS_TLS') && { tls: {} }),
         },
       }),
       inject: [ConfigService],

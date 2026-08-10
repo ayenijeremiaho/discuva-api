@@ -206,7 +206,7 @@ describe('EmailQueueService', () => {
     expect(sentHtml()).toContain('Cached Church');
   });
 
-  it("carries the current tenant's subdomain in login_url/admin_login_url", async () => {
+  it("carries the current tenant's subdomain in login_url (host-prepended, member's real wildcard) and admin_login_url (query param, admin has no wildcard)", async () => {
     mockCls.get.mockReturnValue('tenant-1');
     mockTenantRepo.findOneBy.mockResolvedValue({
       id: 'tenant-1',
@@ -220,7 +220,14 @@ describe('EmailQueueService', () => {
 
     const html = sentHtml();
     expect(html).toContain('https://church-alpha.discuva.org/login');
-    expect(html).toContain('https://church-alpha.discuva.org/admin/login');
+    // Handlebars HTML-escapes the double-stashed template var, so "="
+    // becomes "&#x3D;" in the rendered output — this is what the recipient
+    // actually receives (the template must reference {{{admin_login_url}}}
+    // triple-stashed, or an <a href> attribute, to get a real ampersand
+    // there; not something to fix in this spec).
+    expect(html).toContain(
+      'https://discuva.org/admin/login?subdomain&#x3D;church-alpha',
+    );
   });
 
   it('falls back to the bare, tenant-less login URLs when there is no tenant CLS context', async () => {
@@ -246,7 +253,7 @@ describe('EmailQueueService', () => {
       );
     });
 
-    it("returns the admin ADMIN_LOGIN_URL prefixed with the current tenant's subdomain", async () => {
+    it("returns the admin ADMIN_LOGIN_URL with the current tenant's subdomain as a query param (discuva-admin has no wildcard)", async () => {
       mockCls.get.mockReturnValue('tenant-1');
       mockTenantRepo.findOneBy.mockResolvedValue({
         id: 'tenant-1',
@@ -254,7 +261,7 @@ describe('EmailQueueService', () => {
       });
 
       await expect(service.resolveTenantUrl('admin')).resolves.toBe(
-        'https://church-alpha.discuva.org/admin/login',
+        'https://discuva.org/admin/login?subdomain=church-alpha',
       );
     });
 

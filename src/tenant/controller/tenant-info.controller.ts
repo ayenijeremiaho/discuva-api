@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
+import { ConfigService } from '@nestjs/config';
 import { Public } from '../../auth/decorator/public.decorator';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -36,6 +37,7 @@ export class TenantInfoController {
     private readonly cls: ClsService<AppClsStore>,
     private readonly cloudinaryService: CloudinaryService,
     private readonly cacheService: CacheService,
+    private readonly config: ConfigService,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
     private readonly tenantAssetService: TenantAssetService,
@@ -184,7 +186,12 @@ export class TenantInfoController {
   private async toProfile(tenant: Tenant) {
     return {
       name: tenant.name,
-      logoUrl: tenant.logoUrl,
+      // Same fallback EmailQueueService/PdfService already apply when a
+      // tenant hasn't uploaded its own logo — without this, every
+      // logo-consuming surface (favicon swap, PWA manifest icon) stayed
+      // stuck on the bundled placeholder for any tenant that never visited
+      // the branding page, instead of at least showing the platform default.
+      logoUrl: tenant.logoUrl ?? this.config.get<string>('LOGO_URL') ?? null,
       tagline: tenant.tagline,
       address: tenant.address,
       supportEmail: tenant.supportEmail,

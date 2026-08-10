@@ -161,6 +161,7 @@ describe('TenantGivingProviderService', () => {
 
       const result = await service.listProviders();
 
+      expect(result.tenantId).toBe('tenant-1');
       expect(result.catalog).toHaveLength(2);
       expect(result.ownConfigs).toEqual([
         { providerId: 'stripe', providerName: 'Stripe', isActive: true },

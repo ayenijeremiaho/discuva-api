@@ -30,11 +30,13 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
   ) {
+    const tls = this.configService.get<boolean>('REDIS_TLS');
     this.redis = new Redis({
       host: this.configService.get<string>('REDIS_HOST'),
       port: this.configService.get<number>('REDIS_PORT'),
       password: this.configService.get<string>('REDIS_PASSWORD') || undefined,
       db: this.configService.get<number>('REDIS_DB'),
+      ...(tls && { tls: {} }),
       lazyConnect: true,
       retryStrategy: (times: number) => {
         const delay = Math.min(100 * Math.pow(2, times - 1), 30_000);

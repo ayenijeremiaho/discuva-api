@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { BranchController } from './branch.controller';
 import { BranchInviteService } from '../service/branch-invite.service';
 import { BranchRollupService } from '../service/branch-rollup.service';
+import { BranchLinkRequestService } from '../service/branch-link-request.service';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 
 const mockBranchInviteService = {
@@ -16,6 +17,14 @@ const mockBranchRollupService = {
   unlinkBranch: jest.fn(),
   leaveParent: jest.fn(),
 };
+const mockBranchLinkRequestService = {
+  createLinkRequest: jest.fn(),
+  listOutgoing: jest.fn(),
+  revokeLinkRequest: jest.fn(),
+  listIncoming: jest.fn(),
+  acceptLinkRequest: jest.fn(),
+  declineLinkRequest: jest.fn(),
+};
 
 describe('BranchController', () => {
   let controller: BranchController;
@@ -27,6 +36,10 @@ describe('BranchController', () => {
       providers: [
         { provide: BranchInviteService, useValue: mockBranchInviteService },
         { provide: BranchRollupService, useValue: mockBranchRollupService },
+        {
+          provide: BranchLinkRequestService,
+          useValue: mockBranchLinkRequestService,
+        },
       ],
     })
       .overrideGuard(AdminGuard)
@@ -93,5 +106,47 @@ describe('BranchController', () => {
   it('leaveParent delegates to BranchRollupService', () => {
     controller.leaveParent();
     expect(mockBranchRollupService.leaveParent).toHaveBeenCalled();
+  });
+
+  it('createLinkRequest delegates to BranchLinkRequestService', () => {
+    controller.createLinkRequest({
+      targetSubdomain: 'branchchurch',
+      sponsorPlan: true,
+    });
+    expect(mockBranchLinkRequestService.createLinkRequest).toHaveBeenCalledWith(
+      'branchchurch',
+      true,
+    );
+  });
+
+  it('listOutgoingLinkRequests delegates to BranchLinkRequestService', () => {
+    controller.listOutgoingLinkRequests();
+    expect(mockBranchLinkRequestService.listOutgoing).toHaveBeenCalled();
+  });
+
+  it('revokeLinkRequest delegates to BranchLinkRequestService', () => {
+    controller.revokeLinkRequest('req-1');
+    expect(mockBranchLinkRequestService.revokeLinkRequest).toHaveBeenCalledWith(
+      'req-1',
+    );
+  });
+
+  it('listIncomingLinkRequests delegates to BranchLinkRequestService', () => {
+    controller.listIncomingLinkRequests();
+    expect(mockBranchLinkRequestService.listIncoming).toHaveBeenCalled();
+  });
+
+  it('acceptLinkRequest delegates to BranchLinkRequestService', () => {
+    controller.acceptLinkRequest('req-1');
+    expect(mockBranchLinkRequestService.acceptLinkRequest).toHaveBeenCalledWith(
+      'req-1',
+    );
+  });
+
+  it('declineLinkRequest delegates to BranchLinkRequestService', () => {
+    controller.declineLinkRequest('req-1');
+    expect(
+      mockBranchLinkRequestService.declineLinkRequest,
+    ).toHaveBeenCalledWith('req-1');
   });
 });
