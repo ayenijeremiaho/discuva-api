@@ -22,7 +22,7 @@ name: Build and Deploy discuva-api
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   workflow_dispatch:
     inputs:
       deploy:
@@ -71,6 +71,9 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || inputs.deploy
     environment: production
+    permissions:
+      contents: read
+      packages: read # needs to pull the image build-and-push just pushed, before flyctl re-pushes it into Fly's registry
     steps:
       - uses: actions/checkout@v4
 
