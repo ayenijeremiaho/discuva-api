@@ -15,7 +15,11 @@ const mockEncryptionService = {
 };
 const mockCacheService = { del: jest.fn() };
 const mockProviderRepo = { findOneBy: jest.fn(), find: jest.fn() };
-const mockConfigRepo = { findOneBy: jest.fn(), create: jest.fn((v) => v) };
+const mockConfigRepo = {
+  findOneBy: jest.fn(),
+  find: jest.fn(),
+  create: jest.fn((v) => v),
+};
 
 const mockQueryBuilder = {
   update: jest.fn().mockReturnThis(),
@@ -56,6 +60,51 @@ describe('TenantCommunicationProviderService', () => {
       ],
     }).compile();
     service = module.get(TenantCommunicationProviderService);
+  });
+
+  describe('listProviders', () => {
+    it('excludes a deactivated provider the tenant has never configured', async () => {
+      mockProviderRepo.find.mockResolvedValue([
+        { id: 'termii', channel: 'sms', name: 'Termii', isActive: true },
+        { id: 'twilio', channel: 'sms', name: 'Twilio', isActive: false },
+      ]);
+      mockConfigRepo.find.mockResolvedValue([]);
+
+      const result = await service.listProviders('sms');
+
+      expect(result.catalog.map((p) => p.id)).toEqual(['termii']);
+    });
+
+    it('keeps a deactivated provider visible when the tenant already has a config against it — a row disappearing with no explanation would be worse than showing it deactivated', async () => {
+      mockProviderRepo.find.mockResolvedValue([
+        { id: 'termii', channel: 'sms', name: 'Termii', isActive: true },
+        { id: 'twilio', channel: 'sms', name: 'Twilio', isActive: false },
+      ]);
+      mockConfigRepo.find.mockResolvedValue([
+        {
+          providerId: 'twilio',
+          senderIdentity: null,
+          isActive: true,
+          tenantId: 'tenant-1',
+        },
+      ]);
+
+      const result = await service.listProviders('sms');
+
+      expect(result.catalog.map((p) => p.id).sort()).toEqual([
+        'termii',
+        'twilio',
+      ]);
+      expect(result.ownConfigs).toEqual([
+        {
+          providerId: 'twilio',
+          providerName: 'Twilio',
+          channel: 'sms',
+          senderIdentity: null,
+          isActive: true,
+        },
+      ]);
+    });
   });
 
   describe('upsertConfig', () => {

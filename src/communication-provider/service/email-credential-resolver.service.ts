@@ -7,6 +7,7 @@ import { CommunicationProvider } from '../../platform-admin/entity/communication
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { communicationProviderCacheKey } from '../utility/communication-provider-cache-key';
 
 export interface ResolvedEmailConfig {
   providerId: string;
@@ -44,7 +45,7 @@ export class EmailCredentialResolverService {
   }
 
   private cacheKey(tenantId: string): string {
-    return `communication-provider-config:${tenantId}:email`;
+    return communicationProviderCacheKey(tenantId, 'email');
   }
 
   // Returns undefined when the tenant should fall back to the platform
@@ -71,6 +72,9 @@ export class EmailCredentialResolverService {
             .where('config.tenantId = :tenantId', { tenantId })
             .andWhere('config.isActive = true')
             .andWhere('provider.channel = :channel', { channel: 'email' })
+            // Same platform-deactivation enforcement as
+            // SmsCredentialResolverService — see its identical comment.
+            .andWhere('provider.isActive = true')
             .getOne();
 
           // Cast to a sentinel rather than returning undefined here — see

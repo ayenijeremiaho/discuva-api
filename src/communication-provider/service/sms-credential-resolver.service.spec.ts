@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
-import { EmailCredentialResolverService } from './email-credential-resolver.service';
+import { SmsCredentialResolverService } from './sms-credential-resolver.service';
 import { TenantCommunicationProviderConfig } from '../../platform-admin/entity/tenant-communication-provider-config.entity';
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { CacheService } from '../../utility/service/cache.service';
@@ -34,8 +34,8 @@ const mockCacheService = {
   getOrSet: jest.fn((_key, fetchFn) => fetchFn()),
 };
 
-describe('EmailCredentialResolverService', () => {
-  let service: EmailCredentialResolverService;
+describe('SmsCredentialResolverService', () => {
+  let service: SmsCredentialResolverService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -44,7 +44,7 @@ describe('EmailCredentialResolverService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        EmailCredentialResolverService,
+        SmsCredentialResolverService,
         { provide: ClsService, useValue: mockCls },
         { provide: EncryptionService, useValue: mockEncryptionService },
         { provide: CacheService, useValue: mockCacheService },
@@ -54,7 +54,7 @@ describe('EmailCredentialResolverService', () => {
         },
       ],
     }).compile();
-    service = module.get(EmailCredentialResolverService);
+    service = module.get(SmsCredentialResolverService);
   });
 
   it('returns undefined when there is no tenant context', async () => {
@@ -63,28 +63,26 @@ describe('EmailCredentialResolverService', () => {
     expect(mockConfigRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('returns undefined when the tenant has no active email BYOK config', async () => {
+  it('returns undefined when the tenant has no active sms BYOK config', async () => {
     mockQueryBuilder.getOne.mockResolvedValue(null);
     expect(await service.resolveConfig()).toBeUndefined();
   });
 
-  it('returns the decrypted credentials, providerId, and senderIdentity when configured', async () => {
+  it('returns the decrypted credentials and providerId when configured', async () => {
     mockQueryBuilder.getOne.mockResolvedValue({
-      providerId: 'resend',
+      providerId: 'termii',
       credentialsEncrypted: { apiKey: 'enc-key' },
-      senderIdentity: 'church@example.com',
     });
 
     const result = await service.resolveConfig();
 
     expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
       'provider.channel = :channel',
-      { channel: 'email' },
+      { channel: 'sms' },
     );
     expect(result).toEqual({
-      providerId: 'resend',
+      providerId: 'termii',
       credentials: { apiKey: 'decrypted(enc-key)' },
-      senderIdentity: 'church@example.com',
     });
   });
 

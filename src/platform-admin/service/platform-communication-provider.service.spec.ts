@@ -5,6 +5,8 @@ import { PlatformCommunicationProviderService } from './platform-communication-p
 import { CommunicationProvider } from '../entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from '../entity/tenant-communication-provider-config.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
+import { CacheService } from '../../utility/service/cache.service';
+import { TenantBroadcastService } from './tenant-broadcast.service';
 
 const mockProviderRepo = {
   find: jest.fn(),
@@ -15,12 +17,15 @@ const mockProviderRepo = {
 };
 const mockTenantProviderConfigRepo = { find: jest.fn() };
 const mockTenantRepo = { findOneBy: jest.fn() };
+const mockCacheService = { del: jest.fn() };
+const mockTenantBroadcastService = { notifyTenants: jest.fn() };
 
 describe('PlatformCommunicationProviderService', () => {
   let service: PlatformCommunicationProviderService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockTenantProviderConfigRepo.find.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PlatformCommunicationProviderService,
@@ -33,6 +38,11 @@ describe('PlatformCommunicationProviderService', () => {
           useValue: mockTenantProviderConfigRepo,
         },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        { provide: CacheService, useValue: mockCacheService },
+        {
+          provide: TenantBroadcastService,
+          useValue: mockTenantBroadcastService,
+        },
       ],
     }).compile();
     service = module.get(PlatformCommunicationProviderService);
@@ -76,7 +86,7 @@ describe('PlatformCommunicationProviderService', () => {
 
   describe('setActive', () => {
     it('flips isActive and saves', async () => {
-      const provider = { id: 'termii', isActive: true };
+      const provider = { id: 'termii', channel: 'sms', isActive: true };
       mockProviderRepo.findOneBy.mockResolvedValue(provider);
       mockProviderRepo.save.mockImplementation((p) => Promise.resolve(p));
 
@@ -94,6 +104,73 @@ describe('PlatformCommunicationProviderService', () => {
         NotFoundException,
       );
       expect(mockProviderRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('does nothing extra when no tenant is configured against the provider', async () => {
+      mockProviderRepo.findOneBy.mockResolvedValue({
+        id: 'termii',
+        channel: 'sms',
+        isActive: true,
+      });
+      mockProviderRepo.save.mockImplementation((p) => Promise.resolve(p));
+      mockTenantProviderConfigRepo.find.mockResolvedValue([]);
+
+      await service.setActive('termii', false);
+
+      expect(mockCacheService.del).not.toHaveBeenCalled();
+      expect(mockTenantBroadcastService.notifyTenants).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the resolved-credential cache for every tenant with an active config, and notifies them', async () => {
+      mockProviderRepo.findOneBy.mockResolvedValue({
+        id: 'termii',
+        channel: 'sms',
+        name: 'Termii',
+        isActive: true,
+      });
+      mockProviderRepo.save.mockImplementation((p) => Promise.resolve(p));
+      mockTenantProviderConfigRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-1', providerId: 'termii', isActive: true },
+        { tenantId: 'tenant-2', providerId: 'termii', isActive: true },
+      ]);
+
+      await service.setActive('termii', false);
+
+      expect(mockTenantProviderConfigRepo.find).toHaveBeenCalledWith({
+        where: { providerId: 'termii', isActive: true },
+      });
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'communication-provider-config:tenant-1:sms',
+      );
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'communication-provider-config:tenant-2:sms',
+      );
+      expect(mockTenantBroadcastService.notifyTenants).toHaveBeenCalledWith(
+        ['tenant-1', 'tenant-2'],
+        expect.stringContaining('unavailable'),
+        expect.any(String),
+      );
+    });
+
+    it('sends a "restored" notice, not a "disrupted" one, when reactivating', async () => {
+      mockProviderRepo.findOneBy.mockResolvedValue({
+        id: 'termii',
+        channel: 'sms',
+        name: 'Termii',
+        isActive: false,
+      });
+      mockProviderRepo.save.mockImplementation((p) => Promise.resolve(p));
+      mockTenantProviderConfigRepo.find.mockResolvedValue([
+        { tenantId: 'tenant-1', providerId: 'termii', isActive: true },
+      ]);
+
+      await service.setActive('termii', true);
+
+      expect(mockTenantBroadcastService.notifyTenants).toHaveBeenCalledWith(
+        ['tenant-1'],
+        expect.stringContaining('available again'),
+        expect.any(String),
+      );
     });
   });
 

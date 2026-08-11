@@ -27351,7 +27351,7 @@
                 "flutterwave-sms"
               ]
             },
-            "description": "Activate/deactivate a provider in the platform-wide catalog. As of this endpoint's introduction, deactivating is admin-console-only bookkeeping — it does not yet stop a tenant already configured against the provider from continuing to use it (SmsCredentialResolverService/EmailCredentialResolverService don't check the catalog's isActive), nor does it filter the provider out of the tenant-facing catalog (GET /communication-providers) that new tenants pick from. See docs/TECH_DOC.md's Communication Providers section for the current, up-to-date status of that enforcement work."
+            "description": "Activate/deactivate a provider in the platform-wide catalog. Deactivating: (1) removes it from the tenant-facing catalog (GET /communication-providers) that new tenants pick from, unless a tenant is already configured against it (that row stays visible rather than silently vanishing); (2) stops it resolving for tenants already using it — SmsCredentialResolverService/EmailCredentialResolverService now check the catalog's isActive too, and the 5-minute resolved-credential cache is invalidated immediately for every affected tenant, not left to expire naturally; (3) emails every affected tenant's admin explaining the channel is disrupted. Reactivating (isActive: true) undoes (1)/(2) and sends a 'restored' notice instead. See docs/TECH_DOC.md's \"Communication Providers: deactivation has real consequences\" section."
           },
           "response": []
         },

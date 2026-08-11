@@ -12,6 +12,7 @@ import { EncryptionService } from '../../utility/service/encryption.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { UpsertProviderConfigDto } from '../dto/upsert-provider-config.dto';
 import { CacheService } from '../../utility/service/cache.service';
+import { communicationProviderCacheKey } from '../utility/communication-provider-cache-key';
 
 export interface TenantProviderConfigSummary {
   providerId: string;
@@ -49,25 +50,36 @@ export class TenantCommunicationProviderService {
   }
 
   private cacheKey(tenantId: string, channel: string): string {
-    return `communication-provider-config:${tenantId}:${channel}`;
+    return communicationProviderCacheKey(tenantId, channel);
   }
 
   // Catalog (every provider registered for the given channel, or all
   // channels) plus this tenant's own config summary for each — never the
   // credentials themselves, `credentialsEncrypted` has `select: false` and
   // this method never selects it back in regardless.
+  //
+  // `catalog` excludes providers the platform has deactivated (see
+  // PlatformCommunicationProviderService.setActive) UNLESS this tenant is
+  // already configured against one — a deactivated-but-still-configured
+  // provider stays visible (discuva-admin's page renders one row per
+  // catalog entry, so filtering it out entirely would make an
+  // already-set-up provider's row silently vanish with no explanation,
+  // even though its encrypted credentials are still saved). The tenant is
+  // notified separately via TenantBroadcastService when this happens.
   async listProviders(channel?: 'sms' | 'email'): Promise<{
     catalog: CommunicationProvider[];
     ownConfigs: TenantProviderConfigSummary[];
   }> {
     const tenantId = this.currentTenantId();
-    const catalog = await this.providerRepo.find({
+    const allProviders = await this.providerRepo.find({
       where: channel ? { channel } : {},
       order: { channel: 'ASC', name: 'ASC' },
     });
 
     const configs = await this.configRepo.find({ where: { tenantId } });
-    const providerById = new Map(catalog.map((p) => [p.id, p]));
+    const providerById = new Map(allProviders.map((p) => [p.id, p]));
+    const configuredProviderIds = new Set(configs.map((c) => c.providerId));
+
     const ownConfigs: TenantProviderConfigSummary[] = configs
       .filter(
         (c) => !channel || providerById.get(c.providerId)?.channel === channel,
@@ -79,6 +91,10 @@ export class TenantCommunicationProviderService {
         senderIdentity: c.senderIdentity,
         isActive: c.isActive,
       }));
+
+    const catalog = allProviders.filter(
+      (p) => p.isActive || configuredProviderIds.has(p.id),
+    );
 
     return { catalog, ownConfigs };
   }

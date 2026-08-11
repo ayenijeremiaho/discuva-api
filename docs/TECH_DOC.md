@@ -2544,6 +2544,32 @@ deactivates every other provider already active on that same channel for the ten
 each pick a single `isActive = true` row per channel, so allowing more than one active at a time would make that
 pick arbitrary. Turning a provider *off* never touches its siblings.
 
+**Communication Providers: deactivation has real consequences (added 2026-08).** A platform admin can activate/
+deactivate a provider in the platform-wide catalog (`PATCH /platform/communication-providers/:id`,
+`PlatformCommunicationProviderService.setActive` — see Platform Admin above). Initially this only flipped the
+`CommunicationProvider.isActive` column with zero downstream effect anywhere — verified live at the time: neither
+credential resolver checked it, the tenant-facing catalog endpoint didn't filter on it, and a tenant already
+configured against a since-deactivated provider kept sending through it exactly as before. Three changes closed
+that gap:
+
+1. **`TenantCommunicationProviderService.listProviders()`** excludes an inactive provider from the catalog a
+   tenant can newly select — *unless* that tenant already has a config against it, in which case it stays visible
+   (filtering it out entirely would make an already-configured provider's row silently vanish from
+   `discuva-admin`'s page with no explanation, even though its encrypted credentials are still saved).
+2. **`SmsCredentialResolverService`/`EmailCredentialResolverService`** now also require `provider.isActive = true`
+   in the same query that already checks `config.isActive = true` and `provider.channel`. A deactivated provider
+   genuinely stops resolving for every tenant using it, not just new ones.
+3. **`PlatformCommunicationProviderService.setActive()`** invalidates the 300s resolved-credential cache
+   immediately for every tenant with an active config against the provider (`communicationProviderCacheKey` —
+   extracted as a shared utility, `src/communication-provider/utility/communication-provider-cache-key.ts`, since
+   four separate places needed the identical cache-key string and three of them were computing it independently
+   before this), rather than leaving affected tenants to keep working for up to 5 more minutes. It also emails
+   those same tenants' admins — `TenantBroadcastService.notifyTenants()` (see "Tenant Broadcasts" under Platform
+   Admin above), deliberately targeted at only the tenants actually using this provider, not a platform-wide
+   broadcast — explaining the channel is disrupted (deactivating) or restored (reactivating). A tenant's own
+   `TenantCommunicationProviderConfig` row is never touched by any of this — same "don't retroactively delete
+   something already configured" posture `suspendTenant` uses for a tenant's own data.
+
 **Env vars:** `CREDENTIALS_ENCRYPTION_KEY` (required, `min(32)` chars) — see Environment Variables.
 
 **Email BYOK send path (`EmailProcessor.handleSend`, `src/utility/processor/email.processor.ts`):** unlike SMS,

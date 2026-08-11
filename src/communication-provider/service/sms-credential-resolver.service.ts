@@ -7,6 +7,7 @@ import { CommunicationProvider } from '../../platform-admin/entity/communication
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { communicationProviderCacheKey } from '../utility/communication-provider-cache-key';
 
 export interface ResolvedSmsConfig {
   providerId: string;
@@ -33,7 +34,7 @@ export class SmsCredentialResolverService {
   }
 
   private cacheKey(tenantId: string): string {
-    return `communication-provider-config:${tenantId}:sms`;
+    return communicationProviderCacheKey(tenantId, 'sms');
   }
 
   // Returns undefined when there's no tenant context at all (a script/job
@@ -59,6 +60,12 @@ export class SmsCredentialResolverService {
             .where('config.tenantId = :tenantId', { tenantId })
             .andWhere('config.isActive = true')
             .andWhere('provider.channel = :channel', { channel: 'sms' })
+            // A platform-deactivated provider stops resolving here too, not
+            // just in the tenant-facing catalog listing — see
+            // PlatformCommunicationProviderService.setActive's own comment
+            // for the cache-invalidation half of making this take effect
+            // immediately rather than after this method's own 300s TTL.
+            .andWhere('provider.isActive = true')
             .getOne();
 
           // Cast to a sentinel rather than returning undefined here — see the
