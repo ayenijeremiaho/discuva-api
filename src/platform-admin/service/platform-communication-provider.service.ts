@@ -45,6 +45,23 @@ export class PlatformCommunicationProviderService {
     return this.providerRepo.save(this.providerRepo.create(dto));
   }
 
+  // Deactivating here only removes the provider from the platform-wide
+  // catalog a tenant can newly BYOK against — it doesn't touch any
+  // TenantCommunicationProviderConfig row already pointing at it, same
+  // "don't retroactively break something already configured" posture as
+  // suspendTenant leaving a tenant's own data untouched.
+  async setActive(
+    id: string,
+    isActive: boolean,
+  ): Promise<CommunicationProvider> {
+    const provider = await this.providerRepo.findOneBy({ id });
+    if (!provider) {
+      throw new NotFoundException(`Communication provider "${id}" not found.`);
+    }
+    provider.isActive = isActive;
+    return this.providerRepo.save(provider);
+  }
+
   // Never returns credentialsEncrypted — the entity's own `select: false`
   // already keeps it out of a plain find(), and this method doesn't
   // addSelect it back in. Support cases need "which provider, BYOK or not"

@@ -4381,8 +4381,13 @@ global-guard equivalent to lean on, since every platform controller applies `Pla
 platform admin's permissions are loaded once, at JWT-validation time (`PlatformAdminAuthService.validateById`
 eager-loads the `platformAdminRole` relation), not a second DB round-trip per request. `@RequiresPlatformPermission(...)`
 mirrors tenant-side `@RequiresPermission(...)` and is applied per-route (or once at class level when every route in
-a controller needs the same permission, e.g. `PlatformAnalyticsController`). Twelve permissions across six groups —
-see `PlatformAdminPermissionGroups` for the exact list, used to render a grouped permission picker.
+a controller needs the same permission, e.g. `PlatformAnalyticsController`). Thirteen permissions across seven
+groups — see `PlatformAdminPermissionGroups` for the exact list, used to render a grouped permission picker.
+`BROADCAST_WRITE` (added alongside the tenant-broadcast capability below) needed a data migration, not just an
+enum addition, to actually reach an already-seeded `SuperAdmin` role — `PlatformAdminRole.permissions` is a plain
+`text[]` snapshotted once at row-creation time (`DefaultPlatformAdminSeed` never re-syncs an existing role against
+the enum on later boots), so adding a new permission value does nothing for a platform admin whose role already
+existed. See `1792371600000-GrantSuperAdminBroadcastPermission.ts`.
 
 **Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant via
 schema-qualified reads — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
@@ -4416,6 +4421,7 @@ being visible outside this service. All four routes now return the identical cur
 | GET | `/platform/subscriptions` | List all subscriptions — spot `past_due` churn risk. |
 | GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
 | POST | `/platform/communication-providers` | Register a new provider — `{ id, channel, name }`. |
+| PATCH | `/platform/communication-providers/:id` | `{ isActive: boolean }` — activate/deactivate a provider in the platform-wide catalog. See "Communication Providers: deactivation has real consequences" below for what this actually does to a tenant already using the provider. |
 | GET | `/platform/tenants/:id/communication-providers` | A tenant's active provider per channel — never the raw encrypted credentials. |
 | GET | `/platform/analytics/overview`\|`/growth`\|`/revenue`\|`/engagement`\|`/churn`\|`/adoption` | Cross-tenant business metrics — see "Platform Analytics" below. |
 | GET | `/platform/tenants/:id/billing-sessions` | This tenant's checkout session history, newest first. |
@@ -4432,8 +4438,42 @@ being visible outside this service. All four routes now return the identical cur
 | PATCH | `/platform/admins/:id` | Change role and/or `isActive`. `403`s if `id` is the caller's own — see below. |
 | POST | `/platform/auth/forgot-password` | Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. |
 | POST | `/platform/auth/reset-password` | Public, rate-limited (5/min). Verify the OTP and set a new password — also how a newly-onboarded admin sets their initial one. |
+| POST | `/platform/broadcast` | `{ subject, message }` (plain text, not HTML) — one email to every active tenant's oldest active admin. See "Tenant Broadcasts" below. |
 
 **Routes prefix:** `/platform`
+
+#### Tenant Broadcasts (`TenantBroadcastService`, added 2026-08)
+
+Sends one email to every active tenant's oldest active admin — used both as a direct platform-admin action
+(`POST /platform/broadcast`, `discuva-platform`'s "Broadcast" nav page) and internally by other services that need
+to notify every tenant about something platform-wide (first consumer: Communication Provider deactivation, below).
+
+**Never a single batched `to: [...]` call.** Confirmed live in `EmailProcessor`: an array `to` produces one shared,
+mutually-visible `To:` header (`Array.isArray(to) ? to.join(', ') : to`) — sending one email to every tenant's
+admin that way would leak every church admin's email address to every other church admin. `TenantBroadcastService`
+instead uses `forEachActiveTenant` (already proven by `SubscriptionLapseScheduler`) to re-enter each tenant's own
+schema and queue one individual `EmailQueueService.queueEmail()` call per tenant.
+
+**Only the tenant's oldest active admin is notified**, same "one primary contact" convention
+`SubscriptionLapseScheduler` already established for platform-initiated notices — not every admin the tenant has.
+
+**Two entry points on the service**, one plain-text and one raw-HTML:
+- `broadcastPlainTextToAllTenantAdmins(subject, message)` — what `POST /platform/broadcast` actually calls. Each
+  non-blank line of `message` becomes its own `<p>`, HTML-escaped first. A platform admin typing into a form
+  textarea should never be able to inject arbitrary markup/scripts into an email reaching every church on the
+  platform at once.
+- `broadcastToAllTenantAdmins(subject, html)` — the lower-level primitive, for internal callers that need real
+  markup (e.g. a provider-outage notice with a link). Every other `queueEmail` call site in this codebase passes
+  raw HTML directly; this one is no different, it's only the plain-text entry point above that restricts it.
+
+**Result shape**, distinct from `forEachActiveTenant`'s own `{ succeeded, failed }`: `{ sent, skipped, failed }` —
+`skipped` (a tenant with no active admin on file) is tracked separately from `failed` (the tenant callback itself
+threw), since neither means the same thing operationally.
+
+**Permission:** `BROADCAST_WRITE`, deliberately its own permission rather than folded into an existing one — same
+"independently grantable, bigger blast radius than it looks" reasoning as `TENANTS_IMPERSONATE`. See the
+migration note earlier in this section for why an already-seeded `SuperAdmin` role needed a data migration, not
+just the enum addition, to actually gain this permission.
 
 #### Platform Admin Management (`/platform/admins`, `/platform/admin-roles`)
 

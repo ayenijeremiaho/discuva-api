@@ -16,6 +16,7 @@ import { PlatformGivingProviderService } from './service/platform-giving-provide
 import { PlatformAnalyticsService } from './service/platform-analytics.service';
 import { PlatformAdminRoleService } from './service/platform-admin-role.service';
 import { PlatformAdminManagementService } from './service/platform-admin-management.service';
+import { TenantBroadcastService } from './service/tenant-broadcast.service';
 import { PlatformAdminJwtStrategy } from './strategy/platform-admin-jwt.strategy';
 import { PlatformAdminGuard } from './guard/platform-admin.guard';
 import { DefaultPlatformAdminSeed } from './seed/default-platform-admin.seed';
@@ -34,6 +35,7 @@ import { BillingCheckoutSession } from '../billing/entity/billing-checkout-sessi
 import { TenantRollup } from '../branch/entity/tenant-rollup.entity';
 import { TenantModule } from '../tenant/tenant.module';
 import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.entity';
+import { UtilityModule } from '../utility/utility.module';
 
 @Module({
   imports: [
@@ -57,6 +59,7 @@ import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.
       TenantOnboardingEvent,
     ]),
     TenantModule,
+    UtilityModule,
   ],
   controllers: [
     PlatformAdminController,
@@ -75,6 +78,7 @@ import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.
     PlatformAnalyticsService,
     PlatformAdminRoleService,
     PlatformAdminManagementService,
+    TenantBroadcastService,
     DefaultPlatformAdminSeed,
   ],
 })

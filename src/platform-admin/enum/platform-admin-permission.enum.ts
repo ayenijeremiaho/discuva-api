@@ -24,6 +24,11 @@ export enum PlatformAdminPermission {
   // permission to anyone".
   PLATFORM_ADMINS_READ = 'platform_admins:read',
   PLATFORM_ADMINS_WRITE = 'platform_admins:write',
+  // Sends one email to every active tenant's admin — deliberately its own
+  // permission, not folded into an existing one, since misuse here reaches
+  // every church on the platform at once (same "independently grantable,
+  // bigger blast radius than it looks" reasoning as TENANTS_IMPERSONATE).
+  BROADCAST_WRITE = 'broadcast:write',
 }
 
 export const PLATFORM_ADMIN_PERMISSION_LABELS: Record<
@@ -44,6 +49,7 @@ export const PLATFORM_ADMIN_PERMISSION_LABELS: Record<
   [PlatformAdminPermission.ANALYTICS_READ]: 'View Platform Analytics',
   [PlatformAdminPermission.PLATFORM_ADMINS_READ]: 'View Platform Admins',
   [PlatformAdminPermission.PLATFORM_ADMINS_WRITE]: 'Manage Platform Admins',
+  [PlatformAdminPermission.BROADCAST_WRITE]: 'Send Tenant Broadcasts',
 };
 
 export interface PlatformAdminPermissionGroup {
@@ -89,4 +95,5 @@ export const PlatformAdminPermissionGroups: PlatformAdminPermissionGroup[] = [
     PlatformAdminPermission.PLATFORM_ADMINS_READ,
     PlatformAdminPermission.PLATFORM_ADMINS_WRITE,
   ]),
+  buildGroup('Broadcasts', [PlatformAdminPermission.BROADCAST_WRITE]),
 ];

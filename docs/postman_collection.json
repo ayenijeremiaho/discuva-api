@@ -27312,6 +27312,50 @@
           "response": []
         },
         {
+          "name": "Set Communication Provider Active",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/communication-providers/flutterwave-sms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "communication-providers",
+                "flutterwave-sms"
+              ]
+            },
+            "description": "Activate/deactivate a provider in the platform-wide catalog. As of this endpoint's introduction, deactivating is admin-console-only bookkeeping — it does not yet stop a tenant already configured against the provider from continuing to use it (SmsCredentialResolverService/EmailCredentialResolverService don't check the catalog's isActive), nor does it filter the provider out of the tenant-facing catalog (GET /communication-providers) that new tenants pick from. See docs/TECH_DOC.md's Communication Providers section for the current, up-to-date status of that enforcement work."
+          },
+          "response": []
+        },
+        {
           "name": "Get Tenant Communication Providers",
           "request": {
             "method": "GET",
@@ -27820,6 +27864,49 @@
               ]
             },
             "description": "Public, rate-limited (5/min). Verify the OTP and set a new password. Also how a newly-onboarded platform admin sets their initial password from the welcome email link."
+          },
+          "response": []
+        },
+        {
+          "name": "Broadcast to All Tenant Admins",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Scheduled maintenance tonight\",\n  \"message\": \"We'll be performing maintenance between 11pm and midnight WAT. Brief interruptions may occur.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/broadcast",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "broadcast"
+              ]
+            },
+            "description": "Sends one individual email (never a batched multi-recipient call) to every active tenant's oldest active admin. `message` is plain text only \u2014 each non-blank line becomes its own paragraph, HTML-escaped first; raw markup is never accepted here (a platform admin composing this in a form textarea shouldn't be able to inject arbitrary HTML into an email reaching every church on the platform at once). Requires BROADCAST_WRITE, a permission independent of everything else \u2014 see docs/TECH_DOC.md's \"Tenant Broadcasts\" section. Response: `{ sent, skipped, failed }` \u2014 skipped means a tenant had no active admin on file, distinct from a hard failure."
           },
           "response": []
         },

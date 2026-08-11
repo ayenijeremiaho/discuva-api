@@ -22,6 +22,7 @@ import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
+import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
 import {
   PlatformAdminForgotPasswordDto,
@@ -35,7 +36,9 @@ import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
+import { SetCommunicationProviderActiveDto } from '../dto/set-communication-provider-active.dto';
 import { RefundCheckoutSessionDto } from '../dto/refund-checkout-session.dto';
+import { BroadcastDto } from '../dto/broadcast.dto';
 import { CheckoutService } from '../../billing/service/checkout.service';
 
 // Route shapes match MULTI_TENANT_MIGRATION.md §4.10's capability list.
@@ -60,6 +63,7 @@ export class PlatformAdminController {
     private readonly communicationProviderService: PlatformCommunicationProviderService,
     private readonly givingProviderService: PlatformGivingProviderService,
     private readonly checkoutService: CheckoutService,
+    private readonly tenantBroadcastService: TenantBroadcastService,
   ) {}
 
   @Post('auth/login')
@@ -207,6 +211,18 @@ export class PlatformAdminController {
 
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(
+    PlatformAdminPermission.COMMUNICATION_PROVIDERS_WRITE,
+  )
+  @Patch('communication-providers/:id')
+  async setCommunicationProviderActive(
+    @Param('id') id: string,
+    @Body() dto: SetCommunicationProviderActiveDto,
+  ) {
+    return this.communicationProviderService.setActive(id, dto.isActive);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(
     PlatformAdminPermission.COMMUNICATION_PROVIDERS_READ,
   )
   @Get('tenants/:id/communication-providers')
@@ -245,6 +261,20 @@ export class PlatformAdminController {
     return this.checkoutService.refundCheckoutSession(
       sessionId,
       dto.amountCents,
+    );
+  }
+
+  // Plain text only, not raw HTML — see BroadcastDto's own comment and
+  // TenantBroadcastService.plainTextToHtml for why. One email per tenant's
+  // oldest active admin, never a single batched call — see
+  // TenantBroadcastService's class comment for the privacy reasoning.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BROADCAST_WRITE)
+  @Post('broadcast')
+  async broadcastToTenants(@Body() dto: BroadcastDto) {
+    return this.tenantBroadcastService.broadcastPlainTextToAllTenantAdmins(
+      dto.subject,
+      dto.message,
     );
   }
 }

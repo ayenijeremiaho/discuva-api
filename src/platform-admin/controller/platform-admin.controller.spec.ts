@@ -5,6 +5,7 @@ import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
+import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { CheckoutService } from '../../billing/service/checkout.service';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 
@@ -17,6 +18,12 @@ const mockCheckoutService = {
 };
 const mockGivingProviderService = {
   getTenantGivingProviders: jest.fn(),
+};
+const mockCommunicationProviderService = {
+  setActive: jest.fn(),
+};
+const mockTenantBroadcastService = {
+  broadcastPlainTextToAllTenantAdmins: jest.fn(),
 };
 const mockAuthService = {
   forgotPassword: jest.fn(),
@@ -34,12 +41,19 @@ describe('PlatformAdminController (billing support routes)', () => {
         { provide: PlatformAdminAuthService, useValue: mockAuthService },
         { provide: PlatformTenantService, useValue: {} },
         { provide: PlatformPlanService, useValue: {} },
-        { provide: PlatformCommunicationProviderService, useValue: {} },
+        {
+          provide: PlatformCommunicationProviderService,
+          useValue: mockCommunicationProviderService,
+        },
         {
           provide: PlatformGivingProviderService,
           useValue: mockGivingProviderService,
         },
         { provide: CheckoutService, useValue: mockCheckoutService },
+        {
+          provide: TenantBroadcastService,
+          useValue: mockTenantBroadcastService,
+        },
       ],
     })
       .overrideGuard(PlatformAdminGuard)
@@ -69,6 +83,30 @@ describe('PlatformAdminController (billing support routes)', () => {
       'sess-1',
       undefined,
     );
+  });
+
+  it('setCommunicationProviderActive delegates to PlatformCommunicationProviderService', async () => {
+    await controller.setCommunicationProviderActive('termii', {
+      isActive: false,
+    });
+    expect(mockCommunicationProviderService.setActive).toHaveBeenCalledWith(
+      'termii',
+      false,
+    );
+  });
+
+  it('broadcastToTenants delegates to TenantBroadcastService with subject and plain-text message', async () => {
+    mockTenantBroadcastService.broadcastPlainTextToAllTenantAdmins.mockResolvedValue(
+      { sent: 3, skipped: 0, failed: 0 },
+    );
+    const result = await controller.broadcastToTenants({
+      subject: 'Heads up',
+      message: 'SMS is temporarily down.',
+    });
+    expect(
+      mockTenantBroadcastService.broadcastPlainTextToAllTenantAdmins,
+    ).toHaveBeenCalledWith('Heads up', 'SMS is temporarily down.');
+    expect(result).toEqual({ sent: 3, skipped: 0, failed: 0 });
   });
 
   it('getTenantGivingProviders delegates to PlatformGivingProviderService', async () => {
