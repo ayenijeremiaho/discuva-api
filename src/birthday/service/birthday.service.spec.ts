@@ -358,7 +358,12 @@ describe('BirthdayService', () => {
       expect(mockMemberRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ status: MemberStatusEnum.ACTIVE }),
-          relations: ['workerProfile', 'workerProfile.department', 'pastor'],
+          relations: [
+            'workerProfile',
+            'workerProfile.department',
+            'clergy',
+            'clergy.title',
+          ],
         }),
       );
     });
@@ -378,7 +383,7 @@ describe('BirthdayService', () => {
       expect(result[0]).not.toHaveProperty('phoneNumber');
     });
 
-    it('derives departmentName from workerProfile.department and pastorType from pastor', async () => {
+    it('derives departmentName from workerProfile.department and clergyTitleName from clergy.title', async () => {
       mockMemberRepo.find.mockResolvedValue([
         makeMember({
           id: 'member-1',
@@ -386,7 +391,7 @@ describe('BirthdayService', () => {
         } as any),
         makeMember({
           id: 'member-2',
-          pastor: { type: 'LEAD' },
+          clergy: { title: { name: 'Lead Pastor' } },
         } as any),
         makeMember({ id: 'member-3' } as any),
       ]);
@@ -396,12 +401,18 @@ describe('BirthdayService', () => {
       expect(result.find((m) => m.id === 'member-1')?.departmentName).toBe(
         'Worship',
       );
-      expect(result.find((m) => m.id === 'member-1')?.pastorType).toBeNull();
-      expect(result.find((m) => m.id === 'member-2')?.pastorType).toBe('LEAD');
+      expect(
+        result.find((m) => m.id === 'member-1')?.clergyTitleName,
+      ).toBeNull();
+      expect(result.find((m) => m.id === 'member-2')?.clergyTitleName).toBe(
+        'Lead Pastor',
+      );
       expect(
         result.find((m) => m.id === 'member-3')?.departmentName,
       ).toBeNull();
-      expect(result.find((m) => m.id === 'member-3')?.pastorType).toBeNull();
+      expect(
+        result.find((m) => m.id === 'member-3')?.clergyTitleName,
+      ).toBeNull();
     });
 
     it('flags alreadyWishedByMe only for recipients the current sender already wished this year', async () => {

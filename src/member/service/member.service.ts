@@ -9,7 +9,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, FindManyOptions, In, Repository } from 'typeorm';
 import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
-import { Pastor } from '../entity/pastor.entity';
+import { Clergy } from '../entity/clergy.entity';
+import { ClergyTitle } from '../../clergy-title/entity/clergy-title.entity';
 import { Department } from '../../department/entity/department.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { SundaySchoolClass } from '../../sunday-school/entity/sunday-school-class.entity';
@@ -28,7 +29,8 @@ import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
-import { AssignPastorDto } from '../dto/assign-pastor.dto';
+import { AssignClergyDto } from '../dto/assign-clergy.dto';
+import { SetClergyReviewAccessDto } from '../dto/set-clergy-review-access.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
@@ -45,8 +47,10 @@ export class MemberService {
     private readonly memberRepository: Repository<Member>,
     @InjectRepository(WorkerProfile)
     private readonly workerProfileRepository: Repository<WorkerProfile>,
-    @InjectRepository(Pastor)
-    private readonly pastorRepository: Repository<Pastor>,
+    @InjectRepository(Clergy)
+    private readonly clergyRepository: Repository<Clergy>,
+    @InjectRepository(ClergyTitle)
+    private readonly clergyTitleRepository: Repository<ClergyTitle>,
     @InjectRepository(Department)
     private readonly departmentRepository: Repository<Department>,
     private readonly utilityService: UtilityService,
@@ -467,75 +471,130 @@ export class MemberService {
     );
   }
 
-  async assignPastor(
+  private async getClergyTitleOrThrow(id: string): Promise<ClergyTitle> {
+    const clergyTitle = await this.clergyTitleRepository.findOneBy({ id });
+    if (!clergyTitle) {
+      throw new NotFoundException('Clergy title not found.');
+    }
+    return clergyTitle;
+  }
+
+  async assignClergy(
     memberId: string,
-    dto: AssignPastorDto,
+    dto: AssignClergyDto,
     actorId: string,
   ): Promise<Member> {
-    const member = await this.getById(memberId, ['pastor']);
-    if (member.pastor) {
+    const member = await this.getById(memberId, ['clergy']);
+    if (member.clergy) {
       throw new ConflictException(
-        'This member is already designated as a pastor.',
+        'This member is already designated as clergy.',
       );
     }
+    const title = await this.getClergyTitleOrThrow(dto.clergyTitleId);
 
-    const pastor = this.pastorRepository.create({ member, type: dto.type });
-    await this.pastorRepository.save(pastor);
+    const clergy = this.clergyRepository.create({ member, title });
+    await this.clergyRepository.save(clergy);
 
-    this.auditLogService.log('PASTOR_ASSIGNED', {
+    this.auditLogService.log('CLERGY_ASSIGNED', {
       actorId,
       targetId: member.id,
       targetEmail: member.email,
-      metadata: { type: dto.type },
+      metadata: {
+        clergyTitleId: title.id,
+        clergyTitleName: title.name,
+      },
     });
 
     return this.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
   }
 
-  async updatePastorType(
+  async updateClergyTitle(
     memberId: string,
-    dto: AssignPastorDto,
+    dto: AssignClergyDto,
     actorId: string,
   ): Promise<Member> {
-    const member = await this.getById(memberId, ['pastor']);
-    if (!member.pastor) {
-      throw new NotFoundException('This member is not designated as a pastor.');
+    const member = await this.getById(memberId, ['clergy']);
+    if (!member.clergy) {
+      throw new NotFoundException('This member is not designated as clergy.');
     }
+    const title = await this.getClergyTitleOrThrow(dto.clergyTitleId);
 
-    member.pastor.type = dto.type;
-    await this.pastorRepository.save(member.pastor);
+    member.clergy.title = title;
+    await this.clergyRepository.save(member.clergy);
 
-    this.auditLogService.log('PASTOR_TYPE_UPDATED', {
+    this.auditLogService.log('CLERGY_TITLE_CHANGED', {
       actorId,
       targetId: member.id,
       targetEmail: member.email,
-      metadata: { type: dto.type },
+      metadata: {
+        clergyTitleId: title.id,
+        clergyTitleName: title.name,
+      },
     });
 
     return this.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
   }
 
-  async removePastor(memberId: string, actorId: string): Promise<void> {
-    const member = await this.getById(memberId, ['pastor']);
-    if (!member.pastor) {
-      throw new NotFoundException('This member is not designated as a pastor.');
+  async removeClergy(memberId: string, actorId: string): Promise<void> {
+    const member = await this.getById(memberId, ['clergy']);
+    if (!member.clergy) {
+      throw new NotFoundException('This member is not designated as clergy.');
     }
 
-    await this.pastorRepository.remove(member.pastor);
+    await this.clergyRepository.remove(member.clergy);
 
-    this.auditLogService.log('PASTOR_REMOVED', {
+    this.auditLogService.log('CLERGY_REMOVED', {
       actorId,
       targetId: member.id,
       targetEmail: member.email,
     });
+  }
+
+  // Deliberately separate from assignClergy/updateClergyTitle — holding a
+  // title (a promotion/recognition) does not by itself grant the ability
+  // to see and respond to every department's Pastor Feedback reports. An
+  // admin flips this independently so it reads as its own deliberate
+  // decision, not a side effect of a title change.
+  async setClergyReviewAccess(
+    memberId: string,
+    dto: SetClergyReviewAccessDto,
+    actorId: string,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, ['clergy']);
+    if (!member.clergy) {
+      throw new NotFoundException('This member is not designated as clergy.');
+    }
+
+    member.clergy.canReviewFeedback = dto.canReviewFeedback;
+    await this.clergyRepository.save(member.clergy);
+
+    this.auditLogService.log(
+      dto.canReviewFeedback
+        ? 'CLERGY_REVIEW_ACCESS_GRANTED'
+        : 'CLERGY_REVIEW_ACCESS_REVOKED',
+      {
+        actorId,
+        targetId: member.id,
+        targetEmail: member.email,
+      },
+    );
+
+    return this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.department',
+      'clergy',
+      'clergy.title',
+    ]);
   }
 
   async updateMember(
@@ -584,7 +643,8 @@ export class MemberService {
     const member = await this.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
 
     if (dto.firstname) member.firstname = dto.firstname;
@@ -613,7 +673,8 @@ export class MemberService {
     const member = await this.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
 
     const previousPublicId = member.photoPublicId;
@@ -645,7 +706,8 @@ export class MemberService {
     const member = await this.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
     const saved = await this.clearPhoto(member);
     this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
@@ -661,7 +723,8 @@ export class MemberService {
     const member = await this.getById(memberId, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
     const saved = await this.clearPhoto(member);
     this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
@@ -934,7 +997,8 @@ export class MemberService {
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.workerProfile', 'workerProfile')
       .leftJoinAndSelect('workerProfile.department', 'department')
-      .leftJoinAndSelect('member.pastor', 'pastor')
+      .leftJoinAndSelect('member.clergy', 'clergy')
+      .leftJoinAndSelect('clergy.title', 'clergyTitle')
       .orderBy('member.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -989,7 +1053,8 @@ export class MemberService {
       .createQueryBuilder('member')
       .innerJoinAndSelect('member.workerProfile', 'profile')
       .innerJoinAndSelect('profile.department', 'department')
-      .leftJoinAndSelect('member.pastor', 'pastor')
+      .leftJoinAndSelect('member.clergy', 'clergy')
+      .leftJoinAndSelect('clergy.title', 'clergyTitle')
       .where('member.role = :role', { role: MemberRoleEnum.WORKER });
 
     if (status) {

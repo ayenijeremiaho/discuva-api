@@ -30,7 +30,7 @@ export class PastorFeedbackPastorController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    await this.feedbackService.assertIsPastor(user.id);
+    await this.feedbackService.assertCanReviewFeedback(user.id);
     return this.feedbackService.getAllFeedback({
       departmentId,
       weekOf,
@@ -46,7 +46,7 @@ export class PastorFeedbackPastorController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    await this.feedbackService.assertIsPastor(user.id);
+    await this.feedbackService.assertCanReviewFeedback(user.id);
     return this.feedbackService.getFeedbackForDepartment(
       departmentId,
       Number(page),
@@ -60,6 +60,6 @@ export class PastorFeedbackPastorController {
     @Body() dto: RespondToFeedbackDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    return this.feedbackService.respondAsPastor(id, dto, user.id);
+    return this.feedbackService.respondAsClergyReviewer(id, dto, user.id);
   }
 }

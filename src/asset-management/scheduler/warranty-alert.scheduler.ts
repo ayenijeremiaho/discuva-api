@@ -11,6 +11,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -32,6 +34,7 @@ export class WarrantyAlertScheduler {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly reminderSettingsService: ReminderSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -56,6 +59,12 @@ export class WarrantyAlertScheduler {
   }
 
   private async runAlerts(): Promise<void> {
+    const { enabled, thresholds } =
+      await this.reminderSettingsService.getConfig(
+        ReminderSettingKey.ASSET_WARRANTY,
+      );
+    if (!enabled) return;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -70,7 +79,7 @@ export class WarrantyAlertScheduler {
 
     for (const asset of assets) {
       try {
-        await this.processAsset(asset, today, recipients);
+        await this.processAsset(asset, today, recipients, thresholds);
       } catch (err) {
         this.logger.error(
           `Failed to process warranty alert for asset ${asset.id}`,
@@ -84,6 +93,7 @@ export class WarrantyAlertScheduler {
     asset: Asset,
     today: Date,
     recipients: string[],
+    thresholds: number[],
   ): Promise<void> {
     const expiry = new Date(asset.warrantyExpiry);
     expiry.setHours(0, 0, 0, 0);
@@ -93,29 +103,25 @@ export class WarrantyAlertScheduler {
 
     if (daysUntilExpiry < 0) return;
 
-    let updated = false;
-
-    if (daysUntilExpiry === 30 && !asset.warrantyNotified30DaysAt) {
-      this.sendAlert(recipients, asset, '30 days');
-      asset.warrantyNotified30DaysAt = new Date();
-      updated = true;
-    } else if (daysUntilExpiry === 14 && !asset.warrantyNotified14DaysAt) {
-      this.sendAlert(recipients, asset, '14 days');
-      asset.warrantyNotified14DaysAt = new Date();
-      updated = true;
-    } else if (daysUntilExpiry === 7 && !asset.warrantyNotified7DaysAt) {
-      this.sendAlert(recipients, asset, '7 days');
-      asset.warrantyNotified7DaysAt = new Date();
-      updated = true;
-    } else if (daysUntilExpiry === 1 && !asset.warrantyNotified1DayAt) {
-      this.sendAlert(recipients, asset, '1 day');
-      asset.warrantyNotified1DayAt = new Date();
-      updated = true;
+    const notified = asset.warrantyNotifiedThresholds ?? [];
+    if (
+      !thresholds.includes(daysUntilExpiry) ||
+      notified.includes(daysUntilExpiry)
+    ) {
+      return;
     }
 
-    if (updated) {
-      await this.assetRepo.save(asset);
-    }
+    this.sendAlert(
+      recipients,
+      asset,
+      WarrantyAlertScheduler.timingLabel(daysUntilExpiry),
+    );
+    asset.warrantyNotifiedThresholds = [...notified, daysUntilExpiry];
+    await this.assetRepo.save(asset);
+  }
+
+  private static timingLabel(daysUntilExpiry: number): string {
+    return `${daysUntilExpiry} day${daysUntilExpiry === 1 ? '' : 's'}`;
   }
 
   private sendAlert(recipients: string[], asset: Asset, timing: string): void {

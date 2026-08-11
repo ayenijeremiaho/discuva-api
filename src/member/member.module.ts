@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Member } from './entity/member.entity';
 import { WorkerProfile } from './entity/worker-profile.entity';
-import { Pastor } from './entity/pastor.entity';
+import { Clergy } from './entity/clergy.entity';
+import { ClergyTitle } from '../clergy-title/entity/clergy-title.entity';
 import { MemberImportJob } from './entity/member-import-job.entity';
 import { MemberImportRow } from './entity/member-import-row.entity';
 import { MemberSession } from './entity/member-session.entity';
@@ -21,7 +22,8 @@ import { UtilityModule } from '../utility/utility.module';
     TenantTypeOrmModule.forFeature([
       Member,
       WorkerProfile,
-      Pastor,
+      Clergy,
+      ClergyTitle,
       MemberImportJob,
       MemberImportRow,
       MemberSession,

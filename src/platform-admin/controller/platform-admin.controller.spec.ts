@@ -9,6 +9,7 @@ import { PlatformPaymentProviderService } from '../service/platform-payment-prov
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { CheckoutService } from '../../billing/service/checkout.service';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
+import { PlatformSettingsService } from '../service/platform-settings.service';
 
 // Scoped to the billing/giving-support routes added this pass — the rest of
 // this controller predates unit-test coverage in this codebase and isn't
@@ -36,6 +37,10 @@ const mockTenantBroadcastService = {
 const mockAuthService = {
   forgotPassword: jest.fn(),
   resetPassword: jest.fn(),
+};
+const mockPlatformSettingsService = {
+  findAll: jest.fn(),
+  upsert: jest.fn(),
 };
 
 describe('PlatformAdminController (billing support routes)', () => {
@@ -65,6 +70,10 @@ describe('PlatformAdminController (billing support routes)', () => {
         {
           provide: TenantBroadcastService,
           useValue: mockTenantBroadcastService,
+        },
+        {
+          provide: PlatformSettingsService,
+          useValue: mockPlatformSettingsService,
         },
       ],
     })

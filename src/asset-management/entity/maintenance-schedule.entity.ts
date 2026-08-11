@@ -32,6 +32,10 @@ export class MaintenanceSchedule extends BaseEntity {
   @Column({ type: 'date', name: 'next_due_at' })
   nextDueAt: string;
 
+  // Superseded by notifiedThresholds below (tenant-configurable threshold
+  // list, not just 7/3/1/0) — left in place, unused, rather than dropped on
+  // this pre-existing, real-data table. See
+  // AddMaintenanceNotifiedThresholds migration.
   @Column({ type: 'timestamptz', nullable: true, name: 'notified_7_days_at' })
   notified7DaysAt: Date | null;
 
@@ -43,6 +47,9 @@ export class MaintenanceSchedule extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true, name: 'notified_due_day_at' })
   notifiedDueDayAt: Date | null;
+
+  @Column({ type: 'jsonb', name: 'notified_thresholds', default: () => "'[]'" })
+  notifiedThresholds: number[];
 
   @Column({
     type: 'timestamptz',

@@ -17847,6 +17847,132 @@
       ]
     },
     {
+      "name": "Reminder Settings",
+      "item": [
+        {
+          "name": "List all reminder settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/reminder-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "reminder-settings"
+              ]
+            },
+            "description": "Returns all 6 reminder-setting keys with their effective enabled/thresholds (defaults if no override exists)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"key\": \"pledge_reminder\",\n    \"label\": \"Pledge Reminders\",\n    \"unit\": \"days relative to due date\",\n    \"enabled\": true,\n    \"thresholds\": [\n      7,\n      0,\n      -3\n    ]\n  },\n  {\n    \"key\": \"budget_alert\",\n    \"label\": \"Budget Utilization Alerts\",\n    \"unit\": \"% of budget used\",\n    \"enabled\": true,\n    \"thresholds\": [\n      80,\n      100\n    ]\n  },\n  {\n    \"key\": \"follow_up_stale\",\n    \"label\": \"Follow-Up Staleness\",\n    \"unit\": \"days since last activity\",\n    \"enabled\": true,\n    \"thresholds\": [\n      7\n    ]\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get reminder setting",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/reminder-settings/:key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "reminder-settings",
+                ":key"
+              ],
+              "variable": [
+                {
+                  "key": "key",
+                  "value": "pledge_reminder",
+                  "description": "One of: pledge_reminder, budget_alert, follow_up_stale, asset_maintenance, asset_warranty, vehicle_expiry"
+                }
+              ]
+            },
+            "description": "Get a single reminder setting by key."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"key\": \"pledge_reminder\",\n  \"label\": \"Pledge Reminders\",\n  \"unit\": \"days relative to due date\",\n  \"enabled\": true,\n  \"thresholds\": [\n    7,\n    0,\n    -3\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update reminder setting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/reminder-settings/:key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "reminder-settings",
+                ":key"
+              ],
+              "variable": [
+                {
+                  "key": "key",
+                  "value": "pledge_reminder",
+                  "description": ""
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"thresholds\": [\n    10,\n    3,\n    0\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Set the enabled flag and threshold list for one reminder category. thresholds is a list of signed day-offsets (or percent, for budget_alert) - max 10 entries, each between -365 and 365. Requires admin:write."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"key\": \"pledge_reminder\",\n  \"label\": \"Pledge Reminders\",\n  \"unit\": \"days relative to due date\",\n  \"enabled\": true,\n  \"thresholds\": [\n    10,\n    3,\n    0\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Incident Reports (Member)",
       "item": [
         {
@@ -28143,6 +28269,93 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"period\": \"monthly\",\n  \"totals\": [\n    { \"currency\": \"NGN\", \"totalAmountCents\": 7500000, \"count\": 12 }\n  ],\n  \"byProvider\": [\n    { \"provider\": \"paystack\", \"currency\": \"NGN\", \"totalAmountCents\": 7500000, \"count\": 12 }\n  ],\n  \"byTenant\": [\n    {\n      \"tenantId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"tenantName\": \"Grace Chapel\",\n      \"provider\": \"paystack\",\n      \"currency\": \"NGN\",\n      \"totalAmountCents\": 7500000,\n      \"count\": 12\n    }\n  ],\n  \"trend\": [\n    { \"periodLabel\": \"2026-07\", \"currency\": \"NGN\", \"totalAmountCents\": 7500000, \"count\": 12 }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Platform Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "settings"
+              ]
+            },
+            "description": "List platform-wide settings (currently just subscription_grace_period_days). BILLING_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"key\": \"subscription_grace_period_days\",\n    \"label\": \"Subscription Grace Period\",\n    \"unit\": \"days after payment lapse before downgrade to Free\",\n    \"value\": 7\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Update Platform Setting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"value\": 10\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/settings/subscription_grace_period_days",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "settings",
+                "subscription_grace_period_days"
+              ]
+            },
+            "description": "Edit a platform-wide setting live, no redeploy. value must be an integer 0-365. BILLING_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"key\": \"subscription_grace_period_days\",\n  \"label\": \"Subscription Grace Period\",\n  \"unit\": \"days after payment lapse before downgrade to Free\",\n  \"value\": 10\n}"
             }
           ]
         }

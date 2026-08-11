@@ -11,6 +11,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -32,6 +34,7 @@ export class MaintenanceReminderScheduler {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly reminderSettingsService: ReminderSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -56,6 +59,12 @@ export class MaintenanceReminderScheduler {
   }
 
   private async runReminders(): Promise<void> {
+    const { enabled, thresholds } =
+      await this.reminderSettingsService.getConfig(
+        ReminderSettingKey.ASSET_MAINTENANCE,
+      );
+    if (!enabled) return;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -72,7 +81,7 @@ export class MaintenanceReminderScheduler {
 
     for (const schedule of schedules) {
       try {
-        await this.processSchedule(schedule, today, recipients);
+        await this.processSchedule(schedule, today, recipients, thresholds);
       } catch (err) {
         this.logger.error(
           `Failed to process reminders for schedule ${schedule.id}`,
@@ -86,6 +95,7 @@ export class MaintenanceReminderScheduler {
     schedule: MaintenanceSchedule,
     today: Date,
     recipients: string[],
+    thresholds: number[],
   ): Promise<void> {
     const nextDue = new Date(schedule.nextDueAt);
     nextDue.setHours(0, 0, 0, 0);
@@ -94,22 +104,19 @@ export class MaintenanceReminderScheduler {
     );
 
     let updated = false;
+    const notifiedThresholds = schedule.notifiedThresholds ?? [];
 
-    if (daysUntilDue === 7 && !schedule.notified7DaysAt) {
-      this.sendReminder(recipients, schedule, '7 days');
-      schedule.notified7DaysAt = new Date();
-      updated = true;
-    } else if (daysUntilDue === 3 && !schedule.notified3DaysAt) {
-      this.sendReminder(recipients, schedule, '3 days');
-      schedule.notified3DaysAt = new Date();
-      updated = true;
-    } else if (daysUntilDue === 1 && !schedule.notified1DayAt) {
-      this.sendReminder(recipients, schedule, '1 day');
-      schedule.notified1DayAt = new Date();
-      updated = true;
-    } else if (daysUntilDue === 0 && !schedule.notifiedDueDayAt) {
-      this.sendReminder(recipients, schedule, 'due today');
-      schedule.notifiedDueDayAt = new Date();
+    if (
+      daysUntilDue >= 0 &&
+      thresholds.includes(daysUntilDue) &&
+      !notifiedThresholds.includes(daysUntilDue)
+    ) {
+      this.sendReminder(
+        recipients,
+        schedule,
+        MaintenanceReminderScheduler.timingLabel(daysUntilDue),
+      );
+      schedule.notifiedThresholds = [...notifiedThresholds, daysUntilDue];
       updated = true;
     } else if (daysUntilDue < 0) {
       const overdueNotifiedToday =
@@ -177,6 +184,11 @@ export class MaintenanceReminderScheduler {
         EmailCategory.ASSET_ALERTS,
       );
     }
+  }
+
+  private static timingLabel(daysUntilDue: number): string {
+    if (daysUntilDue === 0) return 'due today';
+    return `${daysUntilDue} day${daysUntilDue === 1 ? '' : 's'}`;
   }
 
   private async fetchRecipients(): Promise<string[]> {

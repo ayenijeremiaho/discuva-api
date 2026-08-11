@@ -13,6 +13,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -29,7 +31,6 @@ const STALE_LOCK = 'lock:follow-up-stale';
 export class FollowUpScheduler {
   private readonly logger = new Logger(FollowUpScheduler.name);
   private readonly churchName: string;
-  private readonly staleDays: number;
 
   constructor(
     @InjectRepository(FollowUpTask)
@@ -43,9 +44,9 @@ export class FollowUpScheduler {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly reminderSettingsService: ReminderSettingsService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
-    this.staleDays = this.configService.get<number>('FOLLOW_UP_STALE_DAYS', 7);
   }
 
   @Cron('0 8 * * *', { timeZone: CHURCH_TIMEZONE })
@@ -190,8 +191,15 @@ export class FollowUpScheduler {
   }
 
   private async runStaleCheck(): Promise<void> {
+    const { enabled, thresholds } =
+      await this.reminderSettingsService.getConfig(
+        ReminderSettingKey.FOLLOW_UP_STALE,
+      );
+    if (!enabled || thresholds.length === 0) return;
+    const staleDays = Math.min(...thresholds);
+
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - this.staleDays);
+    cutoff.setDate(cutoff.getDate() - staleDays);
 
     const count = await this.taskRepo
       .createQueryBuilder('task')
@@ -205,7 +213,7 @@ export class FollowUpScheduler {
     }
 
     this.logger.log(
-      `Found ${count} follow-up task(s) inactive for ${this.staleDays}+ day(s)`,
+      `Found ${count} follow-up task(s) inactive for ${staleDays}+ day(s)`,
     );
 
     const admins = await this.adminRepo
@@ -222,12 +230,12 @@ export class FollowUpScheduler {
       if (!admin.member?.email) continue;
       this.emailQueueService.queueEmailWithTemplate(
         admin.member.email,
-        `Follow-Up Alert: ${count} Task(s) With No Activity for ${this.staleDays}+ Day(s)`,
+        `Follow-Up Alert: ${count} Task(s) With No Activity for ${staleDays}+ Day(s)`,
         'follow-up-stale-admin',
         {
           adminName: admin.member.firstname,
           count,
-          staleDays: this.staleDays,
+          staleDays,
           churchName: this.churchName,
         },
         undefined,

@@ -6,7 +6,7 @@ import { PrayerRequest } from '../entity/prayer-request.entity';
 import { Testimony } from '../entity/testimony.entity';
 import { PregnancyPrayerCase } from '../entity/pregnancy-prayer-case.entity';
 import { PregnancyPrayerVisit } from '../entity/pregnancy-prayer-visit.entity';
-import { Pastor } from '../../member/entity/pastor.entity';
+import { Clergy } from '../../member/entity/clergy.entity';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberService } from '../../member/service/member.service';
 import { PrayerRequestStatusEnum } from '../enum/prayer-request-status.enum';
@@ -49,7 +49,7 @@ const mockDepartmentAccessService = {
   assertHasCapability: jest.fn(),
 };
 
-const mockPastorRepo = {
+const mockClergyRepo = {
   exists: jest.fn(),
 };
 
@@ -90,7 +90,7 @@ describe('PrayerRequestService', () => {
           provide: getRepositoryToken(PregnancyPrayerVisit),
           useValue: mockPregnancyVisitRepo,
         },
-        { provide: getRepositoryToken(Pastor), useValue: mockPastorRepo },
+        { provide: getRepositoryToken(Clergy), useValue: mockClergyRepo },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: MemberService, useValue: mockMemberService },
         {
@@ -442,22 +442,22 @@ describe('PrayerRequestService', () => {
     });
   });
 
-  describe('assertIsPrayerTeamOrPastor', () => {
-    it('resolves when the member is a Pastor', async () => {
-      mockPastorRepo.exists.mockResolvedValue(true);
+  describe('assertIsPrayerTeamOrClergy', () => {
+    it('resolves when the member is Clergy', async () => {
+      mockClergyRepo.exists.mockResolvedValue(true);
 
       await expect(
-        service.assertIsPrayerTeamOrPastor('member-1'),
+        service.assertIsPrayerTeamOrClergy('member-1'),
       ).resolves.toBeUndefined();
       expect(mockDepartmentAccessService.hasCapability).not.toHaveBeenCalled();
     });
 
     it('resolves when the member is a Prayer department worker (checked via DepartmentAccessService)', async () => {
-      mockPastorRepo.exists.mockResolvedValue(false);
+      mockClergyRepo.exists.mockResolvedValue(false);
       mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
 
       await expect(
-        service.assertIsPrayerTeamOrPastor('member-1'),
+        service.assertIsPrayerTeamOrClergy('member-1'),
       ).resolves.toBeUndefined();
       expect(mockDepartmentAccessService.hasCapability).toHaveBeenCalledWith(
         'member-1',
@@ -466,11 +466,11 @@ describe('PrayerRequestService', () => {
     });
 
     it('throws ForbiddenException otherwise', async () => {
-      mockPastorRepo.exists.mockResolvedValue(false);
+      mockClergyRepo.exists.mockResolvedValue(false);
       mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
 
       await expect(
-        service.assertIsPrayerTeamOrPastor('member-1'),
+        service.assertIsPrayerTeamOrClergy('member-1'),
       ).rejects.toThrow(ForbiddenException);
     });
   });

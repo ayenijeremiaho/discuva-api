@@ -211,24 +211,18 @@ describe('AssetService', () => {
         frequencyUnit: MaintenanceFrequencyUnit.MONTHS,
         frequencyValue: 3,
         nextDueAt: '2026-09-01',
-        notified7DaysAt: null,
-        notified3DaysAt: null,
-        notified1DayAt: null,
-        notifiedDueDayAt: null,
+        notifiedThresholds: [],
         lastOverdueNotifiedAt: null,
       });
     });
 
-    it('resets notification timestamps when schedule is updated', async () => {
+    it('resets notification thresholds when schedule is updated', async () => {
       const existingSchedule = {
         id: 'sched-1',
         frequencyUnit: MaintenanceFrequencyUnit.MONTHS,
         frequencyValue: 1,
         nextDueAt: '2026-07-01',
-        notified7DaysAt: new Date(),
-        notified3DaysAt: new Date(),
-        notified1DayAt: null,
-        notifiedDueDayAt: null,
+        notifiedThresholds: [7, 3],
         lastOverdueNotifiedAt: null,
       };
       const asset = {
@@ -250,8 +244,7 @@ describe('AssetService', () => {
         mockAdmin,
       );
 
-      expect(existingSchedule.notified7DaysAt).toBeNull();
-      expect(existingSchedule.notified3DaysAt).toBeNull();
+      expect(existingSchedule.notifiedThresholds).toEqual([]);
     });
   });
 
@@ -322,11 +315,8 @@ describe('AssetService', () => {
         frequencyUnit: MaintenanceFrequencyUnit.MONTHS,
         frequencyValue: 3,
         nextDueAt: '2026-06-01',
-        notified7DaysAt: new Date(),
+        notifiedThresholds: [7],
         lastMaintainedAt: null,
-        notified3DaysAt: null,
-        notified1DayAt: null,
-        notifiedDueDayAt: null,
         lastOverdueNotifiedAt: null,
       };
       const asset = {
@@ -357,7 +347,7 @@ describe('AssetService', () => {
 
       expect(schedule.lastMaintainedAt).toBe('2026-06-18');
       expect(schedule.nextDueAt).toBe('2026-09-18');
-      expect(schedule.notified7DaysAt).toBeNull();
+      expect(schedule.notifiedThresholds).toEqual([]);
     });
   });
 });

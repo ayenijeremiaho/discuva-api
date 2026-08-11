@@ -93,6 +93,11 @@ export class Asset extends BaseEntity {
   @Column({ type: 'int', nullable: true, name: 'written_off' })
   writtenOff: number | null;
 
+  // The 12 warranty/insurance/roadworthiness "notifiedNDaysAt" columns below
+  // are superseded by the 3 jsonb threshold-list columns further down
+  // (tenant-configurable thresholds, not just 30/14/7/1) — left in place,
+  // unused, rather than dropped on this pre-existing, real-data table. See
+  // AddAssetExpiryNotifiedThresholds migration.
   @Column({
     type: 'timestamptz',
     nullable: true,
@@ -182,6 +187,27 @@ export class Asset extends BaseEntity {
     name: 'roadworthiness_notified_1_day_at',
   })
   roadworthinessNotified1DayAt: Date | null;
+
+  @Column({
+    type: 'jsonb',
+    name: 'warranty_notified_thresholds',
+    default: () => "'[]'",
+  })
+  warrantyNotifiedThresholds: number[];
+
+  @Column({
+    type: 'jsonb',
+    name: 'insurance_notified_thresholds',
+    default: () => "'[]'",
+  })
+  insuranceNotifiedThresholds: number[];
+
+  @Column({
+    type: 'jsonb',
+    name: 'roadworthiness_notified_thresholds',
+    default: () => "'[]'",
+  })
+  roadworthinessNotifiedThresholds: number[];
 
   @OneToOne(() => MaintenanceSchedule, (schedule) => schedule.asset, {
     cascade: true,

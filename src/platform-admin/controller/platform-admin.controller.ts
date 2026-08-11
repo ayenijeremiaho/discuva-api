@@ -24,6 +24,7 @@ import { PlatformCommunicationProviderService } from '../service/platform-commun
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
+import { PlatformSettingsService } from '../service/platform-settings.service';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
 import {
   PlatformAdminForgotPasswordDto,
@@ -43,6 +44,8 @@ import { BroadcastDto } from '../dto/broadcast.dto';
 import { RegisterGivingProviderDto } from '../dto/register-giving-provider.dto';
 import { SetGivingProviderActiveDto } from '../dto/set-giving-provider-active.dto';
 import { SetPaymentProviderActiveDto } from '../dto/set-payment-provider-active.dto';
+import { UpdatePlatformSettingDto } from '../dto/platform-setting.dto';
+import { PlatformSettingKey } from '../enum/platform-setting-key.enum';
 import { CheckoutService } from '../../billing/service/checkout.service';
 
 // Route shapes match MULTI_TENANT_MIGRATION.md §4.10's capability list.
@@ -69,6 +72,7 @@ export class PlatformAdminController {
     private readonly paymentProviderService: PlatformPaymentProviderService,
     private readonly checkoutService: CheckoutService,
     private readonly tenantBroadcastService: TenantBroadcastService,
+    private readonly platformSettingsService: PlatformSettingsService,
   ) {}
 
   @Post('auth/login')
@@ -313,6 +317,24 @@ export class PlatformAdminController {
       sessionId,
       dto.amountCents,
     );
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('settings')
+  async listPlatformSettings() {
+    return this.platformSettingsService.findAll();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @Patch('settings/:key')
+  async updatePlatformSetting(
+    @Param('key') key: PlatformSettingKey,
+    @Body() dto: UpdatePlatformSettingDto,
+  ) {
+    return this.platformSettingsService.upsert(key, dto);
   }
 
   // Plain text only, not raw HTML — see BroadcastDto's own comment and

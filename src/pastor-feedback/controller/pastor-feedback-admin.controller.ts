@@ -84,6 +84,10 @@ export class PastorFeedbackAdminController {
     @Body() dto: RespondToFeedbackDto,
     @CurrentAdmin() admin: Admin,
   ) {
-    return this.feedbackService.respondAsPastor(id, dto, admin.member.id);
+    return this.feedbackService.respondAsClergyReviewer(
+      id,
+      dto,
+      admin.member.id,
+    );
   }
 }

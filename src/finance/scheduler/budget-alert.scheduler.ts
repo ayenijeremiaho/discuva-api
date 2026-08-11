@@ -12,6 +12,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { JournalEntryStatus } from '../enum/finance.enum';
 import { Tenant } from '../../tenant/entity/tenant.entity';
@@ -36,6 +38,7 @@ export class BudgetAlertScheduler {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly reminderSettingsService: ReminderSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -60,6 +63,12 @@ export class BudgetAlertScheduler {
   }
 
   private async runAlerts(): Promise<void> {
+    const { enabled, thresholds } =
+      await this.reminderSettingsService.getConfig(
+        ReminderSettingKey.BUDGET_ALERT,
+      );
+    if (!enabled) return;
+
     const budgets = await this.budgetRepo.find({
       where: { isActive: true },
       relations: ['account'],
@@ -103,6 +112,7 @@ export class BudgetAlertScheduler {
           budget,
           actualsMap.get(budget.id) ?? 0,
           recipients,
+          thresholds,
         );
       } catch (err) {
         this.logger.error(
@@ -117,26 +127,24 @@ export class BudgetAlertScheduler {
     budget: Budget,
     actuals: number,
     recipients: string[],
+    thresholds: number[],
   ): Promise<void> {
     const budgetAmount = Number(budget.amount);
     if (budgetAmount <= 0) return;
 
     const utilizationPct = (actuals / budgetAmount) * 100;
-    let updated = false;
+    const alertsSent = budget.alertsSent ?? [];
 
-    if (utilizationPct >= 100 && !budget.alert100SentAt) {
-      this.sendAlert(recipients, budget, actuals, 100);
-      budget.alert100SentAt = new Date();
-      updated = true;
-    } else if (utilizationPct >= 80 && !budget.alert80SentAt) {
-      this.sendAlert(recipients, budget, actuals, 80);
-      budget.alert80SentAt = new Date();
-      updated = true;
-    }
+    // Only the highest newly-crossed threshold fires per run — matches the
+    // original 80/100 behavior of never double-alerting in one pass.
+    const toAlert = [...thresholds]
+      .sort((a, b) => b - a)
+      .find((t) => utilizationPct >= t && !alertsSent.includes(t));
+    if (toAlert === undefined) return;
 
-    if (updated) {
-      await this.budgetRepo.save(budget);
-    }
+    this.sendAlert(recipients, budget, actuals, toAlert);
+    budget.alertsSent = [...alertsSent, toAlert];
+    await this.budgetRepo.save(budget);
   }
 
   private sendAlert(

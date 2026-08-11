@@ -24,6 +24,8 @@ import { DefaultPlatformAdminSeed } from './seed/default-platform-admin.seed';
 import { PlatformAdmin } from './entity/platform-admin.entity';
 import { PlatformAdminRole } from './entity/platform-admin-role.entity';
 import { PlatformAdminPasswordResetOtp } from './entity/platform-admin-password-reset-otp.entity';
+import { PlatformSetting } from './entity/platform-setting.entity';
+import { PlatformSettingsService } from './service/platform-settings.service';
 import { CommunicationProvider } from './entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from './entity/tenant-communication-provider-config.entity';
 import { GivingProvider } from '../giving-checkout/entity/giving-provider.entity';
@@ -48,6 +50,7 @@ import { UtilityModule } from '../utility/utility.module';
       PlatformAdmin,
       PlatformAdminRole,
       PlatformAdminPasswordResetOtp,
+      PlatformSetting,
       Tenant,
       Plan,
       Subscription,
@@ -84,6 +87,8 @@ import { UtilityModule } from '../utility/utility.module';
     PlatformAdminManagementService,
     TenantBroadcastService,
     DefaultPlatformAdminSeed,
+    PlatformSettingsService,
   ],
+  exports: [PlatformSettingsService],
 })
 export class PlatformAdminModule {}

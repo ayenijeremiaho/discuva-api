@@ -3,9 +3,25 @@ import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
-import { PastorTypeEnum } from '../enums/pastor-type.enum';
 import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { WorkerProfileDto } from './worker-profile.dto';
+
+export class ClergyTitleRefDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  name: string;
+}
+
+export class MemberClergyDto {
+  @Expose()
+  @Type(() => ClergyTitleRefDto)
+  title: ClergyTitleRefDto;
+
+  @Expose()
+  canReviewFeedback: boolean;
+}
 
 export class MemberDto {
   @Expose()
@@ -67,8 +83,16 @@ export class MemberDto {
   workerProfile: WorkerProfileDto;
 
   @Expose()
-  @Transform(({ obj }) => obj.pastor?.type ?? null)
-  pastorType: PastorTypeEnum | null;
+  @Type(() => MemberClergyDto)
+  @Transform(({ obj }) =>
+    obj.clergy
+      ? {
+          title: obj.clergy.title,
+          canReviewFeedback: obj.clergy.canReviewFeedback,
+        }
+      : null,
+  )
+  clergy: MemberClergyDto | null;
 
   @Expose()
   @Transform(({ obj }) => {

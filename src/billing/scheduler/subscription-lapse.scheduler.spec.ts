@@ -1,7 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
-import { ConfigService } from '@nestjs/config';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { SubscriptionLapseScheduler } from './subscription-lapse.scheduler';
 import { Subscription } from '../entity/subscription.entity';
@@ -9,6 +8,7 @@ import { SubscriptionStatus } from '../enum/subscription-status.enum';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 
 const mockSubscriptionRepo = { find: jest.fn(), save: jest.fn() };
 const mockTenantRepo = { findOneBy: jest.fn() };
@@ -19,8 +19,8 @@ const mockTxHost = {
   tx: { query: jest.fn(), findOne: jest.fn() },
   withTransaction: jest.fn((fn) => fn()),
 };
-const mockConfigService = {
-  get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+const mockPlatformSettingsService = {
+  getSubscriptionGracePeriodDays: jest.fn().mockResolvedValue(7),
 };
 
 describe('SubscriptionLapseScheduler', () => {
@@ -38,6 +38,9 @@ describe('SubscriptionLapseScheduler', () => {
     mockTxHost.tx.findOne.mockResolvedValue({
       member: { email: 'admin@example.com' },
     });
+    mockPlatformSettingsService.getSubscriptionGracePeriodDays.mockResolvedValue(
+      7,
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -51,7 +54,10 @@ describe('SubscriptionLapseScheduler', () => {
         { provide: EmailQueueService, useValue: mockEmailQueueService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
-        { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: PlatformSettingsService,
+          useValue: mockPlatformSettingsService,
+        },
       ],
     }).compile();
     scheduler = module.get(SubscriptionLapseScheduler);
@@ -149,26 +155,10 @@ describe('SubscriptionLapseScheduler', () => {
     );
   });
 
-  it('honors a configured GRACE_PERIOD_DAYS override instead of the hardcoded default', async () => {
-    mockConfigService.get.mockImplementation((key: string) =>
-      key === 'GRACE_PERIOD_DAYS' ? 3 : undefined,
+  it('honors a platform-admin-configured grace period override instead of the hardcoded default', async () => {
+    mockPlatformSettingsService.getSubscriptionGracePeriodDays.mockResolvedValue(
+      3,
     );
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        SubscriptionLapseScheduler,
-        {
-          provide: getRepositoryToken(Subscription),
-          useValue: mockSubscriptionRepo,
-        },
-        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
-        { provide: CacheService, useValue: mockCacheService },
-        { provide: EmailQueueService, useValue: mockEmailQueueService },
-        { provide: ClsService, useValue: mockCls },
-        { provide: TransactionHost, useValue: mockTxHost },
-        { provide: ConfigService, useValue: mockConfigService },
-      ],
-    }).compile();
-    const overriddenScheduler = module.get(SubscriptionLapseScheduler);
 
     const fourDaysAgo = new Date();
     fourDaysAgo.setDate(fourDaysAgo.getDate() - 4); // past the 3-day override
@@ -179,7 +169,7 @@ describe('SubscriptionLapseScheduler', () => {
       ]);
     mockSubscriptionRepo.save.mockResolvedValue({});
 
-    await overriddenScheduler.processLapsedSubscriptions();
+    await scheduler.processLapsedSubscriptions();
 
     expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: SubscriptionStatus.CANCELED }),

@@ -11,6 +11,11 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+
+const mockReminderSettingsService = {
+  getConfig: jest.fn().mockResolvedValue({ enabled: true, thresholds: [7] }),
+};
 
 const mockCacheService = {
   acquireLock: jest.fn().mockResolvedValue(true),
@@ -86,6 +91,10 @@ describe('FollowUpScheduler', () => {
     mockTenantRepo.find.mockResolvedValue([
       { id: 't1', subdomain: 'a', schemaName: 'church_a' },
     ]);
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: true,
+      thresholds: [7],
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -98,6 +107,10 @@ describe('FollowUpScheduler', () => {
         { provide: CacheService, useValue: mockCacheService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        {
+          provide: ReminderSettingsService,
+          useValue: mockReminderSettingsService,
+        },
       ],
     }).compile();
 
@@ -296,6 +309,42 @@ describe('FollowUpScheduler', () => {
       await expect(scheduler.notifyInactiveTasks()).resolves.toBeUndefined();
       expect(mockTaskRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
       expect(mockCacheService.releaseLock).toHaveBeenCalled();
+    });
+
+    it('does not check for stale tasks when the tenant has disabled the reminder', async () => {
+      mockReminderSettingsService.getConfig.mockResolvedValue({
+        enabled: false,
+        thresholds: [7],
+      });
+
+      await scheduler.notifyInactiveTasks();
+
+      expect(mockTaskRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('honors a tenant-configured staleness threshold instead of the default', async () => {
+      mockReminderSettingsService.getConfig.mockResolvedValue({
+        enabled: true,
+        thresholds: [14],
+      });
+      mockTaskQb.getCount.mockResolvedValue(2);
+      mockAdminQb.getMany.mockResolvedValue([
+        { member: { email: 'pastor@church.com', firstname: 'Pastor' } },
+      ]);
+
+      await scheduler.notifyInactiveTasks();
+
+      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
+        'pastor@church.com',
+        expect.stringContaining('14+'),
+        'follow-up-stale-admin',
+        expect.objectContaining({ count: 2, staleDays: 14 }),
+        undefined,
+        expect.any(String),
+      );
     });
   });
 });

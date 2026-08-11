@@ -8,7 +8,8 @@ import {
 import { MemberService } from './member.service';
 import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
-import { Pastor } from '../entity/pastor.entity';
+import { Clergy } from '../entity/clergy.entity';
+import { ClergyTitle } from '../../clergy-title/entity/clergy-title.entity';
 import { Department } from '../../department/entity/department.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { SundaySchoolClass } from '../../sunday-school/entity/sunday-school-class.entity';
@@ -19,7 +20,6 @@ import { ConfigService } from '@nestjs/config';
 import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
-import { PastorTypeEnum } from '../enums/pastor-type.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
@@ -50,11 +50,15 @@ const mockDepartmentRepo = {
   findOneBy: jest.fn(),
 };
 
-const mockPastorRepo = {
+const mockClergyRepo = {
   save: jest.fn(),
   create: jest.fn(),
   remove: jest.fn(),
   findOne: jest.fn(),
+};
+
+const mockClergyTitleRepo = {
+  findOneBy: jest.fn(),
 };
 
 const mockUtilityService = {
@@ -105,8 +109,12 @@ describe('MemberService', () => {
           useValue: mockWorkerProfileRepo,
         },
         {
-          provide: getRepositoryToken(Pastor),
-          useValue: mockPastorRepo,
+          provide: getRepositoryToken(Clergy),
+          useValue: mockClergyRepo,
+        },
+        {
+          provide: getRepositoryToken(ClergyTitle),
+          useValue: mockClergyTitleRepo,
         },
         {
           provide: getRepositoryToken(Department),
@@ -671,97 +679,165 @@ describe('MemberService', () => {
     });
   });
 
-  describe('assignPastor', () => {
-    it('should throw ConflictException if member is already a pastor', async () => {
+  describe('assignClergy', () => {
+    it('should throw ConflictException if member is already clergy', async () => {
       mockMemberRepo.findOne.mockResolvedValue({
         id: 'member-1',
-        pastor: { id: 'pastor-1', type: PastorTypeEnum.ASSOCIATE },
+        clergy: { id: 'clergy-1', title: { id: 'title-assoc' } },
       });
 
       await expect(
-        service.assignPastor(
+        service.assignClergy(
           'member-1',
-          { type: PastorTypeEnum.LEAD },
+          { clergyTitleId: 'title-lead' },
           'actor-1',
         ),
       ).rejects.toThrow(ConflictException);
     });
 
-    it('should create a Pastor record for a member with none', async () => {
-      const member = { id: 'member-1', email: 'm@test.com', pastor: null };
-      mockMemberRepo.findOne.mockResolvedValue(member);
-      mockPastorRepo.create.mockReturnValue({
-        member,
-        type: PastorTypeEnum.LEAD,
-      });
-      mockPastorRepo.save.mockResolvedValue({});
-
-      await service.assignPastor(
-        'member-1',
-        { type: PastorTypeEnum.LEAD },
-        'actor-1',
-      );
-
-      expect(mockPastorRepo.create).toHaveBeenCalledWith({
-        member,
-        type: PastorTypeEnum.LEAD,
-      });
-      expect(mockPastorRepo.save).toHaveBeenCalled();
-    });
-  });
-
-  describe('updatePastorType', () => {
-    it('should throw NotFoundException if member is not a pastor', async () => {
+    it('should throw NotFoundException for an unknown clergyTitleId', async () => {
       mockMemberRepo.findOne.mockResolvedValue({
         id: 'member-1',
-        pastor: null,
+        clergy: null,
       });
+      mockClergyTitleRepo.findOneBy.mockResolvedValue(null);
 
       await expect(
-        service.updatePastorType(
+        service.assignClergy(
           'member-1',
-          { type: PastorTypeEnum.PARISH },
+          { clergyTitleId: 'nonexistent' },
           'actor-1',
         ),
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('should update the type on the existing Pastor record', async () => {
-      const pastor = { id: 'pastor-1', type: PastorTypeEnum.ASSOCIATE };
-      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', pastor });
-      mockPastorRepo.save.mockResolvedValue({});
+    it('should create a Clergy record for a member with none', async () => {
+      const member = { id: 'member-1', email: 'm@test.com', clergy: null };
+      const title = { id: 'title-lead', name: 'Lead Pastor' };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockClergyTitleRepo.findOneBy.mockResolvedValue(title);
+      mockClergyRepo.create.mockReturnValue({ member, title });
+      mockClergyRepo.save.mockResolvedValue({});
 
-      await service.updatePastorType(
+      await service.assignClergy(
         'member-1',
-        { type: PastorTypeEnum.PARISH },
+        { clergyTitleId: 'title-lead' },
         'actor-1',
       );
 
-      expect(mockPastorRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ type: PastorTypeEnum.PARISH }),
+      expect(mockClergyRepo.create).toHaveBeenCalledWith({
+        member,
+        title,
+      });
+      expect(mockClergyRepo.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateClergyTitle', () => {
+    it('should throw NotFoundException if member is not clergy', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        clergy: null,
+      });
+
+      await expect(
+        service.updateClergyTitle(
+          'member-1',
+          { clergyTitleId: 'title-parish' },
+          'actor-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw NotFoundException for an unknown clergyTitleId', async () => {
+      const clergy = { id: 'clergy-1', title: { id: 'title-assoc' } };
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', clergy });
+      mockClergyTitleRepo.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.updateClergyTitle(
+          'member-1',
+          { clergyTitleId: 'nonexistent' },
+          'actor-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should update the title on the existing Clergy record', async () => {
+      const clergy = { id: 'clergy-1', title: { id: 'title-assoc' } };
+      const newTitle = { id: 'title-parish', name: 'Parish Pastor' };
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', clergy });
+      mockClergyTitleRepo.findOneBy.mockResolvedValue(newTitle);
+      mockClergyRepo.save.mockResolvedValue({});
+
+      await service.updateClergyTitle(
+        'member-1',
+        { clergyTitleId: 'title-parish' },
+        'actor-1',
+      );
+
+      expect(mockClergyRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ title: newTitle }),
       );
     });
   });
 
-  describe('removePastor', () => {
-    it('should throw NotFoundException if member is not a pastor', async () => {
+  describe('removeClergy', () => {
+    it('should throw NotFoundException if member is not clergy', async () => {
       mockMemberRepo.findOne.mockResolvedValue({
         id: 'member-1',
-        pastor: null,
+        clergy: null,
       });
 
-      await expect(service.removePastor('member-1', 'actor-1')).rejects.toThrow(
+      await expect(service.removeClergy('member-1', 'actor-1')).rejects.toThrow(
         NotFoundException,
       );
     });
 
-    it('should remove the existing Pastor record', async () => {
-      const pastor = { id: 'pastor-1', type: PastorTypeEnum.LEAD };
-      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', pastor });
+    it('should remove the existing Clergy record', async () => {
+      const clergy = { id: 'clergy-1', title: { id: 'title-lead' } };
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', clergy });
 
-      await service.removePastor('member-1', 'actor-1');
+      await service.removeClergy('member-1', 'actor-1');
 
-      expect(mockPastorRepo.remove).toHaveBeenCalledWith(pastor);
+      expect(mockClergyRepo.remove).toHaveBeenCalledWith(clergy);
+    });
+  });
+
+  describe('setClergyReviewAccess', () => {
+    it('should throw NotFoundException if member is not clergy', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        clergy: null,
+      });
+
+      await expect(
+        service.setClergyReviewAccess(
+          'member-1',
+          { canReviewFeedback: true },
+          'actor-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should set canReviewFeedback on the existing Clergy record', async () => {
+      const clergy = {
+        id: 'clergy-1',
+        title: { id: 'title-lead' },
+        canReviewFeedback: false,
+      };
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1', clergy });
+      mockClergyRepo.save.mockResolvedValue({});
+
+      await service.setClergyReviewAccess(
+        'member-1',
+        { canReviewFeedback: true },
+        'actor-1',
+      );
+
+      expect(mockClergyRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ canReviewFeedback: true }),
+      );
     });
   });
 

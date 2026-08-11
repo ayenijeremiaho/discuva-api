@@ -9,7 +9,7 @@ import { PrayerRequest } from '../entity/prayer-request.entity';
 import { Testimony } from '../entity/testimony.entity';
 import { PregnancyPrayerCase } from '../entity/pregnancy-prayer-case.entity';
 import { PregnancyPrayerVisit } from '../entity/pregnancy-prayer-visit.entity';
-import { Pastor } from '../../member/entity/pastor.entity';
+import { Clergy } from '../../member/entity/clergy.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
   SubmitPrayerRequestDto,
@@ -40,8 +40,8 @@ export class PrayerRequestService {
     private readonly pregnancyCaseRepo: Repository<PregnancyPrayerCase>,
     @InjectRepository(PregnancyPrayerVisit)
     private readonly pregnancyVisitRepo: Repository<PregnancyPrayerVisit>,
-    @InjectRepository(Pastor)
-    private readonly pastorRepo: Repository<Pastor>,
+    @InjectRepository(Clergy)
+    private readonly clergyRepo: Repository<Clergy>,
     private readonly memberService: MemberService,
     private readonly auditLogService: AuditLogService,
     private readonly departmentAccessService: DepartmentAccessService,
@@ -318,11 +318,11 @@ export class PrayerRequestService {
     return saved;
   }
 
-  async assertIsPrayerTeamOrPastor(memberId: string): Promise<void> {
-    const isPastor = await this.pastorRepo.exists({
+  async assertIsPrayerTeamOrClergy(memberId: string): Promise<void> {
+    const isClergy = await this.clergyRepo.exists({
       where: { member: { id: memberId } },
     });
-    if (isPastor) return;
+    if (isClergy) return;
 
     if (
       await this.departmentAccessService.hasCapability(
@@ -334,7 +334,7 @@ export class PrayerRequestService {
     }
 
     throw new ForbiddenException(
-      'Only Prayer department workers or pastors can perform this action',
+      'Only Prayer department workers or clergy can perform this action',
     );
   }
 }

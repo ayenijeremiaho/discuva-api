@@ -37,7 +37,7 @@ export class PrayerRequestTeamController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.getAllRequestsForTeam(
       Number(page),
       Number(limit),
@@ -51,7 +51,7 @@ export class PrayerRequestTeamController {
     @Body() dto: UpdatePrayerRequestStatusDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.updateStatus(id, dto, user.id);
   }
 
@@ -62,7 +62,7 @@ export class PrayerRequestTeamController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.getPregnancyCases(
       Number(page),
       Number(limit),
@@ -75,7 +75,7 @@ export class PrayerRequestTeamController {
     @Body() dto: CreatePregnancyCaseDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.createPregnancyCase(dto, user);
   }
 
@@ -85,7 +85,7 @@ export class PrayerRequestTeamController {
     @Body() dto: LogPregnancyVisitDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.logPregnancyVisit(id, dto, user);
   }
 
@@ -95,7 +95,7 @@ export class PrayerRequestTeamController {
     @Body() dto: UpdatePregnancyCaseStatusDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.updatePregnancyCaseStatus(
       id,
       dto,
@@ -110,7 +110,7 @@ export class PrayerRequestTeamController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    await this.prayerRequestService.assertIsPrayerTeamOrPastor(user.id);
+    await this.prayerRequestService.assertIsPrayerTeamOrClergy(user.id);
     return this.prayerRequestService.getPregnancyVisitHistory(
       id,
       Number(page),

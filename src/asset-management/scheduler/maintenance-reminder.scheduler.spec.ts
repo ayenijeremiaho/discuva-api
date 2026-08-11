@@ -10,6 +10,13 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+
+const mockReminderSettingsService = {
+  getConfig: jest
+    .fn()
+    .mockResolvedValue({ enabled: true, thresholds: [7, 3, 1, 0] }),
+};
 
 const makeScheduleQb = (schedules: object[]) => ({
   innerJoinAndSelect: jest.fn().mockReturnThis(),
@@ -55,6 +62,10 @@ describe('MaintenanceReminderScheduler', () => {
     mockScheduleRepo.createQueryBuilder.mockReturnValue(makeScheduleQb([]));
     mockAdminRepo.createQueryBuilder.mockReturnValue(makeAdminQb([admin]));
     mockCacheService.acquireLock.mockResolvedValue(true);
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: true,
+      thresholds: [7, 3, 1, 0],
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -70,6 +81,10 @@ describe('MaintenanceReminderScheduler', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        {
+          provide: ReminderSettingsService,
+          useValue: mockReminderSettingsService,
+        },
       ],
     }).compile();
     scheduler = module.get(MaintenanceReminderScheduler);
@@ -101,7 +116,7 @@ describe('MaintenanceReminderScheduler', () => {
     const schedule = {
       id: 'sched-1',
       nextDueAt,
-      notified7DaysAt: null,
+      notifiedThresholds: [],
       asset: { name: 'Generator', tagNumber: 'AST-2', category: 'equipment' },
     };
     mockScheduleRepo.createQueryBuilder.mockReturnValue(
@@ -119,7 +134,54 @@ describe('MaintenanceReminderScheduler', () => {
       expect.any(String),
     );
     expect(mockScheduleRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ notified7DaysAt: expect.any(Date) }),
+      expect.objectContaining({ notifiedThresholds: [7] }),
+    );
+  });
+
+  it('does not remind when the tenant has disabled maintenance reminders', async () => {
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: false,
+      thresholds: [7, 3, 1, 0],
+    });
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+
+    await scheduler.dispatchMaintenanceReminders();
+
+    expect(mockScheduleRepo.createQueryBuilder).not.toHaveBeenCalled();
+    expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+  });
+
+  it('honors a tenant-configured threshold list instead of the 7/3/1/0 default', async () => {
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: true,
+      thresholds: [14],
+    });
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+    const nextDueAt = new Date();
+    nextDueAt.setDate(nextDueAt.getDate() + 14);
+    const schedule = {
+      id: 'sched-1',
+      nextDueAt,
+      notifiedThresholds: [],
+      asset: { name: 'Generator', tagNumber: 'AST-2', category: 'equipment' },
+    };
+    mockScheduleRepo.createQueryBuilder.mockReturnValue(
+      makeScheduleQb([schedule]),
+    );
+
+    await scheduler.dispatchMaintenanceReminders();
+
+    expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+      'admin@example.com',
+      expect.stringContaining('14 days'),
+      'asset-maintenance-reminder',
+      expect.any(Object),
+      undefined,
+      expect.any(String),
     );
   });
 

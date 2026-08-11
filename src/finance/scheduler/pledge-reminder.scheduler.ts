@@ -11,6 +11,8 @@ import { CacheService } from '../../utility/service/cache.service';
 import { Pledge } from '../entity/pledge.entity';
 import { PledgeFrequency } from '../enum/finance.enum';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -29,6 +31,7 @@ export class PledgeReminderScheduler {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly reminderSettingsService: ReminderSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -53,13 +56,19 @@ export class PledgeReminderScheduler {
   }
 
   private async runReminders(): Promise<void> {
+    const { enabled, thresholds } =
+      await this.reminderSettingsService.getConfig(
+        ReminderSettingKey.PLEDGE_REMINDER,
+      );
+    if (!enabled) return;
+
     const pledges = await this.pledgeService.findActivePledgesForReminder();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     for (const pledge of pledges) {
       try {
-        await this.processPledge(pledge, today);
+        await this.processPledge(pledge, today, thresholds);
       } catch (err) {
         this.logger.error(
           `Failed to process pledge reminder for pledge ${pledge.id}`,
@@ -69,11 +78,17 @@ export class PledgeReminderScheduler {
     }
   }
 
-  private async processPledge(pledge: Pledge, today: Date): Promise<void> {
+  private async processPledge(
+    pledge: Pledge,
+    today: Date,
+    thresholds: number[],
+  ): Promise<void> {
+    const maxLookaheadDays = Math.max(0, ...thresholds);
     const dueDate = this.getNextDueDate(
       pledge.startDate,
       pledge.frequency,
       today,
+      maxLookaheadDays,
     );
     if (!dueDate) return;
 
@@ -81,8 +96,7 @@ export class PledgeReminderScheduler {
       (dueDate.getTime() - today.getTime()) / 86_400_000,
     );
 
-    const shouldRemind = diffDays === 7 || diffDays === 0 || diffDays === -3;
-    if (!shouldRemind) return;
+    if (!thresholds.includes(diffDays)) return;
 
     const dueDateKey = dueDate.toISOString().slice(0, 10);
     const cacheKey = `pledge-reminder:${pledge.id}:${dueDateKey}:${diffDays}`;
@@ -92,12 +106,8 @@ export class PledgeReminderScheduler {
     const email = pledge.member?.email;
     if (!email) return;
 
-    const isOverdue = diffDays < 0;
-    const subject = isOverdue
-      ? `Pledge Payment Overdue: ${pledge.campaign?.name}`
-      : diffDays === 0
-        ? `Pledge Payment Due Today: ${pledge.campaign?.name}`
-        : `Pledge Payment Due in 7 Days: ${pledge.campaign?.name}`;
+    const status = PledgeReminderScheduler.statusForDiffDays(diffDays);
+    const subject = `Pledge Payment ${PledgeReminderScheduler.subjectLabel(diffDays)}: ${pledge.campaign?.name}`;
 
     this.utilityService.sendEmailWithTemplate(
       email,
@@ -109,11 +119,7 @@ export class PledgeReminderScheduler {
         frequency: pledge.frequency,
         totalAmount: Number(pledge.totalAmount).toLocaleString(),
         dueDate: dueDateKey,
-        status: isOverdue
-          ? 'overdue'
-          : diffDays === 0
-            ? 'due today'
-            : 'due in 7 days',
+        status,
       },
       undefined,
       EmailCategory.FINANCE_ALERTS,
@@ -126,6 +132,7 @@ export class PledgeReminderScheduler {
     startDateStr: string,
     frequency: PledgeFrequency,
     today: Date,
+    maxLookaheadDays: number,
   ): Date | null {
     const start = new Date(`${startDateStr}T00:00:00`);
     if (start > today) return null;
@@ -135,16 +142,35 @@ export class PledgeReminderScheduler {
     }
 
     const monthsPerPeriod = frequency === PledgeFrequency.MONTHLY ? 1 : 3;
+    const lookaheadMs = (maxLookaheadDays + 1) * 86_400_000;
     let current = new Date(start);
 
     while (true) {
       const next = new Date(current);
       next.setMonth(next.getMonth() + monthsPerPeriod);
-      // stop once we pass 7 days into the future (outside reminder window)
-      if (next.getTime() > today.getTime() + 8 * 86_400_000) break;
+      // stop once we pass the furthest configured reminder threshold
+      if (next.getTime() > today.getTime() + lookaheadMs) break;
       current = next;
     }
 
     return current;
+  }
+
+  private static statusForDiffDays(diffDays: number): string {
+    if (diffDays < 0) {
+      const days = Math.abs(diffDays);
+      return `overdue by ${days} day${days === 1 ? '' : 's'}`;
+    }
+    if (diffDays === 0) return 'due today';
+    return `due in ${diffDays} day${diffDays === 1 ? '' : 's'}`;
+  }
+
+  private static subjectLabel(diffDays: number): string {
+    if (diffDays < 0) {
+      const days = Math.abs(diffDays);
+      return `Overdue by ${days} Day${days === 1 ? '' : 's'}`;
+    }
+    if (diffDays === 0) return 'Due Today';
+    return `Due in ${diffDays} Day${diffDays === 1 ? '' : 's'}`;
   }
 }

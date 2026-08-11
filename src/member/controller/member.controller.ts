@@ -25,7 +25,8 @@ import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
-import { AssignPastorDto } from '../dto/assign-pastor.dto';
+import { AssignClergyDto } from '../dto/assign-clergy.dto';
+import { SetClergyReviewAccessDto } from '../dto/set-clergy-review-access.dto';
 import { SignupDto } from '../dto/signup.dto';
 import { plainToInstance } from 'class-transformer';
 import { MemberDto } from '../dto/member.dto';
@@ -143,7 +144,8 @@ export class MemberController {
     const member = await this.memberService.getById(id, [
       'workerProfile',
       'workerProfile.department',
-      'pastor',
+      'clergy',
+      'clergy.title',
     ]);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
@@ -231,13 +233,13 @@ export class MemberController {
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)
-  @Post(':id/pastor')
-  async assignPastor(
+  @Post(':id/clergy')
+  async assignClergy(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AssignPastorDto,
+    @Body() dto: AssignClergyDto,
     @CurrentUser() user: MemberAuth,
   ): Promise<MemberDto> {
-    const member = await this.memberService.assignPastor(id, dto, user.id);
+    const member = await this.memberService.assignClergy(id, dto, user.id);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
@@ -245,13 +247,13 @@ export class MemberController {
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)
-  @Patch(':id/pastor')
-  async updatePastorType(
+  @Patch(':id/clergy')
+  async updateClergyTitle(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AssignPastorDto,
+    @Body() dto: AssignClergyDto,
     @CurrentUser() user: MemberAuth,
   ): Promise<MemberDto> {
-    const member = await this.memberService.updatePastorType(id, dto, user.id);
+    const member = await this.memberService.updateClergyTitle(id, dto, user.id);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
@@ -259,13 +261,31 @@ export class MemberController {
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)
-  @Delete(':id/pastor')
+  @Delete(':id/clergy')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async removePastor(
+  async removeClergy(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: MemberAuth,
   ): Promise<void> {
-    await this.memberService.removePastor(id, user.id);
+    await this.memberService.removeClergy(id, user.id);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Patch(':id/clergy/review-access')
+  async setClergyReviewAccess(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetClergyReviewAccessDto,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<MemberDto> {
+    const member = await this.memberService.setClergyReviewAccess(
+      id,
+      dto,
+      user.id,
+    );
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
   }
 
   @UseGuards(AdminGuard)

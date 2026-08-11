@@ -9,8 +9,14 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { PledgeFrequency } from '../enum/finance.enum';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
 
 const mockPledgeService = { findActivePledgesForReminder: jest.fn() };
+const mockReminderSettingsService = {
+  getConfig: jest
+    .fn()
+    .mockResolvedValue({ enabled: true, thresholds: [7, 0, -3] }),
+};
 const mockTenantRepo = { find: jest.fn() };
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
@@ -41,6 +47,10 @@ describe('PledgeReminderScheduler', () => {
     mockPledgeService.findActivePledgesForReminder.mockResolvedValue([]);
     mockCacheService.acquireLock.mockResolvedValue(true);
     mockCacheService.get.mockResolvedValue(undefined);
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: true,
+      thresholds: [7, 0, -3],
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -52,6 +62,10 @@ describe('PledgeReminderScheduler', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        {
+          provide: ReminderSettingsService,
+          useValue: mockReminderSettingsService,
+        },
       ],
     }).compile();
     scheduler = module.get(PledgeReminderScheduler);
@@ -117,5 +131,76 @@ describe('PledgeReminderScheduler', () => {
     await expect(scheduler.dispatchPledgeReminders()).resolves.toBeUndefined();
     expect(mockPledgeService.findActivePledgesForReminder).toHaveBeenCalled();
     expect(mockCacheService.releaseLock).toHaveBeenCalled();
+  });
+
+  it('does not send when the tenant has disabled pledge reminders', async () => {
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: false,
+      thresholds: [7, 0, -3],
+    });
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    mockPledgeService.findActivePledgesForReminder.mockResolvedValue([
+      {
+        id: 'pledge-1',
+        startDate,
+        frequency: PledgeFrequency.ONE_OFF,
+        totalAmount: 5000,
+        member: { email: 'w@example.com', firstname: 'Ada' },
+        campaign: { name: 'Building Fund' },
+      },
+    ]);
+
+    await scheduler.dispatchPledgeReminders();
+
+    expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+    expect(
+      mockPledgeService.findActivePledgesForReminder,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('honors a tenant-configured threshold list instead of the default', async () => {
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: true,
+      thresholds: [10],
+    });
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+    // MONTHLY, not ONE_OFF — a ONE_OFF pledge's due date is just its raw
+    // startDate, and getNextDueDate() returns null for any startDate still
+    // in the future, so ONE_OFF can never produce a positive diffDays. Set
+    // startDate one month before the target due date so the recurrence
+    // loop lands exactly on today+10.
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 10);
+    const startDateObj = new Date(dueDate);
+    startDateObj.setMonth(startDateObj.getMonth() - 1);
+    const startDate = `${startDateObj.getFullYear()}-${String(startDateObj.getMonth() + 1).padStart(2, '0')}-${String(startDateObj.getDate()).padStart(2, '0')}`;
+    mockPledgeService.findActivePledgesForReminder.mockResolvedValue([
+      {
+        id: 'pledge-1',
+        startDate,
+        frequency: PledgeFrequency.MONTHLY,
+        totalAmount: 5000,
+        member: { email: 'w@example.com', firstname: 'Ada' },
+        campaign: { name: 'Building Fund' },
+      },
+    ]);
+
+    await scheduler.dispatchPledgeReminders();
+
+    expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+      'w@example.com',
+      expect.stringContaining('Due in 10 Days'),
+      'pledge-reminder',
+      expect.any(Object),
+      undefined,
+      expect.any(String),
+    );
   });
 });

@@ -11,6 +11,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -19,28 +21,21 @@ import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant
 interface ExpiryConfig {
   expiryField: 'insuranceExpiry' | 'roadworthinessExpiry';
   label: string;
-  notified30: 'insuranceNotified30DaysAt' | 'roadworthinessNotified30DaysAt';
-  notified14: 'insuranceNotified14DaysAt' | 'roadworthinessNotified14DaysAt';
-  notified7: 'insuranceNotified7DaysAt' | 'roadworthinessNotified7DaysAt';
-  notified1: 'insuranceNotified1DayAt' | 'roadworthinessNotified1DayAt';
+  notifiedField:
+    | 'insuranceNotifiedThresholds'
+    | 'roadworthinessNotifiedThresholds';
 }
 
 const EXPIRY_CONFIGS: ExpiryConfig[] = [
   {
     expiryField: 'insuranceExpiry',
     label: 'Insurance',
-    notified30: 'insuranceNotified30DaysAt',
-    notified14: 'insuranceNotified14DaysAt',
-    notified7: 'insuranceNotified7DaysAt',
-    notified1: 'insuranceNotified1DayAt',
+    notifiedField: 'insuranceNotifiedThresholds',
   },
   {
     expiryField: 'roadworthinessExpiry',
     label: 'Roadworthiness',
-    notified30: 'roadworthinessNotified30DaysAt',
-    notified14: 'roadworthinessNotified14DaysAt',
-    notified7: 'roadworthinessNotified7DaysAt',
-    notified1: 'roadworthinessNotified1DayAt',
+    notifiedField: 'roadworthinessNotifiedThresholds',
   },
 ];
 
@@ -60,6 +55,7 @@ export class VehicleExpiryAlertScheduler {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly reminderSettingsService: ReminderSettingsService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
@@ -84,6 +80,12 @@ export class VehicleExpiryAlertScheduler {
   }
 
   private async runAlerts(): Promise<void> {
+    const { enabled, thresholds } =
+      await this.reminderSettingsService.getConfig(
+        ReminderSettingKey.VEHICLE_EXPIRY,
+      );
+    if (!enabled) return;
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -101,7 +103,7 @@ export class VehicleExpiryAlertScheduler {
 
     for (const asset of assets) {
       try {
-        await this.processAsset(asset, today, recipients);
+        await this.processAsset(asset, today, recipients, thresholds);
       } catch (err) {
         this.logger.error(
           `Failed to process vehicle expiry alert for asset ${asset.id}`,
@@ -115,6 +117,7 @@ export class VehicleExpiryAlertScheduler {
     asset: Asset,
     today: Date,
     recipients: string[],
+    thresholds: number[],
   ): Promise<void> {
     let updated = false;
 
@@ -130,23 +133,15 @@ export class VehicleExpiryAlertScheduler {
 
       if (daysUntil < 0) continue;
 
-      if (daysUntil === 30 && !asset[cfg.notified30]) {
-        this.sendAlert(recipients, asset, cfg.label, expiryStr, '30 days');
-        asset[cfg.notified30] = new Date();
-        updated = true;
-      } else if (daysUntil === 14 && !asset[cfg.notified14]) {
-        this.sendAlert(recipients, asset, cfg.label, expiryStr, '14 days');
-        asset[cfg.notified14] = new Date();
-        updated = true;
-      } else if (daysUntil === 7 && !asset[cfg.notified7]) {
-        this.sendAlert(recipients, asset, cfg.label, expiryStr, '7 days');
-        asset[cfg.notified7] = new Date();
-        updated = true;
-      } else if (daysUntil === 1 && !asset[cfg.notified1]) {
-        this.sendAlert(recipients, asset, cfg.label, expiryStr, '1 day');
-        asset[cfg.notified1] = new Date();
-        updated = true;
+      const notified = asset[cfg.notifiedField] ?? [];
+      if (!thresholds.includes(daysUntil) || notified.includes(daysUntil)) {
+        continue;
       }
+
+      const timing = `${daysUntil} day${daysUntil === 1 ? '' : 's'}`;
+      this.sendAlert(recipients, asset, cfg.label, expiryStr, timing);
+      asset[cfg.notifiedField] = [...notified, daysUntil];
+      updated = true;
     }
 
     if (updated) {

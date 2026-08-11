@@ -21,6 +21,7 @@ import { AuthModule } from './auth/auth.module';
 import { LoggerModule } from 'nestjs-pino';
 import { MemberModule } from './member/member.module';
 import { DepartmentModule } from './department/department.module';
+import { ClergyTitleModule } from './clergy-title/clergy-title.module';
 import { EventModule } from './event/event.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { DashboardModule } from './dashboard/dashboard.module';
@@ -45,6 +46,7 @@ import { FollowUpModule } from './follow-up/follow-up.module';
 import { ServiceProgrammeModule } from './service-programme/service-programme.module';
 import { ServiceHeadcountModule } from './service-headcount/service-headcount.module';
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
+import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
 import { YoutubeModule } from './integrations/youtube/youtube.module';
@@ -196,6 +198,7 @@ import { SocialMediaModule } from './social-media/social-media.module';
     UtilityModule,
     MemberModule,
     DepartmentModule,
+    ClergyTitleModule,
     EventModule,
     AttendanceModule,
     DashboardModule,
@@ -228,6 +231,7 @@ import { SocialMediaModule } from './social-media/social-media.module';
     ServiceProgrammeModule,
     ServiceHeadcountModule,
     ChurchSettingsModule,
+    ReminderSettingsModule,
     IncidentReportModule,
     SermonModule,
     YoutubeModule,

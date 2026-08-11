@@ -24,7 +24,6 @@ import { CacheService } from '../../utility/service/cache.service';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
-import { PastorTypeEnum } from '../../member/enums/pastor-type.enum';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
@@ -38,7 +37,7 @@ export interface BirthdayCelebrant {
   birthYear: number | null;
   role: MemberRoleEnum;
   departmentName: string | null;
-  pastorType: PastorTypeEnum | null;
+  clergyTitleName: string | null;
   alreadyWishedByMe: boolean;
   photoUrl: string | null;
 }
@@ -164,7 +163,12 @@ export class BirthdayService implements OnApplicationBootstrap {
         birthDay: today.getDate(),
         status: MemberStatusEnum.ACTIVE,
       },
-      relations: ['workerProfile', 'workerProfile.department', 'pastor'],
+      relations: [
+        'workerProfile',
+        'workerProfile.department',
+        'clergy',
+        'clergy.title',
+      ],
     });
 
     if (members.length === 0) return [];
@@ -183,7 +187,7 @@ export class BirthdayService implements OnApplicationBootstrap {
     }
 
     // Deliberately omits email/phoneNumber from this member-facing response —
-    // role/department/pastor type (and now photoUrl) disambiguate same-named
+    // role/department/clergy title (and now photoUrl) disambiguate same-named
     // celebrants without exposing personal contact info to other members.
     return members.map((m) => ({
       id: m.id,
@@ -194,7 +198,7 @@ export class BirthdayService implements OnApplicationBootstrap {
       birthYear: m.birthYear,
       role: m.role,
       departmentName: m.workerProfile?.department?.name ?? null,
-      pastorType: m.pastor?.type ?? null,
+      clergyTitleName: m.clergy?.title?.name ?? null,
       alreadyWishedByMe: wishedIds.has(m.id),
       photoUrl: m.photoUrl,
     }));

@@ -42,11 +42,17 @@ export class Budget extends BaseEntity {
   @Column({ type: 'boolean', default: true, name: 'is_active' })
   isActive: boolean;
 
+  // Superseded by alertsSent below (tenant-configurable threshold list, not
+  // just 80/100) — left in place, unused, rather than dropped on this
+  // pre-existing, real-data table. See AddBudgetAlertsSentColumn migration.
   @Column({ type: 'timestamptz', nullable: true, name: 'alert_80_sent_at' })
   alert80SentAt: Date | null;
 
   @Column({ type: 'timestamptz', nullable: true, name: 'alert_100_sent_at' })
   alert100SentAt: Date | null;
+
+  @Column({ type: 'jsonb', name: 'alerts_sent', default: () => "'[]'" })
+  alertsSent: number[];
 
   @ManyToOne(() => Admin, { nullable: false, onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'created_by_id' })

@@ -123,7 +123,6 @@ export const envValidationSchema = Joi.object({
     .max(1)
     .default(0.25),
   FOLLOW_UP_DUE_DAYS: Joi.number().default(3),
-  FOLLOW_UP_STALE_DAYS: Joi.number().default(7),
   ENFORCE_DISTANCE_CHECK: Joi.boolean().default(false),
   ANNUAL_GIVING_STATEMENT_ENABLED: Joi.boolean().default(false),
 
@@ -217,6 +216,7 @@ export const envValidationSchema = Joi.object({
     .valid('paystack', 'flutterwave', 'kora')
     .default('paystack'),
   // Billing-cycle policy constants — see CheckoutService/SubscriptionLapseScheduler.
+  // Grace period moved to the platform-admin-editable PlatformSettingsService
+  // (PlatformSettingKey.SUBSCRIPTION_GRACE_PERIOD_DAYS) — no longer an env var.
   SUBSCRIPTION_PERIOD_DAYS: Joi.number().integer().positive().default(30),
-  GRACE_PERIOD_DAYS: Joi.number().integer().positive().default(7),
 }).options({ allowUnknown: true });

@@ -3,7 +3,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { ClsService } from 'nestjs-cls';
-import { ConfigService } from '@nestjs/config';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Subscription } from '../entity/subscription.entity';
@@ -13,6 +12,7 @@ import { Admin } from '../../admin/entity/admin.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 
 const LOCK_KEY = 'lock:subscription-lapse-check';
 
@@ -30,9 +30,9 @@ export class SubscriptionLapseScheduler {
   // charge). "Retrying" the charge itself is the provider's own
   // responsibility, not this scheduler's — Paystack/Flutterwave both retry a
   // failing card several times before truly giving up, well within this
-  // window.
-  private readonly gracePeriodDays: number;
-
+  // window. Value is platform-admin-configurable (PlatformSettingsService),
+  // not per-tenant — this is billing policy Discuva sets uniformly, not a
+  // tenant preference.
   constructor(
     @InjectRepository(Subscription)
     private readonly subscriptionRepo: Repository<Subscription>,
@@ -42,13 +42,8 @@ export class SubscriptionLapseScheduler {
     private readonly emailQueueService: EmailQueueService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
-    private readonly configService: ConfigService,
-  ) {
-    this.gracePeriodDays = this.configService.get<number>(
-      'GRACE_PERIOD_DAYS',
-      7,
-    );
-  }
+    private readonly platformSettingsService: PlatformSettingsService,
+  ) {}
 
   // KNOWN LIMITATION, not silently swept under the rug: this scheduler
   // treats "currentPeriodEnd has passed with no new charge.succeeded
@@ -69,6 +64,8 @@ export class SubscriptionLapseScheduler {
       return;
     }
 
+    const gracePeriodDays =
+      await this.platformSettingsService.getSubscriptionGracePeriodDays();
     const now = new Date();
 
     const newlyLapsed = await this.subscriptionRepo.find({
@@ -79,7 +76,7 @@ export class SubscriptionLapseScheduler {
     });
     for (const sub of newlyLapsed) {
       try {
-        await this.handleNewlyLapsed(sub);
+        await this.handleNewlyLapsed(sub, gracePeriodDays);
       } catch (err: any) {
         this.logger.warn(
           `Failed handling lapsed subscription for tenant ${sub.tenantId}: ${err?.message ?? err}`,
@@ -93,7 +90,7 @@ export class SubscriptionLapseScheduler {
     for (const sub of pastDue) {
       if (!sub.currentPeriodEnd) continue;
       const graceDeadline = new Date(sub.currentPeriodEnd);
-      graceDeadline.setDate(graceDeadline.getDate() + this.gracePeriodDays);
+      graceDeadline.setDate(graceDeadline.getDate() + gracePeriodDays);
       if (now < graceDeadline) continue;
 
       try {
@@ -110,7 +107,10 @@ export class SubscriptionLapseScheduler {
     );
   }
 
-  private async handleNewlyLapsed(sub: Subscription): Promise<void> {
+  private async handleNewlyLapsed(
+    sub: Subscription,
+    gracePeriodDays: number,
+  ): Promise<void> {
     if (sub.cancelAtPeriodEnd) {
       await this.downgradeToFree(sub, 'tenant requested cancellation');
       return;
@@ -122,7 +122,7 @@ export class SubscriptionLapseScheduler {
       sub.tenantId,
       'We could not confirm your latest subscription payment',
       `<p>We couldn't confirm your latest payment for your Discuva subscription.</p>
-       <p>Your account keeps its current features for now, but will be downgraded to the Free plan in ${this.gracePeriodDays} days if this isn't resolved.</p>
+       <p>Your account keeps its current features for now, but will be downgraded to the Free plan in ${gracePeriodDays} days if this isn't resolved.</p>
        <p>If you believe this is an error, please contact support.</p>`,
     );
   }

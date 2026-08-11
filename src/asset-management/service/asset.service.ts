@@ -173,10 +173,7 @@ export class AssetService {
     schedule.frequencyUnit = dto.frequencyUnit;
     schedule.frequencyValue = dto.frequencyValue;
     schedule.nextDueAt = dto.nextDueAt;
-    schedule.notified7DaysAt = null;
-    schedule.notified3DaysAt = null;
-    schedule.notified1DayAt = null;
-    schedule.notifiedDueDayAt = null;
+    schedule.notifiedThresholds = [];
     schedule.lastOverdueNotifiedAt = null;
 
     await this.scheduleRepo.save(schedule);
@@ -311,10 +308,7 @@ export class AssetService {
 
     schedule.lastMaintainedAt = performedAt;
     schedule.nextDueAt = next.toISOString().split('T')[0];
-    schedule.notified7DaysAt = null;
-    schedule.notified3DaysAt = null;
-    schedule.notified1DayAt = null;
-    schedule.notifiedDueDayAt = null;
+    schedule.notifiedThresholds = [];
     schedule.lastOverdueNotifiedAt = null;
     await this.scheduleRepo.save(schedule);
   }

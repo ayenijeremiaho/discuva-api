@@ -102,11 +102,11 @@ The universal identity for every person in the system.
 | photoUrl              | string \| null    | Cloudinary `secure_url` of the member's self-uploaded profile picture. `null` until first upload.         |
 | photoPublicId         | string \| null    | Internal — Cloudinary public_id, used to delete the old asset on replace/remove. Not exposed on `MemberDto`. |
 | workerProfile         | WorkerProfile     | OneToOne, null for plain members                                                                          |
-| pastor                | Pastor \| null    | OneToOne, null unless the member carries a pastoral designation — see Pastor table below                  |
+| clergy                | Clergy \| null    | OneToOne, null unless the member carries a clergy designation — see Clergy table below                    |
 | attendances           | Attendance[]      | OneToMany                                                                                                 |
 | enrollments           | ClassEnrollment[] | OneToMany                                                                                                 |
 
-**Profile picture:** self-service via `POST/DELETE members/me/photo` (`JwtAuthGuard`), uploaded to Cloudinary folder `profile-pictures` (3MB limit, image mimetypes only). Replacing a photo uploads the new one first, saves it, then deletes the previous Cloudinary asset by `photoPublicId` (fire-and-forget). Admins can also clear a member's photo via `DELETE members/:id/photo` (`AdminGuard` + `MEMBERS_WRITE`) for moderation. `GET /birthday/today`'s `BirthdayCelebrant` shape also carries `photoUrl`, alongside the existing role/department/pastorType disambiguation for same-named celebrants (see Birthday Module).
+**Profile picture:** self-service via `POST/DELETE members/me/photo` (`JwtAuthGuard`), uploaded to Cloudinary folder `profile-pictures` (3MB limit, image mimetypes only). Replacing a photo uploads the new one first, saves it, then deletes the previous Cloudinary asset by `photoPublicId` (fire-and-forget). Admins can also clear a member's photo via `DELETE members/:id/photo` (`AdminGuard` + `MEMBERS_WRITE`) for moderation. `GET /birthday/today`'s `BirthdayCelebrant` shape also carries `photoUrl`, alongside the existing role/department/clergyTitleName disambiguation for same-named celebrants (see Birthday Module).
 
 ### WorkerProfile
 
@@ -135,19 +135,63 @@ Both use `AdminGuard` + `MEMBERS_WRITE`.
 
 **Login/refresh gating (`auth.service.ts`):** the "worker account suspended" check is scoped to `member.role === WORKER` — it used to fire whenever *any* `workerProfile` existed with a non-`ACTIVE` status, which would have wrongly blocked login for a plain `MEMBER` carrying a leftover `INACTIVE` profile from a prior revoke/demotion. Applied identically in `validateMember`, `validateRefreshToken`, and its rotated-token-replay path.
 
-### Pastor
+### Clergy
 
-A pastoral designation on a member, independent of `WorkerProfile`/`Department` — a pastor may have no department
-(e.g. a Lead Pastor) or may separately also be an HOD. At most one row per member (`OneToOne` on `member`).
+A clergy designation on a member (renamed from "Pastor" 2026-08 — the container was still called "Pastor"
+everywhere even though the whole point of the title catalog is that a tenant isn't locked into Pentecostal/
+Protestant terms; "Clergy" is the denomination-neutral standard term for ordained/formal ministry office).
+Independent of `WorkerProfile`/`Department` — a clergy member may have no department (e.g. a Lead Pastor) or may
+separately also be an HOD. At most one row per member (`OneToOne` on `member`).
 
-| Field  | Type           | Notes                                              |
-|--------|----------------|-----------------------------------------------------|
-| id     | UUID           | PK                                                   |
-| member | Member         | OneToOne, `onDelete: CASCADE`                        |
-| type   | PastorTypeEnum | LEAD \| PARISH \| ASSOCIATE                          |
+| Field             | Type        | Notes                                              |
+|-------------------|-------------|-----------------------------------------------------|
+| id                | UUID        | PK                                                   |
+| member            | Member      | OneToOne, `onDelete: CASCADE`                        |
+| title             | ClergyTitle | ManyToOne, `onDelete: RESTRICT` — see ClergyTitle below |
+| canReviewFeedback | boolean     | Default `true`. Independent of `title` — holding a title (a promotion/recognition) does NOT by itself grant the ability to see and respond to every department's Pastor Feedback reports. Set explicitly via `PATCH /members/:id/clergy/review-access`, never as a side effect of a title change. See Pastor Feedback Module below. |
 
-Managed via `POST/PATCH/DELETE /members/:id/pastor` (see Member Module). Surfaced on `MemberDto` as
-`pastorType: PastorTypeEnum | null`, computed from the `pastor` relation.
+Managed via `POST/PATCH/DELETE /members/:id/clergy` (see Member Module). Surfaced on `MemberDto` as
+`clergy: { title: {id, name}, canReviewFeedback: boolean } | null`, computed from the `clergy` relation.
+
+### ClergyTitle
+
+Tenant-configurable clergy title catalog (added 2026-08, replacing the old hardcoded `PastorTypeEnum`). A tenant
+defines its own titles instead of being locked into Pentecostal/Protestant terms like "Lead Pastor" — a Catholic
+tenant can use Priest/Bishop/Deacon, a Methodist tenant Minister/Elder/District Superintendent, etc. Every
+existing tenant was seeded with the 3 legacy labels ("Lead Pastor"/"Parish Pastor"/"Associate Pastor") at migration
+time so nothing broke on rollout; tenants are free to rename/delete/add from there.
+
+| Field       | Notes                                                                          |
+|-------------|---------------------------------------------------------------------------------|
+| id          | UUID PK                                                                          |
+| name        | Unique, max 40 characters                                                        |
+| description | Nullable                                                                         |
+| clergy      | OneToMany → Clergy                                                               |
+
+Same CRUD shape as Department (`src/clergy-title/`, mirrors `src/department/` structurally): `create`/`update`
+enforce name uniqueness, `delete` is blocked (`400`) if any `Clergy` row still references the title — the DB-level
+backstop is `clergy.clergy_title_id`'s `onDelete: RESTRICT`. `GET /clergy-titles`/`GET /clergy-titles/:id` are
+public (mirrors `GET /departments`); `POST`/`PATCH`/`DELETE` reuse `AdminGuard` + `MEMBERS_WRITE` rather than a new
+permission pair — same precedent already established for `/members/:id/clergy` itself.
+
+**`name`'s 40-char cap (added 2026-08)** exists to keep the title from distorting the small badge UI it renders in
+(the member detail panel and the member's own account-page header, both `flex-wrap` pill rows) — not an arbitrary
+DB constraint. Enforced via `@MaxLength(40)` on `CreateClergyTitleDto`. `UpdateClergyTitleDto` is a real class
+extending `PartialType(CreateClergyTitleDto)`, not the `type X = Partial<Y>` alias pattern used elsewhere in this
+codebase — the latter compiles to `Object` for reflection purposes, so `main.ts`'s global `ValidationPipe` silently
+skips validating it entirely (confirmed by testing: no whitelist stripping, no `@MaxLength` enforcement) since it
+can't resolve a real class to instantiate against. `PartialType` was needed here specifically so `PATCH
+/clergy-titles/:id` enforces the same cap as `POST` does, not just create.
+
+**Routes** (`src/clergy-title/controller/clergy-title.controller.ts`):
+
+| Method | Path                 | Permission                | Description |
+|--------|----------------------|----------------------------|--------------|
+| GET    | /clergy-titles       | Public                     | Full catalog, ordered by `createdAt DESC` |
+| GET    | /clergy-titles/:id   | Public                     | Single title |
+| POST   | /clergy-titles       | AdminGuard (MEMBERS_WRITE) | `{ name, description? }`; `400` if name already exists |
+| PATCH  | /clergy-titles/:id   | AdminGuard (MEMBERS_WRITE) | Partial update of the same fields |
+| DELETE | /clergy-titles/:id   | AdminGuard (MEMBERS_WRITE) | `400` if any clergy member is still assigned to it |
 
 ### MemberImportJob
 
@@ -302,8 +346,8 @@ Weekly structured feedback a department's HOD or Assistant HOD (D_HOD) submits, 
 | prayerRequests         | text, nullable                                                                                   |
 | additionalNotes        | text, nullable                                                                                   |
 | submittedAt            | auto timestamp                                                                                   |
-| respondedByPastor      | ManyToOne → Pastor, nullable (`onDelete: SET NULL`)                                              |
-| respondedByPastorName  | Snapshotted at response time, same rationale as `submittedByName`                                |
+| respondedByClergy      | ManyToOne → Clergy, nullable (`onDelete: SET NULL`)                                              |
+| respondedByClergyName  | Snapshotted at response time, same rationale as `submittedByName`                                |
 | pastorResponse         | text, nullable                                                                                   |
 | pastorRespondedAt      | timestamp, nullable                                                                              |
 
@@ -311,11 +355,11 @@ Weekly structured feedback a department's HOD or Assistant HOD (D_HOD) submits, 
 
 **Ownership check (submission/edit):** the caller must be an HOD or Assistant HOD (`DepartmentLead` row) of the target department — checked via `DepartmentLead.exists({ workerProfile, department })`, mirroring the `isHod` check in `auth.service.ts:getProfile()`. Not gated by `RolesGuard`/`@Roles(WORKER)` alone, since being a worker isn't sufficient — must specifically lead that department.
 
-**Ownership check (pastor response):** the caller must have a `Pastor` record (`pastorRepo.exists({ member: { id } })`, any `PastorTypeEnum`). Available via both the admin portal (an `Admin` account whose linked `Member` has a `Pastor` record) and the mobile app (any member with a `Pastor` record).
+**Ownership check (feedback response, added 2026-08 — now stricter than mere Clergy existence):** the caller must have a `Clergy` record with `canReviewFeedback: true` (`PastorFeedbackService.assertCanReviewFeedback()`), not just any clergy designation regardless of title. This is deliberately decoupled from `title` — being promoted to a new title (or holding any title at all) does not by itself grant the ability to see and respond to every department's reports; an admin grants that separately via `PATCH /members/:id/clergy/review-access`, defaulting `true` for existing clergy so nothing broke on rollout. Available via both the admin portal (an `Admin` account whose linked `Member` has such a `Clergy` record) and the mobile app.
 
 ### PrayerRequest
 
-A private prayer request submitted by any member/worker — visible only to the submitter, Prayer department workers, and pastors.
+A private prayer request submitted by any member/worker — visible only to the submitter, Prayer department workers, and clergy.
 
 | Field           | Notes                                                                                          |
 |-----------------|--------------------------------------------------------------------------------------------------|
@@ -1702,7 +1746,7 @@ admin UI.
   `follow-up`) also have an inline duplicate of the same check where they already have the `WorkerProfile` loaded
   and calling the service would mean a redundant query.
 - `GET /auth/me` computes a flat `capabilities: DepartmentCapability[]` field on `MemberDto`
-  (`@Transform`, same pattern as `pastorType`) — a deduped union of the primary and secondary department's
+  (`@Transform`, same pattern as `clergy`) — a deduped union of the primary and secondary department's
   capabilities. discuva-member mobile checks this one field (`profile?.capabilities?.includes("X")`) instead of
   independently re-deriving the primary-or-secondary union at every call site.
 - HOD (head-of-department) assignment is always restricted to the worker's **primary** department (unrelated to
@@ -1892,17 +1936,23 @@ own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, 
 flow — see Self-Service Email Change Flow), and the admin-only church-record fields `dateJoinedChurch`,
 `yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost`.
 
-**Pastor designation:** three `AdminGuard` + `MEMBERS_WRITE` routes manage the optional `Pastor` relation on a member
+**Clergy designation:** four `AdminGuard` + `MEMBERS_WRITE` routes manage the optional `Clergy` relation on a member
 (same permission as promote-to-worker — no separate permission was introduced):
 
-- `POST /members/:id/pastor` — body `{ type: PastorTypeEnum }` — assigns the designation; `409 Conflict` if the
-  member is already a pastor.
-- `PATCH /members/:id/pastor` — body `{ type: PastorTypeEnum }` — changes the type; `404` if the member is not a
-  pastor.
-- `DELETE /members/:id/pastor` — removes the designation; `404` if the member is not a pastor. Returns `204`.
+- `POST /members/:id/clergy` — body `{ clergyTitleId: string (uuid) }` — assigns the designation; `409 Conflict` if
+  the member is already clergy, `404` if `clergyTitleId` doesn't match a `ClergyTitle`.
+- `PATCH /members/:id/clergy` — body `{ clergyTitleId: string (uuid) }` — changes the title; `404` if the member is
+  not clergy, or if `clergyTitleId` doesn't match a `ClergyTitle`.
+- `DELETE /members/:id/clergy` — removes the designation; `404` if the member is not clergy. Returns `204`.
+- `PATCH /members/:id/clergy/review-access` — body `{ canReviewFeedback: boolean }` — grants/revokes Pastor Feedback
+  review access, independent of title (see Clergy above and Pastor Feedback Module below); `404` if the member is
+  not clergy.
 
-`pastorType: PastorTypeEnum | null` is surfaced on `MemberDto` (`GET /auth/me`,
-`GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `pastor` relation.
+See ClergyTitle above for the tenant-configurable title catalog these routes reference (`GET /clergy-titles` to
+populate a picker with the tenant's own titles).
+
+`clergy: { title: {id, name}, canReviewFeedback: boolean } | null` is surfaced on `MemberDto` (`GET /auth/me`,
+`GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `clergy` relation.
 
 **Profile photo:** `POST /members/me/photo` (multipart, field `photo`) uploads/replaces the caller's own photo via
 `CloudinaryService` (folder `profile-pictures`); `DELETE /members/me/photo` removes it. Both `JwtAuthGuard` only —
@@ -2045,6 +2095,82 @@ that's disabled for their church. Core, non-toggleable groups (Members, Events &
 Finance, Administration, etc.) carry no `moduleKey` and are always shown.
 
 **Routes prefix:** `/admin/settings` (admin CRUD), `/modules/state` (shared read endpoint, all authenticated roles)
+
+### Reminder Settings Module
+
+Lets a tenant admin control the timing (and on/off state) of 6 reminder-email categories, per-installation, without a
+deploy — previously every value below was either a hardcoded literal or a single global env var, invisible and
+unconfigurable to anyone but whoever edits deploy config. Backed by the **same `ChurchSetting` entity/table** as the
+Church Settings module above (`key` unique, `value: jsonb`), under a disjoint key namespace (`` `reminder:${key}` ``)
+— reuses the proven pattern with zero new migration, but through its own service/controller
+(`ReminderSettingsService`/`ReminderSettingsController`), since the value shape (`{ enabled, thresholds }`) and
+whitelist (`ReminderSettingKey`) differ from the module-toggle shape and shouldn't be forced through
+`ChurchSettingsService`.
+
+**Not the same thing as `EmailCategory`:** `src/utility/email-provider/email-category.enum.ts` already gates every
+category of email the system sends, but **globally** (env-flag booleans in `EmailQueueService.isCategoryEnabled`)
+and at a **coarser granularity** — e.g. `EmailCategory.ASSET_ALERTS` is shared by all 4 asset schedulers
+(maintenance, warranty, vehicle-expiry, overdue-checkout), `EmailCategory.FINANCE_ALERTS` by both pledge and budget
+alerts. `ReminderSettingKey` is deliberately a separate, finer-grained, per-tenant enum layered *on top* of that
+mechanism, not a replacement for it — if ops disables an `EmailCategory` globally via env var, that still suppresses
+sends regardless of any tenant-level `ReminderSettingKey` setting (`EmailQueueService.queueEmail` checks its own
+global flag before a job is ever enqueued, upstream of anything the reminder schedulers decide).
+
+**`KNOWN_REMINDER_SETTINGS`** (`src/reminder-settings/constant/known-reminder-settings.constant.ts`) — the 6 keys,
+each `{ label, unit, defaultThresholds }`. `thresholds` is a list of signed integers whose meaning depends on the
+key's `unit`: for the date-based ones it's day-offsets relative to a due/expiry date (positive = before, `0` = on
+the day, negative = after/overdue); for `budget_alert` it's percent-of-budget-used thresholds. Defaults exactly
+match each scheduler's prior hardcoded/env-default value, so shipping this was behavior-neutral until a tenant
+actually changes one:
+
+| `ReminderSettingKey` | Unit | Default thresholds | Scheduler |
+|---|---|---|---|
+| `pledge_reminder` | days relative to due date | `[7, 0, -3]` | `PledgeReminderScheduler` |
+| `budget_alert` | % of budget used | `[80, 100]` | `BudgetAlertScheduler` |
+| `follow_up_stale` | days since last activity | `[7]` | `FollowUpScheduler.notifyInactiveTasks` |
+| `asset_maintenance` | days before due | `[7, 3, 1, 0]` | `MaintenanceReminderScheduler` |
+| `asset_warranty` | days before expiry | `[30, 14, 7, 1]` | `WarrantyAlertScheduler` |
+| `vehicle_expiry` | days before expiry | `[30, 14, 7, 1]` | `VehicleExpiryAlertScheduler` |
+
+**Explicitly excluded** from tenant control (unreachable by any tenant-facing route, unchanged hardcoded/global
+behavior): `overdue-checkout` alerts (asset accountability — a deliberate product decision, not a tenant
+preference), prayer reminders (dual 2-day-ahead/day-of logic doesn't fit the list-of-offsets shape), and Pastor
+Feedback's weekly reminder (its timing *is* the `@Cron('0 9 * * 1')` schedule itself — tenant-configurable cron
+cadence would need dynamic `SchedulerRegistry` registration, a materially different change than a settings value).
+
+**Runtime read (`getConfig(key)`):** each of the 6 schedulers calls this **inside** its `forEachActiveTenant(...)`
+callback — not once at construction — since cron jobs have no ambient tenant context outside that loop, and
+`CacheService`'s tenant-scoped cache keys rely on the CLS store `forEachActiveTenant` populates per iteration. If
+`enabled` is `false`, the scheduler returns before any email is queued for that tenant that run.
+
+**Per-scheduler notes:**
+- `BudgetAlertScheduler`: unlike the date-based schedulers' `thresholds.includes(diffDays)` check, budget alerts use
+  `thresholds.some(t => utilizationPct >= t && !alreadySent(t))`, sorted descending so only the highest newly-crossed
+  threshold fires per run (matches the original 80/100 behavior of never double-alerting in one pass). Dedup moved
+  from the old fixed `alert80SentAt`/`alert100SentAt` columns to a generic `Budget.alertsSent: number[]` jsonb column
+  (arbitrary threshold count needs a matching data structure) — see `AddBudgetAlertsSentColumn` migration. The old
+  columns are left in place, unused, rather than dropped, to avoid irreversible data loss on this pre-existing table.
+- `MaintenanceReminderScheduler`: same generic-column treatment — `MaintenanceSchedule.notifiedThresholds: number[]`
+  replaces the 4 fixed `notifiedNDaysAt` columns. The **overdue** branch (`daysUntilDue < 0`) is untouched — still an
+  unconditional daily nag via `lastOverdueNotifiedAt`, not part of the configurable threshold list (deliberate:
+  `asset_maintenance`'s unit is "days before due," it was never meant to cover overdue).
+- `WarrantyAlertScheduler`/`VehicleExpiryAlertScheduler`: same treatment on `Asset` — `warrantyNotifiedThresholds`,
+  `insuranceNotifiedThresholds`, `roadworthinessNotifiedThresholds` (3 new jsonb columns) replace 12 old fixed
+  columns combined. See `AddAssetExpiryNotifiedThresholds` migration.
+- `FollowUpScheduler.notifyInactiveTasks`: `FOLLOW_UP_STALE_DAYS` env var removed entirely (superseded); if multiple
+  thresholds are ever configured, the minimum is used as the staleness cutoff (a single scalar concept, using the
+  same list shape as the others for UI/DTO consistency, not because multiple values are meaningful here).
+- `PledgeReminderScheduler`: `getNextDueDate`'s recurrence-search window, previously hardcoded to look 8 days ahead
+  (matched the old fixed `7` threshold), now derives its lookahead from `Math.max(...thresholds)` — a tenant
+  configuring a threshold further out than 7 days would otherwise silently never match, since the search would stop
+  before reaching it.
+
+**Routes:** `GET/PATCH /admin/reminder-settings`, `GET/PATCH /admin/reminder-settings/:key` — same `AdminGuard` +
+`AdminPermission.ADMIN_WRITE`-on-write pattern as `/admin/settings` above.
+
+**Frontend:** discuva-admin's `/notification-settings` page (own `layout.tsx` wrapping `<Shell>` — every new
+top-level route needs one, there is no global Shell in root `layout.tsx`) — one row per setting: an enabled/disabled
+toggle plus an editable numeric-chip list (add/remove) for `thresholds`.
 
 ### Event Module
 
@@ -2201,8 +2327,8 @@ request; `null` means a general testimony not tied to any request.
   (own history), `POST /testimonies` (submit, optional `prayerRequestId` — enforced to be the caller's own request),
   `GET /testimonies/mine`, `GET /testimonies/public` (the opt-in feed, open to any authenticated member/worker).
 - `prayer-request-team.controller.ts` (`JwtAuthGuard`, mobile-facing) — `GET /prayer-requests/team`,
-  `PATCH /prayer-requests/team/:id/status`. Gated in-service by `assertIsPrayerTeamOrPastor()`: any worker whose
-  primary or secondary department has the `MANAGE_PRAYER_REQUESTS` capability, or any member with a `Pastor` record.
+  `PATCH /prayer-requests/team/:id/status`. Gated in-service by `assertIsPrayerTeamOrClergy()`: any worker whose
+  primary or secondary department has the `MANAGE_PRAYER_REQUESTS` capability, or any member with a `Clergy` record.
 - `prayer-request-admin.controller.ts` (`AdminGuard`) — `GET /prayer-requests/admin`,
   `PATCH /prayer-requests/admin/:id/status`, `GET /testimonies/admin` (full visibility, not just public ones).
   Reuses the existing `PRAYER_READ`/`PRAYER_WRITE` permissions (already grouped under "Prayer Roster" in
@@ -2215,7 +2341,7 @@ two resources don't share one).
 **Pregnancy prayer tracking:** the same module also tracks pregnant women receiving ongoing prayer support —
 `PregnancyPrayerCase` (name, EDD, details, status) plus `PregnancyPrayerVisit` (a log entry per prayer/visit,
 mirroring the `FirstTimerVisit` idiom in the Follow-Up module). Unlike prayer requests, these are created and
-managed entirely by the Prayer team/pastors on the woman's behalf — there is no worker-facing self-submit
+managed entirely by the Prayer team/clergy on the woman's behalf — there is no worker-facing self-submit
 controller. `PregnancyPrayerCase.lastPrayedAt` is denormalized and updated whenever a new visit is logged, so the
 UI can show "last prayed" without joining the visit log on every read. Reuses `PRAYER_READ`/`PRAYER_WRITE` — no new
 permission. Every `PregnancyPrayerVisit` is also readable back via `GET
@@ -2224,7 +2350,7 @@ prayer-requests/admin/pregnancy-cases/:id/visits` (admin, `PRAYER_READ`) — pag
 visit-and-note history is reviewable, not just the denormalized `lastPrayedAt` date. Routes: `GET/POST
 prayer-requests/team/pregnancy-cases`, `POST prayer-requests/team/pregnancy-cases/:id/visit`, `PATCH
 prayer-requests/team/pregnancy-cases/:id/status`, `GET prayer-requests/team/pregnancy-cases/:id/visits` (mobile,
-`assertIsPrayerTeamOrPastor` gated) and the parallel `GET prayer-requests/admin/pregnancy-cases`, `PATCH
+`assertIsPrayerTeamOrClergy` gated) and the parallel `GET prayer-requests/admin/pregnancy-cases`, `PATCH
 prayer-requests/admin/pregnancy-cases/:id/status`, `GET prayer-requests/admin/pregnancy-cases/:id/visits` (admin
 portal oversight, read + status-only — case creation and visit logging stay Prayer-team/mobile-only by design).
 
@@ -3147,7 +3273,7 @@ wishes per sender per day (default: 20). Input is DOMPurify-sanitized.
 
 **Fields returned by `/birthday/upcoming`** (admin-only): `id`, `firstname`, `lastname`, `email`, `phoneNumber`, `birthMonth`, `birthDay`, `birthYear`. `birthYear` is nullable — members aren't required to disclose it, so the endpoint only ever uses `birthMonth`/`birthDay` (recurring, year-independent) to determine "is today/upcoming a birthday"; `birthYear` is included purely so callers can render a full date when it's known, falling back to a day+month-only display when it's not.
 
-**Fields returned by `/birthday/today`** (member-facing, `BirthdayCelebrant`): `id`, `firstname`, `lastname`, `birthMonth`, `birthDay`, `birthYear`, `role`, `departmentName`, `pastorType`, `alreadyWishedByMe`, `photoUrl`. Deliberately does **not** include `email`/`phoneNumber` — those are fine for the admin-only `/birthday/upcoming` view but not for a response every member can call. Same-named celebrants are disambiguated instead via `role`/`departmentName` (from `workerProfile.department`, loaded via the `workerProfile` and `workerProfile.department` relations), `pastorType` (from the `pastor` relation), and now `photoUrl` (from `Member.photoUrl` — see Member Module) — the mobile UI shows the photo when set, falling back to initials.
+**Fields returned by `/birthday/today`** (member-facing, `BirthdayCelebrant`): `id`, `firstname`, `lastname`, `birthMonth`, `birthDay`, `birthYear`, `role`, `departmentName`, `clergyTitleName`, `alreadyWishedByMe`, `photoUrl`. Deliberately does **not** include `email`/`phoneNumber` — those are fine for the admin-only `/birthday/upcoming` view but not for a response every member can call. Same-named celebrants are disambiguated instead via `role`/`departmentName` (from `workerProfile.department`, loaded via the `workerProfile` and `workerProfile.department` relations), `clergyTitleName` (from the `clergy.title` relation — a flat string, unlike `MemberDto`'s nested `clergy`, since this is pure display and never drives a form), and now `photoUrl` (from `Member.photoUrl` — see Member Module) — the mobile UI shows the photo when set, falling back to initials.
 
 **`alreadyWishedByMe` on `/birthday/today`:** computed per request from the caller's own JWT identity (not present on `/birthday/upcoming`, which is admin-only and has no "sender" concept) — `true` when the calling member already has a `BirthdayWish` row for that recipient this calendar year. `sendWish()` already enforced one-wish-per-sender-per-recipient-per-year at the DB level (`@Unique(['recipient', 'sender', 'year'])` on `BirthdayWish`) and rejected a second attempt with 400 — this field just surfaces that same state proactively on load, computed via a single extra query (`BirthdayWish.find({ sender, year, recipient: In(todaysBirthdayIds) })`) rather than the client only discovering it reactively after a failed second send.
 
@@ -4521,6 +4647,28 @@ being visible outside this service. All four routes now return the identical cur
 | POST | `/platform/auth/forgot-password` | Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. |
 | POST | `/platform/auth/reset-password` | Public, rate-limited (5/min). Verify the OTP and set a new password — also how a newly-onboarded admin sets their initial one. |
 | POST | `/platform/broadcast` | `{ subject, message }` (plain text, not HTML) — one email to every active tenant's oldest active admin. See "Tenant Broadcasts" below. |
+| GET | `/platform/settings` | List platform-wide settings (currently just `subscription_grace_period_days`) — see "Platform Settings" below. |
+| PATCH | `/platform/settings/:key` | `{ value: number }` — edit a platform-wide setting live, no redeploy. `BILLING_WRITE`. |
+
+#### Platform Settings
+
+A generic, platform-wide (not per-tenant) key/value settings store — the platform-admin equivalent of the tenant-side
+Church Settings module above, but living in `public` schema with no tenant dimension: new `PlatformSetting` entity
+(`key` unique, `value: jsonb`), read/written through `PlatformSettingsService`, same short-TTL cache pattern as
+`ChurchSettingsService`/`ReminderSettingsService`. `KNOWN_PLATFORM_SETTINGS`
+(`src/platform-admin/constant/known-platform-settings.constant.ts`) is the whitelist — currently one entry,
+`subscription_grace_period_days` (default `7`, matches the value it replaced).
+
+**First consumer — subscription grace period:** `SubscriptionLapseScheduler` used to read `GRACE_PERIOD_DAYS` from
+an env var once at boot (a single global value, requiring a redeploy to change). It now calls
+`PlatformSettingsService.getSubscriptionGracePeriodDays()` once per daily run instead — still a single global value
+(not per-tenant: this is billing/revenue policy Discuva sets uniformly, not a per-church preference — a deliberate
+distinction from the tenant-facing Reminder Settings module above, which covers per-church operational preferences).
+The `GRACE_PERIOD_DAYS` env var and its Joi entry have been removed; any deployed value for it is now inert.
+
+**Frontend:** discuva-platform's `/billing-settings` page (own `layout.tsx`, same "every new route needs one"
+convention), gated by `billing:read`/`billing:write` (reusing the existing permission pair `/giving-providers` and
+`/payment-providers` already use, since this is the same conceptual bucket — billing/revenue configuration).
 
 **Routes prefix:** `/platform`
 
@@ -4649,7 +4797,7 @@ outside the requested `?months=` window).
 | POST   | /auth/admin-login                                          | Public                                                        | Admin portal login — verifies active Admin record; no device check                                            |
 | POST   | /auth/refresh                                              | Public                                                        | Exchange refresh token                                                                                        |
 | POST   | /auth/logout                                               | Any                                                           | Invalidate session                                                                                            |
-| GET    | /auth/me                                                   | Any                                                           | Own profile. Includes `isHod: boolean` — `true` if the authenticated member has a row in `department_leads`; `pastorType: PastorTypeEnum \| null`; and `isTrainee: boolean` — mirrors `workerProfile.isTrainee` (`false` for non-workers). Clients should fetch this once on load to drive HOD/trainee-gated UI.                                  |
+| GET    | /auth/me                                                   | Any                                                           | Own profile. Includes `isHod: boolean` — `true` if the authenticated member has a row in `department_leads`; `clergy: {title: {id, name}, canReviewFeedback} \| null`; and `isTrainee: boolean` — mirrors `workerProfile.isTrainee` (`false` for non-workers). Clients should fetch this once on load to drive HOD/trainee-gated UI.                                  |
 | POST   | /auth/change-password                                      | Any                                                           | Change password (required when `requires_password_change` is true)                                            |
 | POST   | /auth/email-change/request                                 | Any (JwtAuthGuard)                                            | Body `{ newEmail }` — sends a 6-digit OTP to the new address; rate-limited; `409` if already in use by another member |
 | POST   | /auth/email-change/confirm                                 | Any (JwtAuthGuard)                                            | Body `{ otp }` — verifies OTP, updates own email, sends a confirmation email                                  |
@@ -4674,9 +4822,15 @@ outside the requested `?months=` window).
 | PATCH  | /members/:id/status                                        | AdminGuard (MEMBERS_WRITE)                                    | Activate/deactivate member                                                                                    |
 | POST   | /members/:id/reset-password                                | AdminGuard (MEMBERS_WRITE)                                    | Reset & email new password                                                                                    |
 | DELETE | /members/:id/device                                        | AdminGuard (MEMBERS_WRITE)                                    | Purge device lock; invalidates all active sessions                                                            |
-| POST   | /members/:id/pastor                                        | AdminGuard (MEMBERS_WRITE)                                    | Assign pastoral designation, body `{ type: PastorTypeEnum }`; `409` if already a pastor                       |
-| PATCH  | /members/:id/pastor                                        | AdminGuard (MEMBERS_WRITE)                                    | Change pastor type, body `{ type: PastorTypeEnum }`; `404` if not a pastor                                    |
-| DELETE | /members/:id/pastor                                        | AdminGuard (MEMBERS_WRITE)                                    | Remove pastoral designation; `404` if not a pastor; returns `204`                                             |
+| POST   | /members/:id/clergy                                        | AdminGuard (MEMBERS_WRITE)                                    | Assign clergy designation, body `{ clergyTitleId }`; `409` if already clergy, `404` if the title is unknown |
+| PATCH  | /members/:id/clergy                                        | AdminGuard (MEMBERS_WRITE)                                    | Change clergy title, body `{ clergyTitleId }`; `404` if not clergy, or if the title is unknown              |
+| DELETE | /members/:id/clergy                                        | AdminGuard (MEMBERS_WRITE)                                    | Remove clergy designation; `404` if not clergy; returns `204`                                             |
+| PATCH  | /members/:id/clergy/review-access                          | AdminGuard (MEMBERS_WRITE)                                    | Grant/revoke Pastor Feedback review access, body `{ canReviewFeedback }`, independent of title; `404` if not clergy |
+| GET    | /clergy-titles                                             | Public                                                         | Tenant's clergy-title catalog, see ClergyTitle above                                                          |
+| GET    | /clergy-titles/:id                                         | Public                                                         | Single clergy title                                                                                            |
+| POST   | /clergy-titles                                             | AdminGuard (MEMBERS_WRITE)                                     | Create a clergy title, body `{ name, description? }`; `400` if name in use                                     |
+| PATCH  | /clergy-titles/:id                                         | AdminGuard (MEMBERS_WRITE)                                     | Update a clergy title                                                                                          |
+| DELETE | /clergy-titles/:id                                         | AdminGuard (MEMBERS_WRITE)                                     | `400` if any clergy member is still assigned to it                                                                    |
 | GET    | /members/bulk-import/template                              | AdminGuard (MEMBERS_WRITE)                                    | Streams a `.xlsx` bulk-import template                                                                        |
 | POST   | /members/bulk-import/preview                               | AdminGuard (MEMBERS_WRITE)                                    | Multipart `file` upload (5 MB cap); validates every row, persists a `MemberImportJob` + rows, returns `{ ...job, rows }` |
 | GET    | /members/bulk-import/:jobId                                | AdminGuard (MEMBERS_WRITE)                                    | Refetch a previously-previewed import job and its rows                                                        |
@@ -4842,16 +4996,16 @@ outside the requested `?months=` window).
 | POST   | /testimonies                                           | Any (JwtAuthGuard)                                            | Submit a testimony (optional `prayerRequestId`, `isPublic`); body: `SubmitTestimonyDto`                        |
 | GET    | /testimonies/mine?page=&limit=                         | Any (JwtAuthGuard)                                             | Own testimony history                                                                                          |
 | GET    | /testimonies/public?page=&limit=                       | Any (JwtAuthGuard)                                             | Opt-in public testimony feed                                                                                    |
-| GET    | /prayer-requests/team?status=&page=&limit=             | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Cross-member browse (mobile)                                                                                    |
-| PATCH  | /prayer-requests/team/:id/status                       | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Update a request's status (mobile)                                                                              |
+| GET    | /prayer-requests/team?status=&page=&limit=             | JwtAuthGuard (Prayer-dept worker or Clergy)                    | Cross-member browse (mobile)                                                                                    |
+| PATCH  | /prayer-requests/team/:id/status                       | JwtAuthGuard (Prayer-dept worker or Clergy)                    | Update a request's status (mobile)                                                                              |
 | GET    | /prayer-requests/admin?status=&page=&limit=            | AdminGuard (PRAYER_READ)                                       | Cross-member browse (admin portal)                                                                              |
 | PATCH  | /prayer-requests/admin/:id/status                      | AdminGuard (PRAYER_WRITE)                                      | Update a request's status (admin portal)                                                                        |
 | GET    | /testimonies/admin?page=&limit=                        | AdminGuard (PRAYER_READ)                                       | Full testimony browse (not just public ones)                                                                   |
-| GET    | /prayer-requests/team/pregnancy-cases?status=&page=&limit= | JwtAuthGuard (Prayer-dept worker or Pastor)                | Cross-member pregnancy prayer case browse (mobile)                                                              |
-| POST   | /prayer-requests/team/pregnancy-cases                  | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Create a pregnancy prayer case (mobile)                                                                        |
-| POST   | /prayer-requests/team/pregnancy-cases/:id/visit        | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Log a prayer visit (mobile)                                                                                    |
-| PATCH  | /prayer-requests/team/pregnancy-cases/:id/status       | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Update case status (mobile)                                                                                    |
-| GET    | /prayer-requests/team/pregnancy-cases/:id/visits       | JwtAuthGuard (Prayer-dept worker or Pastor)                    | Full visit log for a case, newest first (mobile)                                                              |
+| GET    | /prayer-requests/team/pregnancy-cases?status=&page=&limit= | JwtAuthGuard (Prayer-dept worker or Clergy)                | Cross-member pregnancy prayer case browse (mobile)                                                              |
+| POST   | /prayer-requests/team/pregnancy-cases                  | JwtAuthGuard (Prayer-dept worker or Clergy)                    | Create a pregnancy prayer case (mobile)                                                                        |
+| POST   | /prayer-requests/team/pregnancy-cases/:id/visit        | JwtAuthGuard (Prayer-dept worker or Clergy)                    | Log a prayer visit (mobile)                                                                                    |
+| PATCH  | /prayer-requests/team/pregnancy-cases/:id/status       | JwtAuthGuard (Prayer-dept worker or Clergy)                    | Update case status (mobile)                                                                                    |
+| GET    | /prayer-requests/team/pregnancy-cases/:id/visits       | JwtAuthGuard (Prayer-dept worker or Clergy)                    | Full visit log for a case, newest first (mobile)                                                              |
 | GET    | /prayer-requests/admin/pregnancy-cases?status=&page=&limit= | AdminGuard (PRAYER_READ)                                  | Cross-member pregnancy prayer case browse (admin portal)                                                       |
 | PATCH  | /prayer-requests/admin/pregnancy-cases/:id/status      | AdminGuard (PRAYER_WRITE)                                      | Update case status (admin portal)                                                                              |
 | GET    | /prayer-requests/admin/pregnancy-cases/:id/visits      | AdminGuard (PRAYER_READ)                                       | Full visit log for a case, newest first (admin portal)                                                        |
@@ -5245,7 +5399,7 @@ A church worker can also have admin access. They pass `@Roles(WORKER)` routes vi
 | Confirm online attendance                       | ✓               | ✓                            |
 | Submit a prayer request / testimony             | ✓               | ✓                            |
 | View public testimony feed                      | ✓               | ✓                            |
-| Prayer team inbox (view/update request status)  | —               | ✓ (PRAYER-dept worker or Pastor) |
+| Prayer team inbox (view/update request status)  | —               | ✓ (PRAYER-dept worker or Clergy) |
 | Rate a service (own rating only)                | ✓               | ✓                            |
 | Browse and sign up for volunteer opportunities  | ✓               | ✓                            |
 | Browse, join, and leave fellowships             | ✓               | ✓                            |
@@ -5691,10 +5845,6 @@ Granular permissions assigned to `AdminRole` records:
 
 `GET /enums` returns these as both a flat `adminPermissions` list (value + label) and a grouped `adminPermissionGroups` list (group name + permissions with value, label, and description) — use the grouped form to render the permission assignment UI. `sms:read`/`sms:send` are grouped under "SMS Messaging".
 
-### PastorTypeEnum
-
-`LEAD` · `PARISH` · `ASSOCIATE`
-
 ### MemberImportJobStatus
 
 `READY_FOR_REVIEW` · `COMMITTED`
@@ -5924,3 +6074,10 @@ that hasn't been ended yet.
 ### GameSessionStatusEnum
 
 `SCHEDULED` (not yet reachable — sessions start directly into LIVE) · `LIVE` · `ENDED`
+
+### ReminderSettingKey
+
+`pledge_reminder` · `budget_alert` · `follow_up_stale` · `asset_maintenance` · `asset_warranty` · `vehicle_expiry`
+
+See "Reminder Settings Module" above — keys a tenant's per-category reminder timing/enabled settings
+(`GET/PATCH /admin/reminder-settings`). Distinct from `EmailCategory` (a separate, coarser, globally-gated enum).

@@ -11,7 +11,7 @@ import { PastorFeedback } from '../entity/pastor-feedback.entity';
 import { Department } from '../../department/entity/department.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
-import { Pastor } from '../../member/entity/pastor.entity';
+import { Clergy } from '../../member/entity/clergy.entity';
 import {
   SubmitPastorFeedbackDto,
   UpdatePastorFeedbackDto,
@@ -35,8 +35,8 @@ export class PastorFeedbackService {
     private readonly leadRepo: Repository<DepartmentLead>,
     @InjectRepository(WorkerProfile)
     private readonly workerProfileRepo: Repository<WorkerProfile>,
-    @InjectRepository(Pastor)
-    private readonly pastorRepo: Repository<Pastor>,
+    @InjectRepository(Clergy)
+    private readonly clergyRepo: Repository<Clergy>,
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
     private readonly pushService: PushNotificationService,
@@ -135,18 +135,18 @@ export class PastorFeedbackService {
     return saved;
   }
 
-  async respondAsPastor(
+  async respondAsClergyReviewer(
     id: string,
     dto: RespondToFeedbackDto,
     memberId: string,
   ): Promise<PastorFeedback> {
-    const pastor = await this.pastorRepo.findOne({
+    const clergy = await this.clergyRepo.findOne({
       where: { member: { id: memberId } },
       relations: ['member'],
     });
-    if (!pastor) {
+    if (!clergy?.canReviewFeedback) {
       throw new ForbiddenException(
-        'Only pastors can respond to pastor feedback',
+        'Only clergy with feedback-review access can respond to pastor feedback',
       );
     }
 
@@ -156,8 +156,8 @@ export class PastorFeedbackService {
       'submittedBy.member',
     ]);
     feedback.pastorResponse = dto.response;
-    feedback.respondedByPastor = pastor;
-    feedback.respondedByPastorName = `${pastor.member.firstname} ${pastor.member.lastname}`;
+    feedback.respondedByClergy = clergy;
+    feedback.respondedByClergyName = `${clergy.member.firstname} ${clergy.member.lastname}`;
     feedback.pastorRespondedAt = new Date();
 
     const saved = await this.feedbackRepo.save(feedback);
@@ -201,7 +201,7 @@ export class PastorFeedbackService {
   ): Promise<PaginationResponseDto<PastorFeedback>> {
     const [data, total] = await this.feedbackRepo.findAndCount({
       where: { department: { id: departmentId } },
-      relations: ['department', 'respondedByPastor'],
+      relations: ['department', 'respondedByClergy'],
       order: { weekOf: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -224,7 +224,7 @@ export class PastorFeedbackService {
 
     const [data, total] = await this.feedbackRepo.findAndCount({
       where,
-      relations: ['department', 'respondedByPastor'],
+      relations: ['department', 'respondedByClergy'],
       order: { weekOf: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -242,7 +242,7 @@ export class PastorFeedbackService {
     }
     const [data, total] = await this.feedbackRepo.findAndCount({
       where: { submittedBy: { id: currentUser.workerProfileId } },
-      relations: ['department', 'respondedByPastor'],
+      relations: ['department', 'respondedByClergy'],
       order: { weekOf: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -255,11 +255,17 @@ export class PastorFeedbackService {
     await this.feedbackRepo.remove(feedback);
   }
 
-  async assertIsPastor(memberId: string): Promise<void> {
-    const exists = await this.pastorRepo.exists({
+  // Deliberately checks canReviewFeedback, not mere Clergy existence — a
+  // title/promotion doesn't by itself grant the ability to see and respond
+  // to every department's reports; an admin grants that separately (see
+  // MemberService.setClergyReviewAccess).
+  async assertCanReviewFeedback(memberId: string): Promise<void> {
+    const clergy = await this.clergyRepo.findOne({
       where: { member: { id: memberId } },
     });
-    if (!exists) throw new ForbiddenException('Pastor access required');
+    if (!clergy?.canReviewFeedback) {
+      throw new ForbiddenException('Feedback-review access required');
+    }
   }
 
   private async assertIsHodOrDHod(

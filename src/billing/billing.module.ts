@@ -17,6 +17,7 @@ import { BillingController } from './controller/billing.controller';
 import { BillingWebhookController } from './controller/billing-webhook.controller';
 import { SubscriptionLapseScheduler } from './scheduler/subscription-lapse.scheduler';
 import { Tenant } from '../tenant/entity/tenant.entity';
+import { PlatformAdminModule } from '../platform-admin/platform-admin.module';
 
 // Global, like AdminModule — PlanGuard is used via @UseGuards(PlanGuard) in
 // controllers across many feature modules, the same cross-cutting shape as
@@ -33,6 +34,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
       Tenant,
     ]),
     UtilityModule,
+    PlatformAdminModule,
   ],
   controllers: [BillingController, BillingWebhookController],
   providers: [

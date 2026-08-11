@@ -10,6 +10,13 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+
+const mockReminderSettingsService = {
+  getConfig: jest
+    .fn()
+    .mockResolvedValue({ enabled: true, thresholds: [30, 14, 7, 1] }),
+};
 
 const makeAdminQb = (admins: object[]) => ({
   leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -52,6 +59,10 @@ describe('VehicleExpiryAlertScheduler', () => {
     mockAssetRepo.find.mockResolvedValue([]);
     mockAdminRepo.createQueryBuilder.mockReturnValue(makeAdminQb([admin]));
     mockCacheService.acquireLock.mockResolvedValue(true);
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: true,
+      thresholds: [30, 14, 7, 1],
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -64,6 +75,10 @@ describe('VehicleExpiryAlertScheduler', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        {
+          provide: ReminderSettingsService,
+          useValue: mockReminderSettingsService,
+        },
       ],
     }).compile();
     scheduler = module.get(VehicleExpiryAlertScheduler);
@@ -97,7 +112,8 @@ describe('VehicleExpiryAlertScheduler', () => {
       name: 'Church Bus',
       insuranceExpiry: expiry.toISOString(),
       roadworthinessExpiry: null,
-      insuranceNotified14DaysAt: null,
+      insuranceNotifiedThresholds: [],
+      roadworthinessNotifiedThresholds: [],
     };
     mockAssetRepo.find.mockResolvedValue([asset]);
 
@@ -112,8 +128,23 @@ describe('VehicleExpiryAlertScheduler', () => {
       expect.any(String),
     );
     expect(mockAssetRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ insuranceNotified14DaysAt: expect.any(Date) }),
+      expect.objectContaining({ insuranceNotifiedThresholds: [14] }),
     );
+  });
+
+  it('does not alert when the tenant has disabled vehicle expiry alerts', async () => {
+    mockReminderSettingsService.getConfig.mockResolvedValue({
+      enabled: false,
+      thresholds: [30, 14, 7, 1],
+    });
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+
+    await scheduler.dispatchVehicleExpiryAlerts();
+
+    expect(mockAssetRepo.find).not.toHaveBeenCalled();
+    expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
   });
 
   it('continues past one tenant failing so the rest still get processed', async () => {

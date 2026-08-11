@@ -9,7 +9,7 @@ import { PastorFeedbackService } from './pastor-feedback.service';
 import { PastorFeedback } from '../entity/pastor-feedback.entity';
 import { DepartmentLead } from '../../department/entity/department-lead.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
-import { Pastor } from '../../member/entity/pastor.entity';
+import { Clergy } from '../../member/entity/clergy.entity';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
@@ -33,7 +33,7 @@ const mockWorkerProfileRepo = {
   findOne: jest.fn(),
 };
 
-const mockPastorRepo = {
+const mockClergyRepo = {
   findOne: jest.fn(),
   exists: jest.fn(),
 };
@@ -74,7 +74,7 @@ describe('PastorFeedbackService', () => {
           provide: getRepositoryToken(WorkerProfile),
           useValue: mockWorkerProfileRepo,
         },
-        { provide: getRepositoryToken(Pastor), useValue: mockPastorRepo },
+        { provide: getRepositoryToken(Clergy), useValue: mockClergyRepo },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: PushNotificationService, useValue: mockPushService },
@@ -195,19 +195,40 @@ describe('PastorFeedbackService', () => {
     });
   });
 
-  describe('respondAsPastor', () => {
-    it('throws ForbiddenException if caller has no Pastor record', async () => {
-      mockPastorRepo.findOne.mockResolvedValue(null);
+  describe('respondAsClergyReviewer', () => {
+    it('throws ForbiddenException if caller has no Clergy record', async () => {
+      mockClergyRepo.findOne.mockResolvedValue(null);
 
       await expect(
-        service.respondAsPastor('fb-1', { response: 'Well done' }, 'member-1'),
+        service.respondAsClergyReviewer(
+          'fb-1',
+          { response: 'Well done' },
+          'member-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws ForbiddenException if the caller is clergy but lacks review access', async () => {
+      mockClergyRepo.findOne.mockResolvedValue({
+        id: 'clergy-1',
+        canReviewFeedback: false,
+        member: { id: 'clergy-member-1', firstname: 'John', lastname: 'Doe' },
+      });
+
+      await expect(
+        service.respondAsClergyReviewer(
+          'fb-1',
+          { response: 'Well done' },
+          'clergy-member-1',
+        ),
       ).rejects.toThrow(ForbiddenException);
     });
 
     it('saves the response, logs, and notifies the submitter', async () => {
-      mockPastorRepo.findOne.mockResolvedValue({
-        id: 'pastor-1',
-        member: { id: 'pastor-member-1', firstname: 'John', lastname: 'Doe' },
+      mockClergyRepo.findOne.mockResolvedValue({
+        id: 'clergy-1',
+        canReviewFeedback: true,
+        member: { id: 'clergy-member-1', firstname: 'John', lastname: 'Doe' },
       });
       const feedback = {
         id: 'fb-1',
@@ -224,17 +245,17 @@ describe('PastorFeedbackService', () => {
       mockFeedbackRepo.findOne.mockResolvedValue(feedback);
       mockFeedbackRepo.save.mockImplementation((f) => Promise.resolve(f));
 
-      const result = await service.respondAsPastor(
+      const result = await service.respondAsClergyReviewer(
         'fb-1',
         { response: 'Great work this week' },
-        'pastor-member-1',
+        'clergy-member-1',
       );
 
       expect(result.pastorResponse).toBe('Great work this week');
-      expect(result.respondedByPastorName).toBe('John Doe');
+      expect(result.respondedByClergyName).toBe('John Doe');
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'PASTOR_FEEDBACK_RESPONDED',
-        expect.objectContaining({ actorId: 'pastor-member-1' }),
+        expect.objectContaining({ actorId: 'clergy-member-1' }),
       );
       expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalled();
       expect(mockPushService.dispatchToMemberIds).toHaveBeenCalledWith(
@@ -271,19 +292,29 @@ describe('PastorFeedbackService', () => {
     });
   });
 
-  describe('assertIsPastor', () => {
-    it('throws ForbiddenException when no Pastor record exists', async () => {
-      mockPastorRepo.exists.mockResolvedValue(false);
+  describe('assertCanReviewFeedback', () => {
+    it('throws ForbiddenException when no Clergy record exists', async () => {
+      mockClergyRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.assertIsPastor('member-1')).rejects.toThrow(
+      await expect(service.assertCanReviewFeedback('member-1')).rejects.toThrow(
         ForbiddenException,
       );
     });
 
-    it('resolves without throwing when a Pastor record exists', async () => {
-      mockPastorRepo.exists.mockResolvedValue(true);
+    it('throws ForbiddenException when the Clergy record lacks review access', async () => {
+      mockClergyRepo.findOne.mockResolvedValue({ canReviewFeedback: false });
 
-      await expect(service.assertIsPastor('member-1')).resolves.toBeUndefined();
+      await expect(service.assertCanReviewFeedback('member-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('resolves without throwing when canReviewFeedback is true', async () => {
+      mockClergyRepo.findOne.mockResolvedValue({ canReviewFeedback: true });
+
+      await expect(
+        service.assertCanReviewFeedback('member-1'),
+      ).resolves.toBeUndefined();
     });
   });
 });

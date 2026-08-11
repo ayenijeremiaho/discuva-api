@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { Department } from '../../department/entity/department.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
-import { Pastor } from '../../member/entity/pastor.entity';
+import { Clergy } from '../../member/entity/clergy.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 
 @Entity({ name: 'pastor_feedback' })
@@ -59,12 +59,12 @@ export class PastorFeedback extends BaseEntity {
   })
   submittedAt: Date;
 
-  @ManyToOne(() => Pastor, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'responded_by_pastor_id' })
-  respondedByPastor: Pastor | null;
+  @ManyToOne(() => Clergy, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'responded_by_clergy_id' })
+  respondedByClergy: Clergy | null;
 
-  @Column({ name: 'responded_by_pastor_name', nullable: true })
-  respondedByPastorName: string | null;
+  @Column({ name: 'responded_by_clergy_name', nullable: true })
+  respondedByClergyName: string | null;
 
   @Column({ name: 'pastor_response', type: 'text', nullable: true })
   pastorResponse: string | null;
