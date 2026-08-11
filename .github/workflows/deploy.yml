@@ -77,10 +77,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # flyctl deploy --image needs to `docker pull` the GHCR image locally
-      # before it can push it into Fly's own registry — it doesn't fetch it
-      # server-side, so the runner needs its own GHCR login here too (a
-      # fresh runner, separate job from build-and-push).
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -89,16 +85,27 @@ jobs:
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 
-      # No --remote-only / --build flags anywhere here — Fly's own
-      # remote-builder machine is never invoked. This just retags the
-      # already-built GHCR image into registry.fly.io and creates a new
-      # release from it.
+      # flyctl deploy --image cannot pull a private third-party image itself —
+      # GHCR packages are private by default, and Fly has no credentials of
+      # its own for a registry it doesn't own. So this job pulls the image
+      # here (already GHCR-authenticated above) and re-pushes it into Fly's
+      # own registry first. Still not a build — Fly's remote-builder machine
+      # is never invoked, this is a plain image copy.
+      - name: Push image into Fly's own registry
+        run: |
+          flyctl auth docker
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short_sha }}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short_sha }} registry.fly.io/discuva-api:${{ needs.build-and-push.outputs.short_sha }}
+          docker push registry.fly.io/discuva-api:${{ needs.build-and-push.outputs.short_sha }}
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
       - name: Deploy prebuilt image to Fly.io
         run: |
           flyctl deploy \
             --config fly.toml \
             --app discuva-api \
-            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.short_sha }} \
+            --image registry.fly.io/discuva-api:${{ needs.build-and-push.outputs.short_sha }} \
             --strategy rolling
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
