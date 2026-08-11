@@ -16,7 +16,7 @@
 # `fly secrets set` values never appear in this file, CI logs, or the repo —
 # they're stored encrypted by Fly and injected into the machine at runtime.
 app = "discuva-api"
-primary_region = "<FLY_REGION>" # TODO: set to whichever Fly region is nearest your Neon/Upstash region — cross-region DB calls add real latency to every request.
+primary_region = "fra" # Frankfurt — matches Neon's eu-central-1 (AWS Frankfurt) host in env/api.env; cross-region DB calls add real latency to every request.
 
 kill_signal = "SIGINT"
 kill_timeout = "10s"
