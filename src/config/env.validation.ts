@@ -183,10 +183,6 @@ export const envValidationSchema = Joi.object({
   // Only the API host itself (infrastructure, not a secret) is env-driven.
   TERMII_BASE_URL: Joi.string().uri().default('https://api.ng.termii.com'),
 
-  // Platform-wide fallback Data API key, used when a tenant hasn't set its
-  // own via PUT /v1/youtube-integration. Channel id has no platform-wide
-  // equivalent — it's always tenant-specific, set the same way.
-  YOUTUBE_API_KEY: Joi.string().allow('').optional(),
   YOUTUBE_WEBSUB_CALLBACK_URL: Joi.string().uri().allow('').optional(),
   // Shared HMAC secret sent as hub.secret on subscribe — the hub then signs
   // every notification with it (X-Hub-Signature), which is how the callback

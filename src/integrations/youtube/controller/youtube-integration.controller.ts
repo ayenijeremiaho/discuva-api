@@ -2,6 +2,8 @@ import { Body, Controller, Get, Patch, Put, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../../admin/enum/admin-permission.enum';
+import { RequiresModule } from '../../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../../church-settings/guard/module-enabled.guard';
 import {
   SetYoutubeIntegrationActiveDto,
   UpsertYoutubeIntegrationDto,
@@ -11,8 +13,11 @@ import { TenantYoutubeIntegrationService } from '../service/tenant-youtube-integ
 // Tenant self-service for YouTube live-stream auto-announcement — any
 // church admin, not platform-admin-only. Single resource per tenant, so no
 // :channel or :id route param (unlike /communication-providers, which is
-// one-per-channel).
-@UseGuards(AdminGuard)
+// one-per-channel). Pro-only, same treatment as Tithe/Giving and Social
+// Media — a BYOK integration gated on business-value grounds, not cost
+// (this costs Discuva nothing either way).
+@RequiresModule('youtube_integration')
+@UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('youtube-integration')
 export class YoutubeIntegrationController {
   constructor(private readonly service: TenantYoutubeIntegrationService) {}

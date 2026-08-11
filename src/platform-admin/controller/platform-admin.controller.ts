@@ -20,6 +20,7 @@ import { PlatformAdminPermission } from '../enum/platform-admin-permission.enum'
 import { PlatformAdminAuthService } from '../service/platform-admin-auth.service';
 import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
+import { PlatformCapabilityService } from '../service/platform-capability.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
@@ -67,6 +68,7 @@ export class PlatformAdminController {
     private readonly platformAdminAuthService: PlatformAdminAuthService,
     private readonly tenantService: PlatformTenantService,
     private readonly planService: PlatformPlanService,
+    private readonly capabilityService: PlatformCapabilityService,
     private readonly communicationProviderService: PlatformCommunicationProviderService,
     private readonly givingProviderService: PlatformGivingProviderService,
     private readonly paymentProviderService: PlatformPaymentProviderService,
@@ -175,6 +177,13 @@ export class PlatformAdminController {
   @Get('plans')
   async listPlans() {
     return this.planService.listPlans();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.PLANS_READ)
+  @Get('capabilities')
+  listCapabilities() {
+    return this.capabilityService.list();
   }
 
   @UseGuards(PlatformAdminGuard)

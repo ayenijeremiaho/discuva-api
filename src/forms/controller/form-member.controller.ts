@@ -13,11 +13,15 @@ import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { FormSubmissionService } from '../service/form-submission.service';
 import { SubmitFormDto } from '../dto/form.dto';
 
 @RequiresModule('forms')
-@UseGuards(JwtAuthGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.FORMS)
+@UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('forms/member')
 export class FormMemberController {
   constructor(private readonly submissionService: FormSubmissionService) {}

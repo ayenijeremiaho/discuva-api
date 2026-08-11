@@ -5,11 +5,10 @@ export class UpsertYoutubeIntegrationDto {
   @IsNotEmpty()
   channelId: string;
 
-  // Omit to use this platform's own default YOUTUBE_API_KEY — a tenant's
-  // own key is optional (any valid Data API key can look up any public
-  // channel's video snippet, this isn't an access-control requirement the
-  // way a tenant's own SMS sender identity is), BYOK here is about
-  // isolating quota usage, not correctness.
+  // Optional at save time, but live-detection is a no-op without one —
+  // there is no platform-wide fallback key. A tenant can set the channel
+  // first and add a key later; until they do, notifications from that
+  // channel are silently ignored (see YoutubeLiveDetectionService).
   @IsOptional()
   @IsString()
   @IsNotEmpty()

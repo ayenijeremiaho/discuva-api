@@ -26,6 +26,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { PlanGuard } from '../../billing/guard/plan.guard';
 import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { ServiceSessionService } from '../service/service-session.service';
 import { ServiceSessionGateway } from '../gateway/service-session.gateway';
 import { ShareTokenGuard } from '../guard/share-token.guard';
@@ -38,11 +40,13 @@ import { ReorderLiveSlotsDto } from '../dto/reorder-live-slots.dto';
 import { CreateAccessGrantDto } from '../dto/create-access-grant.dto';
 import { VerifyAccessGrantDto } from '../dto/verify-access-grant.dto';
 
-// Same class-level PlanGuard stacking as ServiceProgrammeController — covers
-// every route here, including the share-token/unauthenticated "pm/*" live
-// display routes, which should be just as gated as the admin ones.
-@UseGuards(PlanGuard)
+// Same class-level PlanGuard/ModuleEnabledGuard stacking as
+// ServiceProgrammeController — covers every route here, including the
+// share-token/unauthenticated "pm/*" live display routes, which should be
+// just as gated as the admin ones.
+@UseGuards(PlanGuard, ModuleEnabledGuard)
 @RequiresPlan(PlanFeature.SERVICE_PROGRAMME)
+@RequiresModule('service_programme')
 @Controller('service-session')
 export class ServiceSessionController {
   constructor(

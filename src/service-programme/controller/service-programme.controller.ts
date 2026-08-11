@@ -24,6 +24,8 @@ import { Admin } from '../../admin/entity/admin.entity';
 import { PlanGuard } from '../../billing/guard/plan.guard';
 import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
+import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { ServiceProgrammeService } from '../service/service-programme.service';
 import { ServiceSessionService } from '../service/service-session.service';
 import { CreateServiceProgrammeDto } from '../dto/create-service-programme.dto';
@@ -32,13 +34,17 @@ import { CreateServiceProgrammeSlotDto } from '../dto/create-service-programme-s
 import { UpdateServiceProgrammeSlotDto } from '../dto/update-service-programme-slot.dto';
 import { ReorderProgrammeSlotsDto } from '../dto/reorder-programme-slots.dto';
 
-// PlanGuard stacked at class level composes with each route's own
-// AdminGuard/JwtAuthGuard (NestJS runs class-level and method-level
-// @UseGuards() together, not one overriding the other) — applies to every
-// route in this controller, admin and member ("my-assignments") alike,
-// without needing @RequiresPlan repeated per method.
-@UseGuards(PlanGuard)
+// PlanGuard/ModuleEnabledGuard stacked at class level compose with each
+// route's own AdminGuard/JwtAuthGuard (NestJS runs class-level and
+// method-level @UseGuards() together, not one overriding the other) —
+// applies to every route in this controller, admin and member
+// ("my-assignments") alike, without needing the decorators repeated per
+// method. KNOWN_MODULES has carried a 'service_programme' toggle entry
+// since it was added, but no controller ever enforced it — this closes
+// that gap so the admin's on/off switch actually does something.
+@UseGuards(PlanGuard, ModuleEnabledGuard)
 @RequiresPlan(PlanFeature.SERVICE_PROGRAMME)
+@RequiresModule('service_programme')
 @Controller('service-programme')
 export class ServiceProgrammeController {
   constructor(

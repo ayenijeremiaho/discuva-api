@@ -17,11 +17,15 @@ import { RequiresPermission } from '../../admin/decorator/requires-permission.de
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
+import { PlanGuard } from '../../billing/guard/plan.guard';
+import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { FormService } from '../service/form.service';
 import { CreateFormDto, UpdateFormDto } from '../dto/form.dto';
 
 @RequiresModule('forms')
-@UseGuards(AdminGuard, ModuleEnabledGuard)
+@RequiresPlan(PlanFeature.FORMS)
+@UseGuards(AdminGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('forms')
 export class FormAdminController {
   constructor(private readonly formService: FormService) {}

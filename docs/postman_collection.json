@@ -27254,6 +27254,34 @@
           "response": []
         },
         {
+          "name": "List Capabilities",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/capabilities",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "capabilities"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Create Plan",
           "request": {
             "method": "POST",

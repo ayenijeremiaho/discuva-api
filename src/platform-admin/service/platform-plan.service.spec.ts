@@ -79,6 +79,18 @@ describe('PlatformPlanService', () => {
       expect(result.featureLimits).toEqual({ [PlanFeature.SMS]: 1 });
     });
 
+    it('accepts a KNOWN_MODULES key as a featureLimits entry, not just a PlanFeature value', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue(null);
+
+      const result = await service.createPlan({
+        id: 'free',
+        name: 'Free',
+        featureLimits: { prayer: 3 },
+      } as any);
+
+      expect(result.featureLimits).toEqual({ prayer: 3 });
+    });
+
     it('still throws ConflictException for a duplicate id regardless of featureLimits', async () => {
       mockPlanRepo.findOneBy.mockResolvedValue({ id: 'pro' });
 

@@ -38,6 +38,11 @@ export const KNOWN_MODULES = [
   { key: 'small_groups', moduleName: 'Fellowships', required: false },
   { key: 'forms', moduleName: 'Forms', required: false },
   { key: 'social_media', moduleName: 'Social Media', required: false },
+  {
+    key: 'youtube_integration',
+    moduleName: 'YouTube Integration',
+    required: false,
+  },
 ] as const;
 
 export type KnownModuleKey = (typeof KNOWN_MODULES)[number]['key'];

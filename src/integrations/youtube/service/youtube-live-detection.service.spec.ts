@@ -1,6 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 
@@ -62,8 +61,6 @@ const mockTenant = {
   schemaName: 'church_test',
 };
 
-const PLATFORM_API_KEY = 'platform-default-key';
-
 describe('YoutubeLiveDetectionService', () => {
   let service: YoutubeLiveDetectionService;
 
@@ -79,10 +76,6 @@ describe('YoutubeLiveDetectionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         YoutubeLiveDetectionService,
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn(() => PLATFORM_API_KEY) },
-        },
         {
           provide: getRepositoryToken(TenantYoutubeIntegration),
           useValue: mockIntegrationRepo,
@@ -162,32 +155,29 @@ describe('YoutubeLiveDetectionService', () => {
     expect(fetchSpy.mock.calls[0][0]).toContain('key=decrypted(enc-key)');
   });
 
-  it('falls back to the platform default API key when the tenant has none configured', async () => {
+  it('does nothing when the tenant has no API key configured — no platform-wide fallback', async () => {
     mockIntegrationRepo.findOne.mockResolvedValue({
       tenantId: 'tenant-1',
       channelId: 'UC123',
       apiKeyEncrypted: null,
       lastAnnouncedVideoId: null,
     });
-    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        items: [
-          { snippet: { liveBroadcastContent: 'none', channelId: 'UC123' } },
-        ],
-      }),
-    } as Response);
+    const fetchSpy = jest.spyOn(global, 'fetch');
 
     await service.handleNotification('vid-2', 'UC123');
 
     expect(mockEncryptionService.decrypt).not.toHaveBeenCalled();
-    expect(fetchSpy.mock.calls[0][0]).toContain(`key=${PLATFORM_API_KEY}`);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      mockAnnouncementService.createSystemAnnouncement,
+    ).not.toHaveBeenCalled();
   });
 
   it('does not announce when the video is not actually live', async () => {
     mockIntegrationRepo.findOne.mockResolvedValue({
       tenantId: 'tenant-1',
       channelId: 'UC123',
+      apiKeyEncrypted: 'enc-key',
       lastAnnouncedVideoId: null,
     });
     jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -217,6 +207,7 @@ describe('YoutubeLiveDetectionService', () => {
     mockIntegrationRepo.findOne.mockResolvedValue({
       tenantId: 'tenant-1',
       channelId: 'UC123',
+      apiKeyEncrypted: 'enc-key',
       lastAnnouncedVideoId: null,
     });
     mockIntegrationRepo.save.mockResolvedValue({});
@@ -263,6 +254,7 @@ describe('YoutubeLiveDetectionService', () => {
     mockIntegrationRepo.findOne.mockResolvedValue({
       tenantId: 'tenant-1',
       channelId: 'UC123',
+      apiKeyEncrypted: 'enc-key',
       lastAnnouncedVideoId: null,
     });
     jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -292,6 +284,7 @@ describe('YoutubeLiveDetectionService', () => {
     mockIntegrationRepo.findOne.mockResolvedValue({
       tenantId: 'tenant-1',
       channelId: 'UC123',
+      apiKeyEncrypted: 'enc-key',
       lastAnnouncedVideoId: null,
     });
     jest.spyOn(global, 'fetch').mockRejectedValue(new Error('down'));

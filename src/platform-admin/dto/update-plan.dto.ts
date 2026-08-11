@@ -7,7 +7,7 @@ import {
   IsString,
   Min,
 } from 'class-validator';
-import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { ALL_CAPABILITY_KEYS } from '../../billing/constant/capability-keys.constant';
 
 export class UpdatePlanDto {
   @IsOptional()
@@ -25,8 +25,8 @@ export class UpdatePlanDto {
 
   @IsOptional()
   @IsArray()
-  @IsIn(Object.values(PlanFeature), { each: true })
-  features?: PlanFeature[];
+  @IsIn(ALL_CAPABILITY_KEYS, { each: true })
+  features?: string[];
 
   @IsOptional()
   @IsObject()

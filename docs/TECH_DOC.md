@@ -2906,22 +2906,64 @@ Billing/plan settings UI in `discuva-admin` (`/billing`) is built — plan picke
 plan-inheritance indicator for a sponsored branch. (SMS wallet top-up UI was removed along with the wallet itself —
 SMS billing is now entirely the tenant's own vendor relationship, outside this app.)
 
-**Plan feature gating (`PlanGuard`) — boolean gate plus an optional numeric cap:** any route decorated
-`@RequiresPlan(PlanFeature.X)` first checks `Plan.features` membership (unchanged boolean gate, cached under
-`plan-features:${tenantId}` for 300s) and throws `403 { code: 'PLAN_UPGRADE_REQUIRED' }` if the feature isn't
-included. If the feature *is* included and the plan additionally has a numeric limit configured for it
-(`Plan.featureLimits`, a `jsonb` map of `PlanFeature` → max lifetime uses, admin-editable via
-`PATCH /platform/plans/:id` — absent key means unlimited), the guard atomically checks-and-increments a per-tenant
-lifetime counter (`FeatureUsageService.tryConsume`, backed by `public.feature_usages`, one row per
-`(tenantId, feature)`, a single conditional `INSERT ... ON CONFLICT ... WHERE count < limit` so concurrent requests
-can't both slip through) and throws the same `PLAN_UPGRADE_REQUIRED` 403 once the cap is hit. The slot is consumed
-*before* the route handler runs (not after it succeeds) — the simplest mechanism that works for every
-`@RequiresPlan` route with zero per-feature integration code, at the accepted cost of occasionally spending a use on
-a request that later fails for an unrelated reason (e.g. a validation error inside the handler). Usage counts are
-lifetime and never reset by a plan change — upgrading past a cap and later downgrading back below it still reflects
-prior usage rather than granting a fresh allowance. `GET /platform/plans` / `POST /platform/plans` /
-`PATCH /platform/plans/:id` all accept `featureLimits` alongside the existing `features` array;
-`PlatformPlanService` deep-validates it (each key must be a real `PlanFeature`, each value a positive integer).
+**Plan feature gating (`PlanGuard`) — boolean gate plus an optional, per-route numeric cap:** any route decorated
+`@RequiresPlan(PlanFeature.X)` first checks `Plan.features` membership (boolean gate, cached under
+`plan-features:${tenantId}` for 300s via the shared `PlanFeatureResolverService`) and throws
+`403 { code: 'PLAN_UPGRADE_REQUIRED' }` if the feature isn't included. If the feature *is* included, the plan has a
+numeric limit configured for it (`Plan.featureLimits`, a `jsonb` map of capability key → max lifetime uses,
+admin-editable via `PATCH /platform/plans/:id`), **and** the specific handler invoked also carries
+`@CountsTowardLimit(PlanFeature.X)`, `PlanGuard` does a read-only check (`FeatureUsageService.getUsage`) and 403s
+if usage is already at the cap. This is deliberately narrower than the boolean gate above: `@RequiresPlan` sits at
+class level and covers every route in a controller (list, read, poll, join...), while `@CountsTowardLimit` is
+opt-in per method — only the one route meant to consume a use (typically `create`) carries it, e.g.
+`AdminGameController.create` is the only Games route with `@CountsTowardLimit(PlanFeature.GAMES)`; listing games,
+polling a live session's state, joining, answering, and viewing a leaderboard never touch the counter even when a
+`games` limit is configured.
+
+The actual increment happens in `PlanLimitInterceptor` (`src/billing/interceptor/plan-limit.interceptor.ts`,
+registered globally via `APP_INTERCEPTOR` in `billing.module.ts`, a no-op unless the route carries
+`@CountsTowardLimit`), **after** the handler succeeds — via RxJS `tap()` on the response — not before. A request
+whose handler throws (validation error, 404, etc.) never reaches the `tap()`, so a failed create never spends a
+use; only a request that actually completes does. The increment itself reuses `FeatureUsageService.tryConsume`
+(backed by `public.feature_usages`, one row per `(tenantId, feature)`, a single conditional
+`INSERT ... ON CONFLICT ... WHERE count < limit`), fire-and-forget from the interceptor's point of view — the
+response has already been decided by the guard's earlier read-only check. Splitting "check" (guard, before) from
+"consume" (interceptor, after success) reopens a narrow race two truly concurrent creates could both pass the
+pre-check before either increments; `tryConsume`'s own `WHERE count < limit` still caps the damage to at most one
+extra unit of usage, an accepted tradeoff over the alternative of consuming on every request regardless of outcome.
+Usage counts are lifetime and never reset by a plan change — upgrading past a cap and later downgrading back below
+it still reflects prior usage rather than granting a fresh allowance.
+
+**Every toggleable module is also a plan-assignable capability, not just the original 12 `PlanFeature` values.**
+`ModuleEnabledGuard` (`src/church-settings/guard/module-enabled.guard.ts`) — the guard behind every
+`@RequiresModule('x')` controller — checks two things in order: the tenant's `ChurchSetting` on/off toggle
+(unchanged), then whether `x` is included in the tenant's plan's `features` array (same `PlanFeatureResolverService`
+lookup `PlanGuard` uses), 403ing with the identical `PLAN_UPGRADE_REQUIRED` shape if not. This makes moving *any*
+module (originally Prayer, Evangelism, Training Classes, Tithe/Giving, Sunday School, Pastor Feedback, Fellowships,
+Social Media, Children's Church, Announcements, Follow-Up — the 11 that were previously free with no plan concept
+at all) between Free and Pro a `PATCH /platform/plans/:id` data change from the discuva-platform Plans page, not a code
+deploy — no new `PlanFeature` enum value, no new `@RequiresPlan` decorator, no migration. `ALL_CAPABILITY_KEYS`
+(`src/billing/constant/capability-keys.constant.ts`) is the full set of strings a `features`/`featureLimits` entry
+may validly be: the original `PlanFeature` values (`finance`/`sms`/`audit`/`bulk_export` have no `KNOWN_MODULES`
+counterpart and stay purely plan-gated, no toggle) unioned with every `KNOWN_MODULES` key. `GET /platform/capabilities`
+(`PlatformCapabilityService`) returns this same set labeled for the Plans page's checkbox list, replacing what used
+to be a hardcoded 12-entry array in `plan-form-panel.tsx` (which — notably — never included `forms`, fixed as a
+side effect).
+
+A one-time backfill migration (`BackfillModuleCapabilityKeys`) added the 11 previously-free module keys to *both*
+`free` and `pro` plans' `features` (preserving today's access for every tenant — a platform admin removes a key
+from `free` afterward to make it Pro-only) and 3 module-key spellings that don't match their pre-existing
+`PlanFeature` value (`sermons`/`sermon`, `service_ratings`/`service_rating`, `volunteering`/`volunteer` — these
+three already carried both decorators with two different strings) to `pro` only, alongside the existing spelling —
+a known, deliberately-left naming inconsistency, not something worth a tenant-data rename for now.
+
+**Tithe/Giving (`tithe` key — manual recording, BYOK payment-provider setup, and the member checkout flow) is
+Pro-only** (`MoveTitheToProOnly` migration, run right after the backfill above). Same treatment as `sms`: BYOK
+means it costs Discuva nothing regardless of volume (money flows straight through the tenant's own Paystack/
+Flutterwave/Stripe/Kora account, `TenantGivingProviderController`), but it's high enough business value that it's
+gated as a deliberate upgrade lever rather than left free on cost grounds. The remaining 10 free-from-launch
+modules (Prayer, Evangelism, Training Classes, Sunday School, Pastor Feedback, Fellowships, Social Media,
+Children's Church, Announcements, Follow-Up) are unaffected.
 
 **Internal comps/discounts (`Subscription.discountType`/`discountValue`/`discountReason`/`discountExpiresAt`):** a
 platform-admin-only manual comp, set via `PATCH /platform/tenants/:id/discount` and cleared via
@@ -3112,8 +3154,12 @@ configured `options`.
 | GET    | `/forms/public/:id`                 | Public, `404` unless `isActive && visibility === PUBLIC` | No tenant subdomain restriction beyond the usual Host-header resolution |
 | POST   | `/forms/public/:id/submit`          | Public, rate-limited (5/min) | `memberId` is always `null` — an open, unauthenticated write endpoint, throttled from day one rather than retrofitted |
 
-`forms` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`) like most feature modules in this app —
-disabling it 403s all three controllers, including the public one.
+`forms` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`) *and* Pro-plan-gated
+(`@RequiresPlan(PlanFeature.FORMS)`, `PlanGuard`) on all three controllers, including the public one — `PlanGuard`
+keys off the tenant resolved by `TenantMiddleware`, not the caller's auth, so an unauthenticated visitor filling out
+a public form on a Free-tier tenant is still correctly blocked. Both gates are independent: a Pro tenant can still
+disable Forms via the module toggle, and a Free tenant sees `403 PLAN_UPGRADE_REQUIRED` regardless of the module
+toggle's state.
 
 **Analytics** (`GET /forms/:id/analytics`, a Google-Forms-style summary, not raw rows): computed in-memory per
 field from every submission's `answers[fieldId]`, shaped by that field's type — `DROPDOWN`/`CHECKBOX` get a
@@ -3936,7 +3982,7 @@ needed. Per-tenant BYOK, redesigned from an earlier single-global-channel versio
 | id                       | UUID                 | PK |
 | tenantId                 | UUID, unique         | FK → `tenants.id`, `CASCADE` — one integration per tenant |
 | channelId                | varchar, unique      | The tenant's YouTube channel id |
-| apiKeyEncrypted          | varchar \| null, `select: false` | AES-256-GCM (`EncryptionService`); `null` means "use the platform's `YOUTUBE_API_KEY`" |
+| apiKeyEncrypted          | varchar \| null, `select: false` | AES-256-GCM (`EncryptionService`); `null` means live-detection is a no-op until the tenant sets one — no platform-wide fallback |
 | lastAnnouncedVideoId     | varchar \| null      | Idempotency key — prevents double-announcing the same livestream |
 | subscriptionExpiresAt    | timestamptz \| null  | Estimated WebSub lease expiry (informational; re-subscription runs daily regardless) |
 | isActive                 | boolean, default true | Toggled via `PATCH /v1/youtube-integration` — subscribes/unsubscribes the WebSub lease accordingly |
@@ -3949,15 +3995,27 @@ support (same reasoning as `TenantCommunicationProviderConfig`, `docs/MULTI_TENA
 indexed query. Consequently `v1/integrations/youtube/callback` is excluded from `TenantMiddleware` (§4.3) — it's
 never resolved against a `Host` header, and tenant context for it is entered manually (below).
 
-**Platform-wide pieces (env vars, unchanged by the per-tenant redesign):** `YOUTUBE_WEBSUB_CALLBACK_URL` and
-`YOUTUBE_WEBSUB_SECRET` — the callback URL is one physical endpoint regardless of how many tenants use it, and the
-HMAC secret authenticates the hub itself, not any particular tenant. `YOUTUBE_API_KEY` is a platform-wide *fallback*
-only, used when a tenant configured a channel but not their own key. With `YOUTUBE_WEBSUB_CALLBACK_URL`/
-`YOUTUBE_WEBSUB_SECRET` unset, `YoutubeSubscriptionService.isWebSubConfigured()` is false and `subscribe()`/
-`unsubscribe()` are no-ops (logged at debug level) — nothing breaks for a deployment that hasn't set these, tenants
-just fall back to the Sermon Module's manual "Announce Live" trigger.
+**Platform-wide pieces (env vars):** `YOUTUBE_WEBSUB_CALLBACK_URL` and `YOUTUBE_WEBSUB_SECRET` — the callback URL is
+one physical endpoint regardless of how many tenants use it, and the HMAC secret authenticates the hub itself, not
+any particular tenant. There is deliberately no platform-wide Data API key: a tenant who hasn't set their own gets
+no live-detection, silently, rather than quietly borrowing shared platform quota (`YOUTUBE_API_KEY` was removed —
+see "No platform-wide API key fallback" below). With `YOUTUBE_WEBSUB_CALLBACK_URL`/`YOUTUBE_WEBSUB_SECRET` unset,
+`YoutubeSubscriptionService.isWebSubConfigured()` is false and `subscribe()`/`unsubscribe()` are no-ops (logged at
+debug level) — nothing breaks for a deployment that hasn't set these, tenants just fall back to the Sermon Module's
+manual "Announce Live" trigger.
 
-**Tenant self-service routes** (`AdminGuard`, tenant-scoped — single resource per tenant, no `:id`/`:channel` param):
+**No platform-wide API key fallback:** `YoutubeLiveDetectionService.handleNotification` returns immediately if
+`apiKeyEncrypted` is unset — it never falls back to a shared key, even though any valid Data API key can technically
+look up any public channel's snippet. Each tenant's own Google API quota is consumed by their own traffic only.
+
+**Pro-only, module + plan gated** (`@RequiresModule('youtube_integration')` + `@RequiresPlan` — same treatment as
+Tithe/Giving and Social Media: a BYOK integration gated on business-value grounds, since it costs Discuva nothing
+regardless of a tenant's usage). Gating stops at the config controller — an already-configured integration from
+before this module existed keeps running in the background (webhook processing doesn't re-check plan/module state),
+same limitation as every other feature's pre-existing data surviving a later gate.
+
+**Tenant self-service routes** (`AdminGuard` + `ModuleEnabledGuard` + `PlanGuard`, tenant-scoped — single resource
+per tenant, no `:id`/`:channel` param):
 
 | Method | Path                       | Permission                 | Description |
 |--------|-----------------------------|-----------------------------|--------------|
@@ -3990,8 +4048,8 @@ just fall back to the Sermon Module's manual "Announce Live" trigger.
    stream. It looks up the `TenantYoutubeIntegration` owning the notified `channelId` (`isActive: true`) — an
    unrecognized or inactive channel is dropped silently, no error. It then checks that integration's
    `lastAnnouncedVideoId` (the actual idempotency check — the same video can generate multiple WebSub pings across
-   retries/redeliveries). If new, resolves the API key to use (the tenant's own decrypted key if configured,
-   otherwise the platform's `YOUTUBE_API_KEY`) and calls the YouTube Data API (`videos.list?part=snippet`) to confirm
+   retries/redeliveries). If new, requires the tenant's own decrypted API key — returns silently if none is
+   configured, no fallback — and calls the YouTube Data API (`videos.list?part=snippet`) to confirm
    `snippet.liveBroadcastContent === 'live'` — the WebSub ping alone fires for regular uploads too, not just
    livestreams — **and** that `snippet.channelId` matches the notified channel id, since a forged/mismatched payload
    could otherwise attribute someone else's video to this tenant's announcement. Only then does it look up the owning
@@ -4013,8 +4071,7 @@ NestJS guard either, but is signature-verified in the controller itself as descr
 whose actual authentication is the HMAC check, not a bearer token). Both are excluded from `TenantMiddleware` (§4.3)
 since the hub never sends a `Host` header identifying a tenant.
 
-**Env vars:** `YOUTUBE_API_KEY` (optional, platform-wide fallback), `YOUTUBE_WEBSUB_CALLBACK_URL`,
-`YOUTUBE_WEBSUB_SECRET` — see Environment Variables.
+**Env vars:** `YOUTUBE_WEBSUB_CALLBACK_URL`, `YOUTUBE_WEBSUB_SECRET` — see Environment Variables.
 
 ### ServiceHeadcount Module
 
@@ -4230,6 +4287,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
   - **"Start Service" sequential start** — a multi-service Sunday starts one sub-service at a time in slot order (First Service, then Second Service, and so on), not all at once. Each event group's header shows a "Start `<slot name>`" button whenever at least one of its programmes is still `DRAFT`, labeled with the earliest not-yet-started slot (`getNextDraftProgramme` in `page.tsx`, sorted by `serviceSlotDetail.startTime`). Calling `POST /service-session/event/:eventId/start` (`startEventSessions` in `use-service-session.ts`) starts only that one programme and returns a single session (not an array). The backend rejects the call with 409 if a session for the event is already `LIVE` — the current slot must be ended (`POST /service-session/:sessionCode/end`) before the button can start the next one. No new "EventSession" entity was introduced — `ServiceSessionService.startEvent()` still reuses the existing per-programme `start()`, it just now picks the single earliest `ServiceProgrammeService.findStartableDraftProgrammesForEvent()` result (that method sorts by `serviceSlot.startTime` ASC) instead of looping over all of them. The frontend button is disabled (with an explanatory tooltip) whenever any programme in the event group is `LIVE`, in addition to the backend's 409 — so an admin can't click it mid-service and only sees the error if state is stale.
 
 **Access control:**
+- Both controllers (`ServiceProgrammeController`, `ServiceSessionController`) carry `@RequiresPlan(PlanFeature.SERVICE_PROGRAMME)` **and** `@RequiresModule('service_programme')` at class level, covering every route including the public share-token ones. `service_programme` is `required: true` in `KNOWN_MODULES`, so `ChurchSettingsService.upsert` refuses to let a tenant admin disable it — the module gate is enforced for consistency with every other Pro-plan-gated module (sermon, incident report, volunteer, asset management, facility rental, service ratings), not because it can actually be turned off.
 - Programme CRUD and reporting: `AdminGuard` + `SERVICE_PROGRAMME_READ` (reads) or `SERVICE_PROGRAMME_WRITE` (mutations). Assign these permissions to admin roles via the role management API.
 - Authenticated session control (start, advance, rewind, pause, resume, adjust-time, reorder, end): controller only requires `JwtAuthGuard` (any authenticated member or admin); the real rule is enforced once in `ServiceSessionService.assertCanControlSession()` — **Admin-only**: passes only for an active `Admin` entity holding `SERVICE_PROGRAMME_WRITE`. Admin-department workers do **not** get an authenticated control path (this was previously allowed via a WORKER-department check, reserved for a mobile worker UI that was never built against these endpoints — it has been removed by design). Anyone who isn't a `SERVICE_PROGRAMME_WRITE` admin, staff included, controls a session exclusively through the public Programme Manager link with a named PIN grant (see below) — so every control action outside the admin dashboard is attributable to a specific named person, not a role. This does **not** affect `getEventSummaryReportPdfForWorker` (`GET /service-session/event/:eventId/summary-pdf`, a read-only mobile PDF download) — that keeps its own narrower `assertIsAdminDeptWorker()` check (Admin-department worker, no `SERVICE_PROGRAMME_WRITE` fallback needed), deliberately kept separate so tightening session-control access doesn't also lock Admin-department workers out of an unrelated report download.
 - Public Programme Manager routes (`POST/PUT /service-session/:code/pm/*` — advance, rewind, pause, resume, adjust-time, reorder, end): `@Public()` + `ShareTokenGuard` (`?token=`), **and** `NamedAccessGuard` (`?grantToken=`). The share token only proves "has the link"; every PM-link holder used to be logged as the same generic `PUBLIC_LINK` actor with no way to tell people apart or revoke one person without rotating the link for everyone. `NamedAccessGuard` layers named, individually-revocable identity on top: an admin/worker calls `POST /service-session/:code/access-grants` (`{ name }`, `JwtAuthGuard` + `assertCanControlSession`) to generate a 6-digit PIN for a collaborator (`randomInt`-generated, argon2-hashed via `UtilityService`, returned in plaintext exactly once — never stored or retrievable again). That person then calls the public `POST /service-session/:code/pm/access` (`ShareTokenGuard` only — this route establishes identity, so it can't itself require `NamedAccessGuard`) with `{ name, pin }`; on success `verifyAccessGrant` issues a `grantToken` (random UUID, Redis-cached alongside `{ grantId, name }`, same TTL as the session) that must be appended to every subsequent `pm/*` write call. `NamedAccessGuard.resolveGrantToken` resolves that token, re-checks the underlying `ServiceSessionAccessGrant` row's `revokedAt` on every call (not just at sign-in), and stamps the grant's name onto the request (`@ActorLabel()`) so it flows through to `logAction`'s `actorLabel` column — surfaced as the `actorName` fallback in `getActionLog`/`getActionLogCsv` whenever there's no `performedByMember`. Revoking via `POST /service-session/:code/access-grants/:grantId/revoke` takes effect on that person's very next action, without touching the shared link or anyone else's grant. Grants are scoped to a single session (table `service_session_access_grants`, `session_id` FK `ON DELETE CASCADE`) — a new PIN is needed each time someone needs PM access to a new session, by design (no cross-session standing identity to manage). The frontend Live Session Dashboard's "Programme Manager Access" panel manages grants (add/list/revoke, showing the PIN once); the public `/live/:code/manage` view gates itself behind a name+PIN sign-in form the first time, then caches the resulting `grantToken` in `localStorage` (keyed per session) so it isn't re-prompted on every visit, clearing that cache automatically if any action comes back with a revoked/expired-access error.
@@ -4625,7 +4683,8 @@ being visible outside this service. All four routes now return the identical cur
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
 | GET | `/platform/plans` | List plan tiers. |
 | POST | `/platform/plans` | Create a plan tier. |
-| PATCH | `/platform/plans/:id` | Edit a plan tier's price/currency/features/`featureLimits` (numeric usage cap per `PlanFeature` — see Billing & Checkout above). |
+| PATCH | `/platform/plans/:id` | Edit a plan tier's price/currency/features/`featureLimits` (numeric usage cap per capability key — see Billing & Checkout above). |
+| GET | `/platform/capabilities` | `[{ key, label }]` — every valid `features`/`featureLimits` key (every `KNOWN_MODULES` entry plus the 4 module-less `PlanFeature` values), labeled for the Plans page's checkbox list. See "Every toggleable module is also a plan-assignable capability" above. |
 | GET | `/platform/subscriptions` | List all subscriptions — spot `past_due` churn risk. |
 | GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
 | POST | `/platform/communication-providers` | Register a new provider — `{ id, channel, name }`. |
@@ -5793,13 +5852,13 @@ Termii's API host is the one exception: infrastructure, not a secret, so it stay
 
 ### YouTube Live Detection (optional, platform-wide only)
 
-Channel id and (optionally) a Data API key are **not** set here — they're per-tenant, via `PUT /v1/youtube-integration`
-(see "YouTube Live Detection" above). All three below are platform-wide and all optional — leave unset to skip WebSub
-subscription entirely and rely on the Sermon Module's manual "Announce Live" trigger instead.
+Channel id and Data API key are **not** set here — they're per-tenant, via `PUT /v1/youtube-integration` (see
+"YouTube Live Detection" above), with no platform-wide fallback for the key. Both below are platform-wide and both
+optional — leave unset to skip WebSub subscription entirely and rely on the Sermon Module's manual "Announce Live"
+trigger instead.
 
 | Variable                       | Default          | Description                                                                 |
 |---------------------------------|------------------|--------------------------------------------------------------------------|
-| `YOUTUBE_API_KEY`              | — *(optional)*   | Fallback YouTube Data API v3 key, used only for a tenant that configured a channel but not their own key |
 | `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) — one physical endpoint shared by every tenant |
 | `YOUTUBE_WEBSUB_SECRET`        | — *(optional)*   | Shared HMAC secret sent as `hub.secret` on subscribe; the hub signs every notification with it (`X-Hub-Signature`), which the callback verifies. Required alongside the callback URL — without it, `subscribe()` never registers a live subscription and the callback rejects everything it receives. |
 | `PUBSUBHUBBUB_URL`             | `https://pubsubhubbub.appspot.com/subscribe` | Google's PubSubHubbub hub endpoint `YoutubeSubscriptionService` posts subscribe/unsubscribe requests to |

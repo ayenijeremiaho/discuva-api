@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -29,7 +28,6 @@ export class YoutubeLiveDetectionService {
   private readonly logger = new Logger(YoutubeLiveDetectionService.name);
 
   constructor(
-    private readonly configService: ConfigService,
     @InjectRepository(TenantYoutubeIntegration)
     private readonly integrationRepo: Repository<TenantYoutubeIntegration>,
     @InjectRepository(Tenant)
@@ -85,16 +83,18 @@ export class YoutubeLiveDetectionService {
       }
       if (integration.lastAnnouncedVideoId === videoId) return;
 
-      const apiKey =
-        (integration.apiKeyEncrypted
-          ? this.encryptionService.decrypt(integration.apiKeyEncrypted)
-          : null) || this.configService.get<string>('YOUTUBE_API_KEY');
-      if (!apiKey) {
-        this.logger.warn(
-          `No YouTube Data API key available (tenant nor platform default) for channel ${channelId}`,
+      // No platform-wide fallback — a tenant who hasn't set their own key
+      // just doesn't get live-detection, silently, rather than quietly
+      // borrowing shared platform quota they never asked to use.
+      if (!integration.apiKeyEncrypted) {
+        this.logger.debug(
+          `No tenant API key configured for channel ${channelId} — skipping live-detection lookup.`,
         );
         return;
       }
+      const apiKey = this.encryptionService.decrypt(
+        integration.apiKeyEncrypted,
+      );
 
       const snippet = await this.fetchSnippet(videoId, apiKey);
       if (!snippet || snippet.liveBroadcastContent !== 'live') return;

@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Plan } from '../../billing/entity/plan.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
-import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { ALL_CAPABILITY_KEYS } from '../../billing/constant/capability-keys.constant';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 
@@ -43,12 +43,12 @@ export class PlatformPlanService {
   }
 
   // class-validator's @IsObject() on the DTO only confirms it's an object —
-  // key/value shape (a real PlanFeature per key, a positive integer per
+  // key/value shape (a real capability key per key, a positive integer per
   // value) is checked here since there's no clean declarative validator
   // for that shape.
   private validateFeatureLimits(featureLimits?: Record<string, number>) {
     if (!featureLimits) return;
-    const validFeatures = new Set<string>(Object.values(PlanFeature));
+    const validFeatures = new Set<string>(ALL_CAPABILITY_KEYS);
     for (const [feature, limit] of Object.entries(featureLimits)) {
       if (!validFeatures.has(feature)) {
         throw new BadRequestException(

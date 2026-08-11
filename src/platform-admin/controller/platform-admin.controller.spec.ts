@@ -3,6 +3,7 @@ import { PlatformAdminController } from './platform-admin.controller';
 import { PlatformAdminAuthService } from '../service/platform-admin-auth.service';
 import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
+import { PlatformCapabilityService } from '../service/platform-capability.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
@@ -54,6 +55,7 @@ describe('PlatformAdminController (billing support routes)', () => {
         { provide: PlatformAdminAuthService, useValue: mockAuthService },
         { provide: PlatformTenantService, useValue: {} },
         { provide: PlatformPlanService, useValue: {} },
+        { provide: PlatformCapabilityService, useValue: { list: jest.fn() } },
         {
           provide: PlatformCommunicationProviderService,
           useValue: mockCommunicationProviderService,

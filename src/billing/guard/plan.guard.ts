@@ -5,33 +5,21 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
-import { Plan } from '../entity/plan.entity';
-import { Subscription } from '../entity/subscription.entity';
 import { PlanFeature } from '../enum/plan-feature.enum';
 import { REQUIRES_PLAN_KEY } from '../decorator/requires-plan.decorator';
+import { COUNTS_TOWARD_LIMIT_KEY } from '../decorator/counts-toward-limit.decorator';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
-import { CacheService } from '../../utility/service/cache.service';
 import { FeatureUsageService } from '../service/feature-usage.service';
-
-interface ResolvedPlan {
-  features: string[];
-  featureLimits: Record<string, number>;
-}
+import { PlanFeatureResolverService } from '../service/plan-feature-resolver.service';
 
 @Injectable()
 export class PlanGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly cls: ClsService<AppClsStore>,
-    private readonly cacheService: CacheService,
+    private readonly planFeatureResolver: PlanFeatureResolverService,
     private readonly featureUsageService: FeatureUsageService,
-    @InjectRepository(Subscription)
-    private readonly subscriptionRepo: Repository<Subscription>,
-    @InjectRepository(Plan)
-    private readonly planRepo: Repository<Plan>,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -49,11 +37,12 @@ export class PlanGuard implements CanActivate {
     // an assumed-active bypass.
     if (!tenantId) return true;
 
-    const { features, featureLimits } = await this.cacheService.getOrSet(
-      `plan-features:${tenantId}`,
-      () => this.resolveFeatures(tenantId),
-      300,
-    );
+    // Whatever endpoint changes a tenant's plan must cacheService.del() this
+    // same key (`plan-features:${tenantId}`) — PlatformTenantService.changeTenantPlan
+    // (manual platform-admin override) already does this; self-serve upgrade
+    // checkout is still deferred (§9 Phase 3) and will need the same call.
+    const { features, featureLimits } =
+      await this.planFeatureResolver.resolve(tenantId);
 
     if (!features.includes(required)) {
       throw new ForbiddenException({
@@ -65,19 +54,20 @@ export class PlanGuard implements CanActivate {
 
     // Numeric cap is opt-in per plan (Plan.featureLimits, admin-configurable
     // — see plan.entity.ts) layered on top of the boolean feature gate
-    // above. Consumed here, before the handler runs, rather than after it
-    // succeeds — the simplest mechanism that works for every @RequiresPlan
-    // route with zero per-feature integration work, at the accepted cost of
-    // occasionally spending a use on a request that later 4xxs for an
-    // unrelated reason (e.g. a validation failure inside the handler).
+    // above, and further opt-in per ROUTE via @CountsTowardLimit — most
+    // routes sharing this controller's class-level @RequiresPlan (list,
+    // read, poll, join...) never consume a use, only the one(s) explicitly
+    // marked. This is a read-only pre-check; the actual increment happens
+    // in PlanLimitInterceptor, only after the handler succeeds, so a
+    // request that later 4xxs for an unrelated reason never spends a use.
+    const countsToward = this.reflector.getAllAndOverride<PlanFeature>(
+      COUNTS_TOWARD_LIMIT_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     const limit = featureLimits[required];
-    if (limit != null) {
-      const consumed = await this.featureUsageService.tryConsume(
-        tenantId,
-        required,
-        limit,
-      );
-      if (!consumed) {
+    if (countsToward && limit != null) {
+      const used = await this.featureUsageService.getUsage(tenantId, required);
+      if (used >= limit) {
         throw new ForbiddenException({
           message: `You've reached this plan's usage limit for this feature.`,
           code: 'PLAN_UPGRADE_REQUIRED',
@@ -87,24 +77,5 @@ export class PlanGuard implements CanActivate {
     }
 
     return true;
-  }
-
-  // Whatever endpoint changes a tenant's plan must cacheService.del() this
-  // same key (`plan-features:${tenantId}`) — PlatformTenantService.changeTenantPlan
-  // (manual platform-admin override) already does this; self-serve upgrade
-  // checkout is still deferred (§9 Phase 3) and will need the same call.
-  private async resolveFeatures(tenantId: string): Promise<ResolvedPlan> {
-    const subscription = await this.subscriptionRepo.findOne({
-      where: { tenantId },
-    });
-    if (!subscription) return { features: [], featureLimits: {} };
-
-    const plan = await this.planRepo.findOne({
-      where: { id: subscription.planId },
-    });
-    return {
-      features: plan?.features ?? [],
-      featureLimits: plan?.featureLimits ?? {},
-    };
   }
 }

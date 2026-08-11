@@ -21,12 +21,12 @@ export class TenantYoutubeIntegration extends BaseEntity {
   channelId: string;
 
   // Tenant's own YouTube Data API key (BYOK), encrypted at rest via
-  // EncryptionService — falls back to this platform's own YOUTUBE_API_KEY
-  // when a tenant hasn't set one (see YoutubeLiveDetectionService). Unlike
-  // SMS's apiKey, this isn't strictly required to be tenant-specific for
-  // correctness (any valid Data API key can look up any public channel's
-  // video snippet) — it's BYOK by choice, so each tenant's own quota is
-  // theirs alone, not to satisfy some access-control need.
+  // EncryptionService — no platform-wide fallback; live-detection is a
+  // no-op for a tenant who hasn't set one (see YoutubeLiveDetectionService).
+  // Unlike SMS's apiKey, this isn't strictly required to be tenant-specific
+  // for correctness (any valid Data API key can look up any public
+  // channel's video snippet) — it's BYOK by choice, so each tenant's own
+  // quota is theirs alone, not to satisfy some access-control need.
   @Column({ nullable: true, select: false })
   apiKeyEncrypted: string | null;
 

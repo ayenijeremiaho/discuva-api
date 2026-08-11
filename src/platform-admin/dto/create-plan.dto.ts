@@ -9,7 +9,7 @@ import {
   Matches,
   Min,
 } from 'class-validator';
-import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { ALL_CAPABILITY_KEYS } from '../../billing/constant/capability-keys.constant';
 
 export class CreatePlanDto {
   @IsString()
@@ -34,8 +34,8 @@ export class CreatePlanDto {
 
   @IsOptional()
   @IsArray()
-  @IsIn(Object.values(PlanFeature), { each: true })
-  features?: PlanFeature[];
+  @IsIn(ALL_CAPABILITY_KEYS, { each: true })
+  features?: string[];
 
   // Map of PlanFeature -> max lifetime uses per tenant. Keys/values are
   // deep-validated in PlatformPlanService (a valid PlanFeature per key, a

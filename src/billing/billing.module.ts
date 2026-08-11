@@ -1,4 +1,5 @@
 import { Global, Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UtilityModule } from '../utility/utility.module';
 import { Plan } from './entity/plan.entity';
@@ -13,6 +14,8 @@ import { KoraPaymentProvider } from './provider/kora-payment.provider';
 import { PaymentProviderRegistryService } from './service/payment-provider-registry.service';
 import { CheckoutService } from './service/checkout.service';
 import { FeatureUsageService } from './service/feature-usage.service';
+import { PlanFeatureResolverService } from './service/plan-feature-resolver.service';
+import { PlanLimitInterceptor } from './interceptor/plan-limit.interceptor';
 import { BillingController } from './controller/billing.controller';
 import { BillingWebhookController } from './controller/billing-webhook.controller';
 import { SubscriptionLapseScheduler } from './scheduler/subscription-lapse.scheduler';
@@ -45,8 +48,16 @@ import { PlatformAdminModule } from '../platform-admin/platform-admin.module';
     PaymentProviderRegistryService,
     CheckoutService,
     FeatureUsageService,
+    PlanFeatureResolverService,
     SubscriptionLapseScheduler,
+    { provide: APP_INTERCEPTOR, useClass: PlanLimitInterceptor },
   ],
-  exports: [PlanGuard, TypeOrmModule, CheckoutService, FeatureUsageService],
+  exports: [
+    PlanGuard,
+    TypeOrmModule,
+    CheckoutService,
+    FeatureUsageService,
+    PlanFeatureResolverService,
+  ],
 })
 export class BillingModule {}

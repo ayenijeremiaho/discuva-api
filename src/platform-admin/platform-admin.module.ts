@@ -11,6 +11,7 @@ import { PlatformAdminManagementController } from './controller/platform-admin-m
 import { PlatformAdminAuthService } from './service/platform-admin-auth.service';
 import { PlatformTenantService } from './service/platform-tenant.service';
 import { PlatformPlanService } from './service/platform-plan.service';
+import { PlatformCapabilityService } from './service/platform-capability.service';
 import { PlatformCommunicationProviderService } from './service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from './service/platform-giving-provider.service';
 import { PlatformPaymentProviderService } from './service/platform-payment-provider.service';
@@ -79,6 +80,7 @@ import { UtilityModule } from '../utility/utility.module';
     PlatformAdminGuard,
     PlatformTenantService,
     PlatformPlanService,
+    PlatformCapabilityService,
     PlatformCommunicationProviderService,
     PlatformGivingProviderService,
     PlatformPaymentProviderService,

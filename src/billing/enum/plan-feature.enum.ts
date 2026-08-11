@@ -15,4 +15,5 @@ export enum PlanFeature {
   SERVICE_RATING = 'service_rating',
   SERMON = 'sermon',
   BULK_EXPORT = 'bulk_export',
+  FORMS = 'forms',
 }

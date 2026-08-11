@@ -19,6 +19,7 @@ import { Admin } from '../../admin/entity/admin.entity';
 import { PlanGuard } from '../../billing/guard/plan.guard';
 import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { CountsTowardLimit } from '../../billing/decorator/counts-toward-limit.decorator';
 import { GameService } from '../service/game.service';
 import { GameSessionGateway } from '../gateway/game-session.gateway';
 import {
@@ -40,6 +41,7 @@ export class AdminGameController {
   ) {}
 
   @RequiresPermission(AdminPermission.GAMES_WRITE)
+  @CountsTowardLimit(PlanFeature.GAMES)
   @Post()
   create(@Body() dto: CreateGameDto, @CurrentAdmin() admin: Admin) {
     return this.gameService.createGame(dto, admin);
