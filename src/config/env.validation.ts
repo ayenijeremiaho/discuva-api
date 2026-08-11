@@ -45,36 +45,36 @@ export const envValidationSchema = Joi.object({
   REDIS_TLS: Joi.boolean().default(false),
 
   EMAIL_PROVIDER: Joi.string().valid('gmail', 'resend').default('gmail'),
-  EMAIL_FROM: Joi.string().optional(),
+  EMAIL_FROM: Joi.string().allow('').optional(),
 
-  EMAIL_HOST: Joi.string().optional(),
+  EMAIL_HOST: Joi.string().allow('').optional(),
   EMAIL_PORT: Joi.number().optional(),
   EMAIL_SECURE: Joi.boolean().default(false),
-  EMAIL_USER: Joi.string().optional(),
-  EMAIL_PASSWORD: Joi.string().optional(),
+  EMAIL_USER: Joi.string().allow('').optional(),
+  EMAIL_PASSWORD: Joi.string().allow('').optional(),
 
-  RESEND_API_KEY: Joi.string().optional(),
+  RESEND_API_KEY: Joi.string().allow('').optional(),
 
   // SendGrid provider — platform-default API key; tenants may override via
   // their own BYOK credentials instead. SENDGRID_BASE_URL matches every
   // sibling provider's own *_BASE_URL override (Mailgun/Paystack/Flutterwave)
   // for region failover / test doubles.
-  SENDGRID_API_KEY: Joi.string().optional(),
-  SENDGRID_BASE_URL: Joi.string().uri().optional(),
+  SENDGRID_API_KEY: Joi.string().allow('').optional(),
+  SENDGRID_BASE_URL: Joi.string().uri().allow('').optional(),
 
   // Mailgun provider — platform-default API key/domain; MAILGUN_BASE_URL
   // lets the EU region (api.eu.mailgun.net/v3) be selected without a code
   // change.
-  MAILGUN_API_KEY: Joi.string().optional(),
-  MAILGUN_DOMAIN: Joi.string().optional(),
-  MAILGUN_BASE_URL: Joi.string().uri().optional(),
+  MAILGUN_API_KEY: Joi.string().allow('').optional(),
+  MAILGUN_DOMAIN: Joi.string().allow('').optional(),
+  MAILGUN_BASE_URL: Joi.string().uri().allow('').optional(),
 
   LOGIN_URL: Joi.string().uri().required(),
   ADMIN_LOGIN_URL: Joi.string().uri().required(),
   PLATFORM_LOGIN_URL: Joi.string().uri().required(),
-  SUPPORT_FORM_URL: Joi.string().uri().optional(),
-  EXPLAINER_VIDEO_ANDROID_URL: Joi.string().uri().optional(),
-  EXPLAINER_VIDEO_IOS_URL: Joi.string().uri().optional(),
+  SUPPORT_FORM_URL: Joi.string().uri().allow('').optional(),
+  EXPLAINER_VIDEO_ANDROID_URL: Joi.string().uri().allow('').optional(),
+  EXPLAINER_VIDEO_IOS_URL: Joi.string().uri().allow('').optional(),
 
   THROTTLE_TTL_MS: Joi.number().default(60_000),
   THROTTLE_LIMIT: Joi.number().default(100),
@@ -91,7 +91,7 @@ export const envValidationSchema = Joi.object({
 
   SENTRY_DSN: Joi.string().allow('').optional(),
   SENTRY_ENABLED: Joi.string().valid('true', 'false').default('true'),
-  SENTRY_ENVIRONMENT: Joi.string().optional(),
+  SENTRY_ENVIRONMENT: Joi.string().allow('').optional(),
 
   POSTMAN_URL: Joi.string()
     .uri()
@@ -150,10 +150,10 @@ export const envValidationSchema = Joi.object({
   MAX_FINANCE_PROOF_UPLOAD_BYTES: Joi.number().default(10 * 1024 * 1024),
 
   SESSION_MAX_AGE_DAYS: Joi.number().integer().min(1).default(30),
-  DEFAULT_ADMIN_EMAIL: Joi.string().email().optional(),
-  DEFAULT_ADMIN_PASSWORD_HASH: Joi.string().optional(),
-  DEFAULT_PLATFORM_ADMIN_EMAIL: Joi.string().email().optional(),
-  DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH: Joi.string().optional(),
+  DEFAULT_ADMIN_EMAIL: Joi.string().email().allow('').optional(),
+  DEFAULT_ADMIN_PASSWORD_HASH: Joi.string().allow('').optional(),
+  DEFAULT_PLATFORM_ADMIN_EMAIL: Joi.string().email().allow('').optional(),
+  DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH: Joi.string().allow('').optional(),
 
   EMAIL_SERVICE: Joi.string().default('gmail'),
 
@@ -176,8 +176,8 @@ export const envValidationSchema = Joi.object({
   EMAIL_PASTOR_FEEDBACK_ENABLED: Joi.boolean().default(true),
   EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED: Joi.boolean().default(true),
 
-  BULL_BOARD_USER: Joi.string().optional(),
-  BULL_BOARD_PASSWORD: Joi.string().optional(),
+  BULL_BOARD_USER: Joi.string().allow('').optional(),
+  BULL_BOARD_PASSWORD: Joi.string().allow('').optional(),
 
   // Pure BYOK — every tenant configures their own Termii/Twilio credentials
   // under Communication Providers, there is no platform-default account.
@@ -187,12 +187,12 @@ export const envValidationSchema = Joi.object({
   // Platform-wide fallback Data API key, used when a tenant hasn't set its
   // own via PUT /v1/youtube-integration. Channel id has no platform-wide
   // equivalent — it's always tenant-specific, set the same way.
-  YOUTUBE_API_KEY: Joi.string().optional(),
-  YOUTUBE_WEBSUB_CALLBACK_URL: Joi.string().uri().optional(),
+  YOUTUBE_API_KEY: Joi.string().allow('').optional(),
+  YOUTUBE_WEBSUB_CALLBACK_URL: Joi.string().uri().allow('').optional(),
   // Shared HMAC secret sent as hub.secret on subscribe — the hub then signs
   // every notification with it (X-Hub-Signature), which is how the callback
   // tells a genuine hub delivery apart from a forged POST to the public URL.
-  YOUTUBE_WEBSUB_SECRET: Joi.string().optional(),
+  YOUTUBE_WEBSUB_SECRET: Joi.string().allow('').optional(),
   PUBSUBHUBBUB_URL: Joi.string()
     .uri()
     .default('https://pubsubhubbub.appspot.com/subscribe'),
@@ -200,16 +200,16 @@ export const envValidationSchema = Joi.object({
   // All optional — a deployment that hasn't set a given provider's keys
   // simply can't be selected as ?provider= on a checkout call
   // (PaymentProviderRegistryService throws a clean 400, not a crash).
-  PAYSTACK_SECRET_KEY: Joi.string().optional(),
+  PAYSTACK_SECRET_KEY: Joi.string().allow('').optional(),
   PAYSTACK_BASE_URL: Joi.string().uri().default('https://api.paystack.co'),
-  FLUTTERWAVE_SECRET_KEY: Joi.string().optional(),
+  FLUTTERWAVE_SECRET_KEY: Joi.string().allow('').optional(),
   // Shared secret configured in the Flutterwave dashboard, compared
   // verbatim against the verif-hash webhook header — not an HMAC key.
-  FLUTTERWAVE_SECRET_HASH: Joi.string().optional(),
+  FLUTTERWAVE_SECRET_HASH: Joi.string().allow('').optional(),
   FLUTTERWAVE_BASE_URL: Joi.string()
     .uri()
     .default('https://api.flutterwave.com/v3'),
-  KORA_SECRET_KEY: Joi.string().optional(),
+  KORA_SECRET_KEY: Joi.string().allow('').optional(),
   KORA_BASE_URL: Joi.string()
     .uri()
     .default('https://api.korapay.com/merchant/api/v1'),
