@@ -2732,8 +2732,8 @@ new row is saved, so a failed re-upload never leaves a tenant with no logo. All 
 
 **Mobile app appearance (`tenant_asset_overrides`):** the member PWA (`discuva-member`) ships a bundled
 default hero/backdrop image for every screen — `KNOWN_ASSETS`
-(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (24 keys today,
-e.g. `login-backdrop`, `home-door-welcome`, `giving-backdrop`), each mapped to the screen(s) it actually renders on
+(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (25 keys today,
+e.g. `login-backdrop`, `home-door-welcome`, `giving-backdrop`, `finance-backdrop`), each mapped to the screen(s) it actually renders on
 in the mobile app. A church can override any of these with its own image; anything left unset silently falls back
 to the app's own bundled default — that fallback resolution happens **client-side** in discuva-member, not
 here. This backend only ever knows what's been explicitly overridden.

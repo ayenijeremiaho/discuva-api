@@ -52,6 +52,11 @@ export const KNOWN_ASSETS = [
     description: 'Header on the giving / tithe screen',
   },
   {
+    key: 'finance-backdrop',
+    label: 'Finance Requests',
+    description: 'Header on the HOD department finance/expense request screen',
+  },
+  {
     key: 'leave-request-backdrop',
     label: 'Leave Requests',
     description:

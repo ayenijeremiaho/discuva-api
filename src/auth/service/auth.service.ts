@@ -444,8 +444,8 @@ export class AuthService {
       'workerProfile',
       'workerProfile.department',
       'workerProfile.secondaryDepartment',
-      'pastor',
-      'pastor.pastorTitle',
+      'clergy',
+      'clergy.title',
     ]);
     let isHod = false;
     if (member.workerProfile?.id) {

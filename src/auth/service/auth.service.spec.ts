@@ -819,6 +819,30 @@ describe('AuthService', () => {
     });
   });
 
+  describe('getProfile', () => {
+    // Regression guard: this relation array is a plain string literal, not
+    // a TypeScript symbol, so `tsc` can't catch a stale relation name after
+    // an entity rename — this is exactly how 'pastor'/'pastor.pastorTitle'
+    // silently survived the Pastor -> Clergy rename and 500'd every
+    // GET /auth/me call in production until caught manually.
+    it('requests the current clergy relation names, not the pre-rename ones', async () => {
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        workerProfile: null,
+      });
+
+      await service.getProfile('member-1');
+
+      expect(mockMemberService.getById).toHaveBeenCalledWith('member-1', [
+        'workerProfile',
+        'workerProfile.department',
+        'workerProfile.secondaryDepartment',
+        'clergy',
+        'clergy.title',
+      ]);
+    });
+  });
+
   describe('purgeExpiredOtps', () => {
     it('should run the delete query and release the lock when lock is acquired', async () => {
       mockCacheService.acquireLock.mockResolvedValue(true);
