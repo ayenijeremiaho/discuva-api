@@ -27387,6 +27387,122 @@
           "response": []
         },
         {
+          "name": "Platform: List Giving Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/giving-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "giving-providers"
+              ]
+            },
+            "description": "BILLING_READ. Lists the platform-wide giving-provider catalog \u2014 distinct from GET /finance/giving-providers, which is the tenant-facing catalog+own-config view."
+          },
+          "response": []
+        },
+        {
+          "name": "Platform: Register Giving Provider",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"kora\",\n  \"name\": \"Korapay\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/giving-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "giving-providers"
+              ]
+            },
+            "description": "BILLING_WRITE. Registers a new vendor in the platform-wide giving-provider catalog."
+          },
+          "response": []
+        },
+        {
+          "name": "Platform: Set Giving Provider Active",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/giving-providers/paystack",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "giving-providers",
+                "paystack"
+              ]
+            },
+            "description": "BILLING_WRITE. Activate/deactivate a provider in the platform-wide catalog. Deactivating: (1) removes it from the tenant-facing catalog (GET /finance/giving-providers) unless a tenant is already configured against it; (2) stops it resolving for tenants already using it for new checkout initiation \u2014 GivingCheckoutService now checks the catalog's isActive too, and the 5-minute resolved-credential cache is invalidated immediately for every affected tenant; (3) emails every affected tenant's admin. Deliberately does NOT block an in-flight webhook completing \u2014 see docs/TECH_DOC.md's \"Giving Providers: deactivation has real consequences\". Reactivating sends a 'restored' notice instead."
+          },
+          "response": []
+        },
+        {
           "name": "Get Tenant Giving Providers",
           "request": {
             "method": "GET",

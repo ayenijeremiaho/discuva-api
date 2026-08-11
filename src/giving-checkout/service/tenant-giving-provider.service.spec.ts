@@ -152,8 +152,8 @@ describe('TenantGivingProviderService', () => {
   describe('listProviders', () => {
     it('returns the catalog plus this tenant own config summaries', async () => {
       mockProviderRepo.find.mockResolvedValue([
-        { id: 'paystack', name: 'Paystack' },
-        { id: 'stripe', name: 'Stripe' },
+        { id: 'paystack', name: 'Paystack', isActive: true },
+        { id: 'stripe', name: 'Stripe', isActive: true },
       ]);
       mockConfigRepo.find.mockResolvedValue([
         { providerId: 'stripe', isActive: true },
@@ -165,6 +165,35 @@ describe('TenantGivingProviderService', () => {
       expect(result.catalog).toHaveLength(2);
       expect(result.ownConfigs).toEqual([
         { providerId: 'stripe', providerName: 'Stripe', isActive: true },
+      ]);
+    });
+
+    it('excludes a deactivated provider the tenant has never configured', async () => {
+      mockProviderRepo.find.mockResolvedValue([
+        { id: 'paystack', name: 'Paystack', isActive: true },
+        { id: 'stripe', name: 'Stripe', isActive: false },
+      ]);
+      mockConfigRepo.find.mockResolvedValue([]);
+
+      const result = await service.listProviders();
+
+      expect(result.catalog.map((p) => p.id)).toEqual(['paystack']);
+    });
+
+    it('keeps a deactivated provider visible when the tenant already has a config against it', async () => {
+      mockProviderRepo.find.mockResolvedValue([
+        { id: 'paystack', name: 'Paystack', isActive: true },
+        { id: 'stripe', name: 'Stripe', isActive: false },
+      ]);
+      mockConfigRepo.find.mockResolvedValue([
+        { providerId: 'stripe', isActive: true },
+      ]);
+
+      const result = await service.listProviders();
+
+      expect(result.catalog.map((p) => p.id).sort()).toEqual([
+        'paystack',
+        'stripe',
       ]);
     });
   });

@@ -17,6 +17,7 @@ import {
   GivingCheckoutStatus,
 } from '../entity/giving-checkout-session.entity';
 import { GivingProviderRegistryService } from './giving-provider-registry.service';
+import { givingProviderCacheKey } from '../utility/giving-provider-cache-key';
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -78,15 +79,28 @@ export class GivingCheckoutService {
   }
 
   private cacheKey(tenantId: string): string {
-    return `giving-provider-config:${tenantId}`;
+    return givingProviderCacheKey(tenantId);
   }
 
   // Cached 300s per tenant, invalidated immediately on write by
-  // TenantGivingProviderService — same pattern as
+  // TenantGivingProviderService (or, for a platform-wide deactivate,
+  // PlatformGivingProviderService — see its own comment) — same pattern as
   // SmsCredentialResolverService.resolveConfig(). Explicit `tenantId` param
   // (not read from CLS) because the webhook path calls this with no CLS
   // tenant context at all — only the request path's convenience wrapper
   // below reads it from CLS.
+  //
+  // Joins to GivingProvider and requires provider.isActive too, not just
+  // config.isActive — a platform-deactivated provider genuinely stops
+  // resolving for new checkout initiation, same enforcement
+  // SmsCredentialResolverService/EmailCredentialResolverService added for
+  // communication providers. Deliberately NOT applied to handleWebhook
+  // below: an in-flight checkout that already charged the member on
+  // Paystack's/Flutterwave's/etc. side should still complete and credit the
+  // church's TitheRecord even if the provider was deactivated in the
+  // meantime — rejecting that webhook would take the member's money without
+  // ever crediting it anywhere, a worse outcome than letting one already-
+  // charged transaction finish.
   private async resolveActiveConfig(
     tenantId: string,
   ): Promise<ResolvedGivingConfig | undefined> {
@@ -96,9 +110,15 @@ export class GivingCheckoutService {
         async () => {
           const config = await this.configRepo
             .createQueryBuilder('config')
+            .innerJoin(
+              GivingProvider,
+              'provider',
+              'provider.id = config.providerId',
+            )
             .addSelect('config.credentialsEncrypted')
             .where('config.tenantId = :tenantId', { tenantId })
             .andWhere('config.isActive = true')
+            .andWhere('provider.isActive = true')
             .getOne();
 
           if (!config) return null;

@@ -18,6 +18,9 @@ const mockCheckoutService = {
 };
 const mockGivingProviderService = {
   getTenantGivingProviders: jest.fn(),
+  listProviders: jest.fn(),
+  registerProvider: jest.fn(),
+  setActive: jest.fn(),
 };
 const mockCommunicationProviderService = {
   setActive: jest.fn(),
@@ -114,6 +117,31 @@ describe('PlatformAdminController (billing support routes)', () => {
     expect(
       mockGivingProviderService.getTenantGivingProviders,
     ).toHaveBeenCalledWith('tenant-1');
+  });
+
+  it('listGivingProviders delegates to PlatformGivingProviderService', async () => {
+    mockGivingProviderService.listProviders.mockResolvedValue([
+      { id: 'paystack' },
+    ]);
+    const result = await controller.listGivingProviders();
+    expect(mockGivingProviderService.listProviders).toHaveBeenCalled();
+    expect(result).toEqual([{ id: 'paystack' }]);
+  });
+
+  it('registerGivingProvider delegates to PlatformGivingProviderService', async () => {
+    const dto = { id: 'kora', name: 'Kora' };
+    await controller.registerGivingProvider(dto);
+    expect(mockGivingProviderService.registerProvider).toHaveBeenCalledWith(
+      dto,
+    );
+  });
+
+  it('setGivingProviderActive delegates to PlatformGivingProviderService', async () => {
+    await controller.setGivingProviderActive('kora', { isActive: false });
+    expect(mockGivingProviderService.setActive).toHaveBeenCalledWith(
+      'kora',
+      false,
+    );
   });
 
   it('forgotPassword delegates to PlatformAdminAuthService and returns a generic message', async () => {

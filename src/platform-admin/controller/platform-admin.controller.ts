@@ -39,6 +39,8 @@ import { RegisterCommunicationProviderDto } from '../dto/register-communication-
 import { SetCommunicationProviderActiveDto } from '../dto/set-communication-provider-active.dto';
 import { RefundCheckoutSessionDto } from '../dto/refund-checkout-session.dto';
 import { BroadcastDto } from '../dto/broadcast.dto';
+import { RegisterGivingProviderDto } from '../dto/register-giving-provider.dto';
+import { SetGivingProviderActiveDto } from '../dto/set-giving-provider-active.dto';
 import { CheckoutService } from '../../billing/service/checkout.service';
 
 // Route shapes match MULTI_TENANT_MIGRATION.md §4.10's capability list.
@@ -239,8 +241,33 @@ export class PlatformAdminController {
 
   // Giving-checkout is money the tenant receives directly (not platform
   // revenue), but it's still a billing/money concern from the platform's
-  // support perspective — reuses BILLING_READ rather than adding a new
-  // permission just for this one lookup.
+  // support perspective — reuses BILLING_READ/BILLING_WRITE rather than
+  // adding a new permission pair, same reasoning as the tenant-lookup route
+  // below already established.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('giving-providers')
+  async listGivingProviders() {
+    return this.givingProviderService.listProviders();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
+  @Post('giving-providers')
+  async registerGivingProvider(@Body() dto: RegisterGivingProviderDto) {
+    return this.givingProviderService.registerProvider(dto);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
+  @Patch('giving-providers/:id')
+  async setGivingProviderActive(
+    @Param('id') id: string,
+    @Body() dto: SetGivingProviderActiveDto,
+  ) {
+    return this.givingProviderService.setActive(id, dto.isActive);
+  }
+
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
   @Get('tenants/:id/giving-providers')

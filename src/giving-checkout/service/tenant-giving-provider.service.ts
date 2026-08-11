@@ -12,6 +12,7 @@ import { EncryptionService } from '../../utility/service/encryption.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { UpsertGivingProviderConfigDto } from '../dto/upsert-giving-provider-config.dto';
+import { givingProviderCacheKey } from '../utility/giving-provider-cache-key';
 
 export interface GivingProviderConfigSummary {
   providerId: string;
@@ -46,7 +47,7 @@ export class TenantGivingProviderService {
   }
 
   private cacheKey(tenantId: string): string {
-    return `giving-provider-config:${tenantId}`;
+    return givingProviderCacheKey(tenantId);
   }
 
   // Catalog (every registered giving vendor) plus this tenant's own config
@@ -57,21 +58,35 @@ export class TenantGivingProviderService {
   // (v1/webhooks/giving/:tenantId/:providerId) to hand to Paystack/
   // Flutterwave/etc — nothing else on this tenant-scoped API surface
   // otherwise exposes the tenant's own id to itself.
+  //
+  // `catalog` excludes a platform-deactivated provider (see
+  // PlatformGivingProviderService.setActive) UNLESS this tenant already has
+  // a config against it — same "don't make an already-configured row
+  // silently vanish" reasoning as
+  // TenantCommunicationProviderService.listProviders (discuva-admin's page
+  // renders one row per catalog entry).
   async listProviders(): Promise<{
     tenantId: string;
     catalog: GivingProvider[];
     ownConfigs: GivingProviderConfigSummary[];
   }> {
     const tenantId = this.currentTenantId();
-    const catalog = await this.providerRepo.find({ order: { name: 'ASC' } });
+    const allProviders = await this.providerRepo.find({
+      order: { name: 'ASC' },
+    });
     const configs = await this.configRepo.find({ where: { tenantId } });
-    const providerById = new Map(catalog.map((p) => [p.id, p]));
+    const providerById = new Map(allProviders.map((p) => [p.id, p]));
+    const configuredProviderIds = new Set(configs.map((c) => c.providerId));
 
     const ownConfigs: GivingProviderConfigSummary[] = configs.map((c) => ({
       providerId: c.providerId,
       providerName: providerById.get(c.providerId)?.name ?? c.providerId,
       isActive: c.isActive,
     }));
+
+    const catalog = allProviders.filter(
+      (p) => p.isActive || configuredProviderIds.has(p.id),
+    );
 
     return { tenantId, catalog, ownConfigs };
   }

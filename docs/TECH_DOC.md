@@ -3346,10 +3346,32 @@ resolve a tenant from, only a `:tenantId` path param, so these must be resolvabl
 
 **Checkout initiation (`GivingCheckoutService.initiateCheckout`, member-facing, normal in-app request — tenant
 context already resolved by `TenantMiddleware`):** resolves the tenant's active config (cached 300s per tenant,
-invalidated on write — identical pattern to `SmsCredentialResolverService`), throws `403
-GIVING_PROVIDER_NOT_CONFIGURED` if none is active, looks up the member for email/name, resolves currency from the
-optional `titheAccountId` (falls back to `CURRENCY_CODE`), generates a `giving_{uuid}` reference, and calls the
-resolved provider. Saves a `PENDING` `GivingCheckoutSession` row before returning `{ checkoutUrl }`.
+invalidated on write — identical pattern to `SmsCredentialResolverService`, joined against `GivingProvider` and
+requiring `provider.isActive = true` too, not just the tenant's own config row — see "Giving Providers:
+deactivation has real consequences" below), throws `403 GIVING_PROVIDER_NOT_CONFIGURED` if none is active, looks
+up the member for email/name, resolves currency from the optional `titheAccountId` (falls back to
+`CURRENCY_CODE`), generates a `giving_{uuid}` reference, and calls the resolved provider. Saves a `PENDING`
+`GivingCheckoutSession` row before returning `{ checkoutUrl }`.
+
+**Giving Providers: deactivation has real consequences (added 2026-08, same pass as Communication Providers'
+equivalent above).** `PlatformGivingProviderService.setActive()` (`PATCH /platform/giving-providers/:id`) mirrors
+`PlatformCommunicationProviderService.setActive()` exactly, minus the channel dimension:
+
+1. **`TenantGivingProviderService.listProviders()`** excludes an inactive provider from the catalog a tenant can
+   newly select, unless that tenant already has a config against it (kept visible — `discuva-admin`'s giving
+   providers page renders one row per catalog entry, same as its communication-providers page).
+2. **`GivingCheckoutService.resolveActiveConfig()`** now joins `GivingProvider` and requires `provider.isActive =
+   true`, not just `config.isActive`. A deactivated provider genuinely stops accepting new checkout initiations.
+   **Deliberately not applied to `handleWebhook`** — an in-flight checkout that already charged the member on the
+   provider's own side must still complete and credit the church's `TitheRecord` even if the provider gets
+   deactivated in the interim; rejecting that webhook would take the member's money without crediting it anywhere,
+   a worse outcome than letting one already-charged transaction finish.
+3. **`setActive()`** invalidates the 300s cache immediately for every tenant with an active config against the
+   provider (`givingProviderCacheKey`, extracted as a shared utility for the same reason
+   `communicationProviderCacheKey` was — two places already computed the identical string independently) and
+   emails those tenants via `TenantBroadcastService.notifyTenants()`, targeted at only the affected tenants.
+
+A tenant's own `TenantGivingProviderConfig` row is never touched by any of this.
 
 **Webhook handling (`GivingCheckoutService.handleWebhook`, `POST /webhooks/giving/:tenantId/:provider`,
 `@Public()`, excluded from `TenantMiddleware`):** no CLS/tenant context exists at all when this fires — `tenantId`
@@ -3391,7 +3413,10 @@ platform-support surfaces —
 
 | Method | Path                                        | Permission     | Description |
 |--------|-----------------------------------------------|-----------------|--------------|
-| GET    | `/platform/tenants/:id/giving-providers`     | `BILLING_READ`  | This tenant's configured giving provider(s) and active status — never credentials. Reuses `BILLING_READ` (giving-checkout is a money concern) rather than adding a dedicated permission for one lookup. |
+| GET    | `/platform/giving-providers`                 | `BILLING_READ`  | List the platform-wide giving-provider catalog. |
+| POST   | `/platform/giving-providers`                 | `BILLING_WRITE` | Register a new provider — `{ id, name }`. |
+| PATCH  | `/platform/giving-providers/:id`             | `BILLING_WRITE` | `{ isActive }` — activate/deactivate. See "Giving Providers: deactivation has real consequences" above. |
+| GET    | `/platform/tenants/:id/giving-providers`     | `BILLING_READ`  | This tenant's configured giving provider(s) and active status — never credentials. Reuses `BILLING_READ` (giving-checkout is a money concern) rather than adding a dedicated permission for one lookup — same reasoning now extended to the three routes above. |
 | GET    | `/platform/analytics/giving`                 | `ANALYTICS_READ`| `?period=&months=` — `{ period, totals, byProvider, byTenant, trend }`, every array grouped by `currency` — completed sessions only, **never blended across currencies** (a Stripe/USD tenant summed against a Paystack/NGN one would be meaningless). `totals` is all-time; `trend` is windowed by `months`. |
 
 `PlatformAnalyticsService.getAdoption()` also gained `givingAdoption: ChannelAdoption` (distinct-tenant count with

@@ -64,6 +64,7 @@ const mockDataSource = {
 
 function mockConfigQB(result: any) {
   const qb = {
+    innerJoin: jest.fn().mockReturnThis(),
     addSelect: jest.fn().mockReturnThis(),
     where: jest.fn().mockReturnThis(),
     andWhere: jest.fn().mockReturnThis(),
@@ -154,6 +155,19 @@ describe('GivingCheckoutService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('also filters on the platform catalog entry being active, not just the tenant config — a platform-deactivated provider blocks new checkout', async () => {
+      const qb = mockConfigQB(null);
+      await expect(
+        service.initiateCheckout('member-1', {
+          amountCents: 500000,
+          successUrl: 'https://a',
+          cancelUrl: 'https://b',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(qb.innerJoin).toHaveBeenCalled();
+      expect(qb.andWhere).toHaveBeenCalledWith('provider.isActive = true');
+    });
+
     it('creates a checkout session and records a pending GivingCheckoutSession row', async () => {
       mockConfigQB({
         providerId: 'paystack',
@@ -228,6 +242,28 @@ describe('GivingCheckoutService', () => {
       await expect(
         service.handleWebhook('tenant-1', 'paystack', Buffer.from('{}'), 'sig'),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('does NOT check the platform catalog isActive — an in-flight charge already made on the provider side must still complete even if the provider was deactivated in the meantime', async () => {
+      const qb = mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockGivingProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'charge.failed',
+        providerReference: 'giving_abc',
+        raw: {},
+      });
+
+      await service.handleWebhook(
+        'tenant-1',
+        'paystack',
+        Buffer.from('{}'),
+        'sig',
+      );
+
+      expect(qb.innerJoin).not.toHaveBeenCalled();
+      expect(qb.andWhere).not.toHaveBeenCalledWith('provider.isActive = true');
     });
 
     it('marks the session failed on a non-succeeded event and does not touch tenant schema', async () => {
