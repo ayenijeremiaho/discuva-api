@@ -174,7 +174,8 @@ export class CheckoutService {
     }
 
     const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
-    const provider = this.paymentProviderRegistry.get(providerName);
+    const provider =
+      await this.paymentProviderRegistry.assertActive(providerName);
     const customer = await provider.createCustomer({
       id: tenant.id,
       name: tenant.name,

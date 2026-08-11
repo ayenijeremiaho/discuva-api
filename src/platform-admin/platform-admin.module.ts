@@ -13,6 +13,7 @@ import { PlatformTenantService } from './service/platform-tenant.service';
 import { PlatformPlanService } from './service/platform-plan.service';
 import { PlatformCommunicationProviderService } from './service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from './service/platform-giving-provider.service';
+import { PlatformPaymentProviderService } from './service/platform-payment-provider.service';
 import { PlatformAnalyticsService } from './service/platform-analytics.service';
 import { PlatformAdminRoleService } from './service/platform-admin-role.service';
 import { PlatformAdminManagementService } from './service/platform-admin-management.service';
@@ -32,6 +33,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
 import { Plan } from '../billing/entity/plan.entity';
 import { Subscription } from '../billing/entity/subscription.entity';
 import { BillingCheckoutSession } from '../billing/entity/billing-checkout-session.entity';
+import { PlatformPaymentProvider } from '../billing/entity/payment-provider.entity';
 import { TenantRollup } from '../branch/entity/tenant-rollup.entity';
 import { TenantModule } from '../tenant/tenant.module';
 import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.entity';
@@ -55,6 +57,7 @@ import { UtilityModule } from '../utility/utility.module';
       TenantGivingProviderConfig,
       GivingCheckoutSession,
       BillingCheckoutSession,
+      PlatformPaymentProvider,
       TenantRollup,
       TenantOnboardingEvent,
     ]),
@@ -75,6 +78,7 @@ import { UtilityModule } from '../utility/utility.module';
     PlatformPlanService,
     PlatformCommunicationProviderService,
     PlatformGivingProviderService,
+    PlatformPaymentProviderService,
     PlatformAnalyticsService,
     PlatformAdminRoleService,
     PlatformAdminManagementService,

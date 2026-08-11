@@ -5,6 +5,7 @@ import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
+import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { CheckoutService } from '../../billing/service/checkout.service';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
@@ -23,6 +24,10 @@ const mockGivingProviderService = {
   setActive: jest.fn(),
 };
 const mockCommunicationProviderService = {
+  setActive: jest.fn(),
+};
+const mockPaymentProviderService = {
+  listProviders: jest.fn(),
   setActive: jest.fn(),
 };
 const mockTenantBroadcastService = {
@@ -51,6 +56,10 @@ describe('PlatformAdminController (billing support routes)', () => {
         {
           provide: PlatformGivingProviderService,
           useValue: mockGivingProviderService,
+        },
+        {
+          provide: PlatformPaymentProviderService,
+          useValue: mockPaymentProviderService,
         },
         { provide: CheckoutService, useValue: mockCheckoutService },
         {
@@ -140,6 +149,25 @@ describe('PlatformAdminController (billing support routes)', () => {
     await controller.setGivingProviderActive('kora', { isActive: false });
     expect(mockGivingProviderService.setActive).toHaveBeenCalledWith(
       'kora',
+      false,
+    );
+  });
+
+  it('listPaymentProviders delegates to PlatformPaymentProviderService', async () => {
+    mockPaymentProviderService.listProviders.mockResolvedValue([
+      { id: 'paystack' },
+    ]);
+    const result = await controller.listPaymentProviders();
+    expect(mockPaymentProviderService.listProviders).toHaveBeenCalled();
+    expect(result).toEqual([{ id: 'paystack' }]);
+  });
+
+  it('setPaymentProviderActive delegates to PlatformPaymentProviderService', async () => {
+    await controller.setPaymentProviderActive('paystack', {
+      isActive: false,
+    });
+    expect(mockPaymentProviderService.setActive).toHaveBeenCalledWith(
+      'paystack',
       false,
     );
   });

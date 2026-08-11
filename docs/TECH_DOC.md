@@ -2726,17 +2726,47 @@ not** automatically downgrade a plan — that requires a product decision (does 
 paid tier?) this pass doesn't take on. A platform admin issuing a refund is expected to also apply the tenant-facing
 consequence manually via the existing escape hatch if warranted.
 
+**Payment Providers: deactivation has real consequences (added 2026-08, same pass as Communication/Giving
+Providers' equivalents).** `payment_providers` (`PlatformPaymentProvider`) gives platform admins the same
+list/deactivate capability over paystack/flutterwave/kora that already existed for communication and giving
+providers — but the blast radius is meaningfully narrower here, because unlike those two there's no per-tenant BYOK
+config table: every tenant shares the platform's own provider credentials, so there's nothing to filter out of a
+tenant-facing catalog and nothing per-tenant to cache-invalidate.
+
+- `PaymentProviderRegistryService.get()` — used by webhook handling (`handleWebhookEvent`), self-serve cancel
+  (`cancelSubscription`), and refunds (`refundCheckoutSession`) — deliberately **never** checks the DB `isActive`
+  flag. An already-charged or already-subscribed tenant's in-flight lifecycle must keep working regardless of a
+  later deactivation; rejecting a webhook for an already-completed charge would take the tenant's money without
+  crediting their subscription, the same reasoning `GivingCheckoutService.handleWebhook` already established for
+  tithe/giving webhooks.
+- `PaymentProviderRegistryService.assertActive()` — a new, separate method, used **only** by
+  `initiateSubscriptionCheckout()` — resolves the same provider name then throws `400` if its `payment_providers`
+  row is deactivated. This is the only place deactivation is actually enforced: starting a *new* subscription
+  checkout against a deactivated provider.
+- `PlatformPaymentProviderService.setActive()` looks up every `Subscription` currently on that provider (any status
+  except `CANCELED`) and sends a targeted `TenantBroadcastService.notifyTenants()` email — worded accurately rather
+  than reusing the Communication/Giving copy verbatim, since an existing subscriber's recurring renewal is genuinely
+  unaffected (it flows through the webhook path above, which never checks `isActive`); only starting a *new*
+  checkout with that provider is blocked until it's restored.
+- No `registerProvider()` — unlike `CommunicationProvider`/`GivingProvider`, paystack/flutterwave/kora are
+  hard-coded `IPaymentProvider` classes wired into `BillingModule` (`PaystackPaymentProvider` etc.), not arbitrary
+  BYOK entries a platform admin can add by id/name alone. A fourth vendor needs its own provider class written and
+  registered in `PaymentProviderRegistryService` first, same as it always has — the DB row is just bookkeeping for
+  that vendor's on/off state, not a way to add one.
+
 **Routes** (`AdminGuard`, tenant-scoped, unless noted):
 
 | Method | Path                              | Permission     | Description |
 |--------|-----------------------------------|----------------|--------------|
 | GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, cancelAtPeriodEnd, sponsoredByParent }` |
 | GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, priceCents, currency, features }]`), ordered by price ascending — the only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
-| POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to |
+| POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to; `400` if the named (or default) provider is deactivated — see "Payment Providers: deactivation has real consequences" above |
 | POST   | `/billing/cancel`                  | BILLING_WRITE  | No body — cancels immediately or at period end depending on `currentPeriodEnd`; `400` if no paid/cancelable subscription |
 | POST   | `/webhooks/billing`                | No guard — provider webhook | `@Public()`, dispatches to Paystack or Flutterwave by which of their two signature headers is present (`x-paystack-signature` HMAC-SHA512 vs `verif-hash` shared-secret string compare) |
 | GET    | `/platform/tenants/:id/billing-sessions` | Platform admin | This tenant's checkout session history, newest first |
 | POST   | `/platform/billing-sessions/:sessionId/refund` | Platform admin | Body `{ amountCents? }` — omitted means a full refund |
+| GET    | `/platform/payment-providers`     | Platform admin (`BILLING_READ`) | `[{ id, name, isActive }]`, ordered by name |
+| PATCH  | `/platform/payment-providers/:id` | Platform admin (`BILLING_WRITE`) | `{ isActive }` — activate/deactivate. See "Payment Providers: deactivation has real consequences" above. |
 
 **Env vars:** `PAYSTACK_SECRET_KEY`, `PAYSTACK_BASE_URL`, `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_SECRET_HASH`,
 `FLUTTERWAVE_BASE_URL`, `DEFAULT_PAYMENT_PROVIDER`, `SUBSCRIPTION_PERIOD_DAYS` (default
@@ -4413,7 +4443,8 @@ cancel-don't-delete one.
 The SaaS control plane for the multi-tenant/freemium platform — see `docs/MULTI_TENANT_MIGRATION.md` for the full
 design. Entirely separate from everything else in this document: it operates on `public` schema tables
 (`tenants`, `platform_admins`, `plans`, `subscriptions`, `communication_providers`,
-`tenant_communication_provider_configs`) that describe *tenants themselves*, never a tenant's own
+`tenant_communication_provider_configs`, `giving_providers`, `tenant_giving_provider_configs`,
+`payment_providers`) that describe *tenants themselves*, never a tenant's own
 business data, and authenticates against a completely disjoint identity system (`PlatformAdmin`, not `Member`/`Admin`).
 
 **Auth:** `PlatformAdminGuard` (validates the `platform-admin-jwt` Passport strategy, signed with

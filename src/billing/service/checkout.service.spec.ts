@@ -51,7 +51,10 @@ const mockProvider = {
   refund: jest.fn().mockResolvedValue(undefined),
   verifyAndParseWebhook: jest.fn(),
 };
-const mockRegistry = { get: jest.fn().mockReturnValue(mockProvider) };
+const mockRegistry = {
+  get: jest.fn().mockReturnValue(mockProvider),
+  assertActive: jest.fn().mockResolvedValue(mockProvider),
+};
 
 async function buildService(
   // Defaults to real ConfigService.get(key, defaultValue) semantics —
@@ -94,6 +97,7 @@ describe('CheckoutService', () => {
     jest.clearAllMocks();
     mockCls.get.mockReturnValue('tenant-1');
     mockRegistry.get.mockReturnValue(mockProvider);
+    mockRegistry.assertActive.mockResolvedValue(mockProvider);
     mockManager.create.mockImplementation((_entity, v) => v);
     service = await buildService();
   });
@@ -185,7 +189,7 @@ describe('CheckoutService', () => {
         'https://b',
       );
 
-      expect(mockRegistry.get).toHaveBeenCalledWith('paystack');
+      expect(mockRegistry.assertActive).toHaveBeenCalledWith('paystack');
       expect(mockCheckoutRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           id: 'sub_abc',
@@ -195,6 +199,32 @@ describe('CheckoutService', () => {
         }),
       );
       expect(result.checkoutUrl).toBe('https://pay');
+    });
+
+    it('propagates a deactivated-provider rejection from assertActive without creating a checkout session', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro',
+        priceCents: 500000,
+        currency: 'NGN',
+      });
+      mockTenantRepo.findOneByOrFail.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'Test Church',
+      });
+      mockRegistry.assertActive.mockRejectedValue(
+        new Error('Payment provider "paystack" is temporarily unavailable.'),
+      );
+
+      await expect(
+        service.initiateSubscriptionCheckout(
+          'pro',
+          'admin@example.com',
+          'paystack',
+          'https://a',
+          'https://b',
+        ),
+      ).rejects.toThrow('temporarily unavailable');
+      expect(mockCheckoutRepo.save).not.toHaveBeenCalled();
     });
   });
 

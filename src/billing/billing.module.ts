@@ -5,6 +5,7 @@ import { Plan } from './entity/plan.entity';
 import { Subscription } from './entity/subscription.entity';
 import { BillingCheckoutSession } from './entity/billing-checkout-session.entity';
 import { FeatureUsage } from './entity/feature-usage.entity';
+import { PlatformPaymentProvider } from './entity/payment-provider.entity';
 import { PlanGuard } from './guard/plan.guard';
 import { PaystackPaymentProvider } from './provider/paystack-payment.provider';
 import { FlutterwavePaymentProvider } from './provider/flutterwave-payment.provider';
@@ -28,6 +29,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
       Subscription,
       BillingCheckoutSession,
       FeatureUsage,
+      PlatformPaymentProvider,
       Tenant,
     ]),
     UtilityModule,

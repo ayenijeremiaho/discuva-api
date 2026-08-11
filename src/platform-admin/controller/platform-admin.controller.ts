@@ -22,6 +22,7 @@ import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
+import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
 import {
@@ -41,6 +42,7 @@ import { RefundCheckoutSessionDto } from '../dto/refund-checkout-session.dto';
 import { BroadcastDto } from '../dto/broadcast.dto';
 import { RegisterGivingProviderDto } from '../dto/register-giving-provider.dto';
 import { SetGivingProviderActiveDto } from '../dto/set-giving-provider-active.dto';
+import { SetPaymentProviderActiveDto } from '../dto/set-payment-provider-active.dto';
 import { CheckoutService } from '../../billing/service/checkout.service';
 
 // Route shapes match MULTI_TENANT_MIGRATION.md §4.10's capability list.
@@ -64,6 +66,7 @@ export class PlatformAdminController {
     private readonly planService: PlatformPlanService,
     private readonly communicationProviderService: PlatformCommunicationProviderService,
     private readonly givingProviderService: PlatformGivingProviderService,
+    private readonly paymentProviderService: PlatformPaymentProviderService,
     private readonly checkoutService: CheckoutService,
     private readonly tenantBroadcastService: TenantBroadcastService,
   ) {}
@@ -273,6 +276,27 @@ export class PlatformAdminController {
   @Get('tenants/:id/giving-providers')
   async getTenantGivingProviders(@Param('id') id: string) {
     return this.givingProviderService.getTenantGivingProviders(id);
+  }
+
+  // Subscription-billing vendors (paystack/flutterwave/kora) — same
+  // BILLING_READ/BILLING_WRITE reuse as giving providers, same reasoning.
+  // No register route: these are hard-coded IPaymentProvider classes wired
+  // in BillingModule, not arbitrary BYOK entries.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('payment-providers')
+  async listPaymentProviders() {
+    return this.paymentProviderService.listProviders();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
+  @Patch('payment-providers/:id')
+  async setPaymentProviderActive(
+    @Param('id') id: string,
+    @Body() dto: SetPaymentProviderActiveDto,
+  ) {
+    return this.paymentProviderService.setActive(id, dto.isActive);
   }
 
   // Support action — refund a specific completed checkout. Does not

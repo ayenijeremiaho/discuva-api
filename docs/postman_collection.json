@@ -27534,6 +27534,79 @@
           "response": []
         },
         {
+          "name": "Platform: List Payment Providers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/payment-providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "payment-providers"
+              ]
+            },
+            "description": "BILLING_READ. Lists the platform-wide subscription-billing provider catalog (paystack/flutterwave/kora) used by POST /billing/checkout/subscribe \u2014 distinct from the tenant-facing, fully-BYOK giving/tithe providers (see \"Platform: List Giving Providers\")."
+          },
+          "response": []
+        },
+        {
+          "name": "Platform: Set Payment Provider Active",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/payment-providers/paystack",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "payment-providers",
+                "paystack"
+              ]
+            },
+            "description": "BILLING_WRITE. Activate/deactivate a subscription-billing provider. Deactivating only blocks starting a NEW subscription checkout with it (POST /billing/checkout/subscribe now 400s) \u2014 an already-subscribed tenant's recurring renewal keeps working via their provider's own webhook, which deliberately never checks isActive (an already-charged renewal must still be credited). Emails every tenant with a live (non-canceled) subscription on that provider, worded to make clear their subscription itself isn't affected. Reactivating sends a 'restored' notice. See docs/TECH_DOC.md's \"Payment Providers: deactivation has real consequences\"."
+          },
+          "response": []
+        },
+        {
           "name": "List Platform Admin Roles",
           "request": {
             "method": "GET",
