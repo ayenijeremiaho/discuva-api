@@ -28,6 +28,7 @@ import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
 import { SessionSurface } from '../enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { WebauthnService } from './webauthn.service';
 
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
@@ -40,6 +41,8 @@ const mockUtilityService = {
 const mockAuditLogService = { log: jest.fn() };
 
 const mockPushService = { unsubscribe: jest.fn() };
+
+const mockWebauthnService = { revokeAllCredentials: jest.fn() };
 
 const mockOtpQb = {
   delete: jest.fn().mockReturnThis(),
@@ -186,6 +189,7 @@ describe('AuthService', () => {
         },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: PushNotificationService, useValue: mockPushService },
+        { provide: WebauthnService, useValue: mockWebauthnService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -1217,6 +1221,37 @@ describe('AuthService', () => {
       await service.verifyDeviceReset('test@test.com', '123456');
 
       expect(mockPushService.unsubscribe).toHaveBeenCalledWith('member-1');
+    });
+
+    it('revokes all WebAuthn credentials so a lost device cannot bypass the reset', async () => {
+      const member = {
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'test@test.com',
+      };
+      const record = {
+        memberId: 'member-1',
+        newDeviceId: 'new-device-id',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      };
+      mockMemberService.findByEmail.mockResolvedValue(member);
+      mockDeviceResetOtpRepository.findOne.mockResolvedValue(record);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Test');
+      mockDeviceResetOtpRepository.save.mockResolvedValue(record);
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+      mockMemberService.setDeviceId.mockResolvedValue(undefined);
+      mockUtilityService.sendEmailWithTemplate.mockResolvedValue(undefined);
+
+      await service.verifyDeviceReset('test@test.com', '123456');
+
+      expect(mockWebauthnService.revokeAllCredentials).toHaveBeenCalledWith(
+        'member-1',
+      );
     });
   });
 

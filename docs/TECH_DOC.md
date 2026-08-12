@@ -1591,7 +1591,15 @@ without admin involvement, subject to a rate limit.
      the reset to their own device — the device is bound to whoever initiated the request.
 2. `POST /auth/device-reset/verify` — accepts `{ email, otp }`. Verifies the OTP, checks expiry, marks the record
    as used, updates `member.deviceId` to the `newDeviceId` stored on the OTP record, invalidates all active sessions,
-   and sends a confirmation email. On success the member must log in fresh from the new device.
+   unsubscribes push, **revokes every one of the member's WebAuthn credentials** (`WebauthnService.revokeAllCredentials`),
+   and sends a confirmation email. On success the member must log in fresh from the new device, re-enrolling biometrics
+   if they want one-tap login again.
+   - **Why WebAuthn credentials are revoked too:** a WebAuthn credential is hardware-bound and deliberately never
+     checks `deviceId` (see `loginWithWebauthn`'s own comment) — several trusted devices are meant to each hold their
+     own credential. Without this, a lost/stolen device's fingerprint or Face ID would keep working right through a
+     device reset, since that lock only ever gated the password path. There's no way to isolate which single stored
+     credential belongs to the lost device, so a device reset revokes all of them rather than leaving any possibly
+     compromised one live.
    - If the attempt count reaches the configured maximum, the email is rate-limited and the member must contact an
      admin for an out-of-band device purge (`DELETE /admin/members/:id/device`).
 
@@ -1966,6 +1974,10 @@ independently.
 - **Clone/replay protection**: each credential's signature `counter` must strictly increase on every successful
   authentication (`@simplewebauthn/server`'s `verifyAuthenticationResponse` enforces this) — a same-or-lower counter
   fails verification, the standard signal an authenticator's key material was cloned.
+- **Interaction with Self-Service Device Reset**: because WebAuthn logins never check `deviceId`, `POST
+  /auth/device-reset/verify` also calls `WebauthnService.revokeAllCredentials(memberId)` — every registered
+  credential is deleted, not just the password-login device lock. See the Device Reset section above for why (a lost
+  device's biometric key would otherwise survive a reset intended to lock it out).
 
 ### Member Module
 

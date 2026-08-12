@@ -45,6 +45,7 @@ import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { Member } from '../../member/entity/member.entity';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { WebauthnService } from './webauthn.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
@@ -94,6 +95,7 @@ export class AuthService {
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
     private readonly pushService: PushNotificationService,
+    private readonly webauthnService: WebauthnService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
@@ -674,6 +676,12 @@ export class AuthService {
       this.sessionService.updateLogout(member.id, SessionSurface.ADMIN),
     ]);
     this.pushService.unsubscribe(member.id);
+    // A WebAuthn credential never checks deviceId (see loginWithWebauthn's
+    // own comment) — without this, a lost/stolen device's fingerprint or
+    // Face ID would keep working right through this reset. No way to tell
+    // which single credential belongs to the lost device, so all of this
+    // member's are revoked; they re-enroll fresh from a device they trust.
+    await this.webauthnService.revokeAllCredentials(member.id);
 
     this.clearDeviceResetRateLimit(email);
     this.logger.log(`Device successfully reset for member ${member.id}`);

@@ -350,4 +350,31 @@ describe('WebauthnService', () => {
       );
     });
   });
+
+  describe('revokeAllCredentials', () => {
+    it('deletes every credential for the member and audit-logs the count', async () => {
+      mockCredentialRepo.delete.mockResolvedValue({ affected: 3 });
+
+      await service.revokeAllCredentials('member-1');
+
+      expect(mockCredentialRepo.delete).toHaveBeenCalledWith({
+        memberId: 'member-1',
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_WEBAUTHN_CREDENTIALS_REVOKED',
+        expect.objectContaining({
+          targetId: 'member-1',
+          metadata: { count: 3 },
+        }),
+      );
+    });
+
+    it('does not audit-log when the member had no credentials to revoke', async () => {
+      mockCredentialRepo.delete.mockResolvedValue({ affected: 0 });
+
+      await service.revokeAllCredentials('member-1');
+
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
+    });
+  });
 });

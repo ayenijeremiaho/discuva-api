@@ -288,4 +288,21 @@ export class WebauthnService {
       metadata: { credentialRowId: id },
     });
   }
+
+  // Called from AuthService.verifyDeviceReset() — a device reset overwrites
+  // the password-login device lock and force-logs-out every session, but a
+  // WebAuthn credential is a separate, hardware-bound key that never checks
+  // deviceId at all (see loginWithWebauthn's own comment). Without this, a
+  // lost/stolen device's fingerprint or Face ID would keep working right
+  // through a "reset my device" recovery. No way to isolate which single
+  // credential belongs to the lost device, so all of them are revoked —
+  // the member re-enrolls fresh from whichever device they actually trust.
+  async revokeAllCredentials(memberId: string): Promise<void> {
+    const result = await this.credentialRepo.delete({ memberId });
+    if (!result.affected) return;
+    this.auditLogService.log('MEMBER_WEBAUTHN_CREDENTIALS_REVOKED', {
+      targetId: memberId,
+      metadata: { count: result.affected },
+    });
+  }
 }
