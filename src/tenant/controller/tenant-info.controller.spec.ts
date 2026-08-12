@@ -52,6 +52,7 @@ const baseTenant = {
   tagline: null,
   address: null,
   supportEmail: null,
+  pwaShortName: null,
   currency: 'NGN',
   timezone: 'UTC',
 };
@@ -100,6 +101,7 @@ describe('TenantInfoController', () => {
         tagline: null,
         address: null,
         supportEmail: null,
+        pwaShortName: null,
         currency: 'NGN',
         timezone: 'UTC',
         assets: { 'login-backdrop': 'https://cdn.example.com/login.jpg' },
@@ -155,6 +157,19 @@ describe('TenantInfoController', () => {
       await expect(controller.updateInfo({ tagline: 'x' })).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('persists and returns pwaShortName', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
+
+      const result = await controller.updateInfo({
+        pwaShortName: 'FBC Lagos',
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ pwaShortName: 'FBC Lagos' }),
+      );
+      expect(result.pwaShortName).toBe('FBC Lagos');
     });
   });
 

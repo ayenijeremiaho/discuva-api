@@ -40,6 +40,7 @@ export interface TenantWithHealth {
   tagline: string | null;
   address: string | null;
   supportEmail: string | null;
+  pwaShortName: string | null;
   currency: string;
   timezone: string;
   isActive: boolean;
@@ -371,6 +372,7 @@ export class PlatformTenantService {
       tagline: tenant.tagline,
       address: tenant.address,
       supportEmail: tenant.supportEmail,
+      pwaShortName: tenant.pwaShortName,
       currency: tenant.currency,
       timezone: tenant.timezone,
       isActive: tenant.isActive,

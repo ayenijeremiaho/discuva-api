@@ -195,6 +195,7 @@ export class TenantInfoController {
       tagline: tenant.tagline,
       address: tenant.address,
       supportEmail: tenant.supportEmail,
+      pwaShortName: tenant.pwaShortName,
       currency: tenant.currency,
       timezone: tenant.timezone,
       assets: await this.tenantAssetService.getOverrides(tenant.id),

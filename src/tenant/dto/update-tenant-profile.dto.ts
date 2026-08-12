@@ -32,6 +32,11 @@ export class UpdateTenantProfileDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(20)
+  pwaShortName?: string;
+
+  @IsOptional()
+  @IsString()
   currency?: string;
 
   @IsOptional()

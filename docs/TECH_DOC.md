@@ -2781,11 +2781,21 @@ announcement requires the `SMS_SEND` permission (distinct from `SMS_READ`, which
 `GET /tenant/info` (`@Public()`, still goes through `TenantMiddleware`) returns branding for the current subdomain —
 unchanged. `PATCH /tenant/info` (`AdminGuard`, new `CHURCH_PROFILE_WRITE` permission) is the tenant self-service
 write side (`docs/MULTI_TENANT_MIGRATION.md` §Phase 6c's deferred item, now built) — lets a church admin edit their
-own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone` without going through platform
-support, which was previously the only way to change any of it (`PATCH /platform/tenants/:id`, platform-admin-only).
-Body (`UpdateTenantProfileDto`) is a partial — every field optional, only provided fields are applied
-(`Object.assign`). Deliberately excludes `subdomain`, `schemaName`, `clusterId`, and `isActive` — platform-controlled,
-not something a church admin can change about their own tenant.
+own `name`/`logoUrl`/`tagline`/`address`/`supportEmail`/`pwaShortName`/`currency`/`timezone` without going through
+platform support, which was previously the only way to change any of it (`PATCH /platform/tenants/:id`,
+platform-admin-only). Body (`UpdateTenantProfileDto`) is a partial — every field optional, only provided fields are
+applied (`Object.assign`). Deliberately excludes `subdomain`, `schemaName`, `clusterId`, and `isActive` —
+platform-controlled, not something a church admin can change about their own tenant.
+
+**`pwaShortName`** (nullable, max 20 chars): the label a member sees under the home-screen icon after installing the
+PWA (Android's manifest `short_name`, iOS's `apple-mobile-web-app-title`) — deliberately separate from `name`, which
+is often too long (formal church names) to survive the ~10-13 characters that render before truncation on a real
+home screen. Falls back to `name` itself when unset (still a real improvement over the platform's own generic name,
+which was the bug this field was added to fix) — see discuva-member's `app/manifest.ts` and
+`context/tenant-context.tsx` for where the fallback chain (`pwaShortName ?? name`) is actually consumed.
+`platform-admin/dto/update-tenant.dto.ts` and `PlatformTenantService`'s `TenantWithHealth`/`toHealthShape` mirror this
+field for parity, though no discuva-platform UI currently exposes editing it — self-service via discuva-admin's
+Church Profile page is the only intended write path today.
 
 **Logo upload (`POST /tenant/logo`, `DELETE /tenant/logo`, both `CHURCH_PROFILE_WRITE`):** `logoUrl` on
 `PATCH /tenant/info` only ever accepted an already-hosted URL — these two routes are the actual upload path, mirroring

@@ -41,6 +41,15 @@ export class Tenant extends BaseEntity {
   @Column({ nullable: true })
   supportEmail: string | null;
 
+  // Home-screen label a member sees after installing the PWA (Android's
+  // manifest short_name / iOS's apple-mobile-web-app-title) — deliberately
+  // separate from `name`, which is often too long (formal church names) for
+  // the ~10-13 characters that survive truncation on a real home screen.
+  // Falls back to `name` itself when unset — see discuva-member's
+  // app/manifest.ts and context/tenant-context.tsx.
+  @Column({ nullable: true, length: 20 })
+  pwaShortName: string | null;
+
   @Column({ default: 'NGN' })
   currency: string;
 
