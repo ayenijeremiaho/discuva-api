@@ -50,7 +50,7 @@ kill_timeout = "10s"
 
   [[http_service.checks]]
     grace_period = "20s"
-    interval = "15s"
+    interval = "30s" # was 15s — /health pings CacheService.ping() (a real Redis round-trip), so this alone was ~5,760 idle Redis reads/day. 30s still catches a genuine outage within a minute, well within an acceptable detection window.
     method = "GET"
     timeout = "5s"
     path = "/health"
