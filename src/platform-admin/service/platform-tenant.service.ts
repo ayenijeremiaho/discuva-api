@@ -130,6 +130,8 @@ export class PlatformTenantService {
     const pending = await this.provisioningService.ensurePendingTenant(
       dto.subdomain,
       dto.churchName,
+      undefined,
+      true,
     );
 
     await this.provisioningService.recordEvent(
@@ -148,6 +150,7 @@ export class PlatformTenantService {
         adminLastname: dto.adminLastname,
         adminEmail: dto.adminEmail,
         planId: dto.planId ?? 'free',
+        allowGenericSubdomain: true,
       });
     } catch (err) {
       await this.tenantRepo.update(pending.id, {

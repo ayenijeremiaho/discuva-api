@@ -1661,6 +1661,16 @@ and safe to re-run by hand after a synchronous failure.
 still means "currently allowed to serve live traffic" (also flipped by `PlatformTenantService.suspendTenant`);
 `onboardingStatus` only ever moves forward through the lifecycle once and never changes on suspend/reactivate.
 
+**Subdomain validation** happens inside `ensurePendingTenant`, before touching the database, against two separate
+blocklists — `403`/`409 ConflictException` either way, but for different reasons: `RESERVED_SUBDOMAINS`
+(`src/tenant/utility/extract-subdomain.ts` — `www`/`api`/`admin`/`platform`/`app`) are words that would actually
+break routing if claimed, blocked for *every* caller including platform admins; `GENERIC_OR_ABUSE_PRONE_SUBDOMAINS`
+(`src/tenant/constants/blocked-signup-subdomains.constant.ts` — `test`/`dev`/`demo`/`staging`/`login`/`billing`/etc.,
+grouped by reason in the file itself) is a policy call against free-tier squatting and phishing-adjacent names, and
+can be bypassed via `ensurePendingTenant`'s 4th param (`allowGenericSubdomain`) — set only by
+`PlatformTenantService.createTenant`, since a platform admin deliberately creating e.g. a real sales-demo tenant at
+`demo.<domain>` is a trusted, authenticated action, not the abuse case this list exists to stop.
+
 **Self-serve signup flow (async):**
 1. `TenantProvisioningService.ensurePendingTenant(subdomain, churchName, parentTenantId?)` — the find-or-create part
    of the old `provision()`, now its own method — creates the `Tenant` row (`onboardingStatus: PENDING`) or returns

@@ -20,6 +20,7 @@ import { PasswordResetOtp } from '../../auth/entity/password-reset-otp.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { RESERVED_SUBDOMAINS } from '../utility/extract-subdomain';
+import { GENERIC_OR_ABUSE_PRONE_SUBDOMAINS } from '../constants/blocked-signup-subdomains.constant';
 import { subdomainToSchemaName } from '../utility/schema-name';
 import { buildAdminUrl } from '../utility/tenant-url';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
@@ -62,6 +63,9 @@ export interface ProvisionTenantParams {
   // Subscription.sponsoredByTenantId so PlatformAnalyticsService's MRR
   // calculation correctly excludes it.
   sponsoredPlanId?: string;
+  // See ensurePendingTenant's identical param — only ever set true by
+  // PlatformTenantService.createTenant.
+  allowGenericSubdomain?: boolean;
 }
 
 // Shared by POST /signup and the provision:tenant CLI script — one
@@ -98,11 +102,25 @@ export class TenantProvisioningService {
     subdomain: string,
     churchName: string,
     parentTenantId?: string,
+    // Set only by PlatformTenantService.createTenant — a trusted,
+    // authenticated platform admin deliberately choosing a generic/reserved-
+    // looking word (e.g. a real "demo" tenant for sales). Never bypasses
+    // RESERVED_SUBDOMAINS itself — those would actually break routing for
+    // anyone, admin-created or not.
+    allowGenericSubdomain = false,
   ): Promise<Tenant> {
     const normalized = subdomain.toLowerCase();
     if (RESERVED_SUBDOMAINS.has(normalized)) {
       throw new ConflictException(
         `"${normalized}" is a reserved subdomain and can't be used.`,
+      );
+    }
+    if (
+      !allowGenericSubdomain &&
+      GENERIC_OR_ABUSE_PRONE_SUBDOMAINS.has(normalized)
+    ) {
+      throw new ConflictException(
+        `"${normalized}" isn't available as a subdomain — please choose something specific to your church.`,
       );
     }
 
@@ -156,6 +174,7 @@ export class TenantProvisioningService {
       params.subdomain,
       params.churchName,
       params.parentTenantId,
+      params.allowGenericSubdomain,
     );
 
     await this.ensureSchemaExists(tenant.schemaName);

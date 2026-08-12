@@ -209,6 +209,30 @@ describe('TenantProvisioningService', () => {
       expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
     });
 
+    it('rejects a generic/abuse-prone subdomain by default', async () => {
+      await expect(
+        service.ensurePendingTenant('demo', 'Test Church'),
+      ).rejects.toThrow("isn't available as a subdomain");
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('allows a generic/abuse-prone subdomain when a trusted caller opts in', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(null);
+      mockTenantRepo.create.mockImplementation((v) => v);
+      mockTenantRepo.save.mockImplementation((v) => v);
+
+      await expect(
+        service.ensurePendingTenant('demo', 'Test Church', undefined, true),
+      ).resolves.toBeDefined();
+    });
+
+    it('never allows a routing-reserved subdomain, even with the bypass flag set', async () => {
+      await expect(
+        service.ensurePendingTenant('admin', 'Test Church', undefined, true),
+      ).rejects.toThrow('reserved subdomain');
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+
     it('rejects when the subdomain is already in use by an active tenant', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue({
         id: 'tenant-1',

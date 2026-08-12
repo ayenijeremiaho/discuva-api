@@ -237,6 +237,8 @@ describe('PlatformTenantService', () => {
       expect(mockProvisioningService.ensurePendingTenant).toHaveBeenCalledWith(
         dto.subdomain,
         dto.churchName,
+        undefined,
+        true,
       );
       expect(mockProvisioningService.recordEvent).toHaveBeenCalledWith(
         'tenant-1',
