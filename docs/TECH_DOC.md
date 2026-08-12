@@ -2847,6 +2847,8 @@ the platform's own, never a tenant's. This is the platform-billing counterpart t
 giving/tithe system (`src/giving-checkout/`, which also supports Kora — `KoraGivingProvider` — plus Stripe); the two
 systems share no config or code, only the same proven Korapay request/webhook-signing shape.
 
+**`Plan.currency` is validated against `SUPPORTED_BILLING_CURRENCIES` (`src/billing/constant/supported-currencies.constant.ts`), currently `['NGN', 'USD']` only.** Nothing in `PaymentProviderRegistryService` or any of the three provider implementations checks that Discuva's own merchant account for the chosen provider can actually settle in a plan's currency — a plan created with an unsupported currency would only fail at charge time, at the provider, not at plan-creation time. `CreatePlanDto`/`UpdatePlanDto` enforce this whitelist so a currency can't be picked (via `discuva-platform`'s Plan form or a direct API call) without first confirming it with each active provider's Discuva-owned account and widening the constant.
+
 **Currency unit mismatch between the providers, handled internally:** Paystack's Initialize Transaction takes
 `amount` in the currency's smallest unit (kobo for NGN) — matches this codebase's existing `priceCents`/`amountCents`
 convention, no conversion needed. Flutterwave's Standard Payment and Korapay's Initialize Charge both take the
