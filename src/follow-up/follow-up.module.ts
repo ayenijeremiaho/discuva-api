@@ -45,14 +45,16 @@ import { Tenant } from '../tenant/entity/tenant.entity';
       name: FOLLOW_UP_QUEUE,
       settings: {
         lockDuration: 5 * 60 * 1000,
-        stalledInterval: 60 * 1000,
         maxStalledCount: 2,
         // A per-queue `settings` object here fully replaces (not merges
         // with) BullModule.forRootAsync's own `settings` — see the comment
-        // there. Repeat drainDelay/guardInterval explicitly so this queue
-        // doesn't fall back to Bull's noisy 5s defaults.
-        drainDelay: 300,
-        guardInterval: 300000,
+        // there. Repeated to match the root config rather than falling
+        // back to Bull's noisy 5s/5s/30s defaults; post-event follow-up
+        // work isn't time-critical enough to justify faster stalled-job
+        // detection than the app's other queues get.
+        drainDelay: 3600,
+        guardInterval: 3600000,
+        stalledInterval: 600000,
       },
     }),
     UtilityModule,

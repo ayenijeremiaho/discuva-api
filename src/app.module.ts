@@ -193,16 +193,21 @@ import { SocialMediaModule } from './social-media/social-media.module';
         // registered queue, forever, regardless of tenant/job volume — with
         // 7 queues in this app that's ~250k+ Redis commands/day even with
         // zero jobs ever enqueued, which is what actually exhausted the
-        // Upstash quota with no tenants live. Raising these has no real
-        // latency cost: Redis's blocking BRPOPLPUSH wakes immediately the
-        // moment a real job is pushed, and guardInterval's ceiling
-        // self-adjusts down whenever a delayed job is actually scheduled
-        // (none exist anywhere in this codebase today) — these numbers only
-        // govern how often idle queues poll for nothing.
+        // Upstash quota with no tenants live. drainDelay and guardInterval
+        // are independent timers (confirmed in bull/lib/queue.js) with no
+        // real latency cost at any value: Redis's blocking BRPOPLPUSH wakes
+        // immediately the moment a real job is pushed regardless of this
+        // ceiling, and guardInterval's ceiling self-adjusts down whenever a
+        // delayed job is actually scheduled (none exist anywhere in this
+        // codebase today) — so both are pushed to the practical max. Only
+        // stalledInterval has a genuine tradeoff (how long a crashed
+        // worker's job sits unclaimed before Bull retries it), so it's kept
+        // shorter — 10 min is still a non-issue for this app's single
+        // always-on machine and short-lived handlers.
         settings: {
-          drainDelay: 300, // seconds
-          guardInterval: 300000, // ms
-          stalledInterval: 300000, // ms
+          drainDelay: 3600, // seconds
+          guardInterval: 3600000, // ms
+          stalledInterval: 600000, // ms
         },
       }),
       inject: [ConfigService],
