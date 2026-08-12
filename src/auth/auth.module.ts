@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { AuthService } from './service/auth.service';
+import { WebauthnService } from './service/webauthn.service';
 import { AuthController } from './controller/auth.controller';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule } from '@nestjs/config';
@@ -15,6 +16,7 @@ import { PasswordResetOtp } from './entity/password-reset-otp.entity';
 import { DeviceResetOtp } from './entity/device-reset-otp.entity';
 import { EmailChangeOtp } from './entity/email-change-otp.entity';
 import { DepartmentLead } from '../department/entity/department-lead.entity';
+import { MemberWebauthnCredential } from '../member/entity/member-webauthn-credential.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import jwtConfig from '../config/jwt.config';
 import refreshJwtConfig from '../config/refresh.jwt.config';
@@ -30,6 +32,7 @@ import { UtilityModule } from '../utility/utility.module';
       DeviceResetOtp,
       EmailChangeOtp,
       DepartmentLead,
+      MemberWebauthnCredential,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by AuthService.purgeExpiredOtps' forEachActiveTenant loop.
@@ -41,6 +44,7 @@ import { UtilityModule } from '../utility/utility.module';
   controllers: [AuthController],
   providers: [
     AuthService,
+    WebauthnService,
     LocalStrategy,
     JwtStrategy,
     RefreshJwtStrategy,

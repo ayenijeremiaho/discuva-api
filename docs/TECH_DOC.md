@@ -1914,7 +1914,10 @@ them) — nothing here provisions that.
 **Routes:** `POST /auth/signup`, `POST /auth/login`, `POST /auth/admin-login`, `POST /auth/refresh`,
 `POST /auth/logout`, `GET /auth/me`, `POST /auth/change-password`, `POST /auth/email-change/request`,
 `POST /auth/email-change/confirm`, `POST /auth/forgot-password`,
-`POST /auth/reset-password`, `POST /auth/device-reset/request`, `POST /auth/device-reset/verify`
+`POST /auth/reset-password`, `POST /auth/device-reset/request`, `POST /auth/device-reset/verify`,
+`POST /auth/webauthn/login/options`, `POST /auth/webauthn/login/verify`,
+`POST /auth/webauthn/register/options`, `POST /auth/webauthn/register/verify`,
+`GET /auth/webauthn/credentials`, `DELETE /auth/webauthn/credentials/:id`
 
 `POST /auth/email-change/*` require an authenticated session (member or worker) — see Self-Service Email Change Flow
 above for the full request/confirm sequence.
@@ -1923,6 +1926,46 @@ above for the full request/confirm sequence.
 `deviceId` is required. `POST /auth/admin-login` is for the **web admin portal** — it verifies that the caller has an
 active `Admin` record and has no device check. Both routes use the same Passport `LocalAuthGuard` for credential
 validation.
+
+**WebAuthn / biometric login (`WebauthnService`, `src/auth/service/webauthn.service.ts`)** — mobile-app-only
+alternative to password login using the browser's platform authenticator (Face ID / Touch ID / Android fingerprint /
+Windows Hello), built on `@simplewebauthn/server`. `member_webauthn_credentials` (tenant schema, migrated in
+`src/migrations/tenant/`) holds one row per registered device/authenticator — deliberately no uniqueness constraint
+on `member_id`, unlike `member_sessions`' one-row-per-surface rule: a member can register several devices
+independently.
+
+- **Usernameless (discoverable/resident credentials)** — registration sets `residentKey: 'required'`, so
+  `POST /auth/webauthn/login/options` needs no email and returns generic options with `allowCredentials` omitted;
+  the browser/OS itself resolves which registered credential to use and prompts biometrics directly. The resolved
+  `memberId` only becomes known once `POST /auth/webauthn/login/verify` succeeds (matched by the assertion's
+  `credentialId` against the stored row), at which point `AuthService.loginWithWebauthn(memberId)` issues tokens via
+  the exact same `generateTokens()` used by password login — no separate token-issuance path exists.
+- **`loginWithWebauthn` runs the same active/status checks `validateMember()` applies for password login**
+  (`INACTIVE` status, revoked/suspended worker), but **deliberately does not** apply `login()`'s single-`deviceId`
+  lock — that lock's threat model (a shared/leaked password) doesn't apply to a hardware-bound private key that
+  never leaves the device, and the entire point of allowing several WebAuthn credentials per member is several
+  trusted devices logged in independently.
+- **RP ID is the platform's fixed `APP_BASE_DOMAIN`, never the tenant subdomain** — WebAuthn allows an RP ID that's
+  a registrable-domain suffix of the current origin, so a credential registered on `church-a.<base>` still validates
+  when asserted from `church-a.<base>` later (the request's actual `Origin` header is still checked exactly via
+  `expectedOrigin` on every verify call). RP *name* (shown in the OS-level prompt) is resolved per-request from the
+  current tenant's own `Tenant.name` where available, falling back to `PRODUCT_NAME` — same personalization as every
+  other tenant-branded surface in this app.
+- **Challenges are ephemeral Redis entries** (`CacheService`, 5 min TTL, key `webauthn_challenge:<memberId-or-random-challengeId>`)
+  — never persisted to Postgres, single-use (deleted immediately after a verify attempt, success or failure).
+- **Registration** (`POST /auth/webauthn/register/options` / `/verify`) requires an existing authenticated session
+  (`JwtAuthGuard`, same as any other `/auth/*` account-management route) — a member enrolls a *new* device from
+  within an already-logged-in session, typically from Account settings.
+- **Device management**: `GET /auth/webauthn/credentials` returns `{ id, deviceName, createdAt, lastUsedAt }` per
+  row — never `credentialId`/`publicKey`, which the client has no use for. `deviceName` is derived from the
+  registering request's `User-Agent` at enrollment time ("iPhone", "Android device", "Mac", "Windows PC" — a label
+  only, never used for anything security-relevant). `DELETE /auth/webauthn/credentials/:id` is scoped to
+  `(id, memberId)` — `404` if the row doesn't belong to the caller. Both credential registration and removal are
+  audit-logged (`MEMBER_WEBAUTHN_CREDENTIAL_REGISTERED` / `_REMOVED`), and a successful biometric login logs
+  `MEMBER_LOGIN_WEBAUTHN` (distinct from `MEMBER_LOGIN`, so the audit trail can tell login method apart).
+- **Clone/replay protection**: each credential's signature `counter` must strictly increase on every successful
+  authentication (`@simplewebauthn/server`'s `verifyAuthenticationResponse` enforces this) — a same-or-lower counter
+  fails verification, the standard signal an authenticator's key material was cloned.
 
 ### Member Module
 
@@ -4874,6 +4917,12 @@ outside the requested `?months=` window).
 | POST   | /auth/reset-password                                       | Public                                                        | Verify OTP and set new password; invalidates current session                                                  |
 | POST   | /auth/device-reset/request                                 | Public                                                        | Self-service device reset — rate-limited; issues OTP to registered email; locks in `newDeviceId` at request   |
 | POST   | /auth/device-reset/verify                                  | Public                                                        | Verify OTP and swap `deviceId` to `newDeviceId`; invalidates all active sessions                              |
+| POST   | /auth/webauthn/login/options                               | Public                                                        | Biometric login, step 1 — no email needed (`allowCredentials` omitted); returns `{ challengeId, options }`; IP-throttled (10/min) |
+| POST   | /auth/webauthn/login/verify                                | Public                                                        | Biometric login, step 2 — body `{ challengeId, response }`; resolves the member from the credential and issues tokens via the same path password login uses |
+| POST   | /auth/webauthn/register/options                            | Any (JwtAuthGuard)                                            | Enroll a new device, step 1 — returns resident-key (`residentKey: 'required'`) registration options for the calling member |
+| POST   | /auth/webauthn/register/verify                              | Any (JwtAuthGuard)                                            | Enroll a new device, step 2 — body is the browser's `RegistrationResponseJSON`; stores the new credential, `204` on success |
+| GET    | /auth/webauthn/credentials                                  | Any (JwtAuthGuard)                                            | List the caller's own registered devices — `{ id, deviceName, createdAt, lastUsedAt }[]`, never the credential id/public key |
+| DELETE | /auth/webauthn/credentials/:id                              | Any (JwtAuthGuard)                                            | Remove one of the caller's own devices; `404` if it doesn't belong to them; `204` on success                  |
 | PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` (excludes email and admin-only church-record fields) |
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |

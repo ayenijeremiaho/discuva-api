@@ -553,6 +553,96 @@ describe('AuthService', () => {
     });
   });
 
+  describe('loginWithWebauthn', () => {
+    beforeEach(() => {
+      mockJwtService.signAsync.mockResolvedValue('webauthn-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+    });
+
+    it('throws UnauthorizedException for an inactive member', async () => {
+      mockMemberService.getById.mockResolvedValueOnce({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.INACTIVE,
+        changedPassword: true,
+      });
+
+      await expect(service.loginWithWebauthn('member-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('throws UnauthorizedException for a worker with no workerProfile', async () => {
+      mockMemberService.getById.mockResolvedValueOnce({
+        id: 'member-1',
+        role: MemberRoleEnum.WORKER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+        workerProfile: null,
+      });
+
+      await expect(service.loginWithWebauthn('member-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('throws UnauthorizedException for a suspended worker', async () => {
+      mockMemberService.getById.mockResolvedValueOnce({
+        id: 'member-1',
+        role: MemberRoleEnum.WORKER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+        workerProfile: { id: 'wp-1', status: 'SUSPENDED' },
+      });
+
+      await expect(service.loginWithWebauthn('member-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('issues tokens and logs MEMBER_LOGIN_WEBAUTHN for an active member', async () => {
+      mockMemberService.getById.mockResolvedValueOnce({
+        id: 'member-1',
+        firstname: 'Test',
+        lastname: 'Member',
+        email: 'test@test.com',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+      });
+
+      const result = await service.loginWithWebauthn('member-1');
+
+      expect(result).toMatchObject({
+        access_token: 'webauthn-token',
+        token_type: 'Bearer',
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_LOGIN_WEBAUTHN',
+        expect.objectContaining({ targetId: 'member-1' }),
+      );
+    });
+
+    it('never applies the single-deviceId password-login lock', async () => {
+      mockMemberService.getById.mockResolvedValueOnce({
+        id: 'member-1',
+        firstname: 'Test',
+        lastname: 'Member',
+        email: 'test@test.com',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        changedPassword: true,
+      });
+
+      await service.loginWithWebauthn('member-1');
+
+      expect(mockMemberService.getByIdWithCredentials).not.toHaveBeenCalled();
+      expect(mockMemberService.setDeviceId).not.toHaveBeenCalled();
+    });
+  });
+
   describe('logout', () => {
     it('should call sessionService.updateLogout with memberId and surface', async () => {
       mockSessionService.updateLogout.mockResolvedValue(undefined);

@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Request,
   Res,
@@ -12,7 +14,12 @@ import {
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
+import type {
+  AuthenticationResponseJSON,
+  RegistrationResponseJSON,
+} from '@simplewebauthn/server';
 import { AuthService } from '../service/auth.service';
+import { WebauthnService } from '../service/webauthn.service';
 import { Public } from '../decorator/public.decorator';
 import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check.decorator';
 import { LocalAuthGuard } from '../guard/local-auth.guard';
@@ -41,6 +48,7 @@ const REFRESH_COOKIE_PATH = '/v1/auth/refresh';
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly webauthnService: WebauthnService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -78,6 +86,34 @@ export class AuthController {
     );
     this.setRefreshCookie(res, refresh_token ?? '');
     return body;
+  }
+
+  // Pre-login (no email typed) — the browser/OS resolves which registered
+  // credential to use. Throttled by IP rather than by-account like password
+  // login's rate limiter, since there's no account to key off yet.
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('webauthn/login/options')
+  async webauthnLoginOptions() {
+    return this.webauthnService.generateAuthenticationOptions();
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('webauthn/login/verify')
+  async webauthnLoginVerify(
+    @Request() req: any,
+    @Body('challengeId') challengeId: string,
+    @Body('response') response: AuthenticationResponseJSON,
+  ): Promise<JwtResponse> {
+    const memberId = await this.webauthnService.verifyAuthenticationResponse(
+      challengeId,
+      response,
+      req.headers.origin,
+    );
+    return this.authService.loginWithWebauthn(memberId);
   }
 
   @SkipPasswordChangeCheck()
@@ -142,6 +178,44 @@ export class AuthController {
   ): Promise<{ message: string }> {
     const message = await this.authService.changePassword(req.user.id, dto);
     return { message };
+  }
+
+  @SkipPasswordChangeCheck()
+  @HttpCode(HttpStatus.OK)
+  @Post('webauthn/register/options')
+  async webauthnRegisterOptions(@Request() req: any) {
+    return this.webauthnService.generateRegistrationOptions(req.user.id);
+  }
+
+  @SkipPasswordChangeCheck()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('webauthn/register/verify')
+  async webauthnRegisterVerify(
+    @Request() req: any,
+    @Body() response: RegistrationResponseJSON,
+  ): Promise<void> {
+    await this.webauthnService.verifyRegistrationResponse(
+      req.user.id,
+      response,
+      req.headers.origin,
+      req.headers['user-agent'],
+    );
+  }
+
+  @SkipPasswordChangeCheck()
+  @Get('webauthn/credentials')
+  async webauthnCredentials(@Request() req: any) {
+    return this.webauthnService.listCredentials(req.user.id);
+  }
+
+  @SkipPasswordChangeCheck()
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('webauthn/credentials/:id')
+  async removeWebauthnCredential(
+    @Request() req: any,
+    @Param('id') id: string,
+  ): Promise<void> {
+    await this.webauthnService.removeCredential(req.user.id, id);
   }
 
   @HttpCode(HttpStatus.OK)

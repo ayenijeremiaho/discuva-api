@@ -899,6 +899,209 @@
               "body": "{ \"statusCode\": 400, \"message\": \"Invalid or expired OTP\" }"
             }
           ]
+        },
+        {
+          "name": "WebAuthn Login Options",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.challengeId) pm.collectionVariables.set('webauthnChallengeId', res.data.challengeId);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/webauthn/login/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "webauthn",
+                "login",
+                "options"
+              ]
+            },
+            "description": "Biometric login, step 1. No email/body needed — residentKey credentials mean the browser/OS resolves which registered credential to use. Returns `{ challengeId, options }`; `options` is passed directly into the browser's `navigator.credentials.get()` (via @simplewebauthn/browser's `startAuthentication()`). Public, IP-throttled at 10/min. Can't be meaningfully exercised from Postman itself — the actual credential ceremony only happens in a real browser with platform-authenticator hardware."
+          },
+          "response": []
+        },
+        {
+          "name": "WebAuthn Login Verify",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.access_token)  pm.collectionVariables.set('accessToken',  res.data.access_token);",
+                  "if (res.data?.refresh_token) pm.collectionVariables.set('refreshToken', res.data.refresh_token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challengeId\": \"{{webauthnChallengeId}}\",\n  \"response\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/webauthn/login/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "webauthn",
+                "login",
+                "verify"
+              ]
+            },
+            "description": "Biometric login, step 2. `response` is the browser's AuthenticationResponseJSON from `startAuthentication()` — not something that can be hand-crafted in Postman. Resolves the member from the stored credential matching `response.id`, verifies the signature, checks the counter strictly increased (clone/replay protection), then issues tokens via the exact same path password login uses. Public, IP-throttled."
+          },
+          "response": [
+            {
+              "name": "401 Challenge expired or device not registered",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{ \"statusCode\": 401, \"message\": \"This device is not registered for biometric login.\" }"
+            }
+          ]
+        },
+        {
+          "name": "WebAuthn Register Options",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/webauthn/register/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "webauthn",
+                "register",
+                "options"
+              ]
+            },
+            "description": "Enroll a new device, step 1. Requires an authenticated session (JwtAuthGuard) — a member enrolls a new device from within an already-logged-in session (e.g. Account settings). Returns residentKey:'required' registration options for `navigator.credentials.create()` (via @simplewebauthn/browser's `startRegistration()`). Excludes any credentials already registered for this member."
+          },
+          "response": []
+        },
+        {
+          "name": "WebAuthn Register Verify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/webauthn/register/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "webauthn",
+                "register",
+                "verify"
+              ]
+            },
+            "description": "Enroll a new device, step 2. Body is the browser's RegistrationResponseJSON from `startRegistration()` — not something that can be hand-crafted in Postman. Verifies against the challenge from the options step, stores the new credential (device name derived from the request's User-Agent), audit-logs MEMBER_WEBAUTHN_CREDENTIAL_REGISTERED. Returns 204 on success."
+          },
+          "response": []
+        },
+        {
+          "name": "List WebAuthn Credentials",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/auth/webauthn/credentials",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "webauthn",
+                "credentials"
+              ]
+            },
+            "description": "List the caller's own registered biometric devices — `{ id, deviceName, createdAt, lastUsedAt }[]`. Never returns the credential id or public key, the client has no use for them."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": [ { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"deviceName\": \"iPhone\", \"createdAt\": \"2026-08-12T08:00:00.000Z\", \"lastUsedAt\": \"2026-08-12T09:15:00.000Z\" } ] }"
+            }
+          ]
+        },
+        {
+          "name": "Remove WebAuthn Credential",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/auth/webauthn/credentials/{{webauthnCredentialRowId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "webauthn",
+                "credentials",
+                "{{webauthnCredentialRowId}}"
+              ]
+            },
+            "description": "Remove one of the caller's own registered devices, e.g. after losing a phone. Scoped to (id, memberId) — 404 if the row doesn't belong to the caller. Audit-logged as MEMBER_WEBAUTHN_CREDENTIAL_REMOVED. 204 on success."
+          },
+          "response": [
+            {
+              "name": "404 Not found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"Device not found.\" }"
+            }
+          ]
         }
       ]
     },

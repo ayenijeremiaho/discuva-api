@@ -262,6 +262,53 @@ export class AuthService {
     return tokens;
   }
 
+  // WebauthnService has already proven this device holds a previously-
+  // registered credential for this memberId by the time this runs — it
+  // does not independently re-check member status, same division of
+  // responsibility as validateMember()/LocalStrategy for the password path.
+  // Deliberately does not run the deviceId single-device-lock check
+  // login() applies — WebAuthn credentials are already per-device and
+  // hardware-bound, so that lock's shared/leaked-password threat model
+  // doesn't apply here, and the point of allowing several registered
+  // credentials per member is several trusted devices at once.
+  async loginWithWebauthn(memberId: string): Promise<JwtResponse> {
+    const member = await this.memberService.getById(memberId, [
+      'workerProfile',
+    ]);
+
+    if (member.status === MemberStatusEnum.INACTIVE) {
+      throw new UnauthorizedException(
+        'Your account is inactive. Contact admin.',
+      );
+    }
+    if (member.role === MemberRoleEnum.WORKER) {
+      if (!member.workerProfile) {
+        throw new UnauthorizedException(
+          'Worker access revoked. Please contact admin.',
+        );
+      }
+      if (member.workerProfile.status !== WorkerStatusEnum.ACTIVE) {
+        throw new UnauthorizedException(
+          'Worker account suspended. Please contact admin.',
+        );
+      }
+    }
+
+    const tokens = await this.generateTokens(
+      member.id,
+      member.role,
+      !member.changedPassword,
+      SessionSurface.MEMBER,
+    );
+    this.auditLogService.log('MEMBER_LOGIN_WEBAUTHN', {
+      targetId: member.id,
+      targetEmail: member.email,
+      targetName: `${member.firstname} ${member.lastname}`,
+    });
+
+    return tokens;
+  }
+
   async refreshToken(user: MemberAuth): Promise<JwtResponse> {
     if (user.replayedTokens) return user.replayedTokens;
     return this.generateTokens(
