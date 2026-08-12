@@ -188,6 +188,22 @@ import { SocialMediaModule } from './social-media/social-media.module';
           db: config.get<number>('REDIS_DB', 0),
           ...(config.get<boolean>('REDIS_TLS') && { tls: {} }),
         },
+        // Bull's own idle-worker timers (drainDelay, guardInterval,
+        // stalledInterval) default to 5-30s and fire unconditionally per
+        // registered queue, forever, regardless of tenant/job volume — with
+        // 7 queues in this app that's ~250k+ Redis commands/day even with
+        // zero jobs ever enqueued, which is what actually exhausted the
+        // Upstash quota with no tenants live. Raising these has no real
+        // latency cost: Redis's blocking BRPOPLPUSH wakes immediately the
+        // moment a real job is pushed, and guardInterval's ceiling
+        // self-adjusts down whenever a delayed job is actually scheduled
+        // (none exist anywhere in this codebase today) — these numbers only
+        // govern how often idle queues poll for nothing.
+        settings: {
+          drainDelay: 300, // seconds
+          guardInterval: 300000, // ms
+          stalledInterval: 300000, // ms
+        },
       }),
       inject: [ConfigService],
     }),

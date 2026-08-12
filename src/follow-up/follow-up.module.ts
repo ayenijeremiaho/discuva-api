@@ -47,6 +47,12 @@ import { Tenant } from '../tenant/entity/tenant.entity';
         lockDuration: 5 * 60 * 1000,
         stalledInterval: 60 * 1000,
         maxStalledCount: 2,
+        // A per-queue `settings` object here fully replaces (not merges
+        // with) BullModule.forRootAsync's own `settings` — see the comment
+        // there. Repeat drainDelay/guardInterval explicitly so this queue
+        // doesn't fall back to Bull's noisy 5s defaults.
+        drainDelay: 300,
+        guardInterval: 300000,
       },
     }),
     UtilityModule,
