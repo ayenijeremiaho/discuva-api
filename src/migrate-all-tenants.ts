@@ -22,51 +22,57 @@ async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });
-  try {
-    const dataSource = app.get(DataSource);
-    const provisioningService = app.get(TenantProvisioningService);
+  // Booting AppModule also fires unrelated onApplicationBootstrap hooks
+  // (BirthdayService, MembershipAnniversaryService) that kick off their own
+  // startup catch-up work in the background, not awaited by Nest. Those
+  // hooks use this app's own fire-and-forget cache calls (CacheService
+  // conventions), so a graceful app.close() here can tear down the Redis
+  // connection while one of them is still mid-flight — an unhandled
+  // rejection from a dangling call ("Connection is closed") then kills this
+  // process even though tenant migrations already succeeded. This script's
+  // job is done once migrations finish, so skip the graceful shutdown
+  // entirely and hard-exit instead of calling app.close().
+  const dataSource = app.get(DataSource);
+  const provisioningService = app.get(TenantProvisioningService);
 
-    const tenants: { subdomain: string; schema_name: string }[] =
-      await dataSource.query(
-        `SELECT subdomain, schema_name FROM tenants WHERE is_active = true ORDER BY created_at`,
-      );
-
-    console.log(`Migrating ${tenants.length} active tenant schema(s)...`);
-
-    let cursor = 0;
-    const failures: { subdomain: string; error: unknown }[] = [];
-
-    async function worker() {
-      while (cursor < tenants.length) {
-        const tenant = tenants[cursor++];
-        try {
-          await provisioningService.runTenantMigrations(tenant.schema_name);
-          console.log(`  ✓ ${tenant.subdomain}`);
-        } catch (error) {
-          console.error(`  ✗ ${tenant.subdomain}:`, error);
-          failures.push({ subdomain: tenant.subdomain, error });
-        }
-      }
-    }
-
-    await Promise.all(
-      Array.from({ length: Math.min(CONCURRENCY, tenants.length) }, worker),
+  const tenants: { subdomain: string; schema_name: string }[] =
+    await dataSource.query(
+      `SELECT subdomain, schema_name FROM tenants WHERE is_active = true ORDER BY created_at`,
     );
 
-    if (failures.length) {
-      console.error(
-        `\n${failures.length}/${tenants.length} tenant migration(s) failed: ${failures
-          .map((f) => f.subdomain)
-          .join(', ')}`,
-      );
-      process.exitCode = 1;
-      return;
-    }
+  console.log(`Migrating ${tenants.length} active tenant schema(s)...`);
 
-    console.log(`\nAll ${tenants.length} tenant schema(s) up to date.`);
-  } finally {
-    await app.close();
+  let cursor = 0;
+  const failures: { subdomain: string; error: unknown }[] = [];
+
+  async function worker() {
+    while (cursor < tenants.length) {
+      const tenant = tenants[cursor++];
+      try {
+        await provisioningService.runTenantMigrations(tenant.schema_name);
+        console.log(`  ✓ ${tenant.subdomain}`);
+      } catch (error) {
+        console.error(`  ✗ ${tenant.subdomain}:`, error);
+        failures.push({ subdomain: tenant.subdomain, error });
+      }
+    }
   }
+
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, tenants.length) }, worker),
+  );
+
+  if (failures.length) {
+    console.error(
+      `\n${failures.length}/${tenants.length} tenant migration(s) failed: ${failures
+        .map((f) => f.subdomain)
+        .join(', ')}`,
+    );
+    process.exit(1);
+  }
+
+  console.log(`\nAll ${tenants.length} tenant schema(s) up to date.`);
+  process.exit(0);
 }
 
 bootstrap().catch((err) => {
