@@ -378,6 +378,12 @@ npm run migration:run:all-tenants
 
 This iterates `public.tenants`, sets `search_path` to each schema, and applies pending migrations. Run this during every production deployment.
 
+**Wired in via `fly.toml`'s `release_command`** (`node dist/migrate-all-tenants.js`) — Fly runs it automatically on a
+fresh machine using the newly-built image, before promoting that release to receive traffic. A non-zero exit (this
+script's own fail-fast policy) blocks the promotion entirely, and `experimental.auto_rollback = true` reverts to the
+last working release — a broken tenant migration can't reach production traffic. No separate manual step or
+GitHub Actions changes needed; `.github/workflows/deploy.yml` only builds and calls `flyctl deploy`.
+
 **Execution model:**
 
 - **Concurrency:** schemas are lock-independent — safe to migrate concurrently across tenants. Migrations *within* one tenant's schema must stay sequential (TypeORM's own runner already guarantees this per connection). Use a bounded worker pool (~5–10 concurrent tenants, capped well under Postgres `max_connections`) rather than full-sequential (correct but slow at scale) or unbounded parallel (correct but can exhaust connections).

@@ -7,18 +7,13 @@
 # `docker run`/compose time instead, via env_file: env/api.env on the
 # droplet). All of discuva-api's real config is runtime env, not build-time.
 #
-# KNOWN GAP this workflow deliberately does NOT try to paper over: pending
-# `public`-schema migrations run automatically on boot (`migrationsRun: true`
-# in db.config.ts) — but tenant-schema migrations across ALL existing
-# tenants do NOT run automatically; that's the separate
-# `npm run migration:run:all-tenants:prod` script (`node dist/migrate-all-tenants`).
-# It compiles fine as part of the normal `nest build` and runs on the plain
-# compiled JS in this repo's own production image — no ts-node or
-# devDependencies required. Run it manually (e.g. `docker exec` into the
-# running api container) after a deploy that includes a new tenant-schema
-# migration — see the Production Deployment Commands section. This is
-# flagged, not silently worked around, per your instruction not to touch
-# application code without approval.
+# Tenant-schema migrations (src/migrations/tenant/) are NOT run by this
+# workflow — they're applied by fly.toml's own `release_command`
+# (`node dist/migrate-all-tenants.js`), which Fly runs automatically on a
+# fresh machine using the new image before promoting it to receive traffic,
+# right after `flyctl deploy` below. Nothing extra needed here. Public-
+# schema migrations still run separately, automatically on boot
+# (`migrationsRun: true` in db.config.ts).
 name: Build and Deploy discuva-api
 
 on:

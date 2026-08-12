@@ -24,6 +24,18 @@ kill_timeout = "10s"
 [experimental]
   auto_rollback = true
 
+# Applies pending tenant-schema migrations (src/migrations/tenant/) across
+# every active tenant on every deploy, closing the gap public-schema
+# migrations don't have (those already run automatically on boot via
+# migrationsRun: true in db.config.ts). Runs on a fresh machine using the
+# *new* image, before Fly promotes this release to receive traffic — if
+# migrate-all-tenants.js exits non-zero (its own fail-fast policy, see that
+# file's comments), Fly never switches traffic over, and auto_rollback
+# above reverts to the last working release. Same app secrets/network
+# access as the real machines, nothing extra to configure.
+[deploy]
+  release_command = "node dist/migrate-all-tenants.js"
+
 [env]
   NODE_ENV = "production"
   PORT = "3000"
