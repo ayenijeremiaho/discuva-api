@@ -1,14 +1,16 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService, ConfigType } from '@nestjs/config';
 import * as argon2 from 'argon2';
 import { randomInt } from 'node:crypto';
-import { ConfigService } from '@nestjs/config';
+import platformAdminRefreshJwtConfig from '../../config/platform-admin-refresh-jwt.config';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
 import { PlatformAdminPasswordResetOtp } from '../entity/platform-admin-password-reset-otp.entity';
 import {
@@ -17,6 +19,11 @@ import {
 } from '../interface/platform-admin-auth.interface';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PlatformAdminResetPasswordDto } from '../dto/platform-admin-password-reset.dto';
+
+export interface PlatformAdminTokens {
+  accessToken: string;
+  refreshToken: string;
+}
 
 const FORGOT_PASSWORD_OTP_TTL_SECONDS = 900; // 15 min — same as the tenant-side forgot-password window
 
@@ -30,7 +37,23 @@ export class PlatformAdminAuthService {
     private readonly jwtService: JwtService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    @Inject(platformAdminRefreshJwtConfig.KEY)
+    private readonly refreshJwtConfig: ConfigType<
+      typeof platformAdminRefreshJwtConfig
+    >,
   ) {}
+
+  private async generateTokens(adminId: string): Promise<PlatformAdminTokens> {
+    const payload: PlatformAdminJwtPayload = {
+      sub: adminId,
+      role: 'platform_admin',
+    };
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwtService.signAsync(payload),
+      this.jwtService.signAsync(payload, this.refreshJwtConfig),
+    ]);
+    return { accessToken, refreshToken };
+  }
 
   async validateById(id: string): Promise<PlatformAdminAuth> {
     const admin = await this.platformAdminRepo.findOne({
@@ -49,7 +72,7 @@ export class PlatformAdminAuthService {
   async login(
     email: string,
     password: string,
-  ): Promise<{ accessToken: string; requiresPasswordChange: boolean }> {
+  ): Promise<PlatformAdminTokens & { requiresPasswordChange: boolean }> {
     const admin = await this.platformAdminRepo
       .createQueryBuilder('admin')
       .addSelect('admin.passwordHash')
@@ -61,14 +84,20 @@ export class PlatformAdminAuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    const payload: PlatformAdminJwtPayload = {
-      sub: admin.id,
-      role: 'platform_admin',
-    };
-    return {
-      accessToken: await this.jwtService.signAsync(payload),
-      requiresPasswordChange: !admin.changedPassword,
-    };
+    const tokens = await this.generateTokens(admin.id);
+    return { ...tokens, requiresPasswordChange: !admin.changedPassword };
+  }
+
+  // Called from POST /platform/auth/refresh once
+  // PlatformAdminRefreshJwtStrategy has already verified the refresh
+  // token's signature/expiry -- this only needs to re-confirm the admin is
+  // still active (matches validateById's own check) before issuing a fresh
+  // access token. Stateless: no rotation/session tracking table, the same
+  // refresh cookie keeps working until its own expiry:
+  // PLATFORM_ADMIN_REFRESH_JWT_EXPIRY_IN.
+  async refreshAccessToken(adminId: string): Promise<PlatformAdminTokens> {
+    await this.validateById(adminId);
+    return this.generateTokens(adminId);
   }
 
   // Mirrors AuthService.forgotPassword — silent on an unknown email to

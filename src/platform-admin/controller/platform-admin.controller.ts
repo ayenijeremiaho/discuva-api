@@ -8,10 +8,16 @@ import {
   Param,
   Patch,
   Post,
+  Request,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
+import { PlatformAdminRefreshJwtAuthGuard } from '../guard/platform-admin-refresh-jwt-auth.guard';
+import { PLATFORM_REFRESH_COOKIE_NAME } from '../strategy/platform-admin-refresh-jwt.strategy';
 import { Public } from '../../auth/decorator/public.decorator';
 import { RequiresPlatformPermission } from '../decorator/requires-platform-permission.decorator';
 import { CurrentPlatformAdmin } from '../decorator/current-platform-admin.decorator';
@@ -75,11 +81,83 @@ export class PlatformAdminController {
     private readonly checkoutService: CheckoutService,
     private readonly tenantBroadcastService: TenantBroadcastService,
     private readonly platformSettingsService: PlatformSettingsService,
+    private readonly configService: ConfigService,
   ) {}
 
+  @HttpCode(HttpStatus.OK)
   @Post('auth/login')
-  async login(@Body() dto: PlatformAdminLoginDto) {
-    return this.platformAdminAuthService.login(dto.email, dto.password);
+  async login(
+    @Body() dto: PlatformAdminLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { refreshToken, ...body } = await this.platformAdminAuthService.login(
+      dto.email,
+      dto.password,
+    );
+    this.setRefreshCookie(res, refreshToken);
+    return body;
+  }
+
+  // No @Public() needed beyond the class-level one — PlatformAdminRefreshJwtAuthGuard
+  // validates the refresh cookie itself, a completely separate check from
+  // PlatformAdminGuard's access-token validation.
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(PlatformAdminRefreshJwtAuthGuard)
+  @Post('auth/refresh')
+  async refresh(
+    @Request() req: any,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const admin: PlatformAdminAuth = req.user;
+    const { refreshToken, ...body } =
+      await this.platformAdminAuthService.refreshAccessToken(admin.id);
+    this.setRefreshCookie(res, refreshToken);
+    return body;
+  }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('auth/logout')
+  async logout(@Res({ passthrough: true }) res: Response): Promise<void> {
+    this.clearRefreshCookie(res);
+  }
+
+  private isSecureEnv(): boolean {
+    return this.configService.get<string>('NODE_ENV') !== 'development';
+  }
+
+  private setRefreshCookie(res: Response, token: string): void {
+    const secure = this.isSecureEnv();
+    const expiry =
+      this.configService.get<string>('PLATFORM_ADMIN_REFRESH_JWT_EXPIRY_IN') ??
+      '7d';
+    const match = /^(\d+)([smhd])$/i.exec(expiry);
+    const units: Record<string, number> = {
+      s: 1_000,
+      m: 60_000,
+      h: 3_600_000,
+      d: 86_400_000,
+    };
+    const maxAge = match
+      ? Number.parseInt(match[1], 10) * (units[match[2].toLowerCase()] ?? 0)
+      : 7 * 86_400_000;
+
+    res.cookie(PLATFORM_REFRESH_COOKIE_NAME, token, {
+      httpOnly: true,
+      secure,
+      sameSite: secure ? 'none' : 'lax',
+      path: '/v1/platform/auth',
+      maxAge,
+    });
+  }
+
+  private clearRefreshCookie(res: Response): void {
+    const secure = this.isSecureEnv();
+    res.clearCookie(PLATFORM_REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      secure,
+      sameSite: secure ? 'none' : 'lax',
+      path: '/v1/platform/auth',
+    });
   }
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })

@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import platformAdminJwtConfig from '../config/platform-admin-jwt.config';
+import platformAdminRefreshJwtConfig from '../config/platform-admin-refresh-jwt.config';
 import { PlatformAdminController } from './controller/platform-admin.controller';
 import { PlatformAnalyticsController } from './controller/platform-analytics.controller';
 import { PlatformAdminRoleController } from './controller/platform-admin-role.controller';
@@ -20,7 +21,9 @@ import { PlatformAdminRoleService } from './service/platform-admin-role.service'
 import { PlatformAdminManagementService } from './service/platform-admin-management.service';
 import { TenantBroadcastService } from './service/tenant-broadcast.service';
 import { PlatformAdminJwtStrategy } from './strategy/platform-admin-jwt.strategy';
+import { PlatformAdminRefreshJwtStrategy } from './strategy/platform-admin-refresh-jwt.strategy';
 import { PlatformAdminGuard } from './guard/platform-admin.guard';
+import { PlatformAdminRefreshJwtAuthGuard } from './guard/platform-admin-refresh-jwt-auth.guard';
 import { DefaultPlatformAdminSeed } from './seed/default-platform-admin.seed';
 import { PlatformAdmin } from './entity/platform-admin.entity';
 import { PlatformAdminRole } from './entity/platform-admin-role.entity';
@@ -45,6 +48,7 @@ import { UtilityModule } from '../utility/utility.module';
 @Module({
   imports: [
     ConfigModule.forFeature(platformAdminJwtConfig),
+    ConfigModule.forFeature(platformAdminRefreshJwtConfig),
     PassportModule,
     JwtModule.registerAsync(platformAdminJwtConfig.asProvider()),
     TypeOrmModule.forFeature([
@@ -77,6 +81,8 @@ import { UtilityModule } from '../utility/utility.module';
   providers: [
     PlatformAdminAuthService,
     PlatformAdminJwtStrategy,
+    PlatformAdminRefreshJwtStrategy,
+    PlatformAdminRefreshJwtAuthGuard,
     PlatformAdminGuard,
     PlatformTenantService,
     PlatformPlanService,

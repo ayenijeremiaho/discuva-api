@@ -27131,7 +27131,65 @@
                 "login"
               ]
             },
-            "description": "Platform admin login. Returns { accessToken }. Not the same identity system as member/admin login - see public.platform_admins."
+            "description": "Platform admin login. Returns { accessToken, requiresPasswordChange } and sets an httpOnly platform_refresh_token cookie (path /v1/platform/auth). Not the same identity system as member/admin login - see public.platform_admins."
+          },
+          "response": []
+        },
+        {
+          "name": "Refresh",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.data?.accessToken) pm.collectionVariables.set('platformAccessToken', res.data.accessToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/auth/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Exchanges the httpOnly platform_refresh_token cookie (set by Login) for a fresh { accessToken }, re-setting the cookie. Requires Postman's cookie jar to have captured the cookie from a prior Login request against the same host - no manual auth needed here, PlatformAdminRefreshJwtAuthGuard reads the cookie directly."
+          },
+          "response": []
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Clears the platform_refresh_token cookie. 204 No Content."
           },
           "response": []
         },

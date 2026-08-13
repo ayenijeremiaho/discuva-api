@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { PlatformAdminController } from './platform-admin.controller';
 import { PlatformAdminAuthService } from '../service/platform-admin-auth.service';
 import { PlatformTenantService } from '../service/platform-tenant.service';
@@ -38,10 +39,17 @@ const mockTenantBroadcastService = {
 const mockAuthService = {
   forgotPassword: jest.fn(),
   resetPassword: jest.fn(),
+  login: jest.fn(),
+  refreshAccessToken: jest.fn(),
 };
 const mockPlatformSettingsService = {
   findAll: jest.fn(),
   upsert: jest.fn(),
+};
+const mockConfigService = {
+  get: jest.fn((key: string) =>
+    key === 'PLATFORM_ADMIN_REFRESH_JWT_EXPIRY_IN' ? '7d' : 'production',
+  ),
 };
 
 describe('PlatformAdminController (billing support routes)', () => {
@@ -77,6 +85,7 @@ describe('PlatformAdminController (billing support routes)', () => {
           provide: PlatformSettingsService,
           useValue: mockPlatformSettingsService,
         },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     })
       .overrideGuard(PlatformAdminGuard)
@@ -202,5 +211,67 @@ describe('PlatformAdminController (billing support routes)', () => {
     const result = await controller.resetPassword(dto as any);
     expect(mockAuthService.resetPassword).toHaveBeenCalledWith(dto);
     expect(result.message).toContain('reset successfully');
+  });
+
+  describe('auth session (login/refresh/logout)', () => {
+    function mockResponse() {
+      return { cookie: jest.fn(), clearCookie: jest.fn() } as any;
+    }
+
+    it('login sets the refresh cookie and strips refreshToken from the response body', async () => {
+      mockAuthService.login.mockResolvedValue({
+        accessToken: 'access-1',
+        refreshToken: 'refresh-1',
+        requiresPasswordChange: false,
+      });
+      const res = mockResponse();
+
+      const body = await controller.login(
+        { email: 'a@b.com', password: 'pw' } as any,
+        res,
+      );
+
+      expect(body).toEqual({
+        accessToken: 'access-1',
+        requiresPasswordChange: false,
+      });
+      expect(res.cookie).toHaveBeenCalledWith(
+        'platform_refresh_token',
+        'refresh-1',
+        expect.objectContaining({ httpOnly: true, path: '/v1/platform/auth' }),
+      );
+    });
+
+    it('refresh delegates to refreshAccessToken with the authenticated admin id and re-sets the cookie', async () => {
+      mockAuthService.refreshAccessToken.mockResolvedValue({
+        accessToken: 'access-2',
+        refreshToken: 'refresh-2',
+      });
+      const res = mockResponse();
+      const req = { user: { id: 'admin-1' } } as any;
+
+      const body = await controller.refresh(req, res);
+
+      expect(mockAuthService.refreshAccessToken).toHaveBeenCalledWith(
+        'admin-1',
+      );
+      expect(body).toEqual({ accessToken: 'access-2' });
+      expect(res.cookie).toHaveBeenCalledWith(
+        'platform_refresh_token',
+        'refresh-2',
+        expect.objectContaining({ httpOnly: true }),
+      );
+    });
+
+    it('logout clears the refresh cookie', async () => {
+      const res = mockResponse();
+
+      await controller.logout(res);
+
+      expect(res.clearCookie).toHaveBeenCalledWith(
+        'platform_refresh_token',
+        expect.objectContaining({ httpOnly: true, path: '/v1/platform/auth' }),
+      );
+    });
   });
 });

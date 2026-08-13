@@ -9,6 +9,7 @@ import { PlatformAdminAuthService } from './platform-admin-auth.service';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
 import { PlatformAdminPasswordResetOtp } from '../entity/platform-admin-password-reset-otp.entity';
 import { UtilityService } from '../../utility/service/utility.service';
+import platformAdminRefreshJwtConfig from '../../config/platform-admin-refresh-jwt.config';
 
 jest.mock('argon2');
 
@@ -24,15 +25,25 @@ const mockOtpRepo = {
   save: jest.fn((v) => Promise.resolve({ id: 'otp-1', ...v })),
   findOne: jest.fn(),
 };
-const mockJwtService = { signAsync: jest.fn().mockResolvedValue('signed-jwt') };
+const mockJwtService = {
+  signAsync: jest
+    .fn()
+    .mockResolvedValueOnce('signed-access-jwt')
+    .mockResolvedValueOnce('signed-refresh-jwt'),
+};
 const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
 const mockConfigService = { get: jest.fn().mockReturnValue('Discuva') };
+const mockRefreshJwtConfig = { secret: 'refresh-secret', expiresIn: '7d' };
 
 describe('PlatformAdminAuthService', () => {
   let service: PlatformAdminAuthService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockJwtService.signAsync = jest
+      .fn()
+      .mockResolvedValueOnce('signed-access-jwt')
+      .mockResolvedValueOnce('signed-refresh-jwt');
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PlatformAdminAuthService,
@@ -47,6 +58,10 @@ describe('PlatformAdminAuthService', () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: platformAdminRefreshJwtConfig.KEY,
+          useValue: mockRefreshJwtConfig,
+        },
       ],
     }).compile();
     service = module.get(PlatformAdminAuthService);
@@ -108,13 +123,19 @@ describe('PlatformAdminAuthService', () => {
       const result = await service.login('admin@example.com', 'password123');
 
       expect(result).toEqual({
-        accessToken: 'signed-jwt',
+        accessToken: 'signed-access-jwt',
+        refreshToken: 'signed-refresh-jwt',
         requiresPasswordChange: true,
       });
-      expect(mockJwtService.signAsync).toHaveBeenCalledWith({
+      expect(mockJwtService.signAsync).toHaveBeenNthCalledWith(1, {
         sub: 'admin-1',
         role: 'platform_admin',
       });
+      expect(mockJwtService.signAsync).toHaveBeenNthCalledWith(
+        2,
+        { sub: 'admin-1', role: 'platform_admin' },
+        mockRefreshJwtConfig,
+      );
     });
 
     it('reports requiresPasswordChange false once the admin has set a real password', async () => {
@@ -165,6 +186,33 @@ describe('PlatformAdminAuthService', () => {
       await expect(
         service.login('nobody@example.com', 'password123'),
       ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('refreshAccessToken', () => {
+    it('issues a fresh access + refresh token pair for a still-active admin', async () => {
+      mockPlatformAdminRepo.findOne.mockResolvedValue({
+        id: 'admin-1',
+        email: 'admin@example.com',
+        isActive: true,
+        platformAdminRole: { permissions: [] },
+      });
+
+      const result = await service.refreshAccessToken('admin-1');
+
+      expect(result).toEqual({
+        accessToken: 'signed-access-jwt',
+        refreshToken: 'signed-refresh-jwt',
+      });
+    });
+
+    it('throws UnauthorizedException when the admin is no longer active', async () => {
+      mockPlatformAdminRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.refreshAccessToken('admin-1')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockJwtService.signAsync).not.toHaveBeenCalled();
     });
   });
 

@@ -32,6 +32,11 @@ export const envValidationSchema = Joi.object({
   REFRESH_JWT_EXPIRY_IN: Joi.string().default('7d'),
   PLATFORM_ADMIN_JWT_SECRET: Joi.string().min(32).required(),
   PLATFORM_ADMIN_JWT_EXPIRY_IN: Joi.string().default('1h'),
+  // Deliberately separate from both REFRESH_JWT_SECRET (tenant member/admin)
+  // and PLATFORM_ADMIN_JWT_SECRET (platform access token) -- same "a bug
+  // can't cross auth boundaries" reasoning as platform-admin-jwt.config.ts.
+  PLATFORM_ADMIN_REFRESH_JWT_SECRET: Joi.string().min(32).required(),
+  PLATFORM_ADMIN_REFRESH_JWT_EXPIRY_IN: Joi.string().default('7d'),
   // Symmetric key for encrypting tenant BYOK communication-provider
   // credentials at rest (src/utility/service/encryption.service.ts) —
   // hashed to a 32-byte AES-256 key, so same min-length convention as the

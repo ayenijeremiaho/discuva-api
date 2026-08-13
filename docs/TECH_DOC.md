@@ -4717,6 +4717,22 @@ decorative: `JwtAuthGuard` is a global `APP_GUARD` that runs on every route rega
 applied, and a platform admin never has a tenant JWT to satisfy it. `@Public()` skips only that global guard;
 `PlatformAdminGuard` still independently protects every route except login.
 
+**Refresh session (`POST /platform/auth/refresh`):** access tokens are short-lived (`PLATFORM_ADMIN_JWT_EXPIRY_IN`,
+default `1h`) and the frontend only ever keeps one in memory, never `localStorage` — so until this existed, a page
+reload (or the access token simply expiring mid-session) logged every platform admin out unconditionally, with no
+recovery besides a fresh password login. `POST /platform/auth/login` now also signs a refresh token
+(`PLATFORM_ADMIN_REFRESH_JWT_SECRET`/`_EXPIRY_IN`, default `7d` — deliberately its own secret, not shared with
+either `PLATFORM_ADMIN_JWT_SECRET` or the tenant-side `REFRESH_JWT_SECRET`) and sets it as an httpOnly
+`platform_refresh_token` cookie, scoped to path `/v1/platform/auth` and never returned in the JSON body.
+`PlatformAdminRefreshJwtStrategy` reads that cookie name specifically — deliberately distinct from the tenant
+member/admin `refresh_token` cookie, since both are set by the same shared `api.discuva.org` host across every
+frontend origin, and reusing the same cookie name would let one clobber the other for any browser logged into both
+discuva-admin and discuva-platform. `refreshAccessToken()` is stateless (no session/rotation-tracking table,
+matching the access-token strategy's own `validateById` re-check) — it just re-confirms the admin is still active
+and issues a fresh token pair; the browser keeps sending the same refresh cookie until its own 7-day expiry.
+`POST /platform/auth/logout` clears the cookie (previously logout was purely client-side, never told the backend at
+all — the cookie would have just kept silently re-authenticating an ostensibly "logged out" session otherwise).
+
 **Permissions (`PlatformAdminPermission`, `src/platform-admin/enum/`).** Every platform admin used to be binary —
 `isActive: true` meant full access to every `/platform/*` route, `false` meant none. `PlatformAdminRole` (mirrors
 tenant-side `AdminRole` exactly: `name`, `description`, `permissions: string[]`) now sits between them, and
@@ -4750,7 +4766,9 @@ being visible outside this service. All four routes now return the identical cur
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken }`. |
+| POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken, requiresPasswordChange }` and sets the httpOnly `platform_refresh_token` cookie. |
+| POST | `/platform/auth/refresh` | `PlatformAdminRefreshJwtAuthGuard` (validates the refresh cookie, a separate check from `PlatformAdminGuard`). Returns a fresh `{ accessToken }` and re-sets the refresh cookie. |
+| POST | `/platform/auth/logout` | Clears the refresh cookie. `204`. |
 | GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), `onboardingStatus`, plan/subscription status, and live member/event counts. |
 | POST | `/platform/tenants` | Provisions a new tenant inline (`TenantProvisioningService.provision()`, not the queue self-serve `/signup` uses — see "Async Tenant Provisioning + Onboarding State Machine" above). Body has no password field, same as `/signup`'s `SignupDto` — the new admin gets a welcome email with a set-password link instead (see "Tenant Welcome / Set Password Flow" above). Returns the tenant already `onboardingStatus: ACTIVE`, same shape as `GET /platform/tenants`' rows. |
 | GET | `/platform/tenants/:id/onboarding-events` | The platform-level onboarding audit trail for one tenant, oldest first — see "Async Tenant Provisioning + Onboarding State Machine" above. |
@@ -5722,6 +5740,8 @@ elsewhere in the dependency graph) and calls `Sentry.init()` only when both `SEN
 | `SESSION_MAX_AGE_DAYS`  | `30`                         | Absolute session lifetime in days — refresh rejected after this regardless of rotation |
 | `PLATFORM_ADMIN_JWT_SECRET` | — *(required, min 32 chars)* | Platform-admin token signing secret — deliberately separate from `JWT_SECRET` (§5 Platform Admin) |
 | `PLATFORM_ADMIN_JWT_EXPIRY_IN` | `1h`                  | Platform-admin token expiry |
+| `PLATFORM_ADMIN_REFRESH_JWT_SECRET` | — *(required, min 32 chars)* | Platform-admin refresh-token signing secret — separate from both `PLATFORM_ADMIN_JWT_SECRET` and the tenant-side `REFRESH_JWT_SECRET` |
+| `PLATFORM_ADMIN_REFRESH_JWT_EXPIRY_IN` | `7d`        | Platform-admin refresh-token expiry — how long a session survives without a fresh password login |
 | `CREDENTIALS_ENCRYPTION_KEY` | — *(required, min 32 chars)* | Encrypts tenant BYOK SMS/email provider credentials at rest (§5 Communication Providers) — rotating this makes existing encrypted credentials unreadable |
 
 ### Email
