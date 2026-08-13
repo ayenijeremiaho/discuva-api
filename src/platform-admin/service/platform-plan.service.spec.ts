@@ -120,5 +120,48 @@ describe('PlatformPlanService', () => {
 
       expect(result.featureLimits).toEqual({ [PlanFeature.SMS]: 5 });
     });
+
+    it('rejects a currency change once billingProviderPriceId is set', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro',
+        name: 'Pro',
+        currency: 'NGN',
+        billingProviderPriceId: 'PLN_abc123',
+      });
+
+      await expect(
+        service.updatePlan('pro', { currency: 'USD' } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows a currency change when billingProviderPriceId is not yet set', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro-usd',
+        name: 'Pro',
+        currency: 'NGN',
+        billingProviderPriceId: null,
+      });
+
+      const result = await service.updatePlan('pro-usd', {
+        currency: 'USD',
+      } as any);
+
+      expect(result.currency).toBe('USD');
+    });
+
+    it('allows a non-currency update even when billingProviderPriceId is set', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro',
+        name: 'Pro',
+        currency: 'NGN',
+        billingProviderPriceId: 'PLN_abc123',
+      });
+
+      const result = await service.updatePlan('pro', {
+        name: 'Pro Plan',
+      } as any);
+
+      expect(result.name).toBe('Pro Plan');
+    });
   });
 });

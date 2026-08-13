@@ -101,6 +101,7 @@ describe('PlatformAnalyticsService', () => {
           mockQB([
             {
               priceCents: 15000,
+              currency: 'NGN',
               discountType: null,
               discountValue: null,
               discountExpiresAt: null,
@@ -123,7 +124,7 @@ describe('PlatformAnalyticsService', () => {
           { planId: 'pro', planName: 'Pro', count: 3 },
           { planId: 'free', planName: 'Free', count: 5 },
         ],
-        mrrCents: 15000,
+        mrrByCurrency: [{ currency: 'NGN', mrrCents: 15000 }],
       });
     });
 
@@ -136,12 +137,14 @@ describe('PlatformAnalyticsService', () => {
           mockQB([
             {
               priceCents: 10000,
+              currency: 'NGN',
               discountType: 'percentage',
               discountValue: 20,
               discountExpiresAt: null,
             },
             {
               priceCents: 10000,
+              currency: 'NGN',
               discountType: 'percentage',
               discountValue: 50,
               discountExpiresAt: new Date('2020-01-01'),
@@ -154,7 +157,9 @@ describe('PlatformAnalyticsService', () => {
 
       // First row: 10000 * (1 - 0.2) = 8000. Second row's discount already
       // expired, so it counts at the full 10000. Total: 18000.
-      expect(result.mrrCents).toBe(18000);
+      expect(result.mrrByCurrency).toEqual([
+        { currency: 'NGN', mrrCents: 18000 },
+      ]);
     });
   });
 
@@ -196,6 +201,7 @@ describe('PlatformAnalyticsService', () => {
         mockQB([
           {
             priceCents: 20000,
+            currency: 'NGN',
             discountType: null,
             discountValue: null,
             discountExpiresAt: null,
@@ -218,7 +224,9 @@ describe('PlatformAnalyticsService', () => {
 
       const result = await service.getRevenue('monthly', 12);
 
-      expect(result.mrrCents).toBe(20000);
+      expect(result.mrrByCurrency).toEqual([
+        { currency: 'NGN', mrrCents: 20000 },
+      ]);
       expect(result.revenueByProvider).toEqual([
         { provider: 'paystack', totalCents: 50000 },
         { provider: 'flutterwave', totalCents: 10000 },

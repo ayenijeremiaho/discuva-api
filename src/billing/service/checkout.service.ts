@@ -22,6 +22,20 @@ import {
 } from '../entity/billing-checkout-session.entity';
 import { PaymentProviderRegistryService } from './payment-provider-registry.service';
 
+export interface PublicPlanVariant {
+  planId: string;
+  currency: string;
+  priceCents: number;
+}
+
+export interface PublicPlanTier {
+  tierKey: string;
+  name: string;
+  features: string[];
+  featureLimits: Record<string, number>;
+  variants: PublicPlanVariant[];
+}
+
 export interface BillingSummary {
   planId: string;
   planName: string;
@@ -83,6 +97,38 @@ export class CheckoutService {
   // every other admin-controlled reference list in this codebase).
   async listPlans(): Promise<Plan[]> {
     return this.planRepo.find({ order: { priceCents: 'ASC' } });
+  }
+
+  // Unauthenticated reference data for discuva-web (a separate marketing
+  // site with no tenant/admin context at all) — groups currency variants of
+  // the same conceptual tier together so the caller doesn't have to
+  // re-derive tierKey grouping itself.
+  async listPublicPlans(): Promise<PublicPlanTier[]> {
+    const plans = await this.planRepo.find({ order: { priceCents: 'ASC' } });
+
+    const tiers = new Map<string, PublicPlanTier>();
+    for (const plan of plans) {
+      let tier = tiers.get(plan.tierKey);
+      if (!tier) {
+        tier = {
+          tierKey: plan.tierKey,
+          name: plan.name,
+          features: plan.features,
+          featureLimits: plan.featureLimits,
+          variants: [],
+        };
+        tiers.set(plan.tierKey, tier);
+      }
+      tier.variants.push({
+        planId: plan.id,
+        currency: plan.currency,
+        priceCents: plan.priceCents,
+      });
+    }
+
+    return Array.from(tiers.values()).sort(
+      (a, b) => a.variants[0].priceCents - b.variants[0].priceCents,
+    );
   }
 
   async getBillingSummary(): Promise<BillingSummary> {

@@ -70,6 +70,9 @@ import { BranchModule } from '../branch/branch.module';
  *   resolution could ever produce, so this route is still excluded and
  *   GivingCheckoutService resolves + enters that tenant's context itself
  *   once the webhook signature verifies.
+ * - `v1/billing/public/(.*)` — called directly by discuva-web, a separate
+ *   marketing site with no tenant subdomain in its Host header at all, same
+ *   no-Host-header reasoning as the webhook excludes above.
  * - `/`, `docs`, `health` — @Version(VERSION_NEUTRAL) routes in
  *   AppController, hit by infra health checks against the bare host with
  *   no tenant subdomain at all — no `v1/` prefix on these specifically
@@ -129,6 +132,10 @@ export class TenantModule implements NestModule {
         { path: 'v1/integrations/youtube/callback', method: RequestMethod.ALL },
         { path: 'v1/webhooks/billing', method: RequestMethod.ALL },
         { path: 'v1/webhooks/giving/(.*)', method: RequestMethod.ALL },
+        // Called by discuva-web, a separate marketing site with no tenant
+        // subdomain in its Host header at all — same no-Host-header
+        // reasoning as the excludes above.
+        { path: 'v1/billing/public/(.*)', method: RequestMethod.ALL },
         { path: '/', method: RequestMethod.GET },
         { path: 'docs', method: RequestMethod.GET },
         { path: 'health', method: RequestMethod.GET },

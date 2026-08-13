@@ -24,6 +24,13 @@ export class CreatePlanDto {
   @IsNotEmpty()
   name: string;
 
+  // Groups this row with other currency variants of the same conceptual
+  // tier (e.g. 'pro' and 'pro-usd' both use tierKey 'pro') — display/grouping
+  // only, never read by checkout/guard logic.
+  @IsString()
+  @IsNotEmpty()
+  tierKey: string;
+
   @IsOptional()
   @IsInt()
   @Min(0)

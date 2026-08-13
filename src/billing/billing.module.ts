@@ -18,6 +18,7 @@ import { PlanFeatureResolverService } from './service/plan-feature-resolver.serv
 import { PlanLimitInterceptor } from './interceptor/plan-limit.interceptor';
 import { BillingController } from './controller/billing.controller';
 import { BillingWebhookController } from './controller/billing-webhook.controller';
+import { PublicBillingController } from './controller/public-billing.controller';
 import { SubscriptionLapseScheduler } from './scheduler/subscription-lapse.scheduler';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { PlatformAdminModule } from '../platform-admin/platform-admin.module';
@@ -39,7 +40,11 @@ import { PlatformAdminModule } from '../platform-admin/platform-admin.module';
     UtilityModule,
     PlatformAdminModule,
   ],
-  controllers: [BillingController, BillingWebhookController],
+  controllers: [
+    BillingController,
+    BillingWebhookController,
+    PublicBillingController,
+  ],
   providers: [
     PlanGuard,
     PaystackPaymentProvider,

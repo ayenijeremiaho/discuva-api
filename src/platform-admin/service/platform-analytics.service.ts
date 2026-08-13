@@ -28,13 +28,21 @@ export interface PlanCount {
   count: number;
 }
 
+// Amounts are never blended across currencies — same reasoning as
+// GivingAmountByCurrency below (a plan priced in NGN summed against one
+// priced in USD would be a meaningless number).
+export interface MrrByCurrency {
+  currency: string;
+  mrrCents: number;
+}
+
 export interface PlatformOverview {
   totalTenants: number;
   activeTenants: number;
   suspendedTenants: number;
   totalMembersPlatformWide: number;
   subscriptionsByPlan: PlanCount[];
-  mrrCents: number;
+  mrrByCurrency: MrrByCurrency[];
 }
 
 export interface TrendPoint {
@@ -65,7 +73,7 @@ export interface ProviderRevenue {
 
 export interface RevenueAnalytics {
   period: AnalyticsPeriod;
-  mrrCents: number;
+  mrrByCurrency: MrrByCurrency[];
   revenueByProvider: ProviderRevenue[];
   trend: RevenueTrendPoint[];
 }
@@ -133,7 +141,7 @@ export interface GivingTrendPoint extends GivingAmountByCurrency {
 export interface GivingAnalytics {
   period: AnalyticsPeriod;
   // All-time (not window-limited by `months`) — the trend below is the
-  // windowed breakdown, same split as getRevenue's mrrCents (all-time
+  // windowed breakdown, same split as getRevenue's mrrByCurrency (all-time
   // snapshot) vs. trend (windowed).
   totals: GivingAmountByCurrency[];
   byProvider: GivingByProvider[];
@@ -200,11 +208,12 @@ export class PlatformAnalyticsService {
   // real money may still be flowing — so each row's effective (discounted)
   // price is summed in JS via the same computeEffectivePriceCents helper
   // CheckoutService's billing summary uses, rather than a raw SQL SUM.
-  private async mrrCents(): Promise<number> {
+  private async mrrByCurrency(): Promise<MrrByCurrency[]> {
     const rows = await this.subscriptionRepo
       .createQueryBuilder('sub')
       .innerJoin(Plan, 'plan', 'plan.id = sub.planId')
       .select('plan.priceCents', 'priceCents')
+      .addSelect('plan.currency', 'currency')
       .addSelect('sub.discountType', 'discountType')
       .addSelect('sub.discountValue', 'discountValue')
       .addSelect('sub.discountExpiresAt', 'discountExpiresAt')
@@ -212,22 +221,30 @@ export class PlatformAnalyticsService {
       .andWhere('sub.sponsoredByTenantId IS NULL')
       .getRawMany<{
         priceCents: number;
+        currency: string;
         discountType: DiscountType | null;
         discountValue: number | null;
         discountExpiresAt: Date | null;
       }>();
 
-    return rows.reduce(
-      (total, row) =>
-        total +
-        computeEffectivePriceCents(Number(row.priceCents), {
-          discountType: row.discountType,
-          discountValue:
-            row.discountValue == null ? null : Number(row.discountValue),
-          discountExpiresAt: row.discountExpiresAt,
-        }),
-      0,
-    );
+    const bucketMap = new Map<string, number>();
+    for (const row of rows) {
+      const effective = computeEffectivePriceCents(Number(row.priceCents), {
+        discountType: row.discountType,
+        discountValue:
+          row.discountValue == null ? null : Number(row.discountValue),
+        discountExpiresAt: row.discountExpiresAt,
+      });
+      bucketMap.set(
+        row.currency,
+        (bucketMap.get(row.currency) ?? 0) + effective,
+      );
+    }
+
+    return [...bucketMap.entries()].map(([currency, mrrCents]) => ({
+      currency,
+      mrrCents,
+    }));
   }
 
   async getOverview(): Promise<PlatformOverview> {
@@ -237,7 +254,7 @@ export class PlatformAnalyticsService {
       membersRow,
       planCounts,
       planNames,
-      mrrCents,
+      mrrByCurrency,
     ] = await Promise.all([
       this.tenantRepo.count(),
       this.tenantRepo.count({ where: { isActive: true } }),
@@ -253,7 +270,7 @@ export class PlatformAnalyticsService {
         .groupBy('sub.planId')
         .getRawMany<{ planId: string; count: string }>(),
       this.planNameMap(),
-      this.mrrCents(),
+      this.mrrByCurrency(),
     ]);
 
     return {
@@ -266,7 +283,7 @@ export class PlatformAnalyticsService {
         planName: planNames.get(r.planId) ?? r.planId,
         count: Number.parseInt(r.count, 10),
       })),
-      mrrCents,
+      mrrByCurrency,
     };
   }
 
@@ -309,8 +326,8 @@ export class PlatformAnalyticsService {
   ): Promise<RevenueAnalytics> {
     const since = this.monthsAgo(months);
 
-    const [mrrCents, revenueByProviderRaw, sessions] = await Promise.all([
-      this.mrrCents(),
+    const [mrrByCurrency, revenueByProviderRaw, sessions] = await Promise.all([
+      this.mrrByCurrency(),
       this.checkoutRepo
         .createQueryBuilder('c')
         .select('c.provider', 'provider')
@@ -346,7 +363,7 @@ export class PlatformAnalyticsService {
 
     return {
       period,
-      mrrCents,
+      mrrByCurrency,
       revenueByProvider: revenueByProviderRaw.map((r) => ({
         provider: r.provider,
         totalCents: Number.parseInt(r.total, 10),

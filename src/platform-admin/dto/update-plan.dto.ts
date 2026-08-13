@@ -16,6 +16,10 @@ export class UpdatePlanDto {
   name?: string;
 
   @IsOptional()
+  @IsString()
+  tierKey?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   priceCents?: number;

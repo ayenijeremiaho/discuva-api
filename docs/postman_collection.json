@@ -347,7 +347,7 @@
               {
                 "key": "X-Tenant-Subdomain",
                 "value": "{{tenantSubdomain}}",
-                "description": "Only needed when calling this route via a host with no tenant subdomain of its own (e.g. discuva-member's API calls going to a dedicated api.yourdomain.com production host rather than sharing its own {tenant}.yourdomain.com) — same fallback as Admin Portal Login, TenantMiddleware falls back to it only when Host-header resolution fails. discuva-member sends this on every request unconditionally (harmless when unnecessary); once logged in, later requests resolve tenant from the JWT's own embedded claim instead. Not cryptographically trusted — a wrong value just fails login against the wrong tenant's Member table."
+                "description": "Only needed when calling this route via a host with no tenant subdomain of its own (e.g. discuva-member's API calls going to a dedicated api.yourdomain.com production host rather than sharing its own {tenant}.yourdomain.com) \u2014 same fallback as Admin Portal Login, TenantMiddleware falls back to it only when Host-header resolution fails. discuva-member sends this on every request unconditionally (harmless when unnecessary); once logged in, later requests resolve tenant from the JWT's own embedded claim instead. Not cryptographically trusted \u2014 a wrong value just fails login against the wrong tenant's Member table."
               }
             ],
             "auth": {
@@ -711,7 +711,7 @@
               {
                 "key": "X-Tenant-Subdomain",
                 "value": "{{tenantSubdomain}}",
-                "description": "Only needed when calling via a host with no tenant subdomain of its own (discuva-admin's fixed admin.discuva.org origin) — same fallback as Admin Portal Login. Not needed when calling via a real {tenant}.yourdomain.com host (discuva-member)."
+                "description": "Only needed when calling via a host with no tenant subdomain of its own (discuva-admin's fixed admin.discuva.org origin) \u2014 same fallback as Admin Portal Login. Not needed when calling via a real {tenant}.yourdomain.com host (discuva-member)."
               }
             ],
             "body": {
@@ -762,7 +762,7 @@
               {
                 "key": "X-Tenant-Subdomain",
                 "value": "{{tenantSubdomain}}",
-                "description": "Only needed when calling via a host with no tenant subdomain of its own (discuva-admin's fixed admin.discuva.org origin, and its /set-password first-time flow) — same fallback as Admin Portal Login. Not needed when calling via a real {tenant}.yourdomain.com host (discuva-member)."
+                "description": "Only needed when calling via a host with no tenant subdomain of its own (discuva-admin's fixed admin.discuva.org origin, and its /set-password first-time flow) \u2014 same fallback as Admin Portal Login. Not needed when calling via a real {tenant}.yourdomain.com host (discuva-member)."
               }
             ],
             "body": {
@@ -813,7 +813,7 @@
               {
                 "key": "X-Tenant-Subdomain",
                 "value": "{{tenantSubdomain}}",
-                "description": "Only needed when calling via a host with no tenant subdomain of its own — same fallback as Login. Pre-auth (no token yet), so this is the only way to resolve tenant on a fixed host."
+                "description": "Only needed when calling via a host with no tenant subdomain of its own \u2014 same fallback as Login. Pre-auth (no token yet), so this is the only way to resolve tenant on a fixed host."
               }
             ],
             "body": {
@@ -932,7 +932,7 @@
                 "options"
               ]
             },
-            "description": "Biometric login, step 1. No email/body needed — residentKey credentials mean the browser/OS resolves which registered credential to use. Returns `{ challengeId, options }`; `options` is passed directly into the browser's `navigator.credentials.get()` (via @simplewebauthn/browser's `startAuthentication()`). Public, IP-throttled at 10/min. Can't be meaningfully exercised from Postman itself — the actual credential ceremony only happens in a real browser with platform-authenticator hardware."
+            "description": "Biometric login, step 1. No email/body needed \u2014 residentKey credentials mean the browser/OS resolves which registered credential to use. Returns `{ challengeId, options }`; `options` is passed directly into the browser's `navigator.credentials.get()` (via @simplewebauthn/browser's `startAuthentication()`). Public, IP-throttled at 10/min. Can't be meaningfully exercised from Postman itself \u2014 the actual credential ceremony only happens in a real browser with platform-authenticator hardware."
           },
           "response": []
         },
@@ -983,7 +983,7 @@
                 "verify"
               ]
             },
-            "description": "Biometric login, step 2. `response` is the browser's AuthenticationResponseJSON from `startAuthentication()` — not something that can be hand-crafted in Postman. Resolves the member from the stored credential matching `response.id`, verifies the signature, checks the counter strictly increased (clone/replay protection), then issues tokens via the exact same path password login uses. Public, IP-throttled."
+            "description": "Biometric login, step 2. `response` is the browser's AuthenticationResponseJSON from `startAuthentication()` \u2014 not something that can be hand-crafted in Postman. Resolves the member from the stored credential matching `response.id`, verifies the signature, checks the counter strictly increased (clone/replay protection), then issues tokens via the exact same path password login uses. Public, IP-throttled."
           },
           "response": [
             {
@@ -1011,7 +1011,7 @@
                 "options"
               ]
             },
-            "description": "Enroll a new device, step 1. Requires an authenticated session (JwtAuthGuard) — a member enrolls a new device from within an already-logged-in session (e.g. Account settings). Returns residentKey:'required' registration options for `navigator.credentials.create()` (via @simplewebauthn/browser's `startRegistration()`). Excludes any credentials already registered for this member."
+            "description": "Enroll a new device, step 1. Requires an authenticated session (JwtAuthGuard) \u2014 a member enrolls a new device from within an already-logged-in session (e.g. Account settings). Returns residentKey:'required' registration options for `navigator.credentials.create()` (via @simplewebauthn/browser's `startRegistration()`). Excludes any credentials already registered for this member."
           },
           "response": []
         },
@@ -1046,7 +1046,7 @@
                 "verify"
               ]
             },
-            "description": "Enroll a new device, step 2. Body is the browser's RegistrationResponseJSON from `startRegistration()` — not something that can be hand-crafted in Postman. Verifies against the challenge from the options step, stores the new credential (device name derived from the request's User-Agent), audit-logs MEMBER_WEBAUTHN_CREDENTIAL_REGISTERED. Returns 204 on success."
+            "description": "Enroll a new device, step 2. Body is the browser's RegistrationResponseJSON from `startRegistration()` \u2014 not something that can be hand-crafted in Postman. Verifies against the challenge from the options step, stores the new credential (device name derived from the request's User-Agent), audit-logs MEMBER_WEBAUTHN_CREDENTIAL_REGISTERED. Returns 204 on success."
           },
           "response": []
         },
@@ -1065,7 +1065,7 @@
                 "credentials"
               ]
             },
-            "description": "List the caller's own registered biometric devices — `{ id, deviceName, createdAt, lastUsedAt }[]`. Never returns the credential id or public key, the client has no use for them."
+            "description": "List the caller's own registered biometric devices \u2014 `{ id, deviceName, createdAt, lastUsedAt }[]`. Never returns the credential id or public key, the client has no use for them."
           },
           "response": [
             {
@@ -1092,7 +1092,7 @@
                 "{{webauthnCredentialRowId}}"
               ]
             },
-            "description": "Remove one of the caller's own registered devices, e.g. after losing a phone. Scoped to (id, memberId) — 404 if the row doesn't belong to the caller. Audit-logged as MEMBER_WEBAUTHN_CREDENTIAL_REMOVED. 204 on success."
+            "description": "Remove one of the caller's own registered devices, e.g. after losing a phone. Scoped to (id, memberId) \u2014 404 if the row doesn't belong to the caller. Audit-logged as MEMBER_WEBAUTHN_CREDENTIAL_REMOVED. 204 on success."
           },
           "response": [
             {
@@ -27083,6 +27083,41 @@
       ]
     },
     {
+      "name": "Billing (Public)",
+      "item": [
+        {
+          "name": "Get Public Plans",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/billing/public/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "billing",
+                "public",
+                "plans"
+              ]
+            },
+            "description": "Unauthenticated, no tenant context (excluded from TenantMiddleware) -- called by discuva-web, the public marketing site, to render real per-currency pricing. Groups every Plan row by tierKey so a tier like 'pro' returns all of its currency variants together."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"tierKey\": \"free\",\n    \"name\": \"Free\",\n    \"features\": [],\n    \"featureLimits\": {},\n    \"variants\": [\n      {\n        \"planId\": \"free\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 0\n      }\n    ]\n  },\n  {\n    \"tierKey\": \"pro\",\n    \"name\": \"Pro\",\n    \"features\": [\n      \"sms\",\n      \"tithe\"\n    ],\n    \"featureLimits\": {},\n    \"variants\": [\n      {\n        \"planId\": \"pro-usd\",\n        \"currency\": \"USD\",\n        \"priceCents\": 2900\n      },\n      {\n        \"planId\": \"pro\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 5000000\n      }\n    ]\n  }\n]"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Platform Admin",
       "description": "SaaS control plane for the multi-tenant/freemium platform (see docs/MULTI_TENANT_MIGRATION.md). Entirely separate auth boundary from Member/Worker/Admin - platform admins authenticate against public.platform_admins with their own JWT secret (PLATFORM_ADMIN_JWT_SECRET), never a tenant token. The whole controller is @Public() at the class level so the app's global tenant JwtAuthGuard doesn't reject these routes before PlatformAdminGuard gets a chance to run.",
       "item": [
@@ -27564,7 +27599,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
+              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -27623,9 +27658,17 @@
                 "plans",
                 "enterprise"
               ]
-            }
+            },
+            "description": "Edit a plan row's price/currency/features/featureLimits/tierKey. Changing currency is rejected with 400 once the plan already has a billingProviderPriceId (a live provider-side price object) -- create a new plan variant (e.g. pro-usd) instead of editing an existing plan's currency."
           },
-          "response": []
+          "response": [
+            {
+              "name": "400 Bad Request \u2014 currency change blocked",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Cannot change currency on a plan that already has a live provider price. Create a new plan variant instead.\"\n}"
+            }
+          ]
         },
         {
           "name": "List Subscriptions",
@@ -27766,7 +27809,7 @@
                 "flutterwave-sms"
               ]
             },
-            "description": "Activate/deactivate a provider in the platform-wide catalog. Deactivating: (1) removes it from the tenant-facing catalog (GET /communication-providers) that new tenants pick from, unless a tenant is already configured against it (that row stays visible rather than silently vanishing); (2) stops it resolving for tenants already using it — SmsCredentialResolverService/EmailCredentialResolverService now check the catalog's isActive too, and the 5-minute resolved-credential cache is invalidated immediately for every affected tenant, not left to expire naturally; (3) emails every affected tenant's admin explaining the channel is disrupted. Reactivating (isActive: true) undoes (1)/(2) and sends a 'restored' notice instead. See docs/TECH_DOC.md's \"Communication Providers: deactivation has real consequences\" section."
+            "description": "Activate/deactivate a provider in the platform-wide catalog. Deactivating: (1) removes it from the tenant-facing catalog (GET /communication-providers) that new tenants pick from, unless a tenant is already configured against it (that row stays visible rather than silently vanishing); (2) stops it resolving for tenants already using it \u2014 SmsCredentialResolverService/EmailCredentialResolverService now check the catalog's isActive too, and the 5-minute resolved-credential cache is invalidated immediately for every affected tenant, not left to expire naturally; (3) emails every affected tenant's admin explaining the channel is disrupted. Reactivating (isActive: true) undoes (1)/(2) and sends a 'restored' notice instead. See docs/TECH_DOC.md's \"Communication Providers: deactivation has real consequences\" section."
           },
           "response": []
         },

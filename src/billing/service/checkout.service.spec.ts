@@ -128,6 +128,65 @@ describe('CheckoutService', () => {
     });
   });
 
+  describe('listPublicPlans', () => {
+    it('groups currency variants by tierKey and sorts variants and tiers by price ascending', async () => {
+      // Mocked in the same order the real query (priceCents ASC) would
+      // return them — listPublicPlans relies on that ordering rather than
+      // re-sorting variants itself.
+      mockPlanRepo.find.mockResolvedValue([
+        {
+          id: 'free',
+          name: 'Free',
+          tierKey: 'free',
+          priceCents: 0,
+          currency: 'NGN',
+          features: [],
+          featureLimits: {},
+        },
+        {
+          id: 'pro-usd',
+          name: 'Pro',
+          tierKey: 'pro',
+          priceCents: 2900,
+          currency: 'USD',
+          features: ['sms'],
+          featureLimits: {},
+        },
+        {
+          id: 'pro',
+          name: 'Pro',
+          tierKey: 'pro',
+          priceCents: 5000000,
+          currency: 'NGN',
+          features: ['sms'],
+          featureLimits: {},
+        },
+      ]);
+
+      const result = await service.listPublicPlans();
+
+      expect(result).toEqual([
+        {
+          tierKey: 'free',
+          name: 'Free',
+          features: [],
+          featureLimits: {},
+          variants: [{ planId: 'free', currency: 'NGN', priceCents: 0 }],
+        },
+        {
+          tierKey: 'pro',
+          name: 'Pro',
+          features: ['sms'],
+          featureLimits: {},
+          variants: [
+            { planId: 'pro-usd', currency: 'USD', priceCents: 2900 },
+            { planId: 'pro', currency: 'NGN', priceCents: 5000000 },
+          ],
+        },
+      ]);
+    });
+  });
+
   describe('getBillingSummary', () => {
     it('defaults to the free plan when nothing is configured', async () => {
       mockSubscriptionRepo.findOneBy.mockResolvedValue(null);

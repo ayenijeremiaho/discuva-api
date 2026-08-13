@@ -2859,6 +2859,8 @@ systems share no config or code, only the same proven Korapay request/webhook-si
 
 **`Plan.currency` is validated against `SUPPORTED_BILLING_CURRENCIES` (`src/billing/constant/supported-currencies.constant.ts`), currently `['NGN', 'USD']` only.** Nothing in `PaymentProviderRegistryService` or any of the three provider implementations checks that Discuva's own merchant account for the chosen provider can actually settle in a plan's currency — a plan created with an unsupported currency would only fail at charge time, at the provider, not at plan-creation time. `CreatePlanDto`/`UpdatePlanDto` enforce this whitelist so a currency can't be picked (via `discuva-platform`'s Plan form or a direct API call) without first confirming it with each active provider's Discuva-owned account and widening the constant.
 
+**Multi-currency tiers (`Plan.tierKey`):** each `Plan` row is still exactly one immutable priced offering in one currency — `id` remains the real billing identity (`Subscription.planId`, `Plan.billingProviderPriceId` all key off it, untouched by anything below). `tierKey` is a separate, purely-display grouping key that lets multiple rows represent the same conceptual tier priced in different currencies — e.g. `pro` (`tierKey: 'pro'`, NGN) and `pro-usd` (`tierKey: 'pro'`, USD) are two independent rows, both real, deliberately-priced offerings (never a currency conversion of one another). `PlanGuard`/`PlanFeatureResolverService`/checkout are entirely unaffected — they resolve via `Subscription.planId → Plan`, never `tierKey`. `tierKey` is required on `POST /platform/plans` and optional on `PATCH /platform/plans/:id`. **Safeguard:** `PlatformPlanService.updatePlan()` rejects (`400`) a `currency` change once `Plan.billingProviderPriceId` is already set, since the cached provider-side price object would silently keep charging in the old currency — create a new tier variant row instead of editing an existing plan's currency.
+
 **Currency unit mismatch between the providers, handled internally:** Paystack's Initialize Transaction takes
 `amount` in the currency's smallest unit (kobo for NGN) — matches this codebase's existing `priceCents`/`amountCents`
 convention, no conversion needed. Flutterwave's Standard Payment and Korapay's Initialize Charge both take the
@@ -2962,7 +2964,8 @@ tenant-facing catalog and nothing per-tenant to cache-invalidate.
 | Method | Path                              | Permission     | Description |
 |--------|-----------------------------------|----------------|--------------|
 | GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, cancelAtPeriodEnd, sponsoredByParent }` |
-| GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, priceCents, currency, features }]`), ordered by price ascending — the only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
+| GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, tierKey, priceCents, currency, features }]`), ordered by price ascending — every currency variant of every tier as its own row; the frontend groups by `tierKey` itself. The only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
+| GET    | `/billing/public/plans`           | None — `@Public()` (bypasses the global `JwtAuthGuard`) and `TenantMiddleware`-excluded | Tier-grouped catalog for discuva-web (no tenant/admin context at all): `[{ tierKey, name, features, featureLimits, variants: [{ planId, currency, priceCents }] }]`, variants and tiers sorted by price ascending |
 | POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to; `400` if the named (or default) provider is deactivated — see "Payment Providers: deactivation has real consequences" above |
 | POST   | `/billing/cancel`                  | BILLING_WRITE  | No body — cancels immediately or at period end depending on `currentPeriodEnd`; `400` if no paid/cancelable subscription |
 | POST   | `/webhooks/billing`                | No guard — provider webhook | `@Public()`, dispatches to Paystack or Flutterwave by which of their two signature headers is present (`x-paystack-signature` HMAC-SHA512 vs `verif-hash` shared-secret string compare) |
@@ -3051,10 +3054,12 @@ explicitly removed. Deliberately **never touches checkout or a payment provider*
 `sponsoredByTenantId` above, and for the same structural reason: Paystack/Flutterwave recurring charges are driven
 by a provider-side Plan object keyed on `Plan.billingProviderPriceId`, not a per-transaction amount override, so a
 discount here can't change what a provider actually auto-renews at without creating a distinct provider Plan per
-discount tier (out of scope for an internal comp). Its effect is bookkeeping only: `PlatformAnalyticsService.mrrCents()`
+discount tier (out of scope for an internal comp). Its effect is bookkeeping only: `PlatformAnalyticsService.mrrByCurrency()`
 sums each active, non-sponsored subscription's *effective* (discounted) price via the shared
 `computeEffectivePriceCents()` helper (`src/billing/util/discount.util.ts`) rather than the raw `Plan.priceCents`, so
 reported MRR reflects comps; `GET /platform/tenants` also returns the four discount fields per tenant for display.
+MRR is grouped by `Plan.currency` (`[{ currency, mrrCents }]`), never blended into one figure — same reasoning as
+giving totals below: an NGN-priced and a USD-priced subscription summed together would be meaningless.
 
 ### Branch Hierarchy (`src/branch/`)
 
@@ -4778,9 +4783,9 @@ being visible outside this service. All four routes now return the identical cur
 | PATCH | `/platform/tenants/:id/discount` | Apply an internal comp — `{ discountType: 'percentage' \| 'fixed_amount', discountValue, discountReason?, discountExpiresAt? }`. Requires an existing subscription. Never touches checkout/a payment provider — see Billing & Checkout above. |
 | DELETE | `/platform/tenants/:id/discount` | Clear a tenant's discount. |
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
-| GET | `/platform/plans` | List plan tiers. |
-| POST | `/platform/plans` | Create a plan tier. |
-| PATCH | `/platform/plans/:id` | Edit a plan tier's price/currency/features/`featureLimits` (numeric usage cap per capability key — see Billing & Checkout above). |
+| GET | `/platform/plans` | List plan rows (every currency variant of every tier). |
+| POST | `/platform/plans` | Create a plan row — `tierKey` required, groups it with sibling currency variants. See "Multi-currency tiers" under Billing & Checkout above. |
+| PATCH | `/platform/plans/:id` | Edit a plan row's price/currency/features/`featureLimits`/`tierKey`. `400` if changing `currency` on a row that already has a `billingProviderPriceId` — see "Multi-currency tiers" above. |
 | GET | `/platform/capabilities` | `[{ key, label }]` — every valid `features`/`featureLimits` key (every `KNOWN_MODULES` entry plus the 4 module-less `PlanFeature` values), labeled for the Plans page's checkbox list. See "Every toggleable module is also a plan-assignable capability" above. |
 | GET | `/platform/subscriptions` | List all subscriptions — spot `past_due` churn risk. |
 | GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
@@ -4926,9 +4931,9 @@ once, by `CheckoutService.applySubscriptionCanceled()`. Added specifically becau
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| GET | `/platform/analytics/overview` | `{ totalTenants, activeTenants, suspendedTenants, totalMembersPlatformWide, subscriptionsByPlan[], mrrCents }` — headline numbers |
+| GET | `/platform/analytics/overview` | `{ totalTenants, activeTenants, suspendedTenants, totalMembersPlatformWide, subscriptionsByPlan[], mrrByCurrency: [{currency, mrrCents}] }` — headline numbers. `mrrByCurrency` replaced a single blended `mrrCents` figure (breaking change) once plans could be priced in more than one currency |
 | GET | `/platform/analytics/growth` | `?period=&months=` — `{ period, signups: [{periodLabel, count}], currentActiveTenants, currentSuspendedTenants }` |
-| GET | `/platform/analytics/revenue` | `?period=&months=` — `{ period, mrrCents, revenueByProvider: [{provider, totalCents}], trend: [{periodLabel, subscriptionRevenueCents, totalCents}] }` — only `completed` `BillingCheckoutSession` rows count (subscriptions only — `wallet_topup` no longer exists as a checkout type) |
+| GET | `/platform/analytics/revenue` | `?period=&months=` — `{ period, mrrByCurrency: [{currency, mrrCents}], revenueByProvider: [{provider, totalCents}], trend: [{periodLabel, subscriptionRevenueCents, totalCents}] }` — only `completed` `BillingCheckoutSession` rows count (subscriptions only — `wallet_topup` no longer exists as a checkout type) |
 | GET | `/platform/analytics/engagement` | `{ totalMembers, averageAttendanceRate, totalGiving, tenantsWithRollup, tenantsMissingRollup, oldestComputedAt, newestComputedAt }` — sourced entirely from `tenant_rollups` (§Branch Hierarchy); `oldest`/`newestComputedAt` signal staleness since the rollup cron runs once daily |
 | GET | `/platform/analytics/churn` | `?period=&months=` — `{ period, currentlyCanceled, currentlyPastDue, trend: [{periodLabel, canceledCount}] }` |
 | GET | `/platform/analytics/adoption` | `{ smsAdoption: {byokCount, totalTenants, ratePercent}, emailAdoption: {...}, planDistribution: [{planId, planName, count}] }` — BYOK adoption counts distinct tenants with an active `TenantCommunicationProviderConfig` per channel |
