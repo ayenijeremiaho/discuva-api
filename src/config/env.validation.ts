@@ -220,4 +220,8 @@ export const envValidationSchema = Joi.object({
   // Grace period moved to the platform-admin-editable PlatformSettingsService
   // (PlatformSettingKey.SUBSCRIPTION_GRACE_PERIOD_DAYS) — no longer an env var.
   SUBSCRIPTION_PERIOD_DAYS: Joi.number().integer().positive().default(30),
+  ANNUAL_SUBSCRIPTION_PERIOD_DAYS: Joi.number()
+    .integer()
+    .positive()
+    .default(365),
 }).options({ allowUnknown: true });

@@ -149,11 +149,12 @@ describe('PlatformPlanService', () => {
       expect(result.currency).toBe('USD');
     });
 
-    it('allows a non-currency update even when billingProviderPriceId is set', async () => {
+    it('allows a non-currency, non-interval update even when billingProviderPriceId is set', async () => {
       mockPlanRepo.findOneBy.mockResolvedValue({
         id: 'pro',
         name: 'Pro',
         currency: 'NGN',
+        billingInterval: 'monthly',
         billingProviderPriceId: 'PLN_abc123',
       });
 
@@ -162,6 +163,36 @@ describe('PlatformPlanService', () => {
       } as any);
 
       expect(result.name).toBe('Pro Plan');
+    });
+
+    it('rejects a billingInterval change once billingProviderPriceId is set', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro',
+        name: 'Pro',
+        currency: 'NGN',
+        billingInterval: 'monthly',
+        billingProviderPriceId: 'PLN_abc123',
+      });
+
+      await expect(
+        service.updatePlan('pro', { billingInterval: 'annual' } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows a billingInterval change when billingProviderPriceId is not yet set', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro-annual',
+        name: 'Pro',
+        currency: 'NGN',
+        billingInterval: 'monthly',
+        billingProviderPriceId: null,
+      });
+
+      const result = await service.updatePlan('pro-annual', {
+        billingInterval: 'annual',
+      } as any);
+
+      expect(result.billingInterval).toBe('annual');
     });
   });
 });

@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsEnum,
   IsIn,
   IsInt,
   IsNotEmpty,
@@ -11,6 +12,7 @@ import {
 } from 'class-validator';
 import { ALL_CAPABILITY_KEYS } from '../../billing/constant/capability-keys.constant';
 import { SUPPORTED_BILLING_CURRENCIES } from '../../billing/constant/supported-currencies.constant';
+import { BillingInterval } from '../../billing/enum/billing-interval.enum';
 
 export class CreatePlanDto {
   @IsString()
@@ -39,6 +41,11 @@ export class CreatePlanDto {
   @IsOptional()
   @IsIn(SUPPORTED_BILLING_CURRENCIES)
   currency?: string;
+
+  // Second variant dimension alongside currency — required, matching
+  // tierKey, since every plan row must declare which cadence it bills at.
+  @IsEnum(BillingInterval)
+  billingInterval: BillingInterval;
 
   @IsOptional()
   @IsArray()

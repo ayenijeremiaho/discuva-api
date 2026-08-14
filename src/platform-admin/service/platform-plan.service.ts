@@ -38,17 +38,18 @@ export class PlatformPlanService {
     const plan = await this.planRepo.findOneBy({ id });
     if (!plan) throw new NotFoundException('Plan not found');
     this.validateFeatureLimits(dto.featureLimits);
-    // Once a provider-side price object exists it's charging real money in
-    // the currency it was created with — silently letting `currency` drift
-    // out from under it would desync what the DB says from what actually
-    // gets charged. Create a new tier variant row instead.
-    if (
-      dto.currency !== undefined &&
-      dto.currency !== plan.currency &&
-      plan.billingProviderPriceId
-    ) {
+    // Once a provider-side price object exists it's charging real money at
+    // the currency/interval it was created with — silently letting either
+    // drift out from under it would desync what the DB says from what
+    // actually gets charged/renewed. Create a new plan variant instead.
+    const currencyChanged =
+      dto.currency !== undefined && dto.currency !== plan.currency;
+    const intervalChanged =
+      dto.billingInterval !== undefined &&
+      dto.billingInterval !== plan.billingInterval;
+    if ((currencyChanged || intervalChanged) && plan.billingProviderPriceId) {
       throw new BadRequestException(
-        'Cannot change currency on a plan that already has a live provider price. Create a new plan variant instead.',
+        'Cannot change currency or billing interval on a plan that already has a live provider price. Create a new plan variant instead.',
       );
     }
     Object.assign(plan, dto);

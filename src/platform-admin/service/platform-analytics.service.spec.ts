@@ -161,6 +161,43 @@ describe('PlatformAnalyticsService', () => {
         { currency: 'NGN', mrrCents: 18000 },
       ]);
     });
+
+    it('normalizes an annual subscriber to a monthly-equivalent (divides by 12) before summing MRR', async () => {
+      mockTenantRepo.count.mockResolvedValueOnce(2).mockResolvedValueOnce(2);
+      mockRollupRepo.createQueryBuilder.mockReturnValue(mockQB({ total: '0' }));
+      mockSubscriptionRepo.createQueryBuilder
+        .mockReturnValueOnce(mockQB([]))
+        .mockReturnValueOnce(
+          mockQB([
+            {
+              priceCents: 10000,
+              currency: 'NGN',
+              billingInterval: 'monthly',
+              discountType: null,
+              discountValue: null,
+              discountExpiresAt: null,
+            },
+            {
+              priceCents: 1200000,
+              currency: 'NGN',
+              billingInterval: 'annual',
+              discountType: null,
+              discountValue: null,
+              discountExpiresAt: null,
+            },
+          ]),
+        );
+      mockPlanRepo.find.mockResolvedValue([]);
+
+      const result = await service.getOverview();
+
+      // Monthly row counts in full (10000). Annual row's 1200000 is
+      // normalized to a monthly-equivalent (1200000 / 12 = 100000) before
+      // summing. Total: 110000.
+      expect(result.mrrByCurrency).toEqual([
+        { currency: 'NGN', mrrCents: 110000 },
+      ]);
+    });
   });
 
   describe('getGrowth', () => {

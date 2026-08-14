@@ -12,6 +12,7 @@ import {
 } from '../../billing/entity/billing-checkout-session.entity';
 import { TenantRollup } from '../../branch/entity/tenant-rollup.entity';
 import { DiscountType } from '../../billing/enum/discount-type.enum';
+import { BillingInterval } from '../../billing/enum/billing-interval.enum';
 import { computeEffectivePriceCents } from '../../billing/util/discount.util';
 import { CommunicationProvider } from '../entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from '../entity/tenant-communication-provider-config.entity';
@@ -214,6 +215,7 @@ export class PlatformAnalyticsService {
       .innerJoin(Plan, 'plan', 'plan.id = sub.planId')
       .select('plan.priceCents', 'priceCents')
       .addSelect('plan.currency', 'currency')
+      .addSelect('plan.billingInterval', 'billingInterval')
       .addSelect('sub.discountType', 'discountType')
       .addSelect('sub.discountValue', 'discountValue')
       .addSelect('sub.discountExpiresAt', 'discountExpiresAt')
@@ -222,6 +224,7 @@ export class PlatformAnalyticsService {
       .getRawMany<{
         priceCents: number;
         currency: string;
+        billingInterval: BillingInterval;
         discountType: DiscountType | null;
         discountValue: number | null;
         discountExpiresAt: Date | null;
@@ -235,15 +238,22 @@ export class PlatformAnalyticsService {
           row.discountValue == null ? null : Number(row.discountValue),
         discountExpiresAt: row.discountExpiresAt,
       });
+      // "Monthly" Recurring Revenue — an annual plan's full price is
+      // normalized down to its monthly-equivalent before summing, or MRR
+      // would overstate an annual subscriber's contribution ~12x.
+      const monthlyEquivalent =
+        row.billingInterval === BillingInterval.ANNUAL
+          ? effective / 12
+          : effective;
       bucketMap.set(
         row.currency,
-        (bucketMap.get(row.currency) ?? 0) + effective,
+        (bucketMap.get(row.currency) ?? 0) + monthlyEquivalent,
       );
     }
 
     return [...bucketMap.entries()].map(([currency, mrrCents]) => ({
       currency,
-      mrrCents,
+      mrrCents: Math.round(mrrCents),
     }));
   }
 

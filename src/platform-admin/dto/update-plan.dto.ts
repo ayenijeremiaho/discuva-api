@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsEnum,
   IsIn,
   IsInt,
   IsObject,
@@ -9,6 +10,7 @@ import {
 } from 'class-validator';
 import { ALL_CAPABILITY_KEYS } from '../../billing/constant/capability-keys.constant';
 import { SUPPORTED_BILLING_CURRENCIES } from '../../billing/constant/supported-currencies.constant';
+import { BillingInterval } from '../../billing/enum/billing-interval.enum';
 
 export class UpdatePlanDto {
   @IsOptional()
@@ -27,6 +29,10 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsIn(SUPPORTED_BILLING_CURRENCIES)
   currency?: string;
+
+  @IsOptional()
+  @IsEnum(BillingInterval)
+  billingInterval?: BillingInterval;
 
   @IsOptional()
   @IsArray()

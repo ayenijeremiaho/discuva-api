@@ -1,14 +1,16 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import { BillingInterval } from '../enum/billing-interval.enum';
 
 // Control-plane table — lives in `public`, never a `search_path` target.
 // Price and tier count are data, not code: `id` is free-form and `features`
 // is an array, so adding a third tier is a row insert (docs/MULTI_TENANT_MIGRATION.md §4.11).
-// A single row is one immutable priced offering in one currency. Multiple
-// rows can represent the same conceptual tier in different currencies (e.g.
-// 'pro' priced in NGN and 'pro-usd' priced in USD) by sharing the same
-// `tierKey` — `id` stays the real billing identity (what Subscription.planId
-// points to, what billingProviderPriceId is cached against), `tierKey` is
-// purely a grouping/display concern, never read by checkout/guard logic.
+// A single row is one immutable priced offering in one currency and one
+// billing interval. Multiple rows can represent the same conceptual tier
+// across currency and/or interval (e.g. 'pro' NGN/monthly, 'pro-usd'
+// USD/monthly, 'pro-annual' NGN/annual) by sharing the same `tierKey` —
+// `id` stays the real billing identity (what Subscription.planId points
+// to, what billingProviderPriceId is cached against), `tierKey` is purely
+// a grouping/display concern, never read by checkout/guard logic.
 @Entity({ name: 'plans' })
 export class Plan {
   @PrimaryColumn()
@@ -25,6 +27,9 @@ export class Plan {
 
   @Column({ default: 'NGN' })
   currency: string;
+
+  @Column({ default: 'monthly' })
+  billingInterval: BillingInterval;
 
   @Column({ nullable: true })
   billingProviderPriceId: string | null;
