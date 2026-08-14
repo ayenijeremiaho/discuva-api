@@ -93,6 +93,7 @@ const mockMemberRepo = {
 
 const mockSmsService = {
   send: jest.fn().mockResolvedValue([]),
+  assertConfigured: jest.fn().mockResolvedValue(undefined),
 };
 
 describe('AnnouncementService', () => {
@@ -532,6 +533,24 @@ describe('AnnouncementService', () => {
           noSmsAdmin,
         ),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('rejects sendViaSms=true, before persisting anything, when no SMS provider is configured', async () => {
+      mockSmsService.assertConfigured.mockRejectedValueOnce(
+        new ForbiddenException({
+          message: 'No SMS provider configured.',
+          code: 'SMS_PROVIDER_NOT_CONFIGURED',
+        }),
+      );
+
+      await expect(
+        service.create(
+          { title: 'T', body: 'B', sendViaSms: true, smsBody: 'Hi' } as any,
+          'author-1',
+          smsAdmin,
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockAnnouncementRepo.save).not.toHaveBeenCalled();
     });
 
     it('dispatches SMS to resolved phone numbers using the dedicated smsBody', async () => {

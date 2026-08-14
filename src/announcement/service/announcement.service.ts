@@ -77,7 +77,7 @@ export class AnnouncementService {
     if (dto.audience === AnnouncementAudienceEnum.GROUP && !dto.groupId) {
       throw new BadRequestException('groupId is required for GROUP audience');
     }
-    this.assertCanSendViaSms(dto.sendViaSms, admin);
+    await this.assertCanSendViaSms(dto.sendViaSms, admin);
 
     const announcement = this.announcementRepo.create({
       title: dto.title,
@@ -222,7 +222,7 @@ export class AnnouncementService {
     admin: Admin,
   ): Promise<Announcement> {
     const announcement = await this.getOrThrow(id);
-    this.assertCanSendViaSms(dto.sendViaSms, admin);
+    await this.assertCanSendViaSms(dto.sendViaSms, admin);
 
     const sendingSmsNow = dto.sendViaSms === true && !announcement.sendViaSms;
 
@@ -264,16 +264,23 @@ export class AnnouncementService {
     return saved;
   }
 
-  private assertCanSendViaSms(
+  // Checked before anything is persisted — an announcement created with
+  // sendViaSms=true must not succeed if the SMS itself can never actually
+  // be sent (missing permission, or no SMS provider configured for this
+  // tenant yet). Previously the "not configured" case was only discovered
+  // inside dispatchSms(), after the announcement already existed, and was
+  // silently swallowed there — the admin had no way to know it happened.
+  private async assertCanSendViaSms(
     sendViaSms: boolean | undefined,
     admin: Admin,
-  ): void {
+  ): Promise<void> {
     if (!sendViaSms) return;
     if (!admin.adminRole.permissions.includes(AdminPermission.SMS_SEND)) {
       throw new ForbiddenException(
         `Missing required permission: ${AdminPermission.SMS_SEND}`,
       );
     }
+    await this.smsService.assertConfigured();
   }
 
   async sendSmsBroadcast(

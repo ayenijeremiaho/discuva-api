@@ -6,7 +6,10 @@ import {
   SmsSendResult,
 } from '../interface/sms-provider.interface';
 import { SmsProviderRegistryService } from './sms-provider-registry.service';
-import { SmsCredentialResolverService } from '../../communication-provider/service/sms-credential-resolver.service';
+import {
+  ResolvedSmsConfig,
+  SmsCredentialResolverService,
+} from '../../communication-provider/service/sms-credential-resolver.service';
 
 // Characters Termii documents as forcing UCS-2/unicode encoding (70 chars per
 // segment instead of 160) even though some of these are otherwise ordinary
@@ -50,9 +53,7 @@ export class SmsService {
     return { segments, encoding, characterCount };
   }
 
-  // Pure BYOK — no platform default, no wallet debit. A tenant with no
-  // active SMS provider configured simply can't send until they set one up.
-  async send(to: string[], message: string): Promise<SmsSendResult[]> {
+  private async resolveConfigOrThrow(): Promise<ResolvedSmsConfig> {
     const config = await this.credentialResolver.resolveConfig();
     if (!config) {
       throw new ForbiddenException({
@@ -60,6 +61,21 @@ export class SmsService {
         code: 'SMS_PROVIDER_NOT_CONFIGURED',
       });
     }
+    return config;
+  }
+
+  // Lets a caller (e.g. AnnouncementService, before persisting an
+  // announcement that implies an SMS will follow) check upfront rather
+  // than discovering the failure only once send() is actually called —
+  // same NOT_CONFIGURED_MESSAGE/code as every other method here.
+  async assertConfigured(): Promise<void> {
+    await this.resolveConfigOrThrow();
+  }
+
+  // Pure BYOK — no platform default, no wallet debit. A tenant with no
+  // active SMS provider configured simply can't send until they set one up.
+  async send(to: string[], message: string): Promise<SmsSendResult[]> {
+    const config = await this.resolveConfigOrThrow();
 
     const provider = this.smsProviderRegistry.get(config.providerId);
     const { encoding } = this.calculateSegments(message);
@@ -81,25 +97,13 @@ export class SmsService {
   }
 
   async getBalance(): Promise<SmsBalance> {
-    const config = await this.credentialResolver.resolveConfig();
-    if (!config) {
-      throw new ForbiddenException({
-        message: NOT_CONFIGURED_MESSAGE,
-        code: 'SMS_PROVIDER_NOT_CONFIGURED',
-      });
-    }
+    const config = await this.resolveConfigOrThrow();
     const provider = this.smsProviderRegistry.get(config.providerId);
     return provider.getBalance(config.credentials);
   }
 
   async getLogs(): Promise<SmsLogEntry[]> {
-    const config = await this.credentialResolver.resolveConfig();
-    if (!config) {
-      throw new ForbiddenException({
-        message: NOT_CONFIGURED_MESSAGE,
-        code: 'SMS_PROVIDER_NOT_CONFIGURED',
-      });
-    }
+    const config = await this.resolveConfigOrThrow();
     const provider = this.smsProviderRegistry.get(config.providerId);
     return provider.getMessageHistory(config.credentials);
   }
