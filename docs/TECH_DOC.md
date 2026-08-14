@@ -2859,34 +2859,45 @@ systems share no config or code, only the same proven Korapay request/webhook-si
 
 **`Plan.currency` is validated against `SUPPORTED_BILLING_CURRENCIES` (`src/billing/constant/supported-currencies.constant.ts`), currently `['NGN', 'USD']` only.** Nothing in `PaymentProviderRegistryService` or any of the three provider implementations checks that Discuva's own merchant account for the chosen provider can actually settle in a plan's currency — a plan created with an unsupported currency would only fail at charge time, at the provider, not at plan-creation time. `CreatePlanDto`/`UpdatePlanDto` enforce this whitelist so a currency can't be picked (via `discuva-platform`'s Plan form or a direct API call) without first confirming it with each active provider's Discuva-owned account and widening the constant.
 
-**Multi-currency tiers (`Plan.tierKey`):** each `Plan` row is still exactly one immutable priced offering in one currency — `id` remains the real billing identity (`Subscription.planId`, `Plan.billingProviderPriceId` all key off it, untouched by anything below). `tierKey` is a separate, purely-display grouping key that lets multiple rows represent the same conceptual tier priced in different currencies — e.g. `pro` (`tierKey: 'pro'`, NGN) and `pro-usd` (`tierKey: 'pro'`, USD) are two independent rows, both real, deliberately-priced offerings (never a currency conversion of one another). `PlanGuard`/`PlanFeatureResolverService`/checkout are entirely unaffected — they resolve via `Subscription.planId → Plan`, never `tierKey`. `tierKey` is required on `POST /platform/plans` and optional on `PATCH /platform/plans/:id`. **Safeguard:** `PlatformPlanService.updatePlan()` rejects (`400`) a `currency` change once `Plan.billingProviderPriceId` is already set, since the cached provider-side price object would silently keep charging in the old currency — create a new tier variant row instead of editing an existing plan's currency.
+**Multi-currency, multi-interval tiers (`Plan.tierKey`, `Plan.billingInterval`):** each `Plan` row is still exactly one immutable priced offering in one currency and one billing interval — `id` remains the real billing identity (`Subscription.planId`, `Plan.billingProviderPriceId` all key off it, untouched by anything below). `tierKey` is a separate, purely-display grouping key that lets multiple rows represent the same conceptual tier across currency and/or interval — e.g. `pro` (NGN, monthly), `pro-usd` (USD, monthly), `pro-annual` (NGN, annual) and `pro-usd-annual` (USD, annual) all share `tierKey: 'pro'`, four independent rows, each a real, deliberately-priced offering (never a currency conversion or a computed 12x-minus-discount of another). `PlanGuard`/`PlanFeatureResolverService`/checkout are entirely unaffected — they resolve via `Subscription.planId → Plan`, never `tierKey`. `tierKey` and `billingInterval` (`'monthly' | 'annual'`, `BillingInterval` enum) are both required on `POST /platform/plans` and optional on `PATCH /platform/plans/:id`. **Safeguard:** `PlatformPlanService.updatePlan()` rejects (`400`) a `currency` or `billingInterval` change once `Plan.billingProviderPriceId` is already set, since the cached provider-side price/interval object would silently keep charging at the old currency/cadence — create a new plan variant row instead of editing an existing plan's currency or interval.
+
+**Interval-aware period extension:** `CheckoutService.applyChargeSucceeded()` looks up the charged `Plan`'s `billingInterval` and extends `Subscription.currentPeriodEnd` by `SUBSCRIPTION_PERIOD_DAYS` (monthly, default 30) or `ANNUAL_SUBSCRIPTION_PERIOD_DAYS` (annual, default 365) accordingly — both a fresh checkout and (for Paystack, see below) a provider's own renewal `charge.succeeded` go through this same path, so an annual charge genuinely grants ~365 days, not 30. Only Paystack's lazily-created provider-side Plan object is told this interval at all (`interval: 'annually'` for an annual `Plan`, Paystack's own documented value, mapped from our `BillingInterval.ANNUAL`) — see the Flutterwave/Kora capability-gap note below for why Flutterwave never receives one. `PlatformAnalyticsService.mrrByCurrency()` normalizes an annual subscriber's price to a monthly-equivalent (÷12) before summing, so "MRR" stays actually monthly rather than overstating annual subscribers ~12x.
 
 **Currency unit mismatch between the providers, handled internally:** Paystack's Initialize Transaction takes
 `amount` in the currency's smallest unit (kobo for NGN) — matches this codebase's existing `priceCents`/`amountCents`
 convention, no conversion needed. Flutterwave's Standard Payment and Korapay's Initialize Charge both take the
-*major* unit (naira) — every amount is divided by 100 before being sent and multiplied back where relevant. Paystack
-and Flutterwave both lazily create (and persist onto `Plan.billingProviderPriceId`) a matching provider-side
-plan/payment-plan object the first time a `planId` is checked out against, rather than requiring one to be
-pre-created out of band.
+*major* unit (naira) — every amount is divided by 100 before being sent and multiplied back where relevant. Only
+Paystack lazily creates (and persists onto `Plan.billingProviderPriceId`) a matching provider-side plan object the
+first time a `planId` is checked out against — Flutterwave and Kora never do, see below.
 
-**Kora has no verified recurring-subscription API — a real capability gap, documented rather than papered over.**
-Unlike Paystack (`plan` + Initialize Transaction) and Flutterwave (`payment-plans` + `payment_plan`), Korapay has no
-confirmed subscription/plan product; `KoraPaymentProvider.createSubscriptionCheckout` is a single charge for the
-plan's price (same mechanism as `createOneOffCheckout`), not an auto-renewing subscription. Concretely: a tenant on
-Paystack/Flutterwave may be silently re-charged by the provider's own recurring engine when their period ends (see
-`SubscriptionLapseScheduler` below); a tenant on Kora never will be — they always fall through to the normal
-failed-renewal flow (`PAST_DUE` email → grace period → downgrade) and must complete a fresh checkout to renew.
-`KoraPaymentProvider.cancelSubscription` is correspondingly a documented no-op (nothing server-side to cancel), and
-`refund()` throws rather than calling an unverified endpoint — Korapay's real refund API shape hasn't been confirmed
-against sandbox behavior the way `/charges/initialize` and its webhook signing have (proven first in
-`KoraGivingProvider`). Don't set `DEFAULT_PAYMENT_PROVIDER=kora` without accounting for this.
+**Neither Kora nor Flutterwave has a working recurring-subscription mechanism — a real capability gap, documented
+rather than papered over.** Korapay has no confirmed subscription/plan product at all; `KoraPaymentProvider` never
+claimed one. Flutterwave *does* have a documented `payment-plans` + `payment_plan` API and this codebase originally
+used it the same way Paystack uses its `plan` object — but a real Paystack-style sandbox test exposed that it
+doesn't reliably work: a successful Flutterwave subscription checkout came back with `paymentPlan: null` on its
+`charge.completed` webhook. The channel the customer paid with was USSD (`"event.type": "USSD_TRANSACTION"` in that
+payload) — only a card payment is actually re-chargeable later, and Flutterwave's hosted checkout offers whichever
+channels are enabled on the account with no way from this codebase to restrict a subscription checkout to card
+only. Rather than depend on the customer happening to pick a channel that supports it, `FlutterwavePaymentProvider`
+was changed to match `KoraPaymentProvider` exactly: `createSubscriptionCheckout` is a single charge for the plan's
+price (no `payment_plan` attached), not an auto-renewing subscription, and `Plan.billingProviderPriceId` is never
+set by either provider. Concretely: a tenant on Paystack may be silently re-charged by Paystack's own recurring
+engine when their period ends (see `SubscriptionLapseScheduler` below); a tenant on Flutterwave or Kora never will
+be — they always fall through to the normal failed-renewal flow (`PAST_DUE` email → grace period → downgrade) and
+must complete a fresh checkout to renew. Both `FlutterwavePaymentProvider.cancelSubscription` and
+`KoraPaymentProvider.cancelSubscription` are correspondingly documented no-ops (nothing server-side to cancel).
+Kora's `refund()` throws rather than calling an unverified endpoint — Korapay's real refund API shape hasn't been
+confirmed against sandbox behavior the way `/charges/initialize` and its webhook signing have (proven first in
+`KoraGivingProvider`); Flutterwave's refund endpoint (unrelated to the payment-plan gap above) has been verified.
+Don't set `DEFAULT_PAYMENT_PROVIDER` to `kora` or `flutterwave` without accounting for the lack of real
+auto-renewal.
 
 **`BillingCheckoutSession`** (`public.billing_checkout_sessions`) is recorded at checkout-*initiation* time, primary-
 keyed by the provider's own reference (Paystack `reference` / Flutterwave `tx_ref`) — this is the only thing a
 webhook payload is ever trusted for identity/amount against. `CheckoutService.handleWebhookEvent()` looks up this
 row by the reference the webhook echoes back; a reference with no matching `pending` row (unknown, already
 processed, or forged) is a safe no-op, never an error that could imply something was charged. One intent today:
-`subscription` (activates a 30-day period — see `SUBSCRIPTION_PERIOD_DAYS` — on `Subscription`, not true
+`subscription` (activates a period on `Subscription` — see `SUBSCRIPTION_PERIOD_DAYS`/`ANNUAL_SUBSCRIPTION_PERIOD_DAYS` — not true
 provider-driven recurring-billing reconciliation, deferred pending live sandbox testing). A `wallet_topup` intent
 existed pre-BYOK (funded a prepaid `SmsWallet` debited per SMS sent) — removed along with the wallet itself once SMS
 went pure BYOK (§ SMS Module); `BillingCheckoutType` only has `SUBSCRIPTION` now.
@@ -2907,10 +2918,14 @@ the branch's own to cancel).
 other lapse is treated as a failed renewal: flips `status` to `PAST_DUE` (the "queryable payment-status field" the
 frontend can key a banner off — `SubscriptionStatus.PAST_DUE` existed as an enum value long before anything actually
 set it), emails the tenant's oldest active admin, and gives a `GRACE_PERIOD_DAYS` (7) window before finally
-downgrading to Free. **Known limitation, documented rather than silently accepted:** this is only fully accurate
-once `Subscription.billingProviderSubscriptionId` capture is wired up (still deferred, pending live sandbox
-testing) — until then, a tenant whose provider auto-renewal webhook this codebase doesn't yet recognize will also
-pass through PAST_DUE and eventually lapse here, even if they're genuinely still paying. "Retrying" a failing card
+downgrading to Free. **Known limitation, documented rather than silently accepted:** `Subscription.billingProviderSubscriptionId`
+capture is wired up for Paystack (`subscription.create`, verified against a real sandbox payload, see below) — a
+Paystack tenant whose subscription is canceled from Paystack's own hosted portal is now recognized as canceled
+immediately rather than only once they lapse here. This doesn't apply to Flutterwave or Kora at all, but not
+because anything is unwired — neither provider ever creates a real server-side subscription in the first place
+(see the capability-gap note above), so there's no provider-side cancellation event to miss; a Flutterwave/Kora
+tenant's renewal is always self-serve, and this scheduler's PAST_DUE → grace period → downgrade flow is the
+*expected* path for them, not a gap. "Retrying" a failing card
 is the provider's own responsibility (both Paystack and Flutterwave retry several times before giving up, well
 within the 7-day window) — this scheduler only reflects local state, it never re-attempts a charge itself.
 
@@ -2965,7 +2980,7 @@ tenant-facing catalog and nothing per-tenant to cache-invalidate.
 |--------|-----------------------------------|----------------|--------------|
 | GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, cancelAtPeriodEnd, sponsoredByParent }` |
 | GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, tierKey, priceCents, currency, features }]`), ordered by price ascending — every currency variant of every tier as its own row; the frontend groups by `tierKey` itself. The only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
-| GET    | `/billing/public/plans`           | None — `@Public()` (bypasses the global `JwtAuthGuard`) and `TenantMiddleware`-excluded | Tier-grouped catalog for discuva-web (no tenant/admin context at all): `[{ tierKey, name, features, featureLimits, variants: [{ planId, currency, priceCents }] }]`, variants and tiers sorted by price ascending |
+| GET    | `/billing/public/plans`           | None — `@Public()` (bypasses the global `JwtAuthGuard`) and `TenantMiddleware`-excluded | Tier-grouped catalog for discuva-web (no tenant/admin context at all): `[{ tierKey, name, features, featureLimits, variants: [{ planId, currency, priceCents, billingInterval }] }]`, variants and tiers sorted by price ascending |
 | POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to; `400` if the named (or default) provider is deactivated — see "Payment Providers: deactivation has real consequences" above |
 | POST   | `/billing/cancel`                  | BILLING_WRITE  | No body — cancels immediately or at period end depending on `currentPeriodEnd`; `400` if no paid/cancelable subscription |
 | POST   | `/webhooks/billing`                | No guard — provider webhook | `@Public()`, dispatches to Paystack or Flutterwave by which of their two signature headers is present (`x-paystack-signature` HMAC-SHA512 vs `verif-hash` shared-secret string compare) |
@@ -2976,12 +2991,28 @@ tenant-facing catalog and nothing per-tenant to cache-invalidate.
 
 **Env vars:** `PAYSTACK_SECRET_KEY`, `PAYSTACK_BASE_URL`, `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_SECRET_HASH`,
 `FLUTTERWAVE_BASE_URL`, `DEFAULT_PAYMENT_PROVIDER`, `SUBSCRIPTION_PERIOD_DAYS` (default
-`30`, `CheckoutService`'s flat renewal period), `GRACE_PERIOD_DAYS` (default `7`, `SubscriptionLapseScheduler`'s
+`30`, monthly-plan renewal period), `ANNUAL_SUBSCRIPTION_PERIOD_DAYS` (default `365`, annual-plan renewal
+period — both read by `CheckoutService.applyChargeSucceeded()`, keyed by the charged plan's `billingInterval`),
+`GRACE_PERIOD_DAYS` (default `7`, `SubscriptionLapseScheduler`'s
 PAST_DUE window before downgrading to Free) — see Environment Variables.
 
-**Not built yet:** automatic capture of `Subscription.billingProviderSubscriptionId` from a provider's own
-subscription-lifecycle webhook (see the dunning limitation note above — this is the same underlying gap); true
-recurring-billing reconciliation driven by the provider's own renewal events rather than the flat 30-day period.
+**Paystack `subscription.create` handling (added and verified against a real sandbox payload):**
+`CheckoutService.applySubscriptionCreated()`, triggered by `PaymentEventType.subscription.created`, fires once
+right after the first successful charge on a subscription-linked transaction — confirmed live that `charge.success`
+itself never carries a subscription identifier, only this separate event does (`data.subscription_code`). Matched
+to a tenant via `data.customer.metadata.tenantId` (the same metadata attached at checkout-initiation time), not a
+checkout reference, since a freshly-created provider subscription has none of its own. Populates
+`Subscription.billingProviderSubscriptionId` (closing the gap `applySubscriptionCanceled` needed — see above) and,
+when the payload includes one, sets `currentPeriodEnd` directly from the provider's own `next_payment_date` rather
+than our `SUBSCRIPTION_PERIOD_DAYS`/`ANNUAL_SUBSCRIPTION_PERIOD_DAYS` math, since that reflects the provider's
+actual billing clock rather than whenever we happened to receive a webhook. **No Flutterwave/Kora equivalent, and
+none is planned** — neither provider ever creates a real server-side subscription (see the capability-gap note
+above), so there's no creation event to capture an id or a next-payment-date from; their `currentPeriodEnd` is
+always purely `SUBSCRIPTION_PERIOD_DAYS`/`ANNUAL_SUBSCRIPTION_PERIOD_DAYS` math from checkout time, by design. True
+full recurring-billing reconciliation (the provider's own renewal events driving every subsequent period, not just
+the first) is still not built even for Paystack — only the *first* charge's subscription-creation metadata is
+captured today.
+
 Billing/plan settings UI in `discuva-admin` (`/billing`) is built — plan picker, cancel/downgrade, past-due banner,
 plan-inheritance indicator for a sponsored branch. (SMS wallet top-up UI was removed along with the wallet itself —
 SMS billing is now entirely the tenant's own vendor relationship, outside this app.)
@@ -3045,15 +3076,26 @@ gated as a deliberate upgrade lever rather than left free on cost grounds. The r
 modules (Prayer, Evangelism, Training Classes, Sunday School, Pastor Feedback, Fellowships, Social Media,
 Children's Church, Announcements, Follow-Up) are unaffected.
 
+**`departments` was Pro-only by accident, corrected via `AddDepartmentsToFreePlan`.** Unlike `tithe`, this had no
+migration or comment ever recording it as a deliberate gate — and it directly contradicted `KNOWN_MODULES`'s own
+`required: true` flag on `departments` (`src/church-settings/constants/known-modules.constant.ts`), which marks it
+as a module a church can never disable, i.e. a foundational primitive, not an optional upsell. It's also the FK
+backbone for a wide swath of the app regardless of plan — attendance, worker profiles, finance requests, assets,
+games, volunteer opportunities, announcements, and event reminders all reference `department_id`. A Free-tier
+tenant was getting `403 PLAN_UPGRADE_REQUIRED` on anything gated by `@RequiresModule('departments')` as a result.
+Fixed by adding `departments` to `free.features` (idempotent, `WHERE NOT ('departments' = ANY(features))`) — `pro`
+and its currency/interval variants (`pro-usd`, `pro-annual`, `pro-usd-annual`) already had it, inherited via
+cloning when those variant rows were created.
+
 **Internal comps/discounts (`Subscription.discountType`/`discountValue`/`discountReason`/`discountExpiresAt`):** a
 platform-admin-only manual comp, set via `PATCH /platform/tenants/:id/discount` and cleared via
 `DELETE /platform/tenants/:id/discount` (both `TENANTS_WRITE`, both require an existing `Subscription` row — apply
 `PATCH /platform/tenants/:id/plan` first if the tenant has none yet). `discountType` is `percentage` (1–100,
 validated server-side) or `fixed_amount` (cents); `discountExpiresAt` is optional — `null` means permanent until
 explicitly removed. Deliberately **never touches checkout or a payment provider** — same spirit as
-`sponsoredByTenantId` above, and for the same structural reason: Paystack/Flutterwave recurring charges are driven
+`sponsoredByTenantId` above, and for the same structural reason: Paystack's recurring charges are driven
 by a provider-side Plan object keyed on `Plan.billingProviderPriceId`, not a per-transaction amount override, so a
-discount here can't change what a provider actually auto-renews at without creating a distinct provider Plan per
+discount here can't change what Paystack actually auto-renews at without creating a distinct provider Plan per
 discount tier (out of scope for an internal comp). Its effect is bookkeeping only: `PlatformAnalyticsService.mrrByCurrency()`
 sums each active, non-sponsored subscription's *effective* (discounted) price via the shared
 `computeEffectivePriceCents()` helper (`src/billing/util/discount.util.ts`) rather than the raw `Plan.priceCents`, so
@@ -4783,9 +4825,9 @@ being visible outside this service. All four routes now return the identical cur
 | PATCH | `/platform/tenants/:id/discount` | Apply an internal comp — `{ discountType: 'percentage' \| 'fixed_amount', discountValue, discountReason?, discountExpiresAt? }`. Requires an existing subscription. Never touches checkout/a payment provider — see Billing & Checkout above. |
 | DELETE | `/platform/tenants/:id/discount` | Clear a tenant's discount. |
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
-| GET | `/platform/plans` | List plan rows (every currency variant of every tier). |
-| POST | `/platform/plans` | Create a plan row — `tierKey` required, groups it with sibling currency variants. See "Multi-currency tiers" under Billing & Checkout above. |
-| PATCH | `/platform/plans/:id` | Edit a plan row's price/currency/features/`featureLimits`/`tierKey`. `400` if changing `currency` on a row that already has a `billingProviderPriceId` — see "Multi-currency tiers" above. |
+| GET | `/platform/plans` | List plan rows (every currency/interval variant of every tier). |
+| POST | `/platform/plans` | Create a plan row — `tierKey` and `billingInterval` required, group it with sibling currency/interval variants. See "Multi-currency, multi-interval tiers" under Billing & Checkout above. |
+| PATCH | `/platform/plans/:id` | Edit a plan row's price/currency/`billingInterval`/features/`featureLimits`/`tierKey`. `400` if changing `currency` or `billingInterval` on a row that already has a `billingProviderPriceId` — see "Multi-currency, multi-interval tiers" above. |
 | GET | `/platform/capabilities` | `[{ key, label }]` — every valid `features`/`featureLimits` key (every `KNOWN_MODULES` entry plus the 4 module-less `PlanFeature` values), labeled for the Plans page's checkbox list. See "Every toggleable module is also a plan-assignable capability" above. |
 | GET | `/platform/subscriptions` | List all subscriptions — spot `past_due` churn risk. |
 | GET | `/platform/communication-providers` | List platform-wide registered SMS/email providers. |
@@ -5987,7 +6029,8 @@ All optional — a provider whose secret key isn't set simply can't be selected 
 | `FLUTTERWAVE_SECRET_HASH`     | — *(optional)*                     | Shared secret configured in the Flutterwave dashboard's webhook settings — compared verbatim against the `verif-hash` header, not an HMAC key |
 | `FLUTTERWAVE_BASE_URL`        | `https://api.flutterwave.com/v3`   | Flutterwave API base URL |
 | `DEFAULT_PAYMENT_PROVIDER`    | `paystack`                         | Which provider a checkout call uses when it doesn't specify `?provider=` explicitly |
-| `SUBSCRIPTION_PERIOD_DAYS`    | `30`                                | Flat renewal period `CheckoutService.applyChargeSucceeded()` extends `currentPeriodEnd` by per successful charge |
+| `SUBSCRIPTION_PERIOD_DAYS`    | `30`                                | Renewal period `CheckoutService.applyChargeSucceeded()` extends `currentPeriodEnd` by per successful charge, for a `billingInterval: 'monthly'` plan |
+| `ANNUAL_SUBSCRIPTION_PERIOD_DAYS` | `365`                            | Same, for a `billingInterval: 'annual'` plan |
 | `GRACE_PERIOD_DAYS`           | `7`                                 | How long `SubscriptionLapseScheduler` keeps a `PAST_DUE` subscription's features before downgrading to Free |
 
 ---

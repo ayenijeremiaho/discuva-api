@@ -27111,7 +27111,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"tierKey\": \"free\",\n    \"name\": \"Free\",\n    \"features\": [],\n    \"featureLimits\": {},\n    \"variants\": [\n      {\n        \"planId\": \"free\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 0\n      }\n    ]\n  },\n  {\n    \"tierKey\": \"pro\",\n    \"name\": \"Pro\",\n    \"features\": [\n      \"sms\",\n      \"tithe\"\n    ],\n    \"featureLimits\": {},\n    \"variants\": [\n      {\n        \"planId\": \"pro-usd\",\n        \"currency\": \"USD\",\n        \"priceCents\": 2900\n      },\n      {\n        \"planId\": \"pro\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 5000000\n      }\n    ]\n  }\n]"
+              "body": "[\n  {\n    \"tierKey\": \"free\",\n    \"name\": \"Free\",\n    \"features\": [],\n    \"featureLimits\": {},\n    \"variants\": [\n      {\n        \"planId\": \"free\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 0,\n        \"billingInterval\": \"monthly\"\n      }\n    ]\n  },\n  {\n    \"tierKey\": \"pro\",\n    \"name\": \"Pro\",\n    \"features\": [\n      \"sms\",\n      \"tithe\"\n    ],\n    \"featureLimits\": {},\n    \"variants\": [\n      {\n        \"planId\": \"pro-usd\",\n        \"currency\": \"USD\",\n        \"priceCents\": 2900,\n        \"billingInterval\": \"monthly\"\n      },\n      {\n        \"planId\": \"pro\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 5000000,\n        \"billingInterval\": \"monthly\"\n      },\n      {\n        \"planId\": \"pro-usd-annual\",\n        \"currency\": \"USD\",\n        \"priceCents\": 29000,\n        \"billingInterval\": \"annual\"\n      },\n      {\n        \"planId\": \"pro-annual\",\n        \"currency\": \"NGN\",\n        \"priceCents\": 50000000,\n        \"billingInterval\": \"annual\"\n      }\n    ]\n  }\n]"
             }
           ]
         }
@@ -27599,7 +27599,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
+              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"billingInterval\": \"monthly\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
               "options": {
                 "raw": {
                   "language": "json"
