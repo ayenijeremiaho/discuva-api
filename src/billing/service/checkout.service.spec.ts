@@ -28,6 +28,7 @@ const mockCheckoutRepo = {
 };
 const mockManager = {
   findOne: jest.fn(),
+  findOneBy: jest.fn(),
   save: jest.fn(),
   create: jest.fn((_entity, v) => v),
 };
@@ -140,6 +141,7 @@ describe('CheckoutService', () => {
           tierKey: 'free',
           priceCents: 0,
           currency: 'NGN',
+          billingInterval: 'monthly',
           features: [],
           featureLimits: {},
         },
@@ -149,6 +151,7 @@ describe('CheckoutService', () => {
           tierKey: 'pro',
           priceCents: 2900,
           currency: 'USD',
+          billingInterval: 'monthly',
           features: ['sms'],
           featureLimits: {},
         },
@@ -158,6 +161,7 @@ describe('CheckoutService', () => {
           tierKey: 'pro',
           priceCents: 5000000,
           currency: 'NGN',
+          billingInterval: 'monthly',
           features: ['sms'],
           featureLimits: {},
         },
@@ -171,7 +175,14 @@ describe('CheckoutService', () => {
           name: 'Free',
           features: [],
           featureLimits: {},
-          variants: [{ planId: 'free', currency: 'NGN', priceCents: 0 }],
+          variants: [
+            {
+              planId: 'free',
+              currency: 'NGN',
+              priceCents: 0,
+              billingInterval: 'monthly',
+            },
+          ],
         },
         {
           tierKey: 'pro',
@@ -179,8 +190,18 @@ describe('CheckoutService', () => {
           features: ['sms'],
           featureLimits: {},
           variants: [
-            { planId: 'pro-usd', currency: 'USD', priceCents: 2900 },
-            { planId: 'pro', currency: 'NGN', priceCents: 5000000 },
+            {
+              planId: 'pro-usd',
+              currency: 'USD',
+              priceCents: 2900,
+              billingInterval: 'monthly',
+            },
+            {
+              planId: 'pro',
+              currency: 'NGN',
+              priceCents: 5000000,
+              billingInterval: 'monthly',
+            },
           ],
         },
       ]);
@@ -386,6 +407,41 @@ describe('CheckoutService', () => {
       expect(days).toBe(14);
     });
 
+    it('extends by ANNUAL_SUBSCRIPTION_PERIOD_DAYS, not the monthly default, when the charged plan is annual', async () => {
+      mockProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'charge.succeeded',
+        providerReference: 'sub_abc',
+        raw: {},
+      });
+      mockManager.findOne
+        .mockResolvedValueOnce({
+          id: 'sub_abc',
+          tenantId: 'tenant-1',
+          type: 'subscription',
+          planId: 'pro-annual',
+          provider: 'paystack',
+          status: 'pending',
+        })
+        .mockResolvedValueOnce(null);
+      mockManager.findOneBy.mockResolvedValue({
+        id: 'pro-annual',
+        billingInterval: 'annual',
+      });
+
+      await service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig');
+
+      const savedSub = mockManager.save.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as { status?: string })?.status ===
+          SubscriptionStatus.ACTIVE,
+      )[0];
+      const days = Math.round(
+        (savedSub.currentPeriodEnd.getTime() - Date.now()) /
+          (24 * 60 * 60 * 1000),
+      );
+      expect(days).toBe(365);
+    });
+
     it('marks the session failed on charge.failed', async () => {
       mockProvider.verifyAndParseWebhook.mockReturnValue({
         type: 'charge.failed',
@@ -436,6 +492,87 @@ describe('CheckoutService', () => {
       await expect(
         service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig'),
       ).resolves.toBeUndefined();
+      expect(mockSubscriptionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("captures billingProviderSubscriptionId and trusts the provider's own next payment date on subscription.created", async () => {
+      mockProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'subscription.created',
+        providerSubscriptionId: 'SUB_ldbeenw0zsxrmvz',
+        tenantId: 'tenant-1',
+        nextPaymentDate: new Date('2026-09-14T16:51:00.000Z'),
+        raw: {},
+      });
+      mockSubscriptionRepo.findOneBy.mockResolvedValue({
+        tenantId: 'tenant-1',
+        planId: 'pro',
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodEnd: new Date('2026-08-20T00:00:00.000Z'),
+      });
+      mockSubscriptionRepo.save.mockResolvedValue({});
+
+      await service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig');
+
+      expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          billingProviderSubscriptionId: 'SUB_ldbeenw0zsxrmvz',
+          currentPeriodEnd: new Date('2026-09-14T16:51:00.000Z'),
+        }),
+      );
+    });
+
+    it('still captures billingProviderSubscriptionId when no nextPaymentDate is given, without touching currentPeriodEnd', async () => {
+      mockProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'subscription.created',
+        providerSubscriptionId: 'SUB_123',
+        tenantId: 'tenant-1',
+        raw: {},
+      });
+      const existingPeriodEnd = new Date('2026-08-20T00:00:00.000Z');
+      mockSubscriptionRepo.findOneBy.mockResolvedValue({
+        tenantId: 'tenant-1',
+        planId: 'pro',
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodEnd: existingPeriodEnd,
+      });
+      mockSubscriptionRepo.save.mockResolvedValue({});
+
+      await service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig');
+
+      expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          billingProviderSubscriptionId: 'SUB_123',
+          currentPeriodEnd: existingPeriodEnd,
+        }),
+      );
+    });
+
+    it('is a safe no-op on subscription.created with no matching subscription for that tenant', async () => {
+      mockProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'subscription.created',
+        providerSubscriptionId: 'SUB_123',
+        tenantId: 'tenant-unknown',
+        raw: {},
+      });
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig'),
+      ).resolves.toBeUndefined();
+      expect(mockSubscriptionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('is a safe no-op on subscription.created with no tenantId at all', async () => {
+      mockProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'subscription.created',
+        providerSubscriptionId: 'SUB_123',
+        raw: {},
+      });
+
+      await expect(
+        service.handleWebhookEvent('paystack', Buffer.from('{}'), 'sig'),
+      ).resolves.toBeUndefined();
+      expect(mockSubscriptionRepo.findOneBy).not.toHaveBeenCalled();
       expect(mockSubscriptionRepo.save).not.toHaveBeenCalled();
     });
   });

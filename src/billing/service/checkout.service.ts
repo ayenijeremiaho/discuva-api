@@ -15,6 +15,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { Plan } from '../entity/plan.entity';
 import { Subscription } from '../entity/subscription.entity';
 import { SubscriptionStatus } from '../enum/subscription-status.enum';
+import { BillingInterval } from '../enum/billing-interval.enum';
 import {
   BillingCheckoutSession,
   BillingCheckoutStatus,
@@ -26,6 +27,7 @@ export interface PublicPlanVariant {
   planId: string;
   currency: string;
   priceCents: number;
+  billingInterval: BillingInterval;
 }
 
 export interface PublicPlanTier {
@@ -62,8 +64,10 @@ export class CheckoutService {
   // same "don't guess at a shape you can't verify" discipline as everywhere
   // else in this codebase). A tenant is re-charged and this period extended
   // again the next time their subscription's own webhook fires a fresh
-  // charge.succeeded for the same reference pattern.
-  private readonly subscriptionPeriodDays: number;
+  // charge.succeeded for the same reference pattern. Keyed by the charged
+  // plan's billingInterval, not a single global figure — an annual charge
+  // must extend the period by ~365 days, not 30.
+  private readonly periodDaysByInterval: Record<BillingInterval, number>;
 
   constructor(
     private readonly cls: ClsService<AppClsStore>,
@@ -78,10 +82,16 @@ export class CheckoutService {
     @InjectRepository(BillingCheckoutSession)
     private readonly checkoutRepo: Repository<BillingCheckoutSession>,
   ) {
-    this.subscriptionPeriodDays = this.configService.get<number>(
-      'SUBSCRIPTION_PERIOD_DAYS',
-      30,
-    );
+    this.periodDaysByInterval = {
+      [BillingInterval.MONTHLY]: this.configService.get<number>(
+        'SUBSCRIPTION_PERIOD_DAYS',
+        30,
+      ),
+      [BillingInterval.ANNUAL]: this.configService.get<number>(
+        'ANNUAL_SUBSCRIPTION_PERIOD_DAYS',
+        365,
+      ),
+    };
   }
 
   private currentTenantId(): string {
@@ -123,6 +133,7 @@ export class CheckoutService {
         planId: plan.id,
         currency: plan.currency,
         priceCents: plan.priceCents,
+        billingInterval: plan.billingInterval,
       });
     }
 
@@ -275,6 +286,12 @@ export class CheckoutService {
       );
     } else if (event.type === 'subscription.canceled') {
       await this.applySubscriptionCanceled(event.providerSubscriptionId);
+    } else if (event.type === 'subscription.created') {
+      await this.applySubscriptionCreated(
+        event.providerSubscriptionId,
+        event.tenantId,
+        event.nextPaymentDate,
+      );
     }
   }
 
@@ -307,10 +324,13 @@ export class CheckoutService {
             tenantId: session.tenantId,
           });
         }
+        const plan = await manager.findOneBy(Plan, { id: session.planId! });
+        const periodDays =
+          this.periodDaysByInterval[
+            plan?.billingInterval ?? BillingInterval.MONTHLY
+          ];
         const currentPeriodEnd = new Date();
-        currentPeriodEnd.setDate(
-          currentPeriodEnd.getDate() + this.subscriptionPeriodDays,
-        );
+        currentPeriodEnd.setDate(currentPeriodEnd.getDate() + periodDays);
         subscription.planId = session.planId!;
         subscription.status = SubscriptionStatus.ACTIVE;
         subscription.paymentProvider = session.provider;
@@ -328,15 +348,17 @@ export class CheckoutService {
     }
   }
 
-  // Only fires correctly once Subscription.billingProviderSubscriptionId
-  // has actually been populated — capturing that value from a provider's
-  // own subscription-lifecycle webhook (Paystack subscription.create,
-  // Flutterwave's equivalent) is deferred pending live sandbox testing
-  // (same reasoning as SUBSCRIPTION_PERIOD_DAYS above). Until then this is
-  // a documented no-op, not a silent gap: a tenant is still downgraded
-  // correctly via the existing platform-admin escape hatch
-  // (PATCH /platform/tenants/:id/plan) if a provider-side cancellation
-  // needs to be reflected manually in the meantime.
+  // Fires correctly for Paystack now that subscription.create populates
+  // Subscription.billingProviderSubscriptionId (see applySubscriptionCreated
+  // below) — verified against a real Paystack sandbox webhook payload.
+  // Flutterwave's equivalent creation event is NOT wired up (unverified
+  // against live Flutterwave docs/sandbox, same discipline as its
+  // interval-string mapping in flutterwave-payment.provider.ts), so a
+  // Flutterwave-side cancellation raised from Flutterwave's own hosted
+  // portal still won't resolve to a tenant here. A tenant is still
+  // downgraded correctly via the existing platform-admin escape hatch
+  // (PATCH /platform/tenants/:id/plan) if that needs reflecting manually
+  // in the meantime.
   private async applySubscriptionCanceled(
     providerSubscriptionId?: string,
   ): Promise<void> {
@@ -352,6 +374,36 @@ export class CheckoutService {
     subscription.canceledAt = new Date();
     await this.subscriptionRepo.save(subscription);
     this.cacheService.del(`plan-features:${subscription.tenantId}`);
+  }
+
+  // Captures the provider's own subscription id — needed by
+  // applySubscriptionCanceled above to match a provider-initiated
+  // cancellation back to a tenant, since a cancellation from the
+  // provider's own hosted portal carries no checkout reference of ours.
+  // Also trusts the provider's own next billing date (nextPaymentDate)
+  // over our SUBSCRIPTION_PERIOD_DAYS/ANNUAL_SUBSCRIPTION_PERIOD_DAYS math
+  // when it's given one, since that reflects the provider's actual billing
+  // clock rather than whenever we happened to receive a webhook. Matched
+  // by tenantId, not a checkout reference — a freshly-created provider
+  // subscription has none of its own (confirmed via a real Paystack
+  // sandbox payload). Safe no-op if the Subscription row doesn't exist
+  // yet — charge.succeeded (which creates it) isn't guaranteed to be
+  // processed first, webhook delivery order isn't guaranteed.
+  private async applySubscriptionCreated(
+    providerSubscriptionId?: string,
+    tenantId?: string,
+    nextPaymentDate?: Date,
+  ): Promise<void> {
+    if (!providerSubscriptionId || !tenantId) return;
+
+    const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
+    if (!subscription) return;
+
+    subscription.billingProviderSubscriptionId = providerSubscriptionId;
+    if (nextPaymentDate && !Number.isNaN(nextPaymentDate.getTime())) {
+      subscription.currentPeriodEnd = nextPaymentDate;
+    }
+    await this.subscriptionRepo.save(subscription);
   }
 
   // Platform-admin-only (PlatformAdminController) — a tenant never triggers

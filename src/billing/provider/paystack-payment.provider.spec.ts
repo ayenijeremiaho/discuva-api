@@ -66,6 +66,7 @@ describe('PaystackPaymentProvider', () => {
         name: 'Pro',
         priceCents: 500000,
         currency: 'NGN',
+        billingInterval: 'monthly',
         billingProviderPriceId: null,
       });
       mockPlanRepo.save.mockResolvedValue({});
@@ -90,8 +91,49 @@ describe('PaystackPaymentProvider', () => {
       expect(mockPlanRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ billingProviderPriceId: 'PLN_new' }),
       );
+      const createPlanCall = (global.fetch as jest.Mock).mock.calls[0];
+      expect(JSON.parse(createPlanCall[1].body)).toEqual(
+        expect.objectContaining({ interval: 'monthly' }),
+      );
       expect(result.checkoutUrl).toBe('https://paystack.com/pay/abc');
       expect(result.providerSessionId).toMatch(/^sub_/);
+    });
+
+    it('creates a Paystack plan with interval "annually" for an annual local plan', async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro-annual',
+        name: 'Pro',
+        priceCents: 50000000,
+        currency: 'NGN',
+        billingInterval: 'annual',
+        billingProviderPriceId: null,
+      });
+      mockPlanRepo.save.mockResolvedValue({});
+      mockFetchOnce(200, {
+        status: true,
+        data: { plan_code: 'PLN_annual' },
+      });
+      mockFetchOnce(200, {
+        status: true,
+        data: {
+          authorization_url: 'https://paystack.com/pay/annual',
+          reference: 'ref-annual',
+        },
+      });
+
+      await provider.createSubscriptionCheckout({
+        tenantId: 'tenant-1',
+        planId: 'pro-annual',
+        providerCustomerId: 'CUS_123',
+        email: 'admin@example.com',
+        successUrl: 'https://app.example.com/success',
+        cancelUrl: 'https://app.example.com/cancel',
+      });
+
+      const createPlanCall = (global.fetch as jest.Mock).mock.calls[0];
+      expect(JSON.parse(createPlanCall[1].body)).toEqual(
+        expect.objectContaining({ interval: 'annually' }),
+      );
     });
 
     it('reuses an existing billingProviderPriceId without creating a new plan', async () => {
@@ -168,6 +210,52 @@ describe('PaystackPaymentProvider', () => {
           providerSubscriptionId: 'SUB_123',
         }),
       );
+    });
+
+    // Fixture trimmed from a real Paystack sandbox subscription.create
+    // payload — the fields this parser actually reads (subscription_code,
+    // customer.metadata.tenantId, next_payment_date) are verbatim.
+    it('maps subscription.create to subscription.created, extracting the subscription id, tenantId, and next payment date', () => {
+      const body = JSON.stringify({
+        event: 'subscription.create',
+        data: {
+          id: 1270312,
+          subscription_code: 'SUB_ldbeenw0zsxrmvz',
+          next_payment_date: '2026-09-14T16:51:00.000Z',
+          customer: {
+            id: 391023574,
+            customer_code: 'CUS_5ec4xcoll5jx5ba',
+            metadata: { tenantId: 'tenant-1' },
+          },
+        },
+      });
+      const event = provider.verifyAndParseWebhook(
+        Buffer.from(body),
+        sign(body),
+      );
+      expect(event).toEqual(
+        expect.objectContaining({
+          type: 'subscription.created',
+          providerSubscriptionId: 'SUB_ldbeenw0zsxrmvz',
+          tenantId: 'tenant-1',
+          nextPaymentDate: new Date('2026-09-14T16:51:00.000Z'),
+        }),
+      );
+    });
+
+    it('omits nextPaymentDate when subscription.create carries no next_payment_date', () => {
+      const body = JSON.stringify({
+        event: 'subscription.create',
+        data: {
+          subscription_code: 'SUB_123',
+          customer: { metadata: { tenantId: 'tenant-1' } },
+        },
+      });
+      const event = provider.verifyAndParseWebhook(
+        Buffer.from(body),
+        sign(body),
+      );
+      expect(event.nextPaymentDate).toBeUndefined();
     });
   });
 

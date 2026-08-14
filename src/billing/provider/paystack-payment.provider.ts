@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Plan } from '../entity/plan.entity';
+import { BillingInterval } from '../enum/billing-interval.enum';
 import {
   CheckoutSession,
   IPaymentProvider,
@@ -15,6 +16,14 @@ import {
   PAYSTACK_PROVIDER_NAME,
   PaymentCustomer,
 } from '../interface/payment-provider.interface';
+
+// Paystack's Create Plan `interval` field — documented values are hourly/
+// daily/weekly/monthly/quarterly/biannually/annually, not our own
+// BillingInterval spelling.
+const PAYSTACK_INTERVAL: Record<BillingInterval, string> = {
+  [BillingInterval.MONTHLY]: 'monthly',
+  [BillingInterval.ANNUAL]: 'annually',
+};
 
 // Paystack's Initialize Transaction takes `amount` in the currency's
 // smallest unit (kobo for NGN) — the same convention this codebase already
@@ -99,7 +108,7 @@ export class PaystackPaymentProvider implements IPaymentProvider {
     const data = await this.request('POST', '/plan', {
       name: `${plan.name} (${plan.id})`,
       amount: plan.priceCents,
-      interval: 'monthly',
+      interval: PAYSTACK_INTERVAL[plan.billingInterval],
       currency: plan.currency,
     });
     plan.billingProviderPriceId = data.plan_code;
@@ -240,6 +249,21 @@ export class PaystackPaymentProvider implements IPaymentProvider {
       return {
         type: 'subscription.canceled',
         providerSubscriptionId: data.subscription_code,
+        raw: payload,
+      };
+    }
+    // Fires once, right after the first successful charge on a
+    // subscription-linked transaction (confirmed via a real sandbox
+    // payload) — charge.success itself never carries a subscription
+    // identifier, only this event does.
+    if (event === 'subscription.create') {
+      return {
+        type: 'subscription.created',
+        providerSubscriptionId: data.subscription_code,
+        tenantId: data.customer?.metadata?.tenantId,
+        nextPaymentDate: data.next_payment_date
+          ? new Date(data.next_payment_date)
+          : undefined,
         raw: payload,
       };
     }

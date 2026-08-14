@@ -75,20 +75,23 @@ describe('FlutterwavePaymentProvider', () => {
     expect(body.amount).toBe(5000);
   });
 
-  it('lazily creates a Flutterwave payment plan when missing, then reuses it', async () => {
+  // No real recurring subscription is ever created (see the class-level
+  // comment) — live sandbox testing showed a payment_plan doesn't reliably
+  // attach (a successful subscription checkout paid via USSD came back
+  // with paymentPlan: null, since only card payments are re-chargeable).
+  // createSubscriptionCheckout is a single charge for the plan's price.
+  it("charges the plan's price directly, with no payment_plan attached", async () => {
     mockPlanRepo.findOneBy.mockResolvedValue({
       id: 'pro',
       name: 'Pro',
       priceCents: 500000,
       currency: 'NGN',
-      billingProviderPriceId: null,
+      billingInterval: 'monthly',
     });
-    mockPlanRepo.save.mockResolvedValue({});
-    mockFetchOnce(200, { status: 'success', data: { id: 999 } }); // create plan
     mockFetchOnce(200, {
       status: 'success',
       data: { link: 'https://flutterwave.com/pay/sub' },
-    }); // initiate payment
+    });
 
     const result = await provider.createSubscriptionCheckout({
       tenantId: 'tenant-1',
@@ -99,10 +102,64 @@ describe('FlutterwavePaymentProvider', () => {
       cancelUrl: 'https://b',
     });
 
-    expect(mockPlanRepo.save).toHaveBeenCalledWith(
-      expect.objectContaining({ billingProviderPriceId: '999' }),
-    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.amount).toBe(5000);
+    expect(body.currency).toBe('NGN');
+    expect(body.payment_plan).toBeUndefined();
+    expect(mockPlanRepo.save).not.toHaveBeenCalled();
     expect(result.checkoutUrl).toBe('https://flutterwave.com/pay/sub');
+  });
+
+  it('charges the deliberate annual price as a single charge, still with no payment_plan attached', async () => {
+    mockPlanRepo.findOneBy.mockResolvedValue({
+      id: 'pro-annual',
+      name: 'Pro',
+      priceCents: 50000000,
+      currency: 'NGN',
+      billingInterval: 'annual',
+    });
+    mockFetchOnce(200, {
+      status: 'success',
+      data: { link: 'https://flutterwave.com/pay/annual' },
+    });
+
+    await provider.createSubscriptionCheckout({
+      tenantId: 'tenant-1',
+      planId: 'pro-annual',
+      providerCustomerId: 'admin@example.com',
+      email: 'admin@example.com',
+      successUrl: 'https://a',
+      cancelUrl: 'https://b',
+    });
+
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.amount).toBe(500000);
+    expect(body.payment_plan).toBeUndefined();
+  });
+
+  it('throws for an unknown plan', async () => {
+    mockPlanRepo.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      provider.createSubscriptionCheckout({
+        tenantId: 'tenant-1',
+        planId: 'missing',
+        providerCustomerId: 'admin@example.com',
+        email: 'admin@example.com',
+        successUrl: 'https://a',
+        cancelUrl: 'https://b',
+      }),
+    ).rejects.toThrow('Unknown plan "missing"');
+  });
+
+  describe('cancelSubscription', () => {
+    it('is a no-op — no API call, since no real subscription is ever created', async () => {
+      await provider.cancelSubscription('anything');
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
   });
 
   describe('verifyAndParseWebhook', () => {
@@ -133,6 +190,23 @@ describe('FlutterwavePaymentProvider', () => {
         SECRET_HASH,
       );
       expect(event.type).toBe('charge.failed');
+    });
+
+    // No real subscription is ever created (see class-level comment), so
+    // there's nothing Flutterwave's own hosted portal could raise a
+    // cancellation against — subscription.cancelled is deliberately
+    // unhandled, falling through to the generic safe no-op.
+    it('does not specially handle subscription.cancelled (no real subscription to cancel)', () => {
+      const body = JSON.stringify({
+        event: 'subscription.cancelled',
+        data: { id: 123 },
+      });
+      const event = provider.verifyAndParseWebhook(
+        Buffer.from(body),
+        SECRET_HASH,
+      );
+      expect(event.type).toBe('charge.failed');
+      expect(event.providerSubscriptionId).toBeUndefined();
     });
 
     it('throws when the verif-hash header does not match', () => {

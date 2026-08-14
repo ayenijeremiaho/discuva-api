@@ -16,11 +16,32 @@ import {
   PaymentCustomer,
 } from '../interface/payment-provider.interface';
 
-// Flutterwave's Standard Payment / Payment Plan endpoints take `amount` in
-// the currency's major unit (naira, not kobo) — unlike Paystack, which takes
-// the smallest unit. amountCents/priceCents throughout this codebase are
-// always the smallest unit, so every amount is divided by 100 before being
-// sent, and multiplied back on the way in from webhook payloads.
+// Flutterwave's Standard Payment endpoint takes `amount` in the currency's
+// major unit (naira, not kobo) — unlike Paystack, which takes the smallest
+// unit. amountCents/priceCents throughout this codebase are always the
+// smallest unit, so every amount is divided by 100 before being sent, and
+// multiplied back on the way in from webhook payloads.
+//
+// KNOWN LIMITATION, not silently papered over: this class used to attach a
+// `payment_plan` to subscription checkouts, the same "plan" + interval
+// mechanism Paystack uses. Live sandbox testing showed this doesn't
+// reliably create a real recurring subscription — a real successful
+// subscription checkout came back with `paymentPlan: null` on the
+// charge.completed webhook. Flutterwave's hosted checkout offers whichever
+// payment channels are enabled on the account (card, USSD, bank transfer,
+// etc.), and only a card payment is actually re-chargeable later — the
+// charge that exposed this was paid via USSD (`"event.type":
+// "USSD_TRANSACTION"` in the webhook payload), which has nothing to debit
+// again. Rather than depend on the customer happening to pick a channel
+// that supports it, this class now treats Flutterwave the same as
+// KoraPaymentProvider below: createSubscriptionCheckout is a single charge
+// for the plan's price, not an auto-renewing subscription. A tenant who
+// subscribes via Flutterwave will NOT be silently re-charged by
+// Flutterwave itself when their period ends — they fall through to
+// SubscriptionLapseScheduler's normal failed-renewal flow (PAST_DUE email
+// → grace period → downgrade) and have to complete a fresh checkout to
+// renew, same as Kora. This is a real product gap, not a bug to fix
+// quietly — flagged here so it isn't mistaken for parity with Paystack.
 @Injectable()
 export class FlutterwavePaymentProvider implements IPaymentProvider {
   readonly providerName = FLUTTERWAVE_PROVIDER_NAME;
@@ -78,42 +99,9 @@ export class FlutterwavePaymentProvider implements IPaymentProvider {
     return { providerCustomerId: tenant.email };
   }
 
-  // Lazily creates (and persists onto Plan.billingProviderPriceId) a
-  // matching Flutterwave Payment Plan the first time this planId is ever
-  // checked out against.
-  private async resolvePlanId(planId: string): Promise<{
-    flutterwavePlanId: string;
-    amountCents: number;
-    currency: string;
-  }> {
-    const plan = await this.planRepo.findOneBy({ id: planId });
-    if (!plan) {
-      throw new InternalServerErrorException(`Unknown plan "${planId}".`);
-    }
-    if (plan.billingProviderPriceId) {
-      return {
-        flutterwavePlanId: plan.billingProviderPriceId,
-        amountCents: plan.priceCents,
-        currency: plan.currency,
-      };
-    }
-
-    const data = await this.request('POST', '/payment-plans', {
-      name: `${plan.name} (${plan.id})`,
-      amount: plan.priceCents / 100,
-      interval: 'monthly',
-      currency: plan.currency,
-    });
-    plan.billingProviderPriceId = String(data.id);
-    await this.planRepo.save(plan);
-
-    return {
-      flutterwavePlanId: String(data.id),
-      amountCents: plan.priceCents,
-      currency: plan.currency,
-    };
-  }
-
+  // See class-level comment — a single charge for the plan's price, not a
+  // registered recurring plan (no payment_plan attached, unlike this
+  // method's previous shape).
   async createSubscriptionCheckout(params: {
     tenantId: string;
     planId: string;
@@ -122,16 +110,19 @@ export class FlutterwavePaymentProvider implements IPaymentProvider {
     successUrl: string;
     cancelUrl: string;
   }): Promise<CheckoutSession> {
-    const { flutterwavePlanId, amountCents, currency } =
-      await this.resolvePlanId(params.planId);
+    const plan = await this.planRepo.findOneBy({ id: params.planId });
+    if (!plan) {
+      throw new InternalServerErrorException(
+        `Unknown plan "${params.planId}".`,
+      );
+    }
     const txRef = `sub_${randomUUID()}`;
 
     const data = await this.request('POST', '/payments', {
       tx_ref: txRef,
-      amount: amountCents / 100,
-      currency,
+      amount: plan.priceCents / 100,
+      currency: plan.currency,
       redirect_url: params.successUrl,
-      payment_plan: flutterwavePlanId,
       customer: { email: params.email },
       meta: { tenantId: params.tenantId, cancel_url: params.cancelUrl },
     });
@@ -166,10 +157,17 @@ export class FlutterwavePaymentProvider implements IPaymentProvider {
     return { checkoutUrl: data.link, providerSessionId: txRef };
   }
 
-  async cancelSubscription(providerSubscriptionId: string): Promise<void> {
-    await this.request(
-      'PUT',
-      `/subscriptions/${providerSubscriptionId}/cancel`,
+  // No-op, not a fabricated API call — see class-level comment. There's no
+  // real server-side subscription object to cancel, since
+  // createSubscriptionCheckout never reliably creates one.
+  // CheckoutService already treats a provider cancelSubscription failure
+  // as best-effort/non-blocking (logs a warning, downgrades locally
+  // regardless), so resolving cleanly here is equivalent in practice to
+  // every other provider's failure path, without pretending there's
+  // something real to call.
+  async cancelSubscription(_providerSubscriptionId: string): Promise<void> {
+    this.logger.debug(
+      'FlutterwavePaymentProvider.cancelSubscription is a no-op — no real recurring subscription is ever created (see class-level comment).',
     );
   }
 
@@ -225,13 +223,10 @@ export class FlutterwavePaymentProvider implements IPaymentProvider {
         raw: payload,
       };
     }
-    if (event === 'subscription.cancelled') {
-      return {
-        type: 'subscription.canceled',
-        providerSubscriptionId: String(data.id ?? data.plan ?? ''),
-        raw: payload,
-      };
-    }
+    // No subscription.cancelled handling — see class-level comment. No real
+    // recurring subscription is ever created here, so there's nothing
+    // Flutterwave's own hosted portal could cancel to raise this event
+    // against in the first place.
 
     return { type: 'charge.failed', raw: payload };
   }

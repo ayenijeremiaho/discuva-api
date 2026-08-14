@@ -18,7 +18,8 @@ export interface CheckoutSession {
 export type PaymentEventType =
   | 'charge.succeeded'
   | 'charge.failed'
-  | 'subscription.canceled';
+  | 'subscription.canceled'
+  | 'subscription.created';
 
 export interface NormalizedPaymentEvent {
   type: PaymentEventType;
@@ -31,11 +32,25 @@ export interface NormalizedPaymentEvent {
   // amount/tenant identity carried in the webhook payload itself, only that
   // a checkout CheckoutService itself recorded as pending has now resolved.
   providerReference?: string;
-  // Set for subscription.canceled — looked up against
-  // Subscription.billingProviderSubscriptionId, since a cancellation raised
-  // from the provider's own hosted customer portal has no reference from
-  // any checkout CheckoutService initiated.
+  // Set for subscription.canceled/subscription.created — looked up against
+  // Subscription.billingProviderSubscriptionId (canceled) or persisted onto
+  // it (created), since neither has a checkout reference of its own: a
+  // cancellation raised from the provider's own hosted customer portal, or
+  // a subscription object the provider created after our own charge.success
+  // handling already ran, has nothing CheckoutService itself recorded.
   providerSubscriptionId?: string;
+  // Set for subscription.created — the tenant this new provider-side
+  // subscription belongs to. Confirmed via a real Paystack sandbox
+  // subscription.create payload: carried in data.customer.metadata.tenantId,
+  // the same metadata object attached at checkout-initiation time.
+  tenantId?: string;
+  // Set for subscription.created when the provider states its own next
+  // billing date (confirmed via the same payload — Paystack's
+  // next_payment_date) — trusted over our own flat SUBSCRIPTION_PERIOD_DAYS/
+  // ANNUAL_SUBSCRIPTION_PERIOD_DAYS math when present, since it reflects the
+  // provider's actual billing clock rather than whenever we happened to
+  // receive a webhook.
+  nextPaymentDate?: Date;
   raw: unknown;
 }
 
