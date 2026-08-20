@@ -15,7 +15,8 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import 'multer';
+import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
 import { MemberService } from '../service/member.service';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
@@ -100,22 +101,22 @@ export class MemberController {
   @UseGuards(JwtAuthGuard)
   @Post('me/photo')
   @UseInterceptors(
-    FileInterceptor('photo', {
-      limits: {
-        fileSize:
-          Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
-          3 * 1024 * 1024,
+    LimitedFileInterceptor(
+      'photo',
+      Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
+        3 * 1024 * 1024,
+      {
+        fileFilter: (_req, file, cb) => {
+          if (!file.mimetype.startsWith('image/')) {
+            return cb(
+              new BadRequestException('Only image files are allowed'),
+              false,
+            );
+          }
+          cb(null, true);
+        },
       },
-      fileFilter: (_req, file, cb) => {
-        if (!file.mimetype.startsWith('image/')) {
-          return cb(
-            new BadRequestException('Only image files are allowed'),
-            false,
-          );
-        }
-        cb(null, true);
-      },
-    }),
+    ),
   )
   async updateMyPhoto(
     @CurrentUser() user: MemberAuth,

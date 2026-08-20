@@ -13,7 +13,8 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import 'multer';
+import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { Roles } from '../../auth/decorator/roles.decorator';
@@ -40,33 +41,31 @@ export class FinanceWorkerController {
 
   @Post('requests')
   @UseInterceptors(
-    FileInterceptor('attachment', {
-      limits: {
-        fileSize:
-          Number.parseInt(
-            process.env.MAX_FINANCE_PROOF_UPLOAD_BYTES ?? '',
-            10,
-          ) || 10 * 1024 * 1024,
+    LimitedFileInterceptor(
+      'attachment',
+      Number.parseInt(process.env.MAX_FINANCE_PROOF_UPLOAD_BYTES ?? '', 10) ||
+        10 * 1024 * 1024,
+      {
+        fileFilter: (_req, file, cb) => {
+          const allowed = [
+            'application/pdf',
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+          ];
+          if (allowed.includes(file.mimetype)) {
+            cb(null, true);
+          } else {
+            cb(
+              new BadRequestException(
+                'Only PDF and image files (JPEG, PNG, WebP) are allowed.',
+              ),
+              false,
+            );
+          }
+        },
       },
-      fileFilter: (_req, file, cb) => {
-        const allowed = [
-          'application/pdf',
-          'image/jpeg',
-          'image/png',
-          'image/webp',
-        ];
-        if (allowed.includes(file.mimetype)) {
-          cb(null, true);
-        } else {
-          cb(
-            new BadRequestException(
-              'Only PDF and image files (JPEG, PNG, WebP) are allowed.',
-            ),
-            false,
-          );
-        }
-      },
-    }),
+    ),
   )
   async createRequest(
     @Body() dto: CreateFinanceRequestDto,

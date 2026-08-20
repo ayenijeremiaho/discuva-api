@@ -9,9 +9,16 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Observable } from 'rxjs';
 
-export function LimitedFileInterceptor(fieldName: string, limitBytes: number) {
+type MulterOptions = NonNullable<Parameters<typeof FileInterceptor>[1]>;
+
+export function LimitedFileInterceptor(
+  fieldName: string,
+  limitBytes: number,
+  extraOptions?: Omit<MulterOptions, 'limits'>,
+) {
   const limitMb = Math.round(limitBytes / (1024 * 1024));
   const FileInterceptorMixin = FileInterceptor(fieldName, {
+    ...extraOptions,
     limits: { fileSize: limitBytes },
   });
 

@@ -2798,9 +2798,11 @@ field for parity, though no discuva-platform UI currently exposes editing it —
 Church Profile page is the only intended write path today.
 
 **Logo upload (`POST /tenant/logo`, `DELETE /tenant/logo`, both `CHURCH_PROFILE_WRITE`):** `logoUrl` on
-`PATCH /tenant/info` only ever accepted an already-hosted URL — these two routes are the actual upload path, mirroring
-`MemberController`'s `POST members/me/photo` exactly (multer `FileInterceptor`, 3MB limit, image-mimetype-only
-filter, `CloudinaryService.uploadBuffer` into the `church-logos` folder). `Tenant.logoPublicId` (new column) tracks
+`PATCH /tenant/info` only ever accepted an already-hosted URL — these two routes are the actual upload path, same
+shape as `MemberController`'s `POST members/me/photo` (`LimitedFileInterceptor`, image-mimetype-only filter,
+`CloudinaryService.uploadBuffer` into the `church-logos` folder) but its own limit — `MAX_LOGO_UPLOAD_BYTES`
+(5MB default), not `MAX_AVATAR_UPLOAD_BYTES` — since a logo is reused across more surfaces than a profile photo and
+needs more headroom. `Tenant.logoPublicId` (new column) tracks
 the Cloudinary asset id so a replace or removal can delete the previous asset — deletion always happens *after* the
 new row is saved, so a failed re-upload never leaves a tenant with no logo. All three routes (`PATCH /tenant/info`,
 `POST /tenant/logo`, `DELETE /tenant/logo`) return the same profile shape.
@@ -2820,7 +2822,7 @@ here. This backend only ever knows what's been explicitly overridden.
   labels/descriptions, for the admin appearance-settings page to render without duplicating the catalog
   client-side.
 - `POST /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — upload/replace the override for one asset key.
-  Same upload shape as logo upload (multer, 3MB limit, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
+  Same upload shape as logo upload (multer, `MAX_LOGO_UPLOAD_BYTES` limit — 5MB default, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
   the `tenant-assets` Cloudinary folder this time). `:key` is validated against `KNOWN_ASSETS` in
   `TenantAssetService`, not at the DB level, so the catalog can grow without a migration. Same "new asset saved
   before the old one is deleted" ordering as logo upload.
@@ -5960,8 +5962,11 @@ Used for finance request attachments and payment proofs.
 | `CLOUDINARY_API_SECRET`      | — *(required)* | Cloudinary API secret                                                      |
 | `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | `MulterModule`-wide default (`AppModule`) and the limit for routes with no more specific category below — incident report photos, member bulk-import spreadsheets |
 | `MAX_CLASS_MATERIAL_UPLOAD_BYTES` | `10485760` | Training class study material uploads (`ClassesController`) |
-| `MAX_AVATAR_UPLOAD_BYTES`    | `3145728`      | Small-image convention shared by tenant logo, tenant custom asset images, and member profile photo (`TenantInfoController`, `MemberController`) |
+| `MAX_AVATAR_UPLOAD_BYTES`    | `3145728`      | Member profile photo only (`MemberController`) — a headshot never needs to be large |
+| `MAX_LOGO_UPLOAD_BYTES`      | `5242880`      | Tenant church logo and custom mobile-app appearance assets (`TenantInfoController`) — separate from `MAX_AVATAR_UPLOAD_BYTES` since logos are reused across print/display surfaces and need more headroom than a profile picture |
 | `MAX_FINANCE_PROOF_UPLOAD_BYTES` | `10485760` | Finance request payment-proof attachments (`FinanceWorkerController`) — its own var rather than reusing `MAX_CLASS_MATERIAL_UPLOAD_BYTES`, despite the same default value, since the two are semantically unrelated |
+
+All five of the above are enforced via `LimitedFileInterceptor` (`src/utility/interceptors/limited-file.interceptor.ts`), which rewrites Multer's generic "File too large" error into `"The uploaded file exceeds the maximum allowed size of {N} MB..."` using the *actual* limit passed to that route — not a guess. `HttpExceptionFilter`'s own `PayloadTooLargeException` handling (using `MAX_FILE_UPLOAD_BYTES`) is a fallback only, for the handful of upload routes not yet wrapped in `LimitedFileInterceptor` (e.g. `finance-admin`/`tithe-admin`/`reconciliation` attachment routes, which currently have no configured size limit at all).
 | `TITHE_PROOF_EXPIRY_DAYS`    | `90`           | Days after which a tithe payment proof is purged from Cloudinary and DB    |
 | `ASSET_OVERDUE_NOTIFICATION_DAYS` | `1,3,7`   | Comma-separated day thresholds for overdue checkout reminders. Leave empty to disable. |
 

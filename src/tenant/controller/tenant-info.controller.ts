@@ -12,11 +12,12 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import 'multer';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { ConfigService } from '@nestjs/config';
+import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
 import { Public } from '../../auth/decorator/public.decorator';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -27,6 +28,21 @@ import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
+
+const MAX_LOGO_UPLOAD_BYTES =
+  Number.parseInt(process.env.MAX_LOGO_UPLOAD_BYTES ?? '', 10) ||
+  5 * 1024 * 1024;
+
+function imageOnlyFilter(
+  _req: Express.Request,
+  file: Express.Multer.File,
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) {
+  if (!file.mimetype.startsWith('image/')) {
+    return cb(new BadRequestException('Only image files are allowed'), false);
+  }
+  cb(null, true);
+}
 
 // Bypasses JWT auth but still goes through TenantMiddleware — the frontend
 // calls this on mount to get branding for the current subdomain before a
@@ -72,21 +88,8 @@ export class TenantInfoController {
   @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
   @Post('logo')
   @UseInterceptors(
-    FileInterceptor('logo', {
-      limits: {
-        fileSize:
-          Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
-          3 * 1024 * 1024,
-      },
-      fileFilter: (_req, file, cb) => {
-        if (!file.mimetype.startsWith('image/')) {
-          return cb(
-            new BadRequestException('Only image files are allowed'),
-            false,
-          );
-        }
-        cb(null, true);
-      },
+    LimitedFileInterceptor('logo', MAX_LOGO_UPLOAD_BYTES, {
+      fileFilter: imageOnlyFilter,
     }),
   )
   async uploadLogo(@UploadedFile() logo?: Express.Multer.File) {
@@ -145,21 +148,8 @@ export class TenantInfoController {
   @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
   @Post('assets/:key')
   @UseInterceptors(
-    FileInterceptor('image', {
-      limits: {
-        fileSize:
-          Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
-          3 * 1024 * 1024,
-      },
-      fileFilter: (_req, file, cb) => {
-        if (!file.mimetype.startsWith('image/')) {
-          return cb(
-            new BadRequestException('Only image files are allowed'),
-            false,
-          );
-        }
-        cb(null, true);
-      },
+    LimitedFileInterceptor('image', MAX_LOGO_UPLOAD_BYTES, {
+      fileFilter: imageOnlyFilter,
     }),
   )
   async setAsset(

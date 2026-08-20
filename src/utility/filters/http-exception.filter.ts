@@ -52,6 +52,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
         message = message[0];
       }
 
+      // Fallback only — every upload route that cares about an accurate
+      // limit uses LimitedFileInterceptor, which rewrites this message
+      // itself (with the real per-route limit) before it ever reaches this
+      // filter. This branch only fires for a raw FileInterceptor route with
+      // no accurate-messaging wrapper, so MAX_FILE_UPLOAD_BYTES here is a
+      // guess, not necessarily the limit that actually fired.
       if (
         exception instanceof PayloadTooLargeException &&
         message === MULTER_FILE_TOO_LARGE_MESSAGE
