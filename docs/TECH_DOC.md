@@ -4937,6 +4937,17 @@ replace the `MAX_LOGO_UPLOAD_BYTES`/`MAX_AVATAR_UPLOAD_BYTES`/`MAX_CLASS_MATERIA
 remains an env var, unaffected, since it's the fallback for routes with no dedicated category (incident report
 photos, member bulk-import).
 
+**Fixed: tenant-scoped cache namespacing bug.** `CacheService.get`/`set`/`del` always namespace by whatever tenant
+(if any) is in CLS context — correct for genuinely per-tenant data, but `PlatformSettingsService`'s values aren't
+tenant-specific. A platform-admin write has no tenant context (scopes to `tenant:global:...`), but
+`getMaxUploadBytes()` is called from a real tenant-scoped upload request, so it was caching under
+`tenant:<that-tenant's-id>:...` — a platform-admin change never invalidated it, leaving each tenant serving a stale
+limit for up to the 300s cache TTL after every change. `CacheService` now exposes `getGlobal`/`setGlobal`/
+`delGlobal` (a genuinely separate `global:...` key namespace, not the tenant-scoped methods' coincidental
+`'global'` fallback), and `PlatformSettingsService` uses them for every cache call, including
+`getSubscriptionGracePeriodDays()` — which happened to dodge this bug only because `SubscriptionLapseScheduler`
+calls it before entering any per-tenant loop, not because it was actually correct.
+
 Enforcing a *live* limit is a real constraint Multer doesn't support natively: `limits.fileSize` has to be a static
 number known when the route is decorated, it can't await a DB/cache read per request. `DynamicLimitedFileInterceptor`
 (`src/utility/interceptors/dynamic-limited-file.interceptor.ts`) resolves this by letting Multer parse against a

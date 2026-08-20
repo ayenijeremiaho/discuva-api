@@ -81,7 +81,7 @@ export class PlatformSettingsService {
       row.value = { value: dto.value };
     }
     await this.settingRepo.save(row);
-    this.cacheService.del(this.cacheKey(key));
+    this.cacheService.delGlobal(this.cacheKey(key));
 
     return {
       key,
@@ -96,14 +96,14 @@ export class PlatformSettingsService {
   async getSubscriptionGracePeriodDays(): Promise<number> {
     const key = PlatformSettingKey.SUBSCRIPTION_GRACE_PERIOD_DAYS;
     const cacheKey = this.cacheKey(key);
-    const cached = await this.cacheService.get<number>(cacheKey);
+    const cached = await this.cacheService.getGlobal<number>(cacheKey);
     if (cached !== undefined) return cached;
 
     const row = await this.settingRepo.findOne({ where: { key } });
     const value =
       (row?.value as { value: number } | undefined)?.value ??
       KNOWN_PLATFORM_SETTINGS[key].defaultValue;
-    this.cacheService.set(cacheKey, value, this.CACHE_TTL);
+    this.cacheService.setGlobal(cacheKey, value, this.CACHE_TTL);
     return value;
   }
 
@@ -118,14 +118,14 @@ export class PlatformSettingsService {
       | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB,
   ): Promise<number> {
     const cacheKey = this.cacheKey(key);
-    const cached = await this.cacheService.get<number>(cacheKey);
+    const cached = await this.cacheService.getGlobal<number>(cacheKey);
     if (cached !== undefined) return cached * 1024 * 1024;
 
     const row = await this.settingRepo.findOne({ where: { key } });
     const valueMb =
       (row?.value as { value: number } | undefined)?.value ??
       KNOWN_PLATFORM_SETTINGS[key].defaultValue;
-    this.cacheService.set(cacheKey, valueMb, this.CACHE_TTL);
+    this.cacheService.setGlobal(cacheKey, valueMb, this.CACHE_TTL);
     return valueMb * 1024 * 1024;
   }
 

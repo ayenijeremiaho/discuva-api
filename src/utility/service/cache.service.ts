@@ -102,8 +102,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return `tenant:${tenantId}:${key}`;
   }
 
-  async get<T>(rawKey: string): Promise<T | undefined> {
-    const key = this.scopedKey(rawKey);
+  private async getByKey<T>(key: string): Promise<T | undefined> {
     const raw = await this.redis.get(key);
     if (raw === null) {
       this.accessStats.misses++;
@@ -117,6 +116,15 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     } catch {
       return raw as unknown as T;
     }
+  }
+
+  private async setByKey<T>(key: string, value: T, ttl: number): Promise<void> {
+    await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
+    this.logger.debug(`Cache SET: ${key} (TTL: ${ttl}s)`);
+  }
+
+  async get<T>(rawKey: string): Promise<T | undefined> {
+    return this.getByKey<T>(this.scopedKey(rawKey));
   }
 
   async getOrSet<T>(
@@ -133,9 +141,40 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async set<T>(rawKey: string, value: T, ttl: number = 300): Promise<void> {
-    const key = this.scopedKey(rawKey);
-    await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
-    this.logger.debug(`Cache SET: ${key} (TTL: ${ttl}s)`);
+    await this.setByKey(this.scopedKey(rawKey), value, ttl);
+  }
+
+  // Deliberately NOT tenant-scoped — for data that's the same regardless of
+  // which tenant (if any) happens to be in CLS context when it's read, e.g.
+  // PlatformSettingsService's values. Using the tenant-scoped get/set/del
+  // above for genuinely global data is a real bug: a platform-admin write
+  // (no tenant context, scopes to 'global') would never invalidate what a
+  // tenant-scoped read cached under that tenant's own id, leaving each
+  // tenant serving a stale value until its own cache entry's TTL expires
+  // independently — this is exactly the bug PlatformSettingsService hit.
+  private globalKey(key: string): string {
+    return `global:${key}`;
+  }
+
+  async getGlobal<T>(rawKey: string): Promise<T | undefined> {
+    return this.getByKey<T>(this.globalKey(rawKey));
+  }
+
+  async setGlobal<T>(
+    rawKey: string,
+    value: T,
+    ttl: number = 300,
+  ): Promise<void> {
+    await this.setByKey(this.globalKey(rawKey), value, ttl);
+  }
+
+  async delGlobal(rawKey: string): Promise<number> {
+    const key = this.globalKey(rawKey);
+    const count = await this.redis.del(key);
+    if (count > 0) {
+      this.logger.debug(`Cache DEL: ${key}`);
+    }
+    return count;
   }
 
   async incr(rawKey: string, ttlSeconds: number): Promise<number> {

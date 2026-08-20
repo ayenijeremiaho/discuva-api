@@ -14,9 +14,9 @@ const mockSettingRepo = {
 };
 
 const mockCacheService = {
-  get: jest.fn().mockResolvedValue(undefined),
-  set: jest.fn().mockResolvedValue(undefined),
-  del: jest.fn().mockResolvedValue(1),
+  getGlobal: jest.fn().mockResolvedValue(undefined),
+  setGlobal: jest.fn().mockResolvedValue(undefined),
+  delGlobal: jest.fn().mockResolvedValue(1),
 };
 
 describe('PlatformSettingsService', () => {
@@ -24,7 +24,7 @@ describe('PlatformSettingsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockCacheService.get.mockResolvedValue(undefined);
+    mockCacheService.getGlobal.mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -101,7 +101,7 @@ describe('PlatformSettingsService', () => {
         value: 10,
       });
 
-      expect(mockCacheService.del).toHaveBeenCalledWith(
+      expect(mockCacheService.delGlobal).toHaveBeenCalledWith(
         'platform-settings:subscription_grace_period_days',
       );
     });
@@ -122,7 +122,7 @@ describe('PlatformSettingsService', () => {
 
   describe('getSubscriptionGracePeriodDays', () => {
     it('returns the cached value without hitting the DB', async () => {
-      mockCacheService.get.mockResolvedValue(21);
+      mockCacheService.getGlobal.mockResolvedValue(21);
 
       const result = await service.getSubscriptionGracePeriodDays();
 
@@ -147,9 +147,57 @@ describe('PlatformSettingsService', () => {
       const result = await service.getSubscriptionGracePeriodDays();
 
       expect(result).toBe(5);
-      expect(mockCacheService.set).toHaveBeenCalledWith(
+      expect(mockCacheService.setGlobal).toHaveBeenCalledWith(
         'platform-settings:subscription_grace_period_days',
         5,
+        300,
+      );
+    });
+  });
+
+  // Regression coverage for the real bug this uncovered: CacheService's
+  // plain get/set/del always namespace by the current tenant, but platform
+  // settings aren't tenant-specific — a tenant-scoped upload request caching
+  // its own copy under that tenant's id would never see a platform admin's
+  // update (made with no tenant context) invalidate it. getGlobal/setGlobal/
+  // delGlobal bypass that namespacing entirely; these tests just confirm
+  // this service actually calls the *Global variants, not get/set/del.
+  describe('getMaxUploadBytes', () => {
+    it('returns the cached MB value converted to bytes, without hitting the DB', async () => {
+      mockCacheService.getGlobal.mockResolvedValue(5);
+
+      const result = await service.getMaxUploadBytes(
+        PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      );
+
+      expect(result).toBe(5 * 1024 * 1024);
+      expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the default (in bytes) when no cache or DB row exists', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getMaxUploadBytes(
+        PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      );
+
+      expect(result).toBe(5 * 1024 * 1024);
+    });
+
+    it('reads the DB value (MB) and caches it via the global, non-tenant-scoped cache', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({
+        key: PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+        value: { value: 8 },
+      });
+
+      const result = await service.getMaxUploadBytes(
+        PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      );
+
+      expect(result).toBe(8 * 1024 * 1024);
+      expect(mockCacheService.setGlobal).toHaveBeenCalledWith(
+        'platform-settings:max_logo_upload_mb',
+        8,
         300,
       );
     });
