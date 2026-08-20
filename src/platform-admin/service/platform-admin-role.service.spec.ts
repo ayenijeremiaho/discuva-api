@@ -86,20 +86,33 @@ describe('PlatformAdminRoleService', () => {
   });
 
   describe('findOrCreateSuperAdmin', () => {
-    it('returns the existing SuperAdmin role if present', async () => {
-      mockRoleRepo.findOneBy.mockResolvedValue({
+    it('returns the existing "Platform Super Admin" role if present', async () => {
+      mockRoleRepo.findOneBy.mockResolvedValueOnce({
         id: 'role-1',
-        name: 'SuperAdmin',
+        name: 'Platform Super Admin',
       });
       const result = await service.findOrCreateSuperAdmin();
       expect(result.id).toBe('role-1');
       expect(mockRoleRepo.save).not.toHaveBeenCalled();
     });
 
-    it('seeds a SuperAdmin role with every permission if none exists', async () => {
+    it('self-heals a legacy "SuperAdmin" row by renaming it, instead of creating a duplicate', async () => {
+      mockRoleRepo.findOneBy
+        .mockResolvedValueOnce(null) // no 'Platform Super Admin' yet
+        .mockResolvedValueOnce({ id: 'role-1', name: 'SuperAdmin' }); // legacy row
+      mockRoleRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.findOrCreateSuperAdmin();
+
+      expect(result.id).toBe('role-1');
+      expect(result.name).toBe('Platform Super Admin');
+      expect(mockRoleRepo.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('seeds a fresh "Platform Super Admin" role with every permission if neither exists', async () => {
       mockRoleRepo.findOneBy.mockResolvedValue(null);
       const result = await service.findOrCreateSuperAdmin();
-      expect(result.name).toBe('SuperAdmin');
+      expect(result.name).toBe('Platform Super Admin');
       expect(mockRoleRepo.save).toHaveBeenCalled();
       const saved = mockRoleRepo.save.mock.calls[0][0];
       expect(saved.permissions.length).toBeGreaterThan(0);

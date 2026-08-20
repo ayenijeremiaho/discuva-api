@@ -62,7 +62,7 @@ export class DefaultPlatformAdminSeed {
     );
 
     this.logger.log(
-      `Default platform admin (${email}) seeded with SuperAdmin role`,
+      `Default platform admin (${email}) seeded with Platform Super Admin role`,
     );
   }
 }

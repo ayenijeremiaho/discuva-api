@@ -281,6 +281,16 @@ export class TenantProvisioningService {
           );
           if (adminCount > 0) return null;
 
+          // TenantSchemaGenesis (the schema-genesis migration every new
+          // tenant runs before this code executes) still seeds a legacy
+          // 'Super Admin' (with a space) role from the pre-AdminRoleService
+          // naming convention — dead weight, since no admin is ever
+          // assigned to it (the real admin below always goes on
+          // 'SuperAdmin', no space) and it never receives any permission
+          // grants added since. Safe to delete unconditionally here: no
+          // admin can reference it yet, since adminCount === 0 above.
+          await tx.query(`DELETE FROM admin_roles WHERE name = 'Super Admin'`);
+
           let superAdminRole = await tx.findOneBy(AdminRole, {
             name: 'SuperAdmin',
           });

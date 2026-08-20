@@ -99,13 +99,25 @@ export class PlatformAdminRoleService {
   }
 
   async findOrCreateSuperAdmin(): Promise<PlatformAdminRole> {
-    const existing = await this.roleRepo.findOneBy({ name: 'SuperAdmin' });
+    const existing = await this.roleRepo.findOneBy({
+      name: 'Platform Super Admin',
+    });
     if (existing) return existing;
 
-    this.logger.log('SuperAdmin platform admin role not found — seeding');
+    // Self-healing rename: if the RenamePlatformSuperAdminRole migration
+    // hasn't run yet on this environment, fix the legacy name in place
+    // instead of creating a second row — the exact "SuperAdmin" naming
+    // collision with the tenant-side role this rename exists to resolve.
+    const legacy = await this.roleRepo.findOneBy({ name: 'SuperAdmin' });
+    if (legacy) {
+      legacy.name = 'Platform Super Admin';
+      return this.roleRepo.save(legacy);
+    }
+
+    this.logger.log('Platform Super Admin role not found — seeding');
     return this.roleRepo.save(
       this.roleRepo.create({
-        name: 'SuperAdmin',
+        name: 'Platform Super Admin',
         description: 'Full access to all platform admin features.',
         permissions: Object.values(PlatformAdminPermission),
       }),

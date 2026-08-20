@@ -59,11 +59,11 @@ describe('DefaultPlatformAdminSeed', () => {
     expect(mockPlatformAdminRepo.save).not.toHaveBeenCalled();
   });
 
-  it('seeds the first platform admin with the SuperAdmin role', async () => {
+  it('seeds the first platform admin with the Platform Super Admin role', async () => {
     mockPlatformAdminRepo.existsBy.mockResolvedValue(false);
     mockRoleService.findOrCreateSuperAdmin.mockResolvedValue({
       id: 'role-1',
-      name: 'SuperAdmin',
+      name: 'Platform Super Admin',
     });
     const seed = await buildSeed({
       DEFAULT_PLATFORM_ADMIN_EMAIL: 'Admin@Example.com',
@@ -77,7 +77,7 @@ describe('DefaultPlatformAdminSeed', () => {
         email: 'admin@example.com',
         passwordHash: '$argon2id$v=19$...',
         isActive: true,
-        platformAdminRole: { id: 'role-1', name: 'SuperAdmin' },
+        platformAdminRole: { id: 'role-1', name: 'Platform Super Admin' },
       }),
     );
   });
