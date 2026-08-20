@@ -15,6 +15,7 @@ import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Attendance } from '../entity/attendance.entity';
+import { AttendanceSettingsService } from './attendance-settings.service';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import {
   FOLLOW_UP_QUEUE,
@@ -87,7 +88,6 @@ export class AttendanceService {
   private readonly productName: string;
   private readonly churchName: string;
   private readonly churchAddress: string;
-  private readonly enforceDistanceCheck: boolean;
 
   constructor(
     private readonly dataSource: DataSource,
@@ -109,6 +109,7 @@ export class AttendanceService {
     private readonly emailQueueService: EmailQueueService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly attendanceSettingsService: AttendanceSettingsService,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -116,9 +117,6 @@ export class AttendanceService {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
-    this.enforceDistanceCheck = this.configService.get<boolean>(
-      'ENFORCE_DISTANCE_CHECK',
-    );
   }
 
   async checkin(
@@ -156,7 +154,7 @@ export class AttendanceService {
     this.validateCheckinWindow(now, slot, cfg, isWorker);
 
     if (dto.location) {
-      this.validateLocation(dto.location, cfg);
+      await this.validateLocation(dto.location, cfg);
     }
 
     const status = this.resolveStatus(now, slot, cfg, isWorker);
@@ -1252,17 +1250,20 @@ export class AttendanceService {
     }
   }
 
-  private validateLocation(
+  private async validateLocation(
     location: { latitude: number; longitude: number },
     cfg: ReturnType<EventService['resolveSlotConfig']>,
-  ): void {
+  ): Promise<void> {
     const distance = UtilityService.calculateDistanceInMeters(
       location.latitude,
       location.longitude,
       cfg.venue.latitude,
       cfg.venue.longitude,
     );
-    if (distance > cfg.allowedDistanceInMeters && this.enforceDistance()) {
+    if (
+      distance > cfg.allowedDistanceInMeters &&
+      (await this.enforceDistance())
+    ) {
       throw new BadRequestException(
         'You are too far from the venue to check in.',
       );
@@ -1336,8 +1337,8 @@ export class AttendanceService {
     return new Set(rows.map((r) => r.memberId));
   }
 
-  private enforceDistance(): boolean {
-    return this.enforceDistanceCheck;
+  private async enforceDistance(): Promise<boolean> {
+    return this.attendanceSettingsService.isEnabled();
   }
 
   async getAtRiskMembers(

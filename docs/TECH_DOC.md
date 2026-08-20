@@ -2333,6 +2333,31 @@ event creation — create a venue once, reference it by ID in any config or slot
 - Workers are LATE if they check in after `slot.startTime + workerLateOffsetSeconds`
 - Members are always PRESENT if within the window
 
+**Attendance Distance Check Setting — two layers, per-tenant override on top of a platform-admin default.**
+Previously `ENFORCE_DISTANCE_CHECK` was a single global env var — one on/off switch shared by every tenant, no
+per-church control, requiring a redeploy to change. Now two layers, same shape as the upload-limit settings above:
+
+1. **Platform-wide default** (`PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT`, `PlatformSettingsService.
+   getEnforceDistanceCheckDefault()`) — platform-admin-editable live via `/platform/settings`, same page as the
+   upload limits and subscription grace period. Stored as `0`/`1` (`type: 'boolean'` in the response — the
+   settings page renders a toggle instead of a number input for this one, discuva-platform's
+   `billing-settings/page.tsx`). Unlike every other `PlatformSetting`, its "no row yet" fallback is **not** a
+   hardcoded `KNOWN_PLATFORM_SETTINGS` default — `PlatformSettingsService.resolveDefault()` reads the live
+   `ENFORCE_DISTANCE_CHECK` env var instead, specifically so shipping this didn't silently flip behavior for any
+   environment that already had that env var set to something other than the old default.
+2. **Per-tenant override** (`AttendanceSettingsService`, `src/attendance/service/attendance-settings.service.ts`)
+   — `ChurchSetting`-backed (`key: 'attendance:enforce_distance_check'`), same pattern as `ReminderSettingsService`/
+   `EmailCategorySettingsService` but living inside `AttendanceModule` rather than its own top-level module, since
+   it's a single key, not a family. `getConfig()` returns `{enabled, isPlatformDefault}` so the admin UI can show
+   whether a church is following the platform default or has set its own value. `AttendanceService.enforceDistance()`
+   calls `AttendanceSettingsService.isEnabled()` (cached, tenant-scoped) on every check-in with a location — no
+   longer a value read once at boot into a constructor field.
+
+**Routes:** `GET/PATCH attendances/settings/distance-check` (`AdminGuard`, `ATTENDANCE_READ`/`ATTENDANCE_WRITE`).
+**Frontend:** discuva-admin's Events page, Config Presets tab (`DistanceCheckBanner`) — sits alongside the
+per-`EventConfig` "Allowed Distance (meters)" field it works together with: the radius is per-config, this toggle
+is tenant-wide.
+
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
 **Duplicate check-in:** The `(member, event)` unique constraint is enforced at DB level. If a member tries to check in twice for the same event, the service catches the `QueryFailedError` (PG error code `23505`) and returns `409 Conflict` with the message "You have already checked in for this event."
@@ -4971,12 +4996,19 @@ these ceilings are (tens of MB), rather than reimplementing Multer's own streami
 its own `@Global()` (guards/interceptors resolve dependencies via the *consuming* controller's module, not the
 declaring module).
 
+**Consumer 3 — attendance distance-check default:** `ENFORCE_DISTANCE_CHECK_DEFAULT` — the first *boolean*
+`PlatformSetting` (every prior one was a plain number). `KnownPlatformSetting` gained an optional `type: 'number' |
+'boolean'` field purely as a rendering hint (still stored/transmitted as `0`/`1`, no new column or shape) — the
+settings page renders a toggle instead of a number input when `type === 'boolean'`. See "Attendance Distance Check
+Setting" in the Attendance Module section above for the full per-tenant-override picture this platform default sits
+underneath.
+
 **Frontend:** discuva-platform's `/billing-settings` page (own `layout.tsx`, same "every new route needs one"
 convention, now titled "Platform Settings" in-page and in the sidebar since it's no longer billing-only), gated by
 `billing:read`/`billing:write` (reusing the existing permission pair `/giving-providers` and `/payment-providers`
 already use — no new permission introduced for the upload-limit settings, they're gated the same as every other
 platform-wide setting on this page). The per-row number input's `min`/`max` now come from each setting's own API
-response instead of a hardcoded 0–365.
+response instead of a hardcoded 0–365; a boolean-typed setting renders a toggle switch instead of a number input.
 
 **Routes prefix:** `/platform`
 
@@ -5657,8 +5689,9 @@ POST /attendances/checkin
 
 8. **Validate location** *(if location provided)*: Resolves `effectiveVenue` (
    `slot.venueOverride ?? slot.config.defaultVenue`). Calculates Haversine distance between submitted coordinates and
-   the venue's `latitude`/`longitude`. If distance exceeds `allowedDistanceInMeters` and `ENFORCE_DISTANCE_CHECK=true`,
-   throws 400.
+   the venue's `latitude`/`longitude`. If distance exceeds `allowedDistanceInMeters` and enforcement is on for this
+   tenant (`AttendanceSettingsService.isEnabled()` — see "Attendance Distance Check Setting" below; no longer a
+   single global `ENFORCE_DISTANCE_CHECK=true` for every tenant), throws 400.
 
 9. **Resolve status:**
     - Member → always `PRESENT`
@@ -6035,7 +6068,7 @@ with application cache keys.
 
 | Variable                      | Default | Description                                                        |
 |-------------------------------|---------|--------------------------------------------------------------------|
-| `ENFORCE_DISTANCE_CHECK`      | `false` | Require members to be within `allowedDistanceInMeters` to check in |
+| `ENFORCE_DISTANCE_CHECK`      | `false` | No longer read directly by AttendanceService — now only the fallback-of-the-fallback for `PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT` (see "Attendance Distance Check Setting" below) when no `PlatformSetting` row exists yet either. Kept as a real env var (not removed) specifically so an environment that already has it set isn't silently reset to `false` the moment this shipped. |
 | `ONLINE_CHECKIN_WINDOW_HOURS` | `3`     | Hours after online-confirm emails are sent during which members can confirm online attendance |
 | `FOLLOW_UP_DUE_DAYS`          | `3`     | Days from task creation before a follow-up task is considered overdue (sets `dueDate`) |
 | `FOLLOW_UP_STALE_DAYS`        | `7`     | Days of inactivity before an open task is flagged stale (daily cron + stale endpoint)  |

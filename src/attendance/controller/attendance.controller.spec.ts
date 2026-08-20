@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceService } from '../service/attendance.service';
+import { AttendanceSettingsService } from '../service/attendance-settings.service';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -20,6 +21,11 @@ const mockAttendanceService = {
   confirmOnlineAttendance: jest.fn(),
 };
 
+const mockAttendanceSettingsService = {
+  getConfig: jest.fn(),
+  setEnabled: jest.fn(),
+};
+
 describe('AttendanceController', () => {
   let controller: AttendanceController;
 
@@ -30,6 +36,10 @@ describe('AttendanceController', () => {
       controllers: [AttendanceController],
       providers: [
         { provide: AttendanceService, useValue: mockAttendanceService },
+        {
+          provide: AttendanceSettingsService,
+          useValue: mockAttendanceSettingsService,
+        },
       ],
     })
       .overrideGuard(AdminGuard)
@@ -163,6 +173,39 @@ describe('AttendanceController', () => {
 
       const call = mockAttendanceService.getAllHistory.mock.calls[0];
       expect(call[7]).toBeUndefined();
+    });
+  });
+
+  describe('distance-check settings', () => {
+    it('getEnforceDistanceCheck delegates to AttendanceSettingsService.getConfig', async () => {
+      mockAttendanceSettingsService.getConfig.mockResolvedValue({
+        enabled: true,
+        isPlatformDefault: false,
+      });
+
+      const result = await controller.getEnforceDistanceCheck();
+
+      expect(result).toEqual({ enabled: true, isPlatformDefault: false });
+      expect(mockAttendanceSettingsService.getConfig).toHaveBeenCalled();
+    });
+
+    it('updateEnforceDistanceCheck delegates to AttendanceSettingsService.setEnabled with the acting member id', async () => {
+      mockAttendanceSettingsService.setEnabled.mockResolvedValue({
+        enabled: false,
+        isPlatformDefault: false,
+      });
+      const admin = { member: { id: 'member-1' } } as any;
+
+      const result = await controller.updateEnforceDistanceCheck(
+        { enabled: false },
+        admin,
+      );
+
+      expect(mockAttendanceSettingsService.setEnabled).toHaveBeenCalledWith(
+        false,
+        'member-1',
+      );
+      expect(result).toEqual({ enabled: false, isPlatformDefault: false });
     });
   });
 });

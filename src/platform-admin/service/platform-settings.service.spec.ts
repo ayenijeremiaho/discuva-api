@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PlatformSettingsService } from './platform-settings.service';
 import { PlatformSetting } from '../entity/platform-setting.entity';
 import { PlatformSettingKey } from '../enum/platform-setting-key.enum';
@@ -19,12 +20,17 @@ const mockCacheService = {
   delGlobal: jest.fn().mockResolvedValue(1),
 };
 
+const mockConfigService = {
+  get: jest.fn().mockReturnValue(false),
+};
+
 describe('PlatformSettingsService', () => {
   let service: PlatformSettingsService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCacheService.getGlobal.mockResolvedValue(undefined);
+    mockConfigService.get.mockReturnValue(false);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -34,6 +40,7 @@ describe('PlatformSettingsService', () => {
           useValue: mockSettingRepo,
         },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -55,6 +62,7 @@ describe('PlatformSettingsService', () => {
             value: 7,
             min: 0,
             max: 365,
+            type: 'number',
           },
         ]),
       );
@@ -200,6 +208,71 @@ describe('PlatformSettingsService', () => {
         8,
         300,
       );
+    });
+  });
+
+  // ENFORCE_DISTANCE_CHECK_DEFAULT is the one setting whose "no row yet"
+  // fallback reads the live ENFORCE_DISTANCE_CHECK env var instead of a
+  // hardcoded KNOWN_PLATFORM_SETTINGS default — see resolveDefault()'s
+  // comment for why (an already-deployed env var shouldn't be silently
+  // overridden by shipping this feature).
+  describe('getEnforceDistanceCheckDefault', () => {
+    it('returns the cached value without hitting the DB', async () => {
+      mockCacheService.getGlobal.mockResolvedValue(1);
+
+      const result = await service.getEnforceDistanceCheckDefault();
+
+      expect(result).toBe(true);
+      expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the live env var when no cache or DB row exists', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      mockConfigService.get.mockReturnValue(true);
+
+      const result = await service.getEnforceDistanceCheckDefault();
+
+      expect(result).toBe(true);
+      expect(mockConfigService.get).toHaveBeenCalledWith(
+        'ENFORCE_DISTANCE_CHECK',
+      );
+    });
+
+    it('prefers a DB row over the env var once a platform admin has set one', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({
+        key: PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT,
+        value: { value: 0 },
+      });
+      mockConfigService.get.mockReturnValue(true);
+
+      const result = await service.getEnforceDistanceCheckDefault();
+
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('findOne', () => {
+    it('reports type: "boolean" for a boolean-shaped setting', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      mockConfigService.get.mockReturnValue(false);
+
+      const result = await service.findOne(
+        PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT,
+      );
+
+      expect(result.type).toBe('boolean');
+      expect(result.value).toBe(0);
+    });
+
+    it('reflects the live env var as the default value shown in the UI', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      mockConfigService.get.mockReturnValue(true);
+
+      const result = await service.findOne(
+        PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT,
+      );
+
+      expect(result.value).toBe(1);
     });
   });
 });

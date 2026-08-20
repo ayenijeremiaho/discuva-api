@@ -18,4 +18,5 @@ export class PlatformSettingResponseDto {
   value: number;
   min: number;
   max: number;
+  type: 'number' | 'boolean';
 }

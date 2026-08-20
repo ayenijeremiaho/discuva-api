@@ -9,6 +9,7 @@ import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { addHours, subHours } from 'date-fns';
 import { AttendanceService } from './attendance.service';
+import { AttendanceSettingsService } from './attendance-settings.service';
 import { Attendance } from '../entity/attendance.entity';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
@@ -133,6 +134,10 @@ const mockDepartmentAccessService = {
   assertHasCapability: jest.fn(),
 };
 
+const mockAttendanceSettingsService = {
+  isEnabled: jest.fn().mockResolvedValue(false),
+};
+
 const defaultVenue = {
   id: 'venue-1',
   name: 'Main Auditorium',
@@ -219,6 +224,10 @@ describe('AttendanceService', () => {
         { provide: EmailQueueService, useValue: mockEmailQueueService },
         { provide: ClsService, useValue: mockClsService },
         { provide: TransactionHost, useValue: mockTxHost },
+        {
+          provide: AttendanceSettingsService,
+          useValue: mockAttendanceSettingsService,
+        },
       ],
     }).compile();
 
@@ -321,7 +330,6 @@ describe('AttendanceService', () => {
         id: 'att-1',
         status: AttendanceStatusEnum.PRESENT,
       });
-      mockConfigService.get.mockReturnValue('false');
 
       const result = await service.checkin(
         {
@@ -355,7 +363,6 @@ describe('AttendanceService', () => {
       mockAttendanceRepo.findOne.mockResolvedValue(null);
       mockAttendanceRepo.create.mockReturnValue({});
       mockAttendanceRepo.save.mockResolvedValue({ id: 'att-1' });
-      mockConfigService.get.mockReturnValue('false');
 
       await service.checkin(
         {
@@ -397,7 +404,6 @@ describe('AttendanceService', () => {
         id: 'att-1',
         status: AttendanceStatusEnum.PRESENT,
       });
-      mockConfigService.get.mockReturnValue('false');
 
       const result = await service.checkin(
         {
@@ -441,7 +447,6 @@ describe('AttendanceService', () => {
         id: 'att-1',
         status: AttendanceStatusEnum.LATE,
       });
-      mockConfigService.get.mockReturnValue('false');
 
       const result = await service.checkin(
         {
@@ -457,6 +462,61 @@ describe('AttendanceService', () => {
       expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ status: AttendanceStatusEnum.LATE }),
       );
+    });
+
+    it('rejects a too-far check-in when the tenant has distance enforcement enabled', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceSettingsService.isEnabled.mockResolvedValue(true);
+
+      const farAway = { latitude: 0, longitude: 0 };
+
+      await expect(
+        service.checkin(user, {
+          serviceSlotId: 'slot-1',
+          location: farAway,
+        } as any),
+      ).rejects.toThrow('You are too far from the venue to check in.');
+    });
+
+    it('allows a too-far check-in when the tenant has distance enforcement disabled', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.create.mockReturnValue({
+        status: AttendanceStatusEnum.PRESENT,
+      });
+      mockAttendanceRepo.save.mockResolvedValue({
+        id: 'att-1',
+        status: AttendanceStatusEnum.PRESENT,
+      });
+      mockAttendanceSettingsService.isEnabled.mockResolvedValue(false);
+
+      const farAway = { latitude: 0, longitude: 0 };
+
+      const result = await service.checkin(user, {
+        serviceSlotId: 'slot-1',
+        location: farAway,
+      } as any);
+
+      expect(result).toEqual({ message: 'Check-in successful' });
     });
   });
 

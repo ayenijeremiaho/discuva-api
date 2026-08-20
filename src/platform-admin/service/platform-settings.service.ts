@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { PlatformSetting } from '../entity/platform-setting.entity';
 import {
   PlatformSettingResponseDto,
@@ -22,10 +23,26 @@ export class PlatformSettingsService {
     @InjectRepository(PlatformSetting)
     private readonly settingRepo: Repository<PlatformSetting>,
     private readonly cacheService: CacheService,
+    private readonly configService: ConfigService,
   ) {}
 
   private cacheKey(key: PlatformSettingKey): string {
     return `platform-settings:${key}`;
+  }
+
+  // Every setting's "no row yet" fallback is its hardcoded
+  // KNOWN_PLATFORM_SETTINGS default, except ENFORCE_DISTANCE_CHECK_DEFAULT —
+  // that one already had a live env var (ENFORCE_DISTANCE_CHECK) governing
+  // every tenant before this setting existed, so a hardcoded default here
+  // would silently flip behavior for any environment where ops had already
+  // set that env var to something other than the default. Reading it live
+  // instead means shipping this changes nothing until a platform admin (or
+  // a tenant, via their own override) actually touches it.
+  private resolveDefault(key: PlatformSettingKey): number {
+    if (key === PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT) {
+      return this.configService.get<boolean>('ENFORCE_DISTANCE_CHECK') ? 1 : 0;
+    }
+    return KNOWN_PLATFORM_SETTINGS[key].defaultValue;
   }
 
   async findAll(): Promise<PlatformSettingResponseDto[]> {
@@ -40,9 +57,10 @@ export class PlatformSettingsService {
         key,
         label: known.label,
         unit: known.unit,
-        value: override?.value ?? known.defaultValue,
+        value: override?.value ?? this.resolveDefault(key),
         min: known.min,
         max: known.max,
+        type: known.type ?? 'number',
       };
     });
   }
@@ -56,9 +74,10 @@ export class PlatformSettingsService {
       key,
       label: known.label,
       unit: known.unit,
-      value: value?.value ?? known.defaultValue,
+      value: value?.value ?? this.resolveDefault(key),
       min: known.min,
       max: known.max,
+      type: known.type ?? 'number',
     };
   }
 
@@ -90,6 +109,7 @@ export class PlatformSettingsService {
       value: dto.value,
       min: known.min,
       max: known.max,
+      type: known.type ?? 'number',
     };
   }
 
@@ -102,9 +122,26 @@ export class PlatformSettingsService {
     const row = await this.settingRepo.findOne({ where: { key } });
     const value =
       (row?.value as { value: number } | undefined)?.value ??
-      KNOWN_PLATFORM_SETTINGS[key].defaultValue;
+      this.resolveDefault(key);
     this.cacheService.setGlobal(cacheKey, value, this.CACHE_TTL);
     return value;
+  }
+
+  // Platform-wide default for AttendanceSettingsService — a tenant with no
+  // override of their own follows this. See resolveDefault() for why "no
+  // row yet" reads the live env var instead of a hardcoded default.
+  async getEnforceDistanceCheckDefault(): Promise<boolean> {
+    const key = PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT;
+    const cacheKey = this.cacheKey(key);
+    const cached = await this.cacheService.getGlobal<number>(cacheKey);
+    if (cached !== undefined) return cached === 1;
+
+    const row = await this.settingRepo.findOne({ where: { key } });
+    const value =
+      (row?.value as { value: number } | undefined)?.value ??
+      this.resolveDefault(key);
+    this.cacheService.setGlobal(cacheKey, value, this.CACHE_TTL);
+    return value === 1;
   }
 
   // Shared by every DynamicLimitedFileInterceptor consumer — stored value is
@@ -124,7 +161,7 @@ export class PlatformSettingsService {
     const row = await this.settingRepo.findOne({ where: { key } });
     const valueMb =
       (row?.value as { value: number } | undefined)?.value ??
-      KNOWN_PLATFORM_SETTINGS[key].defaultValue;
+      this.resolveDefault(key);
     this.cacheService.setGlobal(cacheKey, valueMb, this.CACHE_TTL);
     return valueMb * 1024 * 1024;
   }

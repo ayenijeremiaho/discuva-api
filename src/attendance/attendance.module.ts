@@ -4,8 +4,10 @@ import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { Attendance } from './entity/attendance.entity';
 import { AttendanceService } from './service/attendance.service';
+import { AttendanceSettingsService } from './service/attendance-settings.service';
 import { AttendanceController } from './controller/attendance.controller';
 import { AttendanceJobService } from './job/attendance-job';
+import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
 import { ServiceSlot } from '../event/entity/service-slot.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { MemberModule } from '../member/member.module';
@@ -16,7 +18,7 @@ import { FOLLOW_UP_QUEUE } from '../follow-up/processor/post-event.processor';
 
 @Module({
   imports: [
-    TenantTypeOrmModule.forFeature([Attendance, ServiceSlot]),
+    TenantTypeOrmModule.forFeature([Attendance, ServiceSlot, ChurchSetting]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by AttendanceJobService's forEachActiveTenant loop.
     TypeOrmModule.forFeature([Tenant]),
@@ -27,7 +29,11 @@ import { FOLLOW_UP_QUEUE } from '../follow-up/processor/post-event.processor';
     UtilityModule,
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService, AttendanceJobService],
+  providers: [
+    AttendanceService,
+    AttendanceSettingsService,
+    AttendanceJobService,
+  ],
   exports: [TenantTypeOrmModule, AttendanceService],
 })
 export class AttendanceModule {}

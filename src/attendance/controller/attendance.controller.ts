@@ -13,10 +13,12 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AttendanceService } from '../service/attendance.service';
+import { AttendanceSettingsService } from '../service/attendance-settings.service';
 import { CheckInDto } from '../dto/check-in.dto';
 import {
   AdminMarkAttendanceDto,
   CorrectAttendanceDto,
+  UpdateEnforceDistanceCheckDto,
 } from '../dto/attendance.dto';
 import { OnlineConfirmDto } from '../../follow-up/dto/online-confirm.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -39,7 +41,10 @@ import { Admin } from '../../admin/entity/admin.entity';
 
 @Controller('attendances')
 export class AttendanceController {
-  constructor(private readonly attendanceService: AttendanceService) {}
+  constructor(
+    private readonly attendanceService: AttendanceService,
+    private readonly attendanceSettingsService: AttendanceSettingsService,
+  ) {}
 
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
@@ -188,6 +193,26 @@ export class AttendanceController {
       to,
       +page,
       +limit,
+    );
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_READ)
+  @Get('settings/distance-check')
+  async getEnforceDistanceCheck() {
+    return this.attendanceSettingsService.getConfig();
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_WRITE)
+  @Patch('settings/distance-check')
+  async updateEnforceDistanceCheck(
+    @Body() dto: UpdateEnforceDistanceCheckDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.attendanceSettingsService.setEnabled(
+      dto.enabled,
+      admin.member?.id,
     );
   }
 

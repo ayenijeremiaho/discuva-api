@@ -6,6 +6,11 @@ export interface KnownPlatformSetting {
   defaultValue: number;
   min: number;
   max: number;
+  // 'boolean' settings are still stored/transmitted as 0/1 (no new column
+  // shape needed) — this is purely a rendering hint so a settings UI shows
+  // a toggle instead of a number input. Omitted = 'number' (the default
+  // every existing setting already is).
+  type?: 'number' | 'boolean';
 }
 
 export const KNOWN_PLATFORM_SETTINGS: Record<
@@ -46,6 +51,19 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     defaultValue: 10,
     min: 1,
     max: 50,
+  },
+  [PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT]: {
+    label: 'Enforce Attendance Distance Check',
+    unit: 'default for churches that have not set their own override — 0 = off, 1 = on',
+    // Not the real fallback — PlatformSettingsService.resolveDefault()
+    // reads the live ENFORCE_DISTANCE_CHECK env var instead whenever no
+    // row exists yet, so an environment that already has it set to true
+    // isn't silently reset to off the moment this ships. This value only
+    // matters if that env read somehow comes back undefined.
+    defaultValue: 0,
+    min: 0,
+    max: 1,
+    type: 'boolean',
   },
 };
 

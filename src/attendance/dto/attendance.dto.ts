@@ -1,4 +1,4 @@
-import { IsEnum, IsUUID } from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsUUID } from 'class-validator';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { Exclude, Expose } from 'class-transformer';
 import { ToDateString } from '../../utility/dto/date-converter';
@@ -6,6 +6,12 @@ import { ToDateString } from '../../utility/dto/date-converter';
 export class CorrectAttendanceDto {
   @IsEnum(AttendanceStatusEnum)
   status: AttendanceStatusEnum;
+}
+
+export class UpdateEnforceDistanceCheckDto {
+  @IsBoolean()
+  @IsNotEmpty()
+  enabled: boolean;
 }
 
 export class AdminMarkAttendanceDto {
