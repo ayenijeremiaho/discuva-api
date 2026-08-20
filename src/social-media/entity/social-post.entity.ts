@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   OneToMany,
@@ -25,6 +26,10 @@ export class SocialPost extends BaseEntity {
   @Column({ default: SocialPostStatus.DRAFT })
   status: SocialPostStatus;
 
+  // idx_social_posts_created_by already exists in the DB (added by
+  // AddMissingForeignKeyIndexes) — this decorator was missing, purely
+  // cosmetic drift between the entity and reality until now.
+  @Index()
   @ManyToOne(() => Admin, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'created_by' })
   createdBy: Admin | null;

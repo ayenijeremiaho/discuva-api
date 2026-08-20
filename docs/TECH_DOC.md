@@ -2971,6 +2971,11 @@ the branch's own to cancel).
 
 **Failed-renewal safety net (`SubscriptionLapseScheduler`, daily 04:00, distributed-lock guarded):** finds every
 `ACTIVE` subscription whose `currentPeriodEnd` has passed with no new `charge.succeeded` webhook extending it.
+Backed by a composite `(status, current_period_end)` index (`idx_subscriptions_status_current_period_end`,
+`AddSubscriptionStatusPeriodEndIndex` migration) — the query is `WHERE status = 'active' AND current_period_end <
+now()`, and since `ACTIVE` is presumably the majority status platform-wide, a single-column status index (the old
+`idx_subscriptions_status`, dropped in the same migration as redundant — the composite's leftmost prefix already
+covers a status-only filter) barely narrowed the scan on its own.
 `cancelAtPeriodEnd = true` (a voluntary cancellation reaching its natural end) downgrades immediately, no drama. Any
 other lapse is treated as a failed renewal: flips `status` to `PAST_DUE` (the "queryable payment-status field" the
 frontend can key a banner off — `SubscriptionStatus.PAST_DUE` existed as an enum value long before anything actually

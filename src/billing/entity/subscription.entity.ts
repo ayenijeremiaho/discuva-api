@@ -10,6 +10,14 @@ import { DiscountType } from '../enum/discount-type.enum';
 // this tenant on" is always one query, no null-tenant special case
 // (docs/MULTI_TENANT_MIGRATION.md §4.11). Plain FK scalars, not relations —
 // nothing here needs to load a joined Tenant/Plan, just filter by id.
+//
+// Composite (status, currentPeriodEnd) index — serves
+// SubscriptionLapseScheduler's daily `WHERE status = 'active' AND
+// currentPeriodEnd < now()` scan directly (leftmost-prefix also covers a
+// status-only filter, so it subsumes the old single-column status index —
+// see AddSubscriptionStatusPeriodEndIndex migration for why that one was
+// dropped rather than left redundant).
+@Index(['status', 'currentPeriodEnd'])
 @Entity({ name: 'subscriptions' })
 export class Subscription extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
