@@ -211,7 +211,15 @@ export class AuthService {
       );
     }
 
-    if (!member.deviceId) {
+    // The only "new device" signal this codebase has: a member is bound to
+    // exactly one deviceId (see the mismatch check above), so the *only*
+    // time that binding is set is a genuinely new device — either this
+    // member's first-ever login, or their first login after a device
+    // reset. Captured before setDeviceId() mutates it, so the login-alert
+    // email below (which literally says "New ... Login Detected") only
+    // fires for that real event instead of every single login.
+    const isNewDeviceRegistration = !member.deviceId;
+    if (isNewDeviceRegistration) {
       this.logger.log(`First device registered for member ${user.id}`);
       await this.memberService.setDeviceId(user.id, deviceId);
     }
@@ -228,18 +236,20 @@ export class AuthService {
       targetName: `${member.firstname} ${member.lastname}`,
     });
 
-    const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
-    const loginTime = new Date().toLocaleString('en-GB', {
-      timeZone: this.timezone,
-    });
-    this.utilityService.sendEmailWithTemplate(
-      member.email,
-      `${firstName}, New ${this.productName} Login Detected`,
-      'login-notification',
-      { name: firstName, loginTime },
-      undefined,
-      EmailCategory.LOGIN_ALERT,
-    );
+    if (isNewDeviceRegistration) {
+      const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+      const loginTime = new Date().toLocaleString('en-GB', {
+        timeZone: this.timezone,
+      });
+      this.utilityService.sendEmailWithTemplate(
+        member.email,
+        `${firstName}, New ${this.productName} Login Detected`,
+        'login-notification',
+        { name: firstName, loginTime },
+        undefined,
+        EmailCategory.LOGIN_ALERT,
+      );
+    }
 
     return tokens;
   }

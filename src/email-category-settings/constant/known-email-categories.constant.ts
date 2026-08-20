@@ -59,7 +59,7 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
     [EmailCategory.LOGIN_ALERT]: {
       label: 'Login Alerts',
       description:
-        'Sent when a session is created from a new device or location.',
+        'Sent the first time a member logs in from a new device — not on every login.',
     },
     [EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT]: {
       label: 'Service Programme Assignments',

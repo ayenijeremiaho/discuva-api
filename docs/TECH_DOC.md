@@ -1578,6 +1578,16 @@ Only one device may be logged into the mobile app per member account. This preve
   `deviceId = null` and invalidates all active sessions for that member, forcing a fresh login from any device.
 - `POST /auth/admin-login` (web portal) does **not** perform a device check — it is web-first.
 
+**Bug fixed:** the `login-notification` email (`EmailCategory.LOGIN_ALERT`, subject "New … Login Detected") used to
+send on *every* successful login, not just a new-device registration — despite the email itself claiming "We
+detected a new login." `AuthService.login()` now captures `isNewDeviceRegistration = !member.deviceId` before
+`setDeviceId()` mutates it, and only queues the email when that's true — i.e. this member's first-ever login, or
+their first login after a device reset (the only two ways `deviceId` transitions from `null`). Every other login
+(the normal case: `deviceId` already matches) no longer emails at all. The `EmailCategorySettingsService`/
+`ENFORCE_DISTANCE_CHECK`-style tenant-level toggle for `LOGIN_ALERT` (see "Email Category Settings Module") still
+applies on top of this — it can suppress the email entirely for a tenant, but doesn't affect *when* within a
+tenant it would have fired.
+
 ### Self-Service Device Reset Flow
 
 A member who needs to log in from a new device (lost phone, factory reset, etc.) can reset their own device lock

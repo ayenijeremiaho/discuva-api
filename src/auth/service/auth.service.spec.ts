@@ -15,6 +15,7 @@ import { AdminService } from '../../admin/service/admin.service';
 import { MemberService } from '../../member/service/member.service';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { PasswordResetOtp } from '../entity/password-reset-otp.entity';
@@ -462,6 +463,58 @@ describe('AuthService', () => {
         'member-1',
         'first-device',
       );
+    });
+
+    it('sends the "new login detected" email when this is a new device (deviceId was null)', async () => {
+      mockJwtService.signAsync.mockResolvedValue('token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      await service.login(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        'first-device',
+      );
+
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'test@test.com',
+        expect.stringContaining('New'),
+        'login-notification',
+        expect.any(Object),
+        undefined,
+        EmailCategory.LOGIN_ALERT,
+      );
+    });
+
+    it('does NOT send the "new login detected" email on a repeat login from the already-registered device', async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValueOnce({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'test@test.com',
+        deviceId: 'existing-device',
+      });
+      mockJwtService.signAsync.mockResolvedValue('token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      await service.login(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        'existing-device',
+      );
+
+      expect(mockMemberService.setDeviceId).not.toHaveBeenCalled();
+      expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
     });
 
     it('uses getByIdWithCredentials (not getById) to read the member — deviceId is select:false and getById() would silently return undefined', async () => {
