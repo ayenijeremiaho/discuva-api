@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { PlatformSettingsService } from './platform-settings.service';
 import { PlatformSetting } from '../entity/platform-setting.entity';
 import { PlatformSettingKey } from '../enum/platform-setting-key.enum';
@@ -46,14 +46,18 @@ describe('PlatformSettingsService', () => {
 
       const result = await service.findAll();
 
-      expect(result).toEqual([
-        {
-          key: PlatformSettingKey.SUBSCRIPTION_GRACE_PERIOD_DAYS,
-          label: 'Subscription Grace Period',
-          unit: 'days after payment lapse before downgrade to Free',
-          value: 7,
-        },
-      ]);
+      expect(result).toEqual(
+        expect.arrayContaining([
+          {
+            key: PlatformSettingKey.SUBSCRIPTION_GRACE_PERIOD_DAYS,
+            label: 'Subscription Grace Period',
+            unit: 'days after payment lapse before downgrade to Free',
+            value: 7,
+            min: 0,
+            max: 365,
+          },
+        ]),
+      );
     });
 
     it('merges a DB override', async () => {
@@ -106,6 +110,13 @@ describe('PlatformSettingsService', () => {
       await expect(
         service.upsert('not_a_real_key' as PlatformSettingKey, { value: 1 }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('rejects a value outside the known min/max for that key', async () => {
+      await expect(
+        service.upsert(PlatformSettingKey.MAX_LOGO_UPLOAD_MB, { value: 100 }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSettingRepo.save).not.toHaveBeenCalled();
     });
   });
 

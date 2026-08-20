@@ -28629,14 +28629,14 @@
                 "settings"
               ]
             },
-            "description": "List platform-wide settings (currently just subscription_grace_period_days). BILLING_READ."
+            "description": "List platform-wide settings (subscription grace period + the four upload-size limits). BILLING_READ."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"key\": \"subscription_grace_period_days\",\n    \"label\": \"Subscription Grace Period\",\n    \"unit\": \"days after payment lapse before downgrade to Free\",\n    \"value\": 7\n  }\n]"
+              "body": "[\n  {\n    \"key\": \"subscription_grace_period_days\",\n    \"label\": \"Subscription Grace Period\",\n    \"unit\": \"days after payment lapse before downgrade to Free\",\n    \"value\": 7,\n    \"min\": 0,\n    \"max\": 365\n  },\n  {\n    \"key\": \"max_logo_upload_mb\",\n    \"label\": \"Logo & Appearance Image Upload Limit\",\n    \"unit\": \"MB — church logo and mobile app appearance images\",\n    \"value\": 5,\n    \"min\": 1,\n    \"max\": 25\n  },\n  {\n    \"key\": \"max_avatar_upload_mb\",\n    \"label\": \"Profile Photo Upload Limit\",\n    \"unit\": \"MB — member profile pictures\",\n    \"value\": 3,\n    \"min\": 1,\n    \"max\": 15\n  },\n  {\n    \"key\": \"max_class_material_upload_mb\",\n    \"label\": \"Class Material Upload Limit\",\n    \"unit\": \"MB — training class documents, slides, and images\",\n    \"value\": 10,\n    \"min\": 1,\n    \"max\": 50\n  },\n  {\n    \"key\": \"max_finance_proof_upload_mb\",\n    \"label\": \"Finance Proof Upload Limit\",\n    \"unit\": \"MB — payment-proof attachments on finance requests\",\n    \"value\": 10,\n    \"min\": 1,\n    \"max\": 50\n  }\n]"
             }
           ]
         },
@@ -28680,14 +28680,14 @@
                 "subscription_grace_period_days"
               ]
             },
-            "description": "Edit a platform-wide setting live, no redeploy. value must be an integer 0-365. BILLING_WRITE."
+            "description": "Edit a platform-wide setting live, no redeploy. value must be an integer within that key's min/max (returned by GET /platform/settings) — e.g. 0-365 for subscription_grace_period_days, 1-25 for max_logo_upload_mb. 400 if out of range. BILLING_WRITE."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"key\": \"subscription_grace_period_days\",\n  \"label\": \"Subscription Grace Period\",\n  \"unit\": \"days after payment lapse before downgrade to Free\",\n  \"value\": 10\n}"
+              "body": "{\n  \"key\": \"subscription_grace_period_days\",\n  \"label\": \"Subscription Grace Period\",\n  \"unit\": \"days after payment lapse before downgrade to Free\",\n  \"value\": 10,\n  \"min\": 0,\n  \"max\": 365\n}"
             }
           ]
         }

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -45,6 +45,11 @@ import { TenantModule } from '../tenant/tenant.module';
 import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.entity';
 import { UtilityModule } from '../utility/utility.module';
 
+// Global so DynamicLimitedFileInterceptor consumers (TenantModule,
+// MemberModule, ClassesModule, FinanceRequestModule, ...) can inject
+// PlatformSettingsService without each needing an explicit import path —
+// same reasoning UtilityModule documents for its own @Global().
+@Global()
 @Module({
   imports: [
     ConfigModule.forFeature(platformAdminJwtConfig),

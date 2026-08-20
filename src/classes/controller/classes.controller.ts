@@ -14,7 +14,9 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import 'multer';
-import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
+import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynamic-limited-file.interceptor';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { ClassesService } from '../service/classes.service';
 import {
   CreateChurchClassDto,
@@ -88,10 +90,12 @@ export class ClassesController {
   @RequiresPermission(AdminPermission.CLASSES_WRITE)
   @Post('materials/upload')
   @UseInterceptors(
-    LimitedFileInterceptor(
+    DynamicLimitedFileInterceptor(
       'file',
-      Number.parseInt(process.env.MAX_CLASS_MATERIAL_UPLOAD_BYTES ?? '', 10) ||
-        10 * 1024 * 1024,
+      PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[
+        PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB
+      ],
       {
         fileFilter: (_req, file, cb) => {
           const allowed = [

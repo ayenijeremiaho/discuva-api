@@ -16,7 +16,9 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import 'multer';
-import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
+import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynamic-limited-file.interceptor';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { MemberService } from '../service/member.service';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
@@ -101,10 +103,10 @@ export class MemberController {
   @UseGuards(JwtAuthGuard)
   @Post('me/photo')
   @UseInterceptors(
-    LimitedFileInterceptor(
+    DynamicLimitedFileInterceptor(
       'photo',
-      Number.parseInt(process.env.MAX_AVATAR_UPLOAD_BYTES ?? '', 10) ||
-        3 * 1024 * 1024,
+      PlatformSettingKey.MAX_AVATAR_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[PlatformSettingKey.MAX_AVATAR_UPLOAD_MB],
       {
         fileFilter: (_req, file, cb) => {
           if (!file.mimetype.startsWith('image/')) {

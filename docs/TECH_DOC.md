@@ -2448,8 +2448,9 @@ places: a plain external link typed in directly, a fresh upload (`POST classes/m
 name `file`), or reusing a URL already in use by another class (`GET classes/materials/library` — distinct
 `documentUrl`s across all classes, each with the list of class names currently using it, so the admin doesn't
 re-upload the same manual per class type). Upload accepts PDF, Word, PowerPoint, or image mimetypes; size is capped
-by `MAX_CLASS_MATERIAL_UPLOAD_BYTES` (env var, default 10 MB — separate from the app-wide `MAX_FILE_UPLOAD_BYTES`
-default of 5 MB since course material tends to run larger than proofs/images). Uploaded files land in Cloudinary's
+by `PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB` (platform-admin-configurable, default 10 MB — separate from
+the app-wide `MAX_FILE_UPLOAD_BYTES` default of 5 MB since course material tends to run larger than proofs/images).
+Uploaded files land in Cloudinary's
 `class-materials` folder. Whichever source produced the URL, it's set the same way afterward — `documentUrl` on
 `POST`/`PATCH classes`.
 
@@ -2799,10 +2800,11 @@ Church Profile page is the only intended write path today.
 
 **Logo upload (`POST /tenant/logo`, `DELETE /tenant/logo`, both `CHURCH_PROFILE_WRITE`):** `logoUrl` on
 `PATCH /tenant/info` only ever accepted an already-hosted URL — these two routes are the actual upload path, same
-shape as `MemberController`'s `POST members/me/photo` (`LimitedFileInterceptor`, image-mimetype-only filter,
-`CloudinaryService.uploadBuffer` into the `church-logos` folder) but its own limit — `MAX_LOGO_UPLOAD_BYTES`
-(5MB default), not `MAX_AVATAR_UPLOAD_BYTES` — since a logo is reused across more surfaces than a profile photo and
-needs more headroom. `Tenant.logoPublicId` (new column) tracks
+shape as `MemberController`'s `POST members/me/photo` (`DynamicLimitedFileInterceptor`, image-mimetype-only filter,
+`CloudinaryService.uploadBuffer` into the `church-logos` folder) but its own limit —
+`PlatformSettingKey.MAX_LOGO_UPLOAD_MB` (5MB default, platform-admin-configurable), not `MAX_AVATAR_UPLOAD_MB` —
+since a logo is reused across more surfaces than a profile photo and needs more headroom. `Tenant.logoPublicId`
+(new column) tracks
 the Cloudinary asset id so a replace or removal can delete the previous asset — deletion always happens *after* the
 new row is saved, so a failed re-upload never leaves a tenant with no logo. All three routes (`PATCH /tenant/info`,
 `POST /tenant/logo`, `DELETE /tenant/logo`) return the same profile shape.
@@ -2822,7 +2824,7 @@ here. This backend only ever knows what's been explicitly overridden.
   labels/descriptions, for the admin appearance-settings page to render without duplicating the catalog
   client-side.
 - `POST /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — upload/replace the override for one asset key.
-  Same upload shape as logo upload (multer, `MAX_LOGO_UPLOAD_BYTES` limit — 5MB default, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
+  Same upload shape as logo upload (multer, `PlatformSettingKey.MAX_LOGO_UPLOAD_MB` limit — 5MB default, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
   the `tenant-assets` Cloudinary folder this time). `:key` is validated against `KNOWN_ASSETS` in
   `TenantAssetService`, not at the DB level, so the catalog can grow without a migration. Same "new asset saved
   before the old one is deleted" ordering as logo upload.
@@ -4852,7 +4854,7 @@ being visible outside this service. All four routes now return the identical cur
 | POST | `/platform/auth/forgot-password` | Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. |
 | POST | `/platform/auth/reset-password` | Public, rate-limited (5/min). Verify the OTP and set a new password — also how a newly-onboarded admin sets their initial one. |
 | POST | `/platform/broadcast` | `{ subject, message }` (plain text, not HTML) — one email to every active tenant's oldest active admin. See "Tenant Broadcasts" below. |
-| GET | `/platform/settings` | List platform-wide settings (currently just `subscription_grace_period_days`) — see "Platform Settings" below. |
+| GET | `/platform/settings` | List platform-wide settings (grace period + the four upload-size limits) — see "Platform Settings" below. |
 | PATCH | `/platform/settings/:key` | `{ value: number }` — edit a platform-wide setting live, no redeploy. `BILLING_WRITE`. |
 
 #### Platform Settings
@@ -4861,19 +4863,51 @@ A generic, platform-wide (not per-tenant) key/value settings store — the platf
 Church Settings module above, but living in `public` schema with no tenant dimension: new `PlatformSetting` entity
 (`key` unique, `value: jsonb`), read/written through `PlatformSettingsService`, same short-TTL cache pattern as
 `ChurchSettingsService`/`ReminderSettingsService`. `KNOWN_PLATFORM_SETTINGS`
-(`src/platform-admin/constant/known-platform-settings.constant.ts`) is the whitelist — currently one entry,
-`subscription_grace_period_days` (default `7`, matches the value it replaced).
+(`src/platform-admin/constant/known-platform-settings.constant.ts`) is the whitelist — each entry now carries
+`min`/`max` alongside `label`/`unit`/`defaultValue`, enforced server-side in `PlatformSettingsService.upsert()`
+(`400` if out of range) since these vary per key and can't all share one class-validator bound. `GET`/`PATCH
+/platform/settings` responses include `min`/`max` too, so the frontend renders the right bounds per setting instead
+of a hardcoded range.
 
-**First consumer — subscription grace period:** `SubscriptionLapseScheduler` used to read `GRACE_PERIOD_DAYS` from
+**Consumer 1 — subscription grace period:** `SubscriptionLapseScheduler` used to read `GRACE_PERIOD_DAYS` from
 an env var once at boot (a single global value, requiring a redeploy to change). It now calls
 `PlatformSettingsService.getSubscriptionGracePeriodDays()` once per daily run instead — still a single global value
 (not per-tenant: this is billing/revenue policy Discuva sets uniformly, not a per-church preference — a deliberate
 distinction from the tenant-facing Reminder Settings module above, which covers per-church operational preferences).
 The `GRACE_PERIOD_DAYS` env var and its Joi entry have been removed; any deployed value for it is now inert.
 
+**Consumer 2 — upload size limits:** `MAX_LOGO_UPLOAD_MB`, `MAX_AVATAR_UPLOAD_MB`, `MAX_CLASS_MATERIAL_UPLOAD_MB`,
+`MAX_FINANCE_PROOF_UPLOAD_MB` — stored in **MB** (not bytes, since that's what a platform admin actually types into
+the settings form), read via `PlatformSettingsService.getMaxUploadBytes(key)` which converts to bytes. These
+replace the `MAX_LOGO_UPLOAD_BYTES`/`MAX_AVATAR_UPLOAD_BYTES`/`MAX_CLASS_MATERIAL_UPLOAD_BYTES`/
+`MAX_FINANCE_PROOF_UPLOAD_BYTES` env vars entirely (removed from `env.validation.ts`) — `MAX_FILE_UPLOAD_BYTES`
+remains an env var, unaffected, since it's the fallback for routes with no dedicated category (incident report
+photos, member bulk-import).
+
+Enforcing a *live* limit is a real constraint Multer doesn't support natively: `limits.fileSize` has to be a static
+number known when the route is decorated, it can't await a DB/cache read per request. `DynamicLimitedFileInterceptor`
+(`src/utility/interceptors/dynamic-limited-file.interceptor.ts`) resolves this by letting Multer parse against a
+generous, non-configurable hard ceiling (`UPLOAD_HARD_CEILING_BYTES`, always ≥ the setting's `max`) as a safety net,
+then checking the *actual* parsed file's size against the live platform-configured limit inside `intercept()`
+afterward, rejecting with an accurately-labeled `PayloadTooLargeException` if it's over. A file between the live
+limit and the hard ceiling is still fully buffered before being rejected — an accepted tradeoff given how small
+these ceilings are (tens of MB), rather than reimplementing Multer's own streaming internals. `TenantInfoController`
+(logo + appearance assets), `MemberController` (`me/photo`), `ClassesController` (`materials/upload`), and
+`FinanceWorkerController` (`requests` attachment) all use this interceptor now instead of the static
+`LimitedFileInterceptor`.
+
+`PlatformAdminModule` is now `@Global()` so `PlatformSettingsService` can be injected into
+`DynamicLimitedFileInterceptor` from any consuming module (`TenantModule`, `MemberModule`, `ClassesModule`,
+`FinanceRequestModule`) without each needing an explicit import path — same reasoning `UtilityModule` documents for
+its own `@Global()` (guards/interceptors resolve dependencies via the *consuming* controller's module, not the
+declaring module).
+
 **Frontend:** discuva-platform's `/billing-settings` page (own `layout.tsx`, same "every new route needs one"
-convention), gated by `billing:read`/`billing:write` (reusing the existing permission pair `/giving-providers` and
-`/payment-providers` already use, since this is the same conceptual bucket — billing/revenue configuration).
+convention, now titled "Platform Settings" in-page and in the sidebar since it's no longer billing-only), gated by
+`billing:read`/`billing:write` (reusing the existing permission pair `/giving-providers` and `/payment-providers`
+already use — no new permission introduced for the upload-limit settings, they're gated the same as every other
+platform-wide setting on this page). The per-row number input's `min`/`max` now come from each setting's own API
+response instead of a hardcoded 0–365.
 
 **Routes prefix:** `/platform`
 
@@ -5960,13 +5994,17 @@ Used for finance request attachments and payment proofs.
 | `CLOUDINARY_CLOUD_NAME`      | — *(required)* | Cloudinary account cloud name                                              |
 | `CLOUDINARY_API_KEY`         | — *(required)* | Cloudinary API key                                                         |
 | `CLOUDINARY_API_SECRET`      | — *(required)* | Cloudinary API secret                                                      |
-| `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | `MulterModule`-wide default (`AppModule`) and the limit for routes with no more specific category below — incident report photos, member bulk-import spreadsheets |
-| `MAX_CLASS_MATERIAL_UPLOAD_BYTES` | `10485760` | Training class study material uploads (`ClassesController`) |
-| `MAX_AVATAR_UPLOAD_BYTES`    | `3145728`      | Member profile photo only (`MemberController`) — a headshot never needs to be large |
-| `MAX_LOGO_UPLOAD_BYTES`      | `5242880`      | Tenant church logo and custom mobile-app appearance assets (`TenantInfoController`) — separate from `MAX_AVATAR_UPLOAD_BYTES` since logos are reused across print/display surfaces and need more headroom than a profile picture |
-| `MAX_FINANCE_PROOF_UPLOAD_BYTES` | `10485760` | Finance request payment-proof attachments (`FinanceWorkerController`) — its own var rather than reusing `MAX_CLASS_MATERIAL_UPLOAD_BYTES`, despite the same default value, since the two are semantically unrelated |
+| `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | Fallback default for routes with no more specific category — incident report photos, member bulk-import spreadsheets |
 
-All five of the above are enforced via `LimitedFileInterceptor` (`src/utility/interceptors/limited-file.interceptor.ts`), which rewrites Multer's generic "File too large" error into `"The uploaded file exceeds the maximum allowed size of {N} MB..."` using the *actual* limit passed to that route — not a guess. `HttpExceptionFilter`'s own `PayloadTooLargeException` handling (using `MAX_FILE_UPLOAD_BYTES`) is a fallback only, for the handful of upload routes not yet wrapped in `LimitedFileInterceptor` (e.g. `finance-admin`/`tithe-admin`/`reconciliation` attachment routes, which currently have no configured size limit at all).
+Logo/appearance, avatar, class-material, and finance-proof upload limits are **not** env vars — they're
+platform-admin-configurable via `PlatformSettingKey.MAX_LOGO_UPLOAD_MB`/`MAX_AVATAR_UPLOAD_MB`/
+`MAX_CLASS_MATERIAL_UPLOAD_MB`/`MAX_FINANCE_PROOF_UPLOAD_MB` (see "Platform Settings" under the platform-admin
+section) and enforced via `DynamicLimitedFileInterceptor`, which rewrites Multer's generic "File too large" error
+into `"The uploaded file exceeds the maximum allowed size of {N} MB..."` using the *live* limit for that route —
+not a guess. `HttpExceptionFilter`'s own `PayloadTooLargeException` handling (using `MAX_FILE_UPLOAD_BYTES`) is a
+fallback only, for the handful of upload routes not wrapped in `LimitedFileInterceptor`/`DynamicLimitedFileInterceptor`
+at all (e.g. `finance-admin`/`tithe-admin`/`reconciliation` attachment routes, which currently have no configured
+size limit).
 | `TITHE_PROOF_EXPIRY_DAYS`    | `90`           | Days after which a tithe payment proof is purged from Cloudinary and DB    |
 | `ASSET_OVERDUE_NOTIFICATION_DAYS` | `1,3,7`   | Comma-separated day thresholds for overdue checkout reminders. Leave empty to disable. |
 

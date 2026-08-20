@@ -142,20 +142,13 @@ export const envValidationSchema = Joi.object({
   INCIDENT_DAILY_REPORT_LIMIT: Joi.number().default(2),
   ASSET_OVERDUE_NOTIFICATION_DAYS: Joi.string().default('1,3,7'),
   TITHE_PROOF_EXPIRY_DAYS: Joi.number().default(90),
+  // Fallback default for upload routes with no more specific category —
+  // incident report photos, member bulk-import spreadsheets. Logo/avatar/
+  // class-material/finance-proof limits are platform-admin-configurable
+  // (PlatformSettingKey.MAX_*_UPLOAD_MB, src/platform-admin/constant/
+  // known-platform-settings.constant.ts) rather than env vars, so they can
+  // change without a redeploy.
   MAX_FILE_UPLOAD_BYTES: Joi.number().default(5 * 1024 * 1024),
-  MAX_CLASS_MATERIAL_UPLOAD_BYTES: Joi.number().default(10 * 1024 * 1024),
-  // Member profile photo only — a headshot never needs to be large.
-  // Deliberately separate from MAX_LOGO_UPLOAD_BYTES below: logos are
-  // reused across print/display surfaces and need more headroom than a
-  // profile picture does.
-  MAX_AVATAR_UPLOAD_BYTES: Joi.number().default(3 * 1024 * 1024),
-  // Tenant church logo + custom mobile-app appearance assets.
-  MAX_LOGO_UPLOAD_BYTES: Joi.number().default(5 * 1024 * 1024),
-  // Finance request payment-proof attachments — deliberately its own var
-  // rather than reusing MAX_CLASS_MATERIAL_UPLOAD_BYTES (same 10MB value
-  // today, but semantically unrelated; coupling them would mean changing
-  // the class-material limit for one reason silently changes this too).
-  MAX_FINANCE_PROOF_UPLOAD_BYTES: Joi.number().default(10 * 1024 * 1024),
 
   SESSION_MAX_AGE_DAYS: Joi.number().integer().min(1).default(30),
   DEFAULT_ADMIN_EMAIL: Joi.string().email().allow('').optional(),

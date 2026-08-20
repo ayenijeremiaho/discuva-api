@@ -17,7 +17,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { ConfigService } from '@nestjs/config';
-import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
+import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynamic-limited-file.interceptor';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { Public } from '../../auth/decorator/public.decorator';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -28,10 +30,6 @@ import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
-
-const MAX_LOGO_UPLOAD_BYTES =
-  Number.parseInt(process.env.MAX_LOGO_UPLOAD_BYTES ?? '', 10) ||
-  5 * 1024 * 1024;
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -88,9 +86,12 @@ export class TenantInfoController {
   @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
   @Post('logo')
   @UseInterceptors(
-    LimitedFileInterceptor('logo', MAX_LOGO_UPLOAD_BYTES, {
-      fileFilter: imageOnlyFilter,
-    }),
+    DynamicLimitedFileInterceptor(
+      'logo',
+      PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[PlatformSettingKey.MAX_LOGO_UPLOAD_MB],
+      { fileFilter: imageOnlyFilter },
+    ),
   )
   async uploadLogo(@UploadedFile() logo?: Express.Multer.File) {
     if (!logo) throw new BadRequestException('No logo file provided');
@@ -148,9 +149,12 @@ export class TenantInfoController {
   @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
   @Post('assets/:key')
   @UseInterceptors(
-    LimitedFileInterceptor('image', MAX_LOGO_UPLOAD_BYTES, {
-      fileFilter: imageOnlyFilter,
-    }),
+    DynamicLimitedFileInterceptor(
+      'image',
+      PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[PlatformSettingKey.MAX_LOGO_UPLOAD_MB],
+      { fileFilter: imageOnlyFilter },
+    ),
   )
   async setAsset(
     @Param('key') key: string,
