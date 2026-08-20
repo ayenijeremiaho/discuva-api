@@ -2118,6 +2118,19 @@ system creates:
 2. A `SuperAdmin` `AdminRole` carrying all permissions
 3. An `Admin` record linking the two
 
+**Orphaned `'Super Admin'` (with a space) role — cleaned up:** `TenantSchemaGenesis`
+(`src/migrations/tenant/1790726400000-TenantSchemaGenesis.ts`, the schema-genesis migration every new tenant still
+runs) seeds a legacy `'Super Admin'` role from before `AdminRoleService`'s `'SuperAdmin'` (no space) naming
+convention existed — immutable history, can't be edited. Since it runs *before* `seedTenantAdmin()` (application
+code, not a migration), every newly-provisioned tenant ended up with two full-permission roles: the orphaned,
+never-assigned `'Super Admin'`, and the real, actively-used `'SuperAdmin'` (the one later permission-grant
+migrations like `GrantSocialMediaPermissions` target, and the one the real admin is actually assigned to).
+`seedTenantAdmin()` now deletes the orphaned row for new tenants (safe unconditionally at that point — `admins`
+is guaranteed empty, so nothing can reference it via `admins.admin_role_id`'s `ON DELETE RESTRICT` FK); a new
+migration (`1792566000000-RemoveOrphanedSuperAdminSpaceRole.ts`, tenant schema) cleans up the rows already sitting
+in existing tenants, guarded by the same "no admin references it" check so a genuine edge case is left untouched
+rather than failing the migration.
+
 ### Church Settings Module
 
 Lets an admin turn optional feature modules on/off per-installation without a deploy — the mechanism that keeps the
@@ -2172,14 +2185,16 @@ Church Settings module above (`key` unique, `value: jsonb`), under a disjoint ke
 whitelist (`ReminderSettingKey`) differ from the module-toggle shape and shouldn't be forced through
 `ChurchSettingsService`.
 
-**Not the same thing as `EmailCategory`:** `src/utility/email-provider/email-category.enum.ts` already gates every
-category of email the system sends, but **globally** (env-flag booleans in `EmailQueueService.isCategoryEnabled`)
-and at a **coarser granularity** — e.g. `EmailCategory.ASSET_ALERTS` is shared by all 4 asset schedulers
-(maintenance, warranty, vehicle-expiry, overdue-checkout), `EmailCategory.FINANCE_ALERTS` by both pledge and budget
-alerts. `ReminderSettingKey` is deliberately a separate, finer-grained, per-tenant enum layered *on top* of that
-mechanism, not a replacement for it — if ops disables an `EmailCategory` globally via env var, that still suppresses
-sends regardless of any tenant-level `ReminderSettingKey` setting (`EmailQueueService.queueEmail` checks its own
-global flag before a job is ever enqueued, upstream of anything the reminder schedulers decide).
+**Not the same thing as `EmailCategory`:** `src/utility/email-provider/email-category.enum.ts` gates every
+category of email the system sends, at a **coarser granularity** than reminder settings — e.g.
+`EmailCategory.ASSET_ALERTS` is shared by all 4 asset schedulers (maintenance, warranty, vehicle-expiry,
+overdue-checkout), `EmailCategory.FINANCE_ALERTS` by both pledge and budget alerts. It used to be global-only
+(env-flag booleans in `EmailQueueService.isCategoryEnabled`) — it now also has a per-tenant override
+(`EmailCategorySettingsService`, see "Email Category Settings Module" below), but `ReminderSettingKey` remains a
+separate, finer-grained, per-tenant enum layered *on top* of both — if either the env flag or the tenant's
+`EmailCategory` setting is off, that still suppresses sends regardless of any tenant-level `ReminderSettingKey`
+setting (`EmailQueueService.queueEmail` checks its own two gates before a job is ever enqueued, upstream of anything
+the reminder schedulers decide).
 
 **`KNOWN_REMINDER_SETTINGS`** (`src/reminder-settings/constant/known-reminder-settings.constant.ts`) — the 6 keys,
 each `{ label, unit, defaultThresholds }`. `thresholds` is a list of signed integers whose meaning depends on the
@@ -2236,6 +2251,44 @@ callback — not once at construction — since cron jobs have no ambient tenant
 **Frontend:** discuva-admin's `/notification-settings` page (own `layout.tsx` wrapping `<Shell>` — every new
 top-level route needs one, there is no global Shell in root `layout.tsx`) — one row per setting: an enabled/disabled
 toggle plus an editable numeric-chip list (add/remove) for `thresholds`.
+
+### Email Category Settings Module
+
+Lets a tenant admin turn off any of the 15 `EmailCategory` values for their own church — the gap that made every
+category effectively mandatory in practice: the only pre-existing suppression mechanism
+(`EmailQueueService.isCategoryEnabled`) was gated behind process-wide `EMAIL_<CATEGORY>_ENABLED` env vars, so
+disabling one meant disabling it for **every** tenant simultaneously (a single NestJS process serves all tenants).
+Same `ChurchSetting`-backed pattern as Reminder Settings above (own key namespace, `` `email_category:${category}` ``,
+zero new migration), own service/controller (`EmailCategorySettingsService`/`EmailCategorySettingsController`) since
+the value shape (`{ enabled }`) and whitelist (`EmailCategory`, already defined in `src/utility/email-provider/`) are
+unrelated to the module-toggle and reminder-threshold shapes.
+
+**Two independent gates, either can suppress:** `EmailQueueService.isCategoryEnabled(category)` checks the env var
+first (unchanged, still the platform-wide kill switch — rarely touched, requires a redeploy) and only calls
+`EmailCategorySettingsService.isEnabled(category)` if the env var didn't already suppress it, so a globally-disabled
+category never even reaches the tenant-level DB/cache lookup.
+
+**Module wiring note:** `EmailCategorySettingsModule` is `@Global()` but deliberately does **not** import
+`UtilityModule` (also `@Global()`) — `EmailQueueService` lives inside `UtilityModule` and needs to inject
+`EmailCategorySettingsService`, so an explicit cross-import would be circular. Since both modules are global, this
+isn't needed: `UtilityModule`'s own exports (`CacheService`, `AuditLogService`) resolve into
+`EmailCategorySettingsService`'s constructor regardless of whether its module lists `UtilityModule` in `imports`.
+
+**`KNOWN_EMAIL_CATEGORIES`** (`src/email-category-settings/constant/known-email-categories.constant.ts`) — a
+`{ label, description }` per category, all defaulting to enabled (no DB row = on, same fail-open default every
+other settings mechanism in this codebase uses).
+
+**Fixed alongside:** `EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT` was referenced in
+`EmailQueueService`'s flag map but had no corresponding `EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED` entry in
+`env.validation.ts`/`.env.example` — harmless while true (`undefined !== false`), but meant the var could never
+actually be set without Joi's `forbidNonWhitelisted` rejecting it. Now registered like the other 14.
+
+**Routes:** `GET/PATCH /admin/email-category-settings`, `GET/PATCH /admin/email-category-settings/:category` — same
+`AdminGuard` + `AdminPermission.ADMIN_WRITE`-on-write pattern as `/admin/reminder-settings`.
+
+**Frontend:** a new "Email Categories" section on discuva-admin's existing `/notification-settings` page, below the
+reminder-settings section — one row per category, a plain enabled/disabled toggle (no thresholds, unlike reminder
+settings).
 
 ### Event Module
 
@@ -4978,10 +5031,20 @@ mirrors tenant-side's exact business rule: blocked with `400` while any *active*
 (`node dist/seed-platform-admin` in prod), reads `DEFAULT_PLATFORM_ADMIN_EMAIL`/`DEFAULT_PLATFORM_ADMIN_PASSWORD_HASH`
 (generate the hash with the same `npm run hash:password` — already fully generic, no platform-specific variant
 needed), skips if either is unset or if any `platform_admins` row already exists (idempotent — safe to leave in a
-deploy pipeline), and seeds the admin with a find-or-create `SuperAdmin` role holding every `PlatformAdminPermission`.
-The `AddPlatformAdminRoles` migration also seeds this same `SuperAdmin` role directly and backfills any
-pre-migration `platform_admins` row onto it — the seed script's `findOrCreateSuperAdmin()` is what a fresh
-environment without that migration history hits.
+deploy pipeline), and seeds the admin with a find-or-create `Platform Super Admin` role holding every
+`PlatformAdminPermission`. The `AddPlatformAdminRoles` migration also seeds this same role directly (originally
+named `SuperAdmin`, see rename note below) and backfills any pre-migration `platform_admins` row onto it — the seed
+script's `findOrCreateSuperAdmin()` is what a fresh environment without that migration history hits.
+
+**Renamed from `SuperAdmin` to `Platform Super Admin`** (`1793044800000-RenamePlatformSuperAdminRole.ts`): the
+tenant-side `AdminRole` (one church, seeded by `AdminRoleService.findOrCreateSuperAdmin`/
+`TenantProvisioningService.seedTenantAdmin`) and this platform-side `PlatformAdminRole` were both independently
+named the literal string `SuperAdmin` — indistinguishable by name alone across two very different scopes (one
+church vs. every tenant plus billing/impersonation). Renamed the platform side only, since it's a single
+control-plane table with few rows, versus the tenant-side name every existing church's primary admin already sees.
+`findOrCreateSuperAdmin()` is self-healing: it looks for `Platform Super Admin` first, then falls back to renaming
+a legacy `SuperAdmin` row in place if the migration hasn't run yet in that environment, rather than ever creating a
+duplicate.
 
 #### Platform Analytics (`GET /platform/analytics/*`)
 
@@ -6335,4 +6398,15 @@ that hasn't been ended yet.
 `pledge_reminder` · `budget_alert` · `follow_up_stale` · `asset_maintenance` · `asset_warranty` · `vehicle_expiry`
 
 See "Reminder Settings Module" above — keys a tenant's per-category reminder timing/enabled settings
-(`GET/PATCH /admin/reminder-settings`). Distinct from `EmailCategory` (a separate, coarser, globally-gated enum).
+(`GET/PATCH /admin/reminder-settings`). Distinct from `EmailCategory` (a separate, coarser enum — see below).
+
+### EmailCategory
+
+`ATTENDANCE_CHECKIN` · `BIRTHDAY` · `EVENT_REMINDER` · `PRAYER_REMINDER` · `FOLLOW_UP` · `ASSET_ALERTS` ·
+`GIVING_RECEIPT` · `FINANCE_ALERTS` · `SESSION_REPORT` · `INCIDENT_REPORT` · `CHILDREN_CHURCH` · `LOGIN_ALERT` ·
+`SERVICE_PROGRAMME_ASSIGNMENT` · `PASTOR_FEEDBACK` · `MEMBERSHIP_ANNIVERSARY`
+
+See "Email Category Settings Module" above — every category-tagged email checks a global env-flag gate, then a
+per-tenant `EmailCategorySettingsService` gate, before `EmailQueueService.queueEmail` enqueues the job
+(`GET/PATCH /admin/email-category-settings`). Emails sent with no category (OTP, password reset, account-locked —
+security-critical auth flows) always send regardless, by design.

@@ -7,6 +7,8 @@ import { ClsService } from 'nestjs-cls';
 import { EmailQueueService } from './email-queue.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { CacheService } from './cache.service';
+import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
+import { EmailCategory } from '../email-provider/email-category.enum';
 
 jest.mock('node:fs');
 
@@ -42,7 +44,10 @@ const ENV_DEFAULTS: Record<string, string | number> = {
   ADMIN_LOGIN_URL: 'https://discuva.org/admin/login',
 };
 const mockConfigService = {
-  get: jest.fn((key: string) => ENV_DEFAULTS[key]),
+  get: jest.fn((key: string): string | number | boolean => ENV_DEFAULTS[key]),
+};
+const mockEmailCategorySettingsService = {
+  isEnabled: jest.fn().mockResolvedValue(true),
 };
 
 describe('EmailQueueService', () => {
@@ -61,6 +66,7 @@ describe('EmailQueueService', () => {
     mockCacheService.getOrSet.mockImplementation(
       (_key: string, fn: () => Promise<unknown>) => fn(),
     );
+    mockEmailCategorySettingsService.isEnabled.mockResolvedValue(true);
     (fs.readFileSync as jest.Mock).mockReturnValue(TEMPLATE);
 
     const module: TestingModule = await Test.createTestingModule({
@@ -71,6 +77,10 @@ describe('EmailQueueService', () => {
         { provide: ClsService, useValue: mockCls },
         { provide: CacheService, useValue: mockCacheService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        {
+          provide: EmailCategorySettingsService,
+          useValue: mockEmailCategorySettingsService,
+        },
       ],
     }).compile();
     service = module.get(EmailQueueService);
@@ -238,6 +248,66 @@ describe('EmailQueueService', () => {
     const html = sentHtml();
     expect(html).toContain(ENV_DEFAULTS.LOGIN_URL);
     expect(html).toContain(ENV_DEFAULTS.ADMIN_LOGIN_URL);
+  });
+
+  describe('category suppression', () => {
+    it('sends when no category is given, without consulting either gate', async () => {
+      await service.queueEmail('a@b.com', 'Subject', '<p>hi</p>');
+
+      expect(mockQueue.add).toHaveBeenCalled();
+      expect(mockEmailCategorySettingsService.isEnabled).not.toHaveBeenCalled();
+    });
+
+    it('suppresses on the env-level kill switch without checking the tenant setting', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'EMAIL_BIRTHDAY_ENABLED' ? false : ENV_DEFAULTS[key],
+      );
+
+      const jobId = await service.queueEmail(
+        'a@b.com',
+        'Subject',
+        '<p>hi</p>',
+        undefined,
+        undefined,
+        EmailCategory.BIRTHDAY,
+      );
+
+      expect(jobId).toBe('');
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockEmailCategorySettingsService.isEnabled).not.toHaveBeenCalled();
+    });
+
+    it("suppresses on the tenant's own per-category setting even when the env flag is on", async () => {
+      mockEmailCategorySettingsService.isEnabled.mockResolvedValue(false);
+
+      const jobId = await service.queueEmail(
+        'a@b.com',
+        'Subject',
+        '<p>hi</p>',
+        undefined,
+        undefined,
+        EmailCategory.BIRTHDAY,
+      );
+
+      expect(jobId).toBe('');
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(mockEmailCategorySettingsService.isEnabled).toHaveBeenCalledWith(
+        EmailCategory.BIRTHDAY,
+      );
+    });
+
+    it('sends when both the env flag and the tenant setting are enabled', async () => {
+      await service.queueEmail(
+        'a@b.com',
+        'Subject',
+        '<p>hi</p>',
+        undefined,
+        undefined,
+        EmailCategory.BIRTHDAY,
+      );
+
+      expect(mockQueue.add).toHaveBeenCalled();
+    });
   });
 
   describe('resolveTenantUrl', () => {

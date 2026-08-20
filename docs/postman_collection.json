@@ -18176,6 +18176,132 @@
       ]
     },
     {
+      "name": "Email Category Settings",
+      "item": [
+        {
+          "name": "List all email category settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/email-category-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "email-category-settings"
+              ]
+            },
+            "description": "Returns all 15 EmailCategory values with their effective enabled state (default true if no override exists). Distinct from Reminder Settings above - this is a plain per-category on/off switch, not a schedule."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"category\": \"BIRTHDAY\",\n    \"label\": \"Birthday Wishes\",\n    \"description\": \"Sent to members on their birthday.\",\n    \"enabled\": true\n  },\n  {\n    \"category\": \"LOGIN_ALERT\",\n    \"label\": \"Login Alerts\",\n    \"description\": \"Sent when a session is created from a new device or location.\",\n    \"enabled\": true\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get email category setting",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/email-category-settings/:category",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "email-category-settings",
+                ":category"
+              ],
+              "variable": [
+                {
+                  "key": "category",
+                  "value": "BIRTHDAY",
+                  "description": "One of: ATTENDANCE_CHECKIN, BIRTHDAY, EVENT_REMINDER, PRAYER_REMINDER, FOLLOW_UP, ASSET_ALERTS, GIVING_RECEIPT, FINANCE_ALERTS, SESSION_REPORT, INCIDENT_REPORT, CHILDREN_CHURCH, LOGIN_ALERT, SERVICE_PROGRAMME_ASSIGNMENT, PASTOR_FEEDBACK, MEMBERSHIP_ANNIVERSARY"
+                }
+              ]
+            },
+            "description": "Get a single email category setting by category."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"category\": \"BIRTHDAY\",\n  \"label\": \"Birthday Wishes\",\n  \"description\": \"Sent to members on their birthday.\",\n  \"enabled\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update email category setting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/email-category-settings/:category",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "email-category-settings",
+                ":category"
+              ],
+              "variable": [
+                {
+                  "key": "category",
+                  "value": "BIRTHDAY",
+                  "description": ""
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Turn an email category on or off for this tenant only. Two independent gates suppress a send: the platform-wide EMAIL_<CATEGORY>_ENABLED env var (checked first) and this per-tenant setting - either being off suppresses it. Requires admin:write."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"category\": \"BIRTHDAY\",\n  \"label\": \"Birthday Wishes\",\n  \"description\": \"Sent to members on their birthday.\",\n  \"enabled\": false\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Incident Reports (Member)",
       "item": [
         {

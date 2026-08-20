@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { EmailAttachment, EmailJobData } from '../processor/email.processor';
 import { EmailCategory } from '../email-provider/email-category.enum';
+import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { CacheService } from './cache.service';
@@ -28,6 +29,7 @@ export class EmailQueueService {
     private readonly cacheService: CacheService,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
+    private readonly emailCategorySettingsService: EmailCategorySettingsService,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
@@ -40,7 +42,7 @@ export class EmailQueueService {
     attachments?: EmailAttachment[],
     category?: EmailCategory,
   ): Promise<string> {
-    if (category && !this.isCategoryEnabled(category)) {
+    if (category && !(await this.isCategoryEnabled(category))) {
       this.logger.debug(
         `Email suppressed (category ${category} disabled): "${subject}"`,
       );
@@ -130,7 +132,11 @@ export class EmailQueueService {
     return this.emailQueue.getJobCounts();
   }
 
-  private isCategoryEnabled(category?: EmailCategory): boolean {
+  // Two independent layers: the env var is a platform-wide kill switch
+  // (requires a redeploy, rarely touched), the EmailCategorySettingsService
+  // check is the per-tenant override an admin can flip from the portal.
+  // Either one being off suppresses the send.
+  private async isCategoryEnabled(category?: EmailCategory): Promise<boolean> {
     if (!category) return true;
     const flagMap: Record<EmailCategory, string> = {
       [EmailCategory.ATTENDANCE_CHECKIN]: 'EMAIL_ATTENDANCE_CHECKIN_ENABLED',
@@ -151,7 +157,8 @@ export class EmailQueueService {
       [EmailCategory.MEMBERSHIP_ANNIVERSARY]:
         'EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED',
     };
-    return this.config.get<boolean>(flagMap[category]) !== false;
+    if (this.config.get<boolean>(flagMap[category]) === false) return false;
+    return this.emailCategorySettingsService.isEnabled(category);
   }
 
   private async compileTemplate(

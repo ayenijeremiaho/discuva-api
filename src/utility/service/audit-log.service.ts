@@ -150,6 +150,7 @@ export type AuditAction =
   // Church settings
   | 'CHURCH_SETTING_UPDATED'
   | 'REMINDER_SETTING_UPDATED'
+  | 'EMAIL_CATEGORY_SETTING_UPDATED'
   // Incident reports
   | 'INCIDENT_REPORT_CREATED'
   | 'INCIDENT_REPORT_STATUS_UPDATED'

@@ -174,6 +174,10 @@ export const envValidationSchema = Joi.object({
   EMAIL_INCIDENT_REPORT_ENABLED: Joi.boolean().default(true),
   EMAIL_CHILDREN_CHURCH_ENABLED: Joi.boolean().default(true),
   EMAIL_LOGIN_ALERT_ENABLED: Joi.boolean().default(true),
+  // Was referenced in EmailQueueService's flagMap but never registered here
+  // — harmless while true (undefined !== false), but meant the var could
+  // never actually be set without Joi's forbidNonWhitelisted rejecting it.
+  EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED: Joi.boolean().default(true),
   EMAIL_PASTOR_FEEDBACK_ENABLED: Joi.boolean().default(true),
   EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED: Joi.boolean().default(true),
 

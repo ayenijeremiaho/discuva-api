@@ -47,6 +47,7 @@ import { ServiceProgrammeModule } from './service-programme/service-programme.mo
 import { ServiceHeadcountModule } from './service-headcount/service-headcount.module';
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
 import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
+import { EmailCategorySettingsModule } from './email-category-settings/email-category-settings.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
 import { YoutubeModule } from './integrations/youtube/youtube.module';
@@ -253,6 +254,7 @@ import { SocialMediaModule } from './social-media/social-media.module';
     ServiceHeadcountModule,
     ChurchSettingsModule,
     ReminderSettingsModule,
+    EmailCategorySettingsModule,
     IncidentReportModule,
     SermonModule,
     YoutubeModule,
