@@ -105,6 +105,7 @@ export class SmsService {
   async getLogs(): Promise<SmsLogEntry[]> {
     const config = await this.resolveConfigOrThrow();
     const provider = this.smsProviderRegistry.get(config.providerId);
-    return provider.getMessageHistory(config.credentials);
+    const history = await provider.getMessageHistory(config.credentials);
+    return history.map((entry) => ({ ...entry, provider: config.providerId }));
   }
 }

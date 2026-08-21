@@ -598,11 +598,19 @@ failure). Used for debugging delivery issues and compliance — answers "was thi
 | errorMessage   | text        | SMTP/API error on permanent failure; null on success                     |
 | attemptsMade   | int         | Number of send attempts before terminal outcome (max 5)                  |
 | provider       | varchar     | `gmail` \| `smtp` \| `resend` \| `sendgrid` \| `mailgun` — which email provider delivered (or attempted) the message |
+| source         | varchar \| null | `tenant` (sent via the church's own BYOK-configured provider) \| `platform_default` (no tenant provider configured, Discuva's `EMAIL_PROVIDER` default was used instead) \| `null` for rows written before this column existed |
 | createdAt      | timestamptz | When the terminal outcome was recorded                                   |
 
 **Written by:** `@OnQueueCompleted` (status = `sent`) and `@OnQueueFailed` (status = `failed`, only on the final
 attempt after all retries are exhausted). Transient failures that Bull subsequently retries do **not** produce a log
 row — only the final outcome is recorded.
+
+**Provider/source resolution:** `EmailProcessor.handleSend` resolves the actual provider and source (`tenant` vs
+`platform_default`) before attempting the send, and persists both onto the job's own data via `job.update()`. This
+is what lets `onFailed` — which has no return value to read, since a thrown `sendMail()` call means `handleSend`
+never reaches its `return` statement — log the provider/source that was *actually* being attempted rather than
+guessing. (Previously `onFailed` hardcoded the platform default's name unconditionally, mislabeling any failed send
+that was actually attempted through a tenant's own BYOK provider — fixed by this job.update() persistence.)
 
 **Indexes:** `recipient`, `status`, `createdAt`.
 
@@ -2731,12 +2739,15 @@ class, a line in the registry, and a `communication_providers` catalog row — n
   `ISmsProvider` from the registry and batches `to` into groups of that provider's own
   `maxRecipientsPerRequest`. A failed batch is logged and skipped; it does not abort the remaining batches.
 - `getLogs()`/`getBalance()` — same resolve-or-403 pattern, then pure passthrough to the resolved provider (a
-  tenant sees their own vendor's balance/history, never the platform's — there isn't one).
+  tenant sees their own vendor's balance/history, never the platform's — there isn't one). `getLogs()` tags every
+  returned entry with `provider: config.providerId` (`termii` \| `twilio`) — individual `ISmsProvider` classes don't
+  set this themselves, since a provider class has no reason to know its own registry key.
 
 **Message history (`TermiiSmsProvider.getMessageHistory`):** calls Termii's `GET /api/sms/inbox?api_key=...`
 (undocumented pagination or date-filter params — it's a flat array of every message on the account) and maps its
 raw field names (`receiver`, `message`, `status`, `sms_type`, `message_id`, `created_at`, `sender?`) to the
-provider-agnostic `SmsLogEntry` shape (`recipient`, `message`, `status`, `type`, `messageId`, `sentAt`, `sender?`).
+provider-agnostic `SmsLogEntry` shape (`recipient`, `message`, `status`, `type`, `messageId`, `sentAt`, `sender?`,
+`provider?` — the last set by `SmsService.getLogs()`, not by the provider class itself).
 A non-array response body is treated as empty rather than thrown. `TwilioSmsProvider` has no native bulk-send
 endpoint, so it issues one `POST` per recipient (`Promise.all`, capped by `maxRecipientsPerRequest`) and joins the
 returned `sid`s with a comma for `messageId`.
@@ -2747,7 +2758,7 @@ returned `sid`s with a comma for `messageId`.
 |--------|----------------------------|------------|--------------------------------------------------------------------------|
 | GET    | `/admin/sms/balance`       | SMS_READ   | Returns `{ balance, currency }` from the tenant's active provider — `403 SMS_PROVIDER_NOT_CONFIGURED` if none is active |
 | POST   | `/admin/sms/segment-count` | SMS_READ   | Body `{ message }` — returns `{ segments, encoding, characterCount }` without sending anything |
-| GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]`, not paginated or filtered server-side; the frontend paginates/filters the returned array client-side |
+| GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]` (each entry tagged with `provider`), not paginated or filtered server-side; the frontend paginates/filters the returned array client-side |
 
 **Env vars:** `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — Termii's API host is infrastructure, not a
 secret, so it stays env-driven even under pure BYOK; every tenant's Termii account (BYOK) talks to the same host.
@@ -2858,9 +2869,13 @@ context isn't ambient there, so `handleSend` wraps its entire body in `runInTena
 `onCompleted`/`onFailed` did this, purely to log) before calling `EmailCredentialResolverService.resolveConfig()`.
 Resolves to the concrete `IEmailProvider` matching the tenant's `providerId` if BYOK-configured (falling back to
 `GmailProvider` for `gmail` or any unrecognized id), otherwise the platform's constructor-injected
-`EMAIL_PROVIDER_TOKEN` default. Which provider actually handled a given send is
-carried back via Bull's job-return-value convention (`job.returnvalue`) so `onCompleted` logs the real provider used
-to `EmailLog.provider`, not just the platform default — that can differ per send once BYOK is in play.
+`EMAIL_PROVIDER_TOKEN` default — `source` is `'tenant'` in the former case, `'platform_default'` in the latter.
+Which provider/source actually handled a given send is carried back via Bull's job-return-value convention
+(`job.returnvalue`) so `onCompleted` logs the real provider/source to `EmailLog.provider`/`EmailLog.source`, not
+just the platform default — that can differ per send once BYOK is in play. Since `handleSend` also persists the same
+resolved provider/source onto `job.data` via `job.update()` *before* attempting the send, `onFailed` (which has no
+return value to read, since a thrown send means `handleSend` never reaches its `return`) can log the actual
+provider/source that failed instead of guessing the platform default.
 
 **Announcement integration:** see "Optional SMS delivery" under Announcements Module — sending SMS on an
 announcement requires the `SMS_SEND` permission (distinct from `SMS_READ`, which only allows checking balance/cost).
@@ -4365,6 +4380,7 @@ Queries `prayer_roster_entries` where the meeting date is 2 days or 1 day away a
 - `1787184000000-AddMissingFkIndexes` *(13 FK indexes across high-traffic tables: `attendances.service_slot_id`, `follow_up_tasks.(member_id, event_id)`, `first_timer_visits.(first_timer_id, event_id)`, `follow_up_notes.task_id`, `finance_journal_entry_lines.(journal_entry_id, account_id)`, `finance_offerings.fund_id`, `finance_reconciliation_rows.job_id`, `tithe_records.(batch_id)`, composite `tithe_records(member_id, payment_date)`, `asset_checkouts.asset_id`)*
 - `1787875200000-CreatePledgeContributions` *(creates `finance_pledge_contributions`: `pledge_id` FK `CASCADE`, `submitted_by_id` FK to `members` `RESTRICT`, `reviewed_by` FK to `admins` `SET NULL`, `amount`, `payment_date`, `reference`, `status` default `PENDING`, `reviewed_at`, `finance_note`)*
 - `1788393600000-AddPerformanceIndexes` *(composite `members(birth_month, birth_day)` for upcoming-birthday lookups; `first_timers.created_at` for date-range queries; composite `follow_up_tasks(status, due_date)`; single-column `status` indexes on `tithe_upload_batches`, `tithe_unmatched_records`, `tithe_dispute_records`, `tithe_payment_proofs`; `finance_requests.category_id`)*
+- `1792652400000-AddEmailLogSource` *(adds nullable `email_logs.source` — `tenant` vs `platform_default`; existing rows are `NULL`)*
 
 ---
 

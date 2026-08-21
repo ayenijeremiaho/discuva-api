@@ -7,6 +7,10 @@ import {
 } from 'typeorm';
 
 export type EmailLogStatus = 'sent' | 'failed';
+// 'tenant' = sent via the church's own configured (BYOK) provider.
+// 'platform_default' = the church had no provider configured, so Discuva's
+// own default provider (EMAIL_PROVIDER env var) sent it instead.
+export type EmailLogSource = 'tenant' | 'platform_default';
 
 @Entity('email_logs')
 @Index('IDX_email_logs_recipient', ['recipient'])
@@ -33,6 +37,11 @@ export class EmailLog {
 
   @Column({ nullable: true })
   provider: string;
+
+  // Nullable — rows logged before this column existed have no value; the
+  // frontend treats a missing source as "unknown," not as either label.
+  @Column({ type: 'varchar', nullable: true })
+  source: EmailLogSource | null;
 
   @Column({ type: 'int', default: 0 })
   attemptsMade: number;

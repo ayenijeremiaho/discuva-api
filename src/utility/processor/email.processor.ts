@@ -12,7 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
-import { EmailLog } from '../entity/email-log.entity';
+import { EmailLog, EmailLogSource } from '../entity/email-log.entity';
 import { IEmailProvider } from '../email-provider/email-provider.interface';
 import { EMAIL_PROVIDER_TOKEN } from '../email-provider/email-provider.token';
 import { GmailProvider } from '../email-provider/gmail.provider';
@@ -37,6 +37,13 @@ export interface EmailJobData extends TenantJobEnvelope {
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  // Set via job.update() inside handleSend, *before* the send is attempted —
+  // not just returned on success. onFailed has no return value to read (the
+  // function throws before reaching its `return` statement), so this is the
+  // only way it can know which provider/source was actually being attempted
+  // when a send fails, rather than guessing.
+  resolvedProviderName?: string;
+  resolvedSource?: EmailLogSource;
 }
 
 // Bull's return-value convention: handleSend's return becomes job.returnvalue,
@@ -46,6 +53,7 @@ export interface EmailJobData extends TenantJobEnvelope {
 // EMAIL_PROVIDER_TOKEN default alone.
 interface SendResult {
   providerName: string;
+  source: EmailLogSource;
 }
 
 @Injectable()
@@ -90,6 +98,17 @@ export class EmailProcessor {
         ? this.resolveProvider(config.providerId)
         : this.defaultEmailProvider;
       const from = config?.senderIdentity || this.defaultFromAddress;
+      const source: EmailLogSource = config ? 'tenant' : 'platform_default';
+
+      // Persist before attempting the send — if sendMail throws below, this
+      // function never reaches its return statement, so onFailed can only
+      // learn which provider/source was being attempted by reading it back
+      // off the job itself.
+      await job.update({
+        ...job.data,
+        resolvedProviderName: provider.providerName,
+        resolvedSource: source,
+      });
 
       await provider.sendMail(
         { from, to, cc, subject, html, attachments },
@@ -99,7 +118,7 @@ export class EmailProcessor {
         `Email sent via ${provider.providerName}: "${subject}" to ${Array.isArray(to) ? to.join(', ') : to} (attempt ${job.attemptsMade + 1})`,
       );
 
-      return { providerName: provider.providerName };
+      return { providerName: provider.providerName, source };
     });
   }
 
@@ -136,7 +155,11 @@ export class EmailProcessor {
           status: 'sent',
           jobId: String(job.id),
           provider:
-            result?.providerName ?? this.defaultEmailProvider.providerName,
+            result?.providerName ??
+            job.data.resolvedProviderName ??
+            this.defaultEmailProvider.providerName,
+          source:
+            result?.source ?? job.data.resolvedSource ?? 'platform_default',
           attemptsMade: job.attemptsMade,
         }),
       );
@@ -154,13 +177,23 @@ export class EmailProcessor {
       this.logger.error(
         `Email permanently failed after ${job.attemptsMade} attempts: "${subject}" to ${recipient} — ${error.message}`,
       );
+      // Was previously hardcoded to the platform default's name — wrong
+      // whenever the failure happened on the tenant's own BYOK provider.
+      // job.data.resolvedProviderName/resolvedSource (set by handleSend via
+      // job.update() before it ever attempted the send) is the actual
+      // provider that failed; only fall back to the platform default label
+      // for the near-never-happens case where resolution itself threw
+      // before handleSend reached that update call.
       await this.emailLogRepository.save(
         this.emailLogRepository.create({
           recipient,
           subject,
           status: 'failed',
           jobId: String(job.id),
-          provider: this.defaultEmailProvider.providerName,
+          provider:
+            job.data.resolvedProviderName ??
+            this.defaultEmailProvider.providerName,
+          source: job.data.resolvedSource ?? 'platform_default',
           errorMessage: error.message,
           attemptsMade: job.attemptsMade,
         }),

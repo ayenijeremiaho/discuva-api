@@ -194,7 +194,32 @@ describe('SmsService', () => {
       const result = await service.getLogs();
 
       expect(mockProvider.getMessageHistory).toHaveBeenCalled();
-      expect(result).toEqual(logs);
+      expect(result).toEqual([{ ...logs[0], provider: 'termii' }]);
+    });
+
+    it('tags each log entry with the tenant-selected vendor, not a hardcoded one', async () => {
+      mockCredentialResolver.resolveConfig.mockResolvedValue({
+        providerId: 'twilio',
+        credentials: {
+          accountSid: 'AC1',
+          authToken: 'secret',
+          fromNumber: '+1000',
+        },
+      });
+      mockProvider.getMessageHistory.mockResolvedValue([
+        {
+          messageId: 'msg-2',
+          recipient: '+1',
+          message: 'Hi',
+          status: 'delivered',
+          type: 'generic',
+          sentAt: '2026-07-18 10:00:00',
+        },
+      ]);
+
+      const result = await service.getLogs();
+
+      expect(result[0].provider).toBe('twilio');
     });
   });
 });

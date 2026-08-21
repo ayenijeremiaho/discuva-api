@@ -2757,6 +2757,77 @@
       ]
     },
     {
+      "name": "Email Logs",
+      "description": "Append-only delivery record written by the Bull email processor on every terminal outcome (success or permanent failure). Admin-only (EMAIL_LOGS_READ). Supports pagination and optional recipient/status/date filters.",
+      "item": [
+        {
+          "name": "Get Email Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/email-logs?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "email-logs"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "recipient",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Filter by recipient address (partial match)"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "sent | failed"
+                },
+                {
+                  "key": "dateFrom",
+                  "value": "",
+                  "disabled": true,
+                  "description": "ISO date string, inclusive"
+                },
+                {
+                  "key": "dateTo",
+                  "value": "",
+                  "disabled": true,
+                  "description": "ISO date string, inclusive"
+                }
+              ]
+            },
+            "description": "Admin (EMAIL_LOGS_READ): Paginated email delivery log. Supports optional filters: recipient, status, dateFrom, dateTo. `source` (\"tenant\" | \"platform_default\" | null) distinguishes a send via the church's own BYOK-configured provider from one that fell back to Discuva's platform-default provider — null on rows written before this field existed."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f\",\n      \"recipient\": \"member@example.com\",\n      \"subject\": \"Welcome to the congregation\",\n      \"status\": \"sent\",\n      \"jobId\": \"42\",\n      \"errorMessage\": null,\n      \"provider\": \"resend\",\n      \"source\": \"tenant\",\n      \"attemptsMade\": 1,\n      \"createdAt\": \"2026-06-17T09:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Attendance",
       "description": "Tracks member and worker attendance at church services. One attendance record per member per event (not per slot).\n\n**Access:**\n- Check-in: any authenticated member or worker (`JwtAuthGuard`)\n- My history: any authenticated user\n- Admin views (all history, slot summary, leaderboard): AdminGuard with ATTENDANCE_READ\n- Department view: WORKER (department HOD/D-HOD)\n- Correction: AdminGuard with ATTENDANCE_WRITE\n\n**Key concepts:**\n- Checking in to **any slot** of an event covers the whole event. You cannot check in twice to the same event.\n- **Workers must include GPS coordinates** (`location.latitude`, `location.longitude`). Distance from venue is validated against `EventConfig.allowedDistanceInMeters`.\n- Members are always marked `PRESENT`. Workers are `PRESENT` or `LATE` depending on `EventConfig.workerLateOffsetSeconds` relative to the slot start time.\n- **Online attendance**: workers who miss in-person can confirm `ATTENDED_ONLINE` via `POST /attendances/online-confirm` within a configurable window after service.\n- Status values: `PRESENT` | `LATE` | `ABSENT` | `ON_LEAVE` | `ATTENDED_ONLINE`\n\n**Typical flow:**\n1. Admin creates an Event with ServiceSlots (each with a ConfigId)\n2. On service day, member opens the app and calls `POST /attendances/checkin` with the `serviceSlotId`\n3. Worker includes `location` in the same call\n4. Admin reviews via `GET /attendances/history` or `GET /attendances/summary/slot/:slotId`\n5. Admin corrects errors via `PATCH /attendances/:id/correct`",
       "item": [
@@ -7414,14 +7485,14 @@
                 "logs"
               ]
             },
-            "description": "Live passthrough to the SMS provider's message history (Termii) — not stored locally, not paginated/filtered server-side. Returns an array of { messageId, recipient, message, status, type, sentAt, sender? }."
+            "description": "Live passthrough to the tenant's active SMS provider's message history — not stored locally, not paginated/filtered server-side. Returns an array of { messageId, recipient, message, status, type, sentAt, sender?, provider }, where provider (\"termii\" | \"twilio\") is the tenant's currently-configured vendor, tagged onto each entry by the backend, not the provider API itself."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"messageId\": \"abc123\",\n    \"recipient\": \"+2348012345678\",\n    \"message\": \"Reminder: service starts at 9am\",\n    \"status\": \"Delivered\",\n    \"type\": \"generic\",\n    \"sentAt\": \"2026-07-18 10:00:00\",\n    \"sender\": \"YourChurch\"\n  }\n]"
+              "body": "[\n  {\n    \"messageId\": \"abc123\",\n    \"recipient\": \"+2348012345678\",\n    \"message\": \"Reminder: service starts at 9am\",\n    \"status\": \"Delivered\",\n    \"type\": \"generic\",\n    \"sentAt\": \"2026-07-18 10:00:00\",\n    \"sender\": \"YourChurch\",\n    \"provider\": \"termii\"\n  }\n]"
             }
           ]
         }

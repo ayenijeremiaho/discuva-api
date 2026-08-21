@@ -18,6 +18,12 @@ export interface SmsLogEntry {
   type: string;
   sentAt: string;
   sender?: string;
+  // Set by SmsService.getLogs() from the resolved config's providerId, not
+  // by individual ISmsProvider implementations — a provider class has no
+  // reason to know its own registry key. Always populated by the time an
+  // entry leaves SmsService, since pure BYOK means a config must already
+  // have resolved successfully to reach getMessageHistory() at all.
+  provider?: string;
 }
 
 // Flat string map, e.g. Termii's { apiKey, senderId } or Twilio's
