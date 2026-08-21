@@ -12,4 +12,9 @@ export enum PlatformSettingKey {
   // var when no row exists yet, not a hardcoded default — see
   // PlatformSettingsService.resolveDefault().
   ENFORCE_DISTANCE_CHECK_DEFAULT = 'enforce_distance_check_default',
+  // Days a DRAFT social post's uploaded media (SocialPostMedia + its
+  // Cloudinary asset) is kept before SocialMediaRetentionScheduler deletes
+  // it. Published posts' media is retained indefinitely regardless of this
+  // setting — only unpublished drafts age out.
+  SOCIAL_MEDIA_DRAFT_RETENTION_DAYS = 'social_media_draft_retention_days',
 }

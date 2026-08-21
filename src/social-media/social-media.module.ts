@@ -1,13 +1,17 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { BullModule } from '@nestjs/bull';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { SocialAccount } from './entity/social-account.entity';
 import { SocialPost } from './entity/social-post.entity';
 import { SocialPostTarget } from './entity/social-post-target.entity';
+import { SocialPostMedia } from './entity/social-post-media.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { SocialAccountService } from './service/social-account.service';
 import { SocialPostService } from './service/social-post.service';
 import { SocialOAuthConnectService } from './service/social-oauth-connect.service';
+import { SocialPostMediaService } from './service/social-post-media.service';
+import { SocialMediaValidationService } from './service/social-media-validation.service';
 import { SocialMediaController } from './controller/social-media.controller';
 import { SocialOAuthCallbackController } from './controller/social-oauth-callback.controller';
 import { NotConnectedPublisher } from './publisher/not-connected-publisher';
@@ -19,6 +23,8 @@ import { SocialTokenRefresherRegistry } from './token/social-token-refresher-reg
 import { OAuthStateService } from './oauth/oauth-state.service';
 import { NoExchangerAvailable } from './oauth/no-exchanger-available';
 import { SocialOAuthExchangerRegistry } from './oauth/social-oauth-exchanger-registry.service';
+import { SocialPostPublishProcessor } from './processor/social-post-publish.processor';
+import { SocialMediaRetentionScheduler } from './scheduler/social-media-retention.scheduler';
 import { UtilityModule } from '../utility/utility.module';
 
 // Tenant.id/schemaName lookup has to happen via a plain TypeOrmModule
@@ -32,14 +38,18 @@ import { UtilityModule } from '../utility/utility.module';
       SocialAccount,
       SocialPost,
       SocialPostTarget,
+      SocialPostMedia,
     ]),
     TypeOrmModule.forFeature([Tenant]),
+    BullModule.registerQueue({ name: 'social-post-publish' }),
     UtilityModule,
   ],
   providers: [
     SocialAccountService,
     SocialPostService,
     SocialOAuthConnectService,
+    SocialPostMediaService,
+    SocialMediaValidationService,
     NotConnectedPublisher,
     PlatformDisabledPublisher,
     SocialPublisherRegistry,
@@ -49,6 +59,8 @@ import { UtilityModule } from '../utility/utility.module';
     OAuthStateService,
     NoExchangerAvailable,
     SocialOAuthExchangerRegistry,
+    SocialPostPublishProcessor,
+    SocialMediaRetentionScheduler,
   ],
   controllers: [SocialMediaController, SocialOAuthCallbackController],
   exports: [TenantTypeOrmModule],

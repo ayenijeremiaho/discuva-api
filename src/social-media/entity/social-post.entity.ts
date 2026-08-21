@@ -11,6 +11,7 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { SocialPostStatus } from '../enum/social-media.enum';
 import { SocialPostTarget } from './social-post-target.entity';
+import { SocialPostMedia } from './social-post-media.entity';
 
 @Entity({ name: 'social_posts' })
 export class SocialPost extends BaseEntity {
@@ -19,9 +20,6 @@ export class SocialPost extends BaseEntity {
 
   @Column({ type: 'text' })
   content: string;
-
-  @Column({ nullable: true })
-  imageUrl: string | null;
 
   @Column({ default: SocialPostStatus.DRAFT })
   status: SocialPostStatus;
@@ -37,6 +35,14 @@ export class SocialPost extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   publishedAt: Date | null;
 
+  // Set only for status = SCHEDULED — when the delayed Bull job created for
+  // this post fires, it calls the same publish() path "Publish Now" does.
+  @Column({ type: 'timestamptz', nullable: true })
+  scheduledFor: Date | null;
+
   @OneToMany(() => SocialPostTarget, (t) => t.post, { cascade: true })
   targets: SocialPostTarget[];
+
+  @OneToMany(() => SocialPostMedia, (m) => m.post, { cascade: true })
+  media: SocialPostMedia[];
 }

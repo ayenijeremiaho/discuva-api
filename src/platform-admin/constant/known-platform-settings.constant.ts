@@ -65,6 +65,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     max: 1,
     type: 'boolean',
   },
+  [PlatformSettingKey.SOCIAL_MEDIA_DRAFT_RETENTION_DAYS]: {
+    label: 'Social Media Draft Retention',
+    unit: "days an unpublished draft post's uploaded media is kept before automatic deletion",
+    defaultValue: 30,
+    min: 1,
+    max: 365,
+  },
 };
 
 // Multer parses to memory before our own dynamic per-setting check can run

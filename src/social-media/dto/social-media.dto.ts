@@ -1,14 +1,15 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsDateString,
   IsEnum,
   IsNotEmpty,
-  IsOptional,
   IsString,
   IsUUID,
-  IsUrl,
+  ValidateNested,
 } from 'class-validator';
-import { SocialPlatform } from '../enum/social-media.enum';
+import { Type } from 'class-transformer';
+import { SocialPlacement, SocialPlatform } from '../enum/social-media.enum';
 
 export class CreateSocialAccountDto {
   @IsEnum(SocialPlatform)
@@ -19,17 +20,30 @@ export class CreateSocialAccountDto {
   displayName: string;
 }
 
+export class SocialPostTargetDto {
+  @IsUUID('4')
+  accountId: string;
+
+  @IsEnum(SocialPlacement)
+  placement: SocialPlacement;
+}
+
 export class CreateSocialPostDto {
   @IsNotEmpty()
   @IsString()
   content: string;
 
-  @IsOptional()
-  @IsUrl()
-  imageUrl?: string;
-
   @IsArray()
   @ArrayMinSize(1)
-  @IsUUID('4', { each: true })
-  targetAccountIds: string[];
+  @ValidateNested({ each: true })
+  @Type(() => SocialPostTargetDto)
+  targets: SocialPostTargetDto[];
+}
+
+// A separate action from create() — mirrors publish() being its own
+// endpoint rather than a create-time flag, so media/targets can be
+// attached to a draft first, then scheduled once ready.
+export class ScheduleSocialPostDto {
+  @IsDateString()
+  scheduledFor: string;
 }

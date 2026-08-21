@@ -127,6 +127,20 @@ export class PlatformSettingsService {
     return value;
   }
 
+  async getSocialMediaDraftRetentionDays(): Promise<number> {
+    const key = PlatformSettingKey.SOCIAL_MEDIA_DRAFT_RETENTION_DAYS;
+    const cacheKey = this.cacheKey(key);
+    const cached = await this.cacheService.getGlobal<number>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const row = await this.settingRepo.findOne({ where: { key } });
+    const value =
+      (row?.value as { value: number } | undefined)?.value ??
+      this.resolveDefault(key);
+    this.cacheService.setGlobal(cacheKey, value, this.CACHE_TTL);
+    return value;
+  }
+
   // Platform-wide default for AttendanceSettingsService — a tenant with no
   // override of their own follows this. See resolveDefault() for why "no
   // row yet" reads the live env var instead of a hardcoded default.

@@ -9,7 +9,10 @@ import {
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { SocialPost } from './social-post.entity';
 import { SocialAccount } from './social-account.entity';
-import { SocialPostTargetStatus } from '../enum/social-media.enum';
+import {
+  SocialPlacement,
+  SocialPostTargetStatus,
+} from '../enum/social-media.enum';
 
 // One row per (post, account) pair — the per-platform outcome of a single
 // compose-once/publish-everywhere action. Kept separate from SocialPost
@@ -33,6 +36,12 @@ export class SocialPostTarget extends BaseEntity {
 
   @Column({ default: SocialPostTargetStatus.PENDING })
   status: SocialPostTargetStatus;
+
+  // FEED unless the composer explicitly targeted a Story/Reel — a single
+  // connected account can be targeted at multiple placements for the same
+  // post (two separate target rows), each validated independently.
+  @Column({ default: SocialPlacement.FEED })
+  placement: SocialPlacement;
 
   @Column({ type: 'text', nullable: true })
   errorMessage: string | null;

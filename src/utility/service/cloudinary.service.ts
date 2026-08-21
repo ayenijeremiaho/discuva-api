@@ -17,12 +17,17 @@ export type CloudinaryFolder =
   | 'profile-pictures'
   | 'church-logos'
   | 'tenant-assets'
-  | 'class-materials';
+  | 'class-materials'
+  | 'social-media';
 
 export interface CloudinaryUploadResult {
   secureUrl: string;
   publicId: string;
   resourceType: string;
+  width?: number;
+  height?: number;
+  // Seconds, video only — undefined for images.
+  duration?: number;
 }
 
 @Injectable()
@@ -81,6 +86,9 @@ export class CloudinaryService implements OnModuleInit {
             secureUrl: result.secure_url,
             publicId: result.public_id,
             resourceType: result.resource_type,
+            width: result.width,
+            height: result.height,
+            duration: result.duration,
           });
         },
       );
