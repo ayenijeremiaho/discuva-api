@@ -15,6 +15,13 @@ export enum PlatformAdminPermission {
   PLANS_WRITE = 'plans:write',
   COMMUNICATION_PROVIDERS_READ = 'communication_providers:read',
   COMMUNICATION_PROVIDERS_WRITE = 'communication_providers:write',
+  // Governs the platform-owned OAuth app credentials (Meta/Google/X) that
+  // every tenant's social-media connection is built on — separate from
+  // tenant-side SOCIAL_MEDIA_READ/WRITE (a different, disjoint AdminPermission
+  // enum entirely), since a tenant admin can compose/publish posts without
+  // ever needing to see or touch Discuva's own app secrets.
+  SOCIAL_MEDIA_APPS_READ = 'social_media_apps:read',
+  SOCIAL_MEDIA_APPS_WRITE = 'social_media_apps:write',
   BILLING_READ = 'billing:read',
   BILLING_WRITE = 'billing:write',
   ANALYTICS_READ = 'analytics:read',
@@ -44,6 +51,8 @@ export const PLATFORM_ADMIN_PERMISSION_LABELS: Record<
     'View Communication Providers',
   [PlatformAdminPermission.COMMUNICATION_PROVIDERS_WRITE]:
     'Manage Communication Providers',
+  [PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ]: 'View Social Media Apps',
+  [PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE]: 'Manage Social Media Apps',
   [PlatformAdminPermission.BILLING_READ]: 'View Billing & Refunds',
   [PlatformAdminPermission.BILLING_WRITE]: 'Issue Refunds',
   [PlatformAdminPermission.ANALYTICS_READ]: 'View Platform Analytics',
@@ -85,6 +94,10 @@ export const PlatformAdminPermissionGroups: PlatformAdminPermissionGroup[] = [
   buildGroup('Communication Providers', [
     PlatformAdminPermission.COMMUNICATION_PROVIDERS_READ,
     PlatformAdminPermission.COMMUNICATION_PROVIDERS_WRITE,
+  ]),
+  buildGroup('Social Media Apps', [
+    PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ,
+    PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE,
   ]),
   buildGroup('Billing', [
     PlatformAdminPermission.BILLING_READ,

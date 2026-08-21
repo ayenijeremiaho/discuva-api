@@ -28,6 +28,7 @@ import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCapabilityService } from '../service/platform-capability.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
+import { PlatformSocialAppService } from '../service/platform-social-app.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
@@ -46,6 +47,8 @@ import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
 import { SetCommunicationProviderActiveDto } from '../dto/set-communication-provider-active.dto';
+import { RegisterSocialPlatformAppDto } from '../dto/register-social-platform-app.dto';
+import { SetSocialPlatformAppActiveDto } from '../dto/set-social-platform-app-active.dto';
 import { RefundCheckoutSessionDto } from '../dto/refund-checkout-session.dto';
 import { BroadcastDto } from '../dto/broadcast.dto';
 import { RegisterGivingProviderDto } from '../dto/register-giving-provider.dto';
@@ -54,6 +57,7 @@ import { SetPaymentProviderActiveDto } from '../dto/set-payment-provider-active.
 import { UpdatePlatformSettingDto } from '../dto/platform-setting.dto';
 import { PlatformSettingKey } from '../enum/platform-setting-key.enum';
 import { CheckoutService } from '../../billing/service/checkout.service';
+import { SocialPlatform } from '../../social-media/enum/social-media.enum';
 
 // Route shapes match MULTI_TENANT_MIGRATION.md §4.10's capability list.
 //
@@ -76,6 +80,7 @@ export class PlatformAdminController {
     private readonly planService: PlatformPlanService,
     private readonly capabilityService: PlatformCapabilityService,
     private readonly communicationProviderService: PlatformCommunicationProviderService,
+    private readonly socialAppService: PlatformSocialAppService,
     private readonly givingProviderService: PlatformGivingProviderService,
     private readonly paymentProviderService: PlatformPaymentProviderService,
     private readonly checkoutService: CheckoutService,
@@ -324,6 +329,30 @@ export class PlatformAdminController {
   @Get('tenants/:id/communication-providers')
   async getTenantCommunicationProviders(@Param('id') id: string) {
     return this.communicationProviderService.getTenantProviders(id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ)
+  @Get('social-media-apps')
+  async listSocialPlatformApps() {
+    return this.socialAppService.listApps();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE)
+  @Post('social-media-apps')
+  async registerSocialPlatformApp(@Body() dto: RegisterSocialPlatformAppDto) {
+    return this.socialAppService.upsertApp(dto);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE)
+  @Patch('social-media-apps/:platform')
+  async setSocialPlatformAppActive(
+    @Param('platform') platform: SocialPlatform,
+    @Body() dto: SetSocialPlatformAppActiveDto,
+  ) {
+    return this.socialAppService.setActive(platform, dto.isActive);
   }
 
   @UseGuards(PlatformAdminGuard)

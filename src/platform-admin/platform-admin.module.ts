@@ -32,6 +32,8 @@ import { PlatformSetting } from './entity/platform-setting.entity';
 import { PlatformSettingsService } from './service/platform-settings.service';
 import { CommunicationProvider } from './entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from './entity/tenant-communication-provider-config.entity';
+import { SocialPlatformApp } from './entity/social-platform-app.entity';
+import { PlatformSocialAppService } from './service/platform-social-app.service';
 import { GivingProvider } from '../giving-checkout/entity/giving-provider.entity';
 import { TenantGivingProviderConfig } from '../giving-checkout/entity/tenant-giving-provider-config.entity';
 import { GivingCheckoutSession } from '../giving-checkout/entity/giving-checkout-session.entity';
@@ -66,6 +68,7 @@ import { UtilityModule } from '../utility/utility.module';
       Subscription,
       CommunicationProvider,
       TenantCommunicationProviderConfig,
+      SocialPlatformApp,
       GivingProvider,
       TenantGivingProviderConfig,
       GivingCheckoutSession,
@@ -93,6 +96,7 @@ import { UtilityModule } from '../utility/utility.module';
     PlatformPlanService,
     PlatformCapabilityService,
     PlatformCommunicationProviderService,
+    PlatformSocialAppService,
     PlatformGivingProviderService,
     PlatformPaymentProviderService,
     PlatformAnalyticsService,
@@ -102,6 +106,6 @@ import { UtilityModule } from '../utility/utility.module';
     DefaultPlatformAdminSeed,
     PlatformSettingsService,
   ],
-  exports: [PlatformSettingsService],
+  exports: [PlatformSettingsService, PlatformSocialAppService],
 })
 export class PlatformAdminModule {}

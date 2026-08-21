@@ -6,6 +6,7 @@ import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
 import { PlatformCapabilityService } from '../service/platform-capability.service';
 import { PlatformCommunicationProviderService } from '../service/platform-communication-provider.service';
+import { PlatformSocialAppService } from '../service/platform-social-app.service';
 import { PlatformGivingProviderService } from '../service/platform-giving-provider.service';
 import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
@@ -27,6 +28,11 @@ const mockGivingProviderService = {
   setActive: jest.fn(),
 };
 const mockCommunicationProviderService = {
+  setActive: jest.fn(),
+};
+const mockSocialAppService = {
+  listApps: jest.fn(),
+  upsertApp: jest.fn(),
   setActive: jest.fn(),
 };
 const mockPaymentProviderService = {
@@ -67,6 +73,10 @@ describe('PlatformAdminController (billing support routes)', () => {
         {
           provide: PlatformCommunicationProviderService,
           useValue: mockCommunicationProviderService,
+        },
+        {
+          provide: PlatformSocialAppService,
+          useValue: mockSocialAppService,
         },
         {
           provide: PlatformGivingProviderService,
@@ -123,6 +133,34 @@ describe('PlatformAdminController (billing support routes)', () => {
     });
     expect(mockCommunicationProviderService.setActive).toHaveBeenCalledWith(
       'termii',
+      false,
+    );
+  });
+
+  it('listSocialPlatformApps delegates to PlatformSocialAppService', async () => {
+    mockSocialAppService.listApps.mockResolvedValue([]);
+    await controller.listSocialPlatformApps();
+    expect(mockSocialAppService.listApps).toHaveBeenCalled();
+  });
+
+  it('registerSocialPlatformApp delegates to PlatformSocialAppService', async () => {
+    const dto = {
+      platform: 'FACEBOOK' as const,
+      clientId: 'id',
+      clientSecret: 'secret',
+      redirectUri: 'https://api.discuva.app/callback',
+      scopes: 'pages_manage_posts',
+    };
+    await controller.registerSocialPlatformApp(dto as any);
+    expect(mockSocialAppService.upsertApp).toHaveBeenCalledWith(dto);
+  });
+
+  it('setSocialPlatformAppActive delegates to PlatformSocialAppService', async () => {
+    await controller.setSocialPlatformAppActive('FACEBOOK' as any, {
+      isActive: false,
+    });
+    expect(mockSocialAppService.setActive).toHaveBeenCalledWith(
+      'FACEBOOK',
       false,
     );
   });

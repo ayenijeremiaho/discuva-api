@@ -70,6 +70,14 @@ import { BranchModule } from '../branch/branch.module';
  *   resolution could ever produce, so this route is still excluded and
  *   GivingCheckoutService resolves + enters that tenant's context itself
  *   once the webhook signature verifies.
+ * - `v1/integrations/social/:platform/oauth/callback` — called directly by
+ *   Meta/Google/X's OAuth redirect after an admin consents, same
+ *   no-Host-header reasoning as every other webhook/callback above. Unlike
+ *   the giving webhook, the tenant identifier isn't a path param here (an
+ *   OAuth provider only ever echoes back `code`/`state`, nothing else) — it
+ *   travels encoded inside `state` instead, decoded by
+ *   SocialOAuthConnectService before it resolves and enters that tenant's
+ *   context.
  * - `v1/billing/public/(.*)` — called directly by discuva-web, a separate
  *   marketing site with no tenant subdomain in its Host header at all, same
  *   no-Host-header reasoning as the webhook excludes above.
@@ -132,6 +140,10 @@ export class TenantModule implements NestModule {
         { path: 'v1/integrations/youtube/callback', method: RequestMethod.ALL },
         { path: 'v1/webhooks/billing', method: RequestMethod.ALL },
         { path: 'v1/webhooks/giving/(.*)', method: RequestMethod.ALL },
+        {
+          path: 'v1/integrations/social/:platform/oauth/callback',
+          method: RequestMethod.GET,
+        },
         // Called by discuva-web, a separate marketing site with no tenant
         // subdomain in its Host header at all — same no-Host-header
         // reasoning as the excludes above.

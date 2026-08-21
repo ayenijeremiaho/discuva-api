@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { SocialAccountService } from '../service/social-account.service';
 import { SocialPostService } from '../service/social-post.service';
+import { SocialOAuthConnectService } from '../service/social-oauth-connect.service';
 import {
   CreateSocialAccountDto,
   CreateSocialPostDto,
@@ -30,6 +31,7 @@ export class SocialMediaController {
   constructor(
     private readonly accountService: SocialAccountService,
     private readonly postService: SocialPostService,
+    private readonly oauthConnectService: SocialOAuthConnectService,
   ) {}
 
   @RequiresPermission(AdminPermission.SOCIAL_MEDIA_WRITE)
@@ -48,6 +50,13 @@ export class SocialMediaController {
   @Delete('accounts/:id')
   deleteAccount(@Param('id', ParseUUIDPipe) id: string) {
     return this.accountService.delete(id);
+  }
+
+  @RequiresPermission(AdminPermission.SOCIAL_MEDIA_WRITE)
+  @Get('accounts/:id/authorize-url')
+  async getAuthorizeUrl(@Param('id', ParseUUIDPipe) id: string) {
+    const url = await this.oauthConnectService.getAuthorizeUrl(id);
+    return { url };
   }
 
   @RequiresPermission(AdminPermission.SOCIAL_MEDIA_WRITE)

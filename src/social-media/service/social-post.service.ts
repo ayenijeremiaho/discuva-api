@@ -85,7 +85,9 @@ export class SocialPostService {
     await this.postRepo.save(post);
 
     for (const target of post.targets) {
-      const publisher = this.publisherRegistry.resolve(target.account.platform);
+      const publisher = await this.publisherRegistry.resolve(
+        target.account.platform,
+      );
       const result = await publisher.publish(target.account, post);
       target.status = result.success
         ? SocialPostTargetStatus.SUCCESS

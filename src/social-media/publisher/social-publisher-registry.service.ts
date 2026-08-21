@@ -2,16 +2,24 @@ import { Injectable } from '@nestjs/common';
 import { SocialPlatform } from '../enum/social-media.enum';
 import { SocialPlatformPublisher } from './social-platform-publisher.interface';
 import { NotConnectedPublisher } from './not-connected-publisher';
+import { PlatformDisabledPublisher } from './platform-disabled-publisher';
+import { PlatformSocialAppService } from '../../platform-admin/service/platform-social-app.service';
 
-// Every platform resolves to NotConnectedPublisher today. Wiring in a real
-// integration later is a two-line change here — implement
-// SocialPlatformPublisher for that platform and swap its map entry — with
-// no change to SocialPostService or the controller.
+// Every real platform still resolves to NotConnectedPublisher today — a two-
+// line change per platform (implement SocialPlatformPublisher, swap its map
+// entry) with no change to SocialPostService or the controller. The
+// platform-admin kill switch (SocialPlatformApp.isActive) is checked here,
+// not baked into each publisher, so disabling a platform takes effect for
+// every publisher implementation uniformly, present or future.
 @Injectable()
 export class SocialPublisherRegistry {
   private readonly publishers: Record<SocialPlatform, SocialPlatformPublisher>;
 
-  constructor(notConnectedPublisher: NotConnectedPublisher) {
+  constructor(
+    notConnectedPublisher: NotConnectedPublisher,
+    private readonly platformDisabledPublisher: PlatformDisabledPublisher,
+    private readonly platformSocialAppService: PlatformSocialAppService,
+  ) {
     this.publishers = {
       [SocialPlatform.FACEBOOK]: notConnectedPublisher,
       [SocialPlatform.INSTAGRAM]: notConnectedPublisher,
@@ -21,7 +29,10 @@ export class SocialPublisherRegistry {
     };
   }
 
-  resolve(platform: SocialPlatform): SocialPlatformPublisher {
+  async resolve(platform: SocialPlatform): Promise<SocialPlatformPublisher> {
+    if (await this.platformSocialAppService.isPlatformDisabled(platform)) {
+      return this.platformDisabledPublisher;
+    }
     return this.publishers[platform];
   }
 }
