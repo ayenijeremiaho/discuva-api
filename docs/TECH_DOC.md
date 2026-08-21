@@ -3407,58 +3407,138 @@ added after some submissions already exist doesn't drag its stats toward zero.
 
 ### Social Media Module (`src/social-media/`)
 
-Central, tenant-scoped connector framework for cross-posting to a church's social accounts from one compose box —
-currently the **architecture only**: no platform has live OAuth wired in yet, deliberately. Every account starts
-(and stays) `isConnected: false`, and every publish attempt against it fails honestly rather than pretending to
-succeed — see "Why no live platforms yet" below.
+Central, tenant-scoped connector framework for cross-posting to a church's social accounts from one compose box.
+As of this pass, all the **shared OAuth/media/scheduling infrastructure** is real and fully wired — platform-level
+app credentials, per-tenant encrypted token storage, the connect/callback flow, real multi-file upload, per-
+placement validation, retention, and scheduled publishing. What's **still a deliberate stub** is the actual
+per-platform publish call: every platform resolves to `NotConnectedPublisher` (or `PlatformDisabledPublisher` if a
+platform-admin has switched it off) via `SocialPublisherRegistry`, which always fails honestly rather than
+pretending to succeed. Wiring in a real Facebook/Instagram/YouTube/X publisher is the next phase — see the
+publisher extension point below; `SocialPostService` and every controller stay unchanged when that lands.
 
 **Entities:**
 
 - `SocialAccount` (`social_accounts`) — `platform` (`SocialPlatform`: `FACEBOOK`/`INSTAGRAM`/`X`/`YOUTUBE`/`TIKTOK`),
-  `displayName`, `externalAccountId` (nullable — populated once a real OAuth flow exists to produce one),
-  `isConnected` (always `false` today), `connectedAt`/`connectedBy` (nullable, for when connecting becomes real).
-- `SocialPost` (`social_posts`) — `content`, optional `imageUrl`, `status` (`SocialPostStatus`: `DRAFT` →
-  `PUBLISHING` → `PUBLISHED`/`PARTIALLY_PUBLISHED`/`FAILED`), `createdBy` (nullable FK → `admins`, `SET NULL`),
-  `publishedAt`.
-- `SocialPostTarget` (`social_post_targets`) — one row per `(post, account)` pair, so a single post's per-platform
-  outcome is tracked independently rather than collapsed into one post-level status: `status`
-  (`SocialPostTargetStatus`: `PENDING`/`SUCCESS`/`FAILED`), `errorMessage`, `publishedAt`.
+  `displayName`, `externalAccountId` (nullable — Page/Channel/user id, resolved during the OAuth exchange),
+  `isConnected`, `connectedAt`/`connectedBy`. Also carries the OAuth token itself, all `select: false` so a normal
+  `find()` never returns them: `accessTokenEncrypted`, `refreshTokenEncrypted` (nullable — not every platform
+  issues one), `tokenExpiresAt`, `scope`. Encrypted via `EncryptionService` (AES-256-GCM), same convention as
+  `TenantCommunicationProviderConfig.credentialsEncrypted`.
+- `SocialPost` (`social_posts`) — `content`, `status` (`SocialPostStatus`: `DRAFT` → `SCHEDULED`/`PUBLISHING` →
+  `PUBLISHED`/`PARTIALLY_PUBLISHED`/`FAILED`), `createdBy` (nullable FK → `admins`, `SET NULL`), `publishedAt`,
+  `scheduledFor` (nullable — set only while `SCHEDULED`). No longer has `imageUrl`; see `SocialPostMedia`.
+- `SocialPostTarget` (`social_post_targets`) — one row per `(post, account, placement)`, so a single post's
+  per-platform *and* per-placement outcome is tracked independently: `status` (`SocialPostTargetStatus`:
+  `PENDING`/`SUCCESS`/`FAILED`), `placement` (`SocialPlacement`: `FEED`/`STORY`/`REEL` — Instagram Stories/Reels and
+  YouTube Shorts are genuinely different publish surfaces from a feed post, not just a platform distinction; one
+  connected account can have multiple targets across placements for the same post), `errorMessage`, `publishedAt`.
+- `SocialPostMedia` (`social_post_media`) — real Cloudinary-backed attachments, replacing the old free-text
+  `imageUrl`. `url`, `publicId` (needed to delete the actual asset, not just the row), `mimeType`, `sizeBytes`,
+  `width`/`height`/`durationSeconds` (nullable, used by `SocialMediaValidationService`), `order`.
+- `SocialPlatformApp` (`social_platform_apps`, **public schema**, control-plane) — one row per `SocialPlatform`
+  holding Discuva's own OAuth app credentials (`clientId`, `clientSecretEncrypted`, `redirectUri`, `scopes`).
+  Unlike email/SMS BYOK, a tenant cannot register their own Meta/Google/X developer app, so this is
+  platform-owned, not per-tenant. `isActive` is the platform-admin kill switch — see below.
+
+**OAuth connect + callback flow:**
+
+- `GET /social-media/accounts/:id/authorize-url` (tenant-authenticated, `AdminGuard`) — `SocialOAuthConnectService`
+  looks up the account's platform, confirms its `SocialPlatformApp` is registered and active, encodes
+  `{accountId, tenantId, nonce, issuedAt}` into a `state` token via `OAuthStateService` (AES-256-GCM encrypt — the
+  auth tag makes it tamper-evident, doubling as OAuth's CSRF protection without a separate HMAC/JWT; 10-minute
+  expiry), and returns the platform's authorize URL for the frontend to redirect to.
+- `GET /v1/integrations/social/:platform/oauth/callback` — `@Public()`, added to `TenantMiddleware`'s exclude list
+  (`src/tenant/tenant.module.ts` — **do not remove this without also removing the exclude**, the documented
+  failure mode is a silent 404 in production, previously hit for the YouTube WebSub callback). Called directly by
+  Meta/Google/X's redirect, which carries no tenant subdomain — `state` is decoded to recover `tenantId`/
+  `accountId`, the tenant's `schemaName` is looked up, and the rest runs inside `runInTenantContext(...)` (same
+  pattern as the giving-checkout webhook): exchange the code for tokens, encrypt and store them on the matching
+  `SocialAccount`, set `isConnected`/`connectedAt`, then redirect the browser back to discuva-admin
+  (`ADMIN_LOGIN_URL` + `/social-media?connected=<platform>` or `?error=<reason>`). Never throws past the top level
+  — the caller is a browser mid-redirect, not an API client — failures are logged server-side and surfaced to the
+  browser as a generic `?error=connection-failed`.
 
 **The publisher extension point** (`publisher/social-platform-publisher.interface.ts`): `SocialPlatformPublisher`
-is a one-method interface (`publish(account, post): Promise<{success, error?, externalPostId?}>`). Every platform
-resolves to `NotConnectedPublisher` via `SocialPublisherRegistry` today, which always returns
-`{success: false, error: "<PLATFORM> isn't connected yet — ..."}`. Wiring in a real platform later (Meta Graph API,
-X API, etc.) means implementing this interface once and swapping that platform's entry in the registry's map —
-`SocialPostService` and the controller never change.
+is a one-method interface (`publish(account, post): Promise<{success, error?, externalPostId?}>`), resolved per
+`SocialPlatform` by `SocialPublisherRegistry`. On every `resolve()` call it also checks
+`PlatformSocialAppService.isPlatformDisabled(platform)` — if a platform-admin has switched a platform off, it
+returns `PlatformDisabledPublisher` (distinct wording from `NotConnectedPublisher`: "temporarily disabled by
+Discuva," not "this church hasn't set this up") instead of whatever publisher is registered, without touching any
+tenant's already-stored tokens. Wiring in a real platform means implementing this interface plus a matching
+`SocialTokenRefresher` (`token/`, for transparent access-token renewal) and `SocialOAuthExchanger` (`oauth/`, for
+the authorize-URL/code-exchange mechanics) — `SocialPostService`, the controllers, and `SocialTokenResolverService`
+never change.
 
-**Why no live platforms yet:** each platform is a separate OAuth app registration, a different API surface, and in
-X's case a paid API tier — a real scope decision, not a technical default. This session shipped the full compose →
-target-selection → publish-attempt → per-target-result UX so it's ready to point at real credentials the moment
-that's decided, without ever telling an admin a post went out when it didn't.
+**`SocialTokenResolverService`** — every publisher calls `getValidAccessToken(accountId)` instead of touching
+`SocialAccount`'s encrypted columns directly. Takes an id, not an entity, since the token columns are `select:
+false` and a `SocialAccount` loaded via a normal relation (e.g. `post.targets[].account`) never carries them.
+Decrypts and returns the token if not expired (60s safety margin); if expired and a refresh token exists, resolves
+that platform's `SocialTokenRefresher` (default `NoRefresherAvailable`, throws) and persists the renewed token.
 
-**Publish semantics (`SocialPostService.publish`):** every target is attempted independently — one platform
-failing never blocks the others. The post's overall `status` is derived from how many targets actually succeeded:
-`FAILED` if none did, `PUBLISHED` if all did, `PARTIALLY_PUBLISHED` otherwise. `publishedAt` on the post is set
-whenever at least one target succeeded.
+**Media validation (`SocialMediaValidationService`)** — keyed on `(platform, placement)`, not platform alone,
+informed by researched per-platform specs (image/video size & duration caps, caption length, max image count).
+Two-tier model: **errors** (wrong content type for the placement, over a hard size/duration/caption limit) block
+that specific target before it ever reaches its publisher; **warnings** (e.g. an Instagram Reel over the ~3-minute
+"ideal" length) surface without blocking. Enforced inside `SocialPostService.publish()`, not just a frontend
+nicety — a target with unresolved errors is marked `FAILED` with the validation message, and its publisher is
+never called.
+
+**Scheduled publishing** — `POST /social-media/posts/:id/schedule` (`{scheduledFor: ISO string}`) sets `status =
+SCHEDULED` and adds a delayed job to the `social-post-publish` Bull queue (`jobId` = the post's own id, both to
+prevent double-scheduling and so `cancelSchedule` can find it again without a separate stored column). When the
+delay elapses, `SocialPostPublishProcessor` enters the job's tenant context (`runInTenantContext`, envelope carried
+via `buildJobEnvelope`) and calls the *exact same* `SocialPostService.publish()` "Publish Now" calls — scheduling
+only decides *when* that call happens, there is no second publish path. `POST
+/social-media/posts/:id/schedule/cancel` removes the pending job and reverts the post to `DRAFT`.
+
+**Draft media retention (`SocialMediaRetentionScheduler`)** — daily sweep (`@Cron('0 3 * * *')`) across every
+active tenant: any `DRAFT`-status post whose `updatedAt` is older than a configurable window
+(`PlatformSettingKey.SOCIAL_MEDIA_DRAFT_RETENTION_DAYS`, default 30, platform-admin adjustable via the existing
+`PlatformSettingsService`) has its `SocialPostMedia` rows and their Cloudinary assets deleted. `SCHEDULED` and
+published posts are never touched — only abandoned drafts age out. Closes a gap the researched incumbents
+(Buffer/Hootsuite/Later) don't document clearly.
+
+**Publish semantics (`SocialPostService.publish`):** every target is attempted independently — one platform (or
+validation) failing never blocks the others. The post's overall `status` is derived from how many targets actually
+succeeded: `FAILED` if none did, `PUBLISHED` if all did, `PARTIALLY_PUBLISHED` otherwise. `publishedAt` on the post
+is set whenever at least one target succeeded.
 
 **Deleting a post** is only allowed while `DRAFT` or fully `FAILED` — a `PUBLISHED`/`PARTIALLY_PUBLISHED`/
 `PUBLISHING` post's target history is kept, not deletable, since it's the record of what was actually attempted.
 
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
-| POST   | `/social-media/accounts`          | AdminGuard (SOCIAL_MEDIA_WRITE) | Register an account to post to; `isConnected` is always `false` on create |
-| GET    | `/social-media/accounts`          | AdminGuard (SOCIAL_MEDIA_READ)  | List all registered accounts |
-| DELETE | `/social-media/accounts/:id`      | AdminGuard (SOCIAL_MEDIA_WRITE) | Remove an account |
-| POST   | `/social-media/posts`             | AdminGuard (SOCIAL_MEDIA_WRITE) | `{content, imageUrl?, targetAccountIds: string[]}` — creates a `DRAFT` with one `PENDING` target per account |
-| GET    | `/social-media/posts`             | AdminGuard (SOCIAL_MEDIA_READ)  | Paginated (`?page=&limit=`) |
-| GET    | `/social-media/posts/:id`         | AdminGuard (SOCIAL_MEDIA_READ)  | One post with its targets and each target's account |
-| POST   | `/social-media/posts/:id/publish` | AdminGuard (SOCIAL_MEDIA_WRITE) | Attempts every target; see publish semantics above |
-| DELETE | `/social-media/posts/:id`         | AdminGuard (SOCIAL_MEDIA_WRITE) | `DRAFT`/`FAILED` only |
+| POST   | `/social-media/accounts`                    | AdminGuard (SOCIAL_MEDIA_WRITE) | Register an account to post to; `isConnected` is always `false` on create — connecting is a separate step |
+| GET    | `/social-media/accounts`                    | AdminGuard (SOCIAL_MEDIA_READ)  | List all registered accounts |
+| DELETE | `/social-media/accounts/:id`                | AdminGuard (SOCIAL_MEDIA_WRITE) | Remove an account |
+| GET    | `/social-media/accounts/:id/authorize-url`  | AdminGuard (SOCIAL_MEDIA_WRITE) | Returns `{url}` — the platform's OAuth authorize URL, `state`-encoded to this account/tenant |
+| GET    | `/v1/integrations/social/:platform/oauth/callback` | `@Public()`, tenant-excluded | Called by the OAuth provider's redirect, not the frontend directly — see above |
+| POST   | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_WRITE) | `{content, targets: {accountId, placement}[]}` — creates a `DRAFT` with one `PENDING` target per (account, placement) pair |
+| GET    | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_READ)  | Paginated (`?page=&limit=`) |
+| GET    | `/social-media/posts/:id`                   | AdminGuard (SOCIAL_MEDIA_READ)  | One post with its targets, each target's account, and its media |
+| POST   | `/social-media/posts/:id/media`             | AdminGuard (SOCIAL_MEDIA_WRITE) | Multipart, field `files` (up to 10, 200MB cap, image/video only) — `DRAFT` posts only |
+| DELETE | `/social-media/posts/:id/media/:mediaId`    | AdminGuard (SOCIAL_MEDIA_WRITE) | `DRAFT` posts only |
+| POST   | `/social-media/posts/:id/publish`           | AdminGuard (SOCIAL_MEDIA_WRITE) | Attempts every target; see publish semantics above |
+| POST   | `/social-media/posts/:id/schedule`          | AdminGuard (SOCIAL_MEDIA_WRITE) | `{scheduledFor: ISO string}` — `DRAFT` only, must be in the future |
+| POST   | `/social-media/posts/:id/schedule/cancel`   | AdminGuard (SOCIAL_MEDIA_WRITE) | Reverts to `DRAFT`, removes the queued job |
+| DELETE | `/social-media/posts/:id`                   | AdminGuard (SOCIAL_MEDIA_WRITE) | `DRAFT`/`FAILED` only |
 
 `social_media` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`). New `social_media:read`/
 `social_media:write` permissions, backfilled onto existing `SuperAdmin` roles by
 `GrantSocialMediaPermissions1791504000000` (same class of fix as `GrantFormsPermissions` — a brand-new permission
 is only auto-granted to a SuperAdmin role at the moment that role is *created*).
+
+**Platform-admin surface (`/platform/social-media-apps`, discuva-platform):** separate from the tenant-side module
+toggle above — Discuva staff register each platform's OAuth app credentials here (one app per platform, not
+per-tenant) and flip the kill switch. New `PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ`/`WRITE` (a distinct,
+disjoint enum from tenant-side `AdminPermission.SOCIAL_MEDIA_READ`/`WRITE` — a tenant admin composing/publishing
+posts never needs to see Discuva's own app secrets).
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| GET   | `/platform/social-media-apps`            | PlatformAdminGuard (SOCIAL_MEDIA_APPS_READ)  | Never returns `clientSecretEncrypted` — `select: false` |
+| POST  | `/platform/social-media-apps`            | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | `{platform, clientId, clientSecret, redirectUri, scopes}` — upserts (one row per platform) |
+| PATCH | `/platform/social-media-apps/:platform`  | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | `{isActive}` — the kill switch; never touches already-connected tenants' `SocialAccount` tokens either way |
 
 ### Utility Module
 
@@ -4381,6 +4461,9 @@ Queries `prayer_roster_entries` where the meeting date is 2 days or 1 day away a
 - `1787875200000-CreatePledgeContributions` *(creates `finance_pledge_contributions`: `pledge_id` FK `CASCADE`, `submitted_by_id` FK to `members` `RESTRICT`, `reviewed_by` FK to `admins` `SET NULL`, `amount`, `payment_date`, `reference`, `status` default `PENDING`, `reviewed_at`, `finance_note`)*
 - `1788393600000-AddPerformanceIndexes` *(composite `members(birth_month, birth_day)` for upcoming-birthday lookups; `first_timers.created_at` for date-range queries; composite `follow_up_tasks(status, due_date)`; single-column `status` indexes on `tithe_upload_batches`, `tithe_unmatched_records`, `tithe_dispute_records`, `tithe_payment_proofs`; `finance_requests.category_id`)*
 - `1792652400000-AddEmailLogSource` *(adds nullable `email_logs.source` — `tenant` vs `platform_default`; existing rows are `NULL`)*
+- `1792738800000-AddSocialAccountOAuthTokens` *(tenant — adds `social_accounts.access_token_encrypted`/`refresh_token_encrypted`/`token_expires_at`/`scope`)*
+- `1792825200000-AddSocialPostMediaPlacementScheduling` *(tenant — adds `social_post_targets.placement`, `social_posts.scheduled_for`, drops `social_posts.image_url`, creates `social_post_media`)*
+- `1793217600000-AddSocialPlatformApps` *(public/control-plane — creates `social_platform_apps`, the platform-admin-owned OAuth app catalog)*
 
 ---
 
@@ -5028,6 +5111,11 @@ declaring module).
 settings page renders a toggle instead of a number input when `type === 'boolean'`. See "Attendance Distance Check
 Setting" in the Attendance Module section above for the full per-tenant-override picture this platform default sits
 underneath.
+
+**Consumer 4 — social media draft retention:** `SOCIAL_MEDIA_DRAFT_RETENTION_DAYS` (default 30) — read by
+`SocialMediaRetentionScheduler`'s daily sweep (see Social Media Module above). No dedicated frontend work was
+needed for this one: `/billing-settings` already renders every `KNOWN_PLATFORM_SETTINGS` entry generically from the
+`GET /platform/settings` response, so a new key just appears.
 
 **Frontend:** discuva-platform's `/billing-settings` page (own `layout.tsx`, same "every new route needs one"
 convention, now titled "Platform Settings" in-page and in the sidebar since it's no longer billing-only), gated by

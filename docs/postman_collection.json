@@ -2828,6 +2828,343 @@
       ]
     },
     {
+      "name": "Social Media",
+      "description": "Compose-once, publish-everywhere connector framework (AdminGuard, module `social_media`). Every platform currently resolves to an honest 'not connected'/'disabled' stub — no real Facebook/Instagram/YouTube/X publishing is wired in yet, but the full account-connect, media-upload, validation, and scheduling pipeline is real.",
+      "item": [
+        {
+          "name": "Create Social Account",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"platform\": \"FACEBOOK\",\n  \"displayName\": \"Main Church Page\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/social-media/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "accounts"]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Registers which account this church intends to post to — isConnected is always false on create; connecting is a separate OAuth step below."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"id\": \"a1b2c3d4-0000-0000-0000-000000000001\", \"platform\": \"FACEBOOK\", \"displayName\": \"Main Church Page\", \"isConnected\": false, \"connectedAt\": null, \"createdAt\": \"2026-08-01T09:00:00.000Z\" } }"
+            }
+          ]
+        },
+        {
+          "name": "List Social Accounts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/accounts",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "accounts"]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ)."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Social Account",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/accounts/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "accounts", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Authorize URL",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/accounts/:id/authorize-url",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "accounts", ":id", "authorize-url"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Returns the platform's OAuth authorize URL, `state`-encoded to this account/tenant — the frontend does a full-page redirect to it. Requires the platform's SocialPlatformApp to be registered and active on the platform-admin side (see Platform Admin > Social Media Apps)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"url\": \"https://www.facebook.com/v19.0/dialog/oauth?client_id=...&redirect_uri=...&state=...\" } }"
+            }
+          ]
+        },
+        {
+          "name": "OAuth Callback (called by the platform, not the frontend)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/integrations/social/:platform/oauth/callback?code=&state=",
+              "host": ["{{baseUrl}}"],
+              "path": ["v1", "integrations", "social", ":platform", "oauth", "callback"],
+              "query": [
+                { "key": "code", "value": "" },
+                { "key": "state", "value": "" }
+              ],
+              "variable": [{ "key": "platform", "value": "FACEBOOK" }]
+            },
+            "description": "Public, excluded from tenant-subdomain resolution (see TenantMiddleware exclude list — Meta/Google/X's redirect carries no tenant Host header). Not meaningfully callable from Postman: `state` is single-use, short-lived, and only ever produced by the Get Authorize URL call above. Documented for completeness — the browser follows this redirect automatically after the admin consents on the platform's own site, then lands back on discuva-admin's /social-media?connected=<platform> or ?error=<reason>."
+          },
+          "response": []
+        },
+        {
+          "name": "Create Social Post",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Join us this Sunday at 9am!\",\n  \"targets\": [\n    { \"accountId\": \"a1b2c3d4-0000-0000-0000-000000000001\", \"placement\": \"FEED\" }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts"]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Creates a DRAFT with one PENDING target per (accountId, placement) pair — placement is FEED | STORY | REEL. One connected account can be targeted at multiple placements in the same post (e.g. Instagram Feed + Instagram Story as two separate target entries)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"id\": \"p1\", \"content\": \"Join us this Sunday at 9am!\", \"status\": \"DRAFT\", \"scheduledFor\": null, \"publishedAt\": null, \"media\": [], \"targets\": [ { \"id\": \"t1\", \"placement\": \"FEED\", \"status\": \"PENDING\", \"errorMessage\": null, \"publishedAt\": null, \"account\": { \"id\": \"a1b2c3d4-0000-0000-0000-000000000001\", \"platform\": \"FACEBOOK\", \"displayName\": \"Main Church Page\", \"isConnected\": false } } ], \"createdAt\": \"2026-08-01T09:05:00.000Z\" } }"
+            }
+          ]
+        },
+        {
+          "name": "List Social Posts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Social Post",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ)."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Media to Post",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": [] }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id/media",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id", "media"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Multipart field `files` (up to 10 per call, 200MB each, image/* or video/* only). DRAFT posts only. Uploads to Cloudinary and appends SocialPostMedia rows; per-(platform, placement) size/duration/type validation happens at publish time, not on upload."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Media from Post",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id/media/:mediaId",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id", "media", ":mediaId"],
+              "variable": [
+                { "key": "id", "value": "" },
+                { "key": "mediaId", "value": "" }
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT posts only — deletes both the DB row and the Cloudinary asset."
+          },
+          "response": []
+        },
+        {
+          "name": "Publish Social Post",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id", "publish"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Every target attempted independently — one failing (validation or the platform itself) never blocks the others. Post status becomes FAILED (none succeeded), PUBLISHED (all succeeded), or PARTIALLY_PUBLISHED."
+          },
+          "response": []
+        },
+        {
+          "name": "Schedule Social Post",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scheduledFor\": \"2026-08-10T09:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id/schedule",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id", "schedule"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT only, scheduledFor must be in the future. Sets status=SCHEDULED and queues a delayed job that calls the exact same publish path Publish Social Post does, once the delay elapses."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Scheduled Post",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id/schedule/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id", "schedule", "cancel"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Removes the queued job and reverts the post to DRAFT."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Social Post",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:id",
+              "host": ["{{baseUrl}}"],
+              "path": ["social-media", "posts", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT or fully-FAILED only — published history is kept."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Platform Admin - Social Media Apps",
+      "description": "Platform-admin-only (PlatformAdminGuard, permissions SOCIAL_MEDIA_APPS_READ/WRITE — distinct from tenant-side SOCIAL_MEDIA_READ/WRITE above). One OAuth app per platform, shared by every tenant — a church cannot register its own Meta/Google/X developer app.",
+      "item": [
+        {
+          "name": "List Social Platform Apps",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{platformAdminToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media-apps",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "social-media-apps"]
+            },
+            "description": "Never returns clientSecretEncrypted — select: false on the entity column."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": [ { \"platform\": \"FACEBOOK\", \"clientId\": \"1234567890\", \"redirectUri\": \"https://api.discuva.app/v1/integrations/social/FACEBOOK/oauth/callback\", \"scopes\": \"pages_manage_posts,pages_read_engagement\", \"isActive\": true } ] }"
+            }
+          ]
+        },
+        {
+          "name": "Register Social Platform App",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{platformAdminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"platform\": \"FACEBOOK\",\n  \"clientId\": \"1234567890\",\n  \"clientSecret\": \"replace-with-real-secret\",\n  \"redirectUri\": \"https://api.discuva.app/v1/integrations/social/FACEBOOK/oauth/callback\",\n  \"scopes\": \"pages_manage_posts,pages_read_engagement\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media-apps",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "social-media-apps"]
+            },
+            "description": "Upserts — one row per platform. clientSecret is encrypted at rest (EncryptionService, AES-256-GCM) and never returned by any subsequent GET."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Social Platform App Active",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{platformAdminToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media-apps/:platform",
+              "host": ["{{baseUrl}}"],
+              "path": ["platform", "social-media-apps", ":platform"],
+              "variable": [{ "key": "platform", "value": "FACEBOOK" }]
+            },
+            "description": "The kill switch. Deactivating immediately rejects new authorize-url requests and makes every publish attempt for this platform resolve to PlatformDisabledPublisher — but never touches an already-connected tenant's stored SocialAccount tokens either way; reactivating just restores normal resolution."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Attendance",
       "description": "Tracks member and worker attendance at church services. One attendance record per member per event (not per slot).\n\n**Access:**\n- Check-in: any authenticated member or worker (`JwtAuthGuard`)\n- My history: any authenticated user\n- Admin views (all history, slot summary, leaderboard): AdminGuard with ATTENDANCE_READ\n- Department view: WORKER (department HOD/D-HOD)\n- Correction: AdminGuard with ATTENDANCE_WRITE\n\n**Key concepts:**\n- Checking in to **any slot** of an event covers the whole event. You cannot check in twice to the same event.\n- **Workers must include GPS coordinates** (`location.latitude`, `location.longitude`). Distance from venue is validated against `EventConfig.allowedDistanceInMeters`.\n- Members are always marked `PRESENT`. Workers are `PRESENT` or `LATE` depending on `EventConfig.workerLateOffsetSeconds` relative to the slot start time.\n- **Online attendance**: workers who miss in-person can confirm `ATTENDED_ONLINE` via `POST /attendances/online-confirm` within a configurable window after service.\n- Status values: `PRESENT` | `LATE` | `ABSENT` | `ON_LEAVE` | `ATTENDED_ONLINE`\n\n**Typical flow:**\n1. Admin creates an Event with ServiceSlots (each with a ConfigId)\n2. On service day, member opens the app and calls `POST /attendances/checkin` with the `serviceSlotId`\n3. Worker includes `location` in the same call\n4. Admin reviews via `GET /attendances/history` or `GET /attendances/summary/slot/:slotId`\n5. Admin corrects errors via `PATCH /attendances/:id/correct`",
       "item": [
