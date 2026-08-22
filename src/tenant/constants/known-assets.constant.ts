@@ -138,6 +138,11 @@ export const KNOWN_ASSETS = [
     label: 'Security Screens',
     description: 'Header on password/email change and device-reset screens',
   },
+  {
+    key: 'member-directory-hero',
+    label: 'Member Directory',
+    description: 'Header on the member directory search screen',
+  },
 ] as const;
 
 export type KnownAssetKey = (typeof KNOWN_ASSETS)[number]['key'];

@@ -79,6 +79,10 @@ export enum AdminPermission {
   FORMS_WRITE = 'forms:write',
   SOCIAL_MEDIA_READ = 'social_media:read',
   SOCIAL_MEDIA_WRITE = 'social_media:write',
+  // Admin-side is read-only by design — members manage their own directory
+  // profile entirely themselves; admin only ever views aggregate
+  // profession/skill statistics, never edits an individual member's entry.
+  MEMBER_DIRECTORY_READ = 'member_directory:read',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -165,6 +169,7 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.FORMS_WRITE]: 'Build & Manage Forms',
   [AdminPermission.SOCIAL_MEDIA_READ]: 'View Social Media Accounts & Posts',
   [AdminPermission.SOCIAL_MEDIA_WRITE]: 'Connect Accounts & Publish Posts',
+  [AdminPermission.MEMBER_DIRECTORY_READ]: 'View Member Directory Analytics',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -321,6 +326,8 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View connected social media accounts and post history',
   [AdminPermission.SOCIAL_MEDIA_WRITE]:
     'Connect/disconnect social accounts, compose posts, and publish to multiple platforms at once',
+  [AdminPermission.MEMBER_DIRECTORY_READ]:
+    "View aggregate profession/skill statistics for opted-in members — never an individual member's directory entry beyond what search already shows",
 };
 
 export interface AdminPermissionGroupItem {
@@ -535,6 +542,11 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'Social Media',
     [AdminPermission.SOCIAL_MEDIA_READ, AdminPermission.SOCIAL_MEDIA_WRITE],
     'social_media',
+  ),
+  buildGroup(
+    'Member Directory',
+    [AdminPermission.MEMBER_DIRECTORY_READ],
+    'member_directory',
   ),
   buildGroup('Administration', [
     AdminPermission.DASHBOARD_READ,

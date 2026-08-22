@@ -38,6 +38,7 @@ export const KNOWN_MODULES = [
   { key: 'small_groups', moduleName: 'Fellowships', required: false },
   { key: 'forms', moduleName: 'Forms', required: false },
   { key: 'social_media', moduleName: 'Social Media', required: false },
+  { key: 'member_directory', moduleName: 'Member Directory', required: false },
   {
     key: 'youtube_integration',
     moduleName: 'YouTube Integration',

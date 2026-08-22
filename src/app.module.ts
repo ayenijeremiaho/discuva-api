@@ -69,6 +69,7 @@ import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
 import { BranchModule } from './branch/branch.module';
 import { FormsModule } from './forms/forms.module';
 import { SocialMediaModule } from './social-media/social-media.module';
+import { MemberDirectoryModule } from './member-directory/member-directory.module';
 
 @Module({
   imports: [
@@ -246,6 +247,7 @@ import { SocialMediaModule } from './social-media/social-media.module';
     BranchModule,
     FormsModule,
     SocialMediaModule,
+    MemberDirectoryModule,
     EnumsModule,
     TitheModule,
     FinanceRequestModule,
