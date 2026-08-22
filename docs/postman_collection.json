@@ -3165,6 +3165,120 @@
       ]
     },
     {
+      "name": "Member Directory",
+      "description": "Opt-in professional/business discoverability — members search each other by name, occupation, business, or skills. Gated on module `member_directory` (tenant admin toggle), Pro plan (`PlanFeature.MEMBER_DIRECTORY`), and JwtAuthGuard for the member-facing routes / AdminGuard (MEMBER_DIRECTORY_READ) for the analytics route.",
+      "item": [
+        {
+          "name": "Get My Directory Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/member-directory/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["member-directory", "me"]
+            },
+            "description": "Returns a default (invisible, empty) profile if the member has never saved one yet — no row is created until the first PATCH."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"occupation\": null, \"businessName\": null, \"skills\": null, \"bio\": null, \"isVisible\": false, \"showPhone\": false, \"showEmail\": false } }"
+            }
+          ]
+        },
+        {
+          "name": "Update My Directory Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"occupation\": \"Accountant\",\n  \"businessName\": \"Adaeze's Catering\",\n  \"skills\": \"Excel, Tax prep, Bookkeeping\",\n  \"bio\": \"15 years in financial services, happy to help fellow members with tax questions.\",\n  \"isVisible\": true,\n  \"showPhone\": true,\n  \"showEmail\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/member-directory/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["member-directory", "me"]
+            },
+            "description": "Self-service only — a member can only ever edit their own listing. Creates the row on first save (upsert)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get My Completion Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/member-directory/me/completion",
+              "host": ["{{baseUrl}}"],
+              "path": ["member-directory", "me", "completion"]
+            },
+            "description": "Backs the frontend's discoverability nudge — isDiscoverable is true only when isVisible is on AND at least one of occupation/businessName/skills is set."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"isVisible\": true, \"hasOccupation\": true, \"hasBusinessName\": true, \"hasSkills\": true, \"hasBio\": true, \"isDiscoverable\": true } }"
+            }
+          ]
+        },
+        {
+          "name": "Search Directory",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/member-directory/search?q=accountant&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["member-directory", "search"],
+              "query": [
+                { "key": "q", "value": "accountant", "description": "Matches against name, occupation, businessName, and skills" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            },
+            "description": "Only ever returns isVisible=true members. phoneNumber/email are included per-row only if that member's own showPhone/showEmail is true."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"data\": [\n      {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"Jane\",\n        \"lastname\": \"Doe\",\n        \"photoUrl\": null,\n        \"occupation\": \"Accountant\",\n        \"businessName\": \"Adaeze's Catering\",\n        \"skills\": \"Excel, Tax prep, Bookkeeping\",\n        \"bio\": \"15 years in financial services, happy to help fellow members with tax questions.\",\n        \"phoneNumber\": \"+2348012345678\"\n      }\n    ],\n    \"page\": 1,\n    \"limit\": 20,\n    \"totalCount\": 1,\n    \"totalPages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Member Directory Analytics (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/admin/member-directory/analytics",
+              "host": ["{{baseUrl}}"],
+              "path": ["admin", "member-directory", "analytics"]
+            },
+            "description": "AdminGuard (MEMBER_DIRECTORY_READ). Read-only aggregate — never phone/email regardless of a member's own showPhone/showEmail choice. occupationBreakdown excludes members with no occupation set and is sorted by count descending."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"totalMembers\": 240,\n    \"totalOptedIn\": 37,\n    \"occupationBreakdown\": [\n      {\n        \"occupation\": \"Teacher\",\n        \"members\": [\n          { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"firstname\": \"Jane\", \"lastname\": \"Doe\" }\n        ]\n      }\n    ]\n  }\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Attendance",
       "description": "Tracks member and worker attendance at church services. One attendance record per member per event (not per slot).\n\n**Access:**\n- Check-in: any authenticated member or worker (`JwtAuthGuard`)\n- My history: any authenticated user\n- Admin views (all history, slot summary, leaderboard): AdminGuard with ATTENDANCE_READ\n- Department view: WORKER (department HOD/D-HOD)\n- Correction: AdminGuard with ATTENDANCE_WRITE\n\n**Key concepts:**\n- Checking in to **any slot** of an event covers the whole event. You cannot check in twice to the same event.\n- **Workers must include GPS coordinates** (`location.latitude`, `location.longitude`). Distance from venue is validated against `EventConfig.allowedDistanceInMeters`.\n- Members are always marked `PRESENT`. Workers are `PRESENT` or `LATE` depending on `EventConfig.workerLateOffsetSeconds` relative to the slot start time.\n- **Online attendance**: workers who miss in-person can confirm `ATTENDED_ONLINE` via `POST /attendances/online-confirm` within a configurable window after service.\n- Status values: `PRESENT` | `LATE` | `ABSENT` | `ON_LEAVE` | `ATTENDED_ONLINE`\n\n**Typical flow:**\n1. Admin creates an Event with ServiceSlots (each with a ConfigId)\n2. On service day, member opens the app and calls `POST /attendances/checkin` with the `serviceSlotId`\n3. Worker includes `location` in the same call\n4. Admin reviews via `GET /attendances/history` or `GET /attendances/summary/slot/:slotId`\n5. Admin corrects errors via `PATCH /attendances/:id/correct`",
       "item": [

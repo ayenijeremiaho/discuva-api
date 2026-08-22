@@ -4463,7 +4463,9 @@ Queries `prayer_roster_entries` where the meeting date is 2 days or 1 day away a
 - `1792652400000-AddEmailLogSource` *(adds nullable `email_logs.source` — `tenant` vs `platform_default`; existing rows are `NULL`)*
 - `1792738800000-AddSocialAccountOAuthTokens` *(tenant — adds `social_accounts.access_token_encrypted`/`refresh_token_encrypted`/`token_expires_at`/`scope`)*
 - `1792825200000-AddSocialPostMediaPlacementScheduling` *(tenant — adds `social_post_targets.placement`, `social_posts.scheduled_for`, drops `social_posts.image_url`, creates `social_post_media`)*
+- `1792911600000-AddMemberDirectoryProfiles` *(tenant — creates `member_directory_profiles`, indexed on `is_visible`)*
 - `1793217600000-AddSocialPlatformApps` *(public/control-plane — creates `social_platform_apps`, the platform-admin-owned OAuth app catalog)*
+- `1793304000000-AddMemberDirectoryToProPlan` *(public/control-plane — appends `'member_directory'` to the `pro` plan's `features` array)*
 
 ---
 
@@ -4871,6 +4873,56 @@ member actions. `VOLUNTEER_SIGNUP_CREATED` (a commitment, worth a record unlike 
 actions (`VOLUNTEER_OPPORTUNITY_CREATED`/`_UPDATED`/`_CANCELLED`) are audited.
 
 **Routes prefix:** `/volunteer-opportunities`, `/admin/volunteer-opportunities`
+
+### Member Directory Module (`src/member-directory/`)
+
+Opt-in professional/business discoverability — members search each other by name, occupation, business, or skills
+("who in the church is an accountant," "does anyone run a catering business") to drive collaboration. Deliberately
+scoped narrower than the original idea it came from: member-to-member chat and member-created interest groups were
+both explicitly deferred (chat as a genuine trust/safety decision to make deliberately later, not a technical
+default; interest groups deprioritized in favor of shipping the directory itself first).
+
+**Entity** `MemberDirectoryProfile` (`member_directory_profiles`) — a separate entity from `Member` rather than
+columns bolted onto it, so the whole feature stays cleanly removable via one migration if it's ever pulled: 1:1 with
+`Member` (`member_id` unique FK, `ON DELETE CASCADE`), `occupation`, `businessName` (kept separate — "I'm an
+accountant" and "I run Adaeze's Catering" are independent facts a member may want to share one, both, or neither
+of), `skills` (free text, comma-separated — deliberately not a Postgres array column, so it stays searchable with
+the same `LOWER(...) LIKE` convention as every other field here, no new query technique), `bio` (text).
+
+**Visibility is opt-in, no moderation step** — `isVisible` (default `false`) mirrors `Testimony.isPublic`'s
+"submitter's own flag, no separate publish/approval step" precedent. `showPhone`/`showEmail` (both default `false`)
+are deliberately separate from `isVisible`: surfacing contact info is a materially bigger privacy step than showing
+an opted-in occupation/business/bio, so a member can be discoverable without exposing how to reach them directly.
+
+**Search** (`MemberDirectoryService.search`) reuses this codebase's existing search convention
+(`MemberService.getAll`'s `LOWER(field) LIKE LOWER(:s)` pattern) across `firstname`/`lastname`/`occupation`/
+`businessName`/`skills`, scoped to `isVisible = true` only. The response mapping omits `phoneNumber`/`email` per row
+unless that row's own `showPhone`/`showEmail` is true — the same "deliberately trim sensitive fields out of the
+response" precedent `MemberService.searchActiveMembersLite()` already established for the admin check-in picker.
+Paginated (Pagination Policy: member lists grow unboundedly).
+
+**Discoverability nudge**: `GET member-directory/me/completion` returns whether a member's own listing is visible
+and has at least one of occupation/business/skills set (`isDiscoverable`) — the frontend uses this to show a prompt
+encouraging the member to fill in their profile and opt in, directly serving the "get members to add their
+professional/business details" goal rather than leaving the feature to sit empty by default.
+
+**Admin analytics** (`GET admin/member-directory/analytics`, `MEMBER_DIRECTORY_READ`, read-only by design — admin
+never edits an individual member's listing, only views aggregates): total opted-in count and a profession
+breakdown grouped by `occupation`, each with the list of members holding it, sorted by count descending. Never
+returns phone/email regardless of a member's own `showPhone`/`showEmail` choice — this is a church-wide statistics
+view, not a directory lookup; an admin who needs to contact a member already has that via the regular member
+record.
+
+**Gated on three independent axes:**
+- `KNOWN_MODULES` key `member_directory` (`required: false`) — tenant admin's own on/off toggle.
+- `PlanFeature.MEMBER_DIRECTORY` — Pro plan only (migration `AddMemberDirectoryToProPlan` appends it to the
+  already-seeded `pro` row's `features` array, same idiom as `AddFormsToProPlan`).
+- `KNOWN_ASSETS` key `member-directory-hero` — lets a tenant admin upload a custom header image for the directory
+  screen via the existing Appearance page (`GET tenant/assets/catalog` is rendered generically there, so no
+  discuva-admin change was needed for this to appear).
+
+**Routes prefix:** `/member-directory` (member/worker, `JwtAuthGuard` + `ModuleEnabledGuard` + `PlanGuard`),
+`/admin/member-directory` (admin, `AdminGuard` + same module/plan guards).
 
 ### Small Group Module (displayed to users as "Fellowships")
 
