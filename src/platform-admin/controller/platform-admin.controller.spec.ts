@@ -13,6 +13,7 @@ import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { CheckoutService } from '../../billing/service/checkout.service';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 import { PlatformSettingsService } from '../service/platform-settings.service';
+import { PlatformAdminPermissionGroups } from '../enum/platform-admin-permission.enum';
 
 // Scoped to the billing/giving-support routes added this pass — the rest of
 // this controller predates unit-test coverage in this codebase and isn't
@@ -134,6 +135,12 @@ describe('PlatformAdminController (billing support routes)', () => {
     expect(mockCommunicationProviderService.setActive).toHaveBeenCalledWith(
       'termii',
       false,
+    );
+  });
+
+  it('getPermissionGroups returns the live permission catalog, not a hand-copied duplicate', async () => {
+    expect(controller.getPermissionGroups()).toBe(
+      PlatformAdminPermissionGroups,
     );
   });
 

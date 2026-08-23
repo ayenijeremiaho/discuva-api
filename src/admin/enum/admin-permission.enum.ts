@@ -364,6 +364,13 @@ function buildGroup(
   };
 }
 
+// Served live via GET /enums (EnumsController — `adminPermissionGroups`
+// field) rather than hand-copied into discuva-admin as a second constant.
+// discuva-admin used to hardcode its own duplicate of this list and it
+// silently drifted out of sync as permissions were added over time,
+// eventually showing a confusing "80 of 67 selected" count on the role
+// editor — any new permission added here is picked up automatically once
+// it's in a group below, no second file to remember.
 export const AdminPermissionGroups: AdminPermissionGroup[] = [
   buildGroup('Members', [
     AdminPermission.MEMBERS_READ,

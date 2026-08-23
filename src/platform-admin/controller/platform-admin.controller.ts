@@ -22,7 +22,10 @@ import { Public } from '../../auth/decorator/public.decorator';
 import { RequiresPlatformPermission } from '../decorator/requires-platform-permission.decorator';
 import { CurrentPlatformAdmin } from '../decorator/current-platform-admin.decorator';
 import { PlatformAdminAuth } from '../interface/platform-admin-auth.interface';
-import { PlatformAdminPermission } from '../enum/platform-admin-permission.enum';
+import {
+  PlatformAdminPermission,
+  PlatformAdminPermissionGroups,
+} from '../enum/platform-admin-permission.enum';
 import { PlatformAdminAuthService } from '../service/platform-admin-auth.service';
 import { PlatformTenantService } from '../service/platform-tenant.service';
 import { PlatformPlanService } from '../service/platform-plan.service';
@@ -184,6 +187,20 @@ export class PlatformAdminController {
   async resetPassword(@Body() dto: PlatformAdminResetPasswordDto) {
     await this.platformAdminAuthService.resetPassword(dto);
     return { message: 'Password reset successfully. You can now log in.' };
+  }
+
+  // No @RequiresPlatformPermission — this is metadata (the permission
+  // catalog itself), not data gated behind a permission. Any authenticated
+  // platform admin needs this to render a role editor, whether or not they
+  // themselves hold PLATFORM_ADMINS_WRITE. Single source of truth for the
+  // frontend role-editor's permission list — see
+  // PlatformAdminPermissionGroups' own doc comment for why this replaced a
+  // hand-copied frontend constant (it silently drifted out of sync as
+  // permissions were added over time).
+  @UseGuards(PlatformAdminGuard)
+  @Get('permissions/groups')
+  getPermissionGroups() {
+    return PlatformAdminPermissionGroups;
   }
 
   @UseGuards(PlatformAdminGuard)

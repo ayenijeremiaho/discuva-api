@@ -81,6 +81,13 @@ function buildGroup(
 
 // For a frontend permission-picker to render grouped checkboxes rather than
 // one flat list of 12 — same reason AdminPermissionGroups exists tenant-side.
+// Served live via GET /platform/permissions/groups
+// (PlatformAdminController.getPermissionGroups) rather than hand-copied into
+// discuva-platform as a second constant — a hand-copied frontend duplicate
+// of this array is exactly what silently drifted out of sync on the
+// tenant-admin side (AdminPermissionGroups) as permissions were added over
+// time, showing a confusing "80 of 67 selected" count. Any new permission
+// added here is picked up automatically once it's in a group below.
 export const PlatformAdminPermissionGroups: PlatformAdminPermissionGroup[] = [
   buildGroup('Tenants', [
     PlatformAdminPermission.TENANTS_READ,
