@@ -1306,6 +1306,60 @@ describe('AuthService', () => {
         'member-1',
       );
     });
+
+    it('records a failed OTP-verify attempt when the code is wrong', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'test@test.com',
+      });
+      mockDeviceResetOtpRepository.findOne.mockResolvedValue({
+        memberId: 'member-1',
+        newDeviceId: 'new-device-id',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+
+      await expect(
+        service.verifyDeviceReset('test@test.com', 'wrong-otp'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockCacheService.incr.mock.calls[0][0]).toEqual(
+        expect.stringContaining('otp_verify_fail'),
+      );
+    });
+
+    it('clears the OTP-verify rate limit counter on success', async () => {
+      const record = {
+        memberId: 'member-1',
+        newDeviceId: 'new-device-id',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      };
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'test@test.com',
+      });
+      mockDeviceResetOtpRepository.findOne.mockResolvedValue(record);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Test');
+      mockDeviceResetOtpRepository.save.mockResolvedValue(record);
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+      mockMemberService.setDeviceId.mockResolvedValue(undefined);
+      mockUtilityService.sendEmailWithTemplate.mockResolvedValue(undefined);
+
+      await service.verifyDeviceReset('test@test.com', '123456');
+
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        expect.stringContaining('otp_verify_fail'),
+      );
+    });
   });
 
   describe('requestEmailChange', () => {
@@ -1374,6 +1428,53 @@ describe('AuthService', () => {
       await expect(
         service.confirmEmailChange('member-1', '123456'),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('records a failed OTP-verify attempt when the code is wrong', async () => {
+      mockEmailChangeOtpRepository.findOne.mockResolvedValue({
+        memberId: 'member-1',
+        newEmail: 'new@test.com',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+
+      await expect(
+        service.confirmEmailChange('member-1', 'wrong-otp'),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockCacheService.incr.mock.calls[0][0]).toEqual(
+        expect.stringContaining('otp_verify_fail'),
+      );
+    });
+
+    it('clears the OTP-verify rate limit counter on success', async () => {
+      const record = {
+        memberId: 'member-1',
+        newEmail: 'new@test.com',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      };
+      mockEmailChangeOtpRepository.findOne.mockResolvedValue(record);
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Test');
+      mockMemberService.findByEmail.mockResolvedValue(null);
+      mockEmailChangeOtpRepository.save.mockResolvedValue(record);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Test',
+        email: 'new@test.com',
+      });
+
+      await service.confirmEmailChange('member-1', '123456');
+
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        expect.stringContaining('otp_verify_fail'),
+      );
     });
 
     it('updates the member email and sends a confirmation on success', async () => {

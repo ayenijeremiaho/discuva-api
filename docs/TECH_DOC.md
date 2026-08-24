@@ -1620,6 +1620,28 @@ without admin involvement, subject to a rate limit.
      compromised one live.
    - If the attempt count reaches the configured maximum, the email is rate-limited and the member must contact an
      admin for an out-of-band device purge (`DELETE /admin/members/:id/device`).
+   - **Wrong-guess limiting:** see "OTP Verify Guess Limiting" below — this endpoint is one of the three protected.
+
+### OTP Verify Guess Limiting
+
+`FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS` (and the per-route `@Throttle` decorators) only cap how
+often a *new* OTP can be requested — none of them capped how many *guesses* could be made against an OTP that was
+already issued. A 6-digit code has only 1,000,000 possible values, so without a separate per-account guess limit a
+distributed attacker (rotating source IPs past the per-IP `@Throttle`) could brute-force a live code within its
+`OTP_TTL_SECONDS` validity window.
+
+`AuthService.checkOtpVerifyRateLimit`/`recordFailedOtpVerify`/`clearOtpVerifyRateLimit` add a per-account counter
+(Redis key `otp_verify_fail:<identifier>:<scope>`, TTL = `OTP_TTL_SECONDS`) on top of the existing request-side
+limits — mirrors `checkLoginRateLimit`'s shape. Every wrong or expired/missing-code attempt increments the counter;
+a correct verify clears it. Once `OTP_VERIFY_MAX_ATTEMPTS` (default `5`) failed attempts accumulate, the endpoint
+returns `429 TOO_MANY_REQUESTS` — the account must wait out the window or request a fresh OTP (which doesn't reset
+this counter, only reissuing the underlying code does something new to guess). Applies independently, keyed per
+`scope`, to all three OTP-verify endpoints:
+
+- `POST /auth/reset-password` (`scope: 'password_reset'`, identifier: email)
+- `POST /auth/device-reset/verify` (`scope: 'device_reset'`, identifier: email)
+- `POST /auth/email-change/confirm` (`scope: 'email_change'`, identifier: member id) — this route previously had no
+  `@Throttle` at all; it now has the same `5/min` per-IP throttle as the other two, plus this per-account guard.
 
 ### Forgot Password / OTP Reset Flow
 
@@ -1630,6 +1652,7 @@ without admin involvement, subject to a rate limit.
    the hash, checks expiry (default: 15 min for a self-requested reset — longer for a tenant-welcome OTP, see below),
    marks the OTP as used, updates the password, **invalidates any existing session**, and emails a confirmation. On
    success the user must log in fresh.
+   - **Wrong-guess limiting:** see "OTP Verify Guess Limiting" above.
 
 This endpoint is also how a brand-new tenant's first admin sets their initial password — see "Tenant Welcome / Set
 Password Flow" below.
@@ -1649,6 +1672,7 @@ ownership from scratch.
 2. `POST /auth/email-change/confirm` — accepts `{ otp }`. Verifies the OTP and expiry (`OTP_TTL_SECONDS`) against the
    caller's own most recent unused record, re-checks that `newEmail` is still unclaimed (`409` on a race), marks the
    record used, updates `member.email` to the stored `newEmail`, and emails a confirmation to the new address.
+   - **Wrong-guess limiting:** see "OTP Verify Guess Limiting" above.
 
 ### Tenant Welcome / Set Password Flow
 
@@ -6187,6 +6211,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `LOGIN_WINDOW_SECONDS`           | `900`   | Lockout window duration (15 min)             |
 | `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Max self-service device reset requests per window per email |
 | `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Rate-limit window for device resets (24 hr)  |
+| `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
 ### Global Rate Limiting
 

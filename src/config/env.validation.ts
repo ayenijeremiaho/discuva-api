@@ -134,6 +134,12 @@ export const envValidationSchema = Joi.object({
   OTP_TTL_SECONDS: Joi.number().default(900),
   FORGOT_PASSWORD_MAX_ATTEMPTS: Joi.number().default(3),
   FORGOT_PASSWORD_WINDOW_SECONDS: Joi.number().default(3600),
+  // Per-account guess cap on verifying an already-issued OTP (password
+  // reset, device reset, email change) — separate from the *_MAX_ATTEMPTS
+  // above, which only cap how often a new OTP can be requested/emailed, not
+  // how many guesses a live 6-digit code can take. Window is OTP_TTL_SECONDS
+  // itself: once a code expires the guess count is moot anyway.
+  OTP_VERIFY_MAX_ATTEMPTS: Joi.number().default(5),
 
   CACHE_TTL_REFERENCE_SECONDS: Joi.number().default(300),
   CACHE_TTL_LEADERBOARD_SECONDS: Joi.number().default(90),

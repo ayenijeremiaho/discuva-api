@@ -70,6 +70,7 @@ export class AuthService {
   private readonly loginWindowSeconds: number;
   private readonly deviceResetMaxAttempts: number;
   private readonly deviceResetWindowSeconds: number;
+  private readonly otpVerifyMaxAttempts: number;
   private readonly timezone: string;
   private readonly productName: string;
 
@@ -116,6 +117,9 @@ export class AuthService {
     );
     this.deviceResetWindowSeconds = this.configService.get<number>(
       'DEVICE_RESET_WINDOW_SECONDS',
+    );
+    this.otpVerifyMaxAttempts = this.configService.get<number>(
+      'OTP_VERIFY_MAX_ATTEMPTS',
     );
     this.timezone = this.configService.get<string>('TIMEZONE');
     this.productName = this.configService.get<string>('PRODUCT_NAME');
@@ -565,8 +569,13 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
+    await this.checkOtpVerifyRateLimit('password_reset', dto.email);
+
     const member = await this.memberService.findByEmail(dto.email);
-    if (!member) throw new BadRequestException('Invalid or expired reset code');
+    if (!member) {
+      await this.recordFailedOtpVerify('password_reset', dto.email);
+      throw new BadRequestException('Invalid or expired reset code');
+    }
 
     const otpRecord = await this.otpRepository.findOne({
       where: { memberId: member.id, usedAt: IsNull() },
@@ -574,6 +583,7 @@ export class AuthService {
     });
 
     if (!otpRecord || otpRecord.expiresAt < new Date()) {
+      await this.recordFailedOtpVerify('password_reset', dto.email);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
@@ -583,11 +593,14 @@ export class AuthService {
       dto.otp,
       otpRecord.otpHash,
     );
-    if (!isValid)
+    if (!isValid) {
+      await this.recordFailedOtpVerify('password_reset', dto.email);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
+    }
 
+    this.clearOtpVerifyRateLimit('password_reset', dto.email);
     otpRecord.usedAt = new Date();
     await this.otpRepository.save(otpRecord);
 
@@ -656,8 +669,13 @@ export class AuthService {
   }
 
   async verifyDeviceReset(email: string, otp: string): Promise<void> {
+    await this.checkOtpVerifyRateLimit('device_reset', email);
+
     const member = await this.memberService.findByEmail(email);
-    if (!member) throw new BadRequestException('Invalid or expired reset code');
+    if (!member) {
+      await this.recordFailedOtpVerify('device_reset', email);
+      throw new BadRequestException('Invalid or expired reset code');
+    }
 
     const record = await this.deviceResetOtpRepository.findOne({
       where: { memberId: member.id, usedAt: IsNull() },
@@ -665,6 +683,7 @@ export class AuthService {
     });
 
     if (!record || record.expiresAt < new Date()) {
+      await this.recordFailedOtpVerify('device_reset', email);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
@@ -672,11 +691,13 @@ export class AuthService {
 
     const isValid = await UtilityService.verifyHashedValue(otp, record.otpHash);
     if (!isValid) {
+      await this.recordFailedOtpVerify('device_reset', email);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
     }
 
+    this.clearOtpVerifyRateLimit('device_reset', email);
     record.usedAt = new Date();
     await this.deviceResetOtpRepository.save(record);
 
@@ -757,12 +778,15 @@ export class AuthService {
   }
 
   async confirmEmailChange(memberId: string, otp: string): Promise<void> {
+    await this.checkOtpVerifyRateLimit('email_change', memberId);
+
     const record = await this.emailChangeOtpRepository.findOne({
       where: { memberId, usedAt: IsNull() },
       order: { createdAt: 'DESC' },
     });
 
     if (!record || record.expiresAt < new Date()) {
+      await this.recordFailedOtpVerify('email_change', memberId);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
@@ -770,6 +794,7 @@ export class AuthService {
 
     const isValid = await UtilityService.verifyHashedValue(otp, record.otpHash);
     if (!isValid) {
+      await this.recordFailedOtpVerify('email_change', memberId);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
@@ -782,6 +807,7 @@ export class AuthService {
       throw new ConflictException('This email address is already in use.');
     }
 
+    this.clearOtpVerifyRateLimit('email_change', memberId);
     record.usedAt = new Date();
     await this.emailChangeOtpRepository.save(record);
 
@@ -906,6 +932,46 @@ export class AuthService {
 
   private clearLoginRateLimit(email: string): void {
     this.cacheService.del(this.cacheService.key('login_fail', email));
+  }
+
+  // Per-account guess cap on an already-issued OTP — distinct from
+  // checkOtpRateLimit/checkDeviceResetRateLimit above, which only throttle
+  // how often a *new* code can be requested, not how many guesses a live
+  // 6-digit code can take. scope keeps password-reset/device-reset/
+  // email-change counters independent per identifier.
+  private async checkOtpVerifyRateLimit(
+    scope: string,
+    identifier: string,
+  ): Promise<void> {
+    const key = this.cacheService.key('otp_verify_fail', identifier, scope);
+    const count = (await this.cacheService.get<number>(key)) ?? 0;
+    if (count >= this.otpVerifyMaxAttempts) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          error: 'TOO_MANY_REQUESTS',
+          message:
+            'Too many incorrect attempts. Please request a new code and try again.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+  }
+
+  private async recordFailedOtpVerify(
+    scope: string,
+    identifier: string,
+  ): Promise<void> {
+    await this.cacheService.incr(
+      this.cacheService.key('otp_verify_fail', identifier, scope),
+      this.otpTtlSeconds,
+    );
+  }
+
+  private clearOtpVerifyRateLimit(scope: string, identifier: string): void {
+    this.cacheService.del(
+      this.cacheService.key('otp_verify_fail', identifier, scope),
+    );
   }
 
   private generateOtp(): string {

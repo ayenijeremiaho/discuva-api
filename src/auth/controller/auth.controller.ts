@@ -231,6 +231,7 @@ export class AuthController {
   }
 
   @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('email-change/confirm')
   async confirmEmailChange(
     @Request() req: any,
