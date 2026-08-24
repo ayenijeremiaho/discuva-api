@@ -3,10 +3,6 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class AddSearchIndexesAndDropRedundant1792998000000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;`,
-    );
-
-    await queryRunner.query(
       `CREATE INDEX "IDX_members_firstname_trgm" ON members USING gin (firstname gin_trgm_ops);`,
     );
     await queryRunner.query(
