@@ -167,6 +167,31 @@ export class MemberImportService {
       errors: string[];
     }[] = [];
 
+    // Batched up front instead of queried per-row — a 1,000-row import used
+    // to fire ~2,000 sequential DB round trips (one email lookup + one
+    // department lookup per row) inside this loop.
+    const candidateEmails = Array.from(
+      new Set(
+        parsedRows.map((r) => r.data.email).filter((e): e is string => !!e),
+      ),
+    );
+    const existingEmails = new Set(
+      candidateEmails.length
+        ? (
+            await this.memberRepository.find({
+              where: { email: In(candidateEmails) },
+              select: ['email'],
+            })
+          ).map((m) => m.email)
+        : [],
+    );
+    const departmentByLowerName = new Map(
+      (await this.departmentRepository.find()).map((d) => [
+        d.name.toLowerCase(),
+        d,
+      ]),
+    );
+
     for (const { rowNumber, data } of parsedRows) {
       const errors: string[] = [];
 
@@ -197,19 +222,14 @@ export class MemberImportService {
           );
         } else {
           emailsInFile.set(data.email, rowNumber);
-          const existing = await this.memberRepository.findOneBy({
-            email: data.email,
-          });
-          if (existing) errors.push('A member with this email already exists');
+          if (existingEmails.has(data.email)) {
+            errors.push('A member with this email already exists');
+          }
         }
       }
 
       if (data.department) {
-        const department = await this.departmentRepository
-          .createQueryBuilder('d')
-          .where('LOWER(d.name) = LOWER(:name)', { name: data.department })
-          .getOne();
-        if (!department) {
+        if (!departmentByLowerName.has(data.department.toLowerCase())) {
           errors.push(`Unknown department: "${data.department}"`);
         }
       }

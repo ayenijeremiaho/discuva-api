@@ -73,7 +73,7 @@ describe('MemberImportService', () => {
   };
 
   const mockDepartmentRepository = {
-    createQueryBuilder: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
   };
 
   const mockExcelService = {
@@ -88,11 +88,7 @@ describe('MemberImportService', () => {
     jest.clearAllMocks();
     mockMemberRepository.findOneBy.mockResolvedValue(null);
     mockMemberRepository.find.mockResolvedValue([]);
-    mockDepartmentRepository.createQueryBuilder.mockReturnValue({
-      where: jest.fn().mockReturnThis(),
-      getOne: jest.fn().mockResolvedValue(null),
-      getMany: jest.fn().mockResolvedValue([]),
-    });
+    mockDepartmentRepository.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -198,7 +194,9 @@ describe('MemberImportService', () => {
     });
 
     it('flags a row whose email already exists in the DB', async () => {
-      mockMemberRepository.findOneBy.mockResolvedValueOnce({ id: 'existing' });
+      mockMemberRepository.find.mockResolvedValueOnce([
+        { email: 'jane@test.com' },
+      ]);
       const buffer = await buildXlsxBuffer([
         [
           'Jane',
