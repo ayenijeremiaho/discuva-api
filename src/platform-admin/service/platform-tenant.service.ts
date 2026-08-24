@@ -12,6 +12,7 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import type { StringValue } from 'ms';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
 import { SubscriptionStatus } from '../../billing/enum/subscription-status.enum';
@@ -87,7 +88,9 @@ export class PlatformTenantService {
     this.tenantJwtService = new JwtService({
       secret: this.configService.get<string>('JWT_SECRET'),
       signOptions: {
-        expiresIn: this.configService.get<string>('JWT_EXPIRY_IN'),
+        expiresIn: this.configService.get<string>(
+          'JWT_EXPIRY_IN',
+        ) as StringValue,
       },
     });
   }

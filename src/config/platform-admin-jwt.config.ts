@@ -1,6 +1,7 @@
 import { JwtModuleOptions } from '@nestjs/jwt';
 import * as process from 'node:process';
 import { registerAs } from '@nestjs/config';
+import type { StringValue } from 'ms';
 
 /**
  * Deliberately separate from jwt.config.ts / JWT_SECRET — platform-admin
@@ -14,7 +15,8 @@ export default registerAs(
   (): JwtModuleOptions => ({
     secret: process.env.PLATFORM_ADMIN_JWT_SECRET,
     signOptions: {
-      expiresIn: process.env.PLATFORM_ADMIN_JWT_EXPIRY_IN ?? '1h',
+      expiresIn: (process.env.PLATFORM_ADMIN_JWT_EXPIRY_IN ??
+        '1h') as StringValue,
     },
   }),
 );
