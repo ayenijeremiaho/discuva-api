@@ -102,8 +102,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.CLASSES_WRITE]: 'Manage Training Classes',
   [AdminPermission.ANNOUNCEMENTS_READ]: 'View Announcements',
   [AdminPermission.ANNOUNCEMENTS_WRITE]: 'Manage Announcements',
-  [AdminPermission.GROUPS_READ]: 'View Groups',
-  [AdminPermission.GROUPS_WRITE]: 'Manage Groups',
+  [AdminPermission.GROUPS_READ]: 'View Contact Lists',
+  [AdminPermission.GROUPS_WRITE]: 'Manage Contact Lists',
   [AdminPermission.NOTES_READ]: 'View Notes',
   [AdminPermission.NOTES_WRITE]: 'Manage Notes',
   [AdminPermission.DASHBOARD_READ]: 'View Dashboard',
@@ -202,9 +202,9 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View all announcements sent to members or workers',
   [AdminPermission.ANNOUNCEMENTS_WRITE]:
     'Create and publish announcements to members or workers',
-  [AdminPermission.GROUPS_READ]: 'View groups and their member rosters',
+  [AdminPermission.GROUPS_READ]: 'View contact lists and their member rosters',
   [AdminPermission.GROUPS_WRITE]:
-    'Create and manage groups, and add or remove members individually or in bulk',
+    'Create and manage contact lists, and add or remove members individually or in bulk',
   [AdminPermission.NOTES_READ]:
     'View pastoral notes and member interaction records',
   [AdminPermission.NOTES_WRITE]: 'Create and assign pastoral notes to members',
@@ -433,7 +433,7 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'tithe',
   ),
   buildGroup(
-    'Announcements',
+    'Content & Messaging',
     [
       AdminPermission.ANNOUNCEMENTS_READ,
       AdminPermission.ANNOUNCEMENTS_WRITE,
@@ -555,7 +555,7 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     [AdminPermission.MEMBER_DIRECTORY_READ],
     'member_directory',
   ),
-  buildGroup('Administration', [
+  buildGroup('System', [
     AdminPermission.DASHBOARD_READ,
     AdminPermission.ADMIN_READ,
     AdminPermission.ADMIN_WRITE,
