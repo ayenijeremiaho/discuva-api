@@ -7,10 +7,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, QueryFailedError, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { In, QueryFailedError, Repository } from 'typeorm';
 import { Queue } from 'bull';
 import { ClsService } from 'nestjs-cls';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { BulkUploadJob } from '../entity/bulk-upload-job.entity';
@@ -58,8 +60,7 @@ export class ReconciliationService {
     private readonly journalEntryLineRepo: Repository<JournalEntryLine>,
     @InjectQueue(RECONCILIATION_QUEUE)
     private readonly queue: Queue,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly bankImportProfileService: BankImportProfileService,
     private readonly auditLogService: AuditLogService,
     private readonly cls: ClsService<AppClsStore>,
@@ -262,19 +263,16 @@ export class ReconciliationService {
       throw new BadRequestException('No confirmed rows found for this job.');
 
     // Batched idempotency pre-check — one SELECT for the whole batch instead
-    // of one per row (each previously run inside its own transaction). The
-    // actual posting below stays one transaction per row deliberately: a
-    // bad row (e.g. an invalid account reference) shouldn't block the other
-    // rows in the batch from posting, and this is a bulk bank-import
-    // workflow where partial success across rows is expected and desired —
-    // unlike the other bulk operations fixed elsewhere, this one is not
-    // collapsed into a single transaction. The `idempotency_key` column's
-    // DB-level UNIQUE constraint remains the actual guard against
-    // double-posting under a race (e.g. the endpoint called twice
-    // concurrently); the batched check here is purely an optimization to
-    // skip already-posted rows in the common (non-racing) case, so a
-    // constraint violation on that rare race is still caught and treated
-    // as "already posted" below, matching the original behaviour.
+    // of one per row. Each row's posting is still isolated from the others
+    // via a SAVEPOINT (not a separate this.dataSource.transaction() — that
+    // would open a connection that never sees TenantMiddleware's SET LOCAL
+    // search_path, same issue as elsewhere): a bad row (e.g. a duplicate
+    // idempotency key from a rare concurrent race) rolls back to its own
+    // savepoint and the loop continues, rather than poisoning the shared
+    // ambient transaction for every row after it. The `idempotency_key`
+    // column's DB-level UNIQUE constraint remains the actual guard against
+    // double-posting under a race; the batched check here is purely an
+    // optimization to skip already-posted rows in the common case.
     const idempotencyKeys = confirmedRows.map(
       (row) => `reconciliation-row:${row.id}`,
     );
@@ -286,55 +284,62 @@ export class ReconciliationService {
       alreadyPosted.map((e) => e.idempotencyKey),
     );
 
+    const manager = this.txHost.tx;
     let created = 0;
+    let rowIndex = 0;
     for (const row of confirmedRows) {
+      rowIndex++;
       const idempotencyKey = `reconciliation-row:${row.id}`;
       if (alreadyPostedKeys.has(idempotencyKey)) continue;
       if (!row.confirmedAccount) continue;
 
+      const savepoint = `reconciliation_row_${rowIndex}`;
       try {
-        await this.dataSource.transaction(async (manager) => {
-          const isBankCredit = row.creditDebit === 'CREDIT';
-          const debitAccountId = isBankCredit
-            ? dto.bankAccountId
-            : row.confirmedAccount!.id;
-          const creditAccountId = isBankCredit
-            ? row.confirmedAccount!.id
-            : dto.bankAccountId;
+        await manager.query(`SAVEPOINT "${savepoint}"`);
 
-          const entry = manager.create(JournalEntry, {
-            date: row.transactionDate,
-            description:
-              row.narration ?? `Bank import: ${row.creditDebit} ${row.amount}`,
-            source: JournalEntrySource.CSV_IMPORT,
-            entryType: JournalEntryType.STANDARD,
-            status: JournalEntryStatus.PENDING_APPROVAL,
-            idempotencyKey,
-            accountingPeriod: { id: dto.accountingPeriodId } as any,
-            createdBy: { id: admin.id } as any,
-          });
-          const savedEntry = await manager.save(JournalEntry, entry);
+        const isBankCredit = row.creditDebit === 'CREDIT';
+        const debitAccountId = isBankCredit
+          ? dto.bankAccountId
+          : row.confirmedAccount!.id;
+        const creditAccountId = isBankCredit
+          ? row.confirmedAccount!.id
+          : dto.bankAccountId;
 
-          await manager.save(JournalEntryLine, [
-            manager.create(JournalEntryLine, {
-              journalEntry: { id: savedEntry.id } as any,
-              account: { id: debitAccountId } as any,
-              entryType: JournalLineType.DEBIT,
-              amount: row.amount,
-            }),
-            manager.create(JournalEntryLine, {
-              journalEntry: { id: savedEntry.id } as any,
-              account: { id: creditAccountId } as any,
-              entryType: JournalLineType.CREDIT,
-              amount: row.amount,
-            }),
-          ]);
-
-          row.status = ReconciliationRowStatus.POSTED;
-          await manager.save(ReconciliationRow, row);
-          created++;
+        const entry = manager.create(JournalEntry, {
+          date: row.transactionDate,
+          description:
+            row.narration ?? `Bank import: ${row.creditDebit} ${row.amount}`,
+          source: JournalEntrySource.CSV_IMPORT,
+          entryType: JournalEntryType.STANDARD,
+          status: JournalEntryStatus.PENDING_APPROVAL,
+          idempotencyKey,
+          accountingPeriod: { id: dto.accountingPeriodId } as any,
+          createdBy: { id: admin.id } as any,
         });
+        const savedEntry = await manager.save(JournalEntry, entry);
+
+        await manager.save(JournalEntryLine, [
+          manager.create(JournalEntryLine, {
+            journalEntry: { id: savedEntry.id } as any,
+            account: { id: debitAccountId } as any,
+            entryType: JournalLineType.DEBIT,
+            amount: row.amount,
+          }),
+          manager.create(JournalEntryLine, {
+            journalEntry: { id: savedEntry.id } as any,
+            account: { id: creditAccountId } as any,
+            entryType: JournalLineType.CREDIT,
+            amount: row.amount,
+          }),
+        ]);
+
+        row.status = ReconciliationRowStatus.POSTED;
+        await manager.save(ReconciliationRow, row);
+        created++;
+
+        await manager.query(`RELEASE SAVEPOINT "${savepoint}"`);
       } catch (err: unknown) {
+        await manager.query(`ROLLBACK TO SAVEPOINT "${savepoint}"`);
         const isDuplicateIdempotencyKey =
           err instanceof QueryFailedError &&
           (err as any).driverError?.code === '23505';

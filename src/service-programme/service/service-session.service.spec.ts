@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import {
   ServiceSessionService,
   SessionAnchor,
@@ -131,9 +131,14 @@ const qbMock = {
   execute: jest.fn().mockResolvedValue(undefined),
 };
 
-const mockDataSource = {
-  transaction: jest.fn(),
+const mockManager = {
+  create: jest.fn((_entity: unknown, data: unknown) => data),
+  save: jest.fn((_entity: unknown, data: unknown) => Promise.resolve(data)),
+  update: jest.fn().mockResolvedValue(undefined),
+  createQueryBuilder: jest.fn().mockReturnValue(qbMock),
 };
+
+const mockTxHost = { tx: mockManager };
 
 const adminDeptProfile = {
   id: 'wp-1',
@@ -205,6 +210,16 @@ describe('ServiceSessionService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockManager.create
+      .mockReset()
+      .mockImplementation((_e: unknown, data: unknown) => data);
+    mockManager.save
+      .mockReset()
+      .mockImplementation((_e: unknown, data: unknown) =>
+        Promise.resolve(data),
+      );
+    mockManager.update.mockReset().mockResolvedValue(undefined);
+    mockManager.createQueryBuilder.mockReset().mockReturnValue(qbMock);
     mockPauseEntryRepo.createQueryBuilder.mockReturnValue(qbMock);
     mockSessionSlotRepo.createQueryBuilder.mockReturnValue(qbMock);
     mockWorkerProfileRepo.createQueryBuilder.mockReturnValue({
@@ -222,7 +237,7 @@ describe('ServiceSessionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ServiceSessionService,
-        { provide: DataSource, useValue: mockDataSource },
+        { provide: TransactionHost, useValue: mockTxHost },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ServiceProgrammeService, useValue: mockProgrammeSvc },
         { provide: EmailQueueService, useValue: mockEmailQueueService },
@@ -330,16 +345,16 @@ describe('ServiceSessionService', () => {
 
     it('creates session and writes Redis anchor', async () => {
       const savedSession = { ...mockSession };
-      mockDataSource.transaction.mockImplementation(async (cb) => {
-        mockSessionRepo.create.mockReturnValue(savedSession);
-        mockSessionRepo.save.mockResolvedValue(savedSession);
-        mockSessionSlotRepo.create.mockReturnValue({});
-        mockSessionSlotRepo.save.mockResolvedValue([]);
-        return cb({
-          create: (Entity, data) => mockSessionRepo.create(data),
-          save: (Entity, data) => mockSessionRepo.save(data),
-        });
-      });
+      mockManager.create.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.create(data),
+      );
+      mockManager.save.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.save(data),
+      );
+      mockSessionRepo.create.mockReturnValue(savedSession);
+      mockSessionRepo.save.mockResolvedValue(savedSession);
+      mockSessionSlotRepo.create.mockReturnValue({});
+      mockSessionSlotRepo.save.mockResolvedValue([]);
 
       await service.start('prog-1', 'member-1');
       expect(mockCacheService.set).toHaveBeenCalledWith(
@@ -369,16 +384,16 @@ describe('ServiceSessionService', () => {
     });
 
     it('also generates and stores a share token', async () => {
-      mockDataSource.transaction.mockImplementation(async (cb) => {
-        mockSessionRepo.create.mockReturnValue(mockSession);
-        mockSessionRepo.save.mockResolvedValue(mockSession);
-        mockSessionSlotRepo.create.mockReturnValue({});
-        mockSessionSlotRepo.save.mockResolvedValue([]);
-        return cb({
-          create: (Entity, data) => mockSessionRepo.create(data),
-          save: (Entity, data) => mockSessionRepo.save(data),
-        });
-      });
+      mockManager.create.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.create(data),
+      );
+      mockManager.save.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.save(data),
+      );
+      mockSessionRepo.create.mockReturnValue(mockSession);
+      mockSessionRepo.save.mockResolvedValue(mockSession);
+      mockSessionSlotRepo.create.mockReturnValue({});
+      mockSessionSlotRepo.save.mockResolvedValue([]);
 
       await service.start('prog-1', 'member-1');
       expect(mockCacheService.set).toHaveBeenCalledWith(
@@ -395,17 +410,16 @@ describe('ServiceSessionService', () => {
     beforeEach(() => {
       mockAdminRepo.findOne.mockResolvedValue(validAdmin);
       mockProgrammeSvc.setProgrammeStatus.mockResolvedValue(undefined);
-      mockDataSource.transaction.mockImplementation(async (cb) => {
-        mockSessionRepo.create.mockReturnValue(mockSession);
-        mockSessionRepo.save.mockResolvedValue(mockSession);
-        mockSessionSlotRepo.create.mockReturnValue({});
-        mockSessionSlotRepo.save.mockResolvedValue([]);
-        return cb({
-          create: (Entity: unknown, data: unknown) =>
-            mockSessionRepo.create(data),
-          save: (Entity: unknown, data: unknown) => mockSessionRepo.save(data),
-        });
-      });
+      mockManager.create.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.create(data),
+      );
+      mockManager.save.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.save(data),
+      );
+      mockSessionRepo.create.mockReturnValue(mockSession);
+      mockSessionRepo.save.mockResolvedValue(mockSession);
+      mockSessionSlotRepo.create.mockReturnValue({});
+      mockSessionSlotRepo.save.mockResolvedValue([]);
     });
 
     it('starts only the earliest startable draft programme under the event', async () => {
@@ -1600,9 +1614,8 @@ describe('ServiceSessionService', () => {
       mockCacheService.get.mockResolvedValue(liveAnchor); // currentSlotPosition: 0
       mockSessionRepo.findOne.mockResolvedValue(mockSession);
       mockSessionSlotRepo.find.mockResolvedValue(allSlots);
-      mockDataSource.transaction.mockImplementation(async (cb) =>
-        cb({ save: (Entity, data) => Promise.resolve(data) }),
-      );
+      // mockManager.save's default (echo data back) is exactly what's
+      // needed here — no override.
     });
 
     it('reassigns positions for the upcoming (pending) tail only', async () => {
@@ -2065,12 +2078,8 @@ describe('ServiceSessionService', () => {
         ...mockSession,
         programme: draftProgramme,
       });
-      mockDataSource.transaction.mockImplementation(async (cb) =>
-        cb({
-          update: jest.fn().mockResolvedValue(undefined),
-          createQueryBuilder: jest.fn().mockReturnValue(qbMock),
-        }),
-      );
+      // mockManager.update/createQueryBuilder's defaults (resolve
+      // undefined / return qbMock) are exactly what's needed here.
       mockProgrammeSvc.setProgrammeStatus.mockResolvedValue(undefined);
       mockProgrammeSvc.upsertTemplateFromProgramme.mockResolvedValue(undefined);
     });

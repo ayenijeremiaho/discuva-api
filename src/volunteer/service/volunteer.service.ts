@@ -4,7 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { VolunteerOpportunity } from '../entity/volunteer-opportunity.entity';
 import { VolunteerSignup } from '../entity/volunteer-signup.entity';
 import { VolunteerOpportunityStatusEnum } from '../enum/volunteer-opportunity-status.enum';
@@ -27,7 +29,7 @@ export interface VolunteerOpportunityWithMyStatus extends VolunteerOpportunity {
 @Injectable()
 export class VolunteerService {
   constructor(
-    private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     @InjectRepository(VolunteerOpportunity)
     private readonly opportunityRepo: Repository<VolunteerOpportunity>,
     @InjectRepository(VolunteerSignup)
@@ -174,94 +176,94 @@ export class VolunteerService {
     opportunityId: string,
     memberId: string,
   ): Promise<VolunteerSignup> {
-    return this.dataSource.transaction(async (manager) => {
-      const opportunity = await manager
-        .getRepository(VolunteerOpportunity)
-        .createQueryBuilder('o')
-        .where('o.id = :id', { id: opportunityId })
-        .setLock('pessimistic_write')
-        .getOne();
-      if (!opportunity) throw new NotFoundException('Opportunity not found');
+    // this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale.
+    const manager = this.txHost.tx;
+    const opportunity = await manager
+      .getRepository(VolunteerOpportunity)
+      .createQueryBuilder('o')
+      .where('o.id = :id', { id: opportunityId })
+      .setLock('pessimistic_write')
+      .getOne();
+    if (!opportunity) throw new NotFoundException('Opportunity not found');
 
-      // Check for an already-CONFIRMED signup before the status/capacity
-      // gates below — a member re-confirming their own existing spot is
-      // idempotent and shouldn't be rejected just because the opportunity
-      // has since closed or filled up around them.
-      const signupRepo = manager.getRepository(VolunteerSignup);
-      const existing = await signupRepo.findOne({
-        where: { opportunity: { id: opportunityId }, member: { id: memberId } },
-      });
-      if (existing?.status === VolunteerSignupStatusEnum.CONFIRMED) {
-        return existing;
-      }
-
-      if (opportunity.status !== VolunteerOpportunityStatusEnum.OPEN) {
-        throw new BadRequestException(
-          'This opportunity is not open for sign-up.',
-        );
-      }
-      if (
-        opportunity.capacity !== null &&
-        opportunity.confirmedCount >= opportunity.capacity
-      ) {
-        throw new BadRequestException('This opportunity is full.');
-      }
-
-      let signup: VolunteerSignup;
-      if (existing) {
-        existing.status = VolunteerSignupStatusEnum.CONFIRMED;
-        signup = await signupRepo.save(existing);
-      } else {
-        signup = await signupRepo.save(
-          signupRepo.create({
-            opportunity: { id: opportunityId } as VolunteerOpportunity,
-            member: { id: memberId } as Member,
-            status: VolunteerSignupStatusEnum.CONFIRMED,
-          }),
-        );
-      }
-
-      opportunity.confirmedCount += 1;
-      await manager.getRepository(VolunteerOpportunity).save(opportunity);
-
-      this.auditLogService.log('VOLUNTEER_SIGNUP_CREATED', {
-        actorId: memberId,
-        targetId: opportunityId,
-      });
-
-      return signup;
+    // Check for an already-CONFIRMED signup before the status/capacity
+    // gates below — a member re-confirming their own existing spot is
+    // idempotent and shouldn't be rejected just because the opportunity
+    // has since closed or filled up around them.
+    const signupRepo = manager.getRepository(VolunteerSignup);
+    const existing = await signupRepo.findOne({
+      where: { opportunity: { id: opportunityId }, member: { id: memberId } },
     });
+    if (existing?.status === VolunteerSignupStatusEnum.CONFIRMED) {
+      return existing;
+    }
+
+    if (opportunity.status !== VolunteerOpportunityStatusEnum.OPEN) {
+      throw new BadRequestException(
+        'This opportunity is not open for sign-up.',
+      );
+    }
+    if (
+      opportunity.capacity !== null &&
+      opportunity.confirmedCount >= opportunity.capacity
+    ) {
+      throw new BadRequestException('This opportunity is full.');
+    }
+
+    let signup: VolunteerSignup;
+    if (existing) {
+      existing.status = VolunteerSignupStatusEnum.CONFIRMED;
+      signup = await signupRepo.save(existing);
+    } else {
+      signup = await signupRepo.save(
+        signupRepo.create({
+          opportunity: { id: opportunityId } as VolunteerOpportunity,
+          member: { id: memberId } as Member,
+          status: VolunteerSignupStatusEnum.CONFIRMED,
+        }),
+      );
+    }
+
+    opportunity.confirmedCount += 1;
+    await manager.getRepository(VolunteerOpportunity).save(opportunity);
+
+    this.auditLogService.log('VOLUNTEER_SIGNUP_CREATED', {
+      actorId: memberId,
+      targetId: opportunityId,
+    });
+
+    return signup;
   }
 
   async cancelMySignUp(opportunityId: string, memberId: string): Promise<void> {
-    await this.dataSource.transaction(async (manager) => {
-      const opportunity = await manager
-        .getRepository(VolunteerOpportunity)
-        .createQueryBuilder('o')
-        .where('o.id = :id', { id: opportunityId })
-        .setLock('pessimistic_write')
-        .getOne();
-      if (!opportunity) throw new NotFoundException('Opportunity not found');
+    // this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale.
+    const manager = this.txHost.tx;
+    const opportunity = await manager
+      .getRepository(VolunteerOpportunity)
+      .createQueryBuilder('o')
+      .where('o.id = :id', { id: opportunityId })
+      .setLock('pessimistic_write')
+      .getOne();
+    if (!opportunity) throw new NotFoundException('Opportunity not found');
 
-      const signupRepo = manager.getRepository(VolunteerSignup);
-      const signup = await signupRepo.findOne({
-        where: {
-          opportunity: { id: opportunityId },
-          member: { id: memberId },
-          status: VolunteerSignupStatusEnum.CONFIRMED,
-        },
-      });
-      if (!signup)
-        throw new NotFoundException(
-          'You are not signed up for this opportunity',
-        );
-
-      signup.status = VolunteerSignupStatusEnum.CANCELLED;
-      await signupRepo.save(signup);
-
-      opportunity.confirmedCount = Math.max(0, opportunity.confirmedCount - 1);
-      await manager.getRepository(VolunteerOpportunity).save(opportunity);
+    const signupRepo = manager.getRepository(VolunteerSignup);
+    const signup = await signupRepo.findOne({
+      where: {
+        opportunity: { id: opportunityId },
+        member: { id: memberId },
+        status: VolunteerSignupStatusEnum.CONFIRMED,
+      },
     });
+    if (!signup)
+      throw new NotFoundException('You are not signed up for this opportunity');
+
+    signup.status = VolunteerSignupStatusEnum.CANCELLED;
+    await signupRepo.save(signup);
+
+    opportunity.confirmedCount = Math.max(0, opportunity.confirmedCount - 1);
+    await manager.getRepository(VolunteerOpportunity).save(opportunity);
   }
 
   private async getOrThrow(id: string): Promise<VolunteerOpportunity> {

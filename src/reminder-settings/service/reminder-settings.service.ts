@@ -14,6 +14,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 type ReminderSettingValue = {
   enabled: boolean;
   thresholds: number[];
+  smsEnabled?: boolean;
 };
 
 @Injectable()
@@ -55,6 +56,7 @@ export class ReminderSettingsService {
         unit: known.unit,
         enabled: override?.enabled ?? true,
         thresholds: override?.thresholds ?? known.defaultThresholds,
+        smsEnabled: override?.smsEnabled ?? false,
       };
     });
   }
@@ -72,6 +74,7 @@ export class ReminderSettingsService {
       unit: known.unit,
       enabled: value?.enabled ?? true,
       thresholds: value?.thresholds ?? known.defaultThresholds,
+      smsEnabled: value?.smsEnabled ?? false,
     };
   }
 
@@ -88,6 +91,7 @@ export class ReminderSettingsService {
     const value: ReminderSettingValue = {
       enabled: dto.enabled,
       thresholds: dto.thresholds,
+      smsEnabled: dto.smsEnabled,
     };
 
     if (!row) {
@@ -105,7 +109,11 @@ export class ReminderSettingsService {
     this.auditLogService.log('REMINDER_SETTING_UPDATED', {
       actorId: actorMemberId,
       targetId: key,
-      metadata: { enabled: dto.enabled, thresholds: dto.thresholds },
+      metadata: {
+        enabled: dto.enabled,
+        thresholds: dto.thresholds,
+        smsEnabled: dto.smsEnabled,
+      },
     });
 
     return {
@@ -114,6 +122,7 @@ export class ReminderSettingsService {
       unit: known.unit,
       enabled: dto.enabled,
       thresholds: dto.thresholds,
+      smsEnabled: dto.smsEnabled,
     };
   }
 
@@ -130,6 +139,7 @@ export class ReminderSettingsService {
     const config: ReminderSettingValue = {
       enabled: value?.enabled ?? true,
       thresholds: value?.thresholds ?? known.defaultThresholds,
+      smsEnabled: value?.smsEnabled ?? false,
     };
     this.cacheService.set(cacheKey, config, this.CACHE_TTL);
     return config;

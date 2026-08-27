@@ -18,15 +18,18 @@ import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynami
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { ClassesService } from '../service/classes.service';
+import { GuestService } from '../service/guest.service';
 import {
   CreateChurchClassDto,
   UpdateChurchClassDto,
 } from '../dto/create-church-class.dto';
+import { UpdateClassSessionDto } from '../dto/update-class-session.dto';
 import {
   BulkEnrollDto,
   EnrollMemberDto,
   UpdateEnrollmentStatusDto,
 } from '../dto/enroll-member.dto';
+import { BulkEnrollGuestsDto, EnrollGuestDto } from '../dto/guest.dto';
 import { PromoteEnrollmentDto } from '../dto/promote-enrollment.dto';
 import { IssueCertificateDto } from '../dto/issue-certificate.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -42,7 +45,10 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('classes')
 export class ClassesController {
-  constructor(private readonly classesService: ClassesService) {}
+  constructor(
+    private readonly classesService: ClassesService,
+    private readonly guestService: GuestService,
+  ) {}
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.CLASSES_WRITE)
@@ -133,6 +139,50 @@ export class ClassesController {
     return this.classesService.getMaterialLibrary();
   }
 
+  // Minimal id/name/date-range list for the Announcements "Class" audience
+  // picker — ANNOUNCEMENTS_WRITE, not CLASSES_READ, mirroring how
+  // GET /groups/lookup is gated: composing an announcement shouldn't
+  // require a second, separate class-management permission grant. Must
+  // stay above the bare ':id' route below.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ANNOUNCEMENTS_WRITE)
+  @Get('lookup')
+  getClassLookup() {
+    return this.classesService.getClassLookup();
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_READ)
+  @Get('guests')
+  listGuests(
+    @Query('search') search?: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 10,
+  ) {
+    return this.guestService.list(search, Number(page), Number(limit));
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_READ)
+  @Get('guests/:id')
+  async getGuest(@Param('id', ParseUUIDPipe) id: string) {
+    const [guest, enrollments] = await Promise.all([
+      this.guestService.getById(id),
+      this.guestService.getEnrollments(id),
+    ]);
+    return { ...guest, enrollments };
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post('guests/:guestId/convert-to-member')
+  convertGuestToMember(
+    @Param('guestId', ParseUUIDPipe) guestId: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.guestService.convertToMember(guestId, user.id);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.classesService.getClass(id);
@@ -147,6 +197,16 @@ export class ClassesController {
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Patch(':id/session')
+  updateClassSession(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateClassSessionDto,
+  ) {
+    return this.classesService.updateClassSession(id, dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
   @Post('enroll')
   enroll(@Body() dto: EnrollMemberDto) {
     return this.classesService.enrollMember(dto);
@@ -157,6 +217,20 @@ export class ClassesController {
   @Post('bulk-enroll')
   bulkEnroll(@Body() dto: BulkEnrollDto) {
     return this.classesService.bulkEnrollMembers(dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post('enroll/guest')
+  enrollGuest(@Body() dto: EnrollGuestDto) {
+    return this.classesService.enrollGuest(dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post('enroll/guests/bulk')
+  bulkEnrollGuests(@Body() dto: BulkEnrollGuestsDto) {
+    return this.classesService.bulkEnrollGuests(dto);
   }
 
   @UseGuards(AdminGuard)

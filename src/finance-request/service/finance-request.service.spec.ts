@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { FinanceRequestService } from './finance-request.service';
@@ -19,6 +20,18 @@ import { ConfigService } from '@nestjs/config';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
+import { ClsService } from 'nestjs-cls';
+import { JournalEntry } from '../../finance/entity/journal-entry.entity';
+import { JournalEntryLine } from '../../finance/entity/journal-entry-line.entity';
+import { JournalEntryLink } from '../../finance/entity/journal-entry-link.entity';
+import { AccountingPeriod } from '../../finance/entity/accounting-period.entity';
+import { Account } from '../../finance/entity/account.entity';
+import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import {
+  AccountingPeriodStatus,
+  JournalEntryStatus,
+} from '../../finance/enum/finance.enum';
 
 const mockCategoryRepo = {
   find: jest.fn(),
@@ -50,6 +63,38 @@ const mockRequestRepo = {
 
 const mockAdminRepo = {
   createQueryBuilder: jest.fn(),
+};
+
+const mockJournalEntryRepo = {
+  findOne: jest.fn(),
+  create: jest.fn(),
+  save: jest.fn(),
+};
+
+const mockJournalEntryLineRepo = {
+  create: jest.fn(),
+  save: jest.fn(),
+};
+
+const mockJournalEntryLinkRepo = {
+  create: jest.fn(),
+  save: jest.fn(),
+};
+
+const mockPeriodRepo = {
+  findOne: jest.fn(),
+};
+
+const mockAccountRepo = {
+  findOne: jest.fn(),
+};
+
+const mockPlanFeatureResolver = {
+  resolve: jest.fn(),
+};
+
+const mockCls = {
+  get: jest.fn(),
 };
 
 const mockAuditLogService = { log: jest.fn() };
@@ -115,6 +160,11 @@ describe('FinanceRequestService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockCls.get.mockReturnValue('tenant-1');
+    mockPlanFeatureResolver.resolve.mockResolvedValue({
+      features: [PlanFeature.FINANCE],
+      featureLimits: {},
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -128,6 +178,23 @@ describe('FinanceRequestService', () => {
           useValue: mockRequestRepo,
         },
         { provide: getRepositoryToken(Admin), useValue: mockAdminRepo },
+        {
+          provide: getRepositoryToken(JournalEntry),
+          useValue: mockJournalEntryRepo,
+        },
+        {
+          provide: getRepositoryToken(JournalEntryLine),
+          useValue: mockJournalEntryLineRepo,
+        },
+        {
+          provide: getRepositoryToken(JournalEntryLink),
+          useValue: mockJournalEntryLinkRepo,
+        },
+        {
+          provide: getRepositoryToken(AccountingPeriod),
+          useValue: mockPeriodRepo,
+        },
+        { provide: getRepositoryToken(Account), useValue: mockAccountRepo },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
@@ -137,6 +204,11 @@ describe('FinanceRequestService', () => {
           provide: TenantCurrencyService,
           useValue: mockTenantCurrencyService,
         },
+        {
+          provide: PlanFeatureResolverService,
+          useValue: mockPlanFeatureResolver,
+        },
+        { provide: ClsService, useValue: mockCls },
       ],
     }).compile();
 
@@ -651,7 +723,7 @@ describe('FinanceRequestService', () => {
       mockRequestRepo.findOne.mockResolvedValue(pendingRequest);
 
       await expect(
-        service.attachProof('req-1', file, mockAdmin),
+        service.attachProof('req-1', file, {}, mockAdmin),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -659,11 +731,11 @@ describe('FinanceRequestService', () => {
       mockRequestRepo.findOne.mockResolvedValue(approvedRequest);
 
       await expect(
-        service.attachProof('req-1', undefined as any, mockAdmin),
+        service.attachProof('req-1', undefined as any, {}, mockAdmin),
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should upload to Cloudinary and save proofUrl', async () => {
+    it('should upload to Cloudinary and save proofUrl when postToJournal is not set', async () => {
       const request = { ...approvedRequest };
       mockRequestRepo.findOne
         .mockResolvedValueOnce(request)
@@ -678,7 +750,7 @@ describe('FinanceRequestService', () => {
       });
       mockRequestRepo.save.mockResolvedValue(request);
 
-      await service.attachProof('req-1', file, mockAdmin);
+      await service.attachProof('req-1', file, {}, mockAdmin);
 
       expect(mockCloudinaryService.uploadBuffer).toHaveBeenCalledWith(
         file.buffer,
@@ -697,6 +769,150 @@ describe('FinanceRequestService', () => {
         'FINANCE_PROOF_ATTACHED',
         expect.any(Object),
       );
+      expect(mockJournalEntryRepo.save).not.toHaveBeenCalled();
+    });
+
+    // ── postToJournal ────────────────────────────────────────────────────────
+
+    describe('postToJournal', () => {
+      const postDto = {
+        postToJournal: true,
+        debitAccountId: 'acct-expense-1',
+        creditAccountId: 'acct-bank-1',
+      };
+      const debitAccount = {
+        id: 'acct-expense-1',
+        isActive: true,
+        type: 'EXPENSE',
+      };
+      const creditAccount = {
+        id: 'acct-bank-1',
+        isActive: true,
+        type: 'ASSET',
+      };
+      const openPeriod = {
+        id: 'period-1',
+        year: new Date().getFullYear(),
+        month: new Date().getMonth() + 1,
+        status: AccountingPeriodStatus.OPEN,
+      };
+
+      beforeEach(() => {
+        mockCloudinaryService.uploadBuffer.mockResolvedValue({
+          secureUrl: 'https://res.cloudinary.com/proof.jpg',
+          publicId: 'finance-proofs/req-1-proof',
+          resourceType: 'image',
+        });
+        mockRequestRepo.save.mockImplementation((r: any) => Promise.resolve(r));
+      });
+
+      it('throws ForbiddenException when the tenant plan lacks FINANCE', async () => {
+        mockRequestRepo.findOne.mockResolvedValueOnce({ ...approvedRequest });
+        mockPlanFeatureResolver.resolve.mockResolvedValue({
+          features: [],
+          featureLimits: {},
+        });
+
+        await expect(
+          service.attachProof('req-1', file, postDto, mockAdmin),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('throws BadRequestException when no accounting period is open', async () => {
+        mockRequestRepo.findOne.mockResolvedValueOnce({ ...approvedRequest });
+        mockJournalEntryRepo.findOne.mockResolvedValue(null);
+        mockPeriodRepo.findOne.mockResolvedValue(null);
+
+        await expect(
+          service.attachProof('req-1', file, postDto, mockAdmin),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('throws NotFoundException when an account does not exist', async () => {
+        mockRequestRepo.findOne.mockResolvedValueOnce({ ...approvedRequest });
+        mockJournalEntryRepo.findOne.mockResolvedValue(null);
+        mockPeriodRepo.findOne.mockResolvedValue(openPeriod);
+        mockAccountRepo.findOne
+          .mockResolvedValueOnce(null)
+          .mockResolvedValueOnce(creditAccount);
+
+        await expect(
+          service.attachProof('req-1', file, postDto, mockAdmin),
+        ).rejects.toThrow(NotFoundException);
+      });
+
+      it('throws BadRequestException when debit and credit accounts are the same', async () => {
+        mockRequestRepo.findOne.mockResolvedValueOnce({ ...approvedRequest });
+        mockJournalEntryRepo.findOne.mockResolvedValue(null);
+        mockPeriodRepo.findOne.mockResolvedValue(openPeriod);
+        mockAccountRepo.findOne
+          .mockResolvedValueOnce(debitAccount)
+          .mockResolvedValueOnce(debitAccount);
+
+        await expect(
+          service.attachProof('req-1', file, postDto, mockAdmin),
+        ).rejects.toThrow(BadRequestException);
+      });
+
+      it('creates a PENDING_APPROVAL journal entry with debit/credit lines and a link back to the request', async () => {
+        const request = { ...approvedRequest, amount: 50000 };
+        mockRequestRepo.findOne.mockResolvedValueOnce(request);
+        mockJournalEntryRepo.findOne.mockResolvedValue(null);
+        mockPeriodRepo.findOne.mockResolvedValue(openPeriod);
+        mockAccountRepo.findOne
+          .mockResolvedValueOnce(debitAccount)
+          .mockResolvedValueOnce(creditAccount);
+        const savedEntry = {
+          id: 'entry-1',
+          status: JournalEntryStatus.PENDING_APPROVAL,
+        };
+        mockJournalEntryRepo.create.mockReturnValue({
+          idempotencyKey: 'finance-request:req-1',
+        });
+        mockJournalEntryRepo.save.mockResolvedValue(savedEntry);
+        mockJournalEntryLineRepo.create.mockImplementation((v: any) => v);
+        mockJournalEntryLinkRepo.create.mockImplementation((v: any) => v);
+
+        const result = await service.attachProof(
+          'req-1',
+          file,
+          postDto,
+          mockAdmin,
+        );
+
+        expect(mockJournalEntryRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            idempotencyKey: 'finance-request:req-1',
+          }),
+        );
+        expect(mockJournalEntryLineRepo.save).toHaveBeenCalledWith([
+          expect.objectContaining({ entryType: 'DEBIT', amount: 50000 }),
+          expect.objectContaining({ entryType: 'CREDIT', amount: 50000 }),
+        ]);
+        expect(mockJournalEntryLinkRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            linkType: 'FINANCE_REQUEST',
+            financeRequestId: 'req-1',
+          }),
+        );
+        expect(result.journalEntry).toEqual(savedEntry);
+      });
+
+      it('is idempotent — re-linking an already-posted request without creating a duplicate entry', async () => {
+        const existingEntry = { id: 'entry-existing' };
+        mockRequestRepo.findOne.mockResolvedValueOnce({ ...approvedRequest });
+        mockJournalEntryRepo.findOne.mockResolvedValue(existingEntry);
+
+        const result = await service.attachProof(
+          'req-1',
+          file,
+          postDto,
+          mockAdmin,
+        );
+
+        expect(mockJournalEntryRepo.save).not.toHaveBeenCalled();
+        expect(result.journalEntry).toEqual(existingEntry);
+      });
     });
   });
 });

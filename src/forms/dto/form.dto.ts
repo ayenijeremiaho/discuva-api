@@ -73,6 +73,13 @@ export class CreateFormDto {
   @IsUUID()
   eventId?: string;
 
+  // Requires visibility=PUBLIC and at least one field each carrying
+  // autoFillKey FIRST_NAME/LAST_NAME/PHONE_NUMBER — validated in
+  // FormService, not here, since it depends on the sibling `fields` array.
+  @IsOptional()
+  @IsBoolean()
+  createsFirstTimers?: boolean;
+
   @IsArray()
   @ArrayMinSize(1, { message: 'A form needs at least one field' })
   @ValidateNested({ each: true })
@@ -103,6 +110,10 @@ export class UpdateFormDto {
   isActive?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  createsFirstTimers?: boolean;
+
+  @IsOptional()
   @IsArray()
   @ArrayMinSize(1, { message: 'A form needs at least one field' })
   @ValidateNested({ each: true })
@@ -116,4 +127,13 @@ export class SubmitFormDto {
   // at compile time.
   @IsObject()
   answers: Record<string, unknown>;
+}
+
+export class AdminSubmitFormDto extends SubmitFormDto {
+  // Links the record to an existing member (e.g. documenting an existing
+  // member's baptism) — omitted for a subject with no member account (e.g.
+  // a newborn being named), same as a public submission's null member.
+  @IsOptional()
+  @IsUUID()
+  memberId?: string;
 }

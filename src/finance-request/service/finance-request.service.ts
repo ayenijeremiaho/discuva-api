@@ -9,10 +9,12 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
 import { FinanceCategory } from '../entity/finance-category.entity';
 import { FinanceRequest } from '../entity/finance-request.entity';
 import { FinanceRequestStatus } from '../enum/finance-request.enum';
 import {
+  AttachProofDto,
   CreateFinanceCategoryDto,
   CreateFinanceRequestDto,
   RejectFinanceRequestDto,
@@ -27,6 +29,23 @@ import { ExcelService } from '../../utility/service/excel.service';
 import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
+import { JournalEntry } from '../../finance/entity/journal-entry.entity';
+import { JournalEntryLine } from '../../finance/entity/journal-entry-line.entity';
+import { JournalEntryLink } from '../../finance/entity/journal-entry-link.entity';
+import { AccountingPeriod } from '../../finance/entity/accounting-period.entity';
+import { Account } from '../../finance/entity/account.entity';
+import {
+  AccountingPeriodStatus,
+  JournalEntrySource,
+  JournalEntryStatus,
+  JournalEntryType,
+  JournalLineType,
+  JournalLinkRole,
+  JournalLinkType,
+} from '../../finance/enum/finance.enum';
+import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 
 @Injectable()
 export class FinanceRequestService {
@@ -40,12 +59,24 @@ export class FinanceRequestService {
     private readonly requestRepo: Repository<FinanceRequest>,
     @InjectRepository(Admin)
     private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(JournalEntry)
+    private readonly journalEntryRepo: Repository<JournalEntry>,
+    @InjectRepository(JournalEntryLine)
+    private readonly journalEntryLineRepo: Repository<JournalEntryLine>,
+    @InjectRepository(JournalEntryLink)
+    private readonly journalEntryLinkRepo: Repository<JournalEntryLink>,
+    @InjectRepository(AccountingPeriod)
+    private readonly periodRepo: Repository<AccountingPeriod>,
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
     private readonly utilityService: UtilityService,
     private readonly auditLogService: AuditLogService,
     private readonly cloudinaryService: CloudinaryService,
     private readonly excelService: ExcelService,
     private readonly config: ConfigService,
     private readonly tenantCurrencyService: TenantCurrencyService,
+    private readonly planFeatureResolver: PlanFeatureResolverService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
   }
@@ -285,13 +316,14 @@ export class FinanceRequestService {
         'category',
         'reviewedBy',
         'reviewedBy.member',
+        'journalEntry',
       ],
     });
     if (!request) throw new NotFoundException('Finance request not found');
     return request;
   }
 
-  async approveRequest(id: string, actorAdmin: Admin): Promise<void> {
+  async approveRequest(id: string, actorAdmin: Admin): Promise<FinanceRequest> {
     const request = await this.getRequest(id);
     if (request.status !== FinanceRequestStatus.PENDING) {
       throw new BadRequestException('Only pending requests can be approved');
@@ -305,7 +337,7 @@ export class FinanceRequestService {
     request.status = FinanceRequestStatus.APPROVED;
     request.reviewedBy = actorAdmin;
     request.reviewedAt = new Date();
-    await this.requestRepo.save(request);
+    const saved = await this.requestRepo.save(request);
 
     this.auditLogService.log('FINANCE_REQUEST_APPROVED', {
       actorId: actorAdmin.member?.id,
@@ -314,13 +346,14 @@ export class FinanceRequestService {
     this.notifyHod(request, 'approved').catch((err) =>
       this.logger.error(`HOD notification failed: ${err.message}`),
     );
+    return saved;
   }
 
   async rejectRequest(
     id: string,
     dto: RejectFinanceRequestDto,
     actorAdmin: Admin,
-  ): Promise<void> {
+  ): Promise<FinanceRequest> {
     const request = await this.getRequest(id);
     if (request.status !== FinanceRequestStatus.PENDING) {
       throw new BadRequestException('Only pending requests can be rejected');
@@ -330,7 +363,7 @@ export class FinanceRequestService {
     request.reviewedBy = actorAdmin;
     request.reviewedAt = new Date();
     request.rejectionReason = dto.rejectionReason;
-    await this.requestRepo.save(request);
+    const saved = await this.requestRepo.save(request);
 
     this.auditLogService.log('FINANCE_REQUEST_REJECTED', {
       actorId: actorAdmin.member?.id,
@@ -339,13 +372,15 @@ export class FinanceRequestService {
     this.notifyHod(request, 'rejected').catch((err) =>
       this.logger.error(`HOD notification failed: ${err.message}`),
     );
+    return saved;
   }
 
   async attachProof(
     id: string,
     file: Express.Multer.File,
+    dto: AttachProofDto,
     actorAdmin: Admin,
-  ): Promise<void> {
+  ): Promise<FinanceRequest> {
     const request = await this.getRequest(id);
     if (request.status !== FinanceRequestStatus.APPROVED) {
       throw new BadRequestException(
@@ -377,15 +412,122 @@ export class FinanceRequestService {
     request.proofUrl = uploaded.secureUrl;
     request.proofPublicId = uploaded.publicId;
     request.proofResourceType = uploaded.resourceType;
-    await this.requestRepo.save(request);
+
+    if (dto.postToJournal) {
+      await this.postFinanceRequestToJournal(request, dto, actorAdmin);
+    }
+
+    const saved = await this.requestRepo.save(request);
 
     this.auditLogService.log('FINANCE_PROOF_ATTACHED', {
       actorId: actorAdmin.member?.id,
-      metadata: { requestId: id },
+      metadata: { requestId: id, postedToJournal: !!dto.postToJournal },
     });
     this.notifyHod(request, 'proof').catch((err) =>
       this.logger.error(`HOD notification failed: ${err.message}`),
     );
+    return saved;
+  }
+
+  // Mirrors PettyCashService.approve(): creates a PENDING_APPROVAL journal
+  // entry, not POSTED — a second, different admin must still approve it via
+  // JournalEntryController before it affects Account.currentBalance.
+  // Deliberately NOT wrapped in DataSource.transaction() — every repo here
+  // comes from TenantTypeOrmModule.forFeature(), which is already bound to
+  // the one per-request transaction TenantMiddleware opens (with the
+  // correct tenant search_path already set), so this is already atomic.
+  private async postFinanceRequestToJournal(
+    request: FinanceRequest,
+    dto: AttachProofDto,
+    actorAdmin: Admin,
+  ): Promise<void> {
+    const tenantId = this.cls.get('tenantId');
+    if (tenantId) {
+      const { features } = await this.planFeatureResolver.resolve(tenantId);
+      if (!features.includes(PlanFeature.FINANCE)) {
+        throw new ForbiddenException({
+          message: 'Posting to the journal requires an upgraded plan.',
+          code: 'PLAN_UPGRADE_REQUIRED',
+          requiredFeature: PlanFeature.FINANCE,
+        });
+      }
+    }
+
+    const idempotencyKey = `finance-request:${request.id}`;
+    const [existing, period] = await Promise.all([
+      this.journalEntryRepo.findOne({ where: { idempotencyKey } }),
+      this.periodRepo.findOne({
+        where: {
+          year: new Date().getFullYear(),
+          month: new Date().getMonth() + 1,
+          status: AccountingPeriodStatus.OPEN,
+        },
+      }),
+    ]);
+    if (existing) {
+      // Idempotent no-op — re-posting an already-posted request just
+      // re-links it rather than erroring or duplicating the entry.
+      request.journalEntry = existing;
+      return;
+    }
+    if (!period) {
+      throw new BadRequestException(
+        'No open accounting period for the current month — cannot post to the journal.',
+      );
+    }
+
+    const [debit, credit] = await Promise.all([
+      this.accountRepo.findOne({ where: { id: dto.debitAccountId } }),
+      this.accountRepo.findOne({ where: { id: dto.creditAccountId } }),
+    ]);
+    if (!debit || !credit) {
+      throw new NotFoundException('One or both accounts not found.');
+    }
+    if (!debit.isActive || !credit.isActive) {
+      throw new BadRequestException('Both accounts must be active.');
+    }
+    if (debit.id === credit.id) {
+      throw new BadRequestException('Debit and credit accounts must differ.');
+    }
+
+    const entry = this.journalEntryRepo.create({
+      date: new Date().toISOString().split('T')[0],
+      description: `Finance request payment: ${request.reason} (${request.department?.name ?? ''})`,
+      reference: request.id,
+      source: JournalEntrySource.FINANCE_REQUEST,
+      entryType: JournalEntryType.STANDARD,
+      status: JournalEntryStatus.PENDING_APPROVAL,
+      idempotencyKey,
+      accountingPeriod: { id: period.id } as AccountingPeriod,
+      createdBy: { id: actorAdmin.id } as Admin,
+    });
+    const savedEntry = await this.journalEntryRepo.save(entry);
+
+    await this.journalEntryLineRepo.save([
+      this.journalEntryLineRepo.create({
+        journalEntry: { id: savedEntry.id } as JournalEntry,
+        account: { id: debit.id } as Account,
+        entryType: JournalLineType.DEBIT,
+        amount: request.amount,
+      }),
+      this.journalEntryLineRepo.create({
+        journalEntry: { id: savedEntry.id } as JournalEntry,
+        account: { id: credit.id } as Account,
+        entryType: JournalLineType.CREDIT,
+        amount: request.amount,
+      }),
+    ]);
+
+    await this.journalEntryLinkRepo.save(
+      this.journalEntryLinkRepo.create({
+        journalEntry: { id: savedEntry.id } as JournalEntry,
+        linkType: JournalLinkType.FINANCE_REQUEST,
+        role: JournalLinkRole.RECIPIENT,
+        financeRequestId: request.id,
+      }),
+    );
+
+    request.journalEntry = savedEntry;
   }
 
   // ── Notifications ─────────────────────────────────────────────────────────

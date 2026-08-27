@@ -8,6 +8,7 @@ import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
 import { GroupModule } from '../group/group.module';
 import { SmsModule } from '../sms/sms.module';
+import { ClassesModule } from '../classes/classes.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SmsModule } from '../sms/sms.module';
     UtilityModule,
     GroupModule,
     SmsModule,
+    ClassesModule,
   ],
   providers: [AnnouncementService],
   controllers: [AnnouncementController],

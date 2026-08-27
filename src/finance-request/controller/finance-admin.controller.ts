@@ -21,11 +21,13 @@ import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FinanceRequestService } from '../service/finance-request.service';
 import {
+  AttachProofDto,
   CreateFinanceCategoryDto,
   RejectFinanceRequestDto,
   UpdateFinanceCategoryDto,
 } from '../dto/finance-request.dto';
 import { FinanceRequestStatus } from '../enum/finance-request.enum';
+import { FinanceRequest } from '../entity/finance-request.entity';
 
 @UseGuards(AdminGuard)
 @Controller('admin/finance')
@@ -120,7 +122,7 @@ export class FinanceAdminController {
   approveRequest(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentAdmin() admin: Admin,
-  ): Promise<void> {
+  ): Promise<FinanceRequest> {
     return this.financeRequestService.approveRequest(id, admin);
   }
 
@@ -130,7 +132,7 @@ export class FinanceAdminController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: RejectFinanceRequestDto,
     @CurrentAdmin() admin: Admin,
-  ): Promise<void> {
+  ): Promise<FinanceRequest> {
     return this.financeRequestService.rejectRequest(id, dto, admin);
   }
 
@@ -140,8 +142,9 @@ export class FinanceAdminController {
   attachProof(
     @Param('id', ParseUUIDPipe) id: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body() dto: AttachProofDto,
     @CurrentAdmin() admin: Admin,
-  ): Promise<void> {
-    return this.financeRequestService.attachProof(id, file, admin);
+  ): Promise<FinanceRequest> {
+    return this.financeRequestService.attachProof(id, file, dto, admin);
   }
 }

@@ -8,7 +8,9 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { randomUUID, randomInt } from 'node:crypto';
 import { ServiceSession } from '../entity/service-session.entity';
 import { ServiceSessionSlot } from '../entity/service-session-slot.entity';
@@ -200,7 +202,7 @@ const ANALYTICS_TTL = 1800;
 @Injectable()
 export class ServiceSessionService {
   constructor(
-    private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly cacheService: CacheService,
     private readonly programmeSvc: ServiceProgrammeService,
     private readonly emailQueueService: EmailQueueService,
@@ -271,34 +273,34 @@ export class ServiceSessionService {
     const sessionCode = this.generateSessionCode();
     const now = new Date();
 
-    const session = await this.dataSource.transaction(async (manager) => {
-      const newSession = manager.create(ServiceSession, {
-        programme,
-        sessionCode,
-        status: ServiceSessionStatusEnum.LIVE,
-        startedAt: now,
-        endedAt: null,
-      });
-      const saved = await manager.save(ServiceSession, newSession);
-
-      const sortedSlots = [...programme.slots].sort(
-        (a, b) => a.position - b.position,
-      );
-      const sessionSlots = sortedSlots.map((s, index) =>
-        manager.create(ServiceSessionSlot, {
-          session: saved,
-          programmeSlot: s,
-          position: index,
-          status:
-            index === 0
-              ? ServiceSessionSlotStatusEnum.IN_PROGRESS
-              : ServiceSessionSlotStatusEnum.PENDING,
-          startedAt: index === 0 ? now : null,
-        }),
-      );
-      await manager.save(ServiceSessionSlot, sessionSlots);
-      return saved;
+    // this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale.
+    const manager = this.txHost.tx;
+    const newSession = manager.create(ServiceSession, {
+      programme,
+      sessionCode,
+      status: ServiceSessionStatusEnum.LIVE,
+      startedAt: now,
+      endedAt: null,
     });
+    const session = await manager.save(ServiceSession, newSession);
+
+    const sortedSlots = [...programme.slots].sort(
+      (a, b) => a.position - b.position,
+    );
+    const sessionSlots = sortedSlots.map((s, index) =>
+      manager.create(ServiceSessionSlot, {
+        session,
+        programmeSlot: s,
+        position: index,
+        status:
+          index === 0
+            ? ServiceSessionSlotStatusEnum.IN_PROGRESS
+            : ServiceSessionSlotStatusEnum.PENDING,
+        startedAt: index === 0 ? now : null,
+      }),
+    );
+    await manager.save(ServiceSessionSlot, sessionSlots);
 
     await this.programmeSvc.setProgrammeStatus(
       programmeId,
@@ -988,9 +990,7 @@ export class ServiceSessionService {
       return slot;
     });
 
-    const saved = await this.dataSource.transaction((manager) =>
-      manager.save(ServiceSessionSlot, updated),
-    );
+    const saved = await this.txHost.tx.save(ServiceSessionSlot, updated);
 
     await this.logAction(
       session.id,
@@ -1023,43 +1023,44 @@ export class ServiceSessionService {
     const now = Date.now();
     const currentActualSeconds = this.calcElapsed(anchor, now);
 
-    await this.dataSource.transaction(async (manager) => {
-      await manager.update(
-        ServiceSessionSlot,
-        { session: { id: session.id }, position: anchor.currentSlotPosition },
-        {
-          status: ServiceSessionSlotStatusEnum.COMPLETED,
-          actualSeconds: Math.round(currentActualSeconds),
-          completedAt: new Date(now),
-        },
-      );
-      await manager.update(
-        ServiceSessionSlot,
-        {
-          session: { id: session.id },
-          status: ServiceSessionSlotStatusEnum.PENDING,
-        },
-        { status: ServiceSessionSlotStatusEnum.SKIPPED },
-      );
-      await manager.update(
-        ServiceSession,
-        { id: session.id },
-        {
-          status: ServiceSessionStatusEnum.COMPLETED,
-          endedAt: new Date(now),
-        },
-      );
-      // If the session ends while still paused, the open ServicePauseEntry
-      // (resumedAt: null) would otherwise stay open forever — buildSessionReport
-      // treats any unresolved pause as contributing zero duration, silently
-      // dropping that entire pause interval from the report's total.
-      await manager
-        .createQueryBuilder()
-        .update(ServicePauseEntry)
-        .set({ resumedAt: new Date(now) })
-        .where('session_id = :sid AND resumed_at IS NULL', { sid: session.id })
-        .execute();
-    });
+    // this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale.
+    const manager = this.txHost.tx;
+    await manager.update(
+      ServiceSessionSlot,
+      { session: { id: session.id }, position: anchor.currentSlotPosition },
+      {
+        status: ServiceSessionSlotStatusEnum.COMPLETED,
+        actualSeconds: Math.round(currentActualSeconds),
+        completedAt: new Date(now),
+      },
+    );
+    await manager.update(
+      ServiceSessionSlot,
+      {
+        session: { id: session.id },
+        status: ServiceSessionSlotStatusEnum.PENDING,
+      },
+      { status: ServiceSessionSlotStatusEnum.SKIPPED },
+    );
+    await manager.update(
+      ServiceSession,
+      { id: session.id },
+      {
+        status: ServiceSessionStatusEnum.COMPLETED,
+        endedAt: new Date(now),
+      },
+    );
+    // If the session ends while still paused, the open ServicePauseEntry
+    // (resumedAt: null) would otherwise stay open forever — buildSessionReport
+    // treats any unresolved pause as contributing zero duration, silently
+    // dropping that entire pause interval from the report's total.
+    await manager
+      .createQueryBuilder()
+      .update(ServicePauseEntry)
+      .set({ resumedAt: new Date(now) })
+      .where('session_id = :sid AND resumed_at IS NULL', { sid: session.id })
+      .execute();
 
     await this.programmeSvc.setProgrammeStatus(
       session.programme.id,

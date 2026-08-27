@@ -21,11 +21,14 @@ import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { Department } from '../../department/entity/department.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Group } from '../../group/entity/group.entity';
+import { ChurchClass } from '../../classes/entity/church-class.entity';
+import { EnrollmentStatusEnum } from '../../classes/enum/enrollment-status.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SanitizationService } from '../../utility/service/sanitization.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { GroupService } from '../../group/service/group.service';
+import { ClassesService } from '../../classes/service/classes.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { SmsService } from '../../sms/service/sms.service';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -47,36 +50,45 @@ export class AnnouncementService {
     private readonly sanitizationService: SanitizationService,
     private readonly auditLogService: AuditLogService,
     private readonly groupService: GroupService,
+    private readonly classesService: ClassesService,
     private readonly pushNotificationService: PushNotificationService,
     private readonly smsService: SmsService,
   ) {}
 
   private readonly logger = new Logger(AnnouncementService.name);
 
+  // Shared by create() and sendSmsBroadcast() — both DTOs carry the same
+  // audience-target fields and require the same one-of-these-per-audience
+  // validation.
+  private assertAudienceTargetProvided(target: {
+    audience?: AnnouncementAudienceEnum;
+    departmentId?: string;
+    targetMemberId?: string;
+    groupId?: string;
+    classId?: string;
+  }): void {
+    const requiredField: Partial<
+      Record<AnnouncementAudienceEnum, keyof typeof target>
+    > = {
+      [AnnouncementAudienceEnum.DEPARTMENT]: 'departmentId',
+      [AnnouncementAudienceEnum.INDIVIDUAL]: 'targetMemberId',
+      [AnnouncementAudienceEnum.GROUP]: 'groupId',
+      [AnnouncementAudienceEnum.CLASS]: 'classId',
+    };
+    const field = target.audience && requiredField[target.audience];
+    if (field && !target[field]) {
+      throw new BadRequestException(
+        `${field} is required for ${target.audience} audience`,
+      );
+    }
+  }
+
   async create(
     dto: CreateAnnouncementDto,
     authorId: string,
     admin: Admin,
   ): Promise<Announcement> {
-    if (
-      dto.audience === AnnouncementAudienceEnum.DEPARTMENT &&
-      !dto.departmentId
-    ) {
-      throw new BadRequestException(
-        'departmentId is required for DEPARTMENT audience',
-      );
-    }
-    if (
-      dto.audience === AnnouncementAudienceEnum.INDIVIDUAL &&
-      !dto.targetMemberId
-    ) {
-      throw new BadRequestException(
-        'targetMemberId is required for INDIVIDUAL audience',
-      );
-    }
-    if (dto.audience === AnnouncementAudienceEnum.GROUP && !dto.groupId) {
-      throw new BadRequestException('groupId is required for GROUP audience');
-    }
+    this.assertAudienceTargetProvided(dto);
     await this.assertCanSendViaSms(dto.sendViaSms, admin);
 
     const announcement = this.announcementRepo.create({
@@ -87,6 +99,7 @@ export class AnnouncementService {
       department: dto.departmentId ? { id: dto.departmentId } : null,
       targetMember: dto.targetMemberId ? { id: dto.targetMemberId } : null,
       group: dto.groupId ? { id: dto.groupId } : null,
+      churchClass: dto.classId ? { id: dto.classId } : null,
       publishedAt: dto.publishedAt ? new Date(dto.publishedAt) : new Date(),
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       sendViaSms: dto.sendViaSms ?? false,
@@ -125,6 +138,7 @@ export class AnnouncementService {
       departmentId: announcement.department?.id,
       targetMemberId: announcement.targetMember?.id,
       groupId: announcement.group?.id,
+      classId: announcement.churchClass?.id,
     })
       .then((memberIds) => {
         if (memberIds.length === 0) return undefined;
@@ -147,10 +161,16 @@ export class AnnouncementService {
     departmentId?: string;
     targetMemberId?: string;
     groupId?: string;
+    classId?: string;
   }): Promise<string[]> {
     if (target.audience === AnnouncementAudienceEnum.GROUP) {
       return target.groupId
         ? this.groupService.getMemberIdsForGroup(target.groupId)
+        : [];
+    }
+    if (target.audience === AnnouncementAudienceEnum.CLASS) {
+      return target.classId
+        ? this.classesService.getMemberIdsForClass(target.classId)
         : [];
     }
     if (target.audience === AnnouncementAudienceEnum.INDIVIDUAL) {
@@ -236,6 +256,8 @@ export class AnnouncementService {
       announcement.targetMember = toNullableRef<Member>(dto.targetMemberId);
     if (dto.groupId !== undefined)
       announcement.group = toNullableRef<Group>(dto.groupId);
+    if (dto.classId !== undefined)
+      announcement.churchClass = toNullableRef<ChurchClass>(dto.classId);
     if (dto.publishedAt !== undefined)
       announcement.publishedAt = new Date(dto.publishedAt);
     if (dto.expiresAt !== undefined)
@@ -287,31 +309,14 @@ export class AnnouncementService {
     dto: SendSmsBroadcastDto,
     actorId: string,
   ): Promise<{ sentCount: number }> {
-    if (
-      dto.audience === AnnouncementAudienceEnum.DEPARTMENT &&
-      !dto.departmentId
-    ) {
-      throw new BadRequestException(
-        'departmentId is required for DEPARTMENT audience',
-      );
-    }
-    if (
-      dto.audience === AnnouncementAudienceEnum.INDIVIDUAL &&
-      !dto.targetMemberId
-    ) {
-      throw new BadRequestException(
-        'targetMemberId is required for INDIVIDUAL audience',
-      );
-    }
-    if (dto.audience === AnnouncementAudienceEnum.GROUP && !dto.groupId) {
-      throw new BadRequestException('groupId is required for GROUP audience');
-    }
+    this.assertAudienceTargetProvided(dto);
 
     const phoneNumbers = await this.resolvePhoneNumbers({
       audience: dto.audience,
       departmentId: dto.departmentId,
       targetMemberId: dto.targetMemberId,
       groupId: dto.groupId,
+      classId: dto.classId,
     });
 
     if (phoneNumbers.length === 0) {
@@ -339,6 +344,7 @@ export class AnnouncementService {
         departmentId: announcement.department?.id,
         targetMemberId: announcement.targetMember?.id,
         groupId: announcement.group?.id,
+        classId: announcement.churchClass?.id,
       });
       if (phoneNumbers.length === 0) return;
       await this.smsService.send(phoneNumbers, announcement.smsBody);
@@ -354,10 +360,15 @@ export class AnnouncementService {
     departmentId?: string;
     targetMemberId?: string;
     groupId?: string;
+    classId?: string;
   }): Promise<string[]> {
     if (target.audience === AnnouncementAudienceEnum.GROUP) {
       if (!target.groupId) return [];
       return this.resolveGroupPhoneNumbers(target.groupId);
+    }
+    if (target.audience === AnnouncementAudienceEnum.CLASS) {
+      if (!target.classId) return [];
+      return this.resolveClassPhoneNumbers(target.classId);
     }
 
     const qb = this.memberRepo
@@ -420,6 +431,32 @@ export class AnnouncementService {
     return [...new Set([...memberPhones, ...phoneOnlyNumbers])];
   }
 
+  // Same dual-source shape as resolveGroupPhoneNumbers — a class enrollee
+  // is either a real Member (needs the active/phone-on-file filter) or a
+  // Guest (no Member account, so their own phone, if any, is the only
+  // channel besides email).
+  private async resolveClassPhoneNumbers(classId: string): Promise<string[]> {
+    const memberIds = await this.classesService.getMemberIdsForClass(classId);
+    let memberPhones: string[] = [];
+    if (memberIds.length > 0) {
+      const members = await this.memberRepo.find({
+        where: {
+          id: In(memberIds),
+          status: MemberStatusEnum.ACTIVE,
+          phoneNumber: Not(IsNull()),
+        },
+      });
+      memberPhones = members
+        .map((m) => m.phoneNumber)
+        .filter((p): p is string => !!p);
+    }
+
+    const guestPhones =
+      await this.classesService.getGuestPhonesForClass(classId);
+
+    return [...new Set([...memberPhones, ...guestPhones])];
+  }
+
   async delete(id: string, actorId: string): Promise<void> {
     const announcement = await this.getOrThrow(id);
     // Capture title before removal — record is gone after this line
@@ -447,6 +484,7 @@ export class AnnouncementService {
 
     const inMemberGroup =
       '(a.audience = :group AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = grp.id AND gm.member_id = :memberId))';
+    const inMemberClass = `(a.audience = :class AND EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.church_class_id = cls.id AND ce.member_id = :memberId AND ce.status IN ('${EnrollmentStatusEnum.IN_PROGRESS}', '${EnrollmentStatusEnum.COMPLETED}')))`;
 
     const qb = this.announcementRepo
       .createQueryBuilder('a')
@@ -454,6 +492,7 @@ export class AnnouncementService {
       .leftJoinAndSelect('a.department', 'department')
       .leftJoinAndSelect('a.targetMember', 'targetMember')
       .leftJoinAndSelect('a.group', 'grp')
+      .leftJoinAndSelect('a.churchClass', 'cls')
       .where('(a.publishedAt IS NULL OR a.publishedAt <= :now)', { now })
       .andWhere('(a.expiresAt IS NULL OR a.expiresAt > :now)', { now })
       .orderBy('a.publishedAt', 'DESC')
@@ -462,36 +501,39 @@ export class AnnouncementService {
 
     if (role === MemberRoleEnum.MEMBER) {
       qb.andWhere(
-        `(a.audience = :all OR a.audience = :membersOnly OR (a.audience = :individual AND targetMember.id = :memberId) OR ${inMemberGroup})`,
+        `(a.audience = :all OR a.audience = :membersOnly OR (a.audience = :individual AND targetMember.id = :memberId) OR ${inMemberGroup} OR ${inMemberClass})`,
         {
           all: AnnouncementAudienceEnum.ALL,
           membersOnly: AnnouncementAudienceEnum.MEMBERS_ONLY,
           individual: AnnouncementAudienceEnum.INDIVIDUAL,
           group: AnnouncementAudienceEnum.GROUP,
+          class: AnnouncementAudienceEnum.CLASS,
           memberId,
         },
       );
     } else if (role === MemberRoleEnum.WORKER && departmentId) {
       qb.andWhere(
-        `(a.audience = :all OR a.audience = :workers OR (a.audience = :dept AND department.id = :departmentId) OR (a.audience = :individual AND targetMember.id = :memberId) OR ${inMemberGroup})`,
+        `(a.audience = :all OR a.audience = :workers OR (a.audience = :dept AND department.id = :departmentId) OR (a.audience = :individual AND targetMember.id = :memberId) OR ${inMemberGroup} OR ${inMemberClass})`,
         {
           all: AnnouncementAudienceEnum.ALL,
           workers: AnnouncementAudienceEnum.WORKERS_ONLY,
           dept: AnnouncementAudienceEnum.DEPARTMENT,
           individual: AnnouncementAudienceEnum.INDIVIDUAL,
           group: AnnouncementAudienceEnum.GROUP,
+          class: AnnouncementAudienceEnum.CLASS,
           departmentId,
           memberId,
         },
       );
     } else {
       qb.andWhere(
-        `(a.audience = :all OR a.audience = :workers OR (a.audience = :individual AND targetMember.id = :memberId) OR ${inMemberGroup})`,
+        `(a.audience = :all OR a.audience = :workers OR (a.audience = :individual AND targetMember.id = :memberId) OR ${inMemberGroup} OR ${inMemberClass})`,
         {
           all: AnnouncementAudienceEnum.ALL,
           workers: AnnouncementAudienceEnum.WORKERS_ONLY,
           individual: AnnouncementAudienceEnum.INDIVIDUAL,
           group: AnnouncementAudienceEnum.GROUP,
+          class: AnnouncementAudienceEnum.CLASS,
           memberId,
         },
       );
@@ -518,6 +560,7 @@ export class AnnouncementService {
       .leftJoinAndSelect('a.department', 'department')
       .leftJoinAndSelect('a.targetMember', 'targetMember')
       .leftJoinAndSelect('a.group', 'grp')
+      .leftJoinAndSelect('a.churchClass', 'cls')
       .orderBy('a.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -613,7 +656,13 @@ export class AnnouncementService {
   private async getOrThrow(id: string): Promise<Announcement> {
     const announcement = await this.announcementRepo.findOne({
       where: { id },
-      relations: ['author', 'department', 'targetMember', 'group'],
+      relations: [
+        'author',
+        'department',
+        'targetMember',
+        'group',
+        'churchClass',
+      ],
     });
     if (!announcement) throw new NotFoundException('Announcement not found');
     return announcement;

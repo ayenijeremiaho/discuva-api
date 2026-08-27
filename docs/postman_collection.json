@@ -250,6 +250,31 @@
       "key": "platformAdminId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "guestId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "guestEnrollmentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "formId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "formFieldId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "firstTimerFormId",
+      "value": "",
+      "type": "string"
     }
   ],
   "auth": {
@@ -7274,6 +7299,338 @@
             }
           ]
         }
+,
+        {
+          "name": "Get Class Lookup (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/lookup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "lookup"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  { \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\", \"name\": \"New Believers Class\", \"startDate\": \"2026-06-01\", \"endDate\": \"2026-07-15\" }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Update Class Session (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/session",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "session"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nextSessionAt\": \"2026-07-01T18:00:00.000Z\",\n  \"meetingLink\": \"https://meet.example.com/marriage-counselling\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{classId}}\",\n  \"nextSessionAt\": \"2026-07-01T18:00:00.000Z\",\n  \"meetingLink\": \"https://meet.example.com/marriage-counselling\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Enroll Guest in Class (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/enroll/guest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "enroll",
+                "guest"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classId\": \"{{classId}}\",\n  \"firstName\": \"Chris\",\n  \"lastName\": \"Okafor\",\n  \"email\": \"chris.okafor@example.com\",\n  \"phone\": \"+2348012345678\",\n  \"purpose\": \"Attending with spouse for marriage counselling\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"e6f5a4b3-2c1d-4e5f-9a8b-7c6d5e4f3a2b\",\n  \"status\": \"IN_PROGRESS\",\n  \"guest\": { \"id\": \"f7a6b5c4-3d2e-4f5a-8b9c-6d7e8f9a0b1c\", \"firstName\": \"Chris\", \"lastName\": \"Okafor\", \"email\": \"chris.okafor@example.com\" }\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('guestEnrollmentId', res.id);",
+                  "if (res.guest && res.guest.id) pm.collectionVariables.set('guestId', res.guest.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bulk Enroll Guests (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/enroll/guests/bulk",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "enroll",
+                "guests",
+                "bulk"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classId\": \"{{classId}}\",\n  \"guests\": [\n    { \"firstName\": \"Tolu\", \"lastName\": \"Adeyemi\", \"email\": \"tolu.adeyemi@example.com\", \"phone\": \"+2348011112222\" },\n    { \"firstName\": \"Ngozi\", \"lastName\": \"Eze\", \"email\": \"ngozi.eze@example.com\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{ \"enrolled\": 2, \"skipped\": 0 }"
+            }
+          ]
+        },
+        {
+          "name": "Get All Guests (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/guests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "guests"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [ { \"id\": \"{{guestId}}\", \"firstName\": \"Chris\", \"lastName\": \"Okafor\", \"email\": \"chris.okafor@example.com\" } ],\n  \"page\": 1,\n  \"limit\": 10,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Guest by ID (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/guests/{{guestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "guests",
+                "{{guestId}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{guestId}}\",\n  \"firstName\": \"Chris\",\n  \"lastName\": \"Okafor\",\n  \"email\": \"chris.okafor@example.com\",\n  \"enrollments\": [ { \"id\": \"{{guestEnrollmentId}}\", \"status\": \"IN_PROGRESS\", \"churchClass\": { \"id\": \"{{classId}}\", \"name\": \"Marriage Counselling\" } } ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Convert Guest to Member (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/guests/{{guestId}}/convert-to-member",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "guests",
+                "{{guestId}}",
+                "convert-to-member"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"{{guestId}}\",\n  \"convertedMember\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"email\": \"chris.okafor@example.com\" }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Guest Class Portal (Public, No Auth)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/guest/{{guestEnrollmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "guest",
+                "{{guestEnrollmentId}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"class\": { \"id\": \"{{classId}}\", \"name\": \"Marriage Counselling\", \"nextSessionAt\": \"2026-07-01T18:00:00.000Z\", \"meetingLink\": \"https://meet.example.com/marriage-counselling\" },\n  \"guest\": { \"firstName\": \"Chris\", \"lastName\": \"Okafor\" },\n  \"assignments\": [],\n  \"progress\": { \"submitted\": 0, \"total\": 0 }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Submit Assignment as Guest (Public, No Auth)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/guest/{{guestEnrollmentId}}/assignments/{{assignmentId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "guest",
+                "{{guestEnrollmentId}}",
+                "assignments",
+                "{{assignmentId}}",
+                "submit"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"My response to the assignment.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"b4a3f2e1-8d6c-5f4e-7a9b-6c1d3e4f2a5b\",\n  \"content\": \"My response to the assignment.\",\n  \"submittedAt\": \"2026-06-20T10:00:00.000Z\"\n}"
+            }
+          ]
+        }
       ]
     },
     {
@@ -7424,6 +7781,50 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Invalid announcement data\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Class Announcement (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Session Moved to 6pm\",\n  \"body\": \"This week's session has moved to 6pm — same link.\",\n  \"audience\": \"CLASS\",\n  \"classId\": \"{{classId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/announcements",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "announcements"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"d4e5f6a7-8b9c-0d1e-2f3a-4b5c6d7e8f9a\",\n  \"title\": \"Session Moved to 6pm\",\n  \"audience\": \"CLASS\",\n  \"churchClass\": { \"id\": \"{{classId}}\" }\n}"
+            },
+            {
+              "name": "400 Bad Request",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"classId is required for CLASS audience\" }"
             }
           ]
         },
@@ -8590,11 +8991,11 @@
       ]
     },
     {
-      "name": "Notes",
-      "description": "Pastoral records for milestone events: child namings, child dedications, and marriages. Admin-only CRUD.\n\n**Access:** Admin-only for all operations.\n\n**Note types:** `child_naming` | `child_dedication` | `marriage`\n\nEach type has its own fields (e.g. child_naming has childName + familyName + dateOfBirth; marriage has husbandName + wifeName + weddingDate). Use `GET /notes/:type` to list by type. Analytics summaries are available via the Notes Analytics folder.",
+      "name": "Forms (Admin)",
+      "description": "Admin-built dynamic forms — not tied to one use case (events, surveys, sign-ups, and admin-recorded pastoral records all reuse the same builder). A form's `visibility` is `MEMBERS`, `PUBLIC`, or `ADMIN_ONLY`. `ADMIN_ONLY` forms have no member-facing or public-facing fill surface at all — the only way a submission is created against one is `POST /forms/:id/submissions` below, used for record-keeping an admin fills in on someone's behalf (e.g. pastoral records: child naming, dedication, marriage, baptism — an admin defines whatever fields a given record type needs, with generic per-field analytics via `GET /forms/:id/analytics`). `POST /forms/:id/submissions` also works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in). Only the admin-submission endpoint is documented here — see `src/forms/` for the full form-builder/member/public API surface.",
       "item": [
         {
-          "name": "Create Child Naming Note",
+          "name": "Create Form (Admin)",
           "request": {
             "method": "POST",
             "header": [
@@ -8603,54 +9004,114 @@
                 "value": "application/json"
               }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/forms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"child_naming\",\n  \"childName\": \"Emmanuel\",\n  \"familyName\": \"Adeyemi\",\n  \"dateOfBirth\": \"2026-05-20\"\n}",
+              "raw": "{\n  \"title\": \"Baptism Record\",\n  \"description\": \"Recorded by an officiating pastor — not self-submitted.\",\n  \"visibility\": \"ADMIN_ONLY\",\n  \"fields\": [\n    { \"label\": \"Person Name\", \"fieldType\": \"TEXT\", \"required\": true },\n    { \"label\": \"Baptism Date\", \"fieldType\": \"DATE\", \"required\": true },\n    { \"label\": \"Officiated By\", \"fieldType\": \"TEXT\", \"required\": false }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/notes",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes"
-              ]
             }
           },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n  \"title\": \"Baptism Record\",\n  \"visibility\": \"ADMIN_ONLY\",\n  \"fields\": [\n    { \"id\": \"f1a2b3c4-1111-4c5d-8e9f-0a1b2c3d4e5f\", \"label\": \"Person Name\", \"fieldType\": \"TEXT\" }\n  ]\n}"
+            }
+          ],
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "const res = pm.response.json();",
-                  "if (res.id) pm.collectionVariables.set('noteId', res.id);"
+                  "if (res.id) pm.collectionVariables.set('formId', res.id);",
+                  "if (res.fields && res.fields[0]) pm.collectionVariables.set('formFieldId', res.fields[0].id);"
                 ],
                 "type": "text/javascript"
               }
             }
+          ]
+        },
+        {
+          "name": "Create Public First-Timer Intake Form (Admin)",
+          "description": "PUBLIC + createsFirstTimers:true — every submission also auto-creates a FirstTimer record (online intake, e.g. via a QR code). Enforced server-side: must be PUBLIC, and FIRST_NAME/LAST_NAME/PHONE_NUMBER must each map to a required field.",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"First-Timer Welcome Form\",\n  \"description\": \"Scan the QR code at the entrance or during livestream to let us know you visited.\",\n  \"visibility\": \"PUBLIC\",\n  \"createsFirstTimers\": true,\n  \"fields\": [\n    { \"label\": \"First Name\", \"fieldType\": \"TEXT\", \"required\": true, \"autoFillKey\": \"FIRST_NAME\" },\n    { \"label\": \"Last Name\", \"fieldType\": \"TEXT\", \"required\": true, \"autoFillKey\": \"LAST_NAME\" },\n    { \"label\": \"Phone Number\", \"fieldType\": \"PHONE\", \"required\": true, \"autoFillKey\": \"PHONE_NUMBER\" },\n    { \"label\": \"Email\", \"fieldType\": \"EMAIL\", \"required\": false, \"autoFillKey\": \"EMAIL\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"d6e5f4a3-2b1c-4d5e-9f0a-1b2c3d4e5f6a\",\n  \"title\": \"First-Timer Welcome Form\",\n  \"visibility\": \"PUBLIC\",\n  \"createsFirstTimers\": true,\n  \"fields\": [ { \"id\": \"a1b2c3d4-1111-4c5d-8e9f-0a1b2c3d4e5f\", \"label\": \"First Name\" } ]\n}"
+            },
+            {
+              "name": "400 Not PUBLIC visibility",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"A form that auto-creates first-timer records must be PUBLIC visibility\" }"
+            },
+            {
+              "name": "400 Missing required autoFillKey field",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"A form that auto-creates first-timer records needs a required field for each of: FIRST_NAME, LAST_NAME, PHONE_NUMBER\" }"
+            }
           ],
-          "response": [
+          "event": [
             {
-              "name": "201 Created",
-              "status": "Created",
-              "code": 201,
-              "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"type\": \"child_naming\",\n  \"parentName\": \"John Doe\",\n  \"childName\": \"Baby Doe\",\n  \"date\": \"2026-06-15\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
-            },
-            {
-              "name": "400 Bad Request",
-              "status": "Bad Request",
-              "code": 400,
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Invalid note data\"\n}"
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('firstTimerFormId', res.id);",
+                  "if (res.fields) { for (const f of res.fields) { pm.collectionVariables.set('firstTimerField_' + f.label.replace(/\\s+/g, ''), f.id); } }"
+                ],
+                "type": "text/javascript"
+              }
             }
           ]
         },
         {
-          "name": "Create Child Dedication Note",
+          "name": "Submit First-Timer Intake Form (Public)",
+          "description": "Anonymous, unauthenticated submission — the QR code / shared link points here. Rate-limited (5/min). Also auto-creates a FirstTimer record since the target form has createsFirstTimers:true; that side effect never blocks this submission from saving even if it fails (e.g. no Follow-Up worker configured yet).",
           "request": {
             "method": "POST",
             "header": [
@@ -8659,23 +9120,26 @@
                 "value": "application/json"
               }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/public/{{firstTimerFormId}}/submit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "public",
+                "{{firstTimerFormId}}",
+                "submit"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"child_dedication\",\n  \"childName\": \"Grace\",\n  \"familyName\": \"Okonkwo\",\n  \"dedicationDate\": \"2026-06-22\"\n}",
+              "raw": "{\n  \"answers\": {\n    \"{{firstTimerField_FirstName}}\": \"Chris\",\n    \"{{firstTimerField_LastName}}\": \"Okafor\",\n    \"{{firstTimerField_PhoneNumber}}\": \"+2348012345678\",\n    \"{{firstTimerField_Email}}\": \"chris@example.com\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/notes",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes"
-              ]
             }
           },
           "response": [
@@ -8683,18 +9147,12 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"type\": \"child_naming\",\n  \"parentName\": \"John Doe\",\n  \"childName\": \"Baby Doe\",\n  \"date\": \"2026-06-15\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
-            },
-            {
-              "name": "400 Bad Request",
-              "status": "Bad Request",
-              "code": 400,
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Invalid note data\"\n}"
+              "body": "{\n  \"id\": \"e7f6a5b4-3c2d-4e5f-0a1b-2c3d4e5f6a7b\",\n  \"member\": null\n}"
             }
           ]
         },
         {
-          "name": "Create Marriage Note",
+          "name": "Create Submission as Admin",
           "request": {
             "method": "POST",
             "header": [
@@ -8703,23 +9161,25 @@
                 "value": "application/json"
               }
             ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/submissions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "submissions"
+              ]
+            },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"type\": \"marriage\",\n  \"husbandName\": \"David Osei\",\n  \"wifeName\": \"Blessing Osei\",\n  \"weddingDate\": \"2026-08-10\"\n}",
+              "raw": "{\n  \"answers\": {\n    \"{{formFieldId}}\": \"John Doe\"\n  },\n  \"memberId\": \"{{memberId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/notes",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes"
-              ]
             }
           },
           "response": [
@@ -8727,326 +9187,13 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"type\": \"child_naming\",\n  \"parentName\": \"John Doe\",\n  \"childName\": \"Baby Doe\",\n  \"date\": \"2026-06-15\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"b4a3f2e1-8d6c-4f4e-9a9b-6c1d3e4f2a5b\",\n  \"member\": { \"id\": \"{{memberId}}\" },\n  \"answers\": { \"{{formFieldId}}\": \"John Doe\" }\n}"
             },
             {
-              "name": "400 Bad Request",
+              "name": "400 Missing required field",
               "status": "Bad Request",
               "code": 400,
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Invalid note data\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Create Baptism Note",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"baptism\",\n  \"personName\": \"David Osei\",\n  \"baptismDate\": \"2026-08-10\",\n  \"memberId\": \"\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/notes",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes"
-              ]
-            },
-            "description": "memberId is optional — when provided, this baptism record becomes visible on that member's own profile via GET members/me/milestones."
-          }
-        },
-        {
-          "name": "Get Notes by Type",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/notes/child_naming?page=1&limit=10&order=DESC",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes",
-                "child_naming"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "1"
-                },
-                {
-                  "key": "limit",
-                  "value": "10"
-                },
-                {
-                  "key": "order",
-                  "value": "DESC",
-                  "description": "ASC | DESC"
-                }
-              ]
-            },
-            "description": "type path param: child_naming | child_dedication | marriage"
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n      \"type\": \"child_naming\",\n      \"parentName\": \"John Doe\",\n      \"childName\": \"Baby Doe\",\n      \"date\": \"2026-06-15\",\n      \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
-            },
-            {
-              "name": "401 Unauthorized",
-              "status": "Unauthorized",
-              "code": 401,
-              "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Get Note by ID",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/notes/child_naming/{{noteId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes",
-                "child_naming",
-                "{{noteId}}"
-              ],
-              "variable": [
-                {
-                  "key": "noteId",
-                  "value": "{{noteId}}"
-                }
-              ]
-            }
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"type\": \"child_naming\",\n  \"parentName\": \"John Doe\",\n  \"childName\": \"Baby Doe\",\n  \"date\": \"2026-06-15\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
-            },
-            {
-              "name": "404 Not Found",
-              "status": "Not Found",
-              "code": 404,
-              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Note not found\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Update Note",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"child_naming\",\n  \"childName\": \"Emmanuel Joshua\"\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "url": {
-              "raw": "{{baseUrl}}/notes/{{noteId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes",
-                "{{noteId}}"
-              ],
-              "variable": [
-                {
-                  "key": "noteId",
-                  "value": "{{noteId}}"
-                }
-              ]
-            },
-            "description": "type field is required to identify the note type. Other fields are optional (partial update)."
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{\n  \"id\": \"e5f6a7b8-9c0d-1e2f-3a4b-5c6d7e8f9a0b\",\n  \"type\": \"child_naming\",\n  \"parentName\": \"John Doe\",\n  \"childName\": \"Baby Doe\",\n  \"date\": \"2026-06-15\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
-            },
-            {
-              "name": "404 Not Found",
-              "status": "Not Found",
-              "code": 404,
-              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Note not found\"\n}"
-            }
-          ]
-        },
-        {
-          "name": "Delete Note",
-          "request": {
-            "method": "DELETE",
-            "url": {
-              "raw": "{{baseUrl}}/notes/child_naming/{{noteId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes",
-                "child_naming",
-                "{{noteId}}"
-              ],
-              "variable": [
-                {
-                  "key": "noteId",
-                  "value": "{{noteId}}"
-                }
-              ]
-            }
-          },
-          "response": [
-            {
-              "name": "204 No Content",
-              "status": "No Content",
-              "code": 204,
-              "body": ""
-            },
-            {
-              "name": "404 Not Found",
-              "status": "Not Found",
-              "code": 404,
-              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Note not found\"\n}"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Notes Analytics",
-      "description": "Aggregated statistics for pastoral notes — child namings, child dedications, and marriages. Admin-only. Supports optional date range filtering via `from` and `to` query params (YYYY-MM-DD). Returns totals, averages, and highlight data per type.",
-      "item": [
-        {
-          "name": "Child Naming Analytics",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/notes-analytics/child_naming?from=2026-01-01&to=2026-12-31",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes-analytics",
-                "child_naming"
-              ],
-              "query": [
-                {
-                  "key": "from",
-                  "value": "2026-01-01",
-                  "description": "Start date YYYY-MM-DD (optional, defaults to 30 days ago)"
-                },
-                {
-                  "key": "to",
-                  "value": "2026-12-31",
-                  "description": "End date YYYY-MM-DD (optional, defaults to today)"
-                }
-              ]
-            }
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{ \"total\": 12, \"avgNamingAgeInDays\": 7, \"topFamily\": \"Adeyemi\", \"topName\": \"Emmanuel\" }"
-            }
-          ]
-        },
-        {
-          "name": "Child Dedication Analytics",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/notes-analytics/child_dedication?from=2026-01-01&to=2026-12-31",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes-analytics",
-                "child_dedication"
-              ],
-              "query": [
-                {
-                  "key": "from",
-                  "value": "2026-01-01"
-                },
-                {
-                  "key": "to",
-                  "value": "2026-12-31"
-                }
-              ]
-            }
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{ \"total\": 8, \"upcoming\": 3, \"topFamily\": \"Okonkwo\", \"topName\": \"Grace\" }"
-            }
-          ]
-        },
-        {
-          "name": "Marriage Analytics",
-          "request": {
-            "method": "GET",
-            "url": {
-              "raw": "{{baseUrl}}/notes-analytics/marriage?from=2026-01-01&to=2026-12-31",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "notes-analytics",
-                "marriage"
-              ],
-              "query": [
-                {
-                  "key": "from",
-                  "value": "2026-01-01"
-                },
-                {
-                  "key": "to",
-                  "value": "2026-12-31"
-                }
-              ]
-            }
-          },
-          "response": [
-            {
-              "name": "200 OK",
-              "status": "OK",
-              "code": 200,
-              "body": "{ \"total\": 5, \"recentMarriage\": \"2026-08-10\", \"avgPerMonth\": 0.4 }"
+              "body": "{ \"statusCode\": 400, \"message\": \"\\\"Person Name\\\" is required\" }"
             }
           ]
         }
@@ -14290,6 +14437,24 @@
                   "type": "file",
                   "src": "",
                   "description": "Payment proof document (image or PDF)"
+                },
+                {
+                  "key": "postToJournal",
+                  "value": "false",
+                  "type": "text",
+                  "description": "Optional. Set to \"true\" to also post this payment to the double-entry ledger (a PENDING_APPROVAL JournalEntry) — requires debitAccountId and creditAccountId below."
+                },
+                {
+                  "key": "debitAccountId",
+                  "value": "{{accountId}}",
+                  "type": "text",
+                  "description": "Required if postToJournal=true. An active EXPENSE account."
+                },
+                {
+                  "key": "creditAccountId",
+                  "value": "{{accountId}}",
+                  "type": "text",
+                  "description": "Required if postToJournal=true. The active BANK/CASH/PETTY_CASH account this was paid from."
                 }
               ]
             },
@@ -14312,20 +14477,26 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_WRITE). Uploads payment proof to Cloudinary and attaches the URL to an APPROVED request. Notifies the HOD by email."
+            "description": "AdminGuard (FINANCE_WRITE). Uploads payment proof to Cloudinary and attaches the URL to an APPROVED request. Notifies the HOD by email. Optionally, when postToJournal=true, also creates a PENDING_APPROVAL JournalEntry (debit debitAccountId, credit creditAccountId, both for the request's amount) linked back to this request — a separate admin must still approve that entry via PATCH /admin/finance/journal-entries/:id/approve before it posts to account balances. Requires an OPEN accounting period and the tenant's plan to include FINANCE (403 PLAN_UPGRADE_REQUIRED otherwise); repeat calls with postToJournal=true on an already-posted request are idempotent (re-links the existing entry)."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"d6e7f8a9-0b1c-2d3e-4f5a-6b7c8d9e0f1a\",\n  \"requestedBy\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\",\n    \"email\": \"john.doe@example.com\"\n  },\n  \"department\": {\n    \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n    \"name\": \"Ushering\"\n  },\n  \"category\": {\n    \"id\": \"e7f8a9b0-1c2d-3e4f-5a6b-7c8d9e0f1a2b\",\n    \"name\": \"Welfare\"\n  },\n  \"amount\": \"150000.00\",\n  \"reason\": \"Welfare fund for members\",\n  \"status\": \"PENDING\",\n  \"recipientBankName\": \"GTBank\",\n  \"recipientAccountNumber\": \"0123456789\",\n  \"recipientAccountName\": \"John Doe\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"d6e7f8a9-0b1c-2d3e-4f5a-6b7c8d9e0f1a\",\n  \"requestedBy\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\",\n    \"email\": \"john.doe@example.com\"\n  },\n  \"department\": {\n    \"id\": \"c3d4e5f6-2a3b-4c5d-6e7f-8a9b0c1d2e3f\",\n    \"name\": \"Ushering\"\n  },\n  \"category\": {\n    \"id\": \"e7f8a9b0-1c2d-3e4f-5a6b-7c8d9e0f1a2b\",\n    \"name\": \"Welfare\"\n  },\n  \"amount\": \"150000.00\",\n  \"reason\": \"Welfare fund for members\",\n  \"status\": \"PENDING\",\n  \"recipientBankName\": \"GTBank\",\n  \"recipientAccountNumber\": \"0123456789\",\n  \"recipientAccountName\": \"John Doe\",\n  \"proofUrl\": \"https://res.cloudinary.com/demo/finance-proofs/req-1-proof.jpg\",\n  \"journalEntry\": { \"id\": \"f1a2b3c4-5d6e-4f7a-8b9c-0d1e2f3a4b5c\", \"status\": \"PENDING_APPROVAL\" },\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Finance request not found\"\n}"
+            },
+            {
+              "name": "403 Plan Upgrade Required (postToJournal on a non-Finance-plan tenant)",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Posting to the journal requires an upgraded plan.\",\n  \"code\": \"PLAN_UPGRADE_REQUIRED\",\n  \"requiredFeature\": \"FINANCE\"\n}"
             }
           ]
         }

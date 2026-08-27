@@ -26,7 +26,6 @@ import { EventModule } from './event/event.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { RequestLeaveModule } from './request-leave/request-leave.module';
-import { NotesModule } from './notes/notes.module';
 import { ClassesModule } from './classes/classes.module';
 import { PastorFeedbackModule } from './pastor-feedback/pastor-feedback.module';
 import { AnnouncementModule } from './announcement/announcement.module';
@@ -226,7 +225,6 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     AttendanceModule,
     DashboardModule,
     RequestLeaveModule,
-    NotesModule,
     ClassesModule,
     PastorFeedbackModule,
     AnnouncementModule,

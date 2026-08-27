@@ -5,6 +5,7 @@ import { FormSubmissionService } from './form-submission.service';
 import { Form } from '../entity/form.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
 import { Member } from '../../member/entity/member.entity';
+import { FollowUpService } from '../../follow-up/service/follow-up.service';
 import {
   FormFieldAutoFill,
   FormFieldType,
@@ -22,12 +23,18 @@ const mockSubmissionRepo = {
 const mockMemberRepo = {
   findOneBy: jest.fn(),
 };
+const mockFollowUpService = {
+  createFirstTimerFromPublicForm: jest.fn().mockResolvedValue({ id: 'ft-1' }),
+};
 
 describe('FormSubmissionService', () => {
   let service: FormSubmissionService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockFollowUpService.createFirstTimerFromPublicForm.mockResolvedValue({
+      id: 'ft-1',
+    });
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FormSubmissionService,
@@ -37,6 +44,7 @@ describe('FormSubmissionService', () => {
           useValue: mockSubmissionRepo,
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
+        { provide: FollowUpService, useValue: mockFollowUpService },
       ],
     }).compile();
     service = module.get(FormSubmissionService);
@@ -158,6 +166,172 @@ describe('FormSubmissionService', () => {
       await expect(
         service.submitAsMember('form-1', 'member-42', { f1: 'x' }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('submitAsAdmin', () => {
+    const adminOnlyForm = {
+      id: 'form-1',
+      isActive: true,
+      visibility: FormVisibility.ADMIN_ONLY,
+      fields: [
+        {
+          id: 'f1',
+          label: 'Child Name',
+          required: true,
+          fieldType: FormFieldType.TEXT,
+        },
+      ],
+    };
+
+    it('saves a submission with member null when no memberId is given', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(adminOnlyForm);
+      const result = await service.submitAsAdmin('form-1', { f1: 'Baby Jane' });
+      expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ member: null, answers: { f1: 'Baby Jane' } }),
+      );
+      expect(result.id).toBe('sub-1');
+    });
+
+    it('links the submission to the given member when memberId is provided', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(adminOnlyForm);
+      await service.submitAsAdmin('form-1', { f1: 'Baby Jane' }, 'member-42');
+      expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ member: { id: 'member-42' } }),
+      );
+    });
+
+    it('works against a MEMBERS-visibility form too, not just ADMIN_ONLY', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue({
+        ...adminOnlyForm,
+        visibility: FormVisibility.MEMBERS,
+      });
+      await expect(
+        service.submitAsAdmin('form-1', { f1: 'Baby Jane' }),
+      ).resolves.toBeDefined();
+    });
+
+    it('404s on an inactive form', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(null);
+      await expect(
+        service.submitAsAdmin('form-1', { f1: 'Baby Jane' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockFormRepo.findOneBy).toHaveBeenCalledWith({
+        id: 'form-1',
+        isActive: true,
+      });
+    });
+
+    it('still validates answers against the form fields', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(adminOnlyForm);
+      await expect(service.submitAsAdmin('form-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('submitAsPublic — createsFirstTimers auto-creation', () => {
+    const firstTimerForm = {
+      id: 'form-1',
+      isActive: true,
+      visibility: FormVisibility.PUBLIC,
+      createsFirstTimers: true,
+      fields: [
+        {
+          id: 'f1',
+          label: 'First Name',
+          required: true,
+          fieldType: FormFieldType.TEXT,
+          autoFillKey: FormFieldAutoFill.FIRST_NAME,
+        },
+        {
+          id: 'f2',
+          label: 'Last Name',
+          required: true,
+          fieldType: FormFieldType.TEXT,
+          autoFillKey: FormFieldAutoFill.LAST_NAME,
+        },
+        {
+          id: 'f3',
+          label: 'Phone',
+          required: true,
+          fieldType: FormFieldType.PHONE,
+          autoFillKey: FormFieldAutoFill.PHONE_NUMBER,
+        },
+        {
+          id: 'f4',
+          label: 'Email',
+          required: false,
+          fieldType: FormFieldType.EMAIL,
+          autoFillKey: FormFieldAutoFill.EMAIL,
+        },
+      ],
+    };
+
+    it('maps submitted answers to a CreateFirstTimerDto via each field autoFillKey', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(firstTimerForm);
+
+      await service.submitAsPublic('form-1', {
+        f1: 'Chris',
+        f2: 'Okafor',
+        f3: '+2348012345678',
+        f4: 'chris@example.com',
+      });
+
+      expect(
+        mockFollowUpService.createFirstTimerFromPublicForm,
+      ).toHaveBeenCalledWith({
+        firstname: 'Chris',
+        lastname: 'Okafor',
+        phone: '+2348012345678',
+        email: 'chris@example.com',
+      });
+    });
+
+    it('leaves email undefined when not answered', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(firstTimerForm);
+
+      await service.submitAsPublic('form-1', {
+        f1: 'Chris',
+        f2: 'Okafor',
+        f3: '+2348012345678',
+      });
+
+      expect(
+        mockFollowUpService.createFirstTimerFromPublicForm,
+      ).toHaveBeenCalledWith(expect.objectContaining({ email: undefined }));
+    });
+
+    it('does not call FollowUpService when createsFirstTimers is false', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue({
+        ...firstTimerForm,
+        createsFirstTimers: false,
+      });
+
+      await service.submitAsPublic('form-1', {
+        f1: 'Chris',
+        f2: 'Okafor',
+        f3: '+2348012345678',
+      });
+
+      expect(
+        mockFollowUpService.createFirstTimerFromPublicForm,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('still saves the submission even if first-timer creation fails', async () => {
+      mockFormRepo.findOneBy.mockResolvedValue(firstTimerForm);
+      mockFollowUpService.createFirstTimerFromPublicForm.mockRejectedValueOnce(
+        new Error('No active Follow-Up team members available.'),
+      );
+
+      const result = await service.submitAsPublic('form-1', {
+        f1: 'Chris',
+        f2: 'Okafor',
+        f3: '+2348012345678',
+      });
+
+      expect(result.id).toBe('sub-1');
     });
   });
 });

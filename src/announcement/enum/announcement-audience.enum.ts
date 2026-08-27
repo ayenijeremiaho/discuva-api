@@ -5,6 +5,7 @@ export enum AnnouncementAudienceEnum {
   DEPARTMENT = 'DEPARTMENT',
   INDIVIDUAL = 'INDIVIDUAL',
   GROUP = 'GROUP',
+  CLASS = 'CLASS',
 }
 
 export const AnnouncementAudienceLabels: Record<
@@ -17,4 +18,5 @@ export const AnnouncementAudienceLabels: Record<
   [AnnouncementAudienceEnum.DEPARTMENT]: 'Department',
   [AnnouncementAudienceEnum.INDIVIDUAL]: 'Individual Member',
   [AnnouncementAudienceEnum.GROUP]: 'Group',
+  [AnnouncementAudienceEnum.CLASS]: 'Class',
 };

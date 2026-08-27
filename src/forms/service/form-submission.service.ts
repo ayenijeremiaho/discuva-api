@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,9 +15,13 @@ import {
   FormFieldAutoFill,
   FormVisibility,
 } from '../enum/form.enum';
+import { FollowUpService } from '../../follow-up/service/follow-up.service';
+import { CreateFirstTimerDto } from '../../follow-up/dto/create-first-timer.dto';
 
 @Injectable()
 export class FormSubmissionService {
+  private readonly logger = new Logger(FormSubmissionService.name);
+
   constructor(
     @InjectRepository(Form)
     private readonly formRepo: Repository<Form>,
@@ -24,6 +29,7 @@ export class FormSubmissionService {
     private readonly submissionRepo: Repository<FormSubmission>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    private readonly followUpService: FollowUpService,
   ) {}
 
   async listForMembers(eventId?: string): Promise<Form[]> {
@@ -102,10 +108,54 @@ export class FormSubmissionService {
       FormVisibility.PUBLIC,
     ]);
     this.validateAnswers(form.fields, answers);
-    return this.submissionRepo.save(
+    const saved = await this.submissionRepo.save(
       this.submissionRepo.create({
         form: { id: form.id } as Form,
         member: null,
+        answers,
+      }),
+    );
+
+    if (form.createsFirstTimers) {
+      // Deliberately awaited but fault-tolerant: a failure here (e.g. no
+      // active Follow-Up team member configured yet) must never surface as
+      // an error to an anonymous visitor filling this in from a QR code —
+      // their submission is already saved regardless. Logged so the gap is
+      // discoverable, not silently lost.
+      try {
+        await this.followUpService.createFirstTimerFromPublicForm(
+          this.buildFirstTimerDto(form.fields, answers),
+        );
+      } catch (err: unknown) {
+        this.logger.error(
+          `Failed to auto-create first-timer from form ${form.id} submission ${saved.id}`,
+          err instanceof Error ? err.stack : err,
+        );
+      }
+    }
+
+    return saved;
+  }
+
+  // No visibility restriction — an admin can record a submission against
+  // any active form regardless of its MEMBERS/PUBLIC/ADMIN_ONLY visibility
+  // (e.g. backfilling a MEMBERS-visibility form entry for someone who
+  // called in rather than used the app), unlike submitAsMember/submitAsPublic
+  // which are each locked to the visibility that makes them reachable at
+  // all. memberId is optional — the subject of a pastoral record often has
+  // no member account at all (e.g. a newborn being named).
+  async submitAsAdmin(
+    formId: string,
+    answers: Record<string, unknown>,
+    memberId?: string,
+  ): Promise<FormSubmission> {
+    const form = await this.formRepo.findOneBy({ id: formId, isActive: true });
+    if (!form) throw new NotFoundException('Form not found');
+    this.validateAnswers(form.fields, answers);
+    return this.submissionRepo.save(
+      this.submissionRepo.create({
+        form: { id: form.id } as Form,
+        member: memberId ? ({ id: memberId } as Member) : null,
         answers,
       }),
     );
@@ -151,6 +201,32 @@ export class FormSubmissionService {
         }
       }
     }
+  }
+
+  // Reverse of resolveAutoFillValue below — pulls a submitted answer back
+  // out by which field carries which autoFillKey, rather than pushing a
+  // member's own profile value in. Assumes FormService already enforced
+  // that FIRST_NAME/LAST_NAME/PHONE_NUMBER each have exactly one field
+  // (createsFirstTimers forms can't be saved otherwise); if more than one
+  // field somehow shares a key, the first match wins.
+  private buildFirstTimerDto(
+    fields: FormField[],
+    answers: Record<string, unknown>,
+  ): CreateFirstTimerDto {
+    const valueFor = (key: FormFieldAutoFill): string | undefined => {
+      const field = fields.find((f) => f.autoFillKey === key);
+      const value = field ? answers[field.id] : undefined;
+      return typeof value === 'string' && value.trim()
+        ? value.trim()
+        : undefined;
+    };
+
+    return {
+      firstname: valueFor(FormFieldAutoFill.FIRST_NAME) ?? '',
+      lastname: valueFor(FormFieldAutoFill.LAST_NAME) ?? '',
+      phone: valueFor(FormFieldAutoFill.PHONE_NUMBER) ?? '',
+      email: valueFor(FormFieldAutoFill.EMAIL),
+    };
   }
 
   private resolveAutoFillValue(

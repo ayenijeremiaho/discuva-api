@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken, getDataSourceToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { VolunteerService } from './volunteer.service';
 import { VolunteerOpportunity } from '../entity/volunteer-opportunity.entity';
@@ -54,23 +55,18 @@ const mockTxManager = {
   ),
 };
 
-const mockDataSource = {
-  transaction: jest.fn(async (cb: any) => cb(mockTxManager)),
-};
+const mockTxHost = { tx: mockTxManager };
 
 describe('VolunteerService', () => {
   let service: VolunteerService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockDataSource.transaction.mockImplementation(async (cb: any) =>
-      cb(mockTxManager),
-    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         VolunteerService,
-        { provide: getDataSourceToken(), useValue: mockDataSource },
+        { provide: TransactionHost, useValue: mockTxHost },
         {
           provide: getRepositoryToken(VolunteerOpportunity),
           useValue: mockOpportunityRepo,

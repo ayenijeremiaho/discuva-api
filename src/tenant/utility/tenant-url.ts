@@ -4,10 +4,17 @@
 // subdomain has to be inserted at send time instead — from tenant.subdomain
 // here, from window.location there. Only for LOGIN_URL (discuva-member) —
 // see buildAdminUrl below for ADMIN_LOGIN_URL, which this does NOT apply to.
-export function buildTenantUrl(baseUrl: string, subdomain: string): string {
+// path, if given, REPLACES baseUrl's own path — same semantics as
+// buildAdminUrl's path parameter below, just with subdomain insertion too.
+export function buildTenantUrl(
+  baseUrl: string,
+  subdomain: string,
+  path?: string,
+): string {
   try {
     const url = new URL(baseUrl);
     url.hostname = `${subdomain}.${url.hostname}`;
+    if (path !== undefined) url.pathname = path;
     return url.toString().replace(/\/$/, '');
   } catch {
     return baseUrl;

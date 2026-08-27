@@ -1,6 +1,12 @@
 export enum FormVisibility {
   MEMBERS = 'MEMBERS',
   PUBLIC = 'PUBLIC',
+  // No member-facing or public-facing fill surface at all — the only way a
+  // submission is ever created is POST /forms/:id/submissions (admin-only).
+  // For record-keeping forms an admin fills in on someone else's behalf
+  // (e.g. pastoral records: child naming, dedication, marriage, baptism)
+  // where the subject has no reason or ability to self-submit.
+  ADMIN_ONLY = 'ADMIN_ONLY',
 }
 
 export enum FormFieldType {

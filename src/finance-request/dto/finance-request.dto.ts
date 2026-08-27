@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -6,8 +7,9 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class CreateFinanceCategoryDto {
   @IsString()
@@ -68,4 +70,22 @@ export class RejectFinanceRequestDto {
   @IsString()
   @IsNotEmpty()
   rejectionReason: string;
+}
+
+export class AttachProofDto {
+  // Bound via @Body() on a multipart/form-data request, so this arrives as
+  // the string "true"/"false", not a boolean — @Type(() => Boolean) would
+  // coerce the string "false" to true. Explicit Transform instead.
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  postToJournal?: boolean = false;
+
+  @ValidateIf((o: AttachProofDto) => o.postToJournal === true)
+  @IsUUID()
+  debitAccountId?: string;
+
+  @ValidateIf((o: AttachProofDto) => o.postToJournal === true)
+  @IsUUID()
+  creditAccountId?: string;
 }

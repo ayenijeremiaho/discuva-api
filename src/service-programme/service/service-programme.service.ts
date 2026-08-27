@@ -7,7 +7,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { ServiceProgramme } from '../entity/service-programme.entity';
 import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import {
@@ -33,7 +35,7 @@ import { PdfService } from '../../utility/service/pdf.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
-import { buildServiceSlotIcs } from '../util/ics-builder';
+import { buildIcsEvent } from '../../utility/util/ics-builder';
 import {
   withMemberNames,
   withMemberNamesList,
@@ -73,7 +75,7 @@ export interface MyAssignment {
 @Injectable()
 export class ServiceProgrammeService {
   constructor(
-    private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     @InjectRepository(ServiceProgramme)
     private readonly programmeRepo: Repository<ServiceProgramme>,
     @InjectRepository(ServiceProgrammeSlot)
@@ -645,8 +647,8 @@ export class ServiceProgrammeService {
     if (member.email) {
       if (programme.serviceSlot?.startTime && programme.serviceSlot?.endTime) {
         const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
-        const ics = buildServiceSlotIcs({
-          uid: slot.id,
+        const ics = buildIcsEvent({
+          uid: `${slot.id}@service-programme`,
           startTime: programme.serviceSlot.startTime,
           endTime: programme.serviceSlot.endTime,
           summary: `${slotType}${topicSuffix} — ${serviceSlotName}`,
@@ -754,22 +756,23 @@ export class ServiceProgrammeService {
     });
     if (!template) throw new NotFoundException('Template not found');
 
-    const result = await this.dataSource.transaction(async (manager) => {
-      if (programme.slots.length > 0) {
-        await manager.remove(ServiceProgrammeSlot, programme.slots);
-      }
-      const newSlots = template.slots.map((s) =>
-        manager.create(ServiceProgrammeSlot, {
-          programme,
-          position: s.position,
-          type: s.type,
-          topic: s.topic,
-          allocatedMinutes: s.allocatedMinutes,
-        }),
-      );
-      programme.slots = await manager.save(ServiceProgrammeSlot, newSlots);
-      return manager.save(ServiceProgramme, programme);
-    });
+    // this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale.
+    const manager = this.txHost.tx;
+    if (programme.slots.length > 0) {
+      await manager.remove(ServiceProgrammeSlot, programme.slots);
+    }
+    const newSlots = template.slots.map((s) =>
+      manager.create(ServiceProgrammeSlot, {
+        programme,
+        position: s.position,
+        type: s.type,
+        topic: s.topic,
+        allocatedMinutes: s.allocatedMinutes,
+      }),
+    );
+    programme.slots = await manager.save(ServiceProgrammeSlot, newSlots);
+    const result = await manager.save(ServiceProgramme, programme);
     this.logger.log(
       `Template ${templateId} applied to programme ${programmeId} (${result.slots.length} slots)`,
     );

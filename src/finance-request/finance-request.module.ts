@@ -8,10 +8,23 @@ import { FinanceWorkerController } from './controller/finance-worker.controller'
 import { AdminModule } from '../admin/admin.module';
 import { DepartmentModule } from '../department/department.module';
 import { UtilityModule } from '../utility/utility.module';
+import { JournalEntry } from '../finance/entity/journal-entry.entity';
+import { JournalEntryLine } from '../finance/entity/journal-entry-line.entity';
+import { JournalEntryLink } from '../finance/entity/journal-entry-link.entity';
+import { AccountingPeriod } from '../finance/entity/accounting-period.entity';
+import { Account } from '../finance/entity/account.entity';
 
 @Module({
   imports: [
-    TenantTypeOrmModule.forFeature([FinanceCategory, FinanceRequest]),
+    TenantTypeOrmModule.forFeature([
+      FinanceCategory,
+      FinanceRequest,
+      JournalEntry,
+      JournalEntryLine,
+      JournalEntryLink,
+      AccountingPeriod,
+      Account,
+    ]),
     AdminModule,
     DepartmentModule,
     UtilityModule,

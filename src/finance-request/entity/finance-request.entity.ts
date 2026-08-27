@@ -11,6 +11,7 @@ import { Department } from '../../department/entity/department.entity';
 import { FinanceCategory } from './finance-category.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FinanceRequestStatus } from '../enum/finance-request.enum';
+import { JournalEntry } from '../../finance/entity/journal-entry.entity';
 
 @Entity({ name: 'finance_requests' })
 export class FinanceRequest extends BaseEntity {
@@ -74,4 +75,12 @@ export class FinanceRequest extends BaseEntity {
 
   @Column({ type: 'character varying', nullable: true })
   proofResourceType: string;
+
+  // Set when a finance-team admin opts to post this request's payment to
+  // the ledger at proof-attachment time — see FinanceRequestService.
+  // Nullable/SET NULL: a voided or deleted journal entry shouldn't take the
+  // finance request down with it.
+  @ManyToOne(() => JournalEntry, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'journal_entry_id' })
+  journalEntry: JournalEntry | null;
 }

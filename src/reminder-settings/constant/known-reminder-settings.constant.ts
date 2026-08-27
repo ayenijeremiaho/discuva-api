@@ -40,4 +40,14 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: 'days before expiry',
     defaultThresholds: [30, 14, 7, 1],
   },
+  [ReminderSettingKey.ASSIGNMENT_DUE]: {
+    label: 'Assignment Due Reminders',
+    unit: 'days before due',
+    defaultThresholds: [3, 1, 0],
+  },
+  [ReminderSettingKey.CLASS_SESSION]: {
+    label: 'Class Session Reminders',
+    unit: 'hours before session',
+    defaultThresholds: [24, 1],
+  },
 };

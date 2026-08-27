@@ -54,7 +54,6 @@ import {
   WorkerStatusEnum,
   WorkerStatusLabels,
 } from '../member/enums/worker-status.enum';
-import { NoteTypeEnum, NoteTypeLabels } from '../notes/enums/note-type.enums';
 import {
   LeaveStatusEnum,
   LeaveStatusLabels,
@@ -137,7 +136,6 @@ export class EnumsController {
       memberRoles: toEnumOptions(MemberRoleEnum, MemberRoleLabels),
       memberStatuses: toEnumOptions(MemberStatusEnum, MemberStatusLabels),
       workerStatuses: toEnumOptions(WorkerStatusEnum, WorkerStatusLabels),
-      noteTypes: toEnumOptions(NoteTypeEnum, NoteTypeLabels),
       leaveStatuses: toEnumOptions(LeaveStatusEnum, LeaveStatusLabels),
       ssAttendanceStatuses: toEnumOptions(
         SundaySchoolAttendanceStatus,

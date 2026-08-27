@@ -9,12 +9,15 @@ import { In, Repository } from 'typeorm';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
 import { ClassType } from '../entity/class-type.entity';
+import { Guest } from '../entity/guest.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
   CreateChurchClassDto,
   UpdateChurchClassDto,
 } from '../dto/create-church-class.dto';
+import { UpdateClassSessionDto } from '../dto/update-class-session.dto';
 import { BulkEnrollDto, EnrollMemberDto } from '../dto/enroll-member.dto';
+import { BulkEnrollGuestsDto, EnrollGuestDto } from '../dto/guest.dto';
 import { PromoteEnrollmentDto } from '../dto/promote-enrollment.dto';
 import { IssueCertificateDto } from '../dto/issue-certificate.dto';
 import { EnrollmentStatusEnum } from '../enum/enrollment-status.enum';
@@ -23,6 +26,7 @@ import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { GuestService } from './guest.service';
 import { ConfigService } from '@nestjs/config';
 
 export interface ClassMaterialLibraryEntry {
@@ -57,6 +61,7 @@ export class ClassesService {
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly guestService: GuestService,
   ) {
     this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -101,6 +106,26 @@ export class ClassesService {
 
     const saved = await this.classRepo.save(churchClass);
     this.logger.log(`Class "${saved.name}" updated (id: ${saved.id})`);
+    return saved;
+  }
+
+  async updateClassSession(
+    id: string,
+    dto: UpdateClassSessionDto,
+  ): Promise<ChurchClass> {
+    const churchClass = await this.getClassOrThrow(id);
+
+    if (dto.nextSessionAt !== undefined) {
+      churchClass.nextSessionAt = dto.nextSessionAt
+        ? new Date(dto.nextSessionAt)
+        : null;
+    }
+    if (dto.meetingLink !== undefined) {
+      churchClass.meetingLink = dto.meetingLink;
+    }
+
+    const saved = await this.classRepo.save(churchClass);
+    this.logger.log(`Next session updated for class "${saved.name}"`);
     return saved;
   }
 
@@ -308,6 +333,185 @@ export class ClassesService {
     return { enrolled, skipped };
   }
 
+  // Minimal shape for the Announcements "Class" audience picker — mirrors
+  // GroupService's lookup method feeding GET /groups/lookup. Includes
+  // startDate/endDate so the picker can show each class's dates, since a
+  // ChurchClass row is already a specific dated cohort (the same class
+  // "name" can recur as several rows over time).
+  async getClassLookup(): Promise<
+    Pick<ChurchClass, 'id' | 'name' | 'startDate' | 'endDate'>[]
+  > {
+    return this.classRepo.find({
+      select: ['id', 'name', 'startDate', 'endDate'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // Backs the Announcements module's CLASS audience (push/in-app) —
+  // mirrors GroupService.getMemberIdsForGroup. In Progress + Completed
+  // only (excludes Cancelled), same scope the audience picker uses.
+  async getMemberIdsForClass(classId: string): Promise<string[]> {
+    const rows = await this.enrollmentRepo
+      .createQueryBuilder('e')
+      .select('e.member_id', 'memberId')
+      .where('e.church_class_id = :classId', { classId })
+      .andWhere('e.status IN (:...statuses)', {
+        statuses: [
+          EnrollmentStatusEnum.IN_PROGRESS,
+          EnrollmentStatusEnum.COMPLETED,
+        ],
+      })
+      .andWhere('e.member_id IS NOT NULL')
+      .getRawMany<{ memberId: string }>();
+    return rows.map((r) => r.memberId);
+  }
+
+  // Backs the Announcements module's CLASS audience (SMS) — the guest side
+  // of the same dual-source union GroupService uses for member vs.
+  // phone-only entries. Guests have no Member account, so their phone
+  // (when on file) is the only channel besides email.
+  async getGuestPhonesForClass(classId: string): Promise<string[]> {
+    const rows = await this.enrollmentRepo
+      .createQueryBuilder('e')
+      .innerJoin('e.guest', 'guest')
+      .select('guest.phone', 'phone')
+      .where('e.church_class_id = :classId', { classId })
+      .andWhere('e.status IN (:...statuses)', {
+        statuses: [
+          EnrollmentStatusEnum.IN_PROGRESS,
+          EnrollmentStatusEnum.COMPLETED,
+        ],
+      })
+      .andWhere('guest.phone IS NOT NULL')
+      .getRawMany<{ phone: string }>();
+    return rows.map((r) => r.phone).filter((p): p is string => !!p);
+  }
+
+  async enrollGuest(dto: EnrollGuestDto): Promise<ClassEnrollment> {
+    const churchClass = await this.getClassOrThrow(dto.classId);
+
+    if (churchClass.status === ChurchClassStatusEnum.CLOSED) {
+      throw new BadRequestException('Cannot enrol a guest into a closed class');
+    }
+
+    const guest = dto.guestId
+      ? await this.guestService.getById(dto.guestId)
+      : await this.guestService.findOrCreateByEmail({
+          firstName: dto.firstName!,
+          lastName: dto.lastName!,
+          email: dto.email!,
+          phone: dto.phone,
+          churchName: dto.churchName,
+          address: dto.address,
+          notes: dto.notes,
+        });
+
+    const existing = await this.enrollmentRepo.findOne({
+      where: { guest: { id: guest.id }, churchClass: { id: dto.classId } },
+    });
+
+    if (existing) {
+      if (existing.status === EnrollmentStatusEnum.COMPLETED) {
+        throw new BadRequestException(
+          'This guest has already completed this class',
+        );
+      }
+      if (existing.status === EnrollmentStatusEnum.IN_PROGRESS) {
+        throw new BadRequestException(
+          'This guest is already enrolled in this class',
+        );
+      }
+      existing.status = EnrollmentStatusEnum.IN_PROGRESS;
+      existing.cancelledAt = null;
+      existing.completedAt = null;
+      if (dto.purpose !== undefined) existing.purpose = dto.purpose;
+      const re = await this.enrollmentRepo.save(existing);
+      this.logger.log(
+        `Guest ${guest.id} re-enrolled in class "${churchClass.name}" (id: ${churchClass.id})`,
+      );
+      return re;
+    }
+
+    const enrollment = this.enrollmentRepo.create({
+      guest,
+      churchClass,
+      purpose: dto.purpose ?? null,
+      status: EnrollmentStatusEnum.IN_PROGRESS,
+    });
+    const saved = await this.enrollmentRepo.save(enrollment);
+    this.logger.log(
+      `Guest ${guest.id} enrolled in class "${churchClass.name}" (id: ${churchClass.id})`,
+    );
+
+    await this.sendGuestPortalAccessEmail(guest, saved, churchClass);
+
+    return saved;
+  }
+
+  async bulkEnrollGuests(
+    dto: BulkEnrollGuestsDto,
+  ): Promise<{ enrolled: number; skipped: number }> {
+    const churchClass = await this.getClassOrThrow(dto.classId);
+
+    if (churchClass.status === ChurchClassStatusEnum.CLOSED) {
+      throw new BadRequestException('Cannot enrol guests into a closed class');
+    }
+
+    let enrolled = 0;
+    let skipped = 0;
+
+    for (const entry of dto.guests) {
+      try {
+        await this.enrollGuest({
+          classId: dto.classId,
+          firstName: entry.firstName,
+          lastName: entry.lastName,
+          email: entry.email,
+          phone: entry.phone,
+        });
+        enrolled++;
+      } catch (err) {
+        this.logger.warn(
+          `Skipped bulk guest enrol for ${entry.email}: ${err instanceof Error ? err.message : err}`,
+        );
+        skipped++;
+      }
+    }
+
+    this.logger.log(
+      `Bulk guest enrol in "${churchClass.name}": ${enrolled} enrolled, ${skipped} skipped`,
+    );
+    return { enrolled, skipped };
+  }
+
+  // Resolves the tenant-subdomain portal URL (a cheap cached lookup, so
+  // worth awaiting) then fires the email without waiting on the send
+  // itself, matching this codebase's email convention. Portal access is
+  // the enrollment's own id (see ClassPublicController) — no separate
+  // token to generate.
+  private async sendGuestPortalAccessEmail(
+    guest: Guest,
+    enrollment: ClassEnrollment,
+    churchClass: ChurchClass,
+  ): Promise<void> {
+    const firstName = UtilityService.capitalizeFirstLetter(guest.firstName);
+    const portalUrl = await this.utilityService.resolveMemberUrl(
+      `/classes/guest/${enrollment.id}`,
+    );
+    this.utilityService.sendEmailWithTemplate(
+      guest.email,
+      `${firstName}, You're Enrolled in ${churchClass.name}`,
+      'class-guest-access',
+      {
+        name: firstName,
+        className: churchClass.name,
+        portalUrl,
+        churchName: this.churchName,
+        churchAddress: this.churchAddress,
+      },
+    );
+  }
+
   async countActiveEnrollments(): Promise<number> {
     return this.enrollmentRepo.count({
       where: { status: EnrollmentStatusEnum.IN_PROGRESS },
@@ -425,7 +629,7 @@ export class ClassesService {
 
     const [enrollments, total] = await this.enrollmentRepo.findAndCount({
       where: { churchClass: { id: classId } },
-      relations: ['member'],
+      relations: ['member', 'guest'],
       skip: (page - 1) * limit,
       take: limit,
       order: { enrolledAt: 'DESC' },
@@ -482,6 +686,7 @@ export class ClassesService {
       where: { id: enrollmentId },
       relations: [
         'member',
+        'guest',
         'churchClass',
         'churchClass.classType',
         'churchClass.classType.nextClassType',
@@ -513,16 +718,28 @@ export class ClassesService {
       );
     }
 
-    const newEnrollment = await this.enrollMember({
-      memberId: enrollment.member.id,
-      classId: targetClass.id,
-    });
+    const newEnrollment = enrollment.member
+      ? await this.enrollMember({
+          memberId: enrollment.member.id,
+          classId: targetClass.id,
+        })
+      : await this.enrollGuest({
+          classId: targetClass.id,
+          guestId: enrollment.guest!.id,
+        });
+
+    const email = enrollment.member?.email ?? enrollment.guest!.email;
+    const firstName = UtilityService.capitalizeFirstLetter(
+      enrollment.member?.firstname ?? enrollment.guest!.firstName,
+    );
+    const lastName = enrollment.member?.lastname ?? enrollment.guest!.lastName;
+    const targetId = enrollment.member?.id ?? enrollment.guest!.id;
 
     this.auditLogService.log('CLASS_LEVEL_PROMOTED', {
       actorId,
-      targetId: enrollment.member.id,
-      targetEmail: enrollment.member.email,
-      targetName: `${enrollment.member.firstname} ${enrollment.member.lastname}`,
+      targetId,
+      targetEmail: email,
+      targetName: `${firstName} ${lastName}`,
       metadata: {
         fromClassId: enrollment.churchClass.id,
         fromClassTypeId: enrollment.churchClass.classType.id,
@@ -531,11 +748,8 @@ export class ClassesService {
       },
     });
 
-    const firstName = UtilityService.capitalizeFirstLetter(
-      enrollment.member.firstname,
-    );
     this.utilityService.sendEmailWithTemplate(
-      enrollment.member.email,
+      email,
       `${firstName}, You've Been Promoted to ${targetClass.name}`,
       'class-level-promotion',
       {
@@ -548,7 +762,7 @@ export class ClassesService {
     );
 
     this.logger.log(
-      `Member ${enrollment.member.id} promoted from class "${enrollment.churchClass.name}" to "${targetClass.name}"`,
+      `${targetId} promoted from class "${enrollment.churchClass.name}" to "${targetClass.name}"`,
     );
 
     return newEnrollment;
@@ -561,7 +775,7 @@ export class ClassesService {
   ): Promise<ClassEnrollment> {
     const enrollment = await this.enrollmentRepo.findOne({
       where: { id: enrollmentId },
-      relations: ['member', 'churchClass'],
+      relations: ['member', 'guest', 'churchClass'],
     });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
 
@@ -577,11 +791,17 @@ export class ClassesService {
 
     const saved = await this.enrollmentRepo.save(enrollment);
 
+    const targetId = enrollment.member?.id ?? enrollment.guest!.id;
+    const targetEmail = enrollment.member?.email ?? enrollment.guest!.email;
+    const targetName = enrollment.member
+      ? `${enrollment.member.firstname} ${enrollment.member.lastname}`
+      : `${enrollment.guest!.firstName} ${enrollment.guest!.lastName}`;
+
     this.auditLogService.log('CLASS_CERTIFICATE_ISSUED', {
       actorId,
-      targetId: enrollment.member.id,
-      targetEmail: enrollment.member.email,
-      targetName: `${enrollment.member.firstname} ${enrollment.member.lastname}`,
+      targetId,
+      targetEmail,
+      targetName,
       metadata: {
         enrollmentId,
         classId: enrollment.churchClass.id,
@@ -638,6 +858,22 @@ export class ClassesService {
   private async getEnrollmentOrThrow(id: string): Promise<ClassEnrollment> {
     const enrollment = await this.enrollmentRepo.findOne({ where: { id } });
     if (!enrollment) throw new NotFoundException('Enrollment not found');
+    return enrollment;
+  }
+
+  // Used by ClassPublicController's @Public() guest-portal routes — the
+  // enrollment id itself is the access key (no separate token, mirroring
+  // how the public Forms feature uses a form's own id), so this only ever
+  // resolves rows that actually have a guest attached; a member's
+  // enrollment id returns the same 404 a nonexistent one would.
+  async getGuestEnrollmentOrThrow(id: string): Promise<ClassEnrollment> {
+    const enrollment = await this.enrollmentRepo.findOne({
+      where: { id },
+      relations: ['guest', 'churchClass'],
+    });
+    if (!enrollment?.guest) {
+      throw new NotFoundException('Enrollment not found');
+    }
     return enrollment;
   }
 }

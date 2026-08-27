@@ -15,6 +15,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { SanitizationService } from '../../utility/service/sanitization.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { GroupService } from '../../group/service/group.service';
+import { ClassesService } from '../../classes/service/classes.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { SmsService } from '../../sms/service/sms.service';
 import { Member } from '../../member/entity/member.entity';
@@ -56,6 +57,11 @@ const mockAuditLogService = { log: jest.fn() };
 const mockGroupService = {
   getMemberIdsForGroup: jest.fn().mockResolvedValue([]),
   getPhoneOnlyNumbersForGroup: jest.fn().mockResolvedValue([]),
+};
+
+const mockClassesService = {
+  getMemberIdsForClass: jest.fn().mockResolvedValue([]),
+  getGuestPhonesForClass: jest.fn().mockResolvedValue([]),
 };
 
 const mockPushNotificationService = {
@@ -117,6 +123,7 @@ describe('AnnouncementService', () => {
         { provide: SanitizationService, useValue: mockSanitizationService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: GroupService, useValue: mockGroupService },
+        { provide: ClassesService, useValue: mockClassesService },
         {
           provide: PushNotificationService,
           useValue: mockPushNotificationService,
@@ -306,6 +313,33 @@ describe('AnnouncementService', () => {
       );
     });
 
+    it('should include the CLASS audience EXISTS clause with the class enum bound for MEMBER role', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAnnouncementRepo.createQueryBuilder.mockReturnValue(qb);
+      jest.spyOn(UtilityService, 'createPaginationResponse').mockReturnValue({
+        data: [],
+        page: 1,
+        limit: 10,
+        totalCount: 0,
+        totalPages: 1,
+      });
+
+      await service.getForMember(
+        'member-1',
+        MemberRoleEnum.MEMBER,
+        null,
+        1,
+        10,
+      );
+
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.churchClass', 'cls');
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('class_enrollments'),
+        expect.objectContaining({ class: AnnouncementAudienceEnum.CLASS }),
+      );
+    });
+
     it('should return paginated results', async () => {
       const qb = makeQb();
       qb.getManyAndCount.mockResolvedValue([
@@ -362,7 +396,13 @@ describe('AnnouncementService', () => {
 
       expect(mockAnnouncementRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'ann-1' },
-        relations: ['author', 'department', 'targetMember', 'group'],
+        relations: [
+          'author',
+          'department',
+          'targetMember',
+          'group',
+          'churchClass',
+        ],
       });
     });
   });
@@ -422,6 +462,65 @@ describe('AnnouncementService', () => {
         expect.objectContaining({
           idempotencyKey: 'ann-1',
           title: 'Call Leaders Meeting',
+          url: '/announcements',
+        }),
+      );
+    });
+
+    it('should throw BadRequestException if audience is CLASS but no classId provided', async () => {
+      await expect(
+        service.create(
+          {
+            title: 'Class Announcement',
+            body: 'For enrollees',
+            audience: AnnouncementAudienceEnum.CLASS,
+          } as any,
+          'author-1',
+          noSmsAdmin,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should save announcement with class set and dispatch a push notification to class enrollees', async () => {
+      const announcement = {
+        id: 'ann-1',
+        title: 'Session Moved',
+        body: 'Session moved to 6pm',
+        audience: AnnouncementAudienceEnum.CLASS,
+        churchClass: { id: 'class-1' },
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockClassesService.getMemberIdsForClass.mockResolvedValue([
+        'member-1',
+        'member-2',
+      ]);
+
+      await service.create(
+        {
+          title: 'Session Moved',
+          body: 'Session moved to 6pm',
+          audience: AnnouncementAudienceEnum.CLASS,
+          classId: 'class-1',
+        } as any,
+        'author-1',
+        noSmsAdmin,
+      );
+
+      expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ churchClass: { id: 'class-1' } }),
+      );
+      await new Promise(process.nextTick);
+      expect(mockClassesService.getMemberIdsForClass).toHaveBeenCalledWith(
+        'class-1',
+      );
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).toHaveBeenCalledWith(
+        ['member-1', 'member-2'],
+        expect.objectContaining({
+          idempotencyKey: 'ann-1',
+          title: 'Session Moved',
           url: '/announcements',
         }),
       );
@@ -761,6 +860,61 @@ describe('AnnouncementService', () => {
         ['+9'],
         'Hi first-timer',
       );
+      expect(result).toEqual({ sentCount: 1 });
+    });
+
+    it('rejects CLASS audience without a classId', async () => {
+      await expect(
+        service.sendSmsBroadcast(
+          { audience: AnnouncementAudienceEnum.CLASS, message: 'Hi' } as any,
+          'admin-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('unions member-derived phones with guest phones for CLASS audience and dedupes', async () => {
+      mockClassesService.getMemberIdsForClass.mockResolvedValue(['member-1']);
+      mockMemberRepo.find.mockResolvedValue([
+        { phoneNumber: '+1' },
+        { phoneNumber: '+2' },
+      ]);
+      mockClassesService.getGuestPhonesForClass.mockResolvedValue(['+2', '+3']);
+
+      const result = await service.sendSmsBroadcast(
+        {
+          audience: AnnouncementAudienceEnum.CLASS,
+          classId: 'class-1',
+          message: 'Class starts soon',
+        } as any,
+        'admin-1',
+      );
+
+      expect(mockClassesService.getGuestPhonesForClass).toHaveBeenCalledWith(
+        'class-1',
+      );
+      expect(mockSmsService.send).toHaveBeenCalledWith(
+        expect.arrayContaining(['+1', '+2', '+3']),
+        'Class starts soon',
+      );
+      expect(mockSmsService.send.mock.calls[0][0]).toHaveLength(3);
+      expect(result).toEqual({ sentCount: 3 });
+    });
+
+    it('reaches guest phones even when the class has no member enrollees', async () => {
+      mockClassesService.getMemberIdsForClass.mockResolvedValue([]);
+      mockClassesService.getGuestPhonesForClass.mockResolvedValue(['+9']);
+
+      const result = await service.sendSmsBroadcast(
+        {
+          audience: AnnouncementAudienceEnum.CLASS,
+          classId: 'class-1',
+          message: 'Hi guest',
+        } as any,
+        'admin-1',
+      );
+
+      expect(mockMemberRepo.find).not.toHaveBeenCalled();
+      expect(mockSmsService.send).toHaveBeenCalledWith(['+9'], 'Hi guest');
       expect(result).toEqual({ sentCount: 1 });
     });
   });

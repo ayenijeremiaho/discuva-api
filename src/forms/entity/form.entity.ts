@@ -37,6 +37,14 @@ export class Form extends BaseEntity {
   @Column({ default: true })
   isActive: boolean;
 
+  // When true, a public submission to this form also creates a FirstTimer
+  // record (source=ONLINE) — the online-intake counterpart to a physical
+  // walk-in, reachable via a QR code/shared link rather than someone at
+  // the door. Only meaningful on a PUBLIC-visibility form; enforced at
+  // create/update time (see FormService).
+  @Column({ name: 'creates_first_timers', default: false })
+  createsFirstTimers: boolean;
+
   @OneToMany(() => FormField, (field) => field.form, {
     cascade: true,
     eager: true,

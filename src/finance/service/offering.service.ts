@@ -3,8 +3,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Offering } from '../entity/offering.entity';
 import { JournalEntry } from '../entity/journal-entry.entity';
 import { JournalEntryLine } from '../entity/journal-entry-line.entity';
@@ -40,8 +42,7 @@ export class OfferingService {
     @InjectRepository(AccountingPeriod)
     private readonly periodRepo: Repository<AccountingPeriod>,
     private readonly auditLogService: AuditLogService,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   async create(dto: CreateOfferingDto, admin: Admin): Promise<Offering> {
@@ -164,45 +165,47 @@ export class OfferingService {
         'Offering total is zero — cannot auto-create journal entry.',
       );
 
-    await this.dataSource.transaction(async (manager) => {
-      const idempotencyKey = `offering-auto-journal:${offering.id}`;
-      const existing = await manager.findOne(JournalEntry, {
-        where: { idempotencyKey },
-      });
-      if (existing) return;
+    // Deliberately this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale (would open a connection
+    // that never sees TenantMiddleware's SET LOCAL search_path).
+    const manager = this.txHost.tx;
+    const idempotencyKey = `offering-auto-journal:${offering.id}`;
+    const existing = await manager.findOne(JournalEntry, {
+      where: { idempotencyKey },
+    });
+    if (existing) return;
 
-      const entry = manager.create(JournalEntry, {
-        date: new Date().toISOString().slice(0, 10),
-        description: `Offering reconciliation — ${offering.type} (${offering.createdAt.toISOString().slice(0, 10)})`,
-        source: JournalEntrySource.MANUAL,
-        entryType: JournalEntryType.STANDARD,
-        status: JournalEntryStatus.PENDING_APPROVAL,
-        idempotencyKey,
-        accountingPeriod: { id: period.id } as any,
-        createdBy: { id: admin.id } as any,
-      });
-      const savedEntry = await manager.save(JournalEntry, entry);
+    const entry = manager.create(JournalEntry, {
+      date: new Date().toISOString().slice(0, 10),
+      description: `Offering reconciliation — ${offering.type} (${offering.createdAt.toISOString().slice(0, 10)})`,
+      source: JournalEntrySource.MANUAL,
+      entryType: JournalEntryType.STANDARD,
+      status: JournalEntryStatus.PENDING_APPROVAL,
+      idempotencyKey,
+      accountingPeriod: { id: period.id } as any,
+      createdBy: { id: admin.id } as any,
+    });
+    const savedEntry = await manager.save(JournalEntry, entry);
 
-      await manager.save(JournalEntryLine, [
-        manager.create(JournalEntryLine, {
-          journalEntry: { id: savedEntry.id } as any,
-          account: { id: debitAccount.id } as any,
-          entryType: JournalLineType.DEBIT,
-          amount: total,
-        }),
-        manager.create(JournalEntryLine, {
-          journalEntry: { id: savedEntry.id } as any,
-          account: { id: creditAccount.id } as any,
-          entryType: JournalLineType.CREDIT,
-          amount: total,
-        }),
-      ]);
+    await manager.save(JournalEntryLine, [
+      manager.create(JournalEntryLine, {
+        journalEntry: { id: savedEntry.id } as any,
+        account: { id: debitAccount.id } as any,
+        entryType: JournalLineType.DEBIT,
+        amount: total,
+      }),
+      manager.create(JournalEntryLine, {
+        journalEntry: { id: savedEntry.id } as any,
+        account: { id: creditAccount.id } as any,
+        entryType: JournalLineType.CREDIT,
+        amount: total,
+      }),
+    ]);
 
-      this.auditLogService.log('JOURNAL_ENTRY_CREATED', {
-        actorId: admin.id,
-        targetId: savedEntry.id,
-        metadata: { source: 'offering-auto-journal', offeringId: offering.id },
-      });
+    this.auditLogService.log('JOURNAL_ENTRY_CREATED', {
+      actorId: admin.id,
+      targetId: savedEntry.id,
+      metadata: { source: 'offering-auto-journal', offeringId: offering.id },
     });
   }
 }

@@ -35,6 +35,10 @@ export class CreateAnnouncementDto {
   @IsUUID()
   groupId?: string;
 
+  @ValidateIf((o) => o.audience === AnnouncementAudienceEnum.CLASS)
+  @IsUUID()
+  classId?: string;
+
   @IsOptional()
   @IsISO8601()
   publishedAt?: string;
@@ -82,6 +86,10 @@ export class UpdateAnnouncementDto {
   @IsOptional()
   @IsUUID()
   groupId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  classId?: string;
 
   @IsOptional()
   @IsISO8601()

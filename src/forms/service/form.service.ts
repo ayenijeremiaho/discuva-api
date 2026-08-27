@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Form } from '../entity/form.entity';
@@ -8,11 +12,21 @@ import { Event } from '../../event/entity/event.entity';
 import { CreateFormDto, UpdateFormDto } from '../dto/form.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
-import { FormFieldType } from '../enum/form.enum';
+import {
+  FormFieldAutoFill,
+  FormFieldType,
+  FormVisibility,
+} from '../enum/form.enum';
 import {
   FormAnalyticsDto,
   FormFieldAnalyticsDto,
 } from '../dto/form-analytics.dto';
+
+const FIRST_TIMER_REQUIRED_AUTOFILL_KEYS = [
+  FormFieldAutoFill.FIRST_NAME,
+  FormFieldAutoFill.LAST_NAME,
+  FormFieldAutoFill.PHONE_NUMBER,
+];
 
 const CHOICE_FIELD_TYPES = new Set([
   FormFieldType.DROPDOWN,
@@ -32,11 +46,15 @@ export class FormService {
   ) {}
 
   async create(dto: CreateFormDto): Promise<Form> {
+    if (dto.createsFirstTimers) {
+      this.assertValidFirstTimerConfig(dto.visibility, dto.fields);
+    }
     const form = this.formRepo.create({
       title: dto.title,
       description: dto.description ?? null,
       visibility: dto.visibility,
       event: dto.eventId ? ({ id: dto.eventId } as Event) : null,
+      createsFirstTimers: dto.createsFirstTimers ?? false,
       fields: dto.fields.map((f, index) =>
         this.fieldRepo.create({
           label: f.label,
@@ -49,6 +67,38 @@ export class FormService {
       ),
     });
     return this.formRepo.save(form);
+  }
+
+  // Requires visibility=PUBLIC (a first-timer, by definition, isn't
+  // reachable through a MEMBERS-only or ADMIN_ONLY form) and a *required*
+  // field carrying each of FIRST_NAME/LAST_NAME/PHONE_NUMBER as its
+  // autoFillKey — those are FirstTimer's required columns, and `required`
+  // is enforced here (not left to CreateFirstTimerDto's own decorators,
+  // which never run against a service-constructed object the way they
+  // would at an HTTP boundary) so a visitor can't submit the form with
+  // them blank and produce an empty first-timer record.
+  // FormSubmissionService reads submitted answers back out via this exact
+  // mapping when auto-creating the record.
+  private assertValidFirstTimerConfig(
+    visibility: FormVisibility,
+    fields: { autoFillKey?: FormFieldAutoFill | null; required?: boolean }[],
+  ): void {
+    if (visibility !== FormVisibility.PUBLIC) {
+      throw new BadRequestException(
+        'A form that auto-creates first-timer records must be PUBLIC visibility',
+      );
+    }
+    const requiredKeys = new Set(
+      fields.filter((f) => f.required).map((f) => f.autoFillKey),
+    );
+    const missing = FIRST_TIMER_REQUIRED_AUTOFILL_KEYS.filter(
+      (key) => !requiredKeys.has(key),
+    );
+    if (missing.length) {
+      throw new BadRequestException(
+        `A form that auto-creates first-timer records needs a required field for each of: ${missing.join(', ')}`,
+      );
+    }
   }
 
   async getAll(): Promise<Form[]> {
@@ -77,6 +127,9 @@ export class FormService {
       form.event = dto.eventId ? ({ id: dto.eventId } as Event) : null;
     }
     if (dto.isActive !== undefined) form.isActive = dto.isActive;
+    if (dto.createsFirstTimers !== undefined) {
+      form.createsFirstTimers = dto.createsFirstTimers;
+    }
 
     if (dto.fields) {
       const incomingIds = new Set(
@@ -97,6 +150,10 @@ export class FormService {
           autoFillKey: f.autoFillKey ?? null,
         }),
       );
+    }
+
+    if (form.createsFirstTimers) {
+      this.assertValidFirstTimerConfig(form.visibility, form.fields);
     }
 
     return this.formRepo.save(form);

@@ -21,14 +21,22 @@ import { PlanGuard } from '../../billing/guard/plan.guard';
 import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { FormService } from '../service/form.service';
-import { CreateFormDto, UpdateFormDto } from '../dto/form.dto';
+import { FormSubmissionService } from '../service/form-submission.service';
+import {
+  AdminSubmitFormDto,
+  CreateFormDto,
+  UpdateFormDto,
+} from '../dto/form.dto';
 
 @RequiresModule('forms')
 @RequiresPlan(PlanFeature.FORMS)
 @UseGuards(AdminGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('forms')
 export class FormAdminController {
-  constructor(private readonly formService: FormService) {}
+  constructor(
+    private readonly formService: FormService,
+    private readonly submissionService: FormSubmissionService,
+  ) {}
 
   @RequiresPermission(AdminPermission.FORMS_WRITE)
   @Post()
@@ -72,6 +80,18 @@ export class FormAdminController {
       page ? Number(page) : 1,
       limit ? Number(limit) : 20,
     );
+  }
+
+  // The only way a submission is ever created against an ADMIN_ONLY-
+  // visibility form — but works against any visibility, not just
+  // ADMIN_ONLY (see FormSubmissionService.submitAsAdmin).
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post(':id/submissions')
+  createSubmission(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AdminSubmitFormDto,
+  ) {
+    return this.submissionService.submitAsAdmin(id, dto.answers, dto.memberId);
   }
 
   @RequiresPermission(AdminPermission.FORMS_READ)

@@ -5,4 +5,6 @@ export enum ReminderSettingKey {
   ASSET_MAINTENANCE = 'asset_maintenance',
   ASSET_WARRANTY = 'asset_warranty',
   VEHICLE_EXPIRY = 'vehicle_expiry',
+  ASSIGNMENT_DUE = 'assignment_due',
+  CLASS_SESSION = 'class_session',
 }

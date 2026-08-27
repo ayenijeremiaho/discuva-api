@@ -74,4 +74,14 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       label: 'Membership Anniversary',
       description: 'Sent to members on their church membership anniversary.',
     },
+    [EmailCategory.ASSIGNMENT_REMINDER]: {
+      label: 'Assignment Due Reminders',
+      description:
+        'Sent to class enrollees (members and guests) ahead of an assignment due date, if they have not yet submitted.',
+    },
+    [EmailCategory.CLASS_SESSION_REMINDER]: {
+      label: 'Class Session Reminders',
+      description:
+        "Sent to class enrollees (members and guests) ahead of a class's next scheduled session/meeting time.",
+    },
   };

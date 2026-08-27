@@ -1,11 +1,15 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { FormService } from './form.service';
 import { Form } from '../entity/form.entity';
 import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
-import { FormFieldType, FormVisibility } from '../enum/form.enum';
+import {
+  FormFieldAutoFill,
+  FormFieldType,
+  FormVisibility,
+} from '../enum/form.enum';
 
 const mockFormRepo = {
   create: jest.fn((v) => v),
@@ -69,6 +73,117 @@ describe('FormService', () => {
       );
       expect(result.title).toBe('Volunteer Sign-up');
     });
+
+    it('rejects createsFirstTimers on a non-PUBLIC form', async () => {
+      await expect(
+        service.create({
+          title: 'New Here?',
+          visibility: FormVisibility.MEMBERS,
+          createsFirstTimers: true,
+          fields: [
+            {
+              label: 'First Name',
+              fieldType: FormFieldType.TEXT,
+              required: true,
+              autoFillKey: FormFieldAutoFill.FIRST_NAME,
+            },
+            {
+              label: 'Last Name',
+              fieldType: FormFieldType.TEXT,
+              required: true,
+              autoFillKey: FormFieldAutoFill.LAST_NAME,
+            },
+            {
+              label: 'Phone',
+              fieldType: FormFieldType.PHONE,
+              required: true,
+              autoFillKey: FormFieldAutoFill.PHONE_NUMBER,
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects createsFirstTimers when a required autoFillKey field is missing', async () => {
+      await expect(
+        service.create({
+          title: 'New Here?',
+          visibility: FormVisibility.PUBLIC,
+          createsFirstTimers: true,
+          fields: [
+            {
+              label: 'First Name',
+              fieldType: FormFieldType.TEXT,
+              required: true,
+              autoFillKey: FormFieldAutoFill.FIRST_NAME,
+            },
+            // LAST_NAME and PHONE_NUMBER missing
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects createsFirstTimers when the mapped field is not marked required', async () => {
+      await expect(
+        service.create({
+          title: 'New Here?',
+          visibility: FormVisibility.PUBLIC,
+          createsFirstTimers: true,
+          fields: [
+            {
+              label: 'First Name',
+              fieldType: FormFieldType.TEXT,
+              required: false, // not required — should be rejected
+              autoFillKey: FormFieldAutoFill.FIRST_NAME,
+            },
+            {
+              label: 'Last Name',
+              fieldType: FormFieldType.TEXT,
+              required: true,
+              autoFillKey: FormFieldAutoFill.LAST_NAME,
+            },
+            {
+              label: 'Phone',
+              fieldType: FormFieldType.PHONE,
+              required: true,
+              autoFillKey: FormFieldAutoFill.PHONE_NUMBER,
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts createsFirstTimers when PUBLIC and all three required fields are mapped', async () => {
+      const result = await service.create({
+        title: 'New Here?',
+        visibility: FormVisibility.PUBLIC,
+        createsFirstTimers: true,
+        fields: [
+          {
+            label: 'First Name',
+            fieldType: FormFieldType.TEXT,
+            required: true,
+            autoFillKey: FormFieldAutoFill.FIRST_NAME,
+          },
+          {
+            label: 'Last Name',
+            fieldType: FormFieldType.TEXT,
+            required: true,
+            autoFillKey: FormFieldAutoFill.LAST_NAME,
+          },
+          {
+            label: 'Phone',
+            fieldType: FormFieldType.PHONE,
+            required: true,
+            autoFillKey: FormFieldAutoFill.PHONE_NUMBER,
+          },
+        ],
+      });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ createsFirstTimers: true }),
+      );
+      expect(result.title).toBe('New Here?');
+    });
   });
 
   describe('update', () => {
@@ -123,6 +238,55 @@ describe('FormService', () => {
       await expect(service.update('missing', { title: 'x' })).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('validates the merged final state, not just the incoming patch, when enabling createsFirstTimers', async () => {
+      // Existing form is MEMBERS-visibility with no autoFillKey fields —
+      // flipping createsFirstTimers on without also fixing visibility/fields
+      // must still be rejected, even though the DTO itself only touches
+      // createsFirstTimers.
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.MEMBERS,
+        fields: [
+          { id: 'f1', label: 'Name', required: true, autoFillKey: null },
+        ],
+      });
+
+      await expect(
+        service.update('form-1', { createsFirstTimers: true }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows enabling createsFirstTimers when the form was already PUBLIC with the right fields', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [
+          {
+            id: 'f1',
+            label: 'First Name',
+            required: true,
+            autoFillKey: FormFieldAutoFill.FIRST_NAME,
+          },
+          {
+            id: 'f2',
+            label: 'Last Name',
+            required: true,
+            autoFillKey: FormFieldAutoFill.LAST_NAME,
+          },
+          {
+            id: 'f3',
+            label: 'Phone',
+            required: true,
+            autoFillKey: FormFieldAutoFill.PHONE_NUMBER,
+          },
+        ],
+      });
+
+      await expect(
+        service.update('form-1', { createsFirstTimers: true }),
+      ).resolves.toBeDefined();
     });
   });
 

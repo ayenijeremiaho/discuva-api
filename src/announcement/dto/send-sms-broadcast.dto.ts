@@ -23,6 +23,10 @@ export class SendSmsBroadcastDto {
   @IsUUID()
   groupId?: string;
 
+  @ValidateIf((o) => o.audience === AnnouncementAudienceEnum.CLASS)
+  @IsUUID()
+  classId?: string;
+
   @IsNotEmpty()
   @IsString()
   message: string;

@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { BadRequestException } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
 import { ReconciliationService } from './reconciliation.service';
@@ -50,11 +51,10 @@ const mockBankImportProfileService = {
 const mockTxManager = {
   create: jest.fn((entity, data) => data),
   save: jest.fn(),
+  query: jest.fn().mockResolvedValue(undefined),
 };
 
-const mockDataSource = {
-  transaction: jest.fn(),
-};
+const mockTxHost = { tx: mockTxManager };
 
 describe('ReconciliationService', () => {
   let service: ReconciliationService;
@@ -63,9 +63,8 @@ describe('ReconciliationService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockJournalEntryRepo.find.mockResolvedValue([]);
-    mockDataSource.transaction.mockImplementation(async (cb: any) =>
-      cb(mockTxManager),
-    );
+    mockTxManager.create.mockImplementation((_entity, data) => data);
+    mockTxManager.query.mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -84,7 +83,7 @@ describe('ReconciliationService', () => {
           useValue: mockJournalEntryLineRepo,
         },
         { provide: getQueueToken(RECONCILIATION_QUEUE), useValue: mockQueue },
-        { provide: getDataSourceToken(), useValue: mockDataSource },
+        { provide: TransactionHost, useValue: mockTxHost },
         {
           provide: BankImportProfileService,
           useValue: mockBankImportProfileService,
@@ -172,9 +171,15 @@ describe('ReconciliationService', () => {
           metadata: { created: 1 },
         }),
       );
+      expect(mockTxManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('SAVEPOINT'),
+      );
+      expect(mockTxManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('RELEASE SAVEPOINT'),
+      );
     });
 
-    it('skips a row already posted, per the batched idempotency pre-check, without opening a transaction for it', async () => {
+    it('skips a row already posted, per the batched idempotency pre-check, without opening a savepoint for it', async () => {
       mockJobRepo.findOne.mockResolvedValue(job);
       const row = makeRow({ id: 'row-already-posted' });
       mockRowRepo.find.mockResolvedValue([row]);
@@ -185,7 +190,7 @@ describe('ReconciliationService', () => {
       const result = await service.postConfirmedRows('job-1', dto, admin);
 
       expect(result).toEqual({ created: 0 });
-      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+      expect(mockTxManager.query).not.toHaveBeenCalled();
     });
 
     it('skips a confirmed row with no confirmedAccount', async () => {
@@ -196,26 +201,18 @@ describe('ReconciliationService', () => {
       const result = await service.postConfirmedRows('job-1', dto, admin);
 
       expect(result).toEqual({ created: 0 });
-      expect(mockDataSource.transaction).not.toHaveBeenCalled();
+      expect(mockTxManager.query).not.toHaveBeenCalled();
     });
 
-    it('propagates a non-idempotency error from a row, matching pre-existing fail-fast behaviour', async () => {
+    it('rolls back to the savepoint and propagates a non-idempotency error from a row, matching pre-existing fail-fast behaviour', async () => {
       mockJobRepo.findOne.mockResolvedValue(job);
       const rowA = makeRow({ id: 'row-a' });
       const rowB = makeRow({ id: 'row-b' });
       mockRowRepo.find.mockResolvedValue([rowA, rowB]);
       mockJournalEntryRepo.find.mockResolvedValue([]);
 
-      let call = 0;
-      mockDataSource.transaction.mockImplementation(async (cb: any) => {
-        call++;
-        if (call === 1) throw new Error('unexpected FK violation');
-        return cb(mockTxManager);
-      });
-      mockTxManager.save.mockImplementation((entity, data) =>
-        Promise.resolve(
-          Array.isArray(data) ? data : { id: 'entry-2', ...data },
-        ),
+      mockTxManager.save.mockRejectedValueOnce(
+        new Error('unexpected FK violation'),
       );
 
       await expect(
@@ -223,9 +220,13 @@ describe('ReconciliationService', () => {
       ).rejects.toThrow('unexpected FK violation');
 
       // row-a's failure propagates (matches pre-existing no-catch-all
-      // behaviour), but only after being attempted — row-b is never reached
-      // since the loop stops at the thrown error, same as before this fix.
-      expect(mockDataSource.transaction).toHaveBeenCalledTimes(1);
+      // behaviour), but only after being attempted, and rolls back to its
+      // own savepoint first — row-b is never reached since the loop stops
+      // at the thrown error, same as before this fix.
+      expect(mockTxManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('ROLLBACK TO SAVEPOINT'),
+      );
+      expect(mockTxManager.save).toHaveBeenCalledTimes(1);
     });
 
     it('treats a unique-constraint violation on insert as "already posted" rather than failing the batch', async () => {
@@ -236,11 +237,14 @@ describe('ReconciliationService', () => {
 
       const dupError = new QueryFailedError('INSERT', [], new Error('dup'));
       (dupError as any).driverError = { code: '23505' };
-      mockDataSource.transaction.mockRejectedValueOnce(dupError);
+      mockTxManager.save.mockRejectedValueOnce(dupError);
 
       const result = await service.postConfirmedRows('job-1', dto, admin);
 
       expect(result).toEqual({ created: 0 });
+      expect(mockTxManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('ROLLBACK TO SAVEPOINT'),
+      );
     });
   });
 });

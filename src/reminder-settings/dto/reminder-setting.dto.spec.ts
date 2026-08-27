@@ -7,6 +7,7 @@ describe('UpdateReminderSettingDto', () => {
     const dto = plainToInstance(UpdateReminderSettingDto, {
       enabled: true,
       thresholds: [7, 0, -3],
+      smsEnabled: true,
     });
     const errors = await validate(dto, {
       whitelist: true,
@@ -19,6 +20,7 @@ describe('UpdateReminderSettingDto', () => {
     const dto = plainToInstance(UpdateReminderSettingDto, {
       enabled: false,
       thresholds: [],
+      smsEnabled: false,
     });
     const errors = await validate(dto, {
       whitelist: true,

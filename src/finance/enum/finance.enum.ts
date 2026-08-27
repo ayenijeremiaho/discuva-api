@@ -48,6 +48,7 @@ export enum JournalEntrySource {
   MANUAL = 'MANUAL',
   CSV_IMPORT = 'CSV_IMPORT',
   PAYMENT_GATEWAY = 'PAYMENT_GATEWAY',
+  FINANCE_REQUEST = 'FINANCE_REQUEST',
 }
 
 export enum JournalEntryType {
@@ -74,6 +75,7 @@ export enum JournalLinkType {
   DEPARTMENT = 'DEPARTMENT',
   SERVICE = 'SERVICE',
   EXTERNAL_PAYEE = 'EXTERNAL_PAYEE',
+  FINANCE_REQUEST = 'FINANCE_REQUEST',
 }
 
 export enum JournalLinkRole {

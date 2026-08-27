@@ -5,7 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { PrayerMeeting } from '../entity/prayer-meeting.entity';
 import { PrayerRosterEntry } from '../entity/prayer-roster-entry.entity';
 import { PrayerFixedAssignment } from '../entity/prayer-fixed-assignment.entity';
@@ -49,7 +51,7 @@ export class PrayerMeetingService {
     private readonly deptLeadRepo: Repository<DepartmentLead>,
     @InjectRepository(PrayerScheduleRule)
     private readonly ruleRepo: Repository<PrayerScheduleRule>,
-    private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly pushService: PushNotificationService,
   ) {}
 
@@ -201,91 +203,90 @@ export class PrayerMeetingService {
     if (!workerProfile)
       throw new NotFoundException('Worker profile not found.');
 
-    return this.dataSource.transaction(async (manager) => {
-      const meeting = await manager
-        .getRepository(PrayerMeeting)
-        .createQueryBuilder('m')
-        .innerJoinAndSelect('m.dayConfig', 'dc')
-        .innerJoinAndSelect('m.program', 'p')
-        .where('m.id = :id', { id: dto.meetingId })
-        .setLock('pessimistic_write')
-        .getOne();
-      if (!meeting) throw new NotFoundException('Prayer meeting not found.');
-      if (meeting.program.id !== programId) {
-        throw new BadRequestException(
-          'Meeting does not belong to this program.',
-        );
-      }
-      if (meeting.selectionStatus !== PrayerWindowStatus.OPEN) {
-        throw new BadRequestException(
-          'Selection window is not open for this meeting.',
-        );
-      }
-      if (meeting.currentCapacity >= meeting.dayConfig.maxCapacity) {
-        throw new BadRequestException('This prayer day is fully booked.');
-      }
-
-      const fixedOnThisDay = await manager.findOne(PrayerFixedAssignment, {
-        where: {
-          workerProfile: { id: workerProfileId },
-          dayConfig: { id: meeting.dayConfig.id },
-          isActive: true,
-        },
-      });
-      if (fixedOnThisDay) {
-        throw new BadRequestException(
-          'You already have a fixed assignment for this prayer day. Contact an admin to make changes.',
-        );
-      }
-
-      const requiredFrequency = await this.getRequiredFrequency(
-        programId,
-        workerProfileId,
+    // this.txHost.tx, not this.dataSource.transaction() — see
+    // JournalEntryService for the full rationale.
+    const manager = this.txHost.tx;
+    const meeting = await manager
+      .getRepository(PrayerMeeting)
+      .createQueryBuilder('m')
+      .innerJoinAndSelect('m.dayConfig', 'dc')
+      .innerJoinAndSelect('m.program', 'p')
+      .where('m.id = :id', { id: dto.meetingId })
+      .setLock('pessimistic_write')
+      .getOne();
+    if (!meeting) throw new NotFoundException('Prayer meeting not found.');
+    if (meeting.program.id !== programId) {
+      throw new BadRequestException('Meeting does not belong to this program.');
+    }
+    if (meeting.selectionStatus !== PrayerWindowStatus.OPEN) {
+      throw new BadRequestException(
+        'Selection window is not open for this meeting.',
       );
-      const existingCount = await manager.count(PrayerRosterEntry, {
-        where: {
-          workerProfile: { id: workerProfileId },
-          meeting: {
-            month: meeting.month,
-            year: meeting.year,
-            program: { id: programId } as any,
-          },
-          status: PrayerRosterStatus.SCHEDULED,
-        },
-      });
-      if (existingCount >= requiredFrequency) {
-        throw new BadRequestException(
-          `You have already selected your required ${requiredFrequency} prayer slot(s) for this month.`,
-        );
-      }
+    }
+    if (meeting.currentCapacity >= meeting.dayConfig.maxCapacity) {
+      throw new BadRequestException('This prayer day is fully booked.');
+    }
 
-      const alreadyOnThisDay = await manager.findOne(PrayerRosterEntry, {
-        where: {
-          workerProfile: { id: workerProfileId },
-          meeting: { id: dto.meetingId },
-          status: PrayerRosterStatus.SCHEDULED,
-        },
-      });
-      if (alreadyOnThisDay)
-        throw new ConflictException(
-          'You are already assigned to this prayer meeting.',
-        );
-
-      const entry = manager.create(PrayerRosterEntry, {
-        workerProfile,
-        meeting,
-        assignmentType: PrayerAssignmentType.SELF_SELECTED,
-      });
-      const saved = await manager.save(PrayerRosterEntry, entry);
-
-      meeting.currentCapacity += 1;
-      if (meeting.currentCapacity >= meeting.dayConfig.maxCapacity) {
-        meeting.selectionStatus = PrayerWindowStatus.CLOSED;
-      }
-      await manager.save(PrayerMeeting, meeting);
-
-      return saved;
+    const fixedOnThisDay = await manager.findOne(PrayerFixedAssignment, {
+      where: {
+        workerProfile: { id: workerProfileId },
+        dayConfig: { id: meeting.dayConfig.id },
+        isActive: true,
+      },
     });
+    if (fixedOnThisDay) {
+      throw new BadRequestException(
+        'You already have a fixed assignment for this prayer day. Contact an admin to make changes.',
+      );
+    }
+
+    const requiredFrequency = await this.getRequiredFrequency(
+      programId,
+      workerProfileId,
+    );
+    const existingCount = await manager.count(PrayerRosterEntry, {
+      where: {
+        workerProfile: { id: workerProfileId },
+        meeting: {
+          month: meeting.month,
+          year: meeting.year,
+          program: { id: programId } as any,
+        },
+        status: PrayerRosterStatus.SCHEDULED,
+      },
+    });
+    if (existingCount >= requiredFrequency) {
+      throw new BadRequestException(
+        `You have already selected your required ${requiredFrequency} prayer slot(s) for this month.`,
+      );
+    }
+
+    const alreadyOnThisDay = await manager.findOne(PrayerRosterEntry, {
+      where: {
+        workerProfile: { id: workerProfileId },
+        meeting: { id: dto.meetingId },
+        status: PrayerRosterStatus.SCHEDULED,
+      },
+    });
+    if (alreadyOnThisDay)
+      throw new ConflictException(
+        'You are already assigned to this prayer meeting.',
+      );
+
+    const entry = manager.create(PrayerRosterEntry, {
+      workerProfile,
+      meeting,
+      assignmentType: PrayerAssignmentType.SELF_SELECTED,
+    });
+    const saved = await manager.save(PrayerRosterEntry, entry);
+
+    meeting.currentCapacity += 1;
+    if (meeting.currentCapacity >= meeting.dayConfig.maxCapacity) {
+      meeting.selectionStatus = PrayerWindowStatus.CLOSED;
+    }
+    await manager.save(PrayerMeeting, meeting);
+
+    return saved;
   }
 
   async getMyRoster(

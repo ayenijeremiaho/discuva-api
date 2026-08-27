@@ -17,8 +17,6 @@ export enum AdminPermission {
   ANNOUNCEMENTS_WRITE = 'announcements:write',
   GROUPS_READ = 'groups:read',
   GROUPS_WRITE = 'groups:write',
-  NOTES_READ = 'notes:read',
-  NOTES_WRITE = 'notes:write',
   DASHBOARD_READ = 'dashboard:read',
   SUNDAY_SCHOOL_READ = 'sunday_school:read',
   SUNDAY_SCHOOL_WRITE = 'sunday_school:write',
@@ -104,8 +102,6 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.ANNOUNCEMENTS_WRITE]: 'Manage Announcements',
   [AdminPermission.GROUPS_READ]: 'View Contact Lists',
   [AdminPermission.GROUPS_WRITE]: 'Manage Contact Lists',
-  [AdminPermission.NOTES_READ]: 'View Notes',
-  [AdminPermission.NOTES_WRITE]: 'Manage Notes',
   [AdminPermission.DASHBOARD_READ]: 'View Dashboard',
   [AdminPermission.SUNDAY_SCHOOL_READ]: 'View Sunday School',
   [AdminPermission.SUNDAY_SCHOOL_WRITE]: 'Manage Sunday School',
@@ -205,9 +201,6 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
   [AdminPermission.GROUPS_READ]: 'View contact lists and their member rosters',
   [AdminPermission.GROUPS_WRITE]:
     'Create and manage contact lists, and add or remove members individually or in bulk',
-  [AdminPermission.NOTES_READ]:
-    'View pastoral notes and member interaction records',
-  [AdminPermission.NOTES_WRITE]: 'Create and assign pastoral notes to members',
   [AdminPermission.DASHBOARD_READ]:
     'Access the admin overview dashboard and summary statistics',
   [AdminPermission.SUNDAY_SCHOOL_READ]:
@@ -442,9 +435,7 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     ],
     'announcements',
   ),
-  buildGroup('Notes & Follow-Up', [
-    AdminPermission.NOTES_READ,
-    AdminPermission.NOTES_WRITE,
+  buildGroup('Follow-Up', [
     AdminPermission.FOLLOW_UP_READ,
     AdminPermission.FOLLOW_UP_WRITE,
   ]),

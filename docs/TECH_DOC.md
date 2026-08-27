@@ -424,8 +424,12 @@ A log entry recorded each time the Prayer team prays with/visits a pregnant woma
 | classType           | ManyToOne → ClassType (nullable: false, onDelete: RESTRICT)   |
 | facilitator         | ManyToOne → Member (nullable)                                  |
 | startDate / endDate | date strings                                                   |
+| nextSessionAt       | timestamptz, nullable — a single "next session" field the facilitator updates as the class progresses week to week, not a full multi-session schedule entity |
+| meetingLink         | varchar, nullable — join link for a virtual session, shown alongside `nextSessionAt` |
 
 **Delete guard:** Deleting a class is blocked if any enrolment record exists (any status — IN_PROGRESS, COMPLETED, or CANCELLED). This preserves historical enrolment data. A class with enrolment history cannot be deleted.
+
+**Next session (`nextSessionAt`/`meetingLink`):** `PATCH classes/:id/session` (body: `UpdateClassSessionDto` — both fields optional, either can be set to `null` to clear it) lets a facilitator/admin record when the class next meets and how to join. Deliberately a single mutable pair of columns rather than a `ClassSession` entity — a class is expected to have one upcoming session in view at a time, updated in place as it progresses, not a pre-populated calendar. Feeds `ClassSessionReminderScheduler` (see Reminder Settings Module) and is surfaced on both the authenticated member class-detail view and the guest portal (`GET classes/guest/:enrollmentId`).
 
 ### ClassType
 
@@ -440,11 +444,32 @@ Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-c
 
 **Promotion chain:** `nextClassType` is a self-referencing pointer, not a `level` number — a class type either points to the next type in its progression or is `null` (standalone, no promotion). The chain is entirely admin-configured via the ClassType CRUD endpoints; nothing is pre-wired by the migration (the 5 seeded legacy types — Believers' Class, Baptismal Class, Workers in Training, Bible College, School of Discipleship — all seed with `nextClassType = null`). Writes are validated server-side against self-reference and cycles (walks the proposed chain up to 20 hops looking for a loop back to the type being edited) since a DB FK can't express "no cycles."
 
+### Guest
+
+A non-member taking a Training Class — e.g. a visitor's spouse attending marriage counselling alongside their member partner. Deliberately its own entity, not inline columns on `ClassEnrollment`: a guest is a repeat, evolving identity that may take several classes over time, so contact details are stored once here and referenced from each enrollment, rather than duplicated (and risking staleness) per enrollment row.
+
+| Field           | Notes                                                                 |
+|-----------------|------------------------------------------------------------------------|
+| firstName       | required                                                                |
+| lastName        | required                                                                |
+| email           | required, unique — the primary contact channel, prioritized over phone |
+| phone           | nullable — optional, used only if the guest opts into SMS              |
+| churchName      | nullable — their home church, if any                                   |
+| address         | nullable                                                                |
+| notes           | text, nullable — open catch-all                                        |
+| convertedMember | ManyToOne → Member, nullable, `onDelete: SET NULL` — set once this guest converts to a full Member; kept as a permanent historical link even after `ClassEnrollment.member` is also updated directly (see conversion below) |
+
+**Find-or-create by email:** `GuestService.findOrCreateByEmail()` backs both the "new guest" enrollment form (profile fields provided, no prior record) and the "existing guest" search-and-select path — a returning guest's contact details are looked up once by email, not re-entered per class.
+
+**Conversion (`POST classes/guests/:guestId/convert-to-member`):** admin-only, scoped to the guest record (not one enrollment) — reuses `MemberService.createByAdmin()`, the same temp-password + forced-change-password + welcome-email flow used for every other admin-created member. Builds a `SignupDto` from the guest's `firstName`/`lastName`/`email`/`phone`, creates the member, sets `guest.convertedMember`, then bulk-updates every `ClassEnrollment` referencing that guest to point at the new member directly — so downstream code (reminders, Announcements audience resolution, submissions) never needs to know about the guest→member relationship, only "does this enrollment have a member." The guest record and its profile data are kept as history, not cleared. Audit-logged as `GUEST_CONVERTED_TO_MEMBER`.
+
 ### ClassEnrollment
 
 | Field                     | Notes                                 |
 |---------------------------|---------------------------------------|
-| member                    | ManyToOne → Member                    |
+| member                    | ManyToOne → Member, nullable          |
+| guest                     | ManyToOne → Guest, nullable, indexed, `onDelete: SET NULL` |
+| purpose                   | text, nullable — why this specific enrollee is taking this specific class; per-enrollment (not per-guest), since the same guest could take two classes for two different reasons |
 | churchClass               | ManyToOne → ChurchClass               |
 | status                    | IN_PROGRESS \| COMPLETED \| CANCELLED |
 | enrolledAt                | auto timestamp                        |
@@ -453,7 +478,11 @@ Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-c
 | certificateIssuedAt       | timestamptz, nullable                 |
 | certificateNumber         | varchar, nullable                     |
 
-**Unique constraint:** (member, churchClass)
+**Exactly one of `member`/`guest` is required** — DB-level CHECK constraint `member_id IS NOT NULL OR guest_id IS NOT NULL`. Not exclusive (not XOR): a converted guest ends up with both set — `guest` is retained as history, `member` is set at conversion time (see `Guest` above).
+
+**Unique constraints:** (member, churchClass) and (guest, churchClass) — a member and a guest can each only have one enrollment record per class.
+
+**Guest portal access:** a guest never logs in — their own `ClassEnrollment.id` (already a random-looking UUID) is the access key, mirroring the Forms module's public-submission pattern (`@Public()`, no token-generation system). On enrollment, `class-guest-access` emails a link to `GET classes/guest/:enrollmentId` (frontend: `discuva-member`'s `app/classes/guest/[id]/page.tsx`, no `Shell`/`withAuth`). That route + the paired `POST classes/guest/:enrollmentId/assignments/:assignmentId/submit` are the *only* surface a guest can reach — no other member-app feature, no self-serve conversion.
 
 **Level promotion:** When an enrollment is `COMPLETED` and its class's `classType.nextClassType` is set, `GET classes/enrollments/:enrollmentId/promotion-candidate` reports eligibility plus any currently-open (`ACTIVE`) classes of that next type. Promotion itself is a separate, explicit, admin-confirmed action — `POST classes/enrollments/:enrollmentId/promote` (body: `targetClassId`) — mirroring the `promoteToWorker` pattern (transaction + `CLASS_LEVEL_PROMOTED` audit log entry + a `class-level-promotion` templated email to the member). Nothing is auto-enrolled on completion; standalone class types (no `nextClassType`) simply have no promotion affordance.
 
@@ -463,10 +492,11 @@ Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-c
 
 | Field        | Notes                                                                     |
 |--------------|----------------------------------------------------------------------------|
-| audience     | ALL \| WORKERS_ONLY \| MEMBERS_ONLY \| DEPARTMENT \| INDIVIDUAL \| GROUP   |
+| audience     | ALL \| WORKERS_ONLY \| MEMBERS_ONLY \| DEPARTMENT \| INDIVIDUAL \| GROUP \| CLASS |
 | department   | ManyToOne → Department (required when audience=DEPARTMENT)                 |
 | targetMember | ManyToOne → Member, nullable (required when audience=INDIVIDUAL)           |
 | group        | ManyToOne → Group, nullable (required when audience=GROUP)                 |
+| churchClass  | ManyToOne → ChurchClass, nullable, column `class_id` (required when audience=CLASS) |
 | publishedAt  | defaults to creation time                                                  |
 | expiresAt    | nullable; expired items excluded from feed                                 |
 | sendViaSms   | boolean, default `false`; requires the caller's admin role to hold `SMS_SEND` (see SMS Module) |
@@ -630,7 +660,8 @@ that was actually attempted through a tenant's own BYOK provider — fixed by th
 `FINANCE_CATEGORY_CREATED` · `FINANCE_CATEGORY_UPDATED` · `FINANCE_REQUEST_CREATED` · `FINANCE_REQUEST_APPROVED` · `FINANCE_REQUEST_REJECTED` · `FINANCE_PROOF_ATTACHED` ·
 `TITHE_PROOF_SUBMITTED` · `TITHE_PROOF_CONFIRMED` · `TITHE_PROOF_DECLINED` · `TITHE_PROOF_EXPIRED_PURGED` ·
 `CHURCH_SETTING_UPDATED` · `INCIDENT_REPORT_CREATED` · `INCIDENT_REPORT_STATUS_UPDATED` ·
-`ASSET_CREATED` · `ASSET_UPDATED` · `ASSET_MAINTENANCE_SCHEDULED` · `ASSET_MAINTENANCE_LOGGED` · `ASSET_INVENTORY_UPDATED`
+`ASSET_CREATED` · `ASSET_UPDATED` · `ASSET_MAINTENANCE_SCHEDULED` · `ASSET_MAINTENANCE_LOGGED` · `ASSET_INVENTORY_UPDATED` ·
+`GUEST_CONVERTED_TO_MEMBER`
 
 ### EventReminder
 
@@ -937,6 +968,7 @@ An expense request raised by a department head (HOD).
 | proofUrl             | string \| null       | Cloudinary URL for payment proof, set post-approval|
 | proofPublicId        | string \| null       | Cloudinary public ID for proof (deletion)          |
 | proofResourceType    | string \| null       | Cloudinary resource type for proof                 |
+| journalEntry         | JournalEntry \| null | ManyToOne, SET NULL — set when a finance-team admin opts to post this request's payment to the ledger at proof-attachment time; see Finance Request Module below |
 
 ### FirstTimer
 
@@ -2218,7 +2250,7 @@ Finance, Administration, etc.) carry no `moduleKey` and are always shown.
 
 ### Reminder Settings Module
 
-Lets a tenant admin control the timing (and on/off state) of 6 reminder-email categories, per-installation, without a
+Lets a tenant admin control the timing (and on/off state) of 8 reminder-email categories, per-installation, without a
 deploy — previously every value below was either a hardcoded literal or a single global env var, invisible and
 unconfigurable to anyone but whoever edits deploy config. Backed by the **same `ChurchSetting` entity/table** as the
 Church Settings module above (`key` unique, `value: jsonb`), under a disjoint key namespace (`` `reminder:${key}` ``)
@@ -2253,6 +2285,49 @@ actually changes one:
 | `asset_maintenance` | days before due | `[7, 3, 1, 0]` | `MaintenanceReminderScheduler` |
 | `asset_warranty` | days before expiry | `[30, 14, 7, 1]` | `WarrantyAlertScheduler` |
 | `vehicle_expiry` | days before expiry | `[30, 14, 7, 1]` | `VehicleExpiryAlertScheduler` |
+| `assignment_due` | days relative to due date | `[3, 1, 0]` | `AssignmentReminderScheduler` |
+| `class_session` | hours before session | `[24, 1]` | `ClassSessionReminderScheduler` |
+
+**`smsEnabled` — email-always, SMS-optional (Training Classes only):** `assignment_due` and `class_session` are the
+only two reminder keys with a tenant-configurable `smsEnabled: boolean` (default `false`) on top of the usual
+`enabled`/`thresholds` shape (`ReminderSettingValue`/`ReminderSettingResponseDto`/`UpdateReminderSettingDto` all
+carry it; stored on the same flexible `ChurchSetting.value` jsonb column, no migration needed). Every other
+reminder key is email-only and unaffected. The email always sends when a threshold matches (to `member.email` or
+`guest.email` — both exist for every Training Classes enrollee now, guest or member); SMS is an *additional* send,
+skipped entirely unless `smsEnabled` is on **and** a phone number is on file for that specific enrollee (a guest's
+`phone` is optional). This mirrors the guest contact model chosen for Classes generally: email-first, phone/SMS
+opt-in — see the `Guest` entity section above.
+
+- `AssignmentReminderScheduler` (`src/classes/scheduler/assignment-reminder.scheduler.ts`): for each published
+  `Assignment` with a `dueDate`, finds `IN_PROGRESS` enrollees of its class (member or guest) with **no matching
+  submission yet** (`ClassEnrollment` LEFT JOIN `AssignmentSubmission` on either `member_id` or
+  `class_enrollment_id`, `WHERE submission IS NULL`), computes `diffDays` vs. today, and — if it matches a
+  configured threshold — emails (`assignment-due-reminder` template, `EmailCategory.ASSIGNMENT_REMINDER`) and
+  optionally SMS-nudges (generic, non-personalized text, no link) every qualifying enrollee. Cache-deduped per
+  `(assignmentId, enrolleeId, diffDays)` so a reminder never double-sends within the same day.
+- `ClassSessionReminderScheduler` (`src/classes/scheduler/class-session-reminder.scheduler.ts`): same structural
+  pattern, keyed per `ChurchClass` with `nextSessionAt` set (not per-assignment) — `diffHours`, not `diffDays`,
+  matching this key's hours-based unit. Emails `IN_PROGRESS` enrollees (`class-session-reminder` template,
+  `EmailCategory.CLASS_SESSION_REMINDER`) with the class name, session time, and `meetingLink` (conditionally
+  rendered in the template if set); SMS text includes the meeting link when present. Separate scheduler/key from
+  `assignment_due` since they're conceptually different triggers (per-assignment vs. per-class) and admins may
+  want different thresholds for each (e.g. "1 hour before" for a meeting vs. "3 days before" for an assignment
+  deadline).
+  - **Calendar invite:** every send also attaches a generated `.ics` file (`class-session.ics`, built via
+    `buildIcsEvent` — see "Calendar invites (`.ics`)" below) so the session can be added to the recipient's
+    calendar directly from the email, the same treatment `service-slot-assigned`/`service-slot-reminder` already
+    give a service assignment. `ChurchClass` has no explicit session-duration field, so the invite defaults to a
+    1-hour block starting at `nextSessionAt`. The invite's `UID` is keyed on `` `${churchClass.id}-${nextSessionAt.getTime()}@classes-session` ``
+    — built once per (class, session) and reused for every recipient of that run — so repeated reminders (24h,
+    1h) for the *same* unchanged session update the one calendar entry the recipient already has, while
+    rescheduling `nextSessionAt` produces a new entry rather than silently mutating the old one. `meetingLink`,
+    when set, is used as both the invite's `LOCATION` and its description text.
+
+Both use the same `forEachActiveTenant` + Redis-lock + per-tenant `getConfig()` pattern as every other reminder
+scheduler (see "Runtime read" below) and are registered in `ClassesModule` (not a separate module) — they're
+Training Classes-specific, not general-purpose. `AssignmentReminderScheduler` runs `@Cron(EVERY_DAY_AT_8AM)`,
+matching the date-based thresholds; `ClassSessionReminderScheduler` runs `@Cron(EVERY_HOUR)`, matching its
+hours-based thresholds — an hourly-granularity trigger needs an hourly check to land on the right hour.
 
 **Explicitly excluded** from tenant control (unreachable by any tenant-facing route, unchanged hardcoded/global
 behavior): `overdue-checkout` alerts (asset accountability — a deliberate product decision, not a tenant
@@ -2260,7 +2335,7 @@ preference), prayer reminders (dual 2-day-ahead/day-of logic doesn't fit the lis
 Feedback's weekly reminder (its timing *is* the `@Cron('0 9 * * 1')` schedule itself — tenant-configurable cron
 cadence would need dynamic `SchedulerRegistry` registration, a materially different change than a settings value).
 
-**Runtime read (`getConfig(key)`):** each of the 6 schedulers calls this **inside** its `forEachActiveTenant(...)`
+**Runtime read (`getConfig(key)`):** each of the 8 schedulers calls this **inside** its `forEachActiveTenant(...)`
 callback — not once at construction — since cron jobs have no ambient tenant context outside that loop, and
 `CacheService`'s tenant-scoped cache keys rely on the CLS store `forEachActiveTenant` populates per iteration. If
 `enabled` is `false`, the scheduler returns before any email is queued for that tenant that run.
@@ -2292,7 +2367,9 @@ callback — not once at construction — since cron jobs have no ambient tenant
 
 **Frontend:** discuva-admin's `/notification-settings` page (own `layout.tsx` wrapping `<Shell>` — every new
 top-level route needs one, there is no global Shell in root `layout.tsx`) — one row per setting: an enabled/disabled
-toggle plus an editable numeric-chip list (add/remove) for `thresholds`.
+toggle plus an editable numeric-chip list (add/remove) for `thresholds`. The `assignment_due`/`class_session` rows
+additionally show an SMS toggle bound to `smsEnabled` — every other row hides it, since only those two keys carry
+the field.
 
 ### Email Category Settings Module
 
@@ -2562,6 +2639,14 @@ Tracks member progress through structured church programs. The module, route pat
 
 **Certificates:** A `COMPLETED` enrollment can be marked as having received a certificate via `PATCH classes/enrollments/:id/certificate` (optional `certificateNumber`) — see the `ClassEnrollment` entity section above.
 
+**Guest enrollment:** non-members can take a class alongside members — see the `Guest`/`ClassEnrollment` entity sections above for the data model and portal-access mechanics. `POST classes/enroll/guest` (body: `EnrollGuestDto` — `classId` + either `guestId` for a returning guest, or `firstName`/`lastName`/`email`(+`phone`/`churchName`/`address`/`notes`) for a new one, + optional per-enrollment `purpose`) enrolls a single guest, finding-or-creating the `Guest` row by email and sending the `class-guest-access` portal-link email on a fresh enrollment (not on re-enrollment of a `CANCELLED` row). `POST classes/enroll/guests/bulk` (body: `BulkEnrollGuestsDto` — `classId` + `guests: {firstName, lastName, email, phone?}[]`) loops the same logic per entry, catching and logging per-entry failures rather than aborting the whole batch, and returns `{ enrolled, skipped }` — mirroring `bulkEnrollMembers`'s all-or-nothing-per-row (not all-or-nothing-per-batch) behavior. Both are blocked (`400`) against a `CLOSED` class.
+
+**Guest management (`GET classes/guests`, `GET classes/guests/:id`):** `GET classes/guests` is a paginated, search-by-name/email list of every guest across all classes (permission `CLASSES_READ`) — the answer to "how does an admin see/manage a guest across multiple classes" without digging through one class's enrollment tab at a time. `GET classes/guests/:id` returns one guest's profile plus every `ClassEnrollment` they've ever had, across all classes.
+
+**Guest-to-member conversion:** `POST classes/guests/:guestId/convert-to-member` (permission `CLASSES_WRITE`) — see the `Guest` entity section above.
+
+**Guest portal access (no login):** `GET classes/guest/:enrollmentId` and `POST classes/guest/:enrollmentId/assignments/:assignmentId/submit`, both `@Public()` (bypass `JwtAuthGuard`; `ModuleEnabledGuard` still applies since it keys off the tenant, not caller auth) on a dedicated `ClassPublicController` — mirrors the Forms module's public-submission pattern exactly. The submit route is rate-limited (`5/min`). `submitAsGuest` verifies the enrollment actually has a `guest` attached and belongs to the *same* class as the assignment, so neither a member's enrollment id nor a guest's enrollment in a different class can be used to submit.
+
 **Study material (`ChurchClass.documentUrl`):** optional, admin-set link to the class's syllabus/manual (Google
 Drive, PDF link, etc.) — validated as a URL (`@IsUrl()`) at the DTO level, but the URL itself can come from three
 places: a plain external link typed in directly, a fresh upload (`POST classes/materials/upload`, multipart, field
@@ -2586,11 +2671,15 @@ otherwise), optional `feedback`, and stamps `gradedBy` (the grading `Admin`, res
 the JWT's member id) + `gradedAt`. `gradedBy` is `SET NULL` on admin deletion, mirroring the `reviewedBy` pattern
 used by tithe/finance proof review.
 
+**Guest submissions:** `AssignmentSubmission.member` is nullable; a guest's submission is keyed by `classEnrollment` (ManyToOne → `ClassEnrollment`, `onDelete: CASCADE`) instead — DB-level CHECK constraint `(member_id IS NOT NULL) != (class_enrollment_id IS NOT NULL)` (exact XOR, unlike `ClassEnrollment`'s own OR constraint): a submission is made either as an authenticated member OR via a specific guest enrollment, never both, and converting a guest later doesn't rewrite past submissions. `UNIQUE(assignment_id, class_enrollment_id)` mirrors the member-side `UNIQUE(assignment_id, member_id)`. `submitAsGuest()` is the guest-portal equivalent of `submit()` — same overwrite-before-grading / reject-after-grading rules, reached only via `ClassPublicController` (see Guest portal access above).
+
+**Progress summary:** both `GET classes/:classId/assignments/available` (member) and `GET classes/guest/:enrollmentId` (guest) return `{ assignments: [...], progress: { submitted, total } }` — the progress summary is derived from the same published-assignments-plus-submissions query already being run, not a separate round-trip. **Breaking change from the prior shape:** `available` used to return a bare `Assignment[]`; callers must now read `.assignments`.
+
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
 | POST   | `/classes/:classId/assignments`                          | AdminGuard (CLASSES_WRITE) | Create an assignment for a class |
 | GET    | `/classes/:classId/assignments`                          | AdminGuard (CLASSES_READ)  | All assignments for a class, including unpublished drafts |
-| GET    | `/classes/:classId/assignments/available`                | JwtAuthGuard               | Published assignments only, each merged with the caller's own `mySubmission` (`null` if not yet submitted) |
+| GET    | `/classes/:classId/assignments/available`                | JwtAuthGuard               | `{ assignments, progress }` — published assignments only, each merged with the caller's own `mySubmission` (`null` if not yet submitted) |
 | PATCH  | `/classes/assignments/:assignmentId`                     | AdminGuard (CLASSES_WRITE) | Partial update |
 | DELETE | `/classes/assignments/:assignmentId`                     | AdminGuard (CLASSES_WRITE) | Cascades submissions |
 | POST   | `/classes/assignments/:assignmentId/submit`              | JwtAuthGuard               | Create or (if ungraded) overwrite the caller's own submission |
@@ -2598,6 +2687,15 @@ used by tithe/finance proof review.
 | PATCH  | `/classes/assignments/submissions/:submissionId/grade`   | AdminGuard (CLASSES_WRITE) | `{ score, feedback? }` |
 | POST   | `/classes/materials/upload`                              | AdminGuard (CLASSES_WRITE) | Multipart, field `file` → `{ url }` |
 | GET    | `/classes/materials/library`                             | AdminGuard (CLASSES_READ)  | `{ documentUrl, usedByClassNames }[]` — for the "reuse a previous upload" picker |
+| GET    | `/classes/lookup`                                        | AdminGuard (ANNOUNCEMENTS_WRITE) | `{id, name, startDate, endDate}[]` — feeds the Announcements CLASS-audience picker; gated on `ANNOUNCEMENTS_WRITE` (composing an announcement), not `CLASSES_READ`, mirroring `GET /groups/lookup` |
+| PATCH  | `/classes/:id/session`                                   | AdminGuard (CLASSES_WRITE) | `{ nextSessionAt?, meetingLink? }` — either can be set to `null` to clear |
+| POST   | `/classes/enroll/guest`                                  | AdminGuard (CLASSES_WRITE) | `EnrollGuestDto` — see Guest enrollment above |
+| POST   | `/classes/enroll/guests/bulk`                            | AdminGuard (CLASSES_WRITE) | `BulkEnrollGuestsDto` → `{ enrolled, skipped }` |
+| GET    | `/classes/guests`                                        | AdminGuard (CLASSES_READ)  | Paginated, `?search=` by name/email |
+| GET    | `/classes/guests/:id`                                    | AdminGuard (CLASSES_READ)  | Guest profile + every enrollment across all classes |
+| POST   | `/classes/guests/:guestId/convert-to-member`             | AdminGuard (CLASSES_WRITE) | See Guest-to-member conversion above |
+| GET    | `/classes/guest/:enrollmentId`                           | `@Public()`                | Class info (incl. `nextSessionAt`/`meetingLink`) + guest name + assignments + progress |
+| POST   | `/classes/guest/:enrollmentId/assignments/:assignmentId/submit` | `@Public()`, rate-limited (5/min) | `{ content }` |
 
 Assignments reuse the existing `classes:read`/`classes:write` permissions rather than adding new ones — managing
 assignments is the same admin surface as managing the classes they belong to.
@@ -2611,16 +2709,19 @@ role and optional `departmentId`.
 
 **Audience rules:**
 
-- MEMBER → sees `ALL` + `MEMBERS_ONLY` + any `INDIVIDUAL` announcements addressed to them + any `GROUP` announcement for a group they belong to
-- WORKER → sees `ALL` + `WORKERS_ONLY` + `DEPARTMENT` (for their department) + `INDIVIDUAL` (addressed to them) + any `GROUP` announcement for a group they belong to
+- MEMBER → sees `ALL` + `MEMBERS_ONLY` + any `INDIVIDUAL` announcements addressed to them + any `GROUP` announcement for a group they belong to + any `CLASS` announcement for a class they're enrolled in (`IN_PROGRESS`/`COMPLETED`, as a member — guests have no login and so never see the feed)
+- WORKER → sees `ALL` + `WORKERS_ONLY` + `DEPARTMENT` (for their department) + `INDIVIDUAL` (addressed to them) + any `GROUP` announcement for a group they belong to + any `CLASS` announcement for a class they're enrolled in
 - ADMIN → sees all audiences
 - Expired announcements (`expiresAt < now`) are excluded from the feed
 
-**Audience types:** `ALL` | `WORKERS_ONLY` | `MEMBERS_ONLY` | `DEPARTMENT` | `INDIVIDUAL` | `GROUP`  
+**Audience types:** `ALL` | `WORKERS_ONLY` | `MEMBERS_ONLY` | `DEPARTMENT` | `INDIVIDUAL` | `GROUP` | `CLASS`  
 When `audience = DEPARTMENT`, `departmentId` is required. When `audience = INDIVIDUAL`, `targetMemberId` (UUID) is
-required. When `audience = GROUP`, `groupId` (UUID) is required.
+required. When `audience = GROUP`, `groupId` (UUID) is required. When `audience = CLASS`, `classId` (UUID) is
+required. Since `ChurchClass` already has `startDate`/`endDate` — each row is one dated cohort — picking a specific
+class already scopes the audience to a specific date range; there's no separate date-range picker. `CLASS` audience
+targets `IN_PROGRESS` + `COMPLETED` enrollees only (excludes `CANCELLED`).
 
-**Push notification on every audience:** `AnnouncementService.create()` always fire-and-forgets a single `PushNotificationService.dispatchToMemberIds()` call after saving, for every audience type — not just `GROUP`. `resolveMemberIdsForAudience()` computes the recipient member-id list per audience (`GROUP` → `GroupService.getMemberIdsForGroup`; `INDIVIDUAL` → the single `targetMember`; `ALL`/`MEMBERS_ONLY`/`WORKERS_ONLY`/`DEPARTMENT` → an `ACTIVE`-member query filtered by role/department, mirroring `resolvePhoneNumbers`'s SMS-targeting logic but without requiring a phone number on file). No push is sent when the resolved list is empty. Idempotency key = the announcement id, so a retry or duplicate call never double-sends. Failure to dispatch is logged as a warning and never fails the announcement creation itself — the announcement is still visible in-app via the feed regardless of push delivery outcome.
+**Push notification on every audience:** `AnnouncementService.create()` always fire-and-forgets a single `PushNotificationService.dispatchToMemberIds()` call after saving, for every audience type — not just `GROUP`. `resolveMemberIdsForAudience()` computes the recipient member-id list per audience (`GROUP` → `GroupService.getMemberIdsForGroup`; `CLASS` → `ClassesService.getMemberIdsForClass` — member-linked enrollees only, guests have no member id to push to; `INDIVIDUAL` → the single `targetMember`; `ALL`/`MEMBERS_ONLY`/`WORKERS_ONLY`/`DEPARTMENT` → an `ACTIVE`-member query filtered by role/department, mirroring `resolvePhoneNumbers`'s SMS-targeting logic but without requiring a phone number on file). No push is sent when the resolved list is empty. Idempotency key = the announcement id, so a retry or duplicate call never double-sends. Failure to dispatch is logged as a warning and never fails the announcement creation itself — the announcement is still visible in-app via the feed regardless of push delivery outcome.
 
 **Optional SMS delivery (`sendViaSms`/`smsBody`):** `CreateAnnouncementDto`/`UpdateAnnouncementDto` accept
 `sendViaSms?: boolean` and `smsBody?: string`. Setting `sendViaSms: true` requires the caller's admin role to hold
@@ -2641,14 +2742,15 @@ Always restricted to `ACTIVE` members with a non-null `phoneNumber`, further fil
 - `DEPARTMENT` — workers whose `workerProfile.department` matches `announcement.department`
 - `INDIVIDUAL` — just `announcement.targetMember`
 - `GROUP` — members resolved via `GroupService.getMemberIdsForGroup(announcement.group.id)`
+- `CLASS` — union of member-linked enrollees' phones (`ClassesService.getMemberIdsForClass`, filtered `ACTIVE`+phone-on-file like every other audience) and guest enrollees' own phones (`ClassesService.getGuestPhonesForClass` — a guest has no `Member` row, so their own `Guest.phone`, if set, is the only channel besides email), deduped — the same dual-source shape `resolveGroupPhoneNumbers` already uses for member vs. phone-only `GroupMember` entries
 
-`resolvePhoneNumbers` takes a plain `{ audience, departmentId?, targetMemberId?, groupId? }` target rather than an
+`resolvePhoneNumbers` takes a plain `{ audience, departmentId?, targetMemberId?, groupId?, classId? }` target rather than an
 `Announcement` entity, so it's reusable outside the announcement-creation flow — see `sendSmsBroadcast` below.
 
 **SMS-only broadcast (`POST /announcements/sms-broadcast`), no announcement created:** For sending a text blast to an
 audience without publishing anything to the in-app feed. Guarded solely by `SMS_SEND` (not `ANNOUNCEMENTS_WRITE` —
 an admin with SMS access but no announcement-authoring access can use this). Body: `SendSmsBroadcastDto` —
-`audience` (required) + the matching `departmentId`/`targetMemberId`/`groupId` for `DEPARTMENT`/`INDIVIDUAL`/`GROUP`
+`audience` (required) + the matching `departmentId`/`targetMemberId`/`groupId`/`classId` for `DEPARTMENT`/`INDIVIDUAL`/`GROUP`/`CLASS`
 audiences + `message` (required). Reuses the same `resolvePhoneNumbers` targeting as `sendViaSms` on a regular
 announcement. No `Announcement` row is created, no push notification is sent, and no title/body is required — this
 is purely an SMS send. Returns `{ sentCount }`; `sentCount: 0` (not an error) when the resolved audience has no
@@ -2674,6 +2776,8 @@ frontend's group picker (`GroupSearchInput`, a searchable combobox filtering the
 rather than a plain `<select>`) calls `GET /groups/lookup` via `useGroupLookup()` (see Groups Module), gated on
 `announcements:write` only, since choosing a group here is a component of the announcement feature rather than a
 separate group-management capability.
+
+**Picking a class when creating a `CLASS` announcement** mirrors the group picker exactly, one permission layer down: `ClassSearchInput` calls `GET /classes/lookup` (see Classes Module — same `announcements:write`-only gating, same reasoning), showing each class's name plus its `startDate`/`endDate` so an admin can distinguish cohorts of the same class type.
 
 ### Groups Module
 
@@ -3373,16 +3477,40 @@ self-referencing) but only flat parent → branch is exercised by anything built
 
 ### Forms (`src/forms/`)
 
-Admin-built dynamic forms — not tied to any one use case (events, surveys, sign-ups all reuse the same builder). A
-form has a `visibility` of `MEMBERS` or `PUBLIC`, an optional link to an `Event`, and an ordered list of fields
-(`TEXT`, `NUMBER`, `EMAIL`, `PHONE`, `TEXTAREA`, `DATE`, `DROPDOWN`, `CHECKBOX` — the latter two carry an `options`
-array). A `PUBLIC` form is fillable with no login at all — the whole point of making it public — while `MEMBERS`
-forms require an authenticated member/worker token.
+Admin-built dynamic forms — not tied to any one use case (events, surveys, sign-ups, and admin-recorded pastoral
+records all reuse the same builder). A form has a `visibility` of `MEMBERS`, `PUBLIC`, or `ADMIN_ONLY`, an optional
+link to an `Event`, and an ordered list of fields (`TEXT`, `NUMBER`, `EMAIL`, `PHONE`, `TEXTAREA`, `DATE`,
+`DROPDOWN`, `CHECKBOX` — the latter two carry an `options` array). A `PUBLIC` form is fillable with no login at all
+— the whole point of making it public — `MEMBERS` forms require an authenticated member/worker token, and
+`ADMIN_ONLY` forms have **no** member-facing or public-facing fill surface at all — the only way a submission is
+ever created against one is `POST /forms/:id/submissions` (admin-only; see below). `ADMIN_ONLY` exists for
+record-keeping forms an admin fills in on someone else's behalf rather than the subject self-submitting — e.g.
+pastoral records (child naming, dedication, marriage, baptism), where the subject often has no reason or ability
+to self-submit (a newborn being named has no account). This is a general-purpose escape hatch, not a fixed set of
+pastoral-record types the way a hardcoded "Notes" module would be — an admin defines whatever fields a given
+record type needs, and gets the same generic per-field analytics (see below) any other form gets, with zero new
+backend code per record type.
 
 **Auto-fill:** a field can carry an `autoFillKey` (`FIRST_NAME`/`LAST_NAME`/`EMAIL`/`PHONE_NUMBER`) — the
 member-facing "get form for filling" endpoint resolves these against the logged-in member's own profile and
 returns them as `suggestedValues` alongside the field definitions, so the frontend can pre-fill without needing its
 own copy of the mapping logic. Never applies to public/anonymous fills — there's no member to infer from.
+
+**Online first-timer intake (`Form.createsFirstTimers`):** a `PUBLIC` form can be flagged so that every submission
+to it also creates a `FirstTimer` record (`FollowUpService.createFirstTimerFromPublicForm`) — the online-intake
+counterpart to a walk-in visitor being registered by a Follow-Up worker. The same `autoFillKey` mechanism doubles
+as the field-mapping: `FormSubmissionService` reads the submitted answers back out via whichever fields carry
+`FIRST_NAME`/`LAST_NAME`/`PHONE_NUMBER`/`EMAIL`. Enforced at create/update time (`FormService.assertValidFirstTimerConfig`):
+the form must be `PUBLIC`, and each of `FIRST_NAME`/`LAST_NAME`/`PHONE_NUMBER` must be mapped to a field that is
+itself `required: true` — not just present — since `CreateFirstTimerDto`'s own class-validator decorators never
+run against a service-constructed object, so this is the only real guard against an empty name/phone reaching
+`FirstTimer`. The resulting `FirstTimer.source` is always forced to `ONLINE` regardless of whatever the form's own
+fields submit, and it's created with no actor (`memberCreatorId`/`adminCreatorId` both unset) — same round-robin
+Follow-Up-worker assignment and task-creation path as every other first-timer registration route. This side effect
+is fault-tolerant: a failure (e.g. no active Follow-Up worker configured yet) is logged but never blocks the
+submission itself from saving — an anonymous visitor filling this in from a QR code never sees an error. The
+intended distribution path is a QR code linking to the form's public URL, printed/displayed for walk-up scanning
+or shown during a livestream (generated client-side in discuva-admin — no backend endpoint involved).
 
 **Submissions are keyed by field id inside a `jsonb` blob** (`FormSubmission.answers: Record<fieldId, value>`),
 not a normalized per-answer table — editing or removing a field later never requires migrating past submissions; a
@@ -3405,6 +3533,7 @@ configured `options`.
 | GET    | `/forms/:id`                        | AdminGuard (FORMS_READ)  | Get one form with fields |
 | PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above) |
 | DELETE | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Cascades fields + submissions |
+| POST   | `/forms/:id/submissions`            | AdminGuard (FORMS_WRITE) | Admin records a submission on someone's behalf — `{ answers, memberId? }`. Works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in) |
 | GET    | `/forms/:id/submissions`            | AdminGuard (FORMS_READ)  | Paginated (`?page=&limit=`) — this list is attendance-scale, unlike the forms list itself |
 | GET    | `/forms/:id/submissions/export`     | AdminGuard (FORMS_READ)  | CSV, one column per field (ordered), `Submitted By` shows the member's name or "Public" |
 | GET    | `/forms/:id/analytics`              | AdminGuard (FORMS_READ)  | At-a-glance summary across all submissions, computed per field type (see below) |
@@ -3618,10 +3747,27 @@ dedicated host).
 | `LOGIN_ALERT` | `EMAIL_LOGIN_ALERT_ENABLED` | `true` |
 | `SERVICE_PROGRAMME_ASSIGNMENT` | `EMAIL_SERVICE_PROGRAMME_ASSIGNMENT_ENABLED` | `true` |
 | `PASTOR_FEEDBACK` | `EMAIL_PASTOR_FEEDBACK_ENABLED` | `true` |
+| `ASSIGNMENT_REMINDER` | `EMAIL_ASSIGNMENT_REMINDER_ENABLED` | `true` |
+| `CLASS_SESSION_REMINDER` | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
 conditionals, and `{{#each}}` for loops. Values are HTML-escaped automatically; use `{{{variable}}}` only for
 intentional raw HTML.
+
+**Calendar invites (`.ics`) — `buildIcsEvent`, `src/utility/util/ics-builder.ts`:** a small, dependency-free
+builder (`BEGIN:VCALENDAR`/`VEVENT` text assembly, no npm ics package) shared by every feature that emails someone
+about a specific dated event. Takes `{ uid, startTime, endTime, summary, description, location? }` and returns a
+`Buffer` — pass it to `UtilityService.sendEmailWithAttachment(to, subject, templateName, templateData, [{ filename, content }], category?)`
+(→ `EmailQueueService.queueEmailWithTemplateAndAttachments`) alongside the usual templated email. The builder
+doesn't own event identity — `uid` is the caller's full string (e.g. `` `${slotId}@service-programme` ``), so a
+recipient's calendar app can tell "this is an update to an event I already have" from "this is a new event" based
+entirely on whether the caller reuses the same `uid` across sends. Two consumers today:
+- **Service Programme** (`ServiceProgrammeService.notifySlotAssignment`, `ServiceProgrammeReminderScheduler`) —
+  `uid: ` `` `${slotId}@service-programme` `` ``, attached whenever the underlying `ServiceSlot` has both a
+  `startTime`/`endTime`; skipped otherwise (no time range to build an event from).
+- **Classes** (`ClassSessionReminderScheduler`) — see the Classes Module reminder-scheduler notes below;
+  `ChurchClass` has no explicit session-duration field, so this consumer defaults `endTime` to `startTime + 1h`
+  rather than omitting the invite.
 
 **Cloudinary (`CloudinaryService`):** Streams file uploads to Cloudinary via `upload_stream` with `resource_type: 'auto'`. Used for finance request attachments, payment proofs, and tithe payment proofs. `uploadBuffer(buffer, folder, filename?)` returns `{secureUrl, publicId, resourceType}` — callers must persist `publicId` and `resourceType` so that assets can be deleted without re-parsing the URL. `deleteByPublicId(publicId, resourceType)` destroys the asset using the stored values (replaces the old `deleteByUrl` which hardcoded `resource_type: 'raw'`). The service validates all three credentials on module init and throws if any are missing. Credentials are read from `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`.
 
@@ -3687,22 +3833,6 @@ greeted this calendar year.
 `EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED`, default `true`, same convention as every other email category).
 
 **Audit:** `MEMBERSHIP_ANNIVERSARY_GREETED` per member greeted (`metadata: { years }`).
-
-### Notes Module
-
-Pastoral records of significant events (child naming, dedication, marriage, baptism — "rites of passage"). Admin-only
-write/read surface. Stored as typed JSON detail objects.
-
-**Note types:** `child_naming`, `child_dedication`, `marriage`, `baptism`
-
-**Optional member link:** every note type accepts an optional `memberId` on create/update, stored as a real FK
-(`Note.member`, nullable, `SET NULL`) separate from the JSON `details` blob — not part of any single type's shape,
-since linking to a member is a cross-cutting concern, not detail data. Most naming/dedication records are for
-someone not yet in the system (e.g. a newborn) so this stays optional; when set, the record becomes visible on that
-member's own profile via `GET members/me/milestones` (`JwtAuthGuard`, own data only, no admin permission needed).
-Passing `memberId: null` on update explicitly unlinks a note.
-
-**Routes prefix:** `/notes`, `/notes-analytics`, `/members/me/milestones`
 
 ### Dashboard Module
 
@@ -3806,7 +3936,7 @@ Full double-entry accounting system for the church. All financial data is fund-s
 | **Chart of Accounts** | `finance_accounts` table. Each account has an optional unique `code` (e.g. `1001`), a type (ASSET / LIABILITY / INCOME / EXPENSE), subtype, normal balance (DEBIT or CREDIT), and an optional fund assignment. `code` is nullable but unique when provided — 409 if a duplicate code is submitted. |
 | **JournalEntry** | The root transaction record. Must be BALANCED (sum of debits = sum of credits) before posting. Created as `PENDING_APPROVAL`; a separate admin with `FINANCE_APPROVE` (who is not the creator — segregation of duties) approves and posts it. |
 | **JournalEntryLine** | One debit or credit line on a journal entry. Linked to an account. `journal_entry_id` and `account_id` are both indexed. |
-| **JournalEntryLink** | Polymorphic association table attaching a journal entry to members, departments, service events, or external payees. Stored as a separate table to preserve FK integrity and allow multiple associations per transaction. |
+| **JournalEntryLink** | Polymorphic association table attaching a journal entry to members, departments, service events, external payees, or finance requests. Stored as a separate table to preserve FK integrity and allow multiple associations per transaction. `linkType: FINANCE_REQUEST` uses a bare `financeRequestId` UUID column rather than a relation, deliberately avoiding an entity import from the separate `finance-request` module. |
 | **ExternalPayee** | Tracks global church remittances, vendors, utilities, contractors, government bodies. |
 | **Offering** | Records Sunday cash + expected transfer amounts. Reconciled separately by finance team. `fund_id` is indexed. |
 | **Budget** | Scoped to an account + fund. Actuals computed at query time from posted entries. |
@@ -4163,6 +4293,21 @@ separate `PATCH /:id/proof` endpoint.
 **Self-approve guard:** An admin cannot approve a request they submitted. Returns `403 Forbidden`.
 
 **Proof replacement:** If `PATCH /:id/proof` is called on a request that already has a proof file, the old Cloudinary asset is deleted before uploading the new one. If the delete fails (network error, already removed), the error is logged and the upload proceeds anyway — the old asset may be orphaned but the request is not blocked.
+
+**Posting to the ledger (`PATCH /:id/proof` with `postToJournal: true`):** optional — proof-attachment time, not
+approve/reject, is when this is offered, since that's when there's actual evidence money moved (reject never moves
+money; approval alone doesn't either). When set, the caller also sends `debitAccountId` (an active `EXPENSE`
+account) and `creditAccountId` (the account paid from) in the same multipart body. Mirrors
+`PettyCashReplenishment`'s approve-time posting exactly: creates one `PENDING_APPROVAL` `JournalEntry` with two
+`JournalEntryLine`s (DEBIT the expense account, CREDIT the paying account, both for `request.amount`) and a
+`JournalEntryLink` (`linkType: FINANCE_REQUEST`, `role: RECIPIENT`, `financeRequestId`) back to the request, guarded
+by idempotency key `finance-request:{id}` — a repeat call with `postToJournal: true` on an already-posted request
+just re-links the existing entry rather than erroring or duplicating it. `FinanceRequest.journalEntry` is set to the
+created entry. A **second, different** admin still has to approve the entry via the normal Journal Entries flow
+(`PATCH /admin/finance/journal-entries/:id/approve`) before it posts to `Account.currentBalance` — segregation of
+duties is unchanged. Requires an OPEN `AccountingPeriod` for the current month (`400` otherwise) and the tenant's
+plan to include `PlanFeature.FINANCE` (`403 PLAN_UPGRADE_REQUIRED` otherwise) — proof upload *without* posting stays
+available regardless of plan, since `FinanceAdminController` itself carries no `PlanGuard`.
 
 **Email notifications:**
 - On creation → all active admins with `FINANCE_WRITE` permission are notified (filtered in SQL via `ANY(r.permissions)`)
@@ -5596,13 +5741,6 @@ outside the requested `?months=` window).
 | POST   | /birthday/wishes/:recipientId                              | Any                                                           | Send a birthday wish (once per year per sender; rate-limited to WISH_DAILY_LIMIT/day)                         |
 | GET    | /birthday/wishes/me                                        | Any                                                           | Read own birthday wishes (?year= filter optional)                                                             |
 | GET    | /birthday/wishes/:memberId                                 | AdminGuard (MEMBERS_READ)                                     | Read any member's birthday wishes                                                                             |
-| GET    | /notes/:type                                               | AdminGuard (NOTES_READ)                                       | List notes by type (types: child_naming, child_dedication, marriage, baptism)                                  |
-| POST   | /notes                                                     | AdminGuard (NOTES_WRITE)                                      | Create note; optional `memberId` to link the record to a member's own profile                                 |
-| PUT    | /notes/:id                                                 | AdminGuard (NOTES_WRITE)                                      | Update note; `memberId: null` explicitly unlinks, omitting it leaves the existing link unchanged               |
-| GET    | /notes/:type/:id                                           | AdminGuard (NOTES_READ)                                       | Get note                                                                                                      |
-| DELETE | /notes/:type/:id                                           | AdminGuard (NOTES_WRITE)                                      | Delete note                                                                                                   |
-| GET    | /notes-analytics/:type                                     | AdminGuard (NOTES_READ)                                       | Analytics for a note type                                                                                     |
-| GET    | /members/me/milestones                                     | JwtAuthGuard                                                  | The requesting member's own linked rites-of-passage records (naming/dedication/marriage/baptism), newest first |
 | GET    | /dashboard/member                                          | Any                                                           | Member dashboard                                                                                              |
 | GET    | /dashboard/worker                                          | WORKER                                                        | Worker dashboard                                                                                              |
 | GET    | /dashboard/admin                                           | AdminGuard (DASHBOARD_READ)                                   | Admin dashboard                                                                                               |
@@ -6199,6 +6337,8 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_CHILDREN_CHURCH_ENABLED`    | `true`  | Children church pickup codes  |
 | `EMAIL_LOGIN_ALERT_ENABLED`        | `true`  | New device login notifications |
 | `EMAIL_PASTOR_FEEDBACK_ENABLED` | `true` | Weekly feedback reminders and pastor-response notifications |
+| `EMAIL_ASSIGNMENT_REMINDER_ENABLED` | `true` | Assignment due-date reminders |
+| `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` | Class next-session reminders |
 
 ### Auth / OTP
 
@@ -6395,7 +6535,7 @@ Granular permissions assigned to `AdminRole` records:
 
 `members:read` · `members:write` · `events:read` · `events:write` · `venues:read` · `venues:write` ·
 `departments:read` · `departments:write` · `attendance:read` · `attendance:write` · `leave:read` · `leave:write` · `classes:read` ·
-`classes:write` · `announcements:read` · `announcements:write` · `notes:read` · `notes:write` · `dashboard:read` ·
+`classes:write` · `announcements:read` · `announcements:write` · `dashboard:read` ·
 `sunday_school:read` · `sunday_school:write` · `children_church:read` · `children_church:write` · `admin:read` ·
 `admin:write` · `audit:read` · `finance:read` · `finance:write` · `follow_up:read` · `follow_up:write` ·
 `service_programme:read` · `service_programme:write` · `headcount:read` · `headcount:write` ·
@@ -6443,7 +6583,7 @@ Granular permissions assigned to `AdminRole` records:
 
 ### AnnouncementAudienceEnum
 
-`ALL` · `WORKERS_ONLY` · `MEMBERS_ONLY` · `DEPARTMENT` · `INDIVIDUAL` · `GROUP`
+`ALL` · `WORKERS_ONLY` · `MEMBERS_ONLY` · `DEPARTMENT` · `INDIVIDUAL` · `GROUP` · `CLASS`
 
 ### NoteTypeEnum *(path param values)*
 
@@ -6635,7 +6775,8 @@ that hasn't been ended yet.
 
 ### ReminderSettingKey
 
-`pledge_reminder` · `budget_alert` · `follow_up_stale` · `asset_maintenance` · `asset_warranty` · `vehicle_expiry`
+`pledge_reminder` · `budget_alert` · `follow_up_stale` · `asset_maintenance` · `asset_warranty` · `vehicle_expiry` ·
+`assignment_due` · `class_session`
 
 See "Reminder Settings Module" above — keys a tenant's per-category reminder timing/enabled settings
 (`GET/PATCH /admin/reminder-settings`). Distinct from `EmailCategory` (a separate, coarser enum — see below).
@@ -6644,7 +6785,8 @@ See "Reminder Settings Module" above — keys a tenant's per-category reminder t
 
 `ATTENDANCE_CHECKIN` · `BIRTHDAY` · `EVENT_REMINDER` · `PRAYER_REMINDER` · `FOLLOW_UP` · `ASSET_ALERTS` ·
 `GIVING_RECEIPT` · `FINANCE_ALERTS` · `SESSION_REPORT` · `INCIDENT_REPORT` · `CHILDREN_CHURCH` · `LOGIN_ALERT` ·
-`SERVICE_PROGRAMME_ASSIGNMENT` · `PASTOR_FEEDBACK` · `MEMBERSHIP_ANNIVERSARY`
+`SERVICE_PROGRAMME_ASSIGNMENT` · `PASTOR_FEEDBACK` · `MEMBERSHIP_ANNIVERSARY` · `ASSIGNMENT_REMINDER` ·
+`CLASS_SESSION_REMINDER`
 
 See "Email Category Settings Module" above — every category-tagged email checks a global env-flag gate, then a
 per-tenant `EmailCategorySettingsService` gate, before `EmailQueueService.queueEmail` enqueues the job

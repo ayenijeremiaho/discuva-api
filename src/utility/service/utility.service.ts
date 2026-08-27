@@ -143,6 +143,13 @@ export class UtilityService {
     return this.emailQueueService.resolveTenantUrl(surface);
   }
 
+  // Delegates to EmailQueueService.resolveMemberUrl — for member-facing
+  // deep links other than the login page itself (e.g. a guest's class
+  // portal link).
+  public resolveMemberUrl(path: string): Promise<string> {
+    return this.emailQueueService.resolveMemberUrl(path);
+  }
+
   public sendEmailWithAttachment(
     to: string | [string],
     subject: string,

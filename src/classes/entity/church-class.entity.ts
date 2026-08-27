@@ -47,6 +47,14 @@ export class ChurchClass extends BaseEntity {
   @Column({ type: 'date', nullable: true })
   endDate: string | null;
 
+  // Single "next session" field the facilitator updates as the class
+  // progresses week to week — not a full multi-session schedule entity.
+  @Column({ name: 'next_session_at', type: 'timestamptz', nullable: true })
+  nextSessionAt: Date | null;
+
+  @Column({ name: 'meeting_link', nullable: true })
+  meetingLink: string | null;
+
   @OneToMany(() => ClassEnrollment, (enrollment) => enrollment.churchClass)
   enrollments: ClassEnrollment[];
 }

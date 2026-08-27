@@ -7,6 +7,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { FirstTimer } from '../entity/first-timer.entity';
 import { FollowUpTask } from '../entity/follow-up-task.entity';
 import { FollowUpNote } from '../entity/follow-up-note.entity';
@@ -48,7 +50,11 @@ export class FollowUpService {
   private readonly churchName: string;
 
   constructor(
+    // Kept for the plain reads elsewhere in this file (createQueryBuilder/
+    // query calls on this.dataSource) — but doCreateFirstTimer below
+    // deliberately does NOT use dataSource.transaction(); see there.
     private readonly dataSource: DataSource,
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly configService: ConfigService,
     private readonly cacheService: CacheService,
     private readonly emailQueueService: EmailQueueService,
@@ -91,6 +97,26 @@ export class FollowUpService {
       adminCreatorId: adminId,
     });
     this.logger.log(`First-timer ${created.id} recorded by admin ${adminId}`);
+    return created;
+  }
+
+  // Called from FormSubmissionService when a PUBLIC form flagged
+  // createsFirstTimers is submitted — no caller identity at all (an
+  // anonymous visitor via a QR code/shared link), same as the empty actor
+  // object an unauthenticated submission naturally produces. source is
+  // forced to ONLINE regardless of whatever the DTO carries, since this
+  // pathway *is* the online-intake mechanism — it shouldn't be spoofable
+  // by whatever a form's fields happen to submit.
+  async createFirstTimerFromPublicForm(
+    dto: CreateFirstTimerDto,
+  ): Promise<FirstTimer> {
+    const created = await this.doCreateFirstTimer(
+      { ...dto, source: FirstTimerSourceEnum.ONLINE },
+      {},
+    );
+    this.logger.log(
+      `First-timer ${created.id} recorded via public form (online intake)`,
+    );
     return created;
   }
 
@@ -643,73 +669,75 @@ export class FollowUpService {
     actor: { memberCreatorId?: string; adminCreatorId?: string },
   ): Promise<FirstTimer> {
     let assignee: WorkerProfile | null = null;
-    let savedFirstTimer: FirstTimer;
     const dueDate = this.computeDueDate();
 
-    await this.dataSource.transaction(async (manager) => {
-      // Serialize concurrent picks so round-robin is accurate under load
-      await manager.query(
-        `SELECT pg_advisory_xact_lock(hashtext('follow-up:round-robin'))`,
+    // Deliberately NOT this.dataSource.transaction() — that would open an
+    // independent connection that never sees TenantMiddleware's SET LOCAL
+    // search_path, so the raw SQL below (worker_profiles/departments/
+    // follow_up_tasks, all tenant-schema tables) would run against the
+    // wrong schema. this.txHost.tx is the ambient manager already inside
+    // the one transaction the current request is running in.
+    const manager = this.txHost.tx;
+    // Serialize concurrent picks so round-robin is accurate under load
+    await manager.query(
+      `SELECT pg_advisory_xact_lock(hashtext('follow-up:round-robin'))`,
+    );
+
+    const rows: { id: string }[] = await manager.query(
+      `SELECT wp.id
+               FROM worker_profiles wp
+               LEFT JOIN departments d_primary ON d_primary.id = wp.department_id
+               LEFT JOIN departments d_secondary ON d_secondary.id = wp.secondary_department_id
+               LEFT JOIN follow_up_tasks ft
+                   ON ft.assigned_to_id = wp.id AND ft.status IN ('PENDING', 'IN_PROGRESS')
+               WHERE ($1 = ANY(d_primary.capabilities) OR $1 = ANY(d_secondary.capabilities)) AND wp.status = $2
+               GROUP BY wp.id
+               ORDER BY COUNT(ft.id) ASC
+               LIMIT 1`,
+      [DepartmentCapability.MANAGE_FOLLOW_UP, WorkerStatusEnum.ACTIVE],
+    );
+
+    if (!rows.length) {
+      throw new BadRequestException(
+        'No active Follow-Up team members available. Assign at least one worker to the Follow-Up department.',
       );
+    }
 
-      const rows: { id: string }[] = await manager.query(
-        `SELECT wp.id
-                 FROM worker_profiles wp
-                 LEFT JOIN departments d_primary ON d_primary.id = wp.department_id
-                 LEFT JOIN departments d_secondary ON d_secondary.id = wp.secondary_department_id
-                 LEFT JOIN follow_up_tasks ft
-                     ON ft.assigned_to_id = wp.id AND ft.status IN ('PENDING', 'IN_PROGRESS')
-                 WHERE ($1 = ANY(d_primary.capabilities) OR $1 = ANY(d_secondary.capabilities)) AND wp.status = $2
-                 GROUP BY wp.id
-                 ORDER BY COUNT(ft.id) ASC
-                 LIMIT 1`,
-        [DepartmentCapability.MANAGE_FOLLOW_UP, WorkerStatusEnum.ACTIVE],
-      );
-
-      if (!rows.length) {
-        throw new BadRequestException(
-          'No active Follow-Up team members available. Assign at least one worker to the Follow-Up department.',
-        );
-      }
-
-      assignee = await manager.findOne(WorkerProfile, {
-        where: { id: rows[0].id },
-        relations: ['member'],
-      });
-
-      const firstTimer = manager.create(FirstTimer, {
-        firstname: dto.firstname,
-        lastname: dto.lastname,
-        phone: dto.phone,
-        email: dto.email ?? null,
-        source: dto.source,
-        wantsToJoinChurch: dto.wantsToJoinChurch ?? false,
-        enjoyedAboutChurch: dto.enjoyedAboutChurch ?? null,
-        wantsToJoinWorkforce: dto.wantsToJoinWorkforce ?? false,
-        notes: dto.notes ?? null,
-        visitedEvent: dto.visitedEventId ? { id: dto.visitedEventId } : null,
-        createdByMember: actor.memberCreatorId
-          ? { id: actor.memberCreatorId }
-          : null,
-        createdByAdmin: actor.adminCreatorId
-          ? { id: actor.adminCreatorId }
-          : null,
-      });
-
-      const ft = await manager.save(FirstTimer, firstTimer);
-
-      await manager.save(
-        manager.create(FollowUpTask, {
-          type: FollowUpTaskTypeEnum.FIRST_TIMER,
-          status: FollowUpTaskStatusEnum.PENDING,
-          firstTimer: ft,
-          assignedTo: assignee,
-          dueDate,
-        }),
-      );
-
-      savedFirstTimer = ft;
+    assignee = await manager.findOne(WorkerProfile, {
+      where: { id: rows[0].id },
+      relations: ['member'],
     });
+
+    const firstTimer = manager.create(FirstTimer, {
+      firstname: dto.firstname,
+      lastname: dto.lastname,
+      phone: dto.phone,
+      email: dto.email ?? null,
+      source: dto.source,
+      wantsToJoinChurch: dto.wantsToJoinChurch ?? false,
+      enjoyedAboutChurch: dto.enjoyedAboutChurch ?? null,
+      wantsToJoinWorkforce: dto.wantsToJoinWorkforce ?? false,
+      notes: dto.notes ?? null,
+      visitedEvent: dto.visitedEventId ? { id: dto.visitedEventId } : null,
+      createdByMember: actor.memberCreatorId
+        ? { id: actor.memberCreatorId }
+        : null,
+      createdByAdmin: actor.adminCreatorId
+        ? { id: actor.adminCreatorId }
+        : null,
+    });
+
+    const ft = await manager.save(FirstTimer, firstTimer);
+
+    await manager.save(
+      manager.create(FollowUpTask, {
+        type: FollowUpTaskTypeEnum.FIRST_TIMER,
+        status: FollowUpTaskStatusEnum.PENDING,
+        firstTimer: ft,
+        assignedTo: assignee,
+        dueDate,
+      }),
+    );
 
     if (assignee?.member?.email) {
       this.emailQueueService.queueEmailWithTemplate(
@@ -730,7 +758,7 @@ export class FollowUpService {
     }
 
     this.cacheService.flushNamespace('follow-up:report');
-    return savedFirstTimer;
+    return ft;
   }
 
   async inviteFirstTimerToMembership(id: string): Promise<{ queued: boolean }> {

@@ -7,6 +7,7 @@ import {
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { FollowUpService } from './follow-up.service';
 import { FirstTimer } from '../entity/first-timer.entity';
 import { FollowUpTask } from '../entity/follow-up-task.entity';
@@ -14,6 +15,7 @@ import { FollowUpNote } from '../entity/follow-up-note.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import {
   ContactMethodEnum,
+  FirstTimerSourceEnum,
   FollowUpOutcomeEnum,
   FollowUpTaskStatusEnum,
   FollowUpTaskTypeEnum,
@@ -90,8 +92,18 @@ const qbMock = {
 
 const mockDataSource = {
   createQueryBuilder: jest.fn().mockReturnValue(qbMock),
-  transaction: jest.fn(),
   query: jest.fn(),
+};
+
+const mockManager = {
+  query: jest.fn(),
+  findOne: jest.fn(),
+  create: jest.fn(),
+  save: jest.fn(),
+};
+
+const mockTxHost = {
+  tx: mockManager,
 };
 
 const mockConfigService = {
@@ -139,6 +151,16 @@ describe('FollowUpService', () => {
     mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
       undefined,
     );
+    mockManager.query.mockReset();
+    mockManager.findOne.mockReset();
+    mockManager.create
+      .mockReset()
+      .mockImplementation((_e: unknown, data: unknown) => data);
+    mockManager.save
+      .mockReset()
+      .mockImplementation((a: unknown, b?: unknown) =>
+        Promise.resolve(b !== undefined ? b : a),
+      );
     qbMock.getRawMany.mockResolvedValue([]);
     qbMock.getRawOne.mockResolvedValue({
       total: '0',
@@ -151,6 +173,7 @@ describe('FollowUpService', () => {
       providers: [
         FollowUpService,
         { provide: DataSource, useValue: mockDataSource },
+        { provide: TransactionHost, useValue: mockTxHost },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: EmailQueueService, useValue: mockEmailQueueService },
@@ -249,18 +272,9 @@ describe('FollowUpService', () => {
 
     it('throws BadRequestException when no FOLLOW_UP assignee is available', async () => {
       mockWorkerProfileRepo.findOne.mockResolvedValue(followUpProfile);
-      mockDataSource.transaction.mockImplementation(async (cb: any) => {
-        const manager = {
-          query: jest
-            .fn()
-            .mockResolvedValueOnce([]) // advisory lock
-            .mockResolvedValueOnce([]), // pick → no workers
-          findOne: jest.fn(),
-          create: jest.fn(),
-          save: jest.fn(),
-        };
-        return cb(manager);
-      });
+      mockManager.query
+        .mockResolvedValueOnce([]) // advisory lock
+        .mockResolvedValueOnce([]); // pick → no workers
 
       await expect(
         service.createFirstTimerByWorker(
@@ -284,21 +298,16 @@ describe('FollowUpService', () => {
         type: FollowUpTaskTypeEnum.FIRST_TIMER,
       };
 
-      mockDataSource.transaction.mockImplementation(async (cb: any) => {
-        const manager = {
-          query: jest
-            .fn()
-            .mockResolvedValueOnce([]) // advisory lock
-            .mockResolvedValueOnce([{ id: 'wp-1' }]), // pick
-          findOne: jest.fn().mockResolvedValue(followUpProfile),
-          create: jest.fn().mockReturnValue(savedFirstTimer),
-          save: jest
-            .fn()
-            .mockResolvedValueOnce(savedFirstTimer)
-            .mockResolvedValueOnce(savedTask),
-        };
-        return cb(manager);
-      });
+      mockManager.query
+        .mockResolvedValueOnce([]) // advisory lock
+        .mockResolvedValueOnce([{ id: 'wp-1' }]); // pick
+      mockManager.findOne.mockResolvedValue(followUpProfile);
+      mockManager.create.mockImplementation((entity: any) =>
+        entity === FollowUpTask ? savedTask : savedFirstTimer,
+      );
+      mockManager.save
+        .mockResolvedValueOnce(savedFirstTimer)
+        .mockResolvedValueOnce(savedTask);
 
       const result = await service.createFirstTimerByWorker(
         { firstname: 'Ada', lastname: 'Obi', phone: '08011111111' },
@@ -326,18 +335,12 @@ describe('FollowUpService', () => {
     it('creates first-timer linked to admin and sends assignment email', async () => {
       const savedFirstTimer = { id: 'ft-2', firstname: 'Bola' };
 
-      mockDataSource.transaction.mockImplementation(async (cb: any) => {
-        const manager = {
-          query: jest
-            .fn()
-            .mockResolvedValueOnce([]) // advisory lock
-            .mockResolvedValueOnce([{ id: 'wp-1' }]), // pick
-          findOne: jest.fn().mockResolvedValue(followUpProfile),
-          create: jest.fn().mockReturnValue(savedFirstTimer),
-          save: jest.fn().mockResolvedValue(savedFirstTimer),
-        };
-        return cb(manager);
-      });
+      mockManager.query
+        .mockResolvedValueOnce([]) // advisory lock
+        .mockResolvedValueOnce([{ id: 'wp-1' }]); // pick
+      mockManager.findOne.mockResolvedValue(followUpProfile);
+      mockManager.create.mockReturnValue(savedFirstTimer);
+      mockManager.save.mockResolvedValue(savedFirstTimer);
 
       const result = await service.createFirstTimerByAdmin(
         { firstname: 'Bola', lastname: 'Ade', phone: '08022222222' },
@@ -346,6 +349,41 @@ describe('FollowUpService', () => {
 
       expect(result).toEqual(savedFirstTimer);
       expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalled();
+    });
+  });
+
+  // ── createFirstTimerFromPublicForm ────────────────────────────────────────
+
+  describe('createFirstTimerFromPublicForm', () => {
+    it('forces source to ONLINE regardless of the DTO and uses an empty actor', async () => {
+      const savedFirstTimer = { id: 'ft-3', firstname: 'Chris' };
+      let capturedCreateArgs: any;
+
+      mockManager.query
+        .mockResolvedValueOnce([]) // advisory lock
+        .mockResolvedValueOnce([{ id: 'wp-1' }]); // pick
+      mockManager.findOne.mockResolvedValue(followUpProfile);
+      mockManager.create.mockImplementation((entity: any, args: any) => {
+        if (entity === FirstTimer) capturedCreateArgs = args;
+        return entity === FirstTimer ? savedFirstTimer : args;
+      });
+      mockManager.save.mockResolvedValue(savedFirstTimer);
+
+      const result = await service.createFirstTimerFromPublicForm({
+        firstname: 'Chris',
+        lastname: 'Okafor',
+        phone: '+2348012345678',
+        source: FirstTimerSourceEnum.WALK_IN,
+      } as any);
+
+      expect(result).toEqual(savedFirstTimer);
+      expect(capturedCreateArgs).toEqual(
+        expect.objectContaining({
+          source: FirstTimerSourceEnum.ONLINE,
+          createdByMember: null,
+          createdByAdmin: null,
+        }),
+      );
     });
   });
 

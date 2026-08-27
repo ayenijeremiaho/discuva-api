@@ -5,6 +5,7 @@ import { AssignmentService } from './assignment.service';
 import { Assignment } from '../entity/assignment.entity';
 import { AssignmentSubmission } from '../entity/assignment-submission.entity';
 import { ChurchClass } from '../entity/church-class.entity';
+import { ClassEnrollment } from '../entity/class-enrollment.entity';
 
 const mockAssignmentRepo = {
   find: jest.fn(),
@@ -28,6 +29,10 @@ const mockClassRepo = {
   findOneBy: jest.fn(),
 };
 
+const mockEnrollmentRepo = {
+  findOne: jest.fn(),
+};
+
 describe('AssignmentService', () => {
   let service: AssignmentService;
 
@@ -45,6 +50,10 @@ describe('AssignmentService', () => {
           useValue: mockSubmissionRepo,
         },
         { provide: getRepositoryToken(ChurchClass), useValue: mockClassRepo },
+        {
+          provide: getRepositoryToken(ClassEnrollment),
+          useValue: mockEnrollmentRepo,
+        },
       ],
     }).compile();
     service = module.get(AssignmentService);
@@ -201,7 +210,7 @@ describe('AssignmentService', () => {
   });
 
   describe('getAvailableForMember', () => {
-    it('returns published assignments merged with the caller own submission', async () => {
+    it('returns published assignments merged with the caller own submission, plus a progress summary', async () => {
       mockAssignmentRepo.find.mockResolvedValue([
         { id: 'assign-1', title: 'Quiz 1', isPublished: true },
         { id: 'assign-2', title: 'Quiz 2', isPublished: true },
@@ -220,17 +229,134 @@ describe('AssignmentService', () => {
 
       const result = await service.getAvailableForMember('class-1', 'member-1');
 
-      expect(result).toHaveLength(2);
-      expect(result[0].mySubmission).toEqual(
+      expect(result.assignments).toHaveLength(2);
+      expect(result.assignments[0].mySubmission).toEqual(
         expect.objectContaining({ id: 'sub-1', score: 18 }),
       );
-      expect(result[1].mySubmission).toBeNull();
+      expect(result.assignments[1].mySubmission).toBeNull();
+      expect(result.progress).toEqual({ submitted: 1, total: 2 });
     });
 
-    it('returns an empty array when the class has no published assignments', async () => {
+    it('returns an empty assignment list and zeroed progress when the class has no published assignments', async () => {
       mockAssignmentRepo.find.mockResolvedValue([]);
       const result = await service.getAvailableForMember('class-1', 'member-1');
-      expect(result).toEqual([]);
+      expect(result).toEqual({
+        assignments: [],
+        progress: { submitted: 0, total: 0 },
+      });
+    });
+  });
+
+  describe('getForGuestEnrollment', () => {
+    it('scopes submissions by class_enrollment_id instead of member_id', async () => {
+      mockAssignmentRepo.find.mockResolvedValue([
+        { id: 'assign-1', title: 'Quiz 1', isPublished: true },
+      ]);
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'sub-1', assignment: { id: 'assign-1' } }]),
+      };
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getForGuestEnrollment('class-1', 'enroll-1');
+
+      expect(qb.where).toHaveBeenCalledWith(
+        's.class_enrollment_id = :enrollmentId',
+        {
+          enrollmentId: 'enroll-1',
+        },
+      );
+      expect(result.progress).toEqual({ submitted: 1, total: 1 });
+    });
+  });
+
+  describe('submitAsGuest', () => {
+    it('throws NotFoundException when the enrollment has no guest attached', async () => {
+      mockAssignmentRepo.findOneBy.mockResolvedValue({
+        id: 'assign-1',
+        isPublished: true,
+        churchClass: { id: 'class-1' },
+      });
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        guest: null,
+        churchClass: { id: 'class-1' },
+      });
+
+      await expect(
+        service.submitAsGuest('assign-1', 'enroll-1', { content: 'x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when the enrollment belongs to a different class', async () => {
+      mockAssignmentRepo.findOneBy.mockResolvedValue({
+        id: 'assign-1',
+        isPublished: true,
+        churchClass: { id: 'class-1' },
+      });
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        guest: { id: 'guest-1' },
+        churchClass: { id: 'class-2' },
+      });
+
+      await expect(
+        service.submitAsGuest('assign-1', 'enroll-1', { content: 'x' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('creates a new submission keyed by classEnrollment when none exists', async () => {
+      mockAssignmentRepo.findOneBy.mockResolvedValue({
+        id: 'assign-1',
+        isPublished: true,
+        churchClass: { id: 'class-1' },
+      });
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        guest: { id: 'guest-1' },
+        churchClass: { id: 'class-1' },
+      });
+      mockSubmissionRepo.findOne.mockResolvedValue(null);
+      mockSubmissionRepo.save.mockImplementation((s) =>
+        Promise.resolve({ id: 'sub-1', ...s }),
+      );
+
+      const result = await service.submitAsGuest('assign-1', 'enroll-1', {
+        content: 'Guest answer',
+      });
+
+      expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: 'Guest answer',
+          classEnrollment: { id: 'enroll-1' },
+        }),
+      );
+      expect(result.id).toBe('sub-1');
+    });
+
+    it('rejects resubmission once already graded', async () => {
+      mockAssignmentRepo.findOneBy.mockResolvedValue({
+        id: 'assign-1',
+        isPublished: true,
+        churchClass: { id: 'class-1' },
+      });
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        guest: { id: 'guest-1' },
+        churchClass: { id: 'class-1' },
+      });
+      mockSubmissionRepo.findOne.mockResolvedValue({
+        id: 'sub-1',
+        gradedAt: new Date('2026-01-02'),
+      });
+
+      await expect(
+        service.submitAsGuest('assign-1', 'enroll-1', { content: 'Too late' }),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

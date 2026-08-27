@@ -11,7 +11,7 @@ import { ServiceSlotTypeLabels } from '../enum/service-slot-type.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
-import { buildServiceSlotIcs } from '../util/ics-builder';
+import { buildIcsEvent } from '../../utility/util/ics-builder';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -113,8 +113,8 @@ export class ServiceProgrammeReminderScheduler {
         slot.programme.serviceSlot?.endTime
       ) {
         const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
-        const ics = buildServiceSlotIcs({
-          uid: slot.id,
+        const ics = buildIcsEvent({
+          uid: `${slot.id}@service-programme`,
           startTime: slot.programme.serviceSlot.startTime,
           endTime: slot.programme.serviceSlot.endTime,
           summary: `${slotType}${topicSuffix} — ${serviceSlotName}`,

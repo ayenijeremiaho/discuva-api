@@ -120,12 +120,13 @@ describe('ReminderSettingsService', () => {
       const result = await service.upsert(ReminderSettingKey.FOLLOW_UP_STALE, {
         enabled: true,
         thresholds: [14],
+        smsEnabled: false,
       });
 
       expect(mockSettingRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           key: 'reminder:follow_up_stale',
-          value: { enabled: true, thresholds: [14] },
+          value: { enabled: true, thresholds: [14], smsEnabled: false },
         }),
       );
       expect(result.thresholds).toEqual([14]);
@@ -134,7 +135,7 @@ describe('ReminderSettingsService', () => {
     it('updates an existing row in place', async () => {
       const existing = {
         key: 'reminder:follow_up_stale',
-        value: { enabled: true, thresholds: [7] },
+        value: { enabled: true, thresholds: [7], smsEnabled: false },
       };
       mockSettingRepo.findOne.mockResolvedValue(existing);
       mockSettingRepo.save.mockImplementation((v) => Promise.resolve(v));
@@ -142,10 +143,15 @@ describe('ReminderSettingsService', () => {
       await service.upsert(ReminderSettingKey.FOLLOW_UP_STALE, {
         enabled: false,
         thresholds: [14],
+        smsEnabled: true,
       });
 
       expect(mockSettingRepo.create).not.toHaveBeenCalled();
-      expect(existing.value).toEqual({ enabled: false, thresholds: [14] });
+      expect(existing.value).toEqual({
+        enabled: false,
+        thresholds: [14],
+        smsEnabled: true,
+      });
     });
 
     it('invalidates the cache after upsert', async () => {
@@ -156,6 +162,7 @@ describe('ReminderSettingsService', () => {
       await service.upsert(ReminderSettingKey.PLEDGE_REMINDER, {
         enabled: true,
         thresholds: [7],
+        smsEnabled: false,
       });
 
       expect(mockCacheService.del).toHaveBeenCalledWith(
@@ -171,6 +178,7 @@ describe('ReminderSettingsService', () => {
       await service.upsert(ReminderSettingKey.PLEDGE_REMINDER, {
         enabled: true,
         thresholds: [7],
+        smsEnabled: false,
       });
 
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
@@ -186,6 +194,7 @@ describe('ReminderSettingsService', () => {
         service.upsert('not_a_real_key' as ReminderSettingKey, {
           enabled: true,
           thresholds: [],
+          smsEnabled: false,
         }),
       ).rejects.toThrow(NotFoundException);
     });
@@ -196,15 +205,20 @@ describe('ReminderSettingsService', () => {
       mockCacheService.get.mockResolvedValue({
         enabled: false,
         thresholds: [3],
+        smsEnabled: true,
       });
 
       const result = await service.getConfig(ReminderSettingKey.ASSET_WARRANTY);
 
-      expect(result).toEqual({ enabled: false, thresholds: [3] });
+      expect(result).toEqual({
+        enabled: false,
+        thresholds: [3],
+        smsEnabled: true,
+      });
       expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
     });
 
-    it('falls back to the default when no cache or DB row exists', async () => {
+    it('falls back to the default (smsEnabled off) when no cache or DB row exists', async () => {
       mockSettingRepo.findOne.mockResolvedValue(null);
 
       const result = await service.getConfig(ReminderSettingKey.ASSET_WARRANTY);
@@ -214,10 +228,31 @@ describe('ReminderSettingsService', () => {
         thresholds:
           KNOWN_REMINDER_SETTINGS[ReminderSettingKey.ASSET_WARRANTY]
             .defaultThresholds,
+        smsEnabled: false,
       });
     });
 
     it('reads the DB value and caches it on a miss', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({
+        key: 'reminder:asset_warranty',
+        value: { enabled: true, thresholds: [20], smsEnabled: true },
+      });
+
+      const result = await service.getConfig(ReminderSettingKey.ASSET_WARRANTY);
+
+      expect(result).toEqual({
+        enabled: true,
+        thresholds: [20],
+        smsEnabled: true,
+      });
+      expect(mockCacheService.set).toHaveBeenCalledWith(
+        'reminder-settings:asset_warranty',
+        { enabled: true, thresholds: [20], smsEnabled: true },
+        300,
+      );
+    });
+
+    it('defaults smsEnabled to false when a DB row exists without it', async () => {
       mockSettingRepo.findOne.mockResolvedValue({
         key: 'reminder:asset_warranty',
         value: { enabled: true, thresholds: [20] },
@@ -225,12 +260,7 @@ describe('ReminderSettingsService', () => {
 
       const result = await service.getConfig(ReminderSettingKey.ASSET_WARRANTY);
 
-      expect(result).toEqual({ enabled: true, thresholds: [20] });
-      expect(mockCacheService.set).toHaveBeenCalledWith(
-        'reminder-settings:asset_warranty',
-        { enabled: true, thresholds: [20] },
-        300,
-      );
+      expect(result.smsEnabled).toBe(false);
     });
   });
 });

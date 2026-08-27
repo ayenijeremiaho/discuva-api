@@ -41,6 +41,11 @@ export class JournalEntryLink extends BaseEntity {
   @Column({ type: 'uuid', nullable: true, name: 'service_event_id' })
   serviceEventId: string | null;
 
+  // Bare UUID, no relation — mirrors serviceEventId above, deliberately
+  // avoiding an import of FinanceRequest (a different module) into this one.
+  @Column({ type: 'uuid', nullable: true, name: 'finance_request_id' })
+  financeRequestId: string | null;
+
   @ManyToOne(() => ExternalPayee, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'external_payee_id' })
   externalPayee: ExternalPayee | null;

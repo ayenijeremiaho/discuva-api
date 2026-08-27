@@ -11,11 +11,13 @@ import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { GuestService } from './guest.service';
 
 const makeQb = () => ({
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
   leftJoin: jest.fn().mockReturnThis(),
+  innerJoin: jest.fn().mockReturnThis(),
   leftJoinAndSelect: jest.fn().mockReturnThis(),
   select: jest.fn().mockReturnThis(),
   addSelect: jest.fn().mockReturnThis(),
@@ -58,6 +60,9 @@ const mockAuditLogService = { log: jest.fn() };
 
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
+  resolveMemberUrl: jest
+    .fn()
+    .mockResolvedValue('https://tenant.app/classes/guest/enroll-1'),
 };
 
 const mockConfigService = {
@@ -67,6 +72,11 @@ const mockConfigService = {
 const mockCloudinaryService = {
   uploadBuffer: jest.fn(),
   deleteByPublicId: jest.fn(),
+};
+
+const mockGuestService = {
+  findOrCreateByEmail: jest.fn(),
+  getById: jest.fn(),
 };
 
 describe('ClassesService', () => {
@@ -88,6 +98,7 @@ describe('ClassesService', () => {
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
+        { provide: GuestService, useValue: mockGuestService },
       ],
     }).compile();
 
@@ -788,6 +799,276 @@ describe('ClassesService', () => {
       const result = await service.issueCertificate('enroll-1', {}, 'admin-1');
 
       expect(result.certificateNumber).toBeNull();
+    });
+  });
+
+  describe('updateClassSession', () => {
+    it('throws NotFoundException if the class does not exist', async () => {
+      mockClassRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateClassSession('nonexistent', {
+          nextSessionAt: '2026-09-01T18:00:00.000Z',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('sets nextSessionAt and meetingLink when provided', async () => {
+      const churchClass = {
+        id: 'class-1',
+        name: 'Marriage Counselling',
+        nextSessionAt: null,
+        meetingLink: null,
+      };
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockClassRepo.save.mockImplementation((c) => Promise.resolve(c));
+
+      const result = await service.updateClassSession('class-1', {
+        nextSessionAt: '2026-09-01T18:00:00.000Z',
+        meetingLink: 'https://meet.example.com/abc',
+      });
+
+      expect(result.nextSessionAt).toEqual(
+        new Date('2026-09-01T18:00:00.000Z'),
+      );
+      expect(result.meetingLink).toBe('https://meet.example.com/abc');
+    });
+
+    it('clears nextSessionAt when explicitly set to null', async () => {
+      const churchClass = {
+        id: 'class-1',
+        nextSessionAt: new Date(),
+        meetingLink: 'https://meet.example.com/abc',
+      };
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockClassRepo.save.mockImplementation((c) => Promise.resolve(c));
+
+      const result = await service.updateClassSession('class-1', {
+        nextSessionAt: null,
+      });
+
+      expect(result.nextSessionAt).toBeNull();
+      expect(result.meetingLink).toBe('https://meet.example.com/abc');
+    });
+  });
+
+  describe('getClassLookup', () => {
+    it('returns id/name/startDate/endDate for every class', async () => {
+      const classes = [
+        {
+          id: 'class-1',
+          name: 'Alpha',
+          startDate: '2026-01-01',
+          endDate: '2026-03-01',
+        },
+      ];
+      mockClassRepo.find.mockResolvedValue(classes);
+
+      const result = await service.getClassLookup();
+
+      expect(mockClassRepo.find).toHaveBeenCalledWith({
+        select: ['id', 'name', 'startDate', 'endDate'],
+        order: { createdAt: 'DESC' },
+      });
+      expect(result).toEqual(classes);
+    });
+  });
+
+  describe('getMemberIdsForClass', () => {
+    it('returns member ids for In Progress/Completed enrollments, excluding guest-only rows', async () => {
+      const qb = makeQb();
+      qb.getRawMany = jest
+        .fn()
+        .mockResolvedValue([
+          { memberId: 'member-1' },
+          { memberId: 'member-2' },
+        ]);
+      mockEnrollmentRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getMemberIdsForClass('class-1');
+
+      expect(result).toEqual(['member-1', 'member-2']);
+      expect(qb.andWhere).toHaveBeenCalledWith('e.status IN (:...statuses)', {
+        statuses: [
+          EnrollmentStatusEnum.IN_PROGRESS,
+          EnrollmentStatusEnum.COMPLETED,
+        ],
+      });
+    });
+  });
+
+  describe('getGuestPhonesForClass', () => {
+    it('returns only non-null guest phone numbers', async () => {
+      const qb = makeQb();
+      qb.getRawMany = jest
+        .fn()
+        .mockResolvedValue([{ phone: '+1111111111' }, { phone: null }]);
+      mockEnrollmentRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getGuestPhonesForClass('class-1');
+
+      expect(result).toEqual(['+1111111111']);
+    });
+  });
+
+  describe('enrollGuest', () => {
+    const churchClass = {
+      id: 'class-1',
+      name: 'Marriage Counselling',
+      status: ChurchClassStatusEnum.ACTIVE,
+    };
+
+    it('throws BadRequestException when the class is closed', async () => {
+      mockClassRepo.findOne.mockResolvedValue({
+        ...churchClass,
+        status: ChurchClassStatusEnum.CLOSED,
+      });
+
+      await expect(
+        service.enrollGuest({
+          classId: 'class-1',
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'jane@example.com',
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('finds-or-creates the guest by email, creates a fresh enrollment, and sends the portal access email', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      const guest = {
+        id: 'guest-1',
+        email: 'jane@example.com',
+        firstName: 'Jane',
+      };
+      mockGuestService.findOrCreateByEmail.mockResolvedValue(guest);
+      mockEnrollmentRepo.findOne.mockResolvedValue(null);
+      const enrollment = {
+        id: 'enroll-1',
+        guest,
+        status: EnrollmentStatusEnum.IN_PROGRESS,
+      };
+      mockEnrollmentRepo.create.mockReturnValue(enrollment);
+      mockEnrollmentRepo.save.mockResolvedValue(enrollment);
+
+      const result = await service.enrollGuest({
+        classId: 'class-1',
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@example.com',
+      } as any);
+
+      expect(mockGuestService.findOrCreateByEmail).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstName: 'Jane',
+          email: 'jane@example.com',
+        }),
+      );
+      expect(mockEnrollmentRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          guest,
+          status: EnrollmentStatusEnum.IN_PROGRESS,
+        }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalled();
+      expect(result).toBe(enrollment);
+    });
+
+    it('looks up the guest by id instead of by email when guestId is provided', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      const guest = { id: 'guest-1', email: 'jane@example.com' };
+      mockGuestService.getById.mockResolvedValue(guest);
+      mockEnrollmentRepo.findOne.mockResolvedValue(null);
+      const enrollment = { id: 'enroll-1', guest };
+      mockEnrollmentRepo.create.mockReturnValue(enrollment);
+      mockEnrollmentRepo.save.mockResolvedValue(enrollment);
+
+      await service.enrollGuest({
+        classId: 'class-1',
+        guestId: 'guest-1',
+      } as any);
+
+      expect(mockGuestService.getById).toHaveBeenCalledWith('guest-1');
+      expect(mockGuestService.findOrCreateByEmail).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException when the guest already completed this class', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockGuestService.getById.mockResolvedValue({ id: 'guest-1' });
+      mockEnrollmentRepo.findOne.mockResolvedValue({
+        id: 'enroll-1',
+        status: EnrollmentStatusEnum.COMPLETED,
+      });
+
+      await expect(
+        service.enrollGuest({ classId: 'class-1', guestId: 'guest-1' } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('re-enrols a CANCELLED guest enrollment back to IN_PROGRESS without sending a new portal email', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockGuestService.getById.mockResolvedValue({ id: 'guest-1' });
+      const cancelled = {
+        id: 'enroll-1',
+        status: EnrollmentStatusEnum.CANCELLED,
+        cancelledAt: new Date(),
+        completedAt: null,
+      };
+      mockEnrollmentRepo.findOne.mockResolvedValue(cancelled);
+      mockEnrollmentRepo.save.mockImplementation((e) => Promise.resolve(e));
+
+      const result = await service.enrollGuest({
+        classId: 'class-1',
+        guestId: 'guest-1',
+      } as any);
+
+      expect(result.status).toBe(EnrollmentStatusEnum.IN_PROGRESS);
+      expect(mockEnrollmentRepo.create).not.toHaveBeenCalled();
+      expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('bulkEnrollGuests', () => {
+    const churchClass = {
+      id: 'class-1',
+      name: 'Marriage Counselling',
+      status: ChurchClassStatusEnum.ACTIVE,
+    };
+
+    it('throws BadRequestException when the class is closed', async () => {
+      mockClassRepo.findOne.mockResolvedValue({
+        ...churchClass,
+        status: ChurchClassStatusEnum.CLOSED,
+      });
+
+      await expect(
+        service.bulkEnrollGuests({
+          classId: 'class-1',
+          guests: [{ firstName: 'Jane', lastName: 'Doe', email: 'a@b.com' }],
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('enrols valid entries and skips ones that fail, without aborting the batch', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockGuestService.findOrCreateByEmail
+        .mockResolvedValueOnce({ id: 'guest-1', email: 'a@b.com' })
+        .mockRejectedValueOnce(new Error('boom'));
+      mockEnrollmentRepo.findOne.mockResolvedValue(null);
+      mockEnrollmentRepo.create.mockImplementation((x) => x);
+      mockEnrollmentRepo.save.mockImplementation((x) =>
+        Promise.resolve({ id: 'enroll-1', ...x }),
+      );
+
+      const result = await service.bulkEnrollGuests({
+        classId: 'class-1',
+        guests: [
+          { firstName: 'Jane', lastName: 'Doe', email: 'a@b.com' },
+          { firstName: 'John', lastName: 'Smith', email: 'c@d.com' },
+        ],
+      } as any);
+
+      expect(result).toEqual({ enrolled: 1, skipped: 1 });
     });
   });
 

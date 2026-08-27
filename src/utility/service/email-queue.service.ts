@@ -156,6 +156,9 @@ export class EmailQueueService {
       [EmailCategory.PASTOR_FEEDBACK]: 'EMAIL_PASTOR_FEEDBACK_ENABLED',
       [EmailCategory.MEMBERSHIP_ANNIVERSARY]:
         'EMAIL_MEMBERSHIP_ANNIVERSARY_ENABLED',
+      [EmailCategory.ASSIGNMENT_REMINDER]: 'EMAIL_ASSIGNMENT_REMINDER_ENABLED',
+      [EmailCategory.CLASS_SESSION_REMINDER]:
+        'EMAIL_CLASS_SESSION_REMINDER_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);
@@ -229,6 +232,15 @@ export class EmailQueueService {
     }
     const base = this.config.get<string>('LOGIN_URL');
     return tenant ? buildTenantUrl(base, tenant.subdomain) : base;
+  }
+
+  // Escape hatch for member-facing deep links that aren't the login page
+  // itself (e.g. a guest's class portal link) — same subdomain-insertion as
+  // resolveTenantUrl('member'), but for an arbitrary path.
+  async resolveMemberUrl(path: string): Promise<string> {
+    const tenant = await this.getCurrentTenant();
+    const base = this.config.get<string>('LOGIN_URL');
+    return tenant ? buildTenantUrl(base, tenant.subdomain, path) : base;
   }
 
   private async getCurrentTenant(): Promise<Tenant | null> {

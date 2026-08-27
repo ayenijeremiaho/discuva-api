@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { ServiceProgrammeService } from './service-programme.service';
 import { ServiceProgramme } from '../entity/service-programme.entity';
 import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
@@ -77,9 +77,13 @@ const mockMemberRepo = {
   find: jest.fn().mockResolvedValue([]),
 };
 
-const mockDataSource = {
-  transaction: jest.fn(),
+const mockManager = {
+  remove: jest.fn(),
+  create: jest.fn((_e: unknown, data: unknown) => data),
+  save: jest.fn((_e: unknown, data: unknown) => Promise.resolve(data)),
 };
+
+const mockTxHost = { tx: mockManager };
 
 const mockPdfService = {
   generateProgrammeDraft: jest.fn().mockResolvedValue(Buffer.from('')),
@@ -128,11 +132,20 @@ describe('ServiceProgrammeService', () => {
       totalCount: 0,
       totalPages: 0,
     });
+    mockManager.remove.mockReset();
+    mockManager.create
+      .mockReset()
+      .mockImplementation((_e: unknown, data: unknown) => data);
+    mockManager.save
+      .mockReset()
+      .mockImplementation((_e: unknown, data: unknown) =>
+        Promise.resolve(data),
+      );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ServiceProgrammeService,
-        { provide: DataSource, useValue: mockDataSource },
+        { provide: TransactionHost, useValue: mockTxHost },
         {
           provide: getRepositoryToken(ServiceProgramme),
           useValue: mockProgrammeRepo,
@@ -1308,6 +1321,81 @@ describe('ServiceProgrammeService', () => {
       await expect(
         service.findStartableDraftProgrammesForEvent('event-x'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('applyTemplate', () => {
+    it('throws NotFoundException when the programme does not exist', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(null);
+      await expect(service.applyTemplate('prog-x', 'tpl-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('throws BadRequestException when the programme is not DRAFT', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(liveProgramme);
+      await expect(service.applyTemplate('prog-2', 'tpl-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('throws NotFoundException when the template does not exist', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue({
+        ...draftProgramme,
+        slots: [],
+      });
+      mockTemplateRepo.findOne.mockResolvedValue(null);
+      await expect(service.applyTemplate('prog-1', 'tpl-x')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('removes existing slots, creates the template slots, and saves the programme', async () => {
+      const existingSlot = { id: 'ps-old' };
+      const programme = { ...draftProgramme, slots: [existingSlot] };
+      mockProgrammeRepo.findOne.mockResolvedValue(programme);
+      mockTemplateRepo.findOne.mockResolvedValue({
+        id: 'tpl-1',
+        slots: [
+          {
+            position: 0,
+            type: ServiceSlotTypeEnum.WORSHIP,
+            topic: 'Opening',
+            allocatedMinutes: 5,
+          },
+          {
+            position: 1,
+            type: ServiceSlotTypeEnum.SPEAKER,
+            topic: 'Message',
+            allocatedMinutes: 30,
+          },
+        ],
+      });
+      const result = await service.applyTemplate('prog-1', 'tpl-1');
+
+      expect(mockManager.remove).toHaveBeenCalledWith(ServiceProgrammeSlot, [
+        existingSlot,
+      ]);
+      expect(mockManager.save).toHaveBeenCalledWith(
+        ServiceProgrammeSlot,
+        expect.arrayContaining([
+          expect.objectContaining({ topic: 'Opening' }),
+          expect.objectContaining({ topic: 'Message' }),
+        ]),
+      );
+      expect(result.slots).toHaveLength(2);
+    });
+
+    it('skips removing slots when the programme has none yet', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue({
+        ...draftProgramme,
+        slots: [],
+      });
+      mockTemplateRepo.findOne.mockResolvedValue({ id: 'tpl-1', slots: [] });
+
+      await service.applyTemplate('prog-1', 'tpl-1');
+
+      expect(mockManager.remove).not.toHaveBeenCalled();
     });
   });
 });
