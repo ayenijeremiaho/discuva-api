@@ -422,14 +422,60 @@ A log entry recorded each time the Prayer team prays with/visits a pregnant woma
 | Field               | Notes                                                          |
 |---------------------|----------------------------------------------------------------|
 | classType           | ManyToOne → ClassType (nullable: false, onDelete: RESTRICT)   |
-| facilitator         | ManyToOne → Member (nullable)                                  |
 | startDate / endDate | date strings                                                   |
-| nextSessionAt       | timestamptz, nullable — a single "next session" field the facilitator updates as the class progresses week to week, not a full multi-session schedule entity |
+| nextSessionAt       | timestamptz, nullable — a single "next session" field the facilitator(s) update as the class progresses week to week, not a full multi-session schedule entity |
 | meetingLink         | varchar, nullable — join link for a virtual session, shown alongside `nextSessionAt` |
+| materials           | OneToMany → ClassMaterial, `cascade: true` — see below         |
+| facilitators        | OneToMany → ClassFacilitator, `cascade: true` — see below      |
 
-**Delete guard:** Deleting a class is blocked if any enrolment record exists (any status — IN_PROGRESS, COMPLETED, or CANCELLED). This preserves historical enrolment data. A class with enrolment history cannot be deleted.
+**Delete guard:** Deleting a class is blocked if any enrolment record exists (any status — IN_PROGRESS, COMPLETED, or CANCELLED). This preserves historical enrolment data. A class with enrolment history cannot be deleted. Deleting an allowed (enrolment-free) class also cleans up its materials' Cloudinary assets first (see `ClassMaterial` below) — the FK's `onDelete: CASCADE` removes the `class_materials` rows automatically, but nothing app-side fires on a DB-level cascade, so this cleanup has to happen explicitly before the class row is removed. `class_facilitators` rows cascade-delete too, but need no app-side cleanup — there's no external asset attached to a facilitator row.
+
+### ClassFacilitator
+
+Replaces the old `ChurchClass.facilitator` (a single Member FK). A class can have several facilitators, and not every facilitator is a registered Member — an outside guest speaker is named via free text instead.
+
+| Field       | Notes                                                                 |
+|-------------|------------------------------------------------------------------------|
+| churchClass | ManyToOne → ChurchClass (nullable: false, onDelete: CASCADE)          |
+| member      | ManyToOne → Member, nullable (nullable: true, onDelete: SET NULL)     |
+| guestName   | varchar, nullable                                                     |
+| order       | int, default 0 — display order                                        |
+
+Exactly one of `member`/`guestName` is set per row — validated in `ClassesService` (not the DTO, since class-validator can't cleanly express "exactly one of two fields"); an entry with both or neither throws `BadRequestException`.
+
+**A class must always have at least one facilitator.** `CreateChurchClassDto.facilitators` is a required, non-empty array (`@ArrayMinSize(1)`). `UpdateChurchClassDto.facilitators` is optional — omit it to leave the existing facilitators untouched — but if provided, it must also be non-empty and **replaces the full list** (no incremental add/remove endpoints, unlike `ClassMaterial`; a facilitator has no upload step or cross-class reuse concern to preserve).
+
+Request shape for both create and update: `facilitators: [{ memberId?: string, guestName?: string }]`.
 
 **Next session (`nextSessionAt`/`meetingLink`):** `PATCH classes/:id/session` (body: `UpdateClassSessionDto` — both fields optional, either can be set to `null` to clear it) lets a facilitator/admin record when the class next meets and how to join. Deliberately a single mutable pair of columns rather than a `ClassSession` entity — a class is expected to have one upcoming session in view at a time, updated in place as it progresses, not a pre-populated calendar. Feeds `ClassSessionReminderScheduler` (see Reminder Settings Module) and is surfaced on both the authenticated member class-detail view and the guest portal (`GET classes/guest/:enrollmentId`).
+
+### ClassMaterial
+
+Replaces the old `ChurchClass.documentUrl` (a single free-text URL — the previous `uploadMaterial()` also never persisted Cloudinary's `publicId`, so nothing could ever be deleted). One-to-many, so a class can carry multiple titled documents and links, each independently addable/removable.
+
+| Field         | Notes                                                                                          |
+|---------------|--------------------------------------------------------------------------------------------------|
+| churchClass   | ManyToOne → ChurchClass (nullable: false, onDelete: CASCADE)                                    |
+| title         | required — defaults to the uploaded file's name (extension stripped) when omitted on upload      |
+| url           | the Cloudinary secure URL (upload) or the pasted external link                                   |
+| publicId      | nullable — Cloudinary asset id; `null` for a pasted link (nothing to delete from Cloudinary)     |
+| resourceType  | nullable — Cloudinary resource type (`image`/`video`/`raw`); `null` for a pasted link             |
+| mimeType      | nullable — set for uploads only                                                                  |
+| sizeBytes     | bigint, nullable — set for uploads only                                                          |
+| order         | int, default 0 — display order, assigned incrementally as materials are added                    |
+
+**Three ways to add a material** (all class-scoped, `AdminGuard` + `CLASSES_WRITE`):
+- `POST classes/:id/materials/upload` — multipart, field `file` (+ optional `title` field), same file-type allowlist as before (PDF/Word/PowerPoint/image), size gated by `PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB` via `DynamicLimitedFileInterceptor`. Uploads to the `class-materials` Cloudinary folder and creates the row in one call.
+- `POST classes/:id/materials/link` — JSON `{ title, url }`, no Cloudinary asset (`publicId: null`).
+- `POST classes/:id/materials/reuse` — JSON echoing a `GET classes/materials/library` entry's fields back; creates a new row pointing at the *same* Cloudinary asset (or the same pasted URL) without a new upload.
+
+**Reference-counted deletion (`DELETE classes/:id/materials/:materialId`):** because "reuse" lets multiple `ClassMaterial` rows share one `publicId`, deleting a row only calls `CloudinaryService.deleteByPublicId()` if no *other* row still references that `publicId` — checked via a live `exists()` query at delete time (not a stored counter, so it can never drift out of sync). A pasted-link row (`publicId: null`) never touches Cloudinary at all. The same check runs for every material when a class itself is deleted.
+
+**Indexes:** `church_class_id` (FK, backs the `materials` relation join and the pre-delete cleanup loop's per-class fetch) and `public_id` (backs the reference-counted `exists()` check above, which runs on every material/class deletion).
+
+**Library (`GET classes/materials/library`, `CLASSES_READ`):** dedups every material across every class by `publicId` (uploads) or `url` (pasted links with no `publicId`), returning `{ title, url, publicId, resourceType, mimeType, sizeBytes, usedByClassNames }[]` — lets the admin UI's "Reuse Previous" picker show what's already in use and by which classes, instead of re-uploading the same syllabus for every cohort.
+
+**Visibility:** `GET classes/:id` (admin) and the guest portal (`GET classes/guest/:enrollmentId`) both return `materials` sorted by `order`; the guest portal's hand-built response only exposes `{id, title, url, resourceType}` per material, not the full row.
 
 ### ClassType
 
@@ -2647,17 +2693,13 @@ Tracks member progress through structured church programs. The module, route pat
 
 **Guest portal access (no login):** `GET classes/guest/:enrollmentId` and `POST classes/guest/:enrollmentId/assignments/:assignmentId/submit`, both `@Public()` (bypass `JwtAuthGuard`; `ModuleEnabledGuard` still applies since it keys off the tenant, not caller auth) on a dedicated `ClassPublicController` — mirrors the Forms module's public-submission pattern exactly. The submit route is rate-limited (`5/min`). `submitAsGuest` verifies the enrollment actually has a `guest` attached and belongs to the *same* class as the assignment, so neither a member's enrollment id nor a guest's enrollment in a different class can be used to submit.
 
-**Study material (`ChurchClass.documentUrl`):** optional, admin-set link to the class's syllabus/manual (Google
-Drive, PDF link, etc.) — validated as a URL (`@IsUrl()`) at the DTO level, but the URL itself can come from three
-places: a plain external link typed in directly, a fresh upload (`POST classes/materials/upload`, multipart, field
-name `file`), or reusing a URL already in use by another class (`GET classes/materials/library` — distinct
-`documentUrl`s across all classes, each with the list of class names currently using it, so the admin doesn't
-re-upload the same manual per class type). Upload accepts PDF, Word, PowerPoint, or image mimetypes; size is capped
-by `PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB` (platform-admin-configurable, default 10 MB — separate from
-the app-wide `MAX_FILE_UPLOAD_BYTES` default of 5 MB since course material tends to run larger than proofs/images).
-Uploaded files land in Cloudinary's
-`class-materials` folder. Whichever source produced the URL, it's set the same way afterward — `documentUrl` on
-`POST`/`PATCH classes`.
+**Study materials — see the `ClassMaterial` entity section above** for the full model (multiple titled
+documents/links per class, upload vs. pasted-link vs. reuse-existing-asset, and the reference-counted delete
+behavior that keeps a shared "reused" upload safe). Upload accepts PDF, Word, PowerPoint, or image mimetypes; size
+is capped by `PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB` (platform-admin-configurable, default 10 MB —
+separate from the app-wide `MAX_FILE_UPLOAD_BYTES` default of 5 MB since course material tends to run larger than
+proofs/images). Materials can only be added to a class that already exists — there's no material field on
+`POST classes` itself.
 
 **Assignments (`Assignment`/`AssignmentSubmission`, tables `assignments`/`assignment_submissions`):** each
 `ChurchClass` can have any number of assignments. An assignment has `title`, optional `instructions`, `maxScore`
@@ -2685,8 +2727,11 @@ used by tithe/finance proof review.
 | POST   | `/classes/assignments/:assignmentId/submit`              | JwtAuthGuard               | Create or (if ungraded) overwrite the caller's own submission |
 | GET    | `/classes/assignments/:assignmentId/submissions`         | AdminGuard (CLASSES_READ)  | Paginated (`?page=&limit=`), for grading |
 | PATCH  | `/classes/assignments/submissions/:submissionId/grade`   | AdminGuard (CLASSES_WRITE) | `{ score, feedback? }` |
-| POST   | `/classes/materials/upload`                              | AdminGuard (CLASSES_WRITE) | Multipart, field `file` → `{ url }` |
-| GET    | `/classes/materials/library`                             | AdminGuard (CLASSES_READ)  | `{ documentUrl, usedByClassNames }[]` — for the "reuse a previous upload" picker |
+| POST   | `/classes/:id/materials/upload`                          | AdminGuard (CLASSES_WRITE) | Multipart, field `file` (+ optional `title`) — uploads to Cloudinary and creates the `ClassMaterial` row |
+| POST   | `/classes/:id/materials/link`                            | AdminGuard (CLASSES_WRITE) | `{ title, url }` — pasted external link, no Cloudinary asset |
+| POST   | `/classes/:id/materials/reuse`                           | AdminGuard (CLASSES_WRITE) | Echoes a library entry's fields — new row, same underlying asset, no re-upload |
+| DELETE | `/classes/:id/materials/:materialId`                     | AdminGuard (CLASSES_WRITE) | Reference-counted Cloudinary cleanup — see `ClassMaterial` above |
+| GET    | `/classes/materials/library`                             | AdminGuard (CLASSES_READ)  | `{ title, url, publicId, resourceType, mimeType, sizeBytes, usedByClassNames }[]` — for the "Reuse Previous" picker |
 | GET    | `/classes/lookup`                                        | AdminGuard (ANNOUNCEMENTS_WRITE) | `{id, name, startDate, endDate}[]` — feeds the Announcements CLASS-audience picker; gated on `ANNOUNCEMENTS_WRITE` (composing an announcement), not `CLASSES_READ`, mirroring `GET /groups/lookup` |
 | PATCH  | `/classes/:id/session`                                   | AdminGuard (CLASSES_WRITE) | `{ nextSessionAt?, meetingLink? }` — either can be set to `null` to clear |
 | POST   | `/classes/enroll/guest`                                  | AdminGuard (CLASSES_WRITE) | `EnrollGuestDto` — see Guest enrollment above |

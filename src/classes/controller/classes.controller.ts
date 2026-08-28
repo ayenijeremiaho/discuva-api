@@ -32,6 +32,10 @@ import {
 import { BulkEnrollGuestsDto, EnrollGuestDto } from '../dto/guest.dto';
 import { PromoteEnrollmentDto } from '../dto/promote-enrollment.dto';
 import { IssueCertificateDto } from '../dto/issue-certificate.dto';
+import {
+  AddClassMaterialLinkDto,
+  ReuseClassMaterialDto,
+} from '../dto/class-material.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
@@ -92,9 +96,18 @@ export class ClassesController {
     return this.classesService.getMyEnrollments(user.id);
   }
 
+  // Must stay above the bare ':id' route below, same reasoning as
+  // 'lookup'/'guests'.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_READ)
+  @Get('materials/library')
+  getMaterialLibrary() {
+    return this.classesService.getMaterialLibrary();
+  }
+
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.CLASSES_WRITE)
-  @Post('materials/upload')
+  @Post(':id/materials/upload')
   @UseInterceptors(
     DynamicLimitedFileInterceptor(
       'file',
@@ -127,16 +140,43 @@ export class ClassesController {
       },
     ),
   )
-  uploadMaterial(@UploadedFile() file?: Express.Multer.File) {
+  uploadClassMaterial(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('title') title: string | undefined,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
     if (!file) throw new BadRequestException('No file provided');
-    return this.classesService.uploadMaterial(file);
+    return this.classesService.uploadClassMaterial(id, file, title);
   }
 
   @UseGuards(AdminGuard)
-  @RequiresPermission(AdminPermission.CLASSES_READ)
-  @Get('materials/library')
-  getMaterialLibrary() {
-    return this.classesService.getMaterialLibrary();
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post(':id/materials/link')
+  addClassMaterialLink(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AddClassMaterialLinkDto,
+  ) {
+    return this.classesService.addClassMaterialLink(id, dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Post(':id/materials/reuse')
+  reuseClassMaterial(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReuseClassMaterialDto,
+  ) {
+    return this.classesService.reuseClassMaterial(id, dto);
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.CLASSES_WRITE)
+  @Delete(':id/materials/:materialId')
+  removeClassMaterial(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('materialId', ParseUUIDPipe) materialId: string,
+  ) {
+    return this.classesService.removeClassMaterial(id, materialId);
   }
 
   // Minimal id/name/date-range list for the Announcements "Class" audience

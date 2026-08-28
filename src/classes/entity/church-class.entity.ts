@@ -8,9 +8,10 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
-import { Member } from '../../member/entity/member.entity';
 import { ClassEnrollment } from './class-enrollment.entity';
 import { ClassType } from './class-type.entity';
+import { ClassMaterial } from './class-material.entity';
+import { ClassFacilitator } from './class-facilitator.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 
 @Entity('church_classes')
@@ -29,17 +30,9 @@ export class ChurchClass extends BaseEntity {
   @Column({ nullable: true, type: 'text' })
   description: string | null;
 
-  // Link to the class's syllabus/manual/study material — hosted externally
-  // (Google Drive, PDF link, etc.), not uploaded through this API.
-  @Column({ nullable: true, name: 'document_url' })
-  documentUrl: string | null;
-
   @Index()
   @Column({ default: ChurchClassStatusEnum.ACTIVE })
   status: ChurchClassStatusEnum;
-
-  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
-  facilitator: Member | null;
 
   @Column({ type: 'date', nullable: true })
   startDate: string | null;
@@ -57,4 +50,14 @@ export class ChurchClass extends BaseEntity {
 
   @OneToMany(() => ClassEnrollment, (enrollment) => enrollment.churchClass)
   enrollments: ClassEnrollment[];
+
+  @OneToMany(() => ClassMaterial, (material) => material.churchClass, {
+    cascade: true,
+  })
+  materials: ClassMaterial[];
+
+  @OneToMany(() => ClassFacilitator, (f) => f.churchClass, {
+    cascade: true,
+  })
+  facilitators: ClassFacilitator[];
 }

@@ -52,6 +52,12 @@ export class ClassPublicController {
         description: enrollment.churchClass.description,
         nextSessionAt: enrollment.churchClass.nextSessionAt,
         meetingLink: enrollment.churchClass.meetingLink,
+        materials: (enrollment.churchClass.materials ?? []).map((m) => ({
+          id: m.id,
+          title: m.title,
+          url: m.url,
+          resourceType: m.resourceType,
+        })),
       },
       guest: {
         firstName: enrollment.guest!.firstName,

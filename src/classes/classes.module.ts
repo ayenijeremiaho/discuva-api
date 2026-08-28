@@ -7,6 +7,8 @@ import { ClassType } from './entity/class-type.entity';
 import { Assignment } from './entity/assignment.entity';
 import { AssignmentSubmission } from './entity/assignment-submission.entity';
 import { Guest } from './entity/guest.entity';
+import { ClassMaterial } from './entity/class-material.entity';
+import { ClassFacilitator } from './entity/class-facilitator.entity';
 import { ClassesService } from './service/classes.service';
 import { ClassTypesService } from './service/class-types.service';
 import { AssignmentService } from './service/assignment.service';
@@ -31,6 +33,8 @@ import { ClassSessionReminderScheduler } from './scheduler/class-session-reminde
       Assignment,
       AssignmentSubmission,
       Guest,
+      ClassMaterial,
+      ClassFacilitator,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by the two class schedulers' forEachActiveTenant loops.

@@ -5,10 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
 import { ClassType } from '../entity/class-type.entity';
+import { ClassMaterial } from '../entity/class-material.entity';
+import { ClassFacilitator } from '../entity/class-facilitator.entity';
 import { Guest } from '../entity/guest.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
@@ -20,6 +22,11 @@ import { BulkEnrollDto, EnrollMemberDto } from '../dto/enroll-member.dto';
 import { BulkEnrollGuestsDto, EnrollGuestDto } from '../dto/guest.dto';
 import { PromoteEnrollmentDto } from '../dto/promote-enrollment.dto';
 import { IssueCertificateDto } from '../dto/issue-certificate.dto';
+import {
+  AddClassMaterialLinkDto,
+  ReuseClassMaterialDto,
+} from '../dto/class-material.dto';
+import { ClassFacilitatorInputDto } from '../dto/class-facilitator.dto';
 import { EnrollmentStatusEnum } from '../enum/enrollment-status.enum';
 import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -30,7 +37,12 @@ import { GuestService } from './guest.service';
 import { ConfigService } from '@nestjs/config';
 
 export interface ClassMaterialLibraryEntry {
-  documentUrl: string;
+  title: string;
+  url: string;
+  publicId: string | null;
+  resourceType: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
   usedByClassNames: string[];
 }
 
@@ -57,6 +69,10 @@ export class ClassesService {
     private readonly enrollmentRepo: Repository<ClassEnrollment>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(ClassMaterial)
+    private readonly materialRepo: Repository<ClassMaterial>,
+    @InjectRepository(ClassFacilitator)
+    private readonly facilitatorRepo: Repository<ClassFacilitator>,
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
@@ -73,12 +89,14 @@ export class ClassesService {
       name: dto.name,
       classType: { id: dto.classTypeId } as ClassType,
       description: dto.description ?? null,
-      documentUrl: dto.documentUrl ?? null,
       startDate: dto.startDate ?? null,
       endDate: dto.endDate ?? null,
-      facilitator: dto.facilitatorId ? { id: dto.facilitatorId } : null,
     });
     const saved = await this.classRepo.save(churchClass);
+
+    const facilitators = this.buildFacilitatorEntities(dto.facilitators, saved);
+    if (facilitators.length) await this.facilitatorRepo.save(facilitators);
+
     this.logger.log(`Class "${saved.name}" created (id: ${saved.id})`);
     return saved;
   }
@@ -94,19 +112,49 @@ export class ClassesService {
       churchClass.classType = { id: dto.classTypeId } as ClassType;
     if (dto.description !== undefined)
       churchClass.description = dto.description;
-    if (dto.documentUrl !== undefined)
-      churchClass.documentUrl = dto.documentUrl;
     if (dto.startDate !== undefined) churchClass.startDate = dto.startDate;
     if (dto.endDate !== undefined) churchClass.endDate = dto.endDate;
-    if (dto.facilitatorId !== undefined) {
-      churchClass.facilitator = dto.facilitatorId
-        ? ({ id: dto.facilitatorId } as Member)
-        : null;
-    }
 
     const saved = await this.classRepo.save(churchClass);
+
+    if (dto.facilitators !== undefined) {
+      const facilitators = this.buildFacilitatorEntities(
+        dto.facilitators,
+        saved,
+      );
+      await this.facilitatorRepo.delete({ churchClass: { id } });
+      if (facilitators.length) await this.facilitatorRepo.save(facilitators);
+    }
+
     this.logger.log(`Class "${saved.name}" updated (id: ${saved.id})`);
     return saved;
+  }
+
+  // Every update replaces the full facilitator list (simplest correct
+  // semantics for a short admin-curated list — unlike ClassMaterial there's
+  // no upload step or cross-class reuse to preserve). Validated here rather
+  // than in the DTO since class-validator can't express "exactly one of
+  // memberId/guestName" cleanly.
+  private buildFacilitatorEntities(
+    entries: ClassFacilitatorInputDto[] | undefined,
+    churchClass: ChurchClass,
+  ): ClassFacilitator[] {
+    if (!entries?.length) return [];
+    return entries.map((entry, index) => {
+      const hasMember = !!entry.memberId;
+      const hasGuestName = !!entry.guestName?.trim();
+      if (hasMember === hasGuestName) {
+        throw new BadRequestException(
+          'Each facilitator must have exactly one of memberId or guestName.',
+        );
+      }
+      return this.facilitatorRepo.create({
+        churchClass,
+        member: entry.memberId ? ({ id: entry.memberId } as Member) : null,
+        guestName: entry.guestName?.trim() || null,
+        order: index,
+      });
+    });
   }
 
   async updateClassSession(
@@ -144,6 +192,17 @@ export class ClassesService {
       );
     }
 
+    // The FK's onDelete: 'CASCADE' removes the class_materials rows at the
+    // DB level automatically, but nothing app-side fires on a DB cascade —
+    // without this, an uploaded (non-shared) material's Cloudinary asset
+    // would silently orphan every time a class is deleted.
+    const materials = await this.materialRepo.find({
+      where: { churchClass: { id } },
+    });
+    for (const material of materials) {
+      await this.cleanupMaterialAsset(material);
+    }
+
     const { name } = churchClass;
     await this.classRepo.remove(churchClass);
     this.logger.log(`Class "${name}" deleted (id: ${id})`);
@@ -152,9 +211,17 @@ export class ClassesService {
   async getClass(id: string): Promise<ChurchClass> {
     const churchClass = await this.classRepo.findOne({
       where: { id },
-      relations: ['facilitator', 'classType', 'classType.nextClassType'],
+      relations: [
+        'facilitators',
+        'facilitators.member',
+        'classType',
+        'classType.nextClassType',
+        'materials',
+      ],
     });
     if (!churchClass) throw new NotFoundException('Class not found');
+    churchClass.materials?.sort((a, b) => a.order - b.order);
+    churchClass.facilitators?.sort((a, b) => a.order - b.order);
     return churchClass;
   }
 
@@ -165,9 +232,11 @@ export class ClassesService {
   ): Promise<PaginationResponseDto<ChurchClass>> {
     const query = this.classRepo
       .createQueryBuilder('c')
-      .leftJoinAndSelect('c.facilitator', 'facilitator')
+      .leftJoinAndSelect('c.facilitators', 'facilitators')
+      .leftJoinAndSelect('facilitators.member', 'facilitatorMember')
       .leftJoinAndSelect('c.classType', 'classType')
       .orderBy('c.createdAt', 'DESC')
+      .addOrderBy('facilitators.order', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -815,38 +884,168 @@ export class ClassesService {
     return saved;
   }
 
-  async uploadMaterial(file: Express.Multer.File): Promise<{ url: string }> {
+  async uploadClassMaterial(
+    classId: string,
+    file: Express.Multer.File,
+    title?: string,
+  ): Promise<ClassMaterial> {
+    const churchClass = await this.getClassOrThrow(classId);
+
     const uploaded = await this.cloudinaryService.uploadBuffer(
       file.buffer,
       'class-materials',
       undefined,
       file.mimetype,
     );
-    return { url: uploaded.secureUrl };
+
+    const nextOrder = await this.getNextMaterialOrder(classId);
+    const material = this.materialRepo.create({
+      churchClass,
+      title: title?.trim() || this.stripExtension(file.originalname),
+      url: uploaded.secureUrl,
+      publicId: uploaded.publicId,
+      resourceType: uploaded.resourceType,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      order: nextOrder,
+    });
+    const saved = await this.materialRepo.save(material);
+    this.logger.log(
+      `Material "${saved.title}" uploaded to class "${churchClass.name}" (id: ${classId})`,
+    );
+    return saved;
+  }
+
+  async addClassMaterialLink(
+    classId: string,
+    dto: AddClassMaterialLinkDto,
+  ): Promise<ClassMaterial> {
+    const churchClass = await this.getClassOrThrow(classId);
+
+    const nextOrder = await this.getNextMaterialOrder(classId);
+    const material = this.materialRepo.create({
+      churchClass,
+      title: dto.title,
+      url: dto.url,
+      publicId: null,
+      resourceType: null,
+      mimeType: null,
+      sizeBytes: null,
+      order: nextOrder,
+    });
+    const saved = await this.materialRepo.save(material);
+    this.logger.log(
+      `Link material "${saved.title}" added to class "${churchClass.name}" (id: ${classId})`,
+    );
+    return saved;
+  }
+
+  // Attaches a new row pointing at an *existing* Cloudinary asset (or the
+  // same pasted link) instead of uploading again — see
+  // ClassMaterialLibraryEntry / getMaterialLibrary(). No new Cloudinary
+  // asset is created; cleanupMaterialAsset()'s live reference check is what
+  // keeps deleting one of these rows from destroying the asset while
+  // another class's material row still points at it.
+  async reuseClassMaterial(
+    classId: string,
+    dto: ReuseClassMaterialDto,
+  ): Promise<ClassMaterial> {
+    const churchClass = await this.getClassOrThrow(classId);
+
+    const nextOrder = await this.getNextMaterialOrder(classId);
+    const material = this.materialRepo.create({
+      churchClass,
+      title: dto.title,
+      url: dto.url,
+      publicId: dto.publicId ?? null,
+      resourceType: dto.resourceType ?? null,
+      mimeType: dto.mimeType ?? null,
+      sizeBytes: dto.sizeBytes ?? null,
+      order: nextOrder,
+    });
+    const saved = await this.materialRepo.save(material);
+    this.logger.log(
+      `Material "${saved.title}" reused on class "${churchClass.name}" (id: ${classId})`,
+    );
+    return saved;
+  }
+
+  async removeClassMaterial(
+    classId: string,
+    materialId: string,
+  ): Promise<void> {
+    const material = await this.materialRepo.findOne({
+      where: { id: materialId, churchClass: { id: classId } },
+    });
+    if (!material)
+      throw new NotFoundException('Material not found on this class');
+
+    await this.materialRepo.remove(material);
+    await this.cleanupMaterialAsset(material);
+    this.logger.log(
+      `Material "${material.title}" removed from class (id: ${classId})`,
+    );
   }
 
   // Lets the admin UI offer "reuse a previous upload" instead of
   // re-uploading the same syllabus/manual for every class it applies to —
-  // just the distinct documentUrls already in use, grouped by which
-  // classes reference each one, since ChurchClass.documentUrl has no
-  // separate library table backing it.
+  // dedups by publicId (a shared Cloudinary asset) or, for pasted links
+  // with no publicId, by the URL itself.
   async getMaterialLibrary(): Promise<ClassMaterialLibraryEntry[]> {
-    const classes = await this.classRepo.find({
-      select: ['name', 'documentUrl'],
+    const materials = await this.materialRepo.find({
+      relations: ['churchClass'],
+      order: { createdAt: 'DESC' },
     });
-    const withMaterial = classes.filter((c) => !!c.documentUrl);
 
-    const byUrl = new Map<string, string[]>();
-    for (const c of withMaterial) {
-      const names = byUrl.get(c.documentUrl!) ?? [];
-      names.push(c.name);
-      byUrl.set(c.documentUrl!, names);
+    const byAsset = new Map<string, ClassMaterialLibraryEntry>();
+    for (const m of materials) {
+      const key = m.publicId ?? m.url;
+      const existing = byAsset.get(key);
+      if (existing) {
+        existing.usedByClassNames.push(m.churchClass.name);
+      } else {
+        byAsset.set(key, {
+          title: m.title,
+          url: m.url,
+          publicId: m.publicId,
+          resourceType: m.resourceType,
+          mimeType: m.mimeType,
+          sizeBytes: m.sizeBytes,
+          usedByClassNames: [m.churchClass.name],
+        });
+      }
     }
 
-    return [...byUrl.entries()].map(([documentUrl, usedByClassNames]) => ({
-      documentUrl,
-      usedByClassNames,
-    }));
+    return [...byAsset.values()];
+  }
+
+  private async getNextMaterialOrder(classId: string): Promise<number> {
+    const count = await this.materialRepo.count({
+      where: { churchClass: { id: classId } },
+    });
+    return count;
+  }
+
+  private stripExtension(filename: string): string {
+    const lastDot = filename.lastIndexOf('.');
+    return lastDot > 0 ? filename.slice(0, lastDot) : filename;
+  }
+
+  // Only deletes the Cloudinary asset once no other ClassMaterial row still
+  // references the same publicId — a shared "reused" material must not
+  // have its file pulled out from under a different class. Pasted links
+  // (publicId null) have nothing to clean up.
+  private async cleanupMaterialAsset(material: ClassMaterial): Promise<void> {
+    if (!material.publicId) return;
+    const stillReferenced = await this.materialRepo.exists({
+      where: { publicId: material.publicId, id: Not(material.id) },
+    });
+    if (!stillReferenced) {
+      this.cloudinaryService.deleteByPublicId(
+        material.publicId,
+        material.resourceType ?? 'raw',
+      );
+    }
   }
 
   private async getClassOrThrow(id: string): Promise<ChurchClass> {
@@ -869,11 +1068,12 @@ export class ClassesService {
   async getGuestEnrollmentOrThrow(id: string): Promise<ClassEnrollment> {
     const enrollment = await this.enrollmentRepo.findOne({
       where: { id },
-      relations: ['guest', 'churchClass'],
+      relations: ['guest', 'churchClass', 'churchClass.materials'],
     });
     if (!enrollment?.guest) {
       throw new NotFoundException('Enrollment not found');
     }
+    enrollment.churchClass.materials?.sort((a, b) => a.order - b.order);
     return enrollment;
   }
 }

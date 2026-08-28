@@ -106,6 +106,74 @@ describe('PrayerReminderScheduler', () => {
     ]);
   });
 
+  it('sends a reminder for a member-direct entry (MEMBERS-audience program, no workerProfile)', async () => {
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+    const entry = {
+      id: 'entry-2',
+      reminderTwoDaySent: false,
+      reminderDaySent: false,
+      workerProfile: null,
+      member: { id: 'member-2', email: 'm@example.com', firstname: 'Bola' },
+      meeting: {
+        date: '2026-06-01',
+        dayConfig: { startTime: '18:00', endTime: '19:00', mode: 'onsite' },
+      },
+    };
+    mockRosterRepo.find
+      .mockResolvedValueOnce([entry])
+      .mockResolvedValueOnce([]);
+
+    await scheduler.sendReminders();
+
+    expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+      'm@example.com',
+      expect.stringContaining('2 Days Away'),
+      'prayer-reminder',
+      expect.objectContaining({ name: 'Bola' }),
+      undefined,
+      expect.any(String),
+    );
+    expect(mockPushService.dispatchToMemberIds).toHaveBeenCalledWith(
+      ['member-2'],
+      expect.objectContaining({
+        idempotencyKey: 'prayer-reminder-two-day:entry-2',
+      }),
+    );
+    expect(mockRosterRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({ reminderTwoDaySent: true }),
+    ]);
+  });
+
+  it('does not mark reminderTwoDaySent when the entry has neither a workerProfile nor a member', async () => {
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't1', subdomain: 'a', schemaName: 'church_a' },
+    ]);
+    const entry = {
+      id: 'entry-3',
+      reminderTwoDaySent: false,
+      reminderDaySent: false,
+      workerProfile: null,
+      member: null,
+      meeting: {
+        date: '2026-06-01',
+        dayConfig: { startTime: '18:00', endTime: '19:00', mode: 'onsite' },
+      },
+    };
+    mockRosterRepo.find
+      .mockResolvedValueOnce([entry])
+      .mockResolvedValueOnce([]);
+
+    await scheduler.sendReminders();
+
+    expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+    expect(mockPushService.dispatchToMemberIds).not.toHaveBeenCalled();
+    expect(mockRosterRepo.save).toHaveBeenCalledWith([
+      expect.objectContaining({ reminderTwoDaySent: false }),
+    ]);
+  });
+
   it('continues past one tenant failing so the rest still get processed', async () => {
     mockTenantRepo.find.mockResolvedValue([
       { id: 't1', subdomain: 'a', schemaName: 'church_a' },

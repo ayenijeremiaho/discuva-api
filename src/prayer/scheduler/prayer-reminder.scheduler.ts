@@ -64,6 +64,7 @@ export class PrayerReminderScheduler {
       relations: [
         'workerProfile',
         'workerProfile.member',
+        'member',
         'meeting',
         'meeting.dayConfig',
       ],
@@ -72,12 +73,12 @@ export class PrayerReminderScheduler {
     for (const entry of entries) {
       try {
         this.queueReminder(entry, 'two-day');
+        entry.reminderTwoDaySent = true;
       } catch (err) {
         this.logger.error(
           `Failed to queue 2-day reminder for entry ${entry.id}: ${err}`,
         );
       }
-      entry.reminderTwoDaySent = true;
     }
 
     if (entries.length) await this.rosterRepo.save(entries);
@@ -96,6 +97,7 @@ export class PrayerReminderScheduler {
       relations: [
         'workerProfile',
         'workerProfile.member',
+        'member',
         'meeting',
         'meeting.dayConfig',
       ],
@@ -104,12 +106,12 @@ export class PrayerReminderScheduler {
     for (const entry of entries) {
       try {
         this.queueReminder(entry, 'day-of');
+        entry.reminderDaySent = true;
       } catch (err) {
         this.logger.error(
           `Failed to queue day-of reminder for entry ${entry.id}: ${err}`,
         );
       }
-      entry.reminderDaySent = true;
     }
 
     if (entries.length) await this.rosterRepo.save(entries);
@@ -119,7 +121,14 @@ export class PrayerReminderScheduler {
     entry: PrayerRosterEntry,
     type: 'two-day' | 'day-of',
   ): void {
-    const member = entry.workerProfile.member;
+    // MEMBERS-audience programs assign entry.member directly (no
+    // workerProfile) — see PrayerRosterService.manualAssign().
+    const member = entry.workerProfile?.member ?? entry.member;
+    if (!member) {
+      throw new Error(
+        `Roster entry ${entry.id} has neither a worker profile nor a member`,
+      );
+    }
     const dayConfig = entry.meeting.dayConfig;
     const subject =
       type === 'two-day'

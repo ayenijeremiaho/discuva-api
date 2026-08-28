@@ -5,6 +5,8 @@ import { ConfigService } from '@nestjs/config';
 import { ClassesService } from './classes.service';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
+import { ClassMaterial } from '../entity/class-material.entity';
+import { ClassFacilitator } from '../entity/class-facilitator.entity';
 import { Member } from '../../member/entity/member.entity';
 import { EnrollmentStatusEnum } from '../enum/enrollment-status.enum';
 import { ChurchClassStatusEnum } from '../enum/church-class-status.enum';
@@ -56,6 +58,22 @@ const mockMemberRepo = {
   find: jest.fn(),
 };
 
+const mockMaterialRepo = {
+  findOne: jest.fn(),
+  find: jest.fn(),
+  create: jest.fn(),
+  save: jest.fn(),
+  remove: jest.fn(),
+  count: jest.fn(),
+  exists: jest.fn(),
+};
+
+const mockFacilitatorRepo = {
+  create: jest.fn((v) => v),
+  save: jest.fn(),
+  delete: jest.fn(),
+};
+
 const mockAuditLogService = { log: jest.fn() };
 
 const mockUtilityService = {
@@ -94,6 +112,14 @@ describe('ClassesService', () => {
           useValue: mockEnrollmentRepo,
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
+        {
+          provide: getRepositoryToken(ClassMaterial),
+          useValue: mockMaterialRepo,
+        },
+        {
+          provide: getRepositoryToken(ClassFacilitator),
+          useValue: mockFacilitatorRepo,
+        },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
@@ -128,42 +154,98 @@ describe('ClassesService', () => {
       expect(result).toMatchObject({ id: 'class-1' });
     });
 
-    it('should set facilitator to null when no facilitatorId provided', async () => {
+    it('creates no facilitator rows when none are provided', async () => {
       const dto = { name: 'Class', classTypeId: 'class-type-1' };
-      mockClassRepo.create.mockReturnValue({ ...dto, facilitator: null });
-      mockClassRepo.save.mockResolvedValue({
-        id: 'class-1',
-        ...dto,
-        facilitator: null,
-      });
+      mockClassRepo.create.mockReturnValue({ ...dto });
+      mockClassRepo.save.mockResolvedValue({ id: 'class-1', ...dto });
 
       await service.createClass(dto as any);
 
-      expect(mockClassRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ facilitator: null }),
-      );
+      expect(mockFacilitatorRepo.save).not.toHaveBeenCalled();
     });
 
-    it('should set facilitator as reference when facilitatorId provided', async () => {
+    it('creates a facilitator row for a member and one for a guest name, in order', async () => {
       const dto = {
         name: 'Class',
         classTypeId: 'class-type-1',
-        facilitatorId: 'member-1',
+        facilitators: [{ memberId: 'member-1' }, { guestName: 'Jane Doe' }],
       };
-      mockClassRepo.create.mockReturnValue({
-        ...dto,
-        facilitator: { id: 'member-1' },
-      });
-      mockClassRepo.save.mockResolvedValue({
-        id: 'class-1',
-        facilitator: { id: 'member-1' },
-      });
+      const saved = { id: 'class-1', ...dto };
+      mockClassRepo.create.mockReturnValue({ ...dto });
+      mockClassRepo.save.mockResolvedValue(saved);
 
       await service.createClass(dto as any);
 
-      expect(mockClassRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ facilitator: { id: 'member-1' } }),
+      expect(mockFacilitatorRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          churchClass: saved,
+          member: { id: 'member-1' },
+          guestName: null,
+          order: 0,
+        }),
+        expect.objectContaining({
+          churchClass: saved,
+          member: null,
+          guestName: 'Jane Doe',
+          order: 1,
+        }),
+      ]);
+    });
+
+    it('throws BadRequestException when a facilitator entry has both memberId and guestName', async () => {
+      const dto = {
+        name: 'Class',
+        classTypeId: 'class-type-1',
+        facilitators: [{ memberId: 'member-1', guestName: 'Jane Doe' }],
+      };
+      mockClassRepo.create.mockReturnValue({ ...dto });
+      mockClassRepo.save.mockResolvedValue({ id: 'class-1', ...dto });
+
+      await expect(service.createClass(dto as any)).rejects.toThrow(
+        BadRequestException,
       );
+    });
+
+    it('throws BadRequestException when a facilitator entry has neither memberId nor guestName', async () => {
+      const dto = {
+        name: 'Class',
+        classTypeId: 'class-type-1',
+        facilitators: [{}],
+      };
+      mockClassRepo.create.mockReturnValue({ ...dto });
+      mockClassRepo.save.mockResolvedValue({ id: 'class-1', ...dto });
+
+      await expect(service.createClass(dto as any)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('updateClass', () => {
+    it('leaves facilitators untouched when the field is omitted from the update', async () => {
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1', name: 'X' });
+      mockClassRepo.save.mockImplementation((c) => Promise.resolve(c));
+
+      await service.updateClass('class-1', { name: 'Y' } as any);
+
+      expect(mockFacilitatorRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('replaces the full facilitator list when facilitators is provided', async () => {
+      const churchClass = { id: 'class-1', name: 'X' };
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockClassRepo.save.mockImplementation((c) => Promise.resolve(c));
+
+      await service.updateClass('class-1', {
+        facilitators: [{ guestName: 'New Facilitator' }],
+      } as any);
+
+      expect(mockFacilitatorRepo.delete).toHaveBeenCalledWith({
+        churchClass: { id: 'class-1' },
+      });
+      expect(mockFacilitatorRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ guestName: 'New Facilitator', order: 0 }),
+      ]);
     });
   });
 
@@ -1072,18 +1154,33 @@ describe('ClassesService', () => {
     });
   });
 
-  describe('uploadMaterial', () => {
-    it('uploads to the class-materials Cloudinary folder and returns the secure URL', async () => {
+  describe('uploadClassMaterial', () => {
+    const churchClass = { id: 'class-1', name: 'New Believers' };
+    const file = {
+      buffer: Buffer.from('pdf-bytes'),
+      mimetype: 'application/pdf',
+      originalname: 'Syllabus.pdf',
+      size: 12345,
+    } as Express.Multer.File;
+
+    it('uploads to the class-materials Cloudinary folder and creates a material row', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
       mockCloudinaryService.uploadBuffer.mockResolvedValue({
         secureUrl: 'https://res.cloudinary.com/x/class-materials/123.pdf',
         publicId: 'class-materials/123',
         resourceType: 'raw',
       });
+      mockMaterialRepo.count.mockResolvedValue(0);
+      mockMaterialRepo.create.mockImplementation((v) => v);
+      mockMaterialRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'material-1', ...v }),
+      );
 
-      const result = await service.uploadMaterial({
-        buffer: Buffer.from('pdf-bytes'),
-        mimetype: 'application/pdf',
-      } as Express.Multer.File);
+      const result = await service.uploadClassMaterial(
+        'class-1',
+        file,
+        'My Title',
+      );
 
       expect(mockCloudinaryService.uploadBuffer).toHaveBeenCalledWith(
         expect.any(Buffer),
@@ -1091,46 +1188,302 @@ describe('ClassesService', () => {
         undefined,
         'application/pdf',
       );
-      expect(result).toEqual({
-        url: 'https://res.cloudinary.com/x/class-materials/123.pdf',
+      expect(mockMaterialRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'My Title',
+          url: 'https://res.cloudinary.com/x/class-materials/123.pdf',
+          publicId: 'class-materials/123',
+          resourceType: 'raw',
+          mimeType: 'application/pdf',
+          sizeBytes: 12345,
+          order: 0,
+        }),
+      );
+      expect(result.id).toBe('material-1');
+    });
+
+    it('defaults the title to the original filename (extension stripped) when omitted', async () => {
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockCloudinaryService.uploadBuffer.mockResolvedValue({
+        secureUrl: 'https://x/y.pdf',
+        publicId: 'class-materials/456',
+        resourceType: 'raw',
       });
+      mockMaterialRepo.count.mockResolvedValue(2);
+      mockMaterialRepo.create.mockImplementation((v) => v);
+      mockMaterialRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      await service.uploadClassMaterial('class-1', file, undefined);
+
+      expect(mockMaterialRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Syllabus', order: 2 }),
+      );
+    });
+
+    it('throws NotFoundException when the class does not exist', async () => {
+      mockClassRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.uploadClassMaterial('missing', file, 'Title'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('addClassMaterialLink', () => {
+    it('creates a material row with no publicId', async () => {
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1', name: 'Class' });
+      mockMaterialRepo.count.mockResolvedValue(0);
+      mockMaterialRepo.create.mockImplementation((v) => v);
+      mockMaterialRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'material-1', ...v }),
+      );
+
+      const result = await service.addClassMaterialLink('class-1', {
+        title: 'Recommended Reading',
+        url: 'https://drive.google.com/xyz',
+      });
+
+      expect(mockMaterialRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Recommended Reading',
+          url: 'https://drive.google.com/xyz',
+          publicId: null,
+        }),
+      );
+      expect(result.id).toBe('material-1');
+    });
+  });
+
+  describe('reuseClassMaterial', () => {
+    it('creates a new row pointing at the same asset without a new upload', async () => {
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'class-2',
+        name: 'Cohort 2',
+      });
+      mockMaterialRepo.count.mockResolvedValue(0);
+      mockMaterialRepo.create.mockImplementation((v) => v);
+      mockMaterialRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'material-2', ...v }),
+      );
+
+      await service.reuseClassMaterial('class-2', {
+        title: 'Syllabus',
+        url: 'https://res.cloudinary.com/x/class-materials/123.pdf',
+        publicId: 'class-materials/123',
+        resourceType: 'raw',
+      });
+
+      expect(mockCloudinaryService.uploadBuffer).not.toHaveBeenCalled();
+      expect(mockMaterialRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ publicId: 'class-materials/123' }),
+      );
+    });
+  });
+
+  describe('removeClassMaterial', () => {
+    it('throws NotFoundException when the material does not belong to the class', async () => {
+      mockMaterialRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.removeClassMaterial('class-1', 'material-x'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('deletes the Cloudinary asset when no other material shares its publicId', async () => {
+      const material = {
+        id: 'material-1',
+        publicId: 'class-materials/123',
+        resourceType: 'raw',
+      };
+      mockMaterialRepo.findOne.mockResolvedValue(material);
+      mockMaterialRepo.exists.mockResolvedValue(false);
+
+      await service.removeClassMaterial('class-1', 'material-1');
+
+      expect(mockMaterialRepo.remove).toHaveBeenCalledWith(material);
+      expect(mockCloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
+        'class-materials/123',
+        'raw',
+      );
+    });
+
+    it('does NOT delete the Cloudinary asset when another material still references it', async () => {
+      const material = {
+        id: 'material-1',
+        publicId: 'class-materials/123',
+        resourceType: 'raw',
+      };
+      mockMaterialRepo.findOne.mockResolvedValue(material);
+      mockMaterialRepo.exists.mockResolvedValue(true); // another row shares this publicId
+
+      await service.removeClassMaterial('class-1', 'material-1');
+
+      expect(mockMaterialRepo.remove).toHaveBeenCalledWith(material);
+      expect(mockCloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
+    });
+
+    it('never calls Cloudinary for a pasted-link material (no publicId)', async () => {
+      const material = { id: 'material-1', publicId: null, resourceType: null };
+      mockMaterialRepo.findOne.mockResolvedValue(material);
+
+      await service.removeClassMaterial('class-1', 'material-1');
+
+      expect(mockMaterialRepo.exists).not.toHaveBeenCalled();
+      expect(mockCloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
     });
   });
 
   describe('getMaterialLibrary', () => {
-    it('groups distinct document URLs by the class names that use them', async () => {
-      mockClassRepo.find.mockResolvedValue([
-        { name: 'New Believers 1', documentUrl: 'https://x/manual.pdf' },
-        { name: 'New Believers 2', documentUrl: 'https://x/manual.pdf' },
-        { name: 'Water Baptism', documentUrl: 'https://x/baptism.pdf' },
-        { name: 'Untitled Class', documentUrl: null },
+    it('dedups uploads by publicId and groups by the class names that use them', async () => {
+      mockMaterialRepo.find.mockResolvedValue([
+        {
+          title: 'Manual',
+          url: 'https://x/manual.pdf',
+          publicId: 'class-materials/1',
+          resourceType: 'raw',
+          mimeType: 'application/pdf',
+          sizeBytes: 100,
+          churchClass: { name: 'New Believers 1' },
+        },
+        {
+          title: 'Manual',
+          url: 'https://x/manual.pdf',
+          publicId: 'class-materials/1',
+          resourceType: 'raw',
+          mimeType: 'application/pdf',
+          sizeBytes: 100,
+          churchClass: { name: 'New Believers 2' },
+        },
+        {
+          title: 'Baptism Guide',
+          url: 'https://x/baptism.pdf',
+          publicId: 'class-materials/2',
+          resourceType: 'raw',
+          mimeType: 'application/pdf',
+          sizeBytes: 200,
+          churchClass: { name: 'Water Baptism' },
+        },
       ]);
 
       const result = await service.getMaterialLibrary();
 
       expect(result).toEqual(
         expect.arrayContaining([
-          {
-            documentUrl: 'https://x/manual.pdf',
+          expect.objectContaining({
+            publicId: 'class-materials/1',
             usedByClassNames: ['New Believers 1', 'New Believers 2'],
-          },
-          {
-            documentUrl: 'https://x/baptism.pdf',
+          }),
+          expect.objectContaining({
+            publicId: 'class-materials/2',
             usedByClassNames: ['Water Baptism'],
-          },
+          }),
         ]),
       );
       expect(result).toHaveLength(2);
     });
 
-    it('returns an empty array when no class has material yet', async () => {
-      mockClassRepo.find.mockResolvedValue([
-        { name: 'Untitled Class', documentUrl: null },
+    it('dedups pasted links by URL when publicId is null', async () => {
+      mockMaterialRepo.find.mockResolvedValue([
+        {
+          title: 'Reading',
+          url: 'https://drive.google.com/xyz',
+          publicId: null,
+          resourceType: null,
+          mimeType: null,
+          sizeBytes: null,
+          churchClass: { name: 'Class A' },
+        },
+        {
+          title: 'Reading',
+          url: 'https://drive.google.com/xyz',
+          publicId: null,
+          resourceType: null,
+          mimeType: null,
+          sizeBytes: null,
+          churchClass: { name: 'Class B' },
+        },
       ]);
 
       const result = await service.getMaterialLibrary();
 
+      expect(result).toEqual([
+        expect.objectContaining({
+          url: 'https://drive.google.com/xyz',
+          usedByClassNames: ['Class A', 'Class B'],
+        }),
+      ]);
+    });
+
+    it('returns an empty array when no materials exist yet', async () => {
+      mockMaterialRepo.find.mockResolvedValue([]);
+      const result = await service.getMaterialLibrary();
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('deleteClass', () => {
+    it('cleans up each material Cloudinary asset before removing the class', async () => {
+      const churchClass = { id: 'class-1', name: 'New Believers' };
+      mockClassRepo.findOne.mockResolvedValue(churchClass);
+      mockEnrollmentRepo.count.mockResolvedValue(0);
+      mockMaterialRepo.find.mockResolvedValue([
+        { id: 'm-1', publicId: 'class-materials/1', resourceType: 'raw' },
+        { id: 'm-2', publicId: null, resourceType: null },
+      ]);
+      mockMaterialRepo.exists.mockResolvedValue(false);
+
+      await service.deleteClass('class-1');
+
+      expect(mockCloudinaryService.deleteByPublicId).toHaveBeenCalledTimes(1);
+      expect(mockCloudinaryService.deleteByPublicId).toHaveBeenCalledWith(
+        'class-materials/1',
+        'raw',
+      );
+      expect(mockClassRepo.remove).toHaveBeenCalledWith(churchClass);
+    });
+
+    it('still blocks deletion when the class has enrollments, before touching materials', async () => {
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1', name: 'X' });
+      mockEnrollmentRepo.count.mockResolvedValue(3);
+
+      await expect(service.deleteClass('class-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockMaterialRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getClass', () => {
+    it('returns the class with materials sorted by order', async () => {
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'class-1',
+        materials: [
+          { id: 'm-2', order: 2 },
+          { id: 'm-1', order: 0 },
+          { id: 'm-3', order: 1 },
+        ],
+      });
+
+      const result = await service.getClass('class-1');
+
+      expect(result.materials.map((m) => m.id)).toEqual(['m-1', 'm-3', 'm-2']);
+    });
+
+    it('returns the class with facilitators sorted by order', async () => {
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'class-1',
+        facilitators: [
+          { id: 'f-2', order: 2 },
+          { id: 'f-1', order: 0 },
+          { id: 'f-3', order: 1 },
+        ],
+      });
+
+      const result = await service.getClass('class-1');
+
+      expect(result.facilitators.map((f) => f.id)).toEqual([
+        'f-1',
+        'f-3',
+        'f-2',
+      ]);
     });
   });
 });

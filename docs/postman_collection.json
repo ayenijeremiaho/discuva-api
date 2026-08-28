@@ -6564,7 +6564,7 @@
     },
     {
       "name": "Classes",
-      "description": "Discipleship classes (Believers, Baptismal, Workers-in-Training, Bible College) that members enroll in.\n\n**Access:** Admin-only for create/update/delete/enroll/update-enrollment. Any authenticated member can view their own enrollments via `GET /classes/my/enrollments`. General class listings are open to any authenticated user.\n\n**Key concepts:**\n- Class types: `BELIEVERS` | `BAPTISMAL` | `WORKERS_IN_TRAINING` | `BIBLE_COLLEGE`\n- Enrollment statuses: `IN_PROGRESS` | `COMPLETED` | `CANCELLED`\n- A member cannot enroll in the same class twice (409 if already enrolled and IN_PROGRESS)\n- Classes with active IN_PROGRESS enrollments cannot be deleted — complete or cancel all enrollments first\n- `facilitatorId` links a member as the class facilitator/teacher (optional)\n\n**Typical flow:**\n1. Admin creates a class with type and date range\n2. Admin enrolls members via `POST /classes/enroll`\n3. Member sees their enrollment in `GET /classes/my/enrollments`\n4. Admin marks complete via `PATCH /classes/enrollments/:id/status` with `{ \"status\": \"COMPLETED\" }`",
+      "description": "Discipleship classes (Believers, Baptismal, Workers-in-Training, Bible College) that members enroll in.\n\n**Access:** Admin-only for create/update/delete/enroll/update-enrollment. Any authenticated member can view their own enrollments via `GET /classes/my/enrollments`. General class listings are open to any authenticated user.\n\n**Key concepts:**\n- Class types: `BELIEVERS` | `BAPTISMAL` | `WORKERS_IN_TRAINING` | `BIBLE_COLLEGE`\n- Enrollment statuses: `IN_PROGRESS` | `COMPLETED` | `CANCELLED`\n- A member cannot enroll in the same class twice (409 if already enrolled and IN_PROGRESS)\n- Classes with active IN_PROGRESS enrollments cannot be deleted — complete or cancel all enrollments first\n- `facilitators` is a required, non-empty list — each entry is either `{ \"memberId\": \"...\" }` (a registered worker) or `{ \"guestName\": \"...\" }` (an outside speaker with no member record)\n\n**Typical flow:**\n1. Admin creates a class with type and date range\n2. Admin enrolls members via `POST /classes/enroll`\n3. Member sees their enrollment in `GET /classes/my/enrollments`\n4. Admin marks complete via `PATCH /classes/enrollments/:id/status` with `{ \"status\": \"COMPLETED\" }`",
       "item": [
         {
           "name": "Create Class (Admin)",
@@ -6578,7 +6578,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"New Believers Class\",\n  \"classTypeId\": \"{{classTypeId}}\",\n  \"description\": \"Foundation class for new members\",\n  \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"facilitatorId\": \"{{memberId}}\",\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-09-30\"\n}",
+              "raw": "{\n  \"name\": \"New Believers Class\",\n  \"classTypeId\": \"{{classTypeId}}\",\n  \"description\": \"Foundation class for new members\",\n  \"facilitators\": [\n    { \"memberId\": \"{{memberId}}\" },\n    { \"guestName\": \"Jane Doe (Guest Speaker)\" }\n  ],\n  \"startDate\": \"2026-07-01\",\n  \"endDate\": \"2026-09-30\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6613,7 +6613,7 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n  \"name\": \"Believers Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"instructor\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\"\n  },\n  \"enrollmentCount\": 14,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n  \"name\": \"Believers Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"facilitators\": [\n    {\n      \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"guestName\": null,\n      \"order\": 0\n    }\n  ],\n  \"enrollmentCount\": 14,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "400 Bad Request",
@@ -6635,7 +6635,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Believers Foundation Class\",\n  \"documentUrl\": \"https://drive.google.com/file/d/example\",\n  \"endDate\": \"2026-10-15\"\n}",
+              "raw": "{\n  \"name\": \"Believers Foundation Class\",\n  \"endDate\": \"2026-10-15\",\n  \"facilitators\": [\n    { \"memberId\": \"{{memberId}}\" }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6657,14 +6657,15 @@
                   "value": "{{classId}}"
                 }
               ]
-            }
+            },
+            "description": "Study materials/links are managed separately via the materials endpoints below, not through this body — a class must already exist before materials can attach to it. `facilitators`, if included, replaces the full facilitator list and must be non-empty — omit it to leave existing facilitators untouched."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n  \"name\": \"Believers Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"instructor\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\"\n  },\n  \"enrollmentCount\": 14,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n  \"name\": \"Believers Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"facilitators\": [\n    {\n      \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"guestName\": null,\n      \"order\": 0\n    }\n  ],\n  \"enrollmentCount\": 14,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
@@ -6708,6 +6709,192 @@
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Class not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Upload Class Material (Admin)",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                },
+                {
+                  "key": "title",
+                  "value": "Syllabus",
+                  "type": "text",
+                  "description": "Optional — defaults to the uploaded file's name (extension stripped)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/materials/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "materials",
+                "upload"
+              ]
+            },
+            "description": "ADMIN only (CLASSES_WRITE). Accepts PDF, Word, PowerPoint, or image files, size-capped by the platform-configured MAX_CLASS_MATERIAL_UPLOAD_MB setting. Uploads to Cloudinary and creates the ClassMaterial row in one call."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n  \"title\": \"Syllabus\",\n  \"url\": \"https://res.cloudinary.com/demo/class-materials/syllabus.pdf\",\n  \"publicId\": \"class-materials/syllabus\",\n  \"resourceType\": \"raw\",\n  \"mimeType\": \"application/pdf\",\n  \"sizeBytes\": 245760,\n  \"order\": 0\n}"
+            }
+          ]
+        },
+        {
+          "name": "Add Class Material Link (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Recommended Reading\",\n  \"url\": \"https://drive.google.com/file/d/example\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/materials/link",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "materials",
+                "link"
+              ]
+            },
+            "description": "ADMIN only (CLASSES_WRITE). A pasted external link — no Cloudinary asset, publicId is null."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"d6e5f4a3-2b1c-4d5e-9f0a-1b2c3d4e5f6a\",\n  \"title\": \"Recommended Reading\",\n  \"url\": \"https://drive.google.com/file/d/example\",\n  \"publicId\": null,\n  \"resourceType\": null,\n  \"mimeType\": null,\n  \"sizeBytes\": null,\n  \"order\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "Reuse Class Material (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Syllabus\",\n  \"url\": \"https://res.cloudinary.com/demo/class-materials/syllabus.pdf\",\n  \"publicId\": \"class-materials/syllabus\",\n  \"resourceType\": \"raw\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/materials/reuse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "materials",
+                "reuse"
+              ]
+            },
+            "description": "ADMIN only (CLASSES_WRITE). Echoes a GET /classes/materials/library entry's fields back — creates a new ClassMaterial row on this class pointing at the same Cloudinary asset (or the same pasted URL), no new upload."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"e7f6a5b4-3c2d-4e5f-0a1b-2c3d4e5f6a7b\",\n  \"title\": \"Syllabus\",\n  \"url\": \"https://res.cloudinary.com/demo/class-materials/syllabus.pdf\",\n  \"publicId\": \"class-materials/syllabus\",\n  \"resourceType\": \"raw\",\n  \"mimeType\": null,\n  \"sizeBytes\": null,\n  \"order\": 0\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Class Material (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/materials/{{materialId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "materials",
+                "{{materialId}}"
+              ]
+            },
+            "description": "ADMIN only (CLASSES_WRITE). Only deletes the Cloudinary asset if no other ClassMaterial row (e.g. on another class, via Reuse) still references the same publicId."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Material not found on this class\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Material Library (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/classes/materials/library",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "materials",
+                "library"
+              ]
+            },
+            "description": "ADMIN only (CLASSES_READ). Every material across every class, deduped by publicId (uploads) or url (pasted links), for the \"Reuse Previous\" picker."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"title\": \"Syllabus\",\n    \"url\": \"https://res.cloudinary.com/demo/class-materials/syllabus.pdf\",\n    \"publicId\": \"class-materials/syllabus\",\n    \"resourceType\": \"raw\",\n    \"mimeType\": \"application/pdf\",\n    \"sizeBytes\": 245760,\n    \"usedByClassNames\": [\"New Believers Class\", \"New Believers Class (Cohort 2)\"]\n  }\n]"
             }
           ]
         },
@@ -6926,7 +7113,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n      \"name\": \"Believers Class\",\n      \"description\": \"Foundation class for new believers\",\n      \"instructor\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"enrollmentCount\": 14,\n      \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n      \"name\": \"Believers Class\",\n      \"description\": \"Foundation class for new believers\",\n      \"facilitators\": [\n        {\n          \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n          \"member\": {\n            \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n            \"firstname\": \"John\",\n            \"lastname\": \"Doe\"\n          },\n          \"guestName\": null,\n          \"order\": 0\n        }\n      ],\n      \"enrollmentCount\": 14,\n      \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
             },
             {
               "name": "401 Unauthorized",
@@ -6963,7 +7150,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n  \"name\": \"Believers Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"instructor\": {\n    \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n    \"firstname\": \"John\",\n    \"lastname\": \"Doe\"\n  },\n  \"enrollmentCount\": 14,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"b2c3d4e5-6f7a-8b9c-0d1e-2f3a4b5c6d7e\",\n  \"name\": \"Believers Class\",\n  \"description\": \"Foundation class for new believers\",\n  \"facilitators\": [\n    {\n      \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"guestName\": null,\n      \"order\": 0\n    }\n  ],\n  \"enrollmentCount\": 14,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
