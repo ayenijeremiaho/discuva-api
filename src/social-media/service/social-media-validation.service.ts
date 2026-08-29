@@ -14,7 +14,7 @@ export interface TargetValidationResult {
   warnings: ValidationIssue[];
 }
 
-interface PlacementConstraints {
+export interface PlacementConstraints {
   requiresVideo?: boolean;
   forbidsVideo?: boolean;
   maxVideoBytes?: number;
@@ -83,16 +83,37 @@ const CONSTRAINTS: Partial<
 
 @Injectable()
 export class SocialMediaValidationService {
+  // Lets the composer show a live "142/280" counter per selected target
+  // without a round-trip per keystroke — same numbers this service
+  // enforces server-side at publish time either way, so there's no risk
+  // of the composer's live feedback drifting from what actually gets
+  // blocked.
+  getConstraints(): Partial<
+    Record<
+      SocialPlatform,
+      Partial<Record<SocialPlacement, PlacementConstraints>>
+    >
+  > {
+    return CONSTRAINTS;
+  }
+
+  // content moved into each target entry (not one shared param) — a
+  // customized target validates against its own contentOverride, not
+  // SocialPost.content, so two targets in the same call can have entirely
+  // different caption lengths.
   validate(
-    content: string,
     media: SocialPostMedia[],
-    targets: { platform: SocialPlatform; placement: SocialPlacement }[],
+    targets: {
+      platform: SocialPlatform;
+      placement: SocialPlacement;
+      content: string;
+    }[],
   ): TargetValidationResult[] {
     const videos = media.filter((m) => m.mimeType.startsWith('video/'));
     const images = media.filter((m) => m.mimeType.startsWith('image/'));
     const primaryVideo = videos[0];
 
-    return targets.map(({ platform, placement }) => {
+    return targets.map(({ platform, placement, content }) => {
       const constraints = CONSTRAINTS[platform]?.[placement];
       const errors: ValidationIssue[] = [];
       const warnings: ValidationIssue[] = [];

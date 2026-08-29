@@ -251,6 +251,41 @@ describe('PlatformSettingsService', () => {
     });
   });
 
+  describe('getSocialMediaEnabled', () => {
+    it('returns the cached value without hitting the DB', async () => {
+      mockCacheService.getGlobal.mockResolvedValue(1);
+
+      const result = await service.getSocialMediaEnabled();
+
+      expect(result).toBe(true);
+      expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('defaults to disabled when no cache or DB row exists', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getSocialMediaEnabled();
+
+      expect(result).toBe(false);
+    });
+
+    it('reads the DB value once a platform admin has flipped it on', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({
+        key: PlatformSettingKey.SOCIAL_MEDIA_ENABLED,
+        value: { value: 1 },
+      });
+
+      const result = await service.getSocialMediaEnabled();
+
+      expect(result).toBe(true);
+      expect(mockCacheService.setGlobal).toHaveBeenCalledWith(
+        'platform-settings:social_media_enabled',
+        1,
+        300,
+      );
+    });
+  });
+
   describe('findOne', () => {
     it('reports type: "boolean" for a boolean-shaped setting', async () => {
       mockSettingRepo.findOne.mockResolvedValue(null);

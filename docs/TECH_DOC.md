@@ -3606,13 +3606,18 @@ added after some submissions already exist doesn't drag its stats toward zero.
 ### Social Media Module (`src/social-media/`)
 
 Central, tenant-scoped connector framework for cross-posting to a church's social accounts from one compose box.
-As of this pass, all the **shared OAuth/media/scheduling infrastructure** is real and fully wired — platform-level
-app credentials, per-tenant encrypted token storage, the connect/callback flow, real multi-file upload, per-
-placement validation, retention, and scheduled publishing. What's **still a deliberate stub** is the actual
-per-platform publish call: every platform resolves to `NotConnectedPublisher` (or `PlatformDisabledPublisher` if a
-platform-admin has switched it off) via `SocialPublisherRegistry`, which always fails honestly rather than
-pretending to succeed. Wiring in a real Facebook/Instagram/YouTube/X publisher is the next phase — see the
-publisher extension point below; `SocialPostService` and every controller stay unchanged when that lands.
+All the **shared OAuth/media/scheduling infrastructure** is real and fully wired — platform-level app credentials,
+per-tenant encrypted token storage, the connect/callback flow, real multi-file upload, per-placement validation,
+retention, and scheduled publishing. **Facebook, Instagram, and YouTube have real publishers**
+(`FacebookGraphPublisher`/`InstagramGraphPublisher`, backed by the Meta Graph API; `YouTubePublisher`, backed by
+the YouTube Data API v3 — see below for both); `X` and `TIKTOK` still resolve to `NotConnectedPublisher` (or
+`PlatformDisabledPublisher` if a platform-admin has switched it off) via `SocialPublisherRegistry`, which always
+fails honestly rather than pretending to succeed. `X`'s API dropped its free tier entirely in February 2026
+(pay-per-use, ~$0.015–$0.20 per post) — wiring it in is a pricing decision (who absorbs that per-post cost:
+Discuva or the church?) as much as an engineering one, not scheduled yet. `TIKTOK`'s Content Posting API restricts
+any unaudited app to `SELF_ONLY` (private) visibility until TikTok completes its own audit, so there's nothing
+meaningful to test until that's done — also not scheduled yet. Wiring in either is the same shape either way — see
+the publisher extension point below; `SocialPostService` and every controller stay unchanged when that lands.
 
 **Entities:**
 
@@ -3629,7 +3634,13 @@ publisher extension point below; `SocialPostService` and every controller stay u
   per-platform *and* per-placement outcome is tracked independently: `status` (`SocialPostTargetStatus`:
   `PENDING`/`SUCCESS`/`FAILED`), `placement` (`SocialPlacement`: `FEED`/`STORY`/`REEL` — Instagram Stories/Reels and
   YouTube Shorts are genuinely different publish surfaces from a feed post, not just a platform distinction; one
-  connected account can have multiple targets across placements for the same post), `errorMessage`, `publishedAt`.
+  connected account can have multiple targets across placements for the same post), `errorMessage`, `publishedAt`,
+  `externalPostId` (nullable — the platform's own id for the published post/video, set from a successful
+  `PublishResult`; what a stats fetch or any future "open this on the platform" link looks up). Also carries the
+  composer's per-target customization: `contentOverride` (nullable text — `null` means this target still shares
+  `SocialPost.content`) and `mediaFocalX`/`mediaFocalY` (nullable numeric, 0-1 — a click-to-crop-focus point, only
+  meaningful for `STORY`/`REEL`; both `null` means "let Cloudinary's `g_auto` content-aware cropping choose," not
+  "no crop" — see `SocialMediaCropService` below).
 - `SocialPostMedia` (`social_post_media`) — real Cloudinary-backed attachments, replacing the old free-text
   `imageUrl`. `url`, `publicId` (needed to delete the actual asset, not just the row), `mimeType`, `sizeBytes`,
   `width`/`height`/`durationSeconds` (nullable, used by `SocialMediaValidationService`), `order`.
@@ -3657,8 +3668,12 @@ publisher extension point below; `SocialPostService` and every controller stay u
   browser as a generic `?error=connection-failed`.
 
 **The publisher extension point** (`publisher/social-platform-publisher.interface.ts`): `SocialPlatformPublisher`
-is a one-method interface (`publish(account, post): Promise<{success, error?, externalPostId?}>`), resolved per
-`SocialPlatform` by `SocialPublisherRegistry`. On every `resolve()` call it also checks
+is a one-method interface (`publish(account, post, placement): Promise<{success, error?, externalPostId?}>`),
+resolved per `SocialPlatform` by `SocialPublisherRegistry`. `placement` is the specific `SocialPostTarget`'s
+placement (`FEED`/`STORY`/`REEL`) — a single account can have multiple targets across placements for the same
+post, so this is the only way a publisher knows which one a given call is for; a publisher that doesn't support a
+placement `SocialMediaValidationService` allows should fail that call explicitly via `PublishResult.error`, not
+silently substitute `FEED`. On every `resolve()` call the registry also checks
 `PlatformSocialAppService.isPlatformDisabled(platform)` — if a platform-admin has switched a platform off, it
 returns `PlatformDisabledPublisher` (distinct wording from `NotConnectedPublisher`: "temporarily disabled by
 Discuva," not "this church hasn't set this up") instead of whatever publisher is registered, without touching any
@@ -3667,19 +3682,123 @@ tenant's already-stored tokens. Wiring in a real platform means implementing thi
 the authorize-URL/code-exchange mechanics) — `SocialPostService`, the controllers, and `SocialTokenResolverService`
 never change.
 
+**Meta (Facebook/Instagram) implementation** (`platform/meta/meta-graph-api.service.ts`) — `MetaGraphApiService`
+holds the Graph API mechanics shared by both `FacebookOAuthExchanger`/`InstagramOAuthExchanger` and
+`FacebookGraphPublisher`/`InstagramGraphPublisher`, since Instagram Business publishing runs on the same Meta App,
+the same Business Login OAuth dialog, and the same Page access token as Facebook — only which node you call (a
+Page vs. its linked IG Business Account) differs:
+- `resolvePageAccessToken` — code → short-lived user token → long-lived user token (`fb_exchange_token`) → `GET
+  /me/accounts` for the Page(s) granted. Exactly one Page is the expected/supported outcome (a church connects one
+  Page); zero or multiple both throw a clear, actionable error rather than guessing which one to use. The Page
+  token returned this way doesn't expire in practice and Meta issues no `refresh_token` for it — `FacebookOAuthExchanger`
+  and `InstagramOAuthExchanger` both omit `expiresInSeconds`/`refreshToken` from their `OAuthExchangeResult`, so
+  `tokenExpiresAt` stays `null` and `SocialTokenResolverService` never attempts a refresh (both platforms stay
+  registered to `NoRefresherAvailable` — nothing to implement there).
+- `getInstagramBusinessAccountId` — one extra call (`GET /{pageId}?fields=instagram_business_account`) is all that
+  separates `InstagramOAuthExchanger` from `FacebookOAuthExchanger`; `externalAccountId` ends up being the IG
+  Business Account id instead of the Page id, but the stored token is the same Page access token either way.
+- `publishToFacebookPage(pageId, pageAccessToken, content, media, placement)` — only `FEED` is implemented; any
+  other placement throws immediately, before any request is made (`SocialMediaValidationService`'s constraints
+  table only defines `FEED` for Facebook today, so this isn't reachable yet, but the rejection is real, not
+  assumed). FEED: text-only → `/feed`; single image → `/photos`; single video → `/videos` (checked in that
+  preference order if a post somehow carries both). No multi-image gallery support yet — matches what validation
+  actually checks today (`primaryVideo`, not a gallery).
+- `publishToInstagram(igUserId, pageAccessToken, content, media, placement)` — always two calls: create a media
+  container (`/media`), then `/media_publish`. What differs by `placement` is the container's `media_type`:
+  `STORY` → `'STORIES'` (image or video); `FEED`/`REEL` are, as far as this API is concerned, the same call — a
+  video posted via the Content Publishing API always processes as a Reel (`media_type: 'REELS'`) even when it also
+  appears in the normal feed, and an image needs no `media_type` at all (defaults to `IMAGE`) in either placement.
+  Video containers process asynchronously on Meta's side, so a bounded poll (`status_code` via `GET
+  /{containerId}`, 3s interval, 20 attempts) waits for `FINISHED` before publishing rather than racing Meta's own
+  processing. Stories don't visibly render the `caption` field, but it's passed through anyway rather than
+  silently dropping content the admin typed.
+
+Every failure path in both publishers resolves to `{success: false, error}` — never throws. This matters because
+`SocialPostService.publish()` calls `publisher.publish()` with no `try`/`catch`; a thrown error there would abort
+every remaining target's publish attempt, not just the one platform that failed, breaking the documented "one
+platform failing never blocks the others" guarantee.
+
+Not live-tested against a real Meta account from this environment (no outbound network access to
+`graph.facebook.com` in the sandbox this was built in) — written correctly against Meta's documented Graph API
+contract and covered by unit tests mocking `fetch`, but the first real connect→publish run against an actual
+connected Page/Instagram account is the real end-to-end verification.
+
+**YouTube implementation** (`platform/youtube/youtube-api.service.ts`) — `YouTubeApiService` holds the Google
+OAuth2 + YouTube Data API v3 mechanics for `YouTubeOAuthExchanger`, `YouTubePublisher`, and (unlike Meta)
+`YouTubeTokenRefresher`:
+- `buildAuthorizeUrl` sets `access_type=offline` and `prompt=consent` — without both, Google only issues a
+  `refresh_token` on a user's very first-ever consent for the app; a later reconnect after revoking access would
+  silently come back with no `refresh_token` at all otherwise, and there'd be nothing for `SocialTokenResolverService`
+  to renew against once the short-lived `access_token` expires.
+- `resolveChannel` mirrors `resolvePageAccessToken`'s "exactly one expected" pattern — a Google account can have
+  multiple channels/brand accounts, same as a Facebook user managing multiple Pages; zero or multiple both throw a
+  clear, actionable error.
+- **No URL-passthrough upload.** Unlike Meta's Graph API (`file_url`/`image_url`, Meta fetches the asset itself),
+  the YouTube Data API has no such option — `publishVideo` downloads the attachment from its Cloudinary URL into
+  memory, then streams those bytes to Google via the resumable upload protocol (`POST .../videos?uploadType=resumable`
+  to start a session and get a `Location` header, then `PUT` the raw bytes to that URL). Loading the full file into
+  memory rather than piping the download directly into the upload is a real, deliberate simplification — correct
+  and fine at the scale a church's social posts run at (the existing 200MB attachment cap), but worth knowing about
+  if that cap ever grows.
+- `REEL` gets `"#Shorts"` appended to the description — the documented, best-effort signal for YouTube's Shorts
+  shelf, not a guaranteed classification; YouTube's own aspect-ratio/duration heuristics still decide.
+- **Google access tokens genuinely expire** (~1 hour), unlike a Meta Page token — `YouTubeTokenRefresher` is the
+  first real (non-`NoRefresherAvailable`) `SocialTokenRefresher` implementation. `SocialTokenRefresher.refresh()`
+  only receives the bare refresh token, not the platform app/`clientSecret` a Google refresh request needs, so it
+  looks its own `SocialPlatformApp` row up directly via `PlatformSocialAppService` rather than requiring an
+  interface change every other platform would have to accommodate too — it's already irreducibly YouTube-specific
+  by being this class at all.
+- `content` maps onto YouTube's separate `title`/`description` fields (Discuva's data model has only one caption
+  field) as `title = content.slice(0, 100)` (YouTube's title cap), `description = content` (`+ "#Shorts"` for
+  `REEL`).
+
+Also not live-tested from this environment, for the same no-outbound-network reason as Meta — written against
+Google's documented OAuth2 and YouTube Data API v3 contracts, covered by unit tests mocking `fetch`.
+
 **`SocialTokenResolverService`** — every publisher calls `getValidAccessToken(accountId)` instead of touching
 `SocialAccount`'s encrypted columns directly. Takes an id, not an entity, since the token columns are `select:
 false` and a `SocialAccount` loaded via a normal relation (e.g. `post.targets[].account`) never carries them.
 Decrypts and returns the token if not expired (60s safety margin); if expired and a refresh token exists, resolves
-that platform's `SocialTokenRefresher` (default `NoRefresherAvailable`, throws) and persists the renewed token.
+that platform's `SocialTokenRefresher` (`YouTubeTokenRefresher` for `YOUTUBE`; `NoRefresherAvailable`, which throws,
+for every platform with no real refresh flow — Meta Page tokens included, since they don't expire) and persists the
+renewed token.
 
 **Media validation (`SocialMediaValidationService`)** — keyed on `(platform, placement)`, not platform alone,
 informed by researched per-platform specs (image/video size & duration caps, caption length, max image count).
-Two-tier model: **errors** (wrong content type for the placement, over a hard size/duration/caption limit) block
-that specific target before it ever reaches its publisher; **warnings** (e.g. an Instagram Reel over the ~3-minute
-"ideal" length) surface without blocking. Enforced inside `SocialPostService.publish()`, not just a frontend
-nicety — a target with unresolved errors is marked `FAILED` with the validation message, and its publisher is
-never called.
+`validate(media, targets)` takes `content` *per target entry* (not one shared param) — a target with its own
+`contentOverride` validates against that override, not `SocialPost.content`, so two targets in the same call can
+have entirely different caption lengths. Two-tier model: **errors** (wrong content type for the placement, over a
+hard size/duration/caption limit) block that specific target before it ever reaches its publisher; **warnings**
+(e.g. an Instagram Reel over the ~3-minute "ideal" length) surface without blocking. Enforced inside
+`SocialPostService.publish()`, not just a frontend nicety — a target with unresolved errors is marked `FAILED`
+with the validation message, and its publisher is never called. `getConstraints()` returns the same table as
+JSON — `GET /social-media/constraints` exposes it so the composer can show a live per-target character counter
+against the exact numbers enforced at publish time, without a round-trip per keystroke.
+
+**Per-target customization — override and crop.** Most targets share `SocialPost.content` and its media
+untouched; two independent, opt-in per-target adjustments exist for when a platform's constraints don't fit the
+shared version:
+- **`contentOverride`** (`PATCH /social-media/posts/:id/targets/:targetId/override`, body `{contentOverride:
+  string | null}`, `DRAFT` posts only) — a target-specific caption, e.g. a shortened version for X's 280-char
+  limit while Facebook/Instagram keep the full text. `null` explicitly clears it, reverting to the shared
+  content. Can also be set at creation time via `CreateSocialPostDto.targets[].contentOverride`.
+- **Crop focal point** (`PATCH /social-media/posts/:id/targets/:targetId/focal-point`, body `{x, y: number | null}`,
+  `DRAFT` posts only, both set or cleared together) — only meaningful for `STORY`/`REEL`. `SocialMediaCropService`
+  crops to `9:16` (the one universal, strict requirement both placements share across every platform that
+  supports them — `FEED` is deliberately never cropped, since no platform enforces a single "correct" feed aspect
+  ratio the way Stories/Reels do) using Cloudinary's `g_auto` content-aware/saliency cropping (core product, no
+  add-on) by default, or `g_xy_center` at the stored `x`/`y` if a focal point is set. `x`/`y` are normalized
+  (0-1) floats — Cloudinary accepts gravity offsets as float percentages directly, so a click position on the
+  composer's rendered preview maps straight through with no pixel-dimension math on either side. The
+  transformation is inserted into the existing Cloudinary delivery URL as a path segment
+  (`.../upload/c_fill,ar_9:16,g_auto/...`) — no re-upload, no second stored asset per placement.
+
+`SocialPostService.publish()` resolves both — `target.contentOverride ?? post.content` and
+`SocialMediaCropService.resolveMediaForPlacement(post.media, target.placement, focalPoint)` — exactly once per
+target, before validation and before calling that target's publisher. A publisher never sees `SocialPost`/
+`SocialPostTarget` directly, only the already-resolved `content: string` and `media: SocialPostMedia[]` (see
+`SocialPlatformPublisher`'s own comment) — so a publisher can't forget to apply an override or a crop, and
+resolution logic lives in exactly one place regardless of how many platforms get wired in later.
 
 **Scheduled publishing** — `POST /social-media/posts/:id/schedule` (`{scheduledFor: ISO string}`) sets `status =
 SCHEDULED` and adds a delayed job to the `social-post-publish` Bull queue (`jobId` = the post's own id, both to
@@ -3699,7 +3818,26 @@ published posts are never touched — only abandoned drafts age out. Closes a ga
 **Publish semantics (`SocialPostService.publish`):** every target is attempted independently — one platform (or
 validation) failing never blocks the others. The post's overall `status` is derived from how many targets actually
 succeeded: `FAILED` if none did, `PUBLISHED` if all did, `PARTIALLY_PUBLISHED` otherwise. `publishedAt` on the post
-is set whenever at least one target succeeded.
+is set whenever at least one target succeeded. A successful `PublishResult.externalPostId` (the platform's own id
+for the post/video) is persisted onto the target as `externalPostId` — a failed republish attempt leaves a prior
+`externalPostId` untouched rather than clearing it.
+
+**Stats extension point (`stats/social-stats-fetcher.interface.ts`)** — `SocialStatsFetcher` is a one-method
+interface (`getStats(account, externalPostId): Promise<PostStats>`), resolved per `SocialPlatform` by
+`SocialStatsFetcherRegistry`, same shape as the publisher/exchanger/refresher extension points.
+`GET /social-media/posts/:id/targets/:targetId/stats` (`SocialPostService.getTargetStats`) resolves a target's
+platform fetcher and returns whatever it reports; throws `BadRequestException` if the target has no
+`externalPostId` yet (never published). **`YouTubeStatsFetcher` is the only real implementation today** — it
+calls `YouTubeApiService.getVideoStats` (`videos.list?part=statistics`), returning `viewCount`/`likeCount`/
+`commentCount` only (`dislikeCount` has been private since December 2021; `favoriteCount` is permanently 0). This
+is deliberately the *Data API v3's* own statistics, not the separate **YouTube Analytics API**
+(`youtubeAnalytics/v2`) — that's a genuinely different product (its own scope `yt-analytics.readonly`, its own
+base URL, enabled separately in Google Cloud Console) needed for anything richer: watch time, audience retention,
+traffic sources. Not wired in — a deliberate, discussed scope decision, not an oversight. Facebook/Instagram stats
+would reuse the *same* Graph API `MetaGraphApiService` already talks to (different permissions —
+`pages_read_engagement`, `instagram_manage_insights` — not a separate product the way YouTube's Analytics API is),
+but no `FacebookStatsFetcher`/`InstagramStatsFetcher` exists yet; both platforms resolve to `NoStatsAvailable`
+(throws) via the registry, same honest-failure posture as `NotConnectedPublisher`.
 
 **Deleting a post** is only allowed while `DRAFT` or fully `FAILED` — a `PUBLISHED`/`PARTIALLY_PUBLISHED`/
 `PUBLISHING` post's target history is kept, not deletable, since it's the record of what was actually attempted.
@@ -3711,12 +3849,17 @@ is set whenever at least one target succeeded.
 | DELETE | `/social-media/accounts/:id`                | AdminGuard (SOCIAL_MEDIA_WRITE) | Remove an account |
 | GET    | `/social-media/accounts/:id/authorize-url`  | AdminGuard (SOCIAL_MEDIA_WRITE) | Returns `{url}` — the platform's OAuth authorize URL, `state`-encoded to this account/tenant |
 | GET    | `/v1/integrations/social/:platform/oauth/callback` | `@Public()`, tenant-excluded | Called by the OAuth provider's redirect, not the frontend directly — see above |
-| POST   | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_WRITE) | `{content, targets: {accountId, placement}[]}` — creates a `DRAFT` with one `PENDING` target per (account, placement) pair |
+| GET    | `/social-media/constraints`                 | AdminGuard (SOCIAL_MEDIA_READ)  | The `(platform, placement)` constraints table as JSON — for the composer's live per-target counters |
+| GET    | `/social-media/platform-enabled`            | AdminGuard (SOCIAL_MEDIA_READ)  | `{enabled: boolean}` — the platform-wide composer readiness gate; see below and "Platform Settings" |
+| POST   | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_WRITE) | `{content, targets: {accountId, placement, contentOverride?}[]}` — creates a `DRAFT` with one `PENDING` target per (account, placement) pair |
 | GET    | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_READ)  | Paginated (`?page=&limit=`) |
 | GET    | `/social-media/posts/:id`                   | AdminGuard (SOCIAL_MEDIA_READ)  | One post with its targets, each target's account, and its media |
 | POST   | `/social-media/posts/:id/media`             | AdminGuard (SOCIAL_MEDIA_WRITE) | Multipart, field `files` (up to 10, 200MB cap, image/video only) — `DRAFT` posts only |
 | DELETE | `/social-media/posts/:id/media/:mediaId`    | AdminGuard (SOCIAL_MEDIA_WRITE) | `DRAFT` posts only |
+| PATCH  | `/social-media/posts/:id/targets/:targetId/override` | AdminGuard (SOCIAL_MEDIA_WRITE) | `{contentOverride: string \| null}` — `DRAFT` posts only, `null` clears it |
+| PATCH  | `/social-media/posts/:id/targets/:targetId/focal-point` | AdminGuard (SOCIAL_MEDIA_WRITE) | `{x, y: number \| null}`, 0-1 — `DRAFT` posts only, must be set/cleared together |
 | POST   | `/social-media/posts/:id/publish`           | AdminGuard (SOCIAL_MEDIA_WRITE) | Attempts every target; see publish semantics above |
+| GET    | `/social-media/posts/:id/targets/:targetId/stats` | AdminGuard (SOCIAL_MEDIA_READ) | `{viewCount?, likeCount?, commentCount?}` — YouTube only today; 400 if the target hasn't published yet |
 | POST   | `/social-media/posts/:id/schedule`          | AdminGuard (SOCIAL_MEDIA_WRITE) | `{scheduledFor: ISO string}` — `DRAFT` only, must be in the future |
 | POST   | `/social-media/posts/:id/schedule/cancel`   | AdminGuard (SOCIAL_MEDIA_WRITE) | Reverts to `DRAFT`, removes the queued job |
 | DELETE | `/social-media/posts/:id`                   | AdminGuard (SOCIAL_MEDIA_WRITE) | `DRAFT`/`FAILED` only |
@@ -3725,6 +3868,16 @@ is set whenever at least one target succeeded.
 `social_media:write` permissions, backfilled onto existing `SuperAdmin` roles by
 `GrantSocialMediaPermissions1791504000000` (same class of fix as `GrantFormsPermissions` — a brand-new permission
 is only auto-granted to a SuperAdmin role at the moment that role is *created*).
+
+**Two independent on/off switches, not one.** A tenant's `social_media` module toggle (above) is a per-church
+preference — does *this* church want the feature. `PlatformSettingKey.SOCIAL_MEDIA_ENABLED` (see "Platform
+Settings" below) is a separate, platform-wide readiness gate a platform admin controls — is the composer ready to
+show *any* tenant yet. A tenant can have their module on and still see "Coming Soon" in discuva-admin if the
+platform-wide gate is off; discuva-admin's `/social-media` page fetches `GET /social-media/platform-enabled` on
+load and renders the real composer only when both are true (a fetch failure — including a `403` from
+`ModuleEnabledGuard` if this tenant's own module is off — defaults to `enabled: false`, never a silently-broken
+composer). This replaced an earlier hardcoded frontend build flag (`SOCIAL_MEDIA_COMING_SOON` in `page.tsx`), which
+required a frontend redeploy to flip and couldn't be toggled per-environment without a code change.
 
 **Platform-admin surface (`/platform/social-media-apps`, discuva-platform):** separate from the tenant-side module
 toggle above — Discuva staff register each platform's OAuth app credentials here (one app per platform, not
@@ -5382,6 +5535,14 @@ underneath.
 `SocialMediaRetentionScheduler`'s daily sweep (see Social Media Module above). No dedicated frontend work was
 needed for this one: `/billing-settings` already renders every `KNOWN_PLATFORM_SETTINGS` entry generically from the
 `GET /platform/settings` response, so a new key just appears.
+
+**Consumer 5 — social media composer readiness gate:** `SOCIAL_MEDIA_ENABLED` (boolean, default `0`) —
+`PlatformSettingsService.getSocialMediaEnabled()`, read by `SocialMediaController`'s new `GET
+/social-media/platform-enabled` (tenant-facing, `SOCIAL_MEDIA_READ`) on every discuva-admin `/social-media` page
+load. Defaults to `0` (composer hidden, "Coming Soon" shown) so shipping this doesn't silently flip every existing
+tenant's UI the moment it deploys — a platform admin flips it on deliberately from `/billing-settings` once ready.
+See the Social Media Module section above for the full "two independent switches" picture. Same generic-settings-page
+freebie as Consumer 4: no dedicated frontend work needed beyond the boolean `type` hint already supported.
 
 **Frontend:** discuva-platform's `/billing-settings` page (own `layout.tsx`, same "every new route needs one"
 convention, now titled "Platform Settings" in-page and in the sidebar since it's no longer billing-only), gated by

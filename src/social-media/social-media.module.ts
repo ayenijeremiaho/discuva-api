@@ -12,17 +12,30 @@ import { SocialPostService } from './service/social-post.service';
 import { SocialOAuthConnectService } from './service/social-oauth-connect.service';
 import { SocialPostMediaService } from './service/social-post-media.service';
 import { SocialMediaValidationService } from './service/social-media-validation.service';
+import { SocialMediaCropService } from './service/social-media-crop.service';
 import { SocialMediaController } from './controller/social-media.controller';
 import { SocialOAuthCallbackController } from './controller/social-oauth-callback.controller';
 import { NotConnectedPublisher } from './publisher/not-connected-publisher';
 import { PlatformDisabledPublisher } from './publisher/platform-disabled-publisher';
+import { FacebookGraphPublisher } from './publisher/facebook-graph-publisher';
+import { InstagramGraphPublisher } from './publisher/instagram-graph-publisher';
+import { YouTubePublisher } from './publisher/youtube-publisher';
 import { SocialPublisherRegistry } from './publisher/social-publisher-registry.service';
+import { NoStatsAvailable } from './stats/no-stats-available';
+import { YouTubeStatsFetcher } from './stats/youtube-stats-fetcher';
+import { SocialStatsFetcherRegistry } from './stats/social-stats-fetcher-registry.service';
 import { SocialTokenResolverService } from './service/social-token-resolver.service';
 import { NoRefresherAvailable } from './token/no-refresher-available';
+import { YouTubeTokenRefresher } from './token/youtube-token-refresher';
 import { SocialTokenRefresherRegistry } from './token/social-token-refresher-registry.service';
 import { OAuthStateService } from './oauth/oauth-state.service';
 import { NoExchangerAvailable } from './oauth/no-exchanger-available';
+import { FacebookOAuthExchanger } from './oauth/facebook-oauth-exchanger';
+import { InstagramOAuthExchanger } from './oauth/instagram-oauth-exchanger';
+import { YouTubeOAuthExchanger } from './oauth/youtube-oauth-exchanger';
 import { SocialOAuthExchangerRegistry } from './oauth/social-oauth-exchanger-registry.service';
+import { MetaGraphApiService } from './platform/meta/meta-graph-api.service';
+import { YouTubeApiService } from './platform/youtube/youtube-api.service';
 import { SocialPostPublishProcessor } from './processor/social-post-publish.processor';
 import { SocialMediaRetentionScheduler } from './scheduler/social-media-retention.scheduler';
 import { UtilityModule } from '../utility/utility.module';
@@ -50,15 +63,28 @@ import { UtilityModule } from '../utility/utility.module';
     SocialOAuthConnectService,
     SocialPostMediaService,
     SocialMediaValidationService,
+    SocialMediaCropService,
     NotConnectedPublisher,
     PlatformDisabledPublisher,
+    FacebookGraphPublisher,
+    InstagramGraphPublisher,
+    YouTubePublisher,
     SocialPublisherRegistry,
+    NoStatsAvailable,
+    YouTubeStatsFetcher,
+    SocialStatsFetcherRegistry,
     SocialTokenResolverService,
     NoRefresherAvailable,
+    YouTubeTokenRefresher,
     SocialTokenRefresherRegistry,
     OAuthStateService,
     NoExchangerAvailable,
+    FacebookOAuthExchanger,
+    InstagramOAuthExchanger,
+    YouTubeOAuthExchanger,
     SocialOAuthExchangerRegistry,
+    MetaGraphApiService,
+    YouTubeApiService,
     SocialPostPublishProcessor,
     SocialMediaRetentionScheduler,
   ],

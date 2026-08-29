@@ -12,13 +12,20 @@ import { SocialPost } from '../entity/social-post.entity';
 import { SocialPostTarget } from '../entity/social-post-target.entity';
 import { SocialAccount } from '../entity/social-account.entity';
 import { Admin } from '../../admin/entity/admin.entity';
-import { CreateSocialPostDto } from '../dto/social-media.dto';
+import {
+  CreateSocialPostDto,
+  UpdateTargetFocalPointDto,
+  UpdateTargetOverrideDto,
+} from '../dto/social-media.dto';
 import {
   SocialPostStatus,
   SocialPostTargetStatus,
 } from '../enum/social-media.enum';
 import { SocialPublisherRegistry } from '../publisher/social-publisher-registry.service';
+import { SocialStatsFetcherRegistry } from '../stats/social-stats-fetcher-registry.service';
+import { PostStats } from '../stats/social-stats-fetcher.interface';
 import { SocialMediaValidationService } from './social-media-validation.service';
+import { SocialMediaCropService } from './social-media-crop.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -35,7 +42,9 @@ export class SocialPostService {
     @InjectRepository(SocialAccount)
     private readonly accountRepo: Repository<SocialAccount>,
     private readonly publisherRegistry: SocialPublisherRegistry,
+    private readonly statsFetcherRegistry: SocialStatsFetcherRegistry,
     private readonly validationService: SocialMediaValidationService,
+    private readonly cropService: SocialMediaCropService,
     @InjectQueue('social-post-publish')
     private readonly publishQueue: Queue<SocialPostPublishJobData>,
     private readonly cls: ClsService<AppClsStore>,
@@ -62,6 +71,7 @@ export class SocialPostService {
           account: accountById.get(t.accountId),
           placement: t.placement,
           status: SocialPostTargetStatus.PENDING,
+          contentOverride: t.contentOverride?.trim() || null,
         }),
       ),
     });
@@ -97,17 +107,35 @@ export class SocialPostService {
   // reaching its publisher — same "one platform failing never blocks the
   // others" independence, just failing earlier and without wasting an API
   // call on a request that was never going to succeed.
+  //
+  // Every target's content and media are resolved here, once, before
+  // anything is validated or published — target.contentOverride ??
+  // post.content, and media urls run through SocialMediaCropService for
+  // this target's placement/focal point. A publisher only ever sees
+  // already-resolved values, never SocialPost/SocialPostTarget directly —
+  // see SocialPlatformPublisher's own comment for why that split matters.
   async publish(id: string): Promise<SocialPost> {
     const post = await this.getById(id);
     post.status = SocialPostStatus.PUBLISHING;
     await this.postRepo.save(post);
 
+    const resolvedContent = post.targets.map(
+      (t) => t.contentOverride ?? post.content,
+    );
+    const resolvedMedia = post.targets.map((t) =>
+      this.cropService.resolveMediaForPlacement(
+        post.media,
+        t.placement,
+        this.resolveFocalPoint(t),
+      ),
+    );
+
     const validationByTarget = this.validationService.validate(
-      post.content,
       post.media,
-      post.targets.map((t) => ({
+      post.targets.map((t, i) => ({
         platform: t.account.platform,
         placement: t.placement,
+        content: resolvedContent[i],
       })),
     );
 
@@ -123,12 +151,18 @@ export class SocialPostService {
       const publisher = await this.publisherRegistry.resolve(
         target.account.platform,
       );
-      const result = await publisher.publish(target.account, post);
+      const result = await publisher.publish(
+        target.account,
+        resolvedContent[i],
+        resolvedMedia[i],
+        target.placement,
+      );
       target.status = result.success
         ? SocialPostTargetStatus.SUCCESS
         : SocialPostTargetStatus.FAILED;
       target.errorMessage = result.error ?? null;
       target.publishedAt = result.success ? new Date() : null;
+      if (result.externalPostId) target.externalPostId = result.externalPostId;
     }
     await this.targetRepo.save(post.targets);
 
@@ -202,5 +236,77 @@ export class SocialPostService {
       );
     }
     await this.postRepo.remove(post);
+  }
+
+  // DRAFT-only, same rule addMedia/removeMedia already enforce
+  // (SocialPostMediaService) — a target that's already PUBLISHING or
+  // resolved shouldn't have its content silently change under it.
+  async updateTargetOverride(
+    postId: string,
+    targetId: string,
+    dto: UpdateTargetOverrideDto,
+  ): Promise<SocialPostTarget> {
+    const target = await this.getDraftTargetOrThrow(postId, targetId);
+    target.contentOverride = dto.contentOverride?.trim() || null;
+    return this.targetRepo.save(target);
+  }
+
+  // x/y are always set or cleared together — a lone x with no y (or vice
+  // versa) is meaningless as a crop focal point, so this rejects that
+  // combination outright rather than silently ignoring the stray value.
+  async updateTargetFocalPoint(
+    postId: string,
+    targetId: string,
+    dto: UpdateTargetFocalPointDto,
+  ): Promise<SocialPostTarget> {
+    if ((dto.x === null) !== (dto.y === null)) {
+      throw new BadRequestException('x and y must be set or cleared together.');
+    }
+    const target = await this.getDraftTargetOrThrow(postId, targetId);
+    target.mediaFocalX = dto.x;
+    target.mediaFocalY = dto.y;
+    return this.targetRepo.save(target);
+  }
+
+  // No DRAFT restriction, unlike updateTargetOverride/updateTargetFocalPoint
+  // — this only reads, and only makes sense once a target has actually
+  // published (has an externalPostId to look up in the first place).
+  async getTargetStats(postId: string, targetId: string): Promise<PostStats> {
+    const post = await this.getById(postId);
+    const target = post.targets.find((t) => t.id === targetId);
+    if (!target) {
+      throw new NotFoundException('Target not found on this post.');
+    }
+    if (!target.externalPostId) {
+      throw new BadRequestException(
+        'This target has not been published yet — there is nothing to fetch stats for.',
+      );
+    }
+    const fetcher = this.statsFetcherRegistry.resolve(target.account.platform);
+    return fetcher.getStats(target.account, target.externalPostId);
+  }
+
+  private async getDraftTargetOrThrow(
+    postId: string,
+    targetId: string,
+  ): Promise<SocialPostTarget> {
+    const post = await this.getById(postId);
+    if (post.status !== SocialPostStatus.DRAFT) {
+      throw new BadRequestException(
+        "Only a draft post's targets can be customized.",
+      );
+    }
+    const target = post.targets.find((t) => t.id === targetId);
+    if (!target) {
+      throw new NotFoundException('Target not found on this post.');
+    }
+    return target;
+  }
+
+  private resolveFocalPoint(
+    target: SocialPostTarget,
+  ): { x: number; y: number } | null {
+    if (target.mediaFocalX == null || target.mediaFocalY == null) return null;
+    return { x: Number(target.mediaFocalX), y: Number(target.mediaFocalY) };
   }
 }

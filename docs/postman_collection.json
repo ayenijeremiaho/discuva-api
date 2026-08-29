@@ -2860,16 +2860,30 @@
           "name": "Create Social Account",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"platform\": \"FACEBOOK\",\n  \"displayName\": \"Main Church Page\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/social-media/accounts",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "accounts"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "accounts"
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Registers which account this church intends to post to — isConnected is always false on create; connecting is a separate OAuth step below."
           },
@@ -2889,8 +2903,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/accounts",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "accounts"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "accounts"
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_READ)."
           },
@@ -2903,9 +2922,20 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/accounts/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "accounts", ":id"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "accounts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE)."
           },
@@ -2918,9 +2948,21 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/accounts/:id/authorize-url",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "accounts", ":id", "authorize-url"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "accounts",
+                ":id",
+                "authorize-url"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Returns the platform's OAuth authorize URL, `state`-encoded to this account/tenant — the frontend does a full-page redirect to it. Requires the platform's SocialPlatformApp to be registered and active on the platform-admin side (see Platform Admin > Social Media Apps)."
           },
@@ -2940,13 +2982,33 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/v1/integrations/social/:platform/oauth/callback?code=&state=",
-              "host": ["{{baseUrl}}"],
-              "path": ["v1", "integrations", "social", ":platform", "oauth", "callback"],
-              "query": [
-                { "key": "code", "value": "" },
-                { "key": "state", "value": "" }
+              "host": [
+                "{{baseUrl}}"
               ],
-              "variable": [{ "key": "platform", "value": "FACEBOOK" }]
+              "path": [
+                "v1",
+                "integrations",
+                "social",
+                ":platform",
+                "oauth",
+                "callback"
+              ],
+              "query": [
+                {
+                  "key": "code",
+                  "value": ""
+                },
+                {
+                  "key": "state",
+                  "value": ""
+                }
+              ],
+              "variable": [
+                {
+                  "key": "platform",
+                  "value": "FACEBOOK"
+                }
+              ]
             },
             "description": "Public, excluded from tenant-subdomain resolution (see TenantMiddleware exclude list — Meta/Google/X's redirect carries no tenant Host header). Not meaningfully callable from Postman: `state` is single-use, short-lived, and only ever produced by the Get Authorize URL call above. Documented for completeness — the browser follows this redirect automatically after the admin consents on the platform's own site, then lands back on discuva-admin's /social-media?connected=<platform> or ?error=<reason>."
           },
@@ -2956,16 +3018,30 @@
           "name": "Create Social Post",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"content\": \"Join us this Sunday at 9am!\",\n  \"targets\": [\n    { \"accountId\": \"a1b2c3d4-0000-0000-0000-000000000001\", \"placement\": \"FEED\" }\n  ]\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/social-media/posts",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts"
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Creates a DRAFT with one PENDING target per (accountId, placement) pair — placement is FEED | STORY | REEL. One connected account can be targeted at multiple placements in the same post (e.g. Instagram Feed + Instagram Story as two separate target entries)."
           },
@@ -2985,11 +3061,22 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/posts?page=1&limit=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts"
+              ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
               ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_READ)."
@@ -3003,9 +3090,20 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_READ)."
           },
@@ -3019,14 +3117,30 @@
             "body": {
               "mode": "formdata",
               "formdata": [
-                { "key": "files", "type": "file", "src": [] }
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": []
+                }
               ]
             },
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id/media",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id", "media"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id",
+                "media"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Multipart field `files` (up to 10 per call, 200MB each, image/* or video/* only). DRAFT posts only. Uploads to Cloudinary and appends SocialPostMedia rows; per-(platform, placement) size/duration/type validation happens at publish time, not on upload."
           },
@@ -3039,16 +3153,170 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id/media/:mediaId",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id", "media", ":mediaId"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id",
+                "media",
+                ":mediaId"
+              ],
               "variable": [
-                { "key": "id", "value": "" },
-                { "key": "mediaId", "value": "" }
+                {
+                  "key": "id",
+                  "value": ""
+                },
+                {
+                  "key": "mediaId",
+                  "value": ""
+                }
               ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT posts only — deletes both the DB row and the Cloudinary asset."
           },
           "response": []
+        },
+        {
+          "name": "Get Composer Constraints",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/constraints",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "constraints"
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ). The (platform, placement) constraints table — image/video size & duration caps, caption length, max image count — as JSON. Lets the composer show a live per-target character counter against the exact numbers SocialMediaValidationService enforces at publish time."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"FACEBOOK\": { \"FEED\": { \"maxImageBytes\": 31457280, \"maxVideoBytes\": 4294967296, \"maxVideoSeconds\": 14400, \"maxCaptionLength\": 63206 } }, \"INSTAGRAM\": { \"FEED\": { \"maxVideoBytes\": 4294967296, \"maxCaptionLength\": 2200 }, \"STORY\": { \"maxVideoSeconds\": 60, \"maxCaptionLength\": 2200 }, \"REEL\": { \"requiresVideo\": true, \"maxVideoBytes\": 1073741824, \"idealMaxVideoSeconds\": 180, \"maxCaptionLength\": 2200 } }, \"X\": { \"FEED\": { \"maxImages\": 4, \"maxVideoBytes\": 536870912, \"maxVideoSeconds\": 140, \"maxCaptionLength\": 280 } }, \"YOUTUBE\": { \"FEED\": { \"requiresVideo\": true, \"maxVideoBytes\": 274877906944, \"maxVideoSeconds\": 43200 }, \"REEL\": { \"requiresVideo\": true, \"maxVideoSeconds\": 180 } } } }"
+            }
+          ]
+        },
+        {
+          "name": "Get Platform Enabled",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/platform-enabled",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "platform-enabled"
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ). {enabled: boolean} — the platform-wide composer readiness gate (PlatformSettingKey.SOCIAL_MEDIA_ENABLED, set by a platform admin on discuva-platform's Platform Settings page), independent of this tenant's own social_media module toggle. discuva-admin's /social-media page fetches this on load and shows \"Coming Soon\" whenever it's false, including on a failed fetch (e.g. a 403 if this tenant's module is off)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"enabled\": true } }"
+            }
+          ]
+        },
+        {
+          "name": "Update Target Content Override",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:postId/targets/:targetId/override",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":postId",
+                "targets",
+                ":targetId",
+                "override"
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT posts only. { contentOverride: string | null } — a per-target caption that overrides the post's shared content (e.g. a shorter caption for X's char limit). null clears the override, reverting the target back to sharing SocialPost.content.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentOverride\": \"Shorter caption just for this target\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"id\": \"...\", \"contentOverride\": \"Shorter caption just for this target\", \"mediaFocalX\": null, \"mediaFocalY\": null, \"status\": \"PENDING\" } }"
+            }
+          ]
+        },
+        {
+          "name": "Update Target Crop Focal Point",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:postId/targets/:targetId/focal-point",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":postId",
+                "targets",
+                ":targetId",
+                "focal-point"
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT posts only. { x, y: number | null }, both 0-1 — normalized click-to-crop-focus point for this target's media, only meaningful for STORY/REEL placements. Must be set or cleared together; both null reverts to Cloudinary's g_auto content-aware cropping.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"x\": 0.5,\n  \"y\": 0.3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"id\": \"...\", \"mediaFocalX\": 0.5, \"mediaFocalY\": 0.3, \"status\": \"PENDING\" } }"
+            }
+          ]
         },
         {
           "name": "Publish Social Post",
@@ -3057,29 +3325,92 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id/publish",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id", "publish"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id",
+                "publish"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Every target attempted independently — one failing (validation or the platform itself) never blocks the others. Post status becomes FAILED (none succeeded), PUBLISHED (all succeeded), or PARTIALLY_PUBLISHED."
           },
           "response": []
         },
         {
+          "name": "Get Target Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/posts/:postId/targets/:targetId/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":postId",
+                "targets",
+                ":targetId",
+                "stats"
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ). { viewCount?, likeCount?, commentCount? } — live-fetched from the platform, not a stored snapshot. YouTube only today (SocialStatsFetcherRegistry); other platforms 500 via NoStatsAvailable. 400 if this target hasn't published yet (no externalPostId)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"viewCount\": 1024, \"likeCount\": 87, \"commentCount\": 12 } }"
+            }
+          ]
+        },
+        {
           "name": "Schedule Social Post",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"scheduledFor\": \"2026-08-10T09:00:00.000Z\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id/schedule",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id", "schedule"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id",
+                "schedule"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT only, scheduledFor must be in the future. Sets status=SCHEDULED and queues a delayed job that calls the exact same publish path Publish Social Post does, once the delay elapses."
           },
@@ -3092,9 +3423,22 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id/schedule/cancel",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id", "schedule", "cancel"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id",
+                "schedule",
+                "cancel"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). Removes the queued job and reverts the post to DRAFT."
           },
@@ -3107,9 +3451,20 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/social-media/posts/:id",
-              "host": ["{{baseUrl}}"],
-              "path": ["social-media", "posts", ":id"],
-              "variable": [{ "key": "id", "value": "" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "posts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
             },
             "description": "AdminGuard (SOCIAL_MEDIA_WRITE). DRAFT or fully-FAILED only — published history is kept."
           },
@@ -3125,11 +3480,21 @@
           "name": "List Social Platform Apps",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{platformAdminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformAdminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/platform/social-media-apps",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "social-media-apps"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media-apps"
+              ]
             },
             "description": "Never returns clientSecretEncrypted — select: false on the entity column."
           },
@@ -3147,18 +3512,33 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{platformAdminToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformAdminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"platform\": \"FACEBOOK\",\n  \"clientId\": \"1234567890\",\n  \"clientSecret\": \"replace-with-real-secret\",\n  \"redirectUri\": \"https://api.discuva.app/v1/integrations/social/FACEBOOK/oauth/callback\",\n  \"scopes\": \"pages_manage_posts,pages_read_engagement\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/social-media-apps",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "social-media-apps"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media-apps"
+              ]
             },
             "description": "Upserts — one row per platform. clientSecret is encrypted at rest (EncryptionService, AES-256-GCM) and never returned by any subsequent GET."
           },
@@ -3169,19 +3549,40 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{platformAdminToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformAdminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"isActive\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/platform/social-media-apps/:platform",
-              "host": ["{{baseUrl}}"],
-              "path": ["platform", "social-media-apps", ":platform"],
-              "variable": [{ "key": "platform", "value": "FACEBOOK" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media-apps",
+                ":platform"
+              ],
+              "variable": [
+                {
+                  "key": "platform",
+                  "value": "FACEBOOK"
+                }
+              ]
             },
             "description": "The kill switch. Deactivating immediately rejects new authorize-url requests and makes every publish attempt for this platform resolve to PlatformDisabledPublisher — but never touches an already-connected tenant's stored SocialAccount tokens either way; reactivating just restores normal resolution."
           },
@@ -3200,8 +3601,13 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/member-directory/me",
-              "host": ["{{baseUrl}}"],
-              "path": ["member-directory", "me"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "member-directory",
+                "me"
+              ]
             },
             "description": "Returns a default (invisible, empty) profile if the member has never saved one yet — no row is created until the first PATCH."
           },
@@ -3218,16 +3624,30 @@
           "name": "Update My Directory Profile",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"occupation\": \"Accountant\",\n  \"businessName\": \"Adaeze's Catering\",\n  \"skills\": \"Excel, Tax prep, Bookkeeping\",\n  \"bio\": \"15 years in financial services, happy to help fellow members with tax questions.\",\n  \"isVisible\": true,\n  \"showPhone\": true,\n  \"showEmail\": false\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{baseUrl}}/member-directory/me",
-              "host": ["{{baseUrl}}"],
-              "path": ["member-directory", "me"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "member-directory",
+                "me"
+              ]
             },
             "description": "Self-service only — a member can only ever edit their own listing. Creates the row on first save (upsert)."
           },
@@ -3240,8 +3660,14 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/member-directory/me/completion",
-              "host": ["{{baseUrl}}"],
-              "path": ["member-directory", "me", "completion"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "member-directory",
+                "me",
+                "completion"
+              ]
             },
             "description": "Backs the frontend's discoverability nudge — isDiscoverable is true only when isVisible is on AND at least one of occupation/businessName/skills is set."
           },
@@ -3261,12 +3687,27 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/member-directory/search?q=accountant&page=1&limit=20",
-              "host": ["{{baseUrl}}"],
-              "path": ["member-directory", "search"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "member-directory",
+                "search"
+              ],
               "query": [
-                { "key": "q", "value": "accountant", "description": "Matches against name, occupation, businessName, and skills" },
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "20" }
+                {
+                  "key": "q",
+                  "value": "accountant",
+                  "description": "Matches against name, occupation, businessName, and skills"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
               ]
             },
             "description": "Only ever returns isVisible=true members. phoneNumber/email are included per-row only if that member's own showPhone/showEmail is true."
@@ -3284,11 +3725,22 @@
           "name": "Get Member Directory Analytics (Admin)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/admin/member-directory/analytics",
-              "host": ["{{baseUrl}}"],
-              "path": ["admin", "member-directory", "analytics"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "member-directory",
+                "analytics"
+              ]
             },
             "description": "AdminGuard (MEMBER_DIRECTORY_READ). Read-only aggregate — never phone/email regardless of a member's own showPhone/showEmail choice. occupationBreakdown excludes members with no occupation set and is sorted by count descending."
           },
@@ -7485,8 +7937,7 @@
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Class not found\"\n}"
             }
           ]
-        }
-,
+        },
         {
           "name": "Get Class Lookup (Admin)",
           "request": {

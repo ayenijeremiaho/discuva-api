@@ -48,4 +48,27 @@ export class SocialPostTarget extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   publishedAt: Date | null;
+
+  // The platform's own id for the published post/video — set from
+  // PublishResult.externalPostId once a target actually succeeds. What a
+  // stats fetch (SocialStatsFetcher) looks up per platform, or any future
+  // "open this on the platform" link.
+  @Column({ nullable: true, name: 'external_post_id' })
+  externalPostId: string | null;
+
+  // "Customize for this platform" — null means this target still shares
+  // SocialPost.content. Resolved once, in SocialPostService, never by a
+  // publisher itself (see SocialPlatformPublisher's own comment).
+  @Column({ type: 'text', nullable: true })
+  contentOverride: string | null;
+
+  // Normalized (0-1) click-to-crop-focus point, only meaningful for
+  // STORY/REEL placements. Both null (the default) means "let Cloudinary's
+  // g_auto content-aware cropping choose" — not "no crop applied." Always
+  // set or cleared together; SocialPostService is what enforces that.
+  @Column({ type: 'numeric', nullable: true })
+  mediaFocalX: number | null;
+
+  @Column({ type: 'numeric', nullable: true })
+  mediaFocalY: number | null;
 }
