@@ -1,10 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SocialPlatformApp } from '../entity/social-platform-app.entity';
 import { SocialPlatform } from '../../social-media/enum/social-media.enum';
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { RegisterSocialPlatformAppDto } from '../dto/register-social-platform-app.dto';
+import {
+  KNOWN_SOCIAL_SCOPES,
+  SCOPE_SEPARATOR,
+} from '../constant/known-social-scopes.constant';
 
 // The platform-wide counterpart to SocialAccount's per-tenant OAuth tokens
 // — one row per SocialPlatform, holding the Discuva-owned app credentials
@@ -28,9 +36,20 @@ export class PlatformSocialAppService {
     return this.appRepo.find({ order: { platform: 'ASC' } });
   }
 
+  // Consumed by SocialMediaController's GET available-platforms — a
+  // registered-but-inactive app (or no row at all) both mean "not
+  // available," same as isPlatformDisabled() but as a list rather than a
+  // single-platform check.
+  async listActivePlatforms(): Promise<SocialPlatform[]> {
+    const apps = await this.appRepo.find({ where: { isActive: true } });
+    return apps.map((a) => a.platform);
+  }
+
   async upsertApp(
     dto: RegisterSocialPlatformAppDto,
   ): Promise<SocialPlatformApp> {
+    this.validateScopes(dto.platform, dto.scopes);
+
     const existing = await this.appRepo.findOneBy({ platform: dto.platform });
     const app = existing ?? this.appRepo.create({ platform: dto.platform });
     app.clientId = dto.clientId;
@@ -38,9 +57,54 @@ export class PlatformSocialAppService {
       dto.clientSecret,
     );
     app.redirectUri = dto.redirectUri;
-    app.scopes = dto.scopes;
+    app.scopes = dto.scopes.join(SCOPE_SEPARATOR[dto.platform] ?? ' ');
+    app.configId = dto.configId ?? null;
     const saved = await this.appRepo.save(app);
     return this.stripSecret(saved);
+  }
+
+  // No catalog entry for this platform (X, TikTok — no real exchanger yet)
+  // means nothing to validate against; any non-empty list DTO validation
+  // already required is accepted. Where a catalog does exist, this is the
+  // one place a mistyped or incomplete scope list gets caught — at
+  // registration, not weeks later as an inexplicable "missing permission"
+  // publish failure.
+  private validateScopes(platform: SocialPlatform, scopes: string[]): void {
+    const known = KNOWN_SOCIAL_SCOPES[platform];
+    if (!known) return;
+
+    const validValues = new Set(known.map((s) => s.value));
+    const unknown = scopes.filter((s) => !validValues.has(s));
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        `Unrecognized scope(s) for ${platform}: ${unknown.join(', ')}`,
+      );
+    }
+
+    const missingRequired = known.filter(
+      (s) => s.required && !scopes.includes(s.value),
+    );
+    if (missingRequired.length > 0) {
+      throw new BadRequestException(
+        `${platform} requires: ${missingRequired.map((s) => s.value).join(', ')}`,
+      );
+    }
+  }
+
+  // A hard delete, unlike setActive()'s soft kill switch — safe here
+  // specifically because SocialAccount has no FK to SocialPlatformApp (only
+  // a plain platform enum string), so removing a row can't orphan anything
+  // relational. An already-connected tenant's SocialAccount tokens are
+  // untouched either way; only future authorize-url/connect attempts for
+  // this platform start failing honestly (same as before it was ever
+  // registered), same as deactivating.
+  async deleteApp(platform: SocialPlatform): Promise<void> {
+    const result = await this.appRepo.delete({ platform });
+    if (result.affected === 0) {
+      throw new NotFoundException(
+        `Social platform app "${platform}" is not registered.`,
+      );
+    }
   }
 
   async setActive(
@@ -84,6 +148,7 @@ export class PlatformSocialAppService {
         'clientSecretEncrypted',
         'redirectUri',
         'scopes',
+        'configId',
         'isActive',
       ],
     });

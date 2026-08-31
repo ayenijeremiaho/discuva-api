@@ -13,6 +13,7 @@ const app: SocialPlatformApp = {
     'https://api.discuva.org/v1/integrations/social/YOUTUBE/oauth/callback',
   scopes:
     'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+  configId: null,
   isActive: true,
 };
 

@@ -17,6 +17,7 @@ const app: SocialPlatformApp = {
   redirectUri:
     'https://api.discuva.org/v1/integrations/social/YOUTUBE/oauth/callback',
   scopes: 'https://www.googleapis.com/auth/youtube.upload',
+  configId: null,
   isActive: true,
 };
 

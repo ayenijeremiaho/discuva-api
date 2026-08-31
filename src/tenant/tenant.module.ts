@@ -38,7 +38,7 @@ import { BranchModule } from '../branch/branch.module';
  * for how this was confirmed and fixed.
  *
  * Excludes are deliberate and each one is load-bearing:
- * - `v1/platform/(.*)` — the platform-admin control plane operates on
+ * - `v1/platform/{*path}` — the platform-admin control plane operates on
  *   `public` tables only and must never be subjected to tenant resolution.
  * - `v1/signup` — provisions a brand-new tenant; by definition there's no
  *   existing tenant row for its subdomain yet, so TenantMiddleware would
@@ -62,7 +62,7 @@ import { BranchModule } from '../branch/branch.module';
  *   BillingCheckoutSession row, not from anything in the webhook payload
  *   (docs/MULTI_TENANT_MIGRATION.md §9 Phase 3) — added proactively this
  *   time, having already been burned once by forgetting it for YouTube.
- * - `v1/webhooks/giving/(.*)` — called directly by a tenant's own
+ * - `v1/webhooks/giving/{*path}` — called directly by a tenant's own
  *   Paystack/Flutterwave/Kora/Stripe account (BYOK giving-checkout, §9
  *   Phase 9h) — same no-Host-header reasoning, but unlike billing's single
  *   shared route there IS a tenant identifier on this one: :tenantId is a
@@ -78,7 +78,13 @@ import { BranchModule } from '../branch/branch.module';
  *   travels encoded inside `state` instead, decoded by
  *   SocialOAuthConnectService before it resolves and enters that tenant's
  *   context.
- * - `v1/billing/public/(.*)` — called directly by discuva-web, a separate
+ * - `v1/integrations/social/meta/data-deletion` (POST) and its `/status/:code`
+ *   (GET) — called directly by Meta when a user removes/deauthorizes the
+ *   app, and by that user's own browser visiting the status link Meta's
+ *   response hands back — same no-Host-header reasoning, and genuinely no
+ *   tenant context at all (MetaDataDeletionService never resolves one; see
+ *   its own comment on why there's nothing tenant-scoped to delete).
+ * - `v1/billing/public/{*path}` — called directly by discuva-web, a separate
  *   marketing site with no tenant subdomain in its Host header at all, same
  *   no-Host-header reasoning as the webhook excludes above.
  * - `/`, `docs`, `health` — @Version(VERSION_NEUTRAL) routes in
@@ -89,7 +95,7 @@ import { BranchModule } from '../branch/branch.module';
  * The `v1/` prefix matters and isn't optional: NestJS's URI versioning adds
  * it to the routes it registers, but middleware exclude patterns match the
  * raw incoming request path, which includes it. Confirmed empirically —
- * `platform/(.*)` (no prefix) silently failed to exclude
+ * `platform/{*path}` (no prefix) silently failed to exclude
  * `/v1/platform/auth/login`, 404ing it exactly like a real tenant route.
  */
 @Module({
@@ -126,28 +132,48 @@ export class TenantModule implements NestModule {
     consumer
       .apply(TenantMiddleware)
       .exclude(
-        { path: 'v1/platform/(.*)', method: RequestMethod.ALL },
+        // `{*path}` (path-to-regexp v8's named-wildcard syntax), not the
+        // legacy `(.*)` glob — every `(.*)` in this list used to be
+        // auto-converted with just a warning ("LegacyRouteConverter"), until
+        // the data-deletion exclude below proved that auto-conversion isn't
+        // reliable: a `(.*)` concatenated directly onto a literal segment
+        // with no separating slash threw a hard PathError and crashed the
+        // whole app on boot in the deployed environment, even though this
+        // exact package version tolerates it fine locally. Converting every
+        // instance here rather than leaving the ones that happen to still
+        // "only warn" — that warning is exactly what the crashing one also
+        // gave, right before it.
+        { path: 'v1/platform/{*path}', method: RequestMethod.ALL },
         { path: 'v1/signup', method: RequestMethod.ALL },
         // Polled by a caller that just signed up, possibly before ever
         // resolving to this tenant's own subdomain (e.g. from a marketing
         // site) — same reasoning as v1/signup itself, and an exact-path
-        // exclude doesn't cover this distinct sub-path. A named parameter,
-        // not `(.*)` — this project's NestJS/path-to-regexp version rejects
-        // a bare wildcard group mid-path (confirmed live: threw PathError
-        // "Unexpected ( at index 11" on boot), only a suffix wildcard like
-        // `v1/platform/(.*)` above is accepted.
+        // exclude doesn't cover this distinct sub-path.
         { path: 'v1/signup/:tenantId/status', method: RequestMethod.GET },
         { path: 'v1/integrations/youtube/callback', method: RequestMethod.ALL },
         { path: 'v1/webhooks/billing', method: RequestMethod.ALL },
-        { path: 'v1/webhooks/giving/(.*)', method: RequestMethod.ALL },
+        { path: 'v1/webhooks/giving/{*path}', method: RequestMethod.ALL },
         {
           path: 'v1/integrations/social/:platform/oauth/callback',
+          method: RequestMethod.GET,
+        },
+        // Two exact/named-param entries rather than one wildcard — the
+        // route shape here doesn't share a common prefix segment the way
+        // the `{*path}` ones above do (POST .../data-deletion vs. GET
+        // .../data-deletion/status/:code), so there's nothing a wildcard
+        // buys over just listing both.
+        {
+          path: 'v1/integrations/social/meta/data-deletion',
+          method: RequestMethod.POST,
+        },
+        {
+          path: 'v1/integrations/social/meta/data-deletion/status/:code',
           method: RequestMethod.GET,
         },
         // Called by discuva-web, a separate marketing site with no tenant
         // subdomain in its Host header at all — same no-Host-header
         // reasoning as the excludes above.
-        { path: 'v1/billing/public/(.*)', method: RequestMethod.ALL },
+        { path: 'v1/billing/public/{*path}', method: RequestMethod.ALL },
         { path: '/', method: RequestMethod.GET },
         { path: 'docs', method: RequestMethod.GET },
         { path: 'health', method: RequestMethod.GET },

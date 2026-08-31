@@ -440,6 +440,100 @@ describe('PlatformTenantService', () => {
     });
   });
 
+  describe('setModuleOverride', () => {
+    it('rejects an unknown module key', async () => {
+      await expect(
+        service.setModuleOverride('tenant-1', {
+          moduleKey: 'not_a_real_module',
+          enabled: true,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('sets an override on a tenant with none yet', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        moduleOverrides: null,
+      });
+      mockDataSource.query.mockResolvedValue([{ c: 0 }]);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
+
+      const result = await service.setModuleOverride('tenant-1', {
+        moduleKey: 'social_media',
+        enabled: true,
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          moduleOverrides: { social_media: true },
+        }),
+      );
+      expect(result.moduleOverrides).toEqual({ social_media: true });
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'plan-features:tenant-1',
+      );
+    });
+
+    it('preserves existing overrides on other modules when setting a new one', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        moduleOverrides: { forms: false },
+      });
+      mockDataSource.query.mockResolvedValue([{ c: 0 }]);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
+
+      await service.setModuleOverride('tenant-1', {
+        moduleKey: 'social_media',
+        enabled: true,
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          moduleOverrides: { forms: false, social_media: true },
+        }),
+      );
+    });
+
+    it('clears only the named override when enabled is null, leaving others intact', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        moduleOverrides: { forms: false, social_media: true },
+      });
+      mockDataSource.query.mockResolvedValue([{ c: 0 }]);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
+
+      const result = await service.setModuleOverride('tenant-1', {
+        moduleKey: 'social_media',
+        enabled: null,
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ moduleOverrides: { forms: false } }),
+      );
+      expect(result.moduleOverrides).toEqual({ forms: false });
+    });
+
+    it('nulls out moduleOverrides entirely once the last override is cleared', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        moduleOverrides: { social_media: true },
+      });
+      mockDataSource.query.mockResolvedValue([{ c: 0 }]);
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
+
+      const result = await service.setModuleOverride('tenant-1', {
+        moduleKey: 'social_media',
+        enabled: null,
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ moduleOverrides: null }),
+      );
+      expect(result.moduleOverrides).toBeNull();
+    });
+  });
+
   describe('removeDiscount', () => {
     it('clears all discount fields', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);

@@ -34,6 +34,8 @@ import { Admin } from '../../admin/entity/admin.entity';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { PlatformSocialAppService } from '../../platform-admin/service/platform-social-app.service';
+import { IMPLEMENTED_PLATFORMS } from '../constant/implemented-platforms.constant';
 
 // 200MB — a generous, non-configurable ceiling on the raw upload itself;
 // SocialMediaValidationService is the real per-(platform, placement) size
@@ -51,6 +53,7 @@ export class SocialMediaController {
     private readonly postMediaService: SocialPostMediaService,
     private readonly validationService: SocialMediaValidationService,
     private readonly platformSettingsService: PlatformSettingsService,
+    private readonly platformSocialAppService: PlatformSocialAppService,
   ) {}
 
   // The frontend's "Coming Soon" gate reads this instead of a hardcoded
@@ -65,6 +68,23 @@ export class SocialMediaController {
   async isPlatformEnabled() {
     return {
       enabled: await this.platformSettingsService.getSocialMediaEnabled(),
+    };
+  }
+
+  // Which platforms the "Add Account" picker should actually offer — the
+  // intersection of IMPLEMENTED_PLATFORMS (has a real exchanger/publisher,
+  // not just NoExchangerAvailable/NotConnectedPublisher) and whatever a
+  // platform admin has registered AND left active. Lets Discuva go live
+  // with Facebook/Instagram/YouTube while X/TikTok stay hidden from every
+  // tenant, without a frontend deploy — same "toggle it from
+  // discuva-platform, not the codebase" posture as platform-enabled above.
+  @RequiresPermission(AdminPermission.SOCIAL_MEDIA_READ)
+  @Get('available-platforms')
+  async getAvailablePlatforms() {
+    const active = await this.platformSocialAppService.listActivePlatforms();
+    const activeSet = new Set(active);
+    return {
+      platforms: IMPLEMENTED_PLATFORMS.filter((p) => activeSet.has(p)),
     };
   }
 

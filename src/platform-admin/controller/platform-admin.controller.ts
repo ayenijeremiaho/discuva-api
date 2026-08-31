@@ -46,6 +46,7 @@ import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
+import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
@@ -59,6 +60,10 @@ import { SetGivingProviderActiveDto } from '../dto/set-giving-provider-active.dt
 import { SetPaymentProviderActiveDto } from '../dto/set-payment-provider-active.dto';
 import { UpdatePlatformSettingDto } from '../dto/platform-setting.dto';
 import { PlatformSettingKey } from '../enum/platform-setting-key.enum';
+import {
+  KNOWN_SOCIAL_SCOPES,
+  SCOPE_SEPARATOR,
+} from '../constant/known-social-scopes.constant';
 import { CheckoutService } from '../../billing/service/checkout.service';
 import { SocialPlatform } from '../../social-media/enum/social-media.enum';
 
@@ -258,6 +263,18 @@ export class PlatformAdminController {
     return this.tenantService.applyDiscount(id, dto);
   }
 
+  // Manual per-tenant module access override — independent of this
+  // tenant's billing plan (see ModuleEnabledGuard/Tenant.moduleOverrides).
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Patch('tenants/:id/module-overrides')
+  async setTenantModuleOverride(
+    @Param('id') id: string,
+    @Body() dto: SetTenantModuleOverrideDto,
+  ) {
+    return this.tenantService.setModuleOverride(id, dto);
+  }
+
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Delete('tenants/:id/discount')
@@ -348,6 +365,24 @@ export class PlatformAdminController {
     return this.communicationProviderService.getTenantProviders(id);
   }
 
+  // No @RequiresPlatformPermission — metadata needed to render the
+  // register-app form's scope picker, same reasoning as
+  // getPermissionGroups() above. Merges KNOWN_SOCIAL_SCOPES with
+  // SCOPE_SEPARATOR per platform so the frontend doesn't hardcode either.
+  @UseGuards(PlatformAdminGuard)
+  @Get('social-media-apps/scope-catalog')
+  getSocialMediaScopeCatalog() {
+    return Object.fromEntries(
+      Object.entries(KNOWN_SOCIAL_SCOPES).map(([platform, scopes]) => [
+        platform,
+        {
+          scopes,
+          separator: SCOPE_SEPARATOR[platform as SocialPlatform] ?? ' ',
+        },
+      ]),
+    );
+  }
+
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ)
   @Get('social-media-apps')
@@ -370,6 +405,14 @@ export class PlatformAdminController {
     @Body() dto: SetSocialPlatformAppActiveDto,
   ) {
     return this.socialAppService.setActive(platform, dto.isActive);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('social-media-apps/:platform')
+  async deleteSocialPlatformApp(@Param('platform') platform: SocialPlatform) {
+    await this.socialAppService.deleteApp(platform);
   }
 
   @UseGuards(PlatformAdminGuard)

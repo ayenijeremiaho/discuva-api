@@ -70,6 +70,7 @@ describe('ModuleEnabledGuard', () => {
     mockPlanFeatureResolver.resolve.mockResolvedValue({
       features: [],
       featureLimits: {},
+      overrides: {},
     });
 
     await expect(guard.canActivate(mockContext())).rejects.toThrow(
@@ -84,8 +85,58 @@ describe('ModuleEnabledGuard', () => {
     mockPlanFeatureResolver.resolve.mockResolvedValue({
       features: ['prayer'],
       featureLimits: {},
+      overrides: {},
     });
 
     await expect(guard.canActivate(mockContext())).resolves.toBe(true);
+  });
+
+  // Tenant.moduleOverrides — platform-admin manual override, independent
+  // of plan membership.
+  describe('platform-admin module overrides', () => {
+    it('blocks the request when a platform admin has explicitly disabled this module for the tenant, even though the plan includes it', async () => {
+      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue('prayer');
+      mockChurchSettingsService.isEnabled.mockResolvedValue(true);
+      mockCls.get.mockReturnValue('tenant-1');
+      mockPlanFeatureResolver.resolve.mockResolvedValue({
+        features: ['prayer'],
+        featureLimits: {},
+        overrides: { prayer: false },
+      });
+
+      await expect(guard.canActivate(mockContext())).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('grants the request when a platform admin has explicitly enabled this module for the tenant, even though the plan does not include it', async () => {
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue('social_media');
+      mockChurchSettingsService.isEnabled.mockResolvedValue(true);
+      mockCls.get.mockReturnValue('tenant-1');
+      mockPlanFeatureResolver.resolve.mockResolvedValue({
+        features: [],
+        featureLimits: {},
+        overrides: { social_media: true },
+      });
+
+      await expect(guard.canActivate(mockContext())).resolves.toBe(true);
+    });
+
+    it('falls through to the plan check when this module has no override set', async () => {
+      jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue('prayer');
+      mockChurchSettingsService.isEnabled.mockResolvedValue(true);
+      mockCls.get.mockReturnValue('tenant-1');
+      mockPlanFeatureResolver.resolve.mockResolvedValue({
+        features: [],
+        featureLimits: {},
+        overrides: { some_other_module: true },
+      });
+
+      await expect(guard.canActivate(mockContext())).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
   });
 });

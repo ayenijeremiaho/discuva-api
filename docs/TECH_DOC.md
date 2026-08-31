@@ -3361,6 +3361,48 @@ gated as a deliberate upgrade lever rather than left free on cost grounds. The r
 modules (Prayer, Evangelism, Training Classes, Sunday School, Pastor Feedback, Fellowships, Social Media,
 Children's Church, Announcements, Follow-Up) are unaffected.
 
+**Per-tenant manual override, independent of plan (`Tenant.moduleOverrides`).** The plan-features mechanism above
+answers "which tier includes this module," a platform-wide default every tenant on that tier shares. It has no
+answer for "let this one specific church test it regardless of their plan" or "pull access from this one tenant
+without touching their plan or anyone else's" — exactly the shape of control needed to roll a still-unstable module
+(Social Media, initially) out to a hand-picked set of test tenants before it's ready to sit in any plan's default
+`features` at all. `moduleOverrides` is a nullable `jsonb` map on `Tenant`, keyed by the same `KNOWN_MODULES`/
+`PlanFeature` strings as `Plan.features` — `{ social_media: true }` grants that module regardless of plan,
+`{ social_media: false }` blocks it regardless of plan, a key simply absent (or the whole map `null`) means no
+override — falls through to the plan check exactly as before this existed. `ModuleEnabledGuard` checks it between
+the tenant's own on/off toggle and the plan-features check: tenant toggle off still always wins (a church's own
+choice is never overridden), then override `false` blocks outright, override `true` grants outright, and only an
+absent override falls through to `features.includes(moduleKey)`. `PlanGuard` (the 4 orphan `PlanFeature`-only
+gates with no `KNOWN_MODULES` counterpart) doesn't consult this — no per-tenant override need has come up for
+those yet, easy to extend the same way later if one does.
+
+`PlanFeatureResolverService.resolve()` — already shared by both guards, already caching per-tenant under
+`plan-features:${tenantId}` — now also fetches the `Tenant` row and returns `overrides` alongside `features`/
+`featureLimits`, so this costs no extra guard-level round trip or cache key. `PlatformTenantService.setModuleOverride()`
+validates `moduleKey` against `KNOWN_MODULES`, merges into the existing map (clearing to `null` only once the
+*last* override key is removed, never wiping a tenant's other overrides), saves, and invalidates the same
+`plan-features:${tenantId}` cache key `changeTenantPlan`/`applyDiscount` already do.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| PATCH | `/platform/tenants/:id/module-overrides` | PlatformAdminGuard (TENANTS_WRITE) | `{moduleKey: string, enabled: boolean \| null}` — `null` clears just that one key |
+
+**Frontend:** `TenantDetailPanel` gained a "Social Media Access" field (discuva-platform's tenant detail panel) —
+shows the resolved status in plain language (force-enabled / force-disabled / included-in-plan / not-included) and
+a three-way Plan Default / Force On / Force Off control. Scoped to `social_media` specifically for now rather than
+a generic per-module picker for every `KNOWN_MODULES` entry — the backend is already fully generic
+(`setModuleOverride` takes any valid `moduleKey`), so widening the UI to other modules later needs no new backend
+work, just more buttons.
+
+**Practical note for rolling Social Media out selectively:** `social_media` was one of the 11 modules the original
+`BackfillModuleCapabilityKeys` migration added to *both* `free` and `pro` plans' `features` (see above) — meaning
+today, by default, every tenant on either plan already has it plan-included. To actually restrict it to a hand-picked
+set of test tenants, remove `social_media` from `free`/`pro`'s `features` first (discuva-platform's existing Plans
+page, `PATCH /platform/plans/:id`), then grant it back per-tenant with `Force On` here for whichever churches
+should see it. Skipping the plan-removal step means every tenant keeps seeing it via the plan check regardless of
+what this override says (an override of `true` is redundant when the plan already includes it) — an override
+alone doesn't "hide" a module that's already plan-included from tenants that were never explicitly `Force Off`.
+
 **`departments` was Pro-only by accident, corrected via `AddDepartmentsToFreePlan`.** Unlike `tithe`, this had no
 migration or comment ever recording it as a deliberate gate — and it directly contradicted `KNOWN_MODULES`'s own
 `required: true` flag on `departments` (`src/church-settings/constants/known-modules.constant.ts`), which marks it
@@ -3851,6 +3893,7 @@ but no `FacebookStatsFetcher`/`InstagramStatsFetcher` exists yet; both platforms
 | GET    | `/v1/integrations/social/:platform/oauth/callback` | `@Public()`, tenant-excluded | Called by the OAuth provider's redirect, not the frontend directly — see above |
 | GET    | `/social-media/constraints`                 | AdminGuard (SOCIAL_MEDIA_READ)  | The `(platform, placement)` constraints table as JSON — for the composer's live per-target counters |
 | GET    | `/social-media/platform-enabled`            | AdminGuard (SOCIAL_MEDIA_READ)  | `{enabled: boolean}` — the platform-wide composer readiness gate; see below and "Platform Settings" |
+| GET    | `/social-media/available-platforms`         | AdminGuard (SOCIAL_MEDIA_READ)  | `{platforms: SocialPlatform[]}` — which platforms the "Add Account" picker should offer; see below |
 | POST   | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_WRITE) | `{content, targets: {accountId, placement, contentOverride?}[]}` — creates a `DRAFT` with one `PENDING` target per (account, placement) pair |
 | GET    | `/social-media/posts`                       | AdminGuard (SOCIAL_MEDIA_READ)  | Paginated (`?page=&limit=`) |
 | GET    | `/social-media/posts/:id`                   | AdminGuard (SOCIAL_MEDIA_READ)  | One post with its targets, each target's account, and its media |
@@ -3879,6 +3922,20 @@ load and renders the real composer only when both are true (a fetch failure — 
 composer). This replaced an earlier hardcoded frontend build flag (`SOCIAL_MEDIA_COMING_SOON` in `page.tsx`), which
 required a frontend redeploy to flip and couldn't be toggled per-environment without a code change.
 
+**Per-platform availability, on top of the all-or-nothing gate above.** `SOCIAL_MEDIA_ENABLED` turns the whole
+composer on or off; it can't hide just X/TikTok while shipping Facebook/Instagram/YouTube. `GET
+/social-media/available-platforms` fills that gap: it intersects `IMPLEMENTED_PLATFORMS`
+(`src/social-media/constant/implemented-platforms.constant.ts` — platforms with a real
+`SocialOAuthExchanger`/`SocialPlatformPublisher`, currently Facebook/Instagram/YouTube; X/TikTok resolve to
+`NoExchangerAvailable`/`NotConnectedPublisher` regardless of what's registered for them) with
+`PlatformSocialAppService.listActivePlatforms()` (registered **and** `isActive` in `social_platform_apps`).
+discuva-admin's `AccountsPanel` filters its "Add Account" platform `<select>` down to this list — a platform stays
+unselectable until it's both built and deliberately activated from discuva-platform's existing Deactivate/Reactivate
+toggle, with no new admin UI needed for it. This is a frontend picker restriction only — `POST
+/social-media/accounts` itself still accepts any `SocialPlatform` enum value; connecting an account for an
+unavailable platform still fails honestly via `NoExchangerAvailable` either way, same as before this endpoint
+existed.
+
 **Platform-admin surface (`/platform/social-media-apps`, discuva-platform):** separate from the tenant-side module
 toggle above — Discuva staff register each platform's OAuth app credentials here (one app per platform, not
 per-tenant) and flip the kill switch. New `PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ`/`WRITE` (a distinct,
@@ -3888,8 +3945,107 @@ posts never needs to see Discuva's own app secrets).
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
 | GET   | `/platform/social-media-apps`            | PlatformAdminGuard (SOCIAL_MEDIA_APPS_READ)  | Never returns `clientSecretEncrypted` — `select: false` |
-| POST  | `/platform/social-media-apps`            | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | `{platform, clientId, clientSecret, redirectUri, scopes}` — upserts (one row per platform) |
+| GET   | `/platform/social-media-apps/scope-catalog` | PlatformAdminGuard (no extra permission — metadata, same posture as `permissions/groups`) | `{[platform]: {scopes: {value,label,required}[], separator}}` — drives the register form's scope picker |
+| POST  | `/platform/social-media-apps`            | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | `{platform, clientId, clientSecret, redirectUri, scopes: string[]}` — upserts (one row per platform) |
 | PATCH | `/platform/social-media-apps/:platform`  | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | `{isActive}` — the kill switch; never touches already-connected tenants' `SocialAccount` tokens either way |
+| DELETE | `/platform/social-media-apps/:platform` | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | Hard delete — `204`, `404` if not registered. Safe: `SocialAccount` has no FK to this table (just a platform enum string), so nothing orphans; an already-connected tenant's tokens are untouched, same as deactivating |
+
+**Scope validation.** `scopes` used to be a raw free-text string, passed straight into the OAuth `scope` query
+parameter with no validation beyond "not empty" — a typo or wrong separator saved silently and only surfaced later,
+either as Meta quietly dropping unrecognized permissions (no error at all, just fewer permissions than intended) or
+Google's consent screen showing `invalid_scope`. It's now `scopes: string[]`, one OAuth permission per entry, checked
+in `PlatformSocialAppService.upsertApp()` against `KNOWN_SOCIAL_SCOPES`
+(`src/platform-admin/constant/known-social-scopes.constant.ts`) — a per-platform whitelist with a `required` flag per
+scope, verified against Meta's and Google's own permission docs (Facebook: `pages_show_list`,
+`pages_read_engagement`, `pages_manage_posts`; Instagram: those three plus `pages_read_user_content`,
+`instagram_basic`, `instagram_content_publish`; YouTube: `.../auth/youtube.upload` required,
+`.../auth/youtube.readonly` optional — needed only for the stats extension point). `upsertApp()` rejects (400) any
+unrecognized scope and any submission missing a required one, then joins the array with that platform's own
+separator (`SCOPE_SEPARATOR` — comma for Meta, space for Google, matching each platform's own OAuth dialog
+convention) before storing — the DB column itself is unchanged, still a single string. Platforms with no exchanger
+built yet (X, TikTok) have no catalog entry, so any non-empty list is accepted rather than guessed at.
+
+**Frontend:** `RegisterAppPanel` replaced the free-text scopes input with a checkbox list fetched from the scope
+catalog — required scopes are pre-checked and disabled (can't be unchecked, since submitting without one always
+400s anyway), so the most common mistake is now structurally impossible rather than just validated after the fact.
+Platforms with no catalog fall back to a comma-separated free-text input. The apps list table gained a "Scopes"
+column rendering each granted scope's catalog label (falling back to the raw value for anything not in the catalog,
+e.g. a scope later removed from it) — previously scopes weren't visible anywhere in the UI at all.
+
+**Facebook Login for Business vs. classic scope-based login
+(`SocialPlatformApp.configId`).** Discovered live against a real Meta App: the "Manage everything on your Page"
+use case (Facebook Login for Business) does not grant permissions via the classic `scope` query parameter at all —
+it requires a Configuration ID, created in the Meta App dashboard (Facebook Login for Business product >
+Configurations), where the actual permission list lives. Sending `scope` alongside/instead of `config_id` on a
+Business Login app produces a partial, confusing failure — some permissions silently rejected as "Invalid Scopes"
+(Meta's own error, shown only to developers) rather than a clean success or a clean rejection of the whole request.
+`configId` is a new nullable column on `SocialPlatformApp`; `MetaGraphApiService.buildAuthorizeUrl()` sends
+`config_id` instead of `scope` whenever it's set, and only falls back to the classic `scope` param when it's null —
+the two are mutually exclusive on the dialog, never sent together. `scopes` is still recorded and validated even
+when `configId` is set — useful as a record of what the Configuration is expected to grant, even though it isn't
+what's literally sent in that case.
+
+**Frontend:** `RegisterAppPanel` shows a "Configuration ID" field for FACEBOOK/INSTAGRAM specifically, with guidance
+on where to find it in the Meta dashboard; the Scopes field's label changes to clarify it's reference-only once a
+Configuration ID is set. The apps list table shows a "Business Login (config_id)" badge in place of the scope pills
+for any row that has one, so which mode a registered app is in is visible at a glance instead of requiring a DB
+query to diagnose the next time this exact class of error shows up.
+
+**Bug found and fixed while wiring this up:** `PlatformSocialAppService.getDecryptedApp()` — the one method that
+reads `SocialPlatformApp` for actual OAuth use — passes an explicit column `select` array (needed to opt back into
+`clientSecretEncrypted`'s `select: false`), and `configId` was never added to it. TypeORM silently omits any column
+not in an explicit select list, so `app.configId` came back `undefined` on the object `buildAuthorizeUrl()` actually
+receives at connect time — meaning the fix above would have compiled, passed its own unit tests (which mock the
+repository directly, bypassing this), and still silently done nothing in production. Added `configId` to the select
+list and a regression test asserting it's present, specifically because this class of bug — correct in isolation,
+broken through one specific read path — doesn't show up any other way.
+
+**Edit and delete for a registered app.** Neither existed before this — the only way to "edit" was re-registering
+blind for the same platform (a full overwrite via the same upsert, requiring every field retyped including a
+Client Secret that's never returned by any GET), and there was no way to remove a platform app at all, only
+deactivate it. `DELETE /platform/social-media-apps/:platform` is a genuine hard delete (see routes table above) —
+safe specifically because `SocialAccount` has no FK to `SocialPlatformApp`, only a plain platform enum string, so
+nothing relational can orphan; an already-connected tenant's stored tokens are untouched either way, identical to
+deactivating. `RegisterAppPanel` now accepts an `editingApp` prop: platform is locked (can't retarget an edit to a
+different platform — delete and re-register instead), Client ID/Redirect URI/Configuration ID pre-fill from the
+existing row, and stored scopes are parsed back into the checkbox picker using that platform's catalog separator.
+Client Secret still can't be pre-filled (never returned by the API) and must be re-entered to save any change,
+same constraint the upsert endpoint always had. The apps list table gained Edit (pencil) and Delete (trash, with a
+native `confirm()` warning what deleting affects) actions alongside the existing Deactivate/Reactivate toggle.
+
+**Meta Data Deletion Callback (`src/social-media/service/meta-data-deletion.service.ts`,
+`controller/meta-data-deletion.controller.ts`).** Meta's Platform Terms §3(d)(i) require every app to either
+periodically process a manual list of app-scoped user IDs to purge, or implement a Data Deletion Callback URL that
+automates it — registered in the Meta App dashboard's Advanced settings as the "Data Deletion Request URL". Meta
+POSTs `application/x-www-form-urlencoded` with a single `signed_request` field
+(`{base64url_sig}.{base64url_json_payload}`, HMAC-SHA256 signed with the app's client secret) whenever a user
+deauthorizes the app or requests deletion from their Facebook Account Settings.
+
+`MetaDataDeletionService.verifySignedRequest()` tries the signature against every registered Meta-platform app's
+secret (Facebook, then Instagram — both typically share one Meta App, tried independently in case they were ever
+registered with different credentials), using `timingSafeEqual` on equal-length buffers, and rejects (throws
+`BadRequestException`, never silently no-ops) anything malformed, unsigned, or signed with an unrecognized secret —
+a forged POST to this public URL must never appear to succeed. `PlatformSocialAppService.getDecryptedApp()` supplies
+the plaintext secret (same decrypt-on-demand pattern the OAuth exchange flow already uses).
+
+The actual "deletion" is close to a no-op by design: `SocialAccount.externalAccountId` stores the connected Facebook
+**Page's** id, never the authorizing person's own Facebook-scoped user id, and `connectedBy` is our own internal
+`Admin` FK, not a Meta identifier — so there is structurally nothing in Discuva's database keyed to the `user_id`
+Meta's signed_request identifies. `recordRequest()` just persists a `SocialDataDeletionRequest` row (public schema,
+no tenant context — same reasoning as `SocialOAuthCallbackController`) so the status URL Meta's response contract
+requires isn't a dead link, and returns a confirmation code immediately; no async job needed. `GET
+.../data-deletion/status/:code` renders a small human-readable HTML page (Meta's contract explicitly requires a
+person be able to read it, not just machines) explaining that no personal data was retained.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| POST | `/integrations/social/meta/data-deletion` | `@Public()`, tenant-excluded | Meta calls this directly; body is form-encoded `signed_request`, not JSON. Responds `{url, confirmation_code}` |
+| GET | `/integrations/social/meta/data-deletion/status/:code` | `@Public()`, tenant-excluded | Human-readable HTML status page — the URL returned above |
+
+`META_DATA_DELETION_STATUS_BASE_URL` (optional env var, matching `YOUTUBE_WEBSUB_CALLBACK_URL`'s own
+`Joi.string().uri().allow('').optional()` convention) supplies the public base URL used to build the status link;
+falls back to the incoming request's own protocol/host when unset, which is fine for local testing but not behind a
+proxy that rewrites those.
 
 ### Utility Module
 

@@ -17,6 +17,7 @@ const app: SocialPlatformApp = {
   redirectUri:
     'https://api.discuva.org/v1/integrations/social/INSTAGRAM/oauth/callback',
   scopes: 'instagram_basic,instagram_content_publish',
+  configId: null,
   isActive: true,
 };
 

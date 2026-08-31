@@ -3015,6 +3015,78 @@
           "response": []
         },
         {
+          "name": "Meta Data Deletion Callback (called by Meta, not the frontend)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "signed_request",
+                  "value": "{base64url_sig}.{base64url_json_payload}",
+                  "description": "HMAC-SHA256 signed with the Meta App's client secret. See MetaDataDeletionService.verifySignedRequest()."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/integrations/social/meta/data-deletion",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "integrations",
+                "social",
+                "meta",
+                "data-deletion"
+              ]
+            },
+            "description": "@Public(), tenant-excluded. Called directly by Meta when a user deauthorizes the app or requests data deletion from their Facebook Account Settings — registered as the \"Data Deletion Request URL\" in the Meta App dashboard's Advanced settings. Verifies the signed_request against every registered Meta-platform app secret (Facebook, then Instagram); rejects anything malformed or unsigned. Discuva never stores the requesting person's own Facebook-scoped id (SocialAccount.externalAccountId is the Page id, not the person's), so there's nothing to actually delete — this just records the request so the required status URL isn't a dead link."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"url\": \"https://api.discuva.org/v1/integrations/social/meta/data-deletion/status/3fa85f64-5717-4562-b3fc-2c963f66afa6\", \"confirmation_code\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\" }"
+            }
+          ]
+        },
+        {
+          "name": "Meta Data Deletion Status (human-readable page)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/integrations/social/meta/data-deletion/status/:confirmationCode",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "integrations",
+                "social",
+                "meta",
+                "data-deletion",
+                "status",
+                ":confirmationCode"
+              ],
+              "variable": [
+                {
+                  "key": "confirmationCode",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "@Public(), tenant-excluded. The status-check URL returned by the callback above — renders a small HTML page (not JSON), since Meta's contract requires a person be able to read it directly. 404 for an unknown confirmation code."
+          },
+          "response": []
+        },
+        {
           "name": "Create Social Post",
           "request": {
             "method": "POST",
@@ -3227,6 +3299,32 @@
               "status": "OK",
               "code": 200,
               "body": "{ \"data\": { \"enabled\": true } }"
+            }
+          ]
+        },
+        {
+          "name": "Get Available Platforms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/available-platforms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "available-platforms"
+              ]
+            },
+            "description": "AdminGuard (SOCIAL_MEDIA_READ). {platforms: SocialPlatform[]} — which platforms the composer's \"Add Account\" picker should offer. Intersection of IMPLEMENTED_PLATFORMS (has a real exchanger/publisher — Facebook/Instagram/YouTube today) and whatever a platform admin has registered AND left active in discuva-platform's Social Media Apps page. Lets Discuva go live with a subset of platforms (e.g. skip X/TikTok) without a frontend deploy — independent of the all-or-nothing platform-enabled gate above."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"platforms\": [\"FACEBOOK\", \"INSTAGRAM\", \"YOUTUBE\"] } }"
             }
           ]
         },
@@ -3508,6 +3606,38 @@
           ]
         },
         {
+          "name": "Get Scope Catalog",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media-apps/scope-catalog",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media-apps",
+                "scope-catalog"
+              ]
+            },
+            "description": "PlatformAdminGuard only, no extra permission — metadata needed to render the register-app form's scope picker, same posture as GET /platform/permissions/groups. Returns the known scope list per platform (with each scope's required flag) and that platform's OAuth separator convention. Platforms with no real exchanger built yet (X, TikTok) are omitted — nothing to validate against."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"FACEBOOK\": { \"scopes\": [ { \"value\": \"pages_show_list\", \"label\": \"List the Pages you manage\", \"required\": true }, { \"value\": \"pages_read_engagement\", \"label\": \"Read Page engagement (required by pages_manage_posts)\", \"required\": true }, { \"value\": \"pages_manage_posts\", \"label\": \"Publish posts, photos, and videos to a Page\", \"required\": true } ], \"separator\": \",\" }, \"YOUTUBE\": { \"scopes\": [ { \"value\": \"https://www.googleapis.com/auth/youtube.upload\", \"label\": \"Upload videos\", \"required\": true }, { \"value\": \"https://www.googleapis.com/auth/youtube.readonly\", \"label\": \"Read channel videos & stats\", \"required\": false } ], \"separator\": \" \" } } }"
+            }
+          ]
+        },
+        {
           "name": "Register Social Platform App",
           "request": {
             "method": "POST",
@@ -3523,7 +3653,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"platform\": \"FACEBOOK\",\n  \"clientId\": \"1234567890\",\n  \"clientSecret\": \"replace-with-real-secret\",\n  \"redirectUri\": \"https://api.discuva.app/v1/integrations/social/FACEBOOK/oauth/callback\",\n  \"scopes\": \"pages_manage_posts,pages_read_engagement\"\n}",
+              "raw": "{\n  \"platform\": \"FACEBOOK\",\n  \"clientId\": \"1234567890\",\n  \"clientSecret\": \"replace-with-real-secret\",\n  \"redirectUri\": \"https://api.discuva.app/v1/integrations/social/FACEBOOK/oauth/callback\",\n  \"scopes\": [\"pages_show_list\", \"pages_read_engagement\", \"pages_manage_posts\"],\n  \"configId\": \"1234567890123456\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3540,7 +3670,7 @@
                 "social-media-apps"
               ]
             },
-            "description": "Upserts — one row per platform. clientSecret is encrypted at rest (EncryptionService, AES-256-GCM) and never returned by any subsequent GET."
+            "description": "Upserts — one row per platform. clientSecret is encrypted at rest (EncryptionService, AES-256-GCM) and never returned by any subsequent GET. scopes is an array, one OAuth permission per entry — validated against KNOWN_SOCIAL_SCOPES for platforms with a known catalog (400 if an entry is unrecognized or a required scope is missing; see Get Scope Catalog), then joined with that platform's own separator before storing. Platforms with no catalog yet (X, TikTok) accept any non-empty list. configId is optional and only meaningful for FACEBOOK/INSTAGRAM using Facebook Login for Business (the \"Manage everything on your Page\" use case) — when set, MetaGraphApiService.buildAuthorizeUrl() sends config_id instead of scope in the OAuth dialog URL, since Meta's Business Login doesn't grant permissions via scope at all. Get it from the Meta App dashboard: Facebook Login for Business product > Configurations. Leave unset for a classic Facebook Login app."
           },
           "response": []
         },
@@ -3585,6 +3715,31 @@
               ]
             },
             "description": "The kill switch. Deactivating immediately rejects new authorize-url requests and makes every publish attempt for this platform resolve to PlatformDisabledPublisher — but never touches an already-connected tenant's stored SocialAccount tokens either way; reactivating just restores normal resolution."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Social Platform App",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{platformAdminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media-apps/FACEBOOK",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media-apps",
+                "FACEBOOK"
+              ]
+            },
+            "description": "Hard delete — 204 on success, 404 if that platform has no registered app. Safe: SocialAccount has no FK to SocialPlatformApp (just a plain platform enum string), so nothing relational orphans. An already-connected tenant's stored SocialAccount tokens are untouched either way, same as deactivating — only future authorize-url/connect attempts for this platform start failing honestly, as if it had never been registered."
           },
           "response": []
         }
@@ -29021,6 +29176,51 @@
               ]
             },
             "description": "Manual plan override (comps, support fixes) - invalidates PlanGuard's cached feature list for this tenant."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Tenant Module Override",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"moduleKey\": \"social_media\",\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/module-overrides",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "module-overrides"
+              ]
+            },
+            "description": "Manual per-tenant module access override, independent of plan (Tenant.moduleOverrides). enabled: true grants the module regardless of what the tenant's plan includes; enabled: false blocks it regardless of plan; enabled: null clears the override for this one moduleKey, reverting to the plan-based default (leaves any other overrides on the tenant untouched). moduleKey must be a valid KNOWN_MODULES key (400 otherwise). Invalidates the same plan-features:<tenantId> cache Change Tenant Plan does."
           },
           "response": []
         },

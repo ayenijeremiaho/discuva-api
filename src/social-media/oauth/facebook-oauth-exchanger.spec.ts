@@ -16,6 +16,7 @@ const app: SocialPlatformApp = {
   redirectUri:
     'https://api.discuva.org/v1/integrations/social/FACEBOOK/oauth/callback',
   scopes: 'pages_show_list,pages_manage_posts',
+  configId: null,
   isActive: true,
 };
 

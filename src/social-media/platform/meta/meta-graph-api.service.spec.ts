@@ -12,6 +12,7 @@ const app: SocialPlatformApp = {
   redirectUri:
     'https://api.discuva.org/v1/integrations/social/FACEBOOK/oauth/callback',
   scopes: 'pages_show_list,pages_manage_posts',
+  configId: null,
   isActive: true,
 };
 
@@ -59,6 +60,24 @@ describe('MetaGraphApiService', () => {
       expect(url).toContain(
         'redirect_uri=' + encodeURIComponent(app.redirectUri),
       );
+    });
+
+    it('sends scope, not config_id, when the app has no configId (classic Facebook Login)', () => {
+      const url = service.buildAuthorizeUrl(app, 'encoded-state');
+      expect(url).toContain('scope=' + encodeURIComponent(app.scopes));
+      expect(url).not.toContain('config_id=');
+    });
+
+    // The exact bug this regression-tests: Facebook Login for Business
+    // (config_id) and classic scope-based login are mutually exclusive on
+    // this dialog — sending both is what produced a real "Invalid Scopes"
+    // rejection for pages_read_engagement/pages_manage_posts even though
+    // both are valid Standard Access permissions.
+    it('sends config_id, not scope, when the app is configured for Facebook Login for Business', () => {
+      const businessApp = { ...app, configId: 'config-123' };
+      const url = service.buildAuthorizeUrl(businessApp, 'encoded-state');
+      expect(url).toContain('config_id=config-123');
+      expect(url).not.toContain('scope=');
     });
   });
 

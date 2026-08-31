@@ -6,6 +6,7 @@ import { SocialAccount } from './entity/social-account.entity';
 import { SocialPost } from './entity/social-post.entity';
 import { SocialPostTarget } from './entity/social-post-target.entity';
 import { SocialPostMedia } from './entity/social-post-media.entity';
+import { SocialDataDeletionRequest } from './entity/social-data-deletion-request.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { SocialAccountService } from './service/social-account.service';
 import { SocialPostService } from './service/social-post.service';
@@ -15,6 +16,8 @@ import { SocialMediaValidationService } from './service/social-media-validation.
 import { SocialMediaCropService } from './service/social-media-crop.service';
 import { SocialMediaController } from './controller/social-media.controller';
 import { SocialOAuthCallbackController } from './controller/social-oauth-callback.controller';
+import { MetaDataDeletionController } from './controller/meta-data-deletion.controller';
+import { MetaDataDeletionService } from './service/meta-data-deletion.service';
 import { NotConnectedPublisher } from './publisher/not-connected-publisher';
 import { PlatformDisabledPublisher } from './publisher/platform-disabled-publisher';
 import { FacebookGraphPublisher } from './publisher/facebook-graph-publisher';
@@ -53,7 +56,7 @@ import { UtilityModule } from '../utility/utility.module';
       SocialPostTarget,
       SocialPostMedia,
     ]),
-    TypeOrmModule.forFeature([Tenant]),
+    TypeOrmModule.forFeature([Tenant, SocialDataDeletionRequest]),
     BullModule.registerQueue({ name: 'social-post-publish' }),
     UtilityModule,
   ],
@@ -87,8 +90,13 @@ import { UtilityModule } from '../utility/utility.module';
     YouTubeApiService,
     SocialPostPublishProcessor,
     SocialMediaRetentionScheduler,
+    MetaDataDeletionService,
   ],
-  controllers: [SocialMediaController, SocialOAuthCallbackController],
+  controllers: [
+    SocialMediaController,
+    SocialOAuthCallbackController,
+    MetaDataDeletionController,
+  ],
   exports: [TenantTypeOrmModule],
 })
 export class SocialMediaModule {}

@@ -31,7 +31,9 @@ import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
+import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
 import { DiscountType } from '../../billing/enum/discount-type.enum';
+import { KNOWN_MODULES } from '../../church-settings/constants/known-modules.constant';
 
 export interface TenantWithHealth {
   id: string;
@@ -55,6 +57,7 @@ export interface TenantWithHealth {
   discountExpiresAt: Date | null;
   memberCount: number | null;
   eventCount: number | null;
+  moduleOverrides: Record<string, boolean> | null;
 }
 
 @Injectable()
@@ -283,6 +286,37 @@ export class PlatformTenantService {
     return this.subscriptionRepo.save(subscription);
   }
 
+  // See Tenant.moduleOverrides' own comment for the "why not just change
+  // their plan" reasoning. `enabled: null` clears the override for this
+  // one moduleKey (leaves any other overrides on the tenant untouched)
+  // rather than wiping the whole map, since a platform admin comping
+  // Social Media shouldn't accidentally revert an unrelated override on
+  // the same tenant.
+  async setModuleOverride(
+    id: string,
+    dto: SetTenantModuleOverrideDto,
+  ): Promise<TenantWithHealth> {
+    if (!KNOWN_MODULES.some((m) => m.key === dto.moduleKey)) {
+      throw new BadRequestException(`Unknown module key: ${dto.moduleKey}`);
+    }
+
+    const tenant = await this.findTenantOrThrow(id);
+    const overrides = { ...tenant.moduleOverrides };
+    if (dto.enabled === null) {
+      delete overrides[dto.moduleKey];
+    } else {
+      overrides[dto.moduleKey] = dto.enabled;
+    }
+    tenant.moduleOverrides = Object.keys(overrides).length ? overrides : null;
+
+    const saved = await this.tenantRepo.save(tenant);
+    // PlanFeatureResolverService caches resolved overrides under this exact
+    // key alongside plan features — same reasoning changeTenantPlan already
+    // documents for its own cache invalidation.
+    await this.cacheService.del(`plan-features:${tenant.id}`);
+    return this.toHealthShape(saved);
+  }
+
   async removeDiscount(id: string): Promise<Subscription> {
     const tenant = await this.findTenantOrThrow(id);
     const subscription = await this.subscriptionRepo.findOneBy({
@@ -389,6 +423,7 @@ export class PlatformTenantService {
       discountExpiresAt: sub?.discountExpiresAt ?? null,
       memberCount,
       eventCount,
+      moduleOverrides: tenant.moduleOverrides,
     };
   }
 

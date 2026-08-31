@@ -202,6 +202,14 @@ export const envValidationSchema = Joi.object({
   // every notification with it (X-Hub-Signature), which is how the callback
   // tells a genuine hub delivery apart from a forged POST to the public URL.
   YOUTUBE_WEBSUB_SECRET: Joi.string().allow('').optional(),
+
+  // Base URL (no trailing slash, e.g. https://api.discuva.org) this API is
+  // reachable at from the public internet — used to build the status-check
+  // link Meta's Data Deletion Callback requires in its response
+  // (MetaDataDeletionService). Optional: falls back to the incoming
+  // request's own protocol/host when unset, which is fine for local
+  // testing but not for a deployment behind a proxy that rewrites those.
+  META_DATA_DELETION_STATUS_BASE_URL: Joi.string().uri().allow('').optional(),
   PUBSUBHUBBUB_URL: Joi.string()
     .uri()
     .default('https://pubsubhubbub.appspot.com/subscribe'),

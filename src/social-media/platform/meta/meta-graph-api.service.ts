@@ -36,14 +36,26 @@ export interface ResolvedPage {
 export class MetaGraphApiService {
   private readonly logger = new Logger(MetaGraphApiService.name);
 
+  // Facebook Login for Business (config_id) and classic Facebook Login
+  // (scope) are mutually exclusive on this dialog — Meta's own docs
+  // recommend not sending scope once a config_id is in play, and in
+  // practice mixing them is what produces a partial "Invalid Scopes"
+  // rejection rather than a clean success or failure. app.configId is only
+  // set for a platform app actually configured for Business Login (see
+  // SocialPlatformApp.configId's own comment); everything else still goes
+  // through the classic scope param.
   buildAuthorizeUrl(app: SocialPlatformApp, state: string): string {
     const params = new URLSearchParams({
       client_id: app.clientId,
       redirect_uri: app.redirectUri,
       state,
-      scope: app.scopes,
       response_type: 'code',
     });
+    if (app.configId) {
+      params.set('config_id', app.configId);
+    } else {
+      params.set('scope', app.scopes);
+    }
     return `${AUTHORIZE_BASE}?${params.toString()}`;
   }
 

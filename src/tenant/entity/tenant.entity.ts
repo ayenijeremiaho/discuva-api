@@ -89,4 +89,18 @@ export class Tenant extends BaseEntity {
   // treated everywhere else in this codebase.
   @Column({ default: false })
   shareGivingWithParent: boolean;
+
+  // Platform-admin-only manual override, per KNOWN_MODULES key, layered on
+  // top of ModuleEnabledGuard's existing tenant-self-toggle + plan-features
+  // check: `true` grants the module regardless of what the tenant's plan
+  // includes (e.g. a beta tester, or comping a specific church ahead of a
+  // real paid tier existing for it), `false` blocks it regardless of plan
+  // (e.g. pulling access from one tenant without touching their plan or
+  // every other tenant on it). A key simply absent from this map means
+  // "no override — fall through to the plan check," not "denied." Free-form
+  // jsonb map rather than one column per module, same reasoning
+  // Plan.featureLimits documents for its own shape: any current or future
+  // module becomes overridable from the Tenant edit UI with no migration.
+  @Column({ type: 'jsonb', nullable: true })
+  moduleOverrides: Record<string, boolean> | null;
 }

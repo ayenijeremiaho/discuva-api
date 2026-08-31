@@ -6,6 +6,7 @@ import { ClsService } from 'nestjs-cls';
 import { PlanGuard } from './plan.guard';
 import { Subscription } from '../entity/subscription.entity';
 import { Plan } from '../entity/plan.entity';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { PlanFeature } from '../enum/plan-feature.enum';
 import { REQUIRES_PLAN_KEY } from '../decorator/requires-plan.decorator';
 import { COUNTS_TOWARD_LIMIT_KEY } from '../decorator/counts-toward-limit.decorator';
@@ -15,6 +16,10 @@ import { CacheService } from '../../utility/service/cache.service';
 
 const mockSubscriptionRepo = { findOne: jest.fn() };
 const mockPlanRepo = { findOne: jest.fn() };
+// PlanGuard itself never consults overrides (only ModuleEnabledGuard
+// does), but PlanFeatureResolverService fetches the tenant row regardless
+// — defaults to null (no tenant found) unless a test overrides it.
+const mockTenantRepo = { findOne: jest.fn().mockResolvedValue(null) };
 const mockFeatureUsageService = { tryConsume: jest.fn(), getUsage: jest.fn() };
 const mockCacheService = {
   getOrSet: jest
@@ -61,6 +66,7 @@ describe('PlanGuard', () => {
           useValue: mockSubscriptionRepo,
         },
         { provide: getRepositoryToken(Plan), useValue: mockPlanRepo },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
       ],
     }).compile();
     guard = module.get(PlanGuard);

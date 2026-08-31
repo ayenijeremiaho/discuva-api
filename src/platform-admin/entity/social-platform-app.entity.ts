@@ -28,6 +28,20 @@ export class SocialPlatformApp {
   @Column()
   scopes: string;
 
+  // Meta's Facebook Login for Business (the "Manage everything on your
+  // Page" business-asset use case, not generic Facebook Login) doesn't
+  // grant permissions via the classic `scope` query param at all — it
+  // requires a Configuration ID created in the Meta App dashboard
+  // (Facebook Login for Business product > Configurations), referencing a
+  // Configuration where the actual permission list lives. Meta's own docs:
+  // "we recommend that you do not use scope" once a config_id is used.
+  // Null for platforms/setups still on classic scope-based login (e.g.
+  // YouTube, or a Facebook app not using Business Login) —
+  // MetaGraphApiService.buildAuthorizeUrl() sends config_id instead of
+  // scope only when this is set.
+  @Column({ nullable: true })
+  configId: string | null;
+
   // The platform-admin kill switch: false rejects new authorize-url
   // requests and makes SocialPublisherRegistry resolve this platform to
   // PlatformDisabledPublisher instead of the real publisher. Never touches
