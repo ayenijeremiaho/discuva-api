@@ -158,23 +158,6 @@ export class PlatformSettingsService {
     return value === 1;
   }
 
-  // Platform-wide readiness gate for the Social Media composer — see
-  // PlatformSettingKey.SOCIAL_MEDIA_ENABLED's own comment for why this is
-  // separate from a tenant's church_settings module toggle.
-  async getSocialMediaEnabled(): Promise<boolean> {
-    const key = PlatformSettingKey.SOCIAL_MEDIA_ENABLED;
-    const cacheKey = this.cacheKey(key);
-    const cached = await this.cacheService.getGlobal<number>(cacheKey);
-    if (cached !== undefined) return cached === 1;
-
-    const row = await this.settingRepo.findOne({ where: { key } });
-    const value =
-      (row?.value as { value: number } | undefined)?.value ??
-      this.resolveDefault(key);
-    this.cacheService.setGlobal(cacheKey, value, this.CACHE_TTL);
-    return value === 1;
-  }
-
   // Shared by every DynamicLimitedFileInterceptor consumer — stored value is
   // MB (see PlatformSettingKey), converted to bytes here since that's what
   // Multer/the interceptor actually need.

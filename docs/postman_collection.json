@@ -3291,7 +3291,7 @@
                 "platform-enabled"
               ]
             },
-            "description": "AdminGuard (SOCIAL_MEDIA_READ). {enabled: boolean} — the platform-wide composer readiness gate (PlatformSettingKey.SOCIAL_MEDIA_ENABLED, set by a platform admin on discuva-platform's Platform Settings page), independent of this tenant's own social_media module toggle. discuva-admin's /social-media page fetches this on load and shows \"Coming Soon\" whenever it's false, including on a failed fetch (e.g. a 403 if this tenant's module is off)."
+            "description": "AdminGuard (SOCIAL_MEDIA_READ). {enabled: boolean} — a lightweight, side-effect-free access ping, not a standalone switch. ModuleEnabledGuard on this controller already 403s before this handler runs if the tenant's own social_media module toggle is off, their plan doesn't include social_media, and no Tenant.moduleOverrides grants it — so reaching this handler at all already proves access, and it unconditionally returns {enabled: true}. discuva-admin's /social-media page fetches this on load and shows \"Coming Soon\" on any failure, including the 403 this guard produces. (Formerly also checked a standalone global PlatformSettingKey.SOCIAL_MEDIA_ENABLED kill switch — retired once per-tenant module overrides shipped, since they achieve the same rollout control with real per-church granularity and actual backend enforcement.)"
           },
           "response": [
             {

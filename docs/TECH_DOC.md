@@ -3912,18 +3912,21 @@ but no `FacebookStatsFetcher`/`InstagramStatsFetcher` exists yet; both platforms
 `GrantSocialMediaPermissions1791504000000` (same class of fix as `GrantFormsPermissions` — a brand-new permission
 is only auto-granted to a SuperAdmin role at the moment that role is *created*).
 
-**Two independent on/off switches, not one.** A tenant's `social_media` module toggle (above) is a per-church
-preference — does *this* church want the feature. `PlatformSettingKey.SOCIAL_MEDIA_ENABLED` (see "Platform
-Settings" below) is a separate, platform-wide readiness gate a platform admin controls — is the composer ready to
-show *any* tenant yet. A tenant can have their module on and still see "Coming Soon" in discuva-admin if the
-platform-wide gate is off; discuva-admin's `/social-media` page fetches `GET /social-media/platform-enabled` on
-load and renders the real composer only when both are true (a fetch failure — including a `403` from
-`ModuleEnabledGuard` if this tenant's own module is off — defaults to `enabled: false`, never a silently-broken
-composer). This replaced an earlier hardcoded frontend build flag (`SOCIAL_MEDIA_COMING_SOON` in `page.tsx`), which
-required a frontend redeploy to flip and couldn't be toggled per-environment without a code change.
+**`GET /social-media/platform-enabled` — a guard-access ping, not a standalone switch.** Originally paired with a
+global `PlatformSettingKey.SOCIAL_MEDIA_ENABLED` kill switch (an all-tenants-at-once readiness gate, separate from
+a tenant's own module toggle) — retired once `Tenant.moduleOverrides` (see "Per-tenant manual override" above)
+shipped, since plan-features-exclusion plus a per-tenant override achieves the same "not ready for everyone yet"
+rollout control with actual per-church granularity, and with real backend enforcement (the old global switch only
+ever gated this one frontend check, never the API itself — a technically-inclined tenant could always reach the
+real endpoints regardless of what it was set to). The route stays: `ModuleEnabledGuard` above it already 403s
+before the handler runs if the tenant's own toggle is off, their plan doesn't include `social_media`, and no
+override grants it — so simply reaching the handler at all already proves access, and it unconditionally returns
+`{enabled: true}`. discuva-admin's `/social-media` page still fetches this on load and shows "Coming Soon" on
+any failure (including the `403` this guard produces), so the frontend behavior is unchanged even though what's
+being checked underneath is now the real per-tenant module/plan/override chain instead of a separate global flag.
 
-**Per-platform availability, on top of the all-or-nothing gate above.** `SOCIAL_MEDIA_ENABLED` turns the whole
-composer on or off; it can't hide just X/TikTok while shipping Facebook/Instagram/YouTube. `GET
+**Per-platform availability.** The module/plan/override chain above is all-or-nothing across every platform at
+once — it can't hide just X/TikTok while shipping Facebook/Instagram/YouTube. `GET
 /social-media/available-platforms` fills that gap: it intersects `IMPLEMENTED_PLATFORMS`
 (`src/social-media/constant/implemented-platforms.constant.ts` — platforms with a real
 `SocialOAuthExchanger`/`SocialPlatformPublisher`, currently Facebook/Instagram/YouTube; X/TikTok resolve to
@@ -5692,13 +5695,13 @@ underneath.
 needed for this one: `/billing-settings` already renders every `KNOWN_PLATFORM_SETTINGS` entry generically from the
 `GET /platform/settings` response, so a new key just appears.
 
-**Consumer 5 — social media composer readiness gate:** `SOCIAL_MEDIA_ENABLED` (boolean, default `0`) —
-`PlatformSettingsService.getSocialMediaEnabled()`, read by `SocialMediaController`'s new `GET
-/social-media/platform-enabled` (tenant-facing, `SOCIAL_MEDIA_READ`) on every discuva-admin `/social-media` page
-load. Defaults to `0` (composer hidden, "Coming Soon" shown) so shipping this doesn't silently flip every existing
-tenant's UI the moment it deploys — a platform admin flips it on deliberately from `/billing-settings` once ready.
-See the Social Media Module section above for the full "two independent switches" picture. Same generic-settings-page
-freebie as Consumer 4: no dedicated frontend work needed beyond the boolean `type` hint already supported.
+**Retired: `SOCIAL_MEDIA_ENABLED`** (formerly Consumer 5 here — a boolean, all-tenants-at-once composer readiness
+gate). Removed once `Tenant.moduleOverrides` shipped (see the Social Media Module and Tenant Module sections
+above) — a per-tenant Force On/Off from discuva-platform's Tenants page, combined with excluding `social_media`
+from a plan's `features`, replaces its job with real per-church granularity and actual backend enforcement, which
+this setting never had (it only ever gated one frontend check, never the API itself). `GET
+/social-media/platform-enabled` still exists and discuva-admin still calls it the same way — see the Social Media
+Module section above for what it checks now instead.
 
 **Frontend:** discuva-platform's `/billing-settings` page (own `layout.tsx`, same "every new route needs one"
 convention, now titled "Platform Settings" in-page and in the sidebar since it's no longer billing-only), gated by

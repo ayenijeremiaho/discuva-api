@@ -17,11 +17,4 @@ export enum PlatformSettingKey {
   // it. Published posts' media is retained indefinitely regardless of this
   // setting — only unpublished drafts age out.
   SOCIAL_MEDIA_DRAFT_RETENTION_DAYS = 'social_media_draft_retention_days',
-  // Boolean (0/1) — platform-wide kill switch for the Social Media composer
-  // UI, independent of any tenant's own church_settings module toggle. A
-  // tenant can have the module enabled and still see "Coming Soon" if this
-  // is 0; this is the platform operator's own readiness gate for rolling
-  // the feature out, not a per-tenant preference. See
-  // SocialMediaController's GET platform-enabled.
-  SOCIAL_MEDIA_ENABLED = 'social_media_enabled',
 }

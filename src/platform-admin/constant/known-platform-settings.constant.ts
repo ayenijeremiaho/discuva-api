@@ -72,14 +72,6 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 1,
     max: 365,
   },
-  [PlatformSettingKey.SOCIAL_MEDIA_ENABLED]: {
-    label: 'Social Media Composer',
-    unit: '0 = every tenant sees "Coming Soon" regardless of their own module toggle, 1 = the real composer is live',
-    defaultValue: 0,
-    min: 0,
-    max: 1,
-    type: 'boolean',
-  },
 };
 
 // Multer parses to memory before our own dynamic per-setting check can run

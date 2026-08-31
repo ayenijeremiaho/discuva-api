@@ -33,7 +33,6 @@ import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
-import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { PlatformSocialAppService } from '../../platform-admin/service/platform-social-app.service';
 import { IMPLEMENTED_PLATFORMS } from '../constant/implemented-platforms.constant';
 
@@ -52,23 +51,29 @@ export class SocialMediaController {
     private readonly oauthConnectService: SocialOAuthConnectService,
     private readonly postMediaService: SocialPostMediaService,
     private readonly validationService: SocialMediaValidationService,
-    private readonly platformSettingsService: PlatformSettingsService,
     private readonly platformSocialAppService: PlatformSocialAppService,
   ) {}
 
-  // The frontend's "Coming Soon" gate reads this instead of a hardcoded
-  // build-time flag, so a platform admin can flip the composer on for every
-  // tenant (PlatformSettingKey.SOCIAL_MEDIA_ENABLED, editable from
-  // discuva-platform's Platform Settings page) without a frontend deploy.
-  // Independent of this tenant's own module toggle — ModuleEnabledGuard
-  // above already ensures this route 403s if the tenant has switched the
-  // module off for themselves.
+  // The frontend's "Coming Soon" gate reads this — a lightweight,
+  // side-effect-free access ping rather than a real functional endpoint,
+  // so the composer page can decide what to render before touching
+  // anything else. Used to also check a standalone global
+  // PlatformSettingKey.SOCIAL_MEDIA_ENABLED switch here, independent of
+  // this tenant's own module/plan access; retired that in favor of
+  // Tenant.moduleOverrides (see ModuleEnabledGuard) — a per-tenant
+  // Force On/Off from discuva-platform's Tenants page achieves the same
+  // "not ready for everyone yet" rollout control the old global switch
+  // did, with actual per-church granularity instead of all-or-nothing,
+  // and it's real backend enforcement (the old switch only ever gated
+  // this frontend check, never the API itself). ModuleEnabledGuard above
+  // already 403s before this handler is ever reached if the tenant's own
+  // toggle is off, their plan doesn't include social_media, and no
+  // override grants it — so simply reaching this handler at all already
+  // proves access.
   @RequiresPermission(AdminPermission.SOCIAL_MEDIA_READ)
   @Get('platform-enabled')
-  async isPlatformEnabled() {
-    return {
-      enabled: await this.platformSettingsService.getSocialMediaEnabled(),
-    };
+  isPlatformEnabled() {
+    return { enabled: true };
   }
 
   // Which platforms the "Add Account" picker should actually offer — the
