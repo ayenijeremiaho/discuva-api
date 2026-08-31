@@ -26,7 +26,11 @@ const mockSubscriptionRepo = {
   save: jest.fn(),
   create: jest.fn((v) => v),
 };
-const mockPlanRepo = { findOneBy: jest.fn() };
+const mockPlanRepo = {
+  findOneBy: jest.fn(),
+  find: jest.fn(),
+  save: jest.fn(),
+};
 const mockOnboardingEventRepo = { find: jest.fn() };
 const mockDataSource = { query: jest.fn() };
 const mockProvisioningService = {
@@ -58,6 +62,7 @@ describe('PlatformTenantService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockTenantRepo.save.mockImplementation((t) => Promise.resolve(t));
+    mockPlanRepo.save.mockImplementation((p) => Promise.resolve(p));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -531,6 +536,143 @@ describe('PlatformTenantService', () => {
         expect.objectContaining({ moduleOverrides: null }),
       );
       expect(result.moduleOverrides).toBeNull();
+    });
+  });
+
+  describe('setSocialMediaRollout', () => {
+    const planFree = { id: 'free', tierKey: 'free', features: [] };
+    const planPro = { id: 'pro', tierKey: 'pro', features: ['classes'] };
+
+    it('disabled: strips social_media from every plan and clears every override', async () => {
+      mockPlanRepo.find.mockResolvedValue([
+        { ...planFree, features: ['social_media'] },
+        { ...planPro, features: ['classes', 'social_media'] },
+      ]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: { social_media: true } },
+        { ...baseTenant, id: 't2', moduleOverrides: { forms: false } },
+      ]);
+
+      const result = await service.setSocialMediaRollout({
+        enabled: false,
+        tenantIds: [],
+      });
+
+      expect(mockPlanRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'free', features: [] }),
+        expect.objectContaining({ id: 'pro', features: ['classes'] }),
+      ]);
+      expect(mockTenantRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 't1', moduleOverrides: null }),
+      ]);
+      expect(result).toEqual({ enabled: false, tenantIds: [] });
+    });
+
+    it('enabled + empty tenantIds: adds social_media to every plan missing it and clears overrides', async () => {
+      mockPlanRepo.find.mockResolvedValue([
+        { ...planFree, features: [] },
+        { ...planPro, features: ['classes', 'social_media'] },
+      ]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: { social_media: true } },
+      ]);
+
+      const result = await service.setSocialMediaRollout({
+        enabled: true,
+        tenantIds: [],
+      });
+
+      expect(mockPlanRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 'free',
+          features: ['social_media'],
+        }),
+      ]);
+      expect(mockTenantRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 't1', moduleOverrides: null }),
+      ]);
+      expect(result).toEqual({ enabled: true, tenantIds: [] });
+    });
+
+    it('enabled + specific tenantIds: strips social_media from plans, sets overrides only for selected tenants, clears it for previously-selected ones no longer in the list', async () => {
+      mockPlanRepo.find.mockResolvedValue([
+        { ...planFree, features: [] },
+        { ...planPro, features: ['classes', 'social_media'] },
+      ]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: { social_media: true } },
+        { ...baseTenant, id: 't2', moduleOverrides: null },
+        { ...baseTenant, id: 't3', moduleOverrides: { forms: true } },
+      ]);
+
+      const result = await service.setSocialMediaRollout({
+        enabled: true,
+        tenantIds: ['t2'],
+      });
+
+      expect(mockPlanRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'pro', features: ['classes'] }),
+      ]);
+      expect(mockTenantRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 't1', moduleOverrides: null }),
+        expect.objectContaining({
+          id: 't2',
+          moduleOverrides: { social_media: true },
+        }),
+      ]);
+      expect(result).toEqual({ enabled: true, tenantIds: ['t2'] });
+    });
+
+    it('leaves an already-correct tenant untouched (no-op save entry) when re-applying the same selection', async () => {
+      mockPlanRepo.find.mockResolvedValue([{ ...planPro, features: [] }]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: { social_media: true } },
+      ]);
+
+      await service.setSocialMediaRollout({
+        enabled: true,
+        tenantIds: ['t1'],
+      });
+
+      expect(mockTenantRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getSocialMediaRollout', () => {
+    it('reports enabled for all when any plan includes social_media', async () => {
+      mockPlanRepo.find.mockResolvedValue([
+        { id: 'free', features: [] },
+        { id: 'pro', features: ['social_media'] },
+      ]);
+
+      const result = await service.getSocialMediaRollout();
+
+      expect(result).toEqual({ enabled: true, tenantIds: [] });
+      expect(mockTenantRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('reports the specific tenant allowlist when no plan includes it', async () => {
+      mockPlanRepo.find.mockResolvedValue([{ id: 'pro', features: [] }]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: { social_media: true } },
+        { ...baseTenant, id: 't2', moduleOverrides: { social_media: false } },
+        { ...baseTenant, id: 't3', moduleOverrides: null },
+      ]);
+
+      const result = await service.getSocialMediaRollout();
+
+      expect(result).toEqual({ enabled: true, tenantIds: ['t1'] });
+    });
+
+    it('reports disabled when no plan includes it and no tenant has a true override', async () => {
+      mockPlanRepo.find.mockResolvedValue([{ id: 'pro', features: [] }]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: null },
+      ]);
+
+      const result = await service.getSocialMediaRollout();
+
+      expect(result).toEqual({ enabled: false, tenantIds: [] });
     });
   });
 

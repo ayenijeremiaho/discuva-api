@@ -3387,21 +3387,42 @@ validates `moduleKey` against `KNOWN_MODULES`, merges into the existing map (cle
 |--------|-------|------|-------|
 | PATCH | `/platform/tenants/:id/module-overrides` | PlatformAdminGuard (TENANTS_WRITE) | `{moduleKey: string, enabled: boolean \| null}` — `null` clears just that one key |
 
-**Frontend:** `TenantDetailPanel` gained a "Social Media Access" field (discuva-platform's tenant detail panel) —
-shows the resolved status in plain language (force-enabled / force-disabled / included-in-plan / not-included) and
-a three-way Plan Default / Force On / Force Off control. Scoped to `social_media` specifically for now rather than
-a generic per-module picker for every `KNOWN_MODULES` entry — the backend is already fully generic
-(`setModuleOverride` takes any valid `moduleKey`), so widening the UI to other modules later needs no new backend
-work, just more buttons.
+**`MakeSocialMediaOverrideOnly` migration** removed `social_media` from every plan's `features` (it had been in
+`pro`/`pro-annual`/`pro-usd`/`pro-usd-annual` since the original backfill, never in `free`) — Social Media is no
+longer plan-included by default anywhere. It's an opt-in, still-early-access module now gated entirely through the
+Social Media Rollout control below.
 
-**Practical note for rolling Social Media out selectively:** `social_media` was one of the 11 modules the original
-`BackfillModuleCapabilityKeys` migration added to *both* `free` and `pro` plans' `features` (see above) — meaning
-today, by default, every tenant on either plan already has it plan-included. To actually restrict it to a hand-picked
-set of test tenants, remove `social_media` from `free`/`pro`'s `features` first (discuva-platform's existing Plans
-page, `PATCH /platform/plans/:id`), then grant it back per-tenant with `Force On` here for whichever churches
-should see it. Skipping the plan-removal step means every tenant keeps seeing it via the plan check regardless of
-what this override says (an override of `true` is redundant when the plan already includes it) — an override
-alone doesn't "hide" a module that's already plan-included from tenants that were never explicitly `Force Off`.
+**Social Media Rollout — the one control surface (`PlatformTenantService.setSocialMediaRollout`/
+`getSocialMediaRollout`).** A platform admin doesn't reason about `Plan.features` vs `Tenant.moduleOverrides`
+separately for this module — they use a single toggle plus an optional searchable multi-select of churches, and
+`setSocialMediaRollout()` decides which underlying mechanism to write:
+
+- **Disabled:** strips `social_media` from every plan's `features` and clears the `social_media` key from every
+  tenant's `moduleOverrides`. Nobody has access.
+- **Enabled, empty selection ("everyone"):** adds `social_media` to every plan's `features` (all tiers, not just
+  Pro — a true "for all" regardless of plan) and clears every tenant's override. Forward-looking: a tenant created
+  next week is covered automatically via the plan check, same as any other plan-included module.
+- **Enabled, specific selection:** strips `social_media` from every plan's `features` (so it stays off by default)
+  and sets `moduleOverrides.social_media = true` for exactly the selected tenants — clearing the key for any
+  previously-selected tenant no longer in the list, so re-saving a shorter list actually revokes access rather than
+  only ever adding to it.
+
+The two mechanisms are kept mutually exclusive on write so there's never a redundant or contradictory state (a
+tenant with a `true` override while the plan already includes the module, or vice versa).
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| GET | `/platform/social-media/rollout` | PlatformAdminGuard (SOCIAL_MEDIA_APPS_READ) | `{enabled: boolean, tenantIds: string[]}` — derived live: `enabled:true, tenantIds:[]` if any plan includes `social_media`, else the list of tenants with a `true` override |
+| PUT | `/platform/social-media/rollout` | PlatformAdminGuard (SOCIAL_MEDIA_APPS_WRITE) | `{enabled: boolean, tenantIds: string[]}` — full replace, not incremental |
+
+**Frontend:** a "Social Media Rollout" card on discuva-platform's Social Media Apps page (`RolloutPanel`) — an
+on/off switch plus a searchable multi-select of churches (chips + type-ahead), shown only when enabled. Replaces
+the earlier per-tenant `TenantDetailPanel` "Force On/Off" buttons, which required visiting each church individually
+and made "roll out to everyone" a two-step, easy-to-forget dance (remove from Plan.features, then Force On each
+tenant by hand) — this is now one screen, one save. `TenantDetailPanel`'s "Social Media Access" field is now
+read-only status text (resolved from the same `moduleOverrides`/plan data) with a link back to this page; the
+generic `PATCH /platform/tenants/:id/module-overrides` endpoint and `setModuleOverride()` still exist underneath
+and remain usable for any other `KNOWN_MODULES` key that later needs the same per-tenant-override treatment.
 
 **`departments` was Pro-only by accident, corrected via `AddDepartmentsToFreePlan`.** Unlike `tithe`, this had no
 migration or comment ever recording it as a deliberate gate — and it directly contradicted `KNOWN_MODULES`'s own
@@ -5697,9 +5718,9 @@ needed for this one: `/billing-settings` already renders every `KNOWN_PLATFORM_S
 
 **Retired: `SOCIAL_MEDIA_ENABLED`** (formerly Consumer 5 here — a boolean, all-tenants-at-once composer readiness
 gate). Removed once `Tenant.moduleOverrides` shipped (see the Social Media Module and Tenant Module sections
-above) — a per-tenant Force On/Off from discuva-platform's Tenants page, combined with excluding `social_media`
-from a plan's `features`, replaces its job with real per-church granularity and actual backend enforcement, which
-this setting never had (it only ever gated one frontend check, never the API itself). `GET
+above) — the Social Media Rollout control (single toggle + searchable multi-select, `PUT
+/platform/social-media/rollout`) replaces its job with real per-church granularity and actual backend enforcement,
+which this setting never had (it only ever gated one frontend check, never the API itself). `GET
 /social-media/platform-enabled` still exists and discuva-admin still calls it the same way — see the Social Media
 Module section above for what it checks now instead.
 

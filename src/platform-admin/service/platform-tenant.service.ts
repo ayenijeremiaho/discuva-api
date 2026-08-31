@@ -32,6 +32,7 @@ import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
+import { SetSocialMediaRolloutDto } from '../dto/set-social-media-rollout.dto';
 import { DiscountType } from '../../billing/enum/discount-type.enum';
 import { KNOWN_MODULES } from '../../church-settings/constants/known-modules.constant';
 
@@ -315,6 +316,116 @@ export class PlatformTenantService {
     // documents for its own cache invalidation.
     await this.cacheService.del(`plan-features:${tenant.id}`);
     return this.toHealthShape(saved);
+  }
+
+  // The single control surface for the Social Media rollout: a platform
+  // admin doesn't reason about Plan.features vs Tenant.moduleOverrides
+  // separately — they pick a toggle + an optional searchable list of
+  // churches, and this method decides which underlying mechanism to write.
+  // "Enabled for all" (empty tenantIds) goes through Plan.features so it's
+  // forward-looking — a tenant created next week is covered automatically,
+  // same as any other plan-included module. "Enabled for specific accounts"
+  // goes through Tenant.moduleOverrides instead, since Plan.features can't
+  // express a curated allowlist. The two are kept mutually exclusive: going
+  // from "all" back to "specific" strips the plan grant so it doesn't leak
+  // access to unselected tenants, and going from "specific" to "all" clears
+  // every override so a previously-excluded tenant doesn't stay excluded.
+  async setSocialMediaRollout(
+    dto: SetSocialMediaRolloutDto,
+  ): Promise<{ enabled: boolean; tenantIds: string[] }> {
+    const moduleKey = 'social_media';
+
+    if (!dto.enabled) {
+      await this.removeModuleFromAllPlans(moduleKey);
+      await this.clearAllOverridesFor(moduleKey);
+      return { enabled: false, tenantIds: [] };
+    }
+
+    if (dto.tenantIds.length === 0) {
+      await this.addModuleToAllPlans(moduleKey);
+      await this.clearAllOverridesFor(moduleKey);
+      return { enabled: true, tenantIds: [] };
+    }
+
+    await this.removeModuleFromAllPlans(moduleKey);
+
+    const tenants = await this.tenantRepo.find();
+    const selected = new Set(dto.tenantIds);
+    const affected: Tenant[] = [];
+    for (const tenant of tenants) {
+      const current = tenant.moduleOverrides ?? {};
+      const shouldHave = selected.has(tenant.id);
+      const has = current[moduleKey] === true;
+      if (shouldHave === has) continue;
+
+      const overrides = { ...current };
+      if (shouldHave) overrides[moduleKey] = true;
+      else delete overrides[moduleKey];
+      tenant.moduleOverrides = Object.keys(overrides).length ? overrides : null;
+      affected.push(tenant);
+    }
+    if (affected.length) {
+      await this.tenantRepo.save(affected);
+      await Promise.all(
+        affected.map((t) => this.cacheService.del(`plan-features:${t.id}`)),
+      );
+    }
+    return { enabled: true, tenantIds: dto.tenantIds };
+  }
+
+  async getSocialMediaRollout(): Promise<{
+    enabled: boolean;
+    tenantIds: string[];
+  }> {
+    const moduleKey = 'social_media';
+    const plans = await this.planRepo.find();
+    if (plans.some((p) => p.features.includes(moduleKey))) {
+      return { enabled: true, tenantIds: [] };
+    }
+
+    const tenants = await this.tenantRepo.find();
+    const tenantIds = tenants
+      .filter((t) => t.moduleOverrides?.[moduleKey] === true)
+      .map((t) => t.id);
+    return { enabled: tenantIds.length > 0, tenantIds };
+  }
+
+  private async removeModuleFromAllPlans(moduleKey: string): Promise<void> {
+    const plans = await this.planRepo.find();
+    const affected = plans.filter((p) => p.features.includes(moduleKey));
+    if (!affected.length) return;
+    for (const plan of affected) {
+      plan.features = plan.features.filter((f) => f !== moduleKey);
+    }
+    await this.planRepo.save(affected);
+  }
+
+  private async addModuleToAllPlans(moduleKey: string): Promise<void> {
+    const plans = await this.planRepo.find();
+    const affected = plans.filter((p) => !p.features.includes(moduleKey));
+    if (!affected.length) return;
+    for (const plan of affected) {
+      plan.features = [...plan.features, moduleKey];
+    }
+    await this.planRepo.save(affected);
+  }
+
+  private async clearAllOverridesFor(moduleKey: string): Promise<void> {
+    const tenants = await this.tenantRepo.find();
+    const affected = tenants.filter(
+      (t) => t.moduleOverrides?.[moduleKey] !== undefined,
+    );
+    if (!affected.length) return;
+
+    for (const tenant of affected) {
+      const overrides = { ...tenant.moduleOverrides };
+      delete overrides[moduleKey];
+      tenant.moduleOverrides = Object.keys(overrides).length ? overrides : null;
+    }
+    await this.tenantRepo.save(affected);
+    await Promise.all(
+      affected.map((t) => this.cacheService.del(`plan-features:${t.id}`)),
+    );
   }
 
   async removeDiscount(id: string): Promise<Subscription> {

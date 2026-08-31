@@ -29225,6 +29225,80 @@
           "response": []
         },
         {
+          "name": "Get Social Media Rollout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media/rollout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media",
+                "rollout"
+              ]
+            },
+            "description": "Current Social Media rollout state: {enabled: boolean, tenantIds: string[]}. Derived live, not stored separately — enabled:true with empty tenantIds means every plan includes 'social_media' (\"everyone\"); enabled:true with a non-empty tenantIds means no plan includes it but those specific tenants have a true moduleOverrides.social_media; enabled:false means neither."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Social Media Rollout",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"tenantIds\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/social-media/rollout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "social-media",
+                "rollout"
+              ]
+            },
+            "description": "The single control surface for the Social Media rollout — a full replace, not incremental. enabled:false strips 'social_media' from every plan's features and clears every tenant's moduleOverrides.social_media. enabled:true with empty tenantIds adds 'social_media' to every plan's features (all tiers) and clears every override — \"everyone, including tenants created later.\" enabled:true with a non-empty tenantIds strips 'social_media' from every plan and sets moduleOverrides.social_media=true for exactly the listed tenant IDs, clearing it for any previously-selected tenant no longer in the list."
+          },
+          "response": []
+        },
+        {
           "name": "Impersonate Tenant",
           "request": {
             "method": "POST",

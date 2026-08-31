@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Request,
   Res,
   UseGuards,
@@ -47,6 +48,7 @@ import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
+import { SetSocialMediaRolloutDto } from '../dto/set-social-media-rollout.dto';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
@@ -413,6 +415,24 @@ export class PlatformAdminController {
   @Delete('social-media-apps/:platform')
   async deleteSocialPlatformApp(@Param('platform') platform: SocialPlatform) {
     await this.socialAppService.deleteApp(platform);
+  }
+
+  // The single control surface for the Social Media rollout — see
+  // PlatformTenantService.setSocialMediaRollout()'s comment. Read/write
+  // permissions mirror the Social Media Apps ones since this lives on the
+  // same admin page.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_READ)
+  @Get('social-media/rollout')
+  async getSocialMediaRollout() {
+    return this.tenantService.getSocialMediaRollout();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE)
+  @Put('social-media/rollout')
+  async setSocialMediaRollout(@Body() dto: SetSocialMediaRolloutDto) {
+    return this.tenantService.setSocialMediaRollout(dto);
   }
 
   @UseGuards(PlatformAdminGuard)
