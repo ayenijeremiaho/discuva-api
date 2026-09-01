@@ -1020,7 +1020,7 @@ describe('TitheService', () => {
       });
     });
 
-    it('should apply search filter on member name and email', async () => {
+    it('should apply search filter on member name, email, and both reference fields', async () => {
       const qb = makeRecordsQb([], 0);
       jest.spyOn(UtilityService, 'createPaginationResponse').mockReturnValue({
         data: [],
@@ -1034,6 +1034,14 @@ describe('TitheService', () => {
 
       expect(qb.andWhere).toHaveBeenCalledWith(
         expect.stringContaining('LOWER(member.firstname)'),
+        expect.objectContaining({ s: '%john%' }),
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LOWER(r.reference)'),
+        expect.objectContaining({ s: '%john%' }),
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LOWER(r.external_reference)'),
         expect.objectContaining({ s: '%john%' }),
       );
     });
@@ -1089,6 +1097,43 @@ describe('TitheService', () => {
         ]),
       );
       expect(result).toBeInstanceOf(Buffer);
+    });
+
+    it('falls back to externalReference when reference is not set (gateway rows)', async () => {
+      const records = [
+        {
+          id: 'r-2',
+          amount: 2000,
+          paymentDate: '2026-01-02',
+          bankName: null,
+          reference: null,
+          externalReference: 'giving_abc123',
+          source: 'PAYMENT_GATEWAY',
+          paymentChannel: 'paystack',
+          member: {
+            firstname: 'John',
+            lastname: 'Doe',
+            email: 'john@test.com',
+          },
+        },
+      ];
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(records),
+      };
+      mockRecordRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAdminRecordsExcel();
+
+      expect(mockExcelService.buildWorkbook).toHaveBeenCalledWith(
+        'Tithe Records',
+        expect.any(Array),
+        expect.arrayContaining([
+          expect.objectContaining({ reference: 'giving_abc123' }),
+        ]),
+      );
     });
   });
 

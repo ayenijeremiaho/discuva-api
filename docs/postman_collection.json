@@ -13623,7 +13623,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_READ). Returns paginated confirmed tithe records. Filters: memberId, departmentId, fromMonth (YYYY-MM), toMonth (YYYY-MM), search (wildcard on name/email), accountId (UUID). source is MANUAL_PROOF for CSV batch/proof-of-payment records or PAYMENT_GATEWAY for online checkout; paymentChannel (paystack/flutterwave/kora/stripe) and externalReference are only set for PAYMENT_GATEWAY rows."
+            "description": "AdminGuard (FINANCE_READ). Returns paginated confirmed tithe records. Filters: memberId, departmentId, fromMonth (YYYY-MM), toMonth (YYYY-MM), search (wildcard on name, email, reference, and externalReference), accountId (UUID). source is MANUAL_PROOF for CSV batch/proof-of-payment records or PAYMENT_GATEWAY for online checkout; paymentChannel (paystack/flutterwave/kora/stripe) and externalReference are only set for PAYMENT_GATEWAY rows — externalReference is the same reference string sent to the gateway at checkout, so it's searchable/reconcilable against the church's own Paystack/Flutterwave/etc. dashboard."
           },
           "response": [
             {
@@ -13695,7 +13695,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_READ). Downloads all matching tithe records as tithe-records.xlsx. Columns: Member Name, Email, Account, Currency, Amount, Payment Date, Sender Bank, Source, Payment Gateway, Reference. Supports same filters as the list endpoint (including accountId); no pagination."
+            "description": "AdminGuard (FINANCE_READ). Downloads all matching tithe records as tithe-records.xlsx. Columns: Member Name, Email, Account, Currency, Amount, Payment Date, Sender Bank, Source, Payment Gateway, Reference (reference for manual/bank rows, falling back to externalReference — the gateway's own transaction reference — for PAYMENT_GATEWAY rows). Supports same filters as the list endpoint (including accountId); no pagination."
           },
           "response": [
             {

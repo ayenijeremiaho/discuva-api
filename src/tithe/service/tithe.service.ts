@@ -952,7 +952,7 @@ export class TitheService {
         senderBank: r.bankName ?? '',
         source: r.source,
         paymentChannel: r.paymentChannel ?? '',
-        reference: r.reference ?? '',
+        reference: r.reference ?? r.externalReference ?? '',
       })),
     );
   }
@@ -988,7 +988,7 @@ export class TitheService {
     if (accountId) qb.andWhere('titheAccount.id = :accountId', { accountId });
     if (search) {
       qb.andWhere(
-        '(LOWER(member.firstname) LIKE :s OR LOWER(member.lastname) LIKE :s OR LOWER(member.email) LIKE :s)',
+        '(LOWER(member.firstname) LIKE :s OR LOWER(member.lastname) LIKE :s OR LOWER(member.email) LIKE :s OR LOWER(r.reference) LIKE :s OR LOWER(r.external_reference) LIKE :s)',
         { s: `%${search.toLowerCase()}%` },
       );
     }
