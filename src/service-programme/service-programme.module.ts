@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ServiceProgramme } from './entity/service-programme.entity';
 import { ServiceProgrammeSlot } from './entity/service-programme-slot.entity';
@@ -23,9 +25,18 @@ import { ServiceProgrammeReminderScheduler } from './scheduler/service-programme
 import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
+import jwtConfig from '../config/jwt.config';
+import refreshJwtConfig from '../config/refresh.jwt.config';
 
 @Module({
   imports: [
+    // Independent registration from AuthModule's own (same jwtConfig/
+    // refreshJwtConfig factories, same secrets) — ServiceSessionGateway
+    // verifies a JWT's tenant claim itself in handleConnection, the same
+    // "any module can independently register the same JwtModule config"
+    // pattern TenantMiddleware uses.
+    JwtModule.registerAsync(jwtConfig.asProvider()),
+    ConfigModule.forFeature(refreshJwtConfig),
     TenantTypeOrmModule.forFeature([
       ServiceProgramme,
       ServiceProgrammeSlot,

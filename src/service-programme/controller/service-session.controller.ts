@@ -13,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { Roles } from '../../auth/decorator/roles.decorator';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -52,7 +54,17 @@ export class ServiceSessionController {
   constructor(
     private readonly sessionSvc: ServiceSessionService,
     private readonly gateway: ServiceSessionGateway,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
+
+  private async broadcastActiveSessionsChanged(): Promise<void> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return;
+    this.gateway.broadcastActiveSessionsChanged(
+      tenantId,
+      await this.sessionSvc.getActiveSessions(),
+    );
+  }
 
   @Post('programme/:programmeId/start')
   @UseGuards(JwtAuthGuard)
@@ -63,6 +75,7 @@ export class ServiceSessionController {
     const session = await this.sessionSvc.start(programmeId, user.id);
     const state = await this.sessionSvc.getState(session.sessionCode);
     this.gateway.broadcastState(session.sessionCode, state);
+    await this.broadcastActiveSessionsChanged();
     return session;
   }
 
@@ -77,6 +90,7 @@ export class ServiceSessionController {
       session.sessionCode,
       await this.sessionSvc.getState(session.sessionCode),
     );
+    await this.broadcastActiveSessionsChanged();
     return session;
   }
 
@@ -208,6 +222,7 @@ export class ServiceSessionController {
       sessionCode,
       await this.sessionSvc.getState(sessionCode),
     );
+    await this.broadcastActiveSessionsChanged();
     return session;
   }
 
@@ -344,6 +359,7 @@ export class ServiceSessionController {
       sessionCode,
       await this.sessionSvc.getState(sessionCode),
     );
+    await this.broadcastActiveSessionsChanged();
     return session;
   }
 
