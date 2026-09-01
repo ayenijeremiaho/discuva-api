@@ -52,6 +52,7 @@ export class TitheRecord extends BaseEntity {
   // Only set for PAYMENT_GATEWAY rows where the member designated a
   // purpose at checkout — null means "General Giving" (no forced default
   // row, mirrors how an omitted TitheAccount is handled).
+  @Index('IDX_tithe_records_giving_option_id')
   @ManyToOne(() => GivingOption, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'giving_option_id' })
   givingOption: GivingOption | null;

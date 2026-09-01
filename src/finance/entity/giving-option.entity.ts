@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -26,6 +27,7 @@ export class GivingOption extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
+  @Index()
   @ManyToOne(() => Fund, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'fund_id' })
   fund: Fund | null;
