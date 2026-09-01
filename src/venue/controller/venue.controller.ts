@@ -7,10 +7,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { VenueService } from '../service/venue.service';
 import { CreateVenueDto, UpdateVenueDto } from '../dto/create-venue.dto';
+import { NearbyVenuesQueryDto } from '../dto/nearby-venues-query.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -31,6 +33,16 @@ export class VenueController {
   @Get()
   getAll() {
     return this.venueService.getAll();
+  }
+
+  @Get('nearby')
+  getNearby(@Query() query: NearbyVenuesQueryDto) {
+    return this.venueService.getNearby(
+      query.latitude,
+      query.longitude,
+      query.radiusMeters,
+      query.limit,
+    );
   }
 
   @Get(':id')

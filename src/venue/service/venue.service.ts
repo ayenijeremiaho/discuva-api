@@ -11,6 +11,7 @@ import { Venue } from '../entity/venue.entity';
 import { CreateVenueDto, UpdateVenueDto } from '../dto/create-venue.dto';
 import { ConfigService } from '@nestjs/config';
 import { CacheService } from '../../utility/service/cache.service';
+import { UtilityService } from '../../utility/service/utility.service';
 
 @Injectable()
 export class VenueService {
@@ -52,6 +53,28 @@ export class VenueService {
     const venue = await this.repo.findOneBy({ id });
     if (!venue) throw new NotFoundException('Venue not found');
     return venue;
+  }
+
+  async getNearby(
+    latitude: number,
+    longitude: number,
+    radiusMeters: number,
+    limit: number,
+  ): Promise<(Venue & { distanceMeters: number })[]> {
+    const all = await this.getAll();
+    return all
+      .map((venue) => ({
+        ...venue,
+        distanceMeters: UtilityService.calculateDistanceInMeters(
+          latitude,
+          longitude,
+          venue.latitude,
+          venue.longitude,
+        ),
+      }))
+      .filter((venue) => venue.distanceMeters <= radiusMeters)
+      .sort((a, b) => a.distanceMeters - b.distanceMeters)
+      .slice(0, limit);
   }
 
   async update(id: string, dto: UpdateVenueDto): Promise<Venue> {

@@ -2486,7 +2486,9 @@ event creation — create a venue once, reference it by ID in any config or slot
 
 **Routes prefix:** `/venues`  
 **ADMIN:** create, update, delete  
-**Any authenticated user:** list (full, unpaginated — admin-controlled reference data), get by ID
+**Any authenticated user:** list (full, unpaginated — admin-controlled reference data), get by ID, find nearby venues by radius
+
+`latitude` and `longitude` must be updated together on `PATCH` — providing only one is rejected by validation, preventing a venue's stored point from being silently detached from reality mid-edit.
 
 ### Attendance Module
 
@@ -6043,6 +6045,7 @@ outside the requested `?months=` window).
 | PATCH  | /venues/:id                                                | AdminGuard (VENUES_WRITE)                                     | Update venue                                                                                                  |
 | DELETE | /venues/:id                                                | AdminGuard (VENUES_WRITE)                                     | Delete venue                                                                                                  |
 | GET    | /venues                                                    | Any                                                           | List venues                                                                                                   |
+| GET    | /venues/nearby                                             | Any                                                           | Find nearby venues by radius                                                                                  |
 | GET    | /venues/:id                                                | Any                                                           | Get venue by ID                                                                                               |
 | GET    | /departments                                               | Any                                                           | List departments                                                                                              |
 | GET    | /departments/capabilities                                  | Any                                                           | List all valid capabilities as `{ value, label }[]` (the shared `EnumOption` shape used across `/enums`) — `label` is the human-readable description from `DepartmentCapabilityLabels`, for admin-UI display |

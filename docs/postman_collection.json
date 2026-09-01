@@ -9994,7 +9994,7 @@
     },
     {
       "name": "Venues",
-      "description": "Named, reusable venue records. Create a venue once; reference its ID in event configs (defaultVenueId) or individual service slots (venueOverrideId). ADMIN: create, update, delete. Any authenticated user: list, get by ID.",
+      "description": "Named, reusable venue records. Create a venue once; reference its ID in event configs (defaultVenueId) or individual service slots (venueOverrideId). ADMIN: create, update, delete. Any authenticated user: list, get by ID, find nearby venues by radius.",
       "item": [
         {
           "name": "Create Venue (Admin)",
@@ -10067,14 +10067,57 @@
               ],
               "query": []
             },
-            "description": "Any authenticated user. Returns all venues paginated, ordered by name."
+            "description": "Any authenticated user. Returns all venues (not paginated — bounded, admin-controlled reference data), ordered by name."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"data\": [\n    { \"id\": \"b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e\", \"name\": \"Main Auditorium\", \"address\": \"123 Church Road, Lagos, Nigeria\", \"latitude\": 6.5244, \"longitude\": 3.3792 },\n    { \"id\": \"c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f\", \"name\": \"Chapel\", \"address\": null, \"latitude\": 6.5300, \"longitude\": 3.3800 }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 2,\n  \"totalPages\": 1\n}"
+              "body": "[\n  { \"id\": \"b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e\", \"name\": \"Main Auditorium\", \"address\": \"123 Church Road, Lagos, Nigeria\", \"latitude\": 6.5244, \"longitude\": 3.3792 },\n  { \"id\": \"c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f\", \"name\": \"Chapel\", \"address\": null, \"latitude\": 6.5300, \"longitude\": 3.3800 }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get Nearby Venues",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/venues/nearby?latitude=6.5244&longitude=3.3792&radiusMeters=5000&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "venues",
+                "nearby"
+              ],
+              "query": [
+                {
+                  "key": "latitude",
+                  "value": "6.5244"
+                },
+                {
+                  "key": "longitude",
+                  "value": "3.3792"
+                },
+                {
+                  "key": "radiusMeters",
+                  "value": "5000"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Any authenticated user. Returns venues within radiusMeters of the given point (default 5000m), sorted nearest-first, capped at limit (default 10, max 50). Each result includes a distanceMeters field."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  { \"id\": \"b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e\", \"name\": \"Main Auditorium\", \"address\": \"123 Church Road, Lagos, Nigeria\", \"latitude\": 6.5244, \"longitude\": 3.3792, \"distanceMeters\": 0 },\n  { \"id\": \"c3d4e5f6-a7b8-9c0d-1e2f-3a4b5c6d7e8f\", \"name\": \"Chapel\", \"address\": null, \"latitude\": 6.5300, \"longitude\": 3.3800, \"distanceMeters\": 742.6 }\n]"
             }
           ]
         },
@@ -10149,14 +10192,14 @@
                 }
               ]
             },
-            "description": "All fields are optional. Only provided fields are updated."
+            "description": "All fields are optional. Only provided fields are updated. latitude and longitude must be provided together — sending only one is rejected with a 400 validation error."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"a7b8c9d0-6e7f-8a9b-0c1d-2e3f4a5b6c7d\",\n  \"name\": \"Main Auditorium\",\n  \"address\": \"12 Church Road, Lagos\",\n  \"capacity\": 500,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"a7b8c9d0-6e7f-8a9b-0c1d-2e3f4a5b6c7d\",\n  \"name\": \"Main Auditorium — Block A\",\n  \"address\": \"456 New Church Road, Lagos\",\n  \"latitude\": 6.5244,\n  \"longitude\": 3.3792,\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",
