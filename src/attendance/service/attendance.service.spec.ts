@@ -488,6 +488,41 @@ describe('AttendanceService', () => {
       ).rejects.toThrow('You are too far from the venue to check in.');
     });
 
+    it('carries a structured TOO_FAR code and distance figures so the frontend can distinguish this from any other check-in failure', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceSettingsService.isEnabled.mockResolvedValue(true);
+
+      const farAway = { latitude: 0, longitude: 0 };
+
+      try {
+        await service.checkin(user, {
+          serviceSlotId: 'slot-1',
+          location: farAway,
+        } as any);
+        fail('expected checkin to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        const response = (err as BadRequestException).getResponse() as Record<
+          string,
+          unknown
+        >;
+        expect(response.code).toBe('TOO_FAR');
+        expect(response.allowedDistanceInMeters).toBe(100);
+        expect(typeof response.distanceMeters).toBe('number');
+        expect(response.distanceMeters as number).toBeGreaterThan(100);
+      }
+    });
+
     it('allows a too-far check-in when the tenant has distance enforcement disabled', async () => {
       const now = new Date();
       const slot = makeSlot(addHours(now, 1));

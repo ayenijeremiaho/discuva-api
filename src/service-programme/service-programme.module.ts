@@ -22,6 +22,7 @@ import { ServiceSessionGateway } from './gateway/service-session.gateway';
 import { ShareTokenGuard } from './guard/share-token.guard';
 import { NamedAccessGuard } from './guard/named-access.guard';
 import { ServiceProgrammeReminderScheduler } from './scheduler/service-programme-reminder.scheduler';
+import { ProgrammeAutoStartScheduler } from './scheduler/programme-auto-start.scheduler';
 import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
@@ -64,6 +65,7 @@ import refreshJwtConfig from '../config/refresh.jwt.config';
     ShareTokenGuard,
     NamedAccessGuard,
     ServiceProgrammeReminderScheduler,
+    ProgrammeAutoStartScheduler,
   ],
   exports: [ServiceProgrammeService, ServiceSessionService],
 })

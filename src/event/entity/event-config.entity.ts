@@ -55,6 +55,13 @@ export class EventConfig extends BaseEntity {
   @Column({ name: 'allowed_distance_in_meters' })
   allowedDistanceInMeters: number;
 
+  // When true, ProgrammeAutoStartScheduler starts a slot's DRAFT programme
+  // on its own once the slot's startTime arrives (within its lookback
+  // window) and nobody's started it manually yet — see the scheduler's own
+  // header comment for the full precondition list.
+  @Column({ name: 'auto_start_session', default: false })
+  autoStartSession: boolean;
+
   @OneToMany(() => ServiceSlot, (slot) => slot.config, { nullable: true })
   serviceSlots: ServiceSlot[];
 }

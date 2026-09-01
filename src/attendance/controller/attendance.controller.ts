@@ -53,6 +53,15 @@ export class AttendanceController {
     return this.attendanceService.checkin(req.user, dto);
   }
 
+  // Member-readable mirror of admin's settings/distance-check below — not
+  // sensitive data, just whether the app should bother enforcing distance
+  // client-side before letting a member attempt check-in at all.
+  @UseGuards(JwtAuthGuard)
+  @Get('me/distance-check')
+  async getMyEnforceDistanceCheck() {
+    return this.attendanceSettingsService.getConfig();
+  }
+
   @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.OK)
   @Post('online-confirm')

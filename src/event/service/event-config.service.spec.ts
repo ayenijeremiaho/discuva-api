@@ -144,6 +144,32 @@ describe('EventConfigService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('defaults autoStartSession to false when not provided', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+      mockRepo.create.mockReturnValue({});
+      mockRepo.save.mockResolvedValue({});
+
+      await service.create(validDto);
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ autoStartSession: false }),
+      );
+    });
+
+    it('passes autoStartSession through when explicitly set to true', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+      mockRepo.create.mockReturnValue({});
+      mockRepo.save.mockResolvedValue({});
+
+      await service.create({ ...validDto, autoStartSession: true });
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ autoStartSession: true }),
+      );
+    });
   });
 
   describe('delete', () => {
@@ -252,6 +278,28 @@ describe('EventConfigService', () => {
 
       expect(mockRepo.exists).not.toHaveBeenCalled();
       expect(result.allowedDistanceInMeters).toBe(200);
+    });
+
+    it('should allow toggling autoStartSession', async () => {
+      const existingConfig = {
+        id: 'config-1',
+        name: 'Same Name',
+        allowedDistanceInMeters: 100,
+        autoStartSession: false,
+        defaultVenue,
+        ...validOffsets,
+      };
+      mockRepo.findOne.mockResolvedValue(existingConfig);
+      mockRepo.save.mockResolvedValue({
+        ...existingConfig,
+        autoStartSession: true,
+      });
+
+      const result = await service.update('config-1', {
+        autoStartSession: true,
+      });
+
+      expect(result.autoStartSession).toBe(true);
     });
 
     it('should update defaultVenue when defaultVenueId is provided', async () => {

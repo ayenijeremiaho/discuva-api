@@ -50,6 +50,7 @@ export class EventConfigService {
       memberCheckinStartOffsetSeconds: dto.memberCheckinStartOffsetSeconds,
       checkinStopOffsetSeconds: dto.checkinStopOffsetSeconds,
       allowedDistanceInMeters: dto.allowedDistanceInMeters,
+      autoStartSession: dto.autoStartSession ?? false,
       defaultVenue,
     });
     const saved = await this.repo.save(config);

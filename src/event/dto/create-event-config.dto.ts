@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -40,4 +41,8 @@ export class CreateEventConfigDto {
   @IsNumber()
   @Min(5)
   allowedDistanceInMeters: number;
+
+  @IsOptional()
+  @IsBoolean()
+  autoStartSession?: boolean;
 }

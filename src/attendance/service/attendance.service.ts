@@ -1264,9 +1264,12 @@ export class AttendanceService {
       distance > cfg.allowedDistanceInMeters &&
       (await this.enforceDistance())
     ) {
-      throw new BadRequestException(
-        'You are too far from the venue to check in.',
-      );
+      throw new BadRequestException({
+        message: 'You are too far from the venue to check in.',
+        code: 'TOO_FAR',
+        distanceMeters: Math.round(distance),
+        allowedDistanceInMeters: cfg.allowedDistanceInMeters,
+      });
     }
   }
 

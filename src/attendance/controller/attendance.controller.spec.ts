@@ -189,6 +189,18 @@ describe('AttendanceController', () => {
       expect(mockAttendanceSettingsService.getConfig).toHaveBeenCalled();
     });
 
+    it('getMyEnforceDistanceCheck (member-readable) delegates to the same AttendanceSettingsService.getConfig', async () => {
+      mockAttendanceSettingsService.getConfig.mockResolvedValue({
+        enabled: true,
+        isPlatformDefault: false,
+      });
+
+      const result = await controller.getMyEnforceDistanceCheck();
+
+      expect(result).toEqual({ enabled: true, isPlatformDefault: false });
+      expect(mockAttendanceSettingsService.getConfig).toHaveBeenCalled();
+    });
+
     it('updateEnforceDistanceCheck delegates to AttendanceSettingsService.setEnabled with the acting member id', async () => {
       mockAttendanceSettingsService.setEnabled.mockResolvedValue({
         enabled: false,

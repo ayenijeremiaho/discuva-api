@@ -402,6 +402,32 @@ describe('ServiceSessionService', () => {
         expect.any(Number),
       );
     });
+
+    it('skips the permission check and logs with an "Auto-started" label when memberId is null (system-triggered)', async () => {
+      mockManager.create.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.create(data),
+      );
+      mockManager.save.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.save(data),
+      );
+      mockSessionRepo.create.mockReturnValue(mockSession);
+      mockSessionRepo.save.mockResolvedValue(mockSession);
+      mockSessionSlotRepo.create.mockReturnValue({});
+      mockSessionSlotRepo.save.mockResolvedValue([]);
+      mockActionEntryRepo.create.mockReturnValue({});
+      mockActionEntryRepo.save.mockResolvedValue({});
+
+      const session = await service.start('prog-1', null);
+
+      expect(session).toEqual(mockSession);
+      expect(mockAdminRepo.findOne).not.toHaveBeenCalled();
+      expect(mockActionEntryRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          performedByMember: null,
+          actorLabel: 'Auto-started',
+        }),
+      );
+    });
   });
 
   // ── startEvent ────────────────────────────────────────────────────────────
@@ -454,6 +480,30 @@ describe('ServiceSessionService', () => {
       expect(
         mockProgrammeSvc.findStartableDraftProgrammesForEvent,
       ).not.toHaveBeenCalled();
+    });
+
+    it('skips the permission check when memberId is null (scheduler-triggered auto-start)', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(null);
+      mockProgrammeSvc.findStartableDraftProgrammesForEvent.mockResolvedValue([
+        { ...draftProgramme, id: 'prog-1' },
+      ]);
+      mockProgrammeSvc.assertProgrammeIsDraft.mockResolvedValue({
+        ...draftProgramme,
+        id: 'prog-1',
+      });
+
+      const session = await service.startEvent('event-1', null);
+
+      expect(session).toEqual(mockSession);
+      expect(mockAdminRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('still guards against a concurrently-live session when auto-starting (memberId null)', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      await expect(service.startEvent('event-1', null)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockAdminRepo.findOne).not.toHaveBeenCalled();
     });
 
     it('throws BadRequestException when the event has no startable draft programmes', async () => {

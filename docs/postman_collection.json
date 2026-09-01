@@ -3975,6 +3975,38 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{ \"statusCode\": 400, \"message\": \"Workers must provide their location to check in.\" }"
+            },
+            {
+              "name": "400 Too far from venue",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"You are too far from the venue to check in.\", \"code\": \"TOO_FAR\", \"distanceMeters\": 342, \"allowedDistanceInMeters\": 100 }"
+            }
+          ]
+        },
+        {
+          "name": "Get My Distance Check Setting",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/attendances/me/distance-check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "me",
+                "distance-check"
+              ]
+            },
+            "description": "Member-readable mirror of the admin distance-check setting above — whether the tenant currently enforces the venue distance check on check-in. Any authenticated member or worker; not sensitive data. The member app uses this to skip its own client-side distance pre-check when enforcement is off, instead of always blocking regardless of the tenant's actual setting."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"enabled\": false,\n  \"isPlatformDefault\": true\n}"
             }
           ]
         },
@@ -5076,7 +5108,7 @@
     },
     {
       "name": "Event Config",
-      "description": "Reusable check-in configuration templates attached to service slots. Defines when check-in opens/closes and what distance from venue is acceptable.\n\n**Access:** Admin-only for all operations.\n\n**Key concepts:**\n- All time offsets are in **seconds relative to the slot's startTime**. Negative values mean \"before the slot starts\".\n- `workerCheckinStartOffsetSeconds` — how early workers may check in (e.g. -5400 = 90 min before)\n- `workerLateOffsetSeconds` — workers arriving after this offset are marked LATE (e.g. 0 = late if after slot start)\n- `memberCheckinStartOffsetSeconds` — how early members may check in (e.g. -1800 = 30 min before)\n- `checkinStopOffsetSeconds` — when check-in closes for everyone (e.g. 3600 = 1 hour after slot start)\n- `allowedDistanceInMeters` — max GPS distance for worker check-in (default 150m)\n- `defaultVenueId` — required; the venue whose coordinates are used for distance checks\n- Constraint: `workerLateOffset > workerCheckinStartOffset` and `checkinStopOffset > workerLateOffset`\n- A config cannot be deleted while service slots still reference it.",
+      "description": "Reusable check-in configuration templates attached to service slots. Defines when check-in opens/closes and what distance from venue is acceptable.\n\n**Access:** Admin-only for all operations.\n\n**Key concepts:**\n- All time offsets are in **seconds relative to the slot's startTime**. Negative values mean \"before the slot starts\".\n- `workerCheckinStartOffsetSeconds` — how early workers may check in (e.g. -5400 = 90 min before)\n- `workerLateOffsetSeconds` — workers arriving after this offset are marked LATE (e.g. 0 = late if after slot start)\n- `memberCheckinStartOffsetSeconds` — how early members may check in (e.g. -1800 = 30 min before)\n- `checkinStopOffsetSeconds` — when check-in closes for everyone (e.g. 3600 = 1 hour after slot start)\n- `allowedDistanceInMeters` — max GPS distance for worker check-in (default 150m)\n- `defaultVenueId` — required; the venue whose coordinates are used for distance checks\n- `autoStartSession` — optional, default `false`. When true, a slot using this config starts its programme's live session on its own once the slot's startTime arrives (if it's still DRAFT and nobody's started it manually) — see ProgrammeAutoStartScheduler in the Service Programme section.\n- Constraint: `workerLateOffset > workerCheckinStartOffset` and `checkinStopOffset > workerLateOffset`\n- A config cannot be deleted while service slots still reference it.",
       "item": [
         {
           "name": "Create Event Config",
@@ -5090,7 +5122,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"defaultVenueId\": \"{{venueId}}\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150\n}",
+              "raw": "{\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"defaultVenueId\": \"{{venueId}}\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150,\n  \"autoStartSession\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5213,7 +5245,7 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d\",\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150,\n  \"defaultVenue\": {\n    \"id\": \"b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e\",\n    \"name\": \"Main Auditorium\",\n    \"latitude\": 6.5244,\n    \"longitude\": 3.3792\n  },\n  \"createdAt\": \"2026-01-01T00:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d\",\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150,\n  \"autoStartSession\": false,\n  \"defaultVenue\": {\n    \"id\": \"b2c3d4e5-f6a7-8b9c-0d1e-2f3a4b5c6d7e\",\n    \"name\": \"Main Auditorium\",\n    \"latitude\": 6.5244,\n    \"longitude\": 3.3792\n  },\n  \"createdAt\": \"2026-01-01T00:00:00.000Z\"\n}"
             },
             {
               "name": "404 Not Found",

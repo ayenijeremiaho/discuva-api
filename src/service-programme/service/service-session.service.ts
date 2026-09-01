@@ -235,8 +235,16 @@ export class ServiceSessionService {
   // Service, and so on. Reuses start() as-is per sub-service (own session,
   // own anchor, own share token) rather than introducing a parent
   // "EventSession" concept.
-  async startEvent(eventId: string, memberId: string): Promise<ServiceSession> {
-    await this.assertCanControlSession(memberId);
+  // memberId is nullable for ProgrammeAutoStartScheduler's system-triggered
+  // start — no human actor to permission-check or attribute the action to,
+  // mirroring the same `if (memberId)` pattern already used by several
+  // sibling methods below (e.g. getShareLinks, pause) for their own
+  // optional-actor call sites.
+  async startEvent(
+    eventId: string,
+    memberId: string | null,
+  ): Promise<ServiceSession> {
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const liveSession = await this.sessionRepo.findOne({
       where: {
@@ -261,8 +269,11 @@ export class ServiceSessionService {
     return this.start(programmes[0].id, memberId);
   }
 
-  async start(programmeId: string, memberId: string): Promise<ServiceSession> {
-    await this.assertCanControlSession(memberId);
+  async start(
+    programmeId: string,
+    memberId: string | null,
+  ): Promise<ServiceSession> {
+    if (memberId) await this.assertCanControlSession(memberId);
 
     const programme =
       await this.programmeSvc.assertProgrammeIsDraft(programmeId);
@@ -334,6 +345,7 @@ export class ServiceSessionService {
       'SESSION_STARTED',
       null,
       memberId,
+      memberId ? null : 'Auto-started',
     );
 
     return session;
