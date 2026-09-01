@@ -31,6 +31,8 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
+import { PledgeContribution } from '../../finance/entity/pledge-contribution.entity';
+import { PledgeContributionStatus } from '../../finance/enum/finance.enum';
 
 const mockClsService = {
   get: jest.fn(),
@@ -87,6 +89,10 @@ const mockDisputeRepo = {
   createQueryBuilder: jest.fn(),
 };
 
+const mockContributionRepo = {
+  find: jest.fn().mockResolvedValue([]),
+};
+
 const mockMemberRepo = {
   findOne: jest.fn(),
 };
@@ -126,7 +132,7 @@ const mockCacheService = {
 };
 
 const mockPdfService = {
-  generateTitheStatement: jest.fn().mockResolvedValue(Buffer.from('pdf')),
+  generateGivingStatement: jest.fn().mockResolvedValue(Buffer.from('pdf')),
 };
 
 const mockExcelService = {
@@ -246,6 +252,10 @@ describe('TitheService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockClsService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        {
+          provide: getRepositoryToken(PledgeContribution),
+          useValue: mockContributionRepo,
+        },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();
@@ -1137,18 +1147,18 @@ describe('TitheService', () => {
     });
   });
 
-  // ── emailTitheStatement ───────────────────────────────────────────────────
+  // ── emailGivingStatement ──────────────────────────────────────────────────
 
-  describe('emailTitheStatement', () => {
+  describe('emailGivingStatement', () => {
     it('should throw NotFoundException when member does not exist', async () => {
       mockMemberRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.emailTitheStatement(mockUser)).rejects.toThrow(
+      await expect(service.emailGivingStatement(mockUser)).rejects.toThrow(
         NotFoundException,
       );
     });
 
-    it('should send email with tithe-statement template to the member', async () => {
+    it('should send email with the giving statement to the member', async () => {
       mockMemberRepo.findOne.mockResolvedValue(mockMember);
       mockRecordRepo.find.mockResolvedValue([
         {
@@ -1156,18 +1166,23 @@ describe('TitheService', () => {
           amount: 5000,
           bankName: null,
           reference: null,
+          externalReference: null,
+          source: 'MANUAL_PROOF',
+          batch: null,
+          givingOption: null,
         },
       ]);
+      mockContributionRepo.find.mockResolvedValue([]);
 
-      await service.emailTitheStatement(mockUser);
+      await service.emailGivingStatement(mockUser);
 
       expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
         'john@test.com',
-        'Your Tithe Statement',
+        'Your Giving Statement',
         'tithe-statement',
         expect.objectContaining({ name: 'John', period: undefined }),
         expect.arrayContaining([
-          expect.objectContaining({ filename: 'tithe-statement.pdf' }),
+          expect.objectContaining({ filename: 'giving-statement.pdf' }),
         ]),
         'GIVING_RECEIPT',
       );
@@ -1176,12 +1191,13 @@ describe('TitheService', () => {
     it('should include a human-readable period when fromMonth/toMonth are given', async () => {
       mockMemberRepo.findOne.mockResolvedValue(mockMember);
       mockRecordRepo.find.mockResolvedValue([]);
+      mockContributionRepo.find.mockResolvedValue([]);
 
-      await service.emailTitheStatement(mockUser, '2026-01', '2026-06');
+      await service.emailGivingStatement(mockUser, '2026-01', '2026-06');
 
       expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
         'john@test.com',
-        'Your Tithe Statement',
+        'Your Giving Statement',
         'tithe-statement',
         expect.objectContaining({ period: 'January 2026 – June 2026' }),
         expect.any(Array),
@@ -1192,12 +1208,13 @@ describe('TitheService', () => {
     it('should format an open-ended "from" period', async () => {
       mockMemberRepo.findOne.mockResolvedValue(mockMember);
       mockRecordRepo.find.mockResolvedValue([]);
+      mockContributionRepo.find.mockResolvedValue([]);
 
-      await service.emailTitheStatement(mockUser, '2026-03', undefined);
+      await service.emailGivingStatement(mockUser, '2026-03', undefined);
 
       expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
         'john@test.com',
-        'Your Tithe Statement',
+        'Your Giving Statement',
         'tithe-statement',
         expect.objectContaining({ period: 'March 2026 onwards' }),
         expect.any(Array),
@@ -1213,15 +1230,56 @@ describe('TitheService', () => {
           amount: 5000,
           bankName: null,
           reference: null,
+          externalReference: null,
+          source: 'MANUAL_PROOF',
+          batch: null,
+          givingOption: null,
         },
       ]);
+      mockContributionRepo.find.mockResolvedValue([]);
 
-      const result = await service.emailTitheStatement(mockUser);
+      const result = await service.emailGivingStatement(mockUser);
 
       expect(result).toEqual({
         message: expect.stringContaining('john@test.com'),
         recordCount: 1,
       });
+    });
+
+    it('merges a CONFIRMED PledgeContribution into the statement as a "Pledge: <campaign>" line', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockRecordRepo.find.mockResolvedValue([
+        {
+          paymentDate: '2026-01-01',
+          amount: 5000,
+          bankName: null,
+          reference: null,
+          externalReference: 'giving_abc',
+          source: 'PAYMENT_GATEWAY',
+          batch: null,
+          givingOption: null,
+        },
+      ]);
+      mockContributionRepo.find.mockResolvedValue([
+        {
+          paymentDate: '2026-01-10',
+          amount: 15000,
+          reference: 'giving_def',
+          status: PledgeContributionStatus.CONFIRMED,
+          pledge: { campaign: { name: 'Roof Repair Fund' } },
+        },
+      ]);
+
+      const result = await service.emailGivingStatement(mockUser);
+
+      expect(mockContributionRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: PledgeContributionStatus.CONFIRMED,
+          }),
+        }),
+      );
+      expect(result.recordCount).toBe(2);
     });
   });
 });

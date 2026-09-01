@@ -14428,7 +14428,7 @@
     },
     {
       "name": "Tithes (Member)",
-      "description": "Member-facing tithe features: view active bank accounts to pay into, see your own tithe history, submit a payment proof, and email yourself a statement PDF.\n\n**Access:** JwtAuthGuard — any authenticated member or worker.\n\n**Typical flow:**\n1. `GET /tithes/accounts` — see active bank accounts and select where you paid\n2. `POST /tithes/proof` — upload receipt image/PDF (multipart) with amount, date, account, optional reference\n3. `GET /tithes/proof` — track the status of your submitted proofs (PENDING → CONFIRMED or DECLINED)\n4. `GET /tithes/me` — view your confirmed tithe history\n5. `POST /tithes/me/statement/send` — request a PDF statement emailed to you",
+      "description": "Member-facing tithe features: view active bank accounts to pay into, see your own giving history, submit a payment proof, and email yourself a Giving Statement PDF.\n\n**Access:** JwtAuthGuard — any authenticated member or worker.\n\n**Typical flow:**\n1. `GET /tithes/accounts` — see active bank accounts and select where you paid\n2. `POST /tithes/proof` — upload receipt image/PDF (multipart) with amount, date, account, optional reference\n3. `GET /tithes/proof` — track the status of your submitted proofs (PENDING → CONFIRMED or DECLINED)\n4. `GET /tithes/me` — view your confirmed giving history\n5. `POST /tithes/me/statement/send` — request a Giving Statement PDF emailed to you",
       "item": [
         {
           "name": "List Active Tithe Accounts",
@@ -14515,7 +14515,7 @@
           ]
         },
         {
-          "name": "Email Tithe Statement PDF",
+          "name": "Email Giving Statement PDF",
           "request": {
             "method": "POST",
             "header": [
@@ -14551,14 +14551,14 @@
                 }
               ]
             },
-            "description": "JwtAuthGuard. Generates a PDF tithe statement and emails it to the caller's registered email address."
+            "description": "JwtAuthGuard. Generates a PDF Giving Statement — merges TitheRecord (Tithe/Offering/General Giving/a GivingOption) with CONFIRMED PledgeContribution (pledge-designated gifts) for the date range, each line typed via the same rule used on the member history list — and emails it to the caller's registered email address."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"message\": \"Your tithe statement has been emailed to john.doe@example.com.\",\n  \"recordCount\": 6\n}"
+              "body": "{\n  \"message\": \"Your giving statement has been emailed to john.doe@example.com.\",\n  \"recordCount\": 6\n}"
             },
             {
               "name": "401 Unauthorized",
@@ -26210,10 +26210,10 @@
                 "checkout"
               ]
             },
-            "description": "titheAccountId is optional (earmarks which fund/account this is for — purely informational, also determines the checkout currency; omitted means CURRENCY_CODE). givingOptionId and pledgeId are optional and mutually exclusive (400 if both given): givingOptionId designates a purpose (Tithe/Offering/General Giving/etc., see GET /finance/giving-options) and the resulting TitheRecord.givingOption is set; pledgeId designates the payment toward one of the member's own ACTIVE pledges instead — this does NOT create a TitheRecord, it records a CONFIRMED PledgeContribution (404 if the pledge isn't the member's own, 400 if not ACTIVE). Returns a checkoutUrl to redirect the member to. 403 GIVING_PROVIDER_NOT_CONFIGURED if the church has no active giving provider.",
+            "description": "Currency is always the tenant's configured CURRENCY_CODE — checkout has no per-transaction currency/account picker (that only applies to the manual proof-of-payment flow, POST /tithes/proof). givingOptionId and pledgeId are optional and mutually exclusive (400 if both given): givingOptionId designates a purpose (Tithe/Offering/General Giving/etc., see GET /finance/giving-options) and the resulting TitheRecord.givingOption is set; pledgeId designates the payment toward one of the member's own ACTIVE pledges instead — this does NOT create a TitheRecord, it records a CONFIRMED PledgeContribution (404 if the pledge isn't the member's own, 400 if not ACTIVE). Returns a checkoutUrl to redirect the member to. 403 GIVING_PROVIDER_NOT_CONFIGURED if the church has no active giving provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amountCents\": 500000,\n  \"titheAccountId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"givingOptionId\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"successUrl\": \"https://church.discuva.org/giving?checkout=success\",\n  \"cancelUrl\": \"https://church.discuva.org/giving?checkout=cancelled\"\n}",
+              "raw": "{\n  \"amountCents\": 500000,\n  \"givingOptionId\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"successUrl\": \"https://church.discuva.org/giving?checkout=success\",\n  \"cancelUrl\": \"https://church.discuva.org/giving?checkout=cancelled\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

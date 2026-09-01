@@ -4302,7 +4302,16 @@ Enables the finance team to manage bank accounts, upload Excel tithe payment she
 
 `GET /admin/tithes/records/download` accepts the same filters (no pagination) and returns an `.xlsx` file with columns: Member Name, Email, Account (bank name), Currency, Amount, Payment Date, Sender Bank, Reference.
 
-**Member visibility:** Members view their own tithes at `GET /tithes/me` and request a PDF statement emailed to them at `POST /tithes/me/statement/send` (`TitheService.emailTitheStatement` — renamed from `/tithes/me/download`, which never downloaded anything; it always emailed a PDF). Optional query params `fromMonth` and `toMonth` (format `YYYY-MM`) filter the records included in the statement and display a period range in the PDF (e.g. `?fromMonth=2026-01&toMonth=2026-06`). If only one bound is supplied the other is open-ended. Returns `{ message, recordCount }` (200 OK) — previously returned `204 No Content`, which meant the frontend's success message could never actually render since HTTP clients discard the body of a 204 regardless of what the server sends. The email body itself (not just the attached PDF) also states the period in prose (`formatStatementPeriod()` — "January 2026 – June 2026" / "March 2026 onwards" / "Up to June 2026") and the record count, falling back to "all N tithe records on file" when no range was requested, so the email is accurate on its own without needing to open the PDF.
+**Member visibility:** Members view their own tithes at `GET /tithes/me` (loads `batch.titheAccount` and `givingOption` relations so the frontend can label each row correctly — see "Giving Statement" below) and request a PDF statement emailed to them at `POST /tithes/me/statement/send` (`TitheService.emailGivingStatement` — renamed from `emailTitheStatement`/`/tithes/me/download`; the route itself is unchanged since it's an internal detail no member ever sees, only the method and everything member-visible were renamed). Optional query params `fromMonth` and `toMonth` (format `YYYY-MM`) filter the records included in the statement and display a period range in the PDF (e.g. `?fromMonth=2026-01&toMonth=2026-06`). If only one bound is supplied the other is open-ended. Returns `{ message, recordCount }` (200 OK) — previously returned `204 No Content`, which meant the frontend's success message could never actually render since HTTP clients discard the body of a 204 regardless of what the server sends. The email body itself (not just the attached PDF) also states the period in prose (`formatStatementPeriod()` — "January 2026 – June 2026" / "March 2026 onwards" / "Up to June 2026") and the record count, falling back to "all N giving records on file" when no range was requested, so the email is accurate on its own without needing to open the PDF.
+
+**Giving Statement — not just a "Tithe Statement" (added 2026-09-01):** the emailed PDF is called "Giving Statement," not "Tithe Statement" — `TitheRecord` already holds every type of online/manual giving (Tithe, Offering, General Giving, a `GivingOption` like "Building Fund"), and calling the whole document "Tithe Statement" wrongly implied it covered only one type. `emailGivingStatement` also merges in the member's CONFIRMED `PledgeContribution`s for the same date range — pledge-designated gifts live in a separate table (see Finance Module's Pledge section) and were previously invisible on this statement entirely, understating a member's real total giving. Each line gets a `Type` column via one shared rule (also used by the frontend history list, see `discuva-member`'s `giving.tsx`):
+- A `PAYMENT_GATEWAY` `TitheRecord` with `givingOption` set → the option's name (e.g. "Building Fund").
+- A `PAYMENT_GATEWAY` `TitheRecord` with no `givingOption` → "General Giving".
+- A `MANUAL_PROOF` `TitheRecord` matched to a `TitheAccount`, or with a `bankName` on file → that account/bank name.
+- A `MANUAL_PROOF` `TitheRecord` with neither → "Tithe" (manual bank-proof reconciliation has always specifically meant tithes; `GivingOption` designation only ever applies to online checkout).
+- A `PledgeContribution` → "Pledge: {campaign name}".
+
+`Offering` (`finance_offerings`) is deliberately excluded — it has no member relation (anonymous in-service collection), so it can't be attributed to an individual's personal statement. This is a different feature from the annual `POST /finance/me/giving-statement/send` (summary-only, previous calendar year, see Finance Module below) — that one already merged `TitheRecord` + `PledgeContribution` totals, just without line items or a member-triggered range.
 
 **Tithe payment proof:** Members and workers submit proof of an offline tithe payment via `POST /tithes/proof` (multipart, field: `file`, max 2 MB; body field `titheAccountId` — the account they paid into). The file is uploaded to Cloudinary and a `TithePaymentProof` record is created with status `PENDING` and `expiresAt` set to `TITHE_PROOF_EXPIRY_DAYS` days from submission (default 90). Finance team admins review proofs at `GET /admin/tithes/proofs` and can `CONFIRM` or `DECLINE` each one. Confirming or declining triggers an email to the member that includes the bank name and account-level currency. A daily cron at `03:00` (church-local time, see [Timezone](#timezone)) (with distributed Redis lock `lock:tithe-proof-cleanup`) finds all expired proofs (`expiresAt ≤ now`), deletes each file from Cloudinary using the stored `publicId` + `resourceType`, and removes the DB rows.
 
@@ -4401,19 +4410,28 @@ resolve a tenant from, only a `:tenantId` path param, so these must be resolvabl
 - **`GivingCheckoutSession`** (`giving_checkout_sessions`) — mirrors `BillingCheckoutSession` exactly: primary
   keyed by the provider's own reference, recorded at checkout-*initiation* time (before the member ever reaches the
   provider's hosted page) — the webhook only ever confirms/denies a session this row already describes, never a
-  source of truth for amount/member/tenant identity itself. `memberId`/`titheAccountId`/`givingOptionId`/`pledgeId`
-  are plain UUID columns, not FK-enforced relations — `Member`/`TitheAccount`/`GivingOption`/`Pledge` all live in
+  source of truth for amount/member/tenant identity itself. `memberId`/`givingOptionId`/`pledgeId`
+  are plain UUID columns, not FK-enforced relations — `Member`/`GivingOption`/`Pledge` all live in
   the tenant's own schema, which a public-schema table can't foreign-key into. `givingOptionId` and `pledgeId` are
-  mutually exclusive (see below).
+  mutually exclusive (see below). A legacy `titheAccountId` column still exists on the table but is unused —
+  checkout no longer lets a member pick a `TitheAccount` (see below).
 
 **Checkout initiation (`GivingCheckoutService.initiateCheckout`, member-facing, normal in-app request — tenant
 context already resolved by `TenantMiddleware`):** resolves the tenant's active config (cached 300s per tenant,
 invalidated on write — identical pattern to `SmsCredentialResolverService`, joined against `GivingProvider` and
 requiring `provider.isActive = true` too, not just the tenant's own config row — see "Giving Providers:
 deactivation has real consequences" below), throws `403 GIVING_PROVIDER_NOT_CONFIGURED` if none is active, looks
-up the member for email/name, resolves currency from the optional `titheAccountId` (falls back to
-`CURRENCY_CODE`), generates a `giving_{uuid}` reference, and calls the resolved provider. Saves a `PENDING`
-`GivingCheckoutSession` row before returning `{ checkoutUrl }`.
+up the member for email/name, resolves currency from `CURRENCY_CODE` (checkout is single-currency per tenant —
+there is no per-transaction currency picker), generates a `giving_{uuid}` reference, and calls the resolved
+provider. Saves a `PENDING` `GivingCheckoutSession` row before returning `{ checkoutUrl }`.
+
+**Why checkout has no `TitheAccount`/currency picker (unlike the manual proof-of-payment flow, which does):** a
+`TitheAccount` is one of the church's real named bank accounts, meaningful only when a member is telling the
+system which one they manually deposited into for reconciliation (`ProofOfPaymentForm`). Gateway checkout never
+deposits into a specific `TitheAccount` — the money always settles to the tenant's configured BYOK merchant
+account for that provider — so a dropdown of account names in the checkout flow looked like it controlled where
+the money went when it never did; it only silently overrode the charged currency. Removed entirely rather than
+kept as "informational."
 
 **Giving purpose designation — `givingOptionId` / `pledgeId` (mutually exclusive):** a member may optionally
 designate the payment at checkout, never both at once (`400 Bad Request` if both are given):
@@ -4472,7 +4490,7 @@ in the same request.
 | PUT    | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ credentials }` — upserts and activates, deactivating any other active provider |
 | PATCH  | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ isActive }` — enable/disable without touching stored credentials |
 | GET    | `/finance/giving/checkout/provider`         | Member JWT                | —                  | `{ providerId, providerName } \| null` — whether to show "Give via Checkout" at all |
-| POST   | `/finance/giving/checkout`                  | Member JWT                | —                  | Body `{ amountCents, titheAccountId?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` |
+| POST   | `/finance/giving/checkout`                  | Member JWT                | —                  | Body `{ amountCents, givingOptionId?, pledgeId?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` |
 | POST   | `/webhooks/giving/:tenantId/:provider`      | None (per-vendor signature) | —                | Provider webhook — creates a `TitheRecord` on a verified successful charge |
 
 Both `finance/giving-providers` and `finance/giving/checkout` are gated behind `@RequiresModule('tithe')` —
@@ -6230,7 +6248,7 @@ outside the requested `?months=` window).
 | PATCH  | /admin/tithes/disputes/:id/approve                         | AdminGuard (FINANCE_WRITE)                                    | Approve a tithe dispute (creates TitheRecord)                                                                 |
 | PATCH  | /admin/tithes/disputes/:id/reject                          | AdminGuard (FINANCE_WRITE)                                    | Reject a tithe dispute                                                                                        |
 | GET    | /tithes/me                                                 | Any (JwtAuthGuard)                                            | Member's own tithe records (paginated)                                                                        |
-| POST   | /tithes/me/statement/send                                  | Any (JwtAuthGuard)                                            | Email a PDF tithe statement to the caller's registered email. Optional query: `fromMonth` (YYYY-MM), `toMonth` (YYYY-MM) — filters records to the date range and prints the period on the PDF |
+| POST   | /tithes/me/statement/send                                  | Any (JwtAuthGuard)                                            | Email a PDF Giving Statement (TitheRecord + CONFIRMED PledgeContribution, merged and per-line typed — see "Giving Statement" above) to the caller's registered email. Optional query: `fromMonth` (YYYY-MM), `toMonth` (YYYY-MM) — filters records to the date range and prints the period on the PDF |
 | POST   | /tithes/proof                                              | Any (JwtAuthGuard)                                            | Submit tithe payment proof (multipart, field: file, max 2 MB); body: amount, paymentDate, bankName?, reference? |
 | GET    | /tithes/proof                                              | Any (JwtAuthGuard)                                            | List caller's own tithe payment proofs (paginated)                                                            |
 | GET    | /admin/tithes/proofs?status=&search=&page=&limit=          | AdminGuard (FINANCE_READ)                                     | List all tithe payment proofs; optional `status` filter (PENDING/CONFIRMED/DECLINED); `search` filters by member firstname, lastname, or email |

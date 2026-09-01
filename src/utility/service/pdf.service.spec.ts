@@ -2,12 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
-import { PdfService } from './pdf.service';
+import { GivingStatementLine, PdfService } from './pdf.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { CacheService } from './cache.service';
 import { SessionReport } from '../../service-programme/service/service-session.service';
 import { Member } from '../../member/entity/member.entity';
-import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 
 const mockTenantRepo = { findOneBy: jest.fn() };
 const mockCacheService = {
@@ -122,20 +121,21 @@ describe('PdfService', () => {
     });
   });
 
-  describe('generateTitheStatement (currency via inline branding.currencyCode)', () => {
+  describe('generateGivingStatement (currency via inline branding.currencyCode)', () => {
     const member = {
       firstname: 'Jane',
       lastname: 'Doe',
       email: 'jane@example.com',
       phoneNumber: '08000000000',
     } as Member;
-    const records = [
+    const lines: GivingStatementLine[] = [
       {
         amount: 5000,
         paymentDate: '2026-01-15',
+        type: 'Tithe',
         bankName: 'Test Bank',
         reference: 'REF-1',
-      } as unknown as TitheRecord,
+      },
     ];
 
     it("uses the tenant's own currency, not the env default", async () => {
@@ -148,11 +148,66 @@ describe('PdfService', () => {
         currency: 'NGN',
       });
 
-      const buffer = await service.generateTitheStatement(member, records);
+      const buffer = await service.generateGivingStatement(member, lines);
       const text = pdfText(buffer);
 
       expect(text).toContain('NGN');
       expect(text).not.toContain(`(${ENV_DEFAULTS.CURRENCY_CODE})`);
+    });
+
+    it('renders the Type column for a mix of giving purposes', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        address: '42 Tenant Ave',
+        tagline: null,
+        currency: 'NGN',
+      });
+      const mixedLines: GivingStatementLine[] = [
+        {
+          amount: 5000,
+          paymentDate: '2026-01-15',
+          type: 'Tithe',
+          bankName: 'Test Bank',
+          reference: 'REF-1',
+        },
+        {
+          amount: 10000,
+          paymentDate: '2026-01-20',
+          type: 'General Giving',
+          bankName: null,
+          reference: 'giving_abc',
+        },
+        {
+          amount: 25000,
+          paymentDate: '2026-01-25',
+          type: 'Building Fund',
+          bankName: null,
+          reference: 'giving_def',
+        },
+        {
+          amount: 15000,
+          paymentDate: '2026-01-28',
+          type: 'Pledge: Roof Repair Fund',
+          bankName: null,
+          reference: 'giving_ghi',
+        },
+      ];
+
+      const buffer = await service.generateGivingStatement(member, mixedLines);
+      const text = pdfText(buffer);
+
+      expect(text).toContain('Giving Statement');
+      expect(text).toContain('Tithe');
+      expect(text).toContain('General Giving');
+      expect(text).toContain('Building Fund');
+      // Checked as a short substring rather than the full concatenated
+      // label — a long Type value can wrap/kern across the narrow
+      // autoTable column in a way that breaks a single contiguous match
+      // in the raw PDF byte stream.
+      expect(text).toContain('Pledge:');
+      expect(text).toContain('Roof');
     });
   });
 

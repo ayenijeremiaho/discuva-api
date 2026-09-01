@@ -18,7 +18,6 @@ import {
 } from '../entity/giving-checkout-session.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Member } from '../../member/entity/member.entity';
-import { TitheAccount } from '../../tithe/entity/tithe-account.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { GivingOption } from '../../finance/entity/giving-option.entity';
 import { Pledge } from '../../finance/entity/pledge.entity';
@@ -56,7 +55,6 @@ const mockCheckoutRepo = {
 };
 const mockTenantRepo = { findOneByOrFail: jest.fn() };
 const mockMemberRepo = { findOneByOrFail: jest.fn() };
-const mockTitheAccountRepo = { findOne: jest.fn() };
 const mockGivingOptionRepo = { exists: jest.fn() };
 const mockPledgeRepo = { findOne: jest.fn() };
 const mockPledgeService = { recordConfirmedContribution: jest.fn() };
@@ -120,10 +118,6 @@ describe('GivingCheckoutService', () => {
         },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
-        {
-          provide: getRepositoryToken(TitheAccount),
-          useValue: mockTitheAccountRepo,
-        },
         {
           provide: getRepositoryToken(GivingOption),
           useValue: mockGivingOptionRepo,
@@ -225,29 +219,6 @@ describe('GivingCheckoutService', () => {
         }),
       );
       expect(result.checkoutUrl).toBe('https://checkout.paystack.com/abc');
-    });
-
-    it('throws NotFoundException for an inactive/unknown tithe account', async () => {
-      mockConfigQB({
-        providerId: 'paystack',
-        credentialsEncrypted: { secretKey: 'sk_1' },
-      });
-      mockMemberRepo.findOneByOrFail.mockResolvedValue({
-        id: 'member-1',
-        email: 'member@example.com',
-        firstname: 'Jane',
-        lastname: 'Doe',
-      });
-      mockTitheAccountRepo.findOne.mockResolvedValue(null);
-
-      await expect(
-        service.initiateCheckout('member-1', {
-          amountCents: 500000,
-          titheAccountId: 'acc-1',
-          successUrl: 'https://a',
-          cancelUrl: 'https://b',
-        }),
-      ).rejects.toThrow(NotFoundException);
     });
 
     it('throws BadRequestException when both givingOptionId and pledgeId are given', async () => {

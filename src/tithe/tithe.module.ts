@@ -17,6 +17,7 @@ import { AdminModule } from '../admin/admin.module';
 import { Admin } from '../admin/entity/admin.entity';
 import { Member } from '../member/entity/member.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
+import { PledgeContribution } from '../finance/entity/pledge-contribution.entity';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
       TithePaymentProof,
       Member,
       Admin,
+      PledgeContribution,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by TitheService.purgeExpiredProofs' forEachActiveTenant loop.

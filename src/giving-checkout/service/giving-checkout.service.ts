@@ -24,7 +24,6 @@ import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Member } from '../../member/entity/member.entity';
-import { TitheAccount } from '../../tithe/entity/tithe-account.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { PledgeStatus, TitheSource } from '../../finance/enum/finance.enum';
 import { GivingOption } from '../../finance/entity/giving-option.entity';
@@ -70,8 +69,6 @@ export class GivingCheckoutService {
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
-    @InjectRepository(TitheAccount)
-    private readonly titheAccountRepo: Repository<TitheAccount>,
     @InjectRepository(GivingOption)
     private readonly givingOptionRepo: Repository<GivingOption>,
     @InjectRepository(Pledge)
@@ -181,16 +178,7 @@ export class GivingCheckoutService {
 
     const member = await this.memberRepo.findOneByOrFail({ id: memberId });
 
-    let currency = this.configService.get<string>('CURRENCY_CODE', 'NGN');
-    if (dto.titheAccountId) {
-      const titheAccount = await this.titheAccountRepo.findOne({
-        where: { id: dto.titheAccountId, isActive: true },
-      });
-      if (!titheAccount) {
-        throw new NotFoundException('Tithe account not found or inactive.');
-      }
-      currency = titheAccount.currency;
-    }
+    const currency = this.configService.get<string>('CURRENCY_CODE', 'NGN');
 
     if (dto.givingOptionId) {
       const exists = await this.givingOptionRepo.exists({
@@ -232,7 +220,6 @@ export class GivingCheckoutService {
         id: reference,
         tenantId,
         memberId,
-        titheAccountId: dto.titheAccountId ?? null,
         givingOptionId: dto.givingOptionId ?? null,
         pledgeId: dto.pledgeId ?? null,
         amountCents: dto.amountCents,

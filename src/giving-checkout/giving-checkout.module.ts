@@ -6,7 +6,6 @@ import { TenantGivingProviderConfig } from './entity/tenant-giving-provider-conf
 import { GivingCheckoutSession } from './entity/giving-checkout-session.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Member } from '../member/entity/member.entity';
-import { TitheAccount } from '../tithe/entity/tithe-account.entity';
 import { GivingOption } from '../finance/entity/giving-option.entity';
 import { Pledge } from '../finance/entity/pledge.entity';
 import { PaystackGivingProvider } from './provider/paystack-giving.provider';
@@ -27,10 +26,10 @@ import { FinanceModule } from '../finance/finance.module';
 // control-plane (public, never a search_path target) — plain TypeOrmModule,
 // same reasoning as CommunicationProviderModule/BillingModule: the giving
 // webhook has no tenant (schema) context until GivingCheckoutService
-// manually resolves one via Tenant.schemaName + runInTenantContext. Member/
-// TitheAccount are tenant-scoped (TenantTypeOrmModule) since
-// GivingCheckoutService reads them during the normal in-app checkout
-// request, which already has tenant context from TenantMiddleware.
+// manually resolves one via Tenant.schemaName + runInTenantContext. Member is
+// tenant-scoped (TenantTypeOrmModule) since GivingCheckoutService reads it
+// during the normal in-app checkout request, which already has tenant
+// context from TenantMiddleware.
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -39,12 +38,7 @@ import { FinanceModule } from '../finance/finance.module';
       GivingCheckoutSession,
       Tenant,
     ]),
-    TenantTypeOrmModule.forFeature([
-      Member,
-      TitheAccount,
-      GivingOption,
-      Pledge,
-    ]),
+    TenantTypeOrmModule.forFeature([Member, GivingOption, Pledge]),
     UtilityModule,
     AdminModule,
     FinanceModule,

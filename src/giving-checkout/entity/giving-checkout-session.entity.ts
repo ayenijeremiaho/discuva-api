@@ -25,6 +25,13 @@ export enum GivingCheckoutStatus {
 // giving-option-designated payment becomes a TitheRecord, a
 // pledge-designated one becomes a PledgeContribution instead; the two
 // ledgers are deliberately never conflated.
+//
+// titheAccountId is unused/legacy — checkout no longer lets a member pick a
+// TitheAccount (that concept only makes sense for the manual proof-of-
+// payment flow, where a member really did deposit into one of the church's
+// named bank accounts; a gateway checkout always settles to the tenant's
+// configured merchant account, never a specific TitheAccount). Column kept
+// nullable rather than migrated away since nothing ever sets it now.
 @Entity({ name: 'giving_checkout_sessions' })
 export class GivingCheckoutSession extends BaseEntity {
   @PrimaryColumn()

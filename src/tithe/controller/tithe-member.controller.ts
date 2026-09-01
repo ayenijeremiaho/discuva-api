@@ -45,7 +45,7 @@ export class TitheMemberController {
     @Query('fromMonth') fromMonth?: string,
     @Query('toMonth') toMonth?: string,
   ) {
-    return this.titheService.emailTitheStatement(req.user, fromMonth, toMonth);
+    return this.titheService.emailGivingStatement(req.user, fromMonth, toMonth);
   }
 
   @Post('proof')

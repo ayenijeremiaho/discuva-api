@@ -12,13 +12,6 @@ export class InitiateGivingCheckoutDto {
   @Min(1)
   amountCents: number;
 
-  // Which fund/account this is earmarked for — optional, purely
-  // informational (mirrors ProofOfPaymentForm's titheAccountId), the
-  // provider checkout itself has no concept of it.
-  @IsOptional()
-  @IsUUID()
-  titheAccountId?: string;
-
   // What this gift is for (Tithe/Offering/General Giving/etc.) — mutually
   // exclusive with pledgeId, enforced in GivingCheckoutService.
   @IsOptional()

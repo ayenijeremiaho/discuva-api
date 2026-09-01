@@ -21,12 +21,17 @@ import { TitheRecord } from '../entity/tithe-record.entity';
 import { TitheUnmatchedRecord } from '../entity/tithe-unmatched-record.entity';
 import { TitheDisputeRecord } from '../entity/tithe-dispute-record.entity';
 import { TithePaymentProof } from '../entity/tithe-payment-proof.entity';
+import { PledgeContribution } from '../../finance/entity/pledge-contribution.entity';
 import {
   TitheBatchStatus,
   TitheDisputeStatus,
   TitheProofStatus,
   TitheUnmatchedStatus,
 } from '../enum/tithe.enum';
+import {
+  PledgeContributionStatus,
+  TitheSource,
+} from '../../finance/enum/finance.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import {
   TITHE_PROCESS_JOB,
@@ -46,7 +51,10 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
-import { PdfService } from '../../utility/service/pdf.service';
+import {
+  GivingStatementLine,
+  PdfService,
+} from '../../utility/service/pdf.service';
 import { ExcelService } from '../../utility/service/excel.service';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -106,6 +114,8 @@ export class TitheService {
     private readonly adminRepo: Repository<Admin>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
+    @InjectRepository(PledgeContribution)
+    private readonly contributionRepo: Repository<PledgeContribution>,
     @InjectQueue(TITHE_QUEUE)
     private readonly titheQueue: Queue,
     private readonly utilityService: UtilityService,
@@ -624,7 +634,7 @@ export class TitheService {
   ): Promise<PaginationResponseDto<TitheRecord>> {
     const [data, total] = await this.recordRepo.findAndCount({
       where: { member: { id: user.id } },
-      relations: ['batch', 'batch.titheAccount'],
+      relations: ['batch', 'batch.titheAccount', 'givingOption'],
       order: { paymentDate: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -634,7 +644,13 @@ export class TitheService {
 
   // ── Tithe Payment Proofs ──────────────────────────────────────────────────
 
-  async emailTitheStatement(
+  // Merges TitheRecord (Tithe/Offering/General Giving/a GivingOption) with
+  // CONFIRMED PledgeContribution (pledge-designated gifts) into one Giving
+  // Statement — the two live in separate tables/ledgers (deliberately never
+  // conflated, see GivingCheckoutService's webhook handling) but both count
+  // as the member's giving, and a statement that silently dropped one would
+  // understate it.
+  async emailGivingStatement(
     user: MemberAuth,
     fromMonth?: string,
     toMonth?: string,
@@ -644,51 +660,77 @@ export class TitheService {
 
     const fromDate = fromMonth ? `${fromMonth}-01` : undefined;
     const toDate = toMonth ? this.lastDayOfMonth(toMonth) : undefined;
+    const dateWhere = {
+      ...(fromDate && toDate ? { paymentDate: Between(fromDate, toDate) } : {}),
+      ...(fromDate && !toDate
+        ? { paymentDate: MoreThanOrEqual(fromDate) }
+        : {}),
+      ...(!fromDate && toDate ? { paymentDate: LessThanOrEqual(toDate) } : {}),
+    };
 
-    const records = await this.recordRepo.find({
-      where: {
-        member: { id: user.id },
-        ...(fromDate && toDate
-          ? { paymentDate: Between(fromDate, toDate) }
-          : {}),
-        ...(fromDate && !toDate
-          ? { paymentDate: MoreThanOrEqual(fromDate) }
-          : {}),
-        ...(!fromDate && toDate
-          ? { paymentDate: LessThanOrEqual(toDate) }
-          : {}),
-      },
-      order: { paymentDate: 'DESC' },
-    });
+    const [records, contributions] = await Promise.all([
+      this.recordRepo.find({
+        where: { member: { id: user.id }, ...dateWhere },
+        relations: ['batch', 'batch.titheAccount', 'givingOption'],
+        order: { paymentDate: 'DESC' },
+      }),
+      this.contributionRepo.find({
+        where: {
+          pledge: { member: { id: user.id } },
+          status: PledgeContributionStatus.CONFIRMED,
+          ...dateWhere,
+        },
+        relations: ['pledge', 'pledge.campaign'],
+        order: { paymentDate: 'DESC' },
+      }),
+    ]);
+
+    const recordLines: GivingStatementLine[] = records.map((r) => ({
+      paymentDate: r.paymentDate,
+      amount: Number(r.amount),
+      type: this.givingRecordTypeLabel(r),
+      bankName: r.bankName,
+      reference: r.reference ?? r.externalReference,
+    }));
+    const contributionLines: GivingStatementLine[] = contributions.map((c) => ({
+      paymentDate: c.paymentDate,
+      amount: Number(c.amount),
+      type: `Pledge: ${c.pledge.campaign.name}`,
+      bankName: null,
+      reference: c.reference,
+    }));
+    const lines = [...recordLines, ...contributionLines].sort((a, b) =>
+      b.paymentDate.localeCompare(a.paymentDate),
+    );
 
     const period =
       (fromMonth ?? toMonth) ? { from: fromMonth, to: toMonth } : undefined;
-    const pdfBuffer = await this.pdfService.generateTitheStatement(
+    const pdfBuffer = await this.pdfService.generateGivingStatement(
       member,
-      records,
+      lines,
       period,
     );
 
     this.utilityService.sendEmailWithAttachment(
       member.email,
-      'Your Tithe Statement',
+      'Your Giving Statement',
       'tithe-statement',
       {
         name: UtilityService.capitalizeFirstLetter(member.firstname),
-        count: records.length,
+        count: lines.length,
         period: this.formatStatementPeriod(fromMonth, toMonth),
       },
-      [{ filename: 'tithe-statement.pdf', content: pdfBuffer }],
+      [{ filename: 'giving-statement.pdf', content: pdfBuffer }],
       EmailCategory.GIVING_RECEIPT,
     );
 
     this.logger.log(
-      `Tithe statement emailed to ${member.email} — ${records.length} records`,
+      `Giving statement emailed to ${member.email} — ${lines.length} records`,
     );
 
     return {
-      message: `Your tithe statement has been emailed to ${member.email}.`,
-      recordCount: records.length,
+      message: `Your giving statement has been emailed to ${member.email}.`,
+      recordCount: lines.length,
     };
   }
 
@@ -1016,6 +1058,22 @@ export class TitheService {
     if (fromMonth && toMonth) return `${fmt(fromMonth)} – ${fmt(toMonth)}`;
     if (fromMonth) return `${fmt(fromMonth)} onwards`;
     return `Up to ${fmt(toMonth as string)}`;
+  }
+
+  // Same rule everywhere a TitheRecord's purpose needs a human label
+  // (Giving Statement, member history list): a bank/account match means a
+  // real manual deposit, so show it; an unmatched MANUAL_PROOF row is, and
+  // always was, specifically a tithe; a PAYMENT_GATEWAY row falls back to
+  // "General Giving" only when the member didn't pick a GivingOption.
+  private givingRecordTypeLabel(record: TitheRecord): string {
+    if (record.batch?.titheAccount?.accountName) {
+      return record.batch.titheAccount.accountName;
+    }
+    if (record.bankName) return record.bankName;
+    if (record.source === TitheSource.PAYMENT_GATEWAY) {
+      return record.givingOption?.name ?? 'General Giving';
+    }
+    return 'Tithe';
   }
 
   private async notifyFinanceTeam(

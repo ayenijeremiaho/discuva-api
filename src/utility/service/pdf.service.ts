@@ -16,7 +16,6 @@ import { ServiceProgrammeSlot } from '../../service-programme/entity/service-pro
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Event as ChurchEvent } from '../../event/entity/event.entity';
 import { ServiceSlotTypeLabels } from '../../service-programme/enum/service-slot-type.enum';
-import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -35,6 +34,20 @@ interface PdfBranding {
   churchTagline: string;
   currencyCode: string;
   currencyLocale: string;
+}
+
+// One row of a member's Giving Statement — merges TitheRecord (Tithe/
+// Offering/General Giving/a GivingOption) and CONFIRMED PledgeContribution
+// (pledge-designated gifts) into a single normalized shape, since the two
+// live in separate tables but both count as the member's giving. `type` is
+// the human-readable purpose (e.g. "General Giving", "Building Fund",
+// "Pledge: Roof Repair Fund") computed by the caller.
+export interface GivingStatementLine {
+  paymentDate: string;
+  amount: number;
+  type: string;
+  bankName: string | null;
+  reference: string | null;
 }
 
 const DARK = '#121212';
@@ -117,9 +130,9 @@ export class PdfService {
     return Buffer.from(doc.output('arraybuffer'));
   }
 
-  async generateTitheStatement(
+  async generateGivingStatement(
     member: Member,
-    records: TitheRecord[],
+    lines: GivingStatementLine[],
     period?: { from?: string; to?: string },
   ): Promise<Buffer> {
     const branding = await this.resolveBranding();
@@ -128,7 +141,7 @@ export class PdfService {
       unit: 'mm',
       format: 'a4',
     });
-    this.drawTitheStatement(doc, member, records, branding, period);
+    this.drawGivingStatement(doc, member, lines, branding, period);
     return Buffer.from(doc.output('arraybuffer'));
   }
 
@@ -325,16 +338,16 @@ export class PdfService {
 
   // ─── Tithe statement ─────────────────────────────────────────────────────
 
-  private drawTitheStatement(
+  private drawGivingStatement(
     doc: jsPDF,
     member: Member,
-    records: TitheRecord[],
+    lines: GivingStatementLine[],
     branding: PdfBranding,
     period?: { from?: string; to?: string },
   ): void {
-    let y = this.drawPageHeader(doc, 'Tithe Statement', branding);
+    let y = this.drawPageHeader(doc, 'Giving Statement', branding);
 
-    const total = records.reduce((sum, r) => sum + Number(r.amount), 0);
+    const total = lines.reduce((sum, r) => sum + Number(r.amount), 0);
 
     const generatedText = `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}`;
 
@@ -363,7 +376,7 @@ export class PdfService {
     y = this.drawLabelValueGrid(doc, y + 4, [
       ['Email', member.email],
       ['Phone', member.phoneNumber ?? '—'],
-      ['Total Records', `${records.length}`],
+      ['Total Records', `${lines.length}`],
       [
         `Total Paid (${branding.currencyCode})`,
         total.toLocaleString(branding.currencyLocale, {
@@ -387,12 +400,13 @@ export class PdfService {
         [
           'Month',
           'Date',
+          'Type',
           `Amount (${branding.currencyCode})`,
           'Bank',
           'Reference',
         ],
       ],
-      body: records.map((r) => {
+      body: lines.map((r) => {
         const [yr, mo] = r.paymentDate.split('-').map(Number);
         const monthName = new Date(yr, mo - 1, 1).toLocaleDateString('en-GB', {
           month: 'long',
@@ -401,6 +415,7 @@ export class PdfService {
         return [
           monthName,
           r.paymentDate,
+          r.type,
           Number(r.amount).toLocaleString(branding.currencyLocale, {
             minimumFractionDigits: 2,
           }),
@@ -412,6 +427,7 @@ export class PdfService {
         [
           'Total',
           '',
+          '',
           `${branding.currencyCode} ${total.toLocaleString(branding.currencyLocale, { minimumFractionDigits: 2 })}`,
           '',
           '',
@@ -419,11 +435,12 @@ export class PdfService {
       ],
 
       columnStyles: {
-        0: { cellWidth: 30 },
-        1: { cellWidth: 24 },
-        2: { cellWidth: 36, halign: 'right' },
-        3: { cellWidth: 36 },
-        4: { cellWidth: 44 },
+        0: { cellWidth: 26 },
+        1: { cellWidth: 20 },
+        2: { cellWidth: 34 },
+        3: { cellWidth: 32, halign: 'right' },
+        4: { cellWidth: 30 },
+        5: { cellWidth: 38 },
       },
       headStyles: {
         fillColor: ACCENT,
@@ -441,7 +458,7 @@ export class PdfService {
       },
       showFoot: 'lastPage',
       didParseCell: (data) => {
-        if (data.section === 'foot' && data.column.index === 2) {
+        if (data.section === 'foot' && data.column.index === 3) {
           data.cell.styles.halign = 'right';
         }
       },
