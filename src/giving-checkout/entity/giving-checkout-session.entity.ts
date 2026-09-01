@@ -17,9 +17,14 @@ export enum GivingCheckoutStatus {
 // TitheRecord for a session id that was never actually issued, or for a
 // different member/amount than what was recorded here.
 //
-// `memberId`/`titheAccountId` are plain UUID columns, not FK-enforced
-// relations — Member/TitheAccount live in the tenant's own schema, which a
-// public-schema table can't foreign-key into.
+// `memberId`/`titheAccountId`/`givingOptionId`/`pledgeId` are plain UUID
+// columns, not FK-enforced relations — Member/TitheAccount/GivingOption/
+// Pledge all live in the tenant's own schema, which a public-schema table
+// can't foreign-key into. givingOptionId and pledgeId are mutually
+// exclusive (validated in GivingCheckoutService.initiateCheckout) — a
+// giving-option-designated payment becomes a TitheRecord, a
+// pledge-designated one becomes a PledgeContribution instead; the two
+// ledgers are deliberately never conflated.
 @Entity({ name: 'giving_checkout_sessions' })
 export class GivingCheckoutSession extends BaseEntity {
   @PrimaryColumn()
@@ -35,6 +40,12 @@ export class GivingCheckoutSession extends BaseEntity {
 
   @Column({ nullable: true })
   titheAccountId: string | null;
+
+  @Column({ nullable: true })
+  givingOptionId: string | null;
+
+  @Column({ nullable: true })
+  pledgeId: string | null;
 
   @Column()
   amountCents: number;

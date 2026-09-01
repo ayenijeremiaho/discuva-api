@@ -167,6 +167,8 @@ export type AuditAction =
   // Finance module
   | 'FUND_CREATED'
   | 'FUND_UPDATED'
+  | 'GIVING_OPTION_CREATED'
+  | 'GIVING_OPTION_UPDATED'
   | 'ACCOUNT_CREATED'
   | 'ACCOUNT_UPDATED'
   | 'ACCOUNTING_PERIOD_CREATED'

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -25,7 +26,10 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TitheAccount } from '../../tithe/entity/tithe-account.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
-import { TitheSource } from '../../finance/enum/finance.enum';
+import { PledgeStatus, TitheSource } from '../../finance/enum/finance.enum';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
+import { Pledge } from '../../finance/entity/pledge.entity';
+import { PledgeService } from '../../finance/service/pledge.service';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 import { InitiateGivingCheckoutDto } from '../dto/initiate-giving-checkout.dto';
 
@@ -68,6 +72,11 @@ export class GivingCheckoutService {
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(TitheAccount)
     private readonly titheAccountRepo: Repository<TitheAccount>,
+    @InjectRepository(GivingOption)
+    private readonly givingOptionRepo: Repository<GivingOption>,
+    @InjectRepository(Pledge)
+    private readonly pledgeRepo: Repository<Pledge>,
+    private readonly pledgeService: PledgeService,
   ) {}
 
   private currentTenantId(): string {
@@ -164,6 +173,12 @@ export class GivingCheckoutService {
       });
     }
 
+    if (dto.givingOptionId && dto.pledgeId) {
+      throw new BadRequestException(
+        'Choose either a giving option or a pledge, not both.',
+      );
+    }
+
     const member = await this.memberRepo.findOneByOrFail({ id: memberId });
 
     let currency = this.configService.get<string>('CURRENCY_CODE', 'NGN');
@@ -175,6 +190,27 @@ export class GivingCheckoutService {
         throw new NotFoundException('Tithe account not found or inactive.');
       }
       currency = titheAccount.currency;
+    }
+
+    if (dto.givingOptionId) {
+      const exists = await this.givingOptionRepo.exists({
+        where: { id: dto.givingOptionId, isActive: true },
+      });
+      if (!exists) {
+        throw new NotFoundException('Giving option not found or inactive.');
+      }
+    }
+
+    if (dto.pledgeId) {
+      const pledge = await this.pledgeRepo.findOne({
+        where: { id: dto.pledgeId, member: { id: memberId } },
+      });
+      if (!pledge) throw new NotFoundException('Pledge not found.');
+      if (pledge.status !== PledgeStatus.ACTIVE) {
+        throw new BadRequestException(
+          'Cannot give toward a non-active pledge.',
+        );
+      }
     }
 
     const provider = this.givingProviderRegistry.get(config.providerId);
@@ -197,6 +233,8 @@ export class GivingCheckoutService {
         tenantId,
         memberId,
         titheAccountId: dto.titheAccountId ?? null,
+        givingOptionId: dto.givingOptionId ?? null,
+        pledgeId: dto.pledgeId ?? null,
         amountCents: dto.amountCents,
         currency,
         provider: config.providerId,
@@ -284,6 +322,19 @@ export class GivingCheckoutService {
       this.txHost,
       { tenantId, schemaName: tenant.schemaName },
       async () => {
+        // A pledge-designated gift feeds pledge fulfillment (PledgeContribution)
+        // instead of the general TitheRecord ledger — the two must never be
+        // conflated (see GivingCheckoutSession's header comment).
+        if (completedSession!.pledgeId) {
+          await this.pledgeService.recordConfirmedContribution(
+            completedSession!.memberId,
+            completedSession!.pledgeId,
+            completedSession!.amountCents / 100,
+            completedSession!.id,
+          );
+          return;
+        }
+
         const manager = this.txHost.tx;
         await manager.save(
           TitheRecord,
@@ -295,6 +346,9 @@ export class GivingCheckoutService {
             source: TitheSource.PAYMENT_GATEWAY,
             externalReference: completedSession!.id,
             paymentChannel: completedSession!.provider,
+            givingOption: completedSession!.givingOptionId
+              ? { id: completedSession!.givingOptionId }
+              : null,
           }),
         );
       },

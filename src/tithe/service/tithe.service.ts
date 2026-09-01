@@ -938,6 +938,8 @@ export class TitheService {
         { header: 'Amount', key: 'amount', width: 18 },
         { header: 'Payment Date', key: 'paymentDate', width: 16 },
         { header: 'Sender Bank', key: 'senderBank', width: 22 },
+        { header: 'Source', key: 'source', width: 16 },
+        { header: 'Payment Gateway', key: 'paymentChannel', width: 18 },
         { header: 'Reference', key: 'reference', width: 30 },
       ],
       records.map((r) => ({
@@ -948,6 +950,8 @@ export class TitheService {
         amount: Number(r.amount),
         paymentDate: r.paymentDate,
         senderBank: r.bankName ?? '',
+        source: r.source,
+        paymentChannel: r.paymentChannel ?? '',
         reference: r.reference ?? '',
       })),
     );
@@ -968,6 +972,7 @@ export class TitheService {
       .leftJoinAndSelect('wp.department', 'dept')
       .leftJoinAndSelect('r.batch', 'batch')
       .leftJoinAndSelect('batch.titheAccount', 'titheAccount')
+      .leftJoinAndSelect('r.givingOption', 'givingOption')
       .orderBy('r.paymentDate', 'DESC');
 
     if (memberId) qb.andWhere('member.id = :memberId', { memberId });

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { Fund } from './entity/fund.entity';
+import { GivingOption } from './entity/giving-option.entity';
 import { AccountingPeriod } from './entity/accounting-period.entity';
 import { Account } from './entity/account.entity';
 import { ExternalPayee } from './entity/external-payee.entity';
@@ -22,6 +23,7 @@ import { BankImportProfile } from './entity/bank-import-profile.entity';
 import { Member } from '../member/entity/member.entity';
 import { TitheRecord } from '../tithe/entity/tithe-record.entity';
 import { FundService } from './service/fund.service';
+import { GivingOptionService } from './service/giving-option.service';
 import { AccountingPeriodService } from './service/accounting-period.service';
 import { AccountService } from './service/account.service';
 import { ExternalPayeeService } from './service/external-payee.service';
@@ -35,6 +37,7 @@ import { ReconciliationService } from './service/reconciliation.service';
 import { FinanceReportService } from './service/finance-report.service';
 import { BankImportProfileService } from './service/bank-import-profile.service';
 import { FundController } from './controller/fund.controller';
+import { GivingOptionController } from './controller/giving-option.controller';
 import { AccountingPeriodController } from './controller/accounting-period.controller';
 import { AccountController } from './controller/account.controller';
 import { ExternalPayeeController } from './controller/external-payee.controller';
@@ -65,6 +68,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
   imports: [
     TenantTypeOrmModule.forFeature([
       Fund,
+      GivingOption,
       AccountingPeriod,
       Account,
       ExternalPayee,
@@ -93,6 +97,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
   ],
   providers: [
     FundService,
+    GivingOptionService,
     AccountingPeriodService,
     AccountService,
     ExternalPayeeService,
@@ -114,6 +119,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
   ],
   controllers: [
     FundController,
+    GivingOptionController,
     AccountingPeriodController,
     AccountController,
     ExternalPayeeController,
@@ -128,6 +134,6 @@ import { Tenant } from '../tenant/entity/tenant.entity';
     BankImportProfileController,
     FinanceMemberController,
   ],
-  exports: [TenantTypeOrmModule],
+  exports: [TenantTypeOrmModule, PledgeService],
 })
 export class FinanceModule {}

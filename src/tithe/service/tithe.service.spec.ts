@@ -1050,6 +1050,8 @@ describe('TitheService', () => {
           paymentDate: '2026-01-01',
           bankName: 'GTB',
           reference: 'REF1',
+          source: 'PAYMENT_GATEWAY',
+          paymentChannel: 'paystack',
           member: {
             firstname: 'Jane',
             lastname: 'Smith',
@@ -1073,12 +1075,16 @@ describe('TitheService', () => {
         expect.arrayContaining([
           expect.objectContaining({ key: 'memberName' }),
           expect.objectContaining({ key: 'amount' }),
+          expect.objectContaining({ key: 'source' }),
+          expect.objectContaining({ key: 'paymentChannel' }),
         ]),
         expect.arrayContaining([
           expect.objectContaining({
             memberName: 'Jane Smith',
             email: 'jane@test.com',
             amount: 5000,
+            source: 'PAYMENT_GATEWAY',
+            paymentChannel: 'paystack',
           }),
         ]),
       );

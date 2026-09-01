@@ -917,8 +917,14 @@ A confirmed tithe payment matched to a member.
 | paymentDate | date    |                                        |
 | reference   | string \| null | Optional bank reference        |
 | bankName    | string \| null | Sender's bank from the CSV column — not the destination account |
+| source      | `MANUAL_PROOF` \| `PAYMENT_GATEWAY` | `MANUAL_PROOF` for CSV batch/proof-of-payment uploads, `PAYMENT_GATEWAY` for online checkout (see Giving Checkout Module) |
+| externalReference | string \| null | Only set for `PAYMENT_GATEWAY` rows — the `GivingCheckoutSession` id that produced this record |
+| paymentChannel | string \| null | Only set for `PAYMENT_GATEWAY` rows — the specific vendor (`paystack`/`flutterwave`/`kora`/`stripe`) the payment cleared through. Admin UI (`/finances/tithes`, Records tab) surfaces this alongside the Source badge, and it's included as its own column in the Excel export — needed for settlement/reconciliation, since two different gateways landing in two different merchant accounts both otherwise show only a generic "Gateway" source. |
+| givingOption | GivingOption \| null | ManyToOne, nullable, `SET NULL`. Only ever set for `PAYMENT_GATEWAY` rows where the member designated a purpose at checkout (see GivingOption below) — `null` means "General Giving," not a data gap. |
 
 **Duplicate detection:** `(memberId, paymentDate, amount)` — if all three match an existing record, the row is flagged as a dispute instead. The destination bank account is inherited from the batch's `titheAccount`.
+
+**Online giving purpose categorization — GivingOption vs. Pledge (never both):** at checkout, a member may optionally designate the payment either toward a `GivingOption` (Tithe/Offering/General Giving/Building Fund/etc. — admin-curated, see GivingOption below) or toward one of their own active `Pledge`s — never both (`InitiateGivingCheckoutDto` rejects a request carrying both `givingOptionId` and `pledgeId`). A `GivingOption` designation creates this `TitheRecord` with `givingOption` set. A `Pledge` designation does **not** create a `TitheRecord` at all — it creates a `PledgeContribution` (status `CONFIRMED` directly, no admin review, since the webhook already verified the money cleared) via `PledgeService.recordConfirmedContribution`, keeping pledge fulfillment and general giving as genuinely separate ledgers. Designating toward a pledge requires the member to already have an **ACTIVE** `Pledge` for that campaign — checkout never auto-creates one on the fly.
 
 **Indexes:** `member_id`, `batch_id` (single-column). Composite `IDX_tithe_records_member_payment` on `(member_id, payment_date)` for member giving history range queries.
 
@@ -4311,7 +4317,8 @@ Full double-entry accounting system for the church. All financial data is fund-s
 
 | Concept | Description |
 |---|---|
-| **Fund** | RESTRICTED or UNRESTRICTED pool of money. Every account, offering, budget, and pledge belongs to a fund. |
+| **Fund** | RESTRICTED or UNRESTRICTED pool of money. Every account, offering, budget, and pledge belongs to a fund. Back-office accounting data only — never exposed to members directly (see GivingOption). |
+| **GivingOption** (`finance_giving_options`) | Donor-facing "what is this gift for" selector for online giving-checkout (Tithe, Offering, General Giving, Building Fund, etc.) — admin-managed (`admin/finance/giving-options`, `FINANCE_READ`/`FINANCE_WRITE`), member-readable (`GET finance/giving-options`, active only). Each option carries an optional `fund` for accounting purposes only — a member never sees the fund's id/type, matching how `PledgeCampaign` already surfaces only `fundName` as a display string, not raw `Fund`. A `TitheRecord` created from a `PAYMENT_GATEWAY` checkout gets `givingOption` set when the member picked one; `null` means "General Giving," no forced default row. |
 | **AccountingPeriod** | A calendar month (year + month). Entries can only be posted to OPEN periods. Closing a period is irreversible by design (only admins with `FINANCE_RECONCILE` can close or reopen). |
 | **Chart of Accounts** | `finance_accounts` table. Each account has an optional unique `code` (e.g. `1001`), a type (ASSET / LIABILITY / INCOME / EXPENSE), subtype, normal balance (DEBIT or CREDIT), and an optional fund assignment. `code` is nullable but unique when provided — 409 if a duplicate code is submitted. |
 | **JournalEntry** | The root transaction record. Must be BALANCED (sum of debits = sum of credits) before posting. Created as `PENDING_APPROVAL`; a separate admin with `FINANCE_APPROVE` (who is not the creator — segregation of duties) approves and posts it. |
@@ -4394,9 +4401,10 @@ resolve a tenant from, only a `:tenantId` path param, so these must be resolvabl
 - **`GivingCheckoutSession`** (`giving_checkout_sessions`) — mirrors `BillingCheckoutSession` exactly: primary
   keyed by the provider's own reference, recorded at checkout-*initiation* time (before the member ever reaches the
   provider's hosted page) — the webhook only ever confirms/denies a session this row already describes, never a
-  source of truth for amount/member/tenant identity itself. `memberId`/`titheAccountId` are plain UUID columns, not
-  FK-enforced relations — `Member`/`TitheAccount` live in the tenant's own schema, which a public-schema table can't
-  foreign-key into.
+  source of truth for amount/member/tenant identity itself. `memberId`/`titheAccountId`/`givingOptionId`/`pledgeId`
+  are plain UUID columns, not FK-enforced relations — `Member`/`TitheAccount`/`GivingOption`/`Pledge` all live in
+  the tenant's own schema, which a public-schema table can't foreign-key into. `givingOptionId` and `pledgeId` are
+  mutually exclusive (see below).
 
 **Checkout initiation (`GivingCheckoutService.initiateCheckout`, member-facing, normal in-app request — tenant
 context already resolved by `TenantMiddleware`):** resolves the tenant's active config (cached 300s per tenant,
@@ -4406,6 +4414,20 @@ deactivation has real consequences" below), throws `403 GIVING_PROVIDER_NOT_CONF
 up the member for email/name, resolves currency from the optional `titheAccountId` (falls back to
 `CURRENCY_CODE`), generates a `giving_{uuid}` reference, and calls the resolved provider. Saves a `PENDING`
 `GivingCheckoutSession` row before returning `{ checkoutUrl }`.
+
+**Giving purpose designation — `givingOptionId` / `pledgeId` (mutually exclusive):** a member may optionally
+designate the payment at checkout, never both at once (`400 Bad Request` if both are given):
+- `givingOptionId` — validated against the tenant's active `GivingOption`s (`404` if missing/inactive). On webhook
+  success, the resulting `TitheRecord.givingOption` is set to it.
+- `pledgeId` — validated as one of *this member's own* `Pledge`s with `status = ACTIVE` (`404` if not found/not
+  theirs, `400` if not active — checkout never auto-creates a pledge on the fly). On webhook success, **no
+  `TitheRecord` is created at all** — instead `PledgeService.recordConfirmedContribution()` records a
+  `PledgeContribution` with `status = CONFIRMED` directly (skipping the `PENDING`/admin-review step
+  `submitContribution()` uses for member-self-reported payments, since the webhook has already verified the money
+  actually cleared) and runs the same pledge-auto-complete check `confirmContribution()` does. This keeps online
+  giving and pledge fulfillment as genuinely separate ledgers — see TitheRecord's own note above.
+
+Neither field set → the resulting `TitheRecord.givingOption` is `null`, displayed as "General Giving."
 
 **Giving Providers: deactivation has real consequences (added 2026-08, same pass as Communication Providers'
 equivalent above).** `PlatformGivingProviderService.setActive()` (`PATCH /platform/giving-providers/:id`) mirrors
@@ -4545,6 +4567,7 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 | Resource | Prefix |
 |---|---|
 | Funds | `/admin/finance/funds` |
+| Giving options | `/admin/finance/giving-options` |
 | Accounting periods | `/admin/finance/accounting-periods` |
 | Chart of accounts | `/admin/finance/accounts` |
 | External payees | `/admin/finance/external-payees` |
@@ -4583,6 +4606,7 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/finance/giving-options` | List active `GivingOption`s for the online-checkout "what is this for" selector — no `fund` exposed |
 | `GET` | `/finance/pledge-campaigns` | List active, non-lapsed pledge campaigns a member can pledge against (member-safe subset of the admin campaign shape — no `createdBy`) |
 | `POST` | `/finance/me/pledges` | Self-service pledge — member commits a pledge to a campaign |
 | `GET` | `/finance/me/pledges` | List the authenticated member's pledges |

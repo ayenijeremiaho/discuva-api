@@ -11,6 +11,7 @@ import {
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { GivingService } from '../service/giving.service';
 import { PledgeService } from '../service/pledge.service';
+import { GivingOptionService } from '../service/giving-option.service';
 import { AnnualGivingStatementScheduler } from '../scheduler/annual-giving-statement.scheduler';
 import { MakePledgeDto } from '../dto/pledge.dto';
 import { SubmitPledgeContributionDto } from '../dto/pledge-contribution.dto';
@@ -21,8 +22,14 @@ export class FinanceMemberController {
   constructor(
     private readonly givingService: GivingService,
     private readonly pledgeService: PledgeService,
+    private readonly givingOptionService: GivingOptionService,
     private readonly annualGivingStatementScheduler: AnnualGivingStatementScheduler,
   ) {}
+
+  @Get('giving-options')
+  getActiveGivingOptions() {
+    return this.givingOptionService.findAllActive();
+  }
 
   @Get('me/giving-summary')
   getGivingSummary(@Request() req: any) {

@@ -3,7 +3,11 @@ import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { GivingCheckoutService } from './giving-checkout.service';
 import { GivingProviderRegistryService } from './giving-provider-registry.service';
 import { GivingProvider } from '../entity/giving-provider.entity';
@@ -16,7 +20,10 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TitheAccount } from '../../tithe/entity/tithe-account.entity';
 import { TitheRecord } from '../../tithe/entity/tithe-record.entity';
-import { TitheSource } from '../../finance/enum/finance.enum';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
+import { Pledge } from '../../finance/entity/pledge.entity';
+import { PledgeStatus, TitheSource } from '../../finance/enum/finance.enum';
+import { PledgeService } from '../../finance/service/pledge.service';
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { CacheService } from '../../utility/service/cache.service';
 
@@ -50,6 +57,9 @@ const mockCheckoutRepo = {
 const mockTenantRepo = { findOneByOrFail: jest.fn() };
 const mockMemberRepo = { findOneByOrFail: jest.fn() };
 const mockTitheAccountRepo = { findOne: jest.fn() };
+const mockGivingOptionRepo = { exists: jest.fn() };
+const mockPledgeRepo = { findOne: jest.fn() };
+const mockPledgeService = { recordConfirmedContribution: jest.fn() };
 
 const mockManagerTx = { create: jest.fn((_e, v) => v), save: jest.fn() };
 const mockTxHost = { tx: mockManagerTx };
@@ -114,6 +124,12 @@ describe('GivingCheckoutService', () => {
           provide: getRepositoryToken(TitheAccount),
           useValue: mockTitheAccountRepo,
         },
+        {
+          provide: getRepositoryToken(GivingOption),
+          useValue: mockGivingOptionRepo,
+        },
+        { provide: getRepositoryToken(Pledge), useValue: mockPledgeRepo },
+        { provide: PledgeService, useValue: mockPledgeService },
       ],
     }).compile();
     service = module.get(GivingCheckoutService);
@@ -232,6 +248,118 @@ describe('GivingCheckoutService', () => {
           cancelUrl: 'https://b',
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when both givingOptionId and pledgeId are given', async () => {
+      await expect(
+        service.initiateCheckout('member-1', {
+          amountCents: 500000,
+          givingOptionId: 'go-1',
+          pledgeId: 'pledge-1',
+          successUrl: 'https://a',
+          cancelUrl: 'https://b',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws NotFoundException for an inactive/unknown giving option', async () => {
+      mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockMemberRepo.findOneByOrFail.mockResolvedValue({
+        id: 'member-1',
+        email: 'member@example.com',
+        firstname: 'Jane',
+        lastname: 'Doe',
+      });
+      mockGivingOptionRepo.exists.mockResolvedValue(false);
+
+      await expect(
+        service.initiateCheckout('member-1', {
+          amountCents: 500000,
+          givingOptionId: 'go-1',
+          successUrl: 'https://a',
+          cancelUrl: 'https://b',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws NotFoundException when the pledge does not belong to the member', async () => {
+      mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockMemberRepo.findOneByOrFail.mockResolvedValue({
+        id: 'member-1',
+        email: 'member@example.com',
+        firstname: 'Jane',
+        lastname: 'Doe',
+      });
+      mockPledgeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.initiateCheckout('member-1', {
+          amountCents: 500000,
+          pledgeId: 'pledge-1',
+          successUrl: 'https://a',
+          cancelUrl: 'https://b',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws BadRequestException when the pledge is not ACTIVE', async () => {
+      mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockMemberRepo.findOneByOrFail.mockResolvedValue({
+        id: 'member-1',
+        email: 'member@example.com',
+        firstname: 'Jane',
+        lastname: 'Doe',
+      });
+      mockPledgeRepo.findOne.mockResolvedValue({
+        id: 'pledge-1',
+        status: PledgeStatus.COMPLETED,
+      });
+
+      await expect(
+        service.initiateCheckout('member-1', {
+          amountCents: 500000,
+          pledgeId: 'pledge-1',
+          successUrl: 'https://a',
+          cancelUrl: 'https://b',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('stores givingOptionId/pledgeId on the session when valid', async () => {
+      mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockMemberRepo.findOneByOrFail.mockResolvedValue({
+        id: 'member-1',
+        email: 'member@example.com',
+        firstname: 'Jane',
+        lastname: 'Doe',
+      });
+      mockGivingOptionRepo.exists.mockResolvedValue(true);
+      mockGivingProvider.createCheckoutSession.mockResolvedValue({
+        checkoutUrl: 'https://checkout.paystack.com/abc',
+      });
+
+      await service.initiateCheckout('member-1', {
+        amountCents: 500000,
+        givingOptionId: 'go-1',
+        successUrl: 'https://a',
+        cancelUrl: 'https://b',
+      });
+
+      expect(mockCheckoutRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ givingOptionId: 'go-1', pledgeId: null }),
+      );
     });
   });
 
@@ -362,6 +490,81 @@ describe('GivingCheckoutService', () => {
         TitheRecord,
         expect.any(Object),
       );
+    });
+
+    it('sets givingOption on the TitheRecord when the session designated one', async () => {
+      mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockGivingProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'charge.succeeded',
+        providerReference: 'giving_abc',
+        raw: {},
+      });
+      mockManager.findOne.mockResolvedValue({
+        id: 'giving_abc',
+        tenantId: 'tenant-1',
+        memberId: 'member-1',
+        amountCents: 500000,
+        provider: 'paystack',
+        givingOptionId: 'go-1',
+        status: GivingCheckoutStatus.PENDING,
+      });
+      mockTenantRepo.findOneByOrFail.mockResolvedValue({
+        id: 'tenant-1',
+        schemaName: 'tenant_schema_1',
+      });
+
+      await service.handleWebhook(
+        'tenant-1',
+        'paystack',
+        Buffer.from('{}'),
+        'sig',
+      );
+
+      expect(mockManagerTx.create).toHaveBeenCalledWith(
+        TitheRecord,
+        expect.objectContaining({ givingOption: { id: 'go-1' } }),
+      );
+    });
+
+    it('records a CONFIRMED PledgeContribution instead of a TitheRecord when the session designated a pledge', async () => {
+      mockConfigQB({
+        providerId: 'paystack',
+        credentialsEncrypted: { secretKey: 'sk_1' },
+      });
+      mockGivingProvider.verifyAndParseWebhook.mockReturnValue({
+        type: 'charge.succeeded',
+        providerReference: 'giving_abc',
+        raw: {},
+      });
+      mockManager.findOne.mockResolvedValue({
+        id: 'giving_abc',
+        tenantId: 'tenant-1',
+        memberId: 'member-1',
+        amountCents: 500000,
+        provider: 'paystack',
+        pledgeId: 'pledge-1',
+        status: GivingCheckoutStatus.PENDING,
+      });
+      mockTenantRepo.findOneByOrFail.mockResolvedValue({
+        id: 'tenant-1',
+        schemaName: 'tenant_schema_1',
+      });
+
+      await service.handleWebhook(
+        'tenant-1',
+        'paystack',
+        Buffer.from('{}'),
+        'sig',
+      );
+
+      expect(
+        mockPledgeService.recordConfirmedContribution,
+      ).toHaveBeenCalledWith('member-1', 'pledge-1', 5000, 'giving_abc');
+      expect(mockManagerTx.create).not.toHaveBeenCalled();
+      expect(mockManagerTx.save).not.toHaveBeenCalled();
     });
   });
 });

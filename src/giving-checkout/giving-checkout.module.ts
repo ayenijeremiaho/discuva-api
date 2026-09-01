@@ -7,6 +7,8 @@ import { GivingCheckoutSession } from './entity/giving-checkout-session.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Member } from '../member/entity/member.entity';
 import { TitheAccount } from '../tithe/entity/tithe-account.entity';
+import { GivingOption } from '../finance/entity/giving-option.entity';
+import { Pledge } from '../finance/entity/pledge.entity';
 import { PaystackGivingProvider } from './provider/paystack-giving.provider';
 import { FlutterwaveGivingProvider } from './provider/flutterwave-giving.provider';
 import { KoraGivingProvider } from './provider/kora-giving.provider';
@@ -19,6 +21,7 @@ import { GivingCheckoutController } from './controller/giving-checkout.controlle
 import { GivingWebhookController } from './controller/giving-webhook.controller';
 import { UtilityModule } from '../utility/utility.module';
 import { AdminModule } from '../admin/admin.module';
+import { FinanceModule } from '../finance/finance.module';
 
 // GivingProvider/TenantGivingProviderConfig/GivingCheckoutSession are all
 // control-plane (public, never a search_path target) — plain TypeOrmModule,
@@ -36,9 +39,15 @@ import { AdminModule } from '../admin/admin.module';
       GivingCheckoutSession,
       Tenant,
     ]),
-    TenantTypeOrmModule.forFeature([Member, TitheAccount]),
+    TenantTypeOrmModule.forFeature([
+      Member,
+      TitheAccount,
+      GivingOption,
+      Pledge,
+    ]),
     UtilityModule,
     AdminModule,
+    FinanceModule,
   ],
   controllers: [
     TenantGivingProviderController,

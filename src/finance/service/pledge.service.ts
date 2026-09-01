@@ -380,6 +380,45 @@ export class PledgeService {
     return saved;
   }
 
+  // Called by GivingCheckoutService.handleWebhook when a member designates
+  // an online payment toward a pledge — unlike submitContribution (member
+  // self-reports, admin must confirm), the webhook has already verified the
+  // money actually cleared, so this records it as CONFIRMED directly with
+  // no review step. Callable as a normal injected service from inside
+  // runInTenantContext: regular @InjectRepository-backed repos transparently
+  // participate in the ambient CLS-scoped transaction it opens (see
+  // tithe.processor.ts's doHandleBatch for the same pattern), so no manual
+  // entity-manager threading is needed here.
+  async recordConfirmedContribution(
+    memberId: string,
+    pledgeId: string,
+    amount: number,
+    reference: string,
+  ): Promise<PledgeContribution> {
+    const pledge = await this.pledgeRepo.findOne({ where: { id: pledgeId } });
+    if (!pledge) throw new NotFoundException('Pledge not found.');
+
+    const contribution = this.contributionRepo.create({
+      pledge,
+      submittedBy: { id: memberId } as any,
+      amount,
+      paymentDate: new Date().toISOString().slice(0, 10),
+      reference,
+      status: PledgeContributionStatus.CONFIRMED,
+    });
+    const saved = await this.contributionRepo.save(contribution);
+
+    await this.maybeAutoCompletePledge(pledge.id);
+
+    this.auditLogService.log('PLEDGE_CONTRIBUTION_CONFIRMED', {
+      actorId: memberId,
+      targetId: saved.id,
+      metadata: { pledgeId, amount, source: 'giving-checkout' },
+    });
+
+    return saved;
+  }
+
   async getMyContributions(
     memberId: string,
     pledgeId: string,

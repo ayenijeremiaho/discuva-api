@@ -284,6 +284,96 @@ describe('PledgeService', () => {
     });
   });
 
+  describe('recordConfirmedContribution', () => {
+    it('creates a CONFIRMED contribution directly, with no PENDING/review step', async () => {
+      mockPledgeRepo.findOne.mockResolvedValue({
+        id: 'pledge-1',
+        status: PledgeStatus.ACTIVE,
+        totalAmount: 50000,
+      });
+      const created = { id: 'contrib-1' };
+      mockContributionRepo.create.mockReturnValue(created);
+      mockContributionRepo.save.mockResolvedValue(created);
+      const sumQb = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ sum: '5000' }),
+      };
+      mockContributionRepo.createQueryBuilder.mockReturnValue(sumQb);
+
+      const result = await service.recordConfirmedContribution(
+        'member-1',
+        'pledge-1',
+        5000,
+        'giving_abc123',
+      );
+
+      expect(result).toEqual(created);
+      expect(mockContributionRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          amount: 5000,
+          reference: 'giving_abc123',
+          status: PledgeContributionStatus.CONFIRMED,
+        }),
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'PLEDGE_CONTRIBUTION_CONFIRMED',
+        expect.objectContaining({
+          metadata: expect.objectContaining({ source: 'giving-checkout' }),
+        }),
+      );
+    });
+
+    it('auto-completes the pledge when the confirmed total covers it', async () => {
+      mockPledgeRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'pledge-1',
+          status: PledgeStatus.ACTIVE,
+          totalAmount: 5000,
+        })
+        .mockResolvedValueOnce({
+          id: 'pledge-1',
+          status: PledgeStatus.ACTIVE,
+          totalAmount: 5000,
+        });
+      mockContributionRepo.create.mockReturnValue({ id: 'contrib-1' });
+      mockContributionRepo.save.mockResolvedValue({ id: 'contrib-1' });
+      mockPledgeRepo.save.mockResolvedValue({});
+      const sumQb = {
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({ sum: '5000' }),
+      };
+      mockContributionRepo.createQueryBuilder.mockReturnValue(sumQb);
+
+      await service.recordConfirmedContribution(
+        'member-1',
+        'pledge-1',
+        5000,
+        'giving_abc123',
+      );
+
+      expect(mockPledgeRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: PledgeStatus.COMPLETED }),
+      );
+    });
+
+    it('throws NotFoundException when the pledge does not exist', async () => {
+      mockPledgeRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.recordConfirmedContribution(
+          'member-1',
+          'missing-pledge',
+          5000,
+          'giving_abc123',
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('confirmContribution', () => {
     it('throws NotFoundException if no pending contribution matches', async () => {
       mockContributionRepo.findOne.mockResolvedValue(null);

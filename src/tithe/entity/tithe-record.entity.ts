@@ -10,6 +10,7 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TitheUploadBatch } from './tithe-upload-batch.entity';
 import { TitheSource } from '../../finance/enum/finance.enum';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
 
 @Entity({ name: 'tithe_records' })
 @Index('IDX_tithe_records_member_payment', ['member', 'paymentDate'])
@@ -47,4 +48,11 @@ export class TitheRecord extends BaseEntity {
 
   @Column({ type: 'varchar', nullable: true, name: 'payment_channel' })
   paymentChannel: string | null;
+
+  // Only set for PAYMENT_GATEWAY rows where the member designated a
+  // purpose at checkout — null means "General Giving" (no forced default
+  // row, mirrors how an omitted TitheAccount is handled).
+  @ManyToOne(() => GivingOption, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'giving_option_id' })
+  givingOption: GivingOption | null;
 }

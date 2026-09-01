@@ -13623,14 +13623,14 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_READ). Returns paginated confirmed tithe records. Filters: memberId, departmentId, fromMonth (YYYY-MM), toMonth (YYYY-MM), search (wildcard on name/email), accountId (UUID)."
+            "description": "AdminGuard (FINANCE_READ). Returns paginated confirmed tithe records. Filters: memberId, departmentId, fromMonth (YYYY-MM), toMonth (YYYY-MM), search (wildcard on name/email), accountId (UUID). source is MANUAL_PROOF for CSV batch/proof-of-payment records or PAYMENT_GATEWAY for online checkout; paymentChannel (paystack/flutterwave/kora/stripe) and externalReference are only set for PAYMENT_GATEWAY rows."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"data\": [\n    {\n      \"id\": \"b4c5d6e7-8f9a-0b1c-2d3e-4f5a6b7c8d9e\",\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"amount\": \"50000.00\",\n      \"currency\": \"NGN\",\n      \"transactionDate\": \"2026-06-01\",\n      \"batch\": {\n        \"id\": \"c5d6e7f8-9a0b-1c2d-3e4f-5a6b7c8d9e0f\"\n      },\n      \"account\": {\n        \"id\": \"a3b4c5d6-7e8f-9a0b-1c2d-3e4f5a6b7c8d\",\n        \"name\": \"Main Account\"\n      }\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"b4c5d6e7-8f9a-0b1c-2d3e-4f5a6b7c8d9e\",\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\",\n        \"email\": \"john@example.com\"\n      },\n      \"batch\": {\n        \"id\": \"c5d6e7f8-9a0b-1c2d-3e4f-5a6b7c8d9e0f\"\n      },\n      \"amount\": \"50000.00\",\n      \"paymentDate\": \"2026-06-01\",\n      \"reference\": null,\n      \"bankName\": \"GTBank\",\n      \"source\": \"MANUAL_PROOF\",\n      \"externalReference\": null,\n      \"paymentChannel\": null\n    },\n    {\n      \"id\": \"c5d6e7f8-9a0b-1c2d-3e4f-5a6b7c8d9e0f\",\n      \"member\": {\n        \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n        \"firstname\": \"Jane\",\n        \"lastname\": \"Smith\",\n        \"email\": \"jane@example.com\"\n      },\n      \"batch\": null,\n      \"amount\": \"2000.00\",\n      \"paymentDate\": \"2026-06-02\",\n      \"reference\": null,\n      \"bankName\": null,\n      \"source\": \"PAYMENT_GATEWAY\",\n      \"externalReference\": \"giving_a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"paymentChannel\": \"paystack\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 2,\n  \"totalPages\": 1\n}"
             },
             {
               "name": "403 Forbidden",
@@ -13695,7 +13695,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_READ). Downloads all matching tithe records as tithe-records.xlsx. Columns: Member Name, Email, Account, Currency, Amount, Payment Date, Sender Bank, Reference. Supports same filters as the list endpoint (including accountId); no pagination."
+            "description": "AdminGuard (FINANCE_READ). Downloads all matching tithe records as tithe-records.xlsx. Columns: Member Name, Email, Account, Currency, Amount, Payment Date, Sender Bank, Source, Payment Gateway, Reference. Supports same filters as the list endpoint (including accountId); no pagination."
           },
           "response": [
             {
@@ -23067,6 +23067,158 @@
           ]
         },
         {
+          "name": "Create giving option",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/giving-options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "giving-options"
+              ]
+            },
+            "description": "FINANCE_WRITE. Donor-facing \"what is this gift for\" option for online giving-checkout (Tithe, Offering, General Giving, Building Fund, etc.). fundId is optional and purely for back-office accounting — never exposed to members via GET /finance/giving-options.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Building Fund\",\n  \"description\": \"Contributions toward the new sanctuary building project\",\n  \"fundId\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"name\": \"Building Fund\",\n  \"description\": \"Contributions toward the new sanctuary building project\",\n  \"fund\": {\n    \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n    \"name\": \"General Fund\"\n  },\n  \"isActive\": true,\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List giving options",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/giving-options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "giving-options"
+              ]
+            },
+            "description": "FINANCE_READ. Returns all giving options (active and inactive) with their backing fund, for admin management."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n    \"name\": \"Building Fund\",\n    \"description\": \"Contributions toward the new sanctuary building project\",\n    \"fund\": {\n      \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n      \"name\": \"General Fund\"\n    },\n    \"isActive\": true,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get giving option",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/giving-options/{{givingOptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "giving-options",
+                "{{givingOptionId}}"
+              ]
+            },
+            "description": "FINANCE_READ."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"name\": \"Building Fund\",\n  \"description\": \"Contributions toward the new sanctuary building project\",\n  \"fund\": {\n    \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n    \"name\": \"General Fund\"\n  },\n  \"isActive\": true,\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update giving option",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/giving-options/{{givingOptionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "giving-options",
+                "{{givingOptionId}}"
+              ]
+            },
+            "description": "FINANCE_WRITE. All fields optional — only provided fields are updated.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"name\": \"Building Fund\",\n  \"description\": \"Contributions toward the new sanctuary building project\",\n  \"fund\": {\n    \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n    \"name\": \"General Fund\"\n  },\n  \"isActive\": false,\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
+            }
+          ]
+        },
+        {
           "name": "Create accounting period",
           "request": {
             "method": "POST",
@@ -26003,6 +26155,37 @@
           ]
         },
         {
+          "name": "List Active Giving Options",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving-options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving-options"
+              ]
+            },
+            "description": "Active GivingOptions for the \"what is this gift for\" checkout selector — Tithe/Offering/General Giving/Building Fund/etc, admin-curated at /admin/finance/giving-options. Never includes the backing fund — that's back-office accounting data only."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n    \"name\": \"Building Fund\",\n    \"description\": \"Contributions toward the new sanctuary building project\",\n    \"isActive\": true,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
           "name": "Initiate Giving Checkout",
           "request": {
             "method": "POST",
@@ -26027,10 +26210,10 @@
                 "checkout"
               ]
             },
-            "description": "titheAccountId is optional (earmarks which fund/account this is for — purely informational, also determines the checkout currency; omitted means CURRENCY_CODE). Returns a checkoutUrl to redirect the member to. 403 GIVING_PROVIDER_NOT_CONFIGURED if the church has no active giving provider.",
+            "description": "titheAccountId is optional (earmarks which fund/account this is for — purely informational, also determines the checkout currency; omitted means CURRENCY_CODE). givingOptionId and pledgeId are optional and mutually exclusive (400 if both given): givingOptionId designates a purpose (Tithe/Offering/General Giving/etc., see GET /finance/giving-options) and the resulting TitheRecord.givingOption is set; pledgeId designates the payment toward one of the member's own ACTIVE pledges instead — this does NOT create a TitheRecord, it records a CONFIRMED PledgeContribution (404 if the pledge isn't the member's own, 400 if not ACTIVE). Returns a checkoutUrl to redirect the member to. 403 GIVING_PROVIDER_NOT_CONFIGURED if the church has no active giving provider.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"amountCents\": 500000,\n  \"titheAccountId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"successUrl\": \"https://church.discuva.org/giving?checkout=success\",\n  \"cancelUrl\": \"https://church.discuva.org/giving?checkout=cancelled\"\n}",
+              "raw": "{\n  \"amountCents\": 500000,\n  \"titheAccountId\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"givingOptionId\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"successUrl\": \"https://church.discuva.org/giving?checkout=success\",\n  \"cancelUrl\": \"https://church.discuva.org/giving?checkout=cancelled\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
