@@ -17,9 +17,8 @@ import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enu
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PdfService } from '../../utility/service/pdf.service';
-import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
-import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 
 const mockProgrammeQueryBuilder = {
   leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -89,13 +88,8 @@ const mockPdfService = {
   generateProgrammeDraft: jest.fn().mockResolvedValue(Buffer.from('')),
 };
 
-const mockEmailQueueService = {
-  queueEmailWithTemplate: jest.fn().mockResolvedValue('job-1'),
-  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
-};
-
-const mockPushNotificationService = {
-  dispatchToMemberIds: jest.fn().mockResolvedValue(undefined),
+const mockNotificationDispatchService = {
+  notifyMember: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockAdmin = {
@@ -164,10 +158,9 @@ describe('ServiceProgrammeService', () => {
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: PdfService, useValue: mockPdfService },
-        { provide: EmailQueueService, useValue: mockEmailQueueService },
         {
-          provide: PushNotificationService,
-          useValue: mockPushNotificationService,
+          provide: NotificationDispatchService,
+          useValue: mockNotificationDispatchService,
         },
       ],
     }).compile();
@@ -747,13 +740,15 @@ describe('ServiceProgrammeService', () => {
 
       await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
 
-      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
-        'ada@example.com',
-        expect.any(String),
-        'service-slot-assigned',
-        expect.objectContaining({ memberName: 'Ada' }),
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          email: expect.objectContaining({
+            to: 'ada@example.com',
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({ memberName: 'Ada' }),
+          }),
+        }),
       );
     });
 
@@ -782,21 +777,32 @@ describe('ServiceProgrammeService', () => {
         backupMemberId: 'member-2',
       });
 
-      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
-        'ben@example.com',
-        expect.stringContaining('Backup'),
-        'service-slot-assigned',
-        expect.objectContaining({ memberName: 'Ben', isBackup: true }),
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          email: expect.objectContaining({
+            to: 'ben@example.com',
+            subject: expect.stringContaining('Backup'),
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({
+              memberName: 'Ben',
+              isBackup: true,
+            }),
+          }),
+        }),
       );
-      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
-        'ada@example.com',
-        expect.any(String),
-        'service-slot-assigned',
-        expect.objectContaining({ memberName: 'Ada', isBackup: false }),
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          email: expect.objectContaining({
+            to: 'ada@example.com',
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({
+              memberName: 'Ada',
+              isBackup: false,
+            }),
+          }),
+        }),
       );
     });
 
@@ -822,20 +828,19 @@ describe('ServiceProgrammeService', () => {
 
       await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
 
-      expect(
-        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
-      ).toHaveBeenCalledWith(
-        'ada@example.com',
-        expect.any(String),
-        'service-slot-assigned',
-        expect.objectContaining({ memberName: 'Ada' }),
-        [expect.objectContaining({ filename: 'service-slot.ics' })],
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          email: expect.objectContaining({
+            to: 'ada@example.com',
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({ memberName: 'Ada' }),
+            attachments: [
+              expect.objectContaining({ filename: 'service-slot.ics' }),
+            ],
+          }),
+        }),
       );
-      expect(
-        mockEmailQueueService.queueEmailWithTemplate,
-      ).not.toHaveBeenCalled();
     });
 
     it('does not email when the assigned member has no email', async () => {
@@ -850,9 +855,9 @@ describe('ServiceProgrammeService', () => {
       mockSlotRepo.save.mockResolvedValue(created);
 
       await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
-      expect(
-        mockEmailQueueService.queueEmailWithTemplate,
-      ).not.toHaveBeenCalled();
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({ email: undefined }),
+      );
     });
 
     it('dispatches a push notification to the assigned member even when they have no email', async () => {
@@ -868,12 +873,12 @@ describe('ServiceProgrammeService', () => {
 
       await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
 
-      expect(
-        mockPushNotificationService.dispatchToMemberIds,
-      ).toHaveBeenCalledWith(
-        ['member-1'],
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
         expect.objectContaining({
-          idempotencyKey: 'service-slot-assigned:new-slot:member-1',
+          push: expect.objectContaining({
+            memberIds: ['member-1'],
+            idempotencyKey: 'service-slot-assigned:new-slot:member-1',
+          }),
         }),
       );
     });
@@ -900,26 +905,19 @@ describe('ServiceProgrammeService', () => {
 
       await service.addSlot('prog-1', { ...dto, memberId: 'member-1' });
 
-      expect(
-        mockEmailQueueService.queueEmailWithTemplateAndAttachments,
-      ).toHaveBeenCalledWith(
-        'ada@example.com',
-        expect.any(String),
-        'service-slot-assigned',
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
         expect.objectContaining({
-          serviceDate: expect.stringContaining('2026'),
-          serviceTime: expect.stringContaining('–'),
-        }),
-        expect.any(Array),
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-      );
-      expect(
-        mockPushNotificationService.dispatchToMemberIds,
-      ).toHaveBeenCalledWith(
-        ['member-1'],
-        expect.objectContaining({
-          body: expect.stringContaining('2026'),
+          email: expect.objectContaining({
+            to: 'ada@example.com',
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({
+              serviceDate: expect.stringContaining('2026'),
+              serviceTime: expect.stringContaining('–'),
+            }),
+          }),
+          push: expect.objectContaining({
+            body: expect.stringContaining('2026'),
+          }),
         }),
       );
     });
@@ -996,13 +994,15 @@ describe('ServiceProgrammeService', () => {
 
       await service.updateSlot('prog-1', 'slot-1', { memberId: 'member-1' });
 
-      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
-        'ada@example.com',
-        expect.any(String),
-        'service-slot-assigned',
-        expect.objectContaining({ memberName: 'Ada' }),
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          email: expect.objectContaining({
+            to: 'ada@example.com',
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({ memberName: 'Ada' }),
+          }),
+        }),
       );
     });
 
@@ -1020,13 +1020,19 @@ describe('ServiceProgrammeService', () => {
         backupMemberId: 'member-2',
       });
 
-      expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
-        'ben@example.com',
-        expect.stringContaining('Backup'),
-        'service-slot-assigned',
-        expect.objectContaining({ memberName: 'Ben', isBackup: true }),
-        undefined,
-        EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          email: expect.objectContaining({
+            to: 'ben@example.com',
+            subject: expect.stringContaining('Backup'),
+            template: 'service-slot-assigned',
+            data: expect.objectContaining({
+              memberName: 'Ben',
+              isBackup: true,
+            }),
+          }),
+        }),
       );
     });
 
@@ -1049,7 +1055,7 @@ describe('ServiceProgrammeService', () => {
       });
 
       expect(
-        mockEmailQueueService.queueEmailWithTemplate,
+        mockNotificationDispatchService.notifyMember,
       ).not.toHaveBeenCalled();
     });
 
@@ -1067,7 +1073,7 @@ describe('ServiceProgrammeService', () => {
 
       await service.updateSlot('prog-1', 'slot-1', { topic: 'Updated Topic' });
       expect(
-        mockEmailQueueService.queueEmailWithTemplate,
+        mockNotificationDispatchService.notifyMember,
       ).not.toHaveBeenCalled();
     });
 
@@ -1085,7 +1091,7 @@ describe('ServiceProgrammeService', () => {
 
       await service.updateSlot('prog-1', 'slot-1', { memberId: null });
       expect(
-        mockEmailQueueService.queueEmailWithTemplate,
+        mockNotificationDispatchService.notifyMember,
       ).not.toHaveBeenCalled();
     });
 

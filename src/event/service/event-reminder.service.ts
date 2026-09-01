@@ -22,13 +22,16 @@ import {
 } from '../dto/event-reminder.dto';
 import { AnnouncementAudienceEnum } from '../../announcement/enum/announcement-audience.enum';
 import { PRESET_MINUTES } from '../enum/reminder-interval-preset.enum';
-import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
-import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import {
+  NotificationDispatchService,
+  NotifyMemberEmail,
+  NotifyMemberPush,
+} from '../../utility/service/notification-dispatch.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
@@ -50,10 +53,9 @@ export class EventReminderService {
     private readonly announcementRepo: Repository<Announcement>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
-    private readonly utilityService: UtilityService,
+    private readonly notificationDispatchService: NotificationDispatchService,
     private readonly cacheService: CacheService,
     private readonly config: ConfigService,
-    private readonly pushService: PushNotificationService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
@@ -225,30 +227,39 @@ export class EventReminderService {
       this.getRecipientMemberIds(reminder),
     ]);
 
-    if (recipients.length > 0) {
-      this.utilityService.sendEmailWithTemplate(
-        recipients as [string],
-        title,
-        'service-reminder',
-        {
-          slot_name: slot.name,
-          time_label: label,
-          start_time: slot.startTime.toLocaleTimeString(this.currencyLocale, {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-        },
-        undefined,
-        EmailCategory.EVENT_REMINDER,
-      );
-    }
+    const email: NotifyMemberEmail | undefined =
+      recipients.length > 0
+        ? {
+            to: recipients,
+            subject: title,
+            template: 'service-reminder',
+            data: {
+              slot_name: slot.name,
+              time_label: label,
+              start_time: slot.startTime.toLocaleTimeString(
+                this.currencyLocale,
+                { hour: '2-digit', minute: '2-digit' },
+              ),
+            },
+          }
+        : undefined;
 
-    if (recipientIds.length > 0) {
-      this.pushService.dispatchToMemberIds(recipientIds, {
-        idempotencyKey: `event-reminder:${reminder.id}`,
-        title,
-        body: `${slot.name} begins in ${label}. Please make your way and check in on time.`,
-        url: '/events',
+    const push: NotifyMemberPush | undefined =
+      recipientIds.length > 0
+        ? {
+            memberIds: recipientIds,
+            title,
+            body: `${slot.name} begins in ${label}. Please make your way and check in on time.`,
+            url: '/events',
+            idempotencyKey: `event-reminder:${reminder.id}`,
+          }
+        : undefined;
+
+    if (email || push) {
+      this.notificationDispatchService.notifyMember({
+        category: EmailCategory.EVENT_REMINDER,
+        email,
+        push,
       });
     }
 

@@ -5,19 +5,19 @@ import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { EventReminderService } from './event-reminder.service';
-import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EventReminder } from '../entity/event-reminder.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Announcement } from '../../announcement/entity/announcement.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
-import { UtilityService } from '../../utility/service/utility.service';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { CacheService } from '../../utility/service/cache.service';
 import {
   PRESET_MINUTES,
   ReminderIntervalPresetEnum,
 } from '../enum/reminder-interval-preset.enum';
 import { AnnouncementAudienceEnum } from '../../announcement/enum/announcement-audience.enum';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 
 const SLOT_START = new Date('2026-07-01T09:00:00.000Z');
 
@@ -78,8 +78,8 @@ const mockAnnouncementRepo = {
   save: jest.fn().mockResolvedValue({}),
 };
 
-const mockUtilityService = {
-  sendEmailWithTemplate: jest.fn(),
+const mockNotificationDispatchService = {
+  notifyMember: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockCacheService = {
@@ -130,13 +130,12 @@ describe('EventReminderService', () => {
           useValue: mockAnnouncementRepo,
         },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
-        { provide: UtilityService, useValue: mockUtilityService },
+        {
+          provide: NotificationDispatchService,
+          useValue: mockNotificationDispatchService,
+        },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
-        {
-          provide: PushNotificationService,
-          useValue: { dispatchToMemberIds: jest.fn() },
-        },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -290,6 +289,54 @@ describe('EventReminderService', () => {
       expect(mockReminderRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ lastSentAt: expect.any(Date) }),
       );
+    });
+
+    it('dispatches one notifyMember call with both the email and push legs, gated by EVENT_REMINDER', async () => {
+      const reminder = makeReminder();
+      mockReminderQb.getMany.mockResolvedValue([reminder]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest
+          .fn()
+          .mockResolvedValue([{ id: 'member-1', email: 'ada@example.com' }]),
+      });
+
+      await service.dispatchDueReminders();
+
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: EmailCategory.EVENT_REMINDER,
+          email: expect.objectContaining({
+            to: ['ada@example.com'],
+            template: 'service-reminder',
+          }),
+          push: expect.objectContaining({
+            memberIds: ['member-1'],
+            idempotencyKey: 'event-reminder:reminder-1',
+          }),
+        }),
+      );
+    });
+
+    it('does not call notifyMember at all when there are no recipients on either channel', async () => {
+      const reminder = makeReminder();
+      mockReminderQb.getMany.mockResolvedValue([reminder]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        innerJoin: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      });
+
+      await service.dispatchDueReminders();
+
+      expect(
+        mockNotificationDispatchService.notifyMember,
+      ).not.toHaveBeenCalled();
     });
 
     it('releases the lock even when no reminders are due', async () => {

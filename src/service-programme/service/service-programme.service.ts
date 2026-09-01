@@ -32,9 +32,11 @@ import {
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PdfService } from '../../utility/service/pdf.service';
-import { EmailQueueService } from '../../utility/service/email-queue.service';
+import {
+  NotificationDispatchService,
+  NotifyMemberEmail,
+} from '../../utility/service/notification-dispatch.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
-import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { buildIcsEvent } from '../../utility/util/ics-builder';
 import {
   withMemberNames,
@@ -87,8 +89,7 @@ export class ServiceProgrammeService {
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
     private readonly pdfService: PdfService,
-    private readonly emailQueueService: EmailQueueService,
-    private readonly pushNotificationService: PushNotificationService,
+    private readonly notificationDispatchService: NotificationDispatchService,
   ) {}
 
   private readonly logger = new Logger(ServiceProgrammeService.name);
@@ -644,6 +645,7 @@ export class ServiceProgrammeService {
       serviceTime,
     };
 
+    let email: NotifyMemberEmail | undefined;
     if (member.email) {
       if (programme.serviceSlot?.startTime && programme.serviceSlot?.endTime) {
         const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
@@ -654,24 +656,20 @@ export class ServiceProgrammeService {
           summary: `${slotType}${topicSuffix} — ${serviceSlotName}`,
           description: `You're assigned to ${slotType} for ${serviceSlotName}.`,
         });
-        this.emailQueueService.queueEmailWithTemplateAndAttachments(
-          member.email,
+        email = {
+          to: member.email,
           subject,
-          'service-slot-assigned',
-          templateData,
-          [{ filename: 'service-slot.ics', content: ics }],
-          undefined,
-          EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-        );
+          template: 'service-slot-assigned',
+          data: templateData,
+          attachments: [{ filename: 'service-slot.ics', content: ics }],
+        };
       } else {
-        this.emailQueueService.queueEmailWithTemplate(
-          member.email,
+        email = {
+          to: member.email,
           subject,
-          'service-slot-assigned',
-          templateData,
-          undefined,
-          EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-        );
+          template: 'service-slot-assigned',
+          data: templateData,
+        };
       }
     }
 
@@ -679,11 +677,16 @@ export class ServiceProgrammeService {
     if (serviceDate) pushBody += ` on ${serviceDate}`;
     if (serviceDate && serviceTime) pushBody += ` at ${serviceTime}`;
 
-    this.pushNotificationService.dispatchToMemberIds([member.id], {
-      idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
-      title: subject,
-      body: pushBody,
-      url: '/events',
+    this.notificationDispatchService.notifyMember({
+      category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      email,
+      push: {
+        memberIds: [member.id],
+        title: subject,
+        body: pushBody,
+        url: '/events',
+        idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
+      },
     });
   }
 
