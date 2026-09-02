@@ -36,4 +36,12 @@ export class FormSubmission extends BaseEntity {
   // field just leaves a harmless orphaned key behind.
   @Column({ type: 'jsonb' })
   answers: Record<string, unknown>;
+
+  // Normalized value of Form.dedupField's submitted answer, set only when
+  // the form designates a dedup field. Paired with a partial unique index
+  // (form_id, dedup_value_normalized) WHERE NOT NULL — enforced at the DB
+  // level so a race between two near-simultaneous duplicate submissions
+  // can't both slip through an application-level check alone.
+  @Column({ name: 'dedup_value_normalized', nullable: true })
+  dedupValueNormalized: string | null;
 }

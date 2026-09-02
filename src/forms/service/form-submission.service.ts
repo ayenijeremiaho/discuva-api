@@ -5,7 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import type { CountryCode } from 'libphonenumber-js';
 import { Form } from '../entity/form.entity';
 import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
@@ -13,14 +15,32 @@ import { Member } from '../../member/entity/member.entity';
 import {
   FIELD_TYPES_REQUIRING_OPTIONS,
   FormFieldAutoFill,
+  FormFieldType,
   FormVisibility,
 } from '../enum/form.enum';
+import {
+  FormSubmitResponseDto,
+  PublicFormDto,
+  PublicFormFieldDto,
+} from '../dto/form.dto';
 import { FollowUpService } from '../../follow-up/service/follow-up.service';
 import { CreateFirstTimerDto } from '../../follow-up/dto/create-first-timer.dto';
+import { GroupService } from '../../group/service/group.service';
+import { normalizePhoneNumber } from '../../utility/decorators/normalize-phone.decorator';
 
 @Injectable()
 export class FormSubmissionService {
   private readonly logger = new Logger(FormSubmissionService.name);
+
+  // Only used to interpret a LOCAL-format phone number with no country
+  // code (e.g. a bare "0801234567") — a number typed with its own country
+  // code (leading "+", or a bare international dialing code) is parsed
+  // correctly regardless of this default. CURRENCY_LOCALE is a global
+  // per-deployment env var (not per-tenant), same convention already used
+  // for currency/date formatting elsewhere (TitheService, PdfService,
+  // EventReminderService) — this platform is multi-country, so this is a
+  // configurable default, not a Nigeria-only assumption.
+  private readonly defaultPhoneRegion: CountryCode;
 
   constructor(
     @InjectRepository(Form)
@@ -30,18 +50,34 @@ export class FormSubmissionService {
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
     private readonly followUpService: FollowUpService,
-  ) {}
+    private readonly groupService: GroupService,
+    private readonly config: ConfigService,
+  ) {
+    const locale = this.config.get<string>('CURRENCY_LOCALE', 'en-NG');
+    this.defaultPhoneRegion = (locale.split('-')[1]?.toUpperCase() ??
+      'NG') as CountryCode;
+  }
 
-  async listForMembers(eventId?: string): Promise<Form[]> {
-    const where: Record<string, unknown> = {
-      isActive: true,
-      visibility: In([FormVisibility.MEMBERS, FormVisibility.PUBLIC]),
-    };
-    if (eventId) where.event = { id: eventId };
-    return this.formRepo.find({
-      where,
-      order: { createdAt: 'DESC' },
-    });
+  async listForMembers(
+    eventId: string | undefined,
+    memberId: string,
+  ): Promise<Form[]> {
+    const qb = this.formRepo
+      .createQueryBuilder('form')
+      .where('form.isActive = true')
+      .andWhere('form.visibility IN (:...visibilities)', {
+        visibilities: [FormVisibility.MEMBERS, FormVisibility.PUBLIC],
+      })
+      .andWhere(
+        `(form.visibility != :members OR form.audience_group_id IS NULL OR EXISTS (
+           SELECT 1 FROM group_members gm
+           WHERE gm.group_id = form.audience_group_id AND gm.member_id = :memberId
+         ))`,
+        { members: FormVisibility.MEMBERS, memberId },
+      )
+      .orderBy('form.createdAt', 'DESC');
+    if (eventId) qb.andWhere('form.event = :eventId', { eventId });
+    return qb.getMany();
   }
 
   async getForMember(
@@ -58,6 +94,14 @@ export class FormSubmissionService {
     ) {
       throw new NotFoundException('Form not found');
     }
+    if (form.visibility === FormVisibility.MEMBERS && form.audienceGroup) {
+      const allowedIds = await this.groupService.getMemberIdsForGroup(
+        form.audienceGroup.id,
+      );
+      if (!allowedIds.includes(memberId)) {
+        throw new NotFoundException('Form not found');
+      }
+    }
 
     const member = await this.memberRepo.findOneBy({ id: memberId });
     const suggestedValues: Record<string, string> = {};
@@ -71,50 +115,51 @@ export class FormSubmissionService {
     return { form, suggestedValues };
   }
 
-  async getForPublic(id: string): Promise<Form> {
+  async getForPublic(id: string): Promise<PublicFormDto> {
     const form = await this.formRepo.findOneBy({
       id,
       isActive: true,
       visibility: FormVisibility.PUBLIC,
     });
     if (!form) throw new NotFoundException('Form not found');
-    return form;
+    return this.toPublicDto(form);
   }
 
   async submitAsMember(
     formId: string,
     memberId: string,
     answers: Record<string, unknown>,
-  ): Promise<FormSubmission> {
+  ): Promise<FormSubmitResponseDto> {
     const form = await this.getVisibleFormOrThrow(formId, [
       FormVisibility.MEMBERS,
       FormVisibility.PUBLIC,
     ]);
-    this.validateAnswers(form.fields, answers);
-    return this.submissionRepo.save(
-      this.submissionRepo.create({
-        form: { id: form.id } as Form,
-        member: { id: memberId } as Member,
-        answers,
-      }),
-    );
+    if (form.visibility === FormVisibility.MEMBERS && form.audienceGroup) {
+      const allowedIds = await this.groupService.getMemberIdsForGroup(
+        form.audienceGroup.id,
+      );
+      if (!allowedIds.includes(memberId)) {
+        throw new NotFoundException('Form not found');
+      }
+    }
+    const normalized = this.normalizeAnswers(form.fields, answers);
+    this.validateAnswers(form.fields, normalized);
+    const saved = await this.saveSubmission(form, normalized, {
+      id: memberId,
+    } as Member);
+    return this.buildSubmitResponse(form, normalized, saved.id);
   }
 
   async submitAsPublic(
     formId: string,
     answers: Record<string, unknown>,
-  ): Promise<FormSubmission> {
+  ): Promise<FormSubmitResponseDto> {
     const form = await this.getVisibleFormOrThrow(formId, [
       FormVisibility.PUBLIC,
     ]);
-    this.validateAnswers(form.fields, answers);
-    const saved = await this.submissionRepo.save(
-      this.submissionRepo.create({
-        form: { id: form.id } as Form,
-        member: null,
-        answers,
-      }),
-    );
+    const normalized = this.normalizeAnswers(form.fields, answers);
+    this.validateAnswers(form.fields, normalized);
+    const saved = await this.saveSubmission(form, normalized, null);
 
     if (form.createsFirstTimers) {
       // Deliberately awaited but fault-tolerant: a failure here (e.g. no
@@ -124,7 +169,7 @@ export class FormSubmissionService {
       // discoverable, not silently lost.
       try {
         await this.followUpService.createFirstTimerFromPublicForm(
-          this.buildFirstTimerDto(form.fields, answers),
+          this.buildFirstTimerDto(form.fields, normalized),
         );
       } catch (err: unknown) {
         this.logger.error(
@@ -134,7 +179,7 @@ export class FormSubmissionService {
       }
     }
 
-    return saved;
+    return this.buildSubmitResponse(form, normalized, saved.id);
   }
 
   // No visibility restriction — an admin can record a submission against
@@ -148,17 +193,17 @@ export class FormSubmissionService {
     formId: string,
     answers: Record<string, unknown>,
     memberId?: string,
-  ): Promise<FormSubmission> {
+  ): Promise<FormSubmitResponseDto> {
     const form = await this.formRepo.findOneBy({ id: formId, isActive: true });
     if (!form) throw new NotFoundException('Form not found');
-    this.validateAnswers(form.fields, answers);
-    return this.submissionRepo.save(
-      this.submissionRepo.create({
-        form: { id: form.id } as Form,
-        member: memberId ? ({ id: memberId } as Member) : null,
-        answers,
-      }),
+    const normalized = this.normalizeAnswers(form.fields, answers);
+    this.validateAnswers(form.fields, normalized);
+    const saved = await this.saveSubmission(
+      form,
+      normalized,
+      memberId ? ({ id: memberId } as Member) : null,
     );
+    return this.buildSubmitResponse(form, normalized, saved.id);
   }
 
   private async getVisibleFormOrThrow(
@@ -170,6 +215,131 @@ export class FormSubmissionService {
       throw new NotFoundException('Form not found');
     }
     return form;
+  }
+
+  // Runs every PHONE-type field's submitted value through
+  // normalizePhoneNumber, writing the canonical form back into a copy of
+  // `answers` — so exports, analytics, and dedup all ever see one shape
+  // for the same real number, never whatever variant a visitor happened to
+  // type. Throws if a *required* PHONE field doesn't normalize; an
+  // optional one that fails to normalize is just left blank rather than
+  // rejected outright (mirrors validateAnswers' existing required-only
+  // strictness).
+  private normalizeAnswers(
+    fields: FormField[],
+    answers: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const normalized = { ...answers };
+    for (const field of fields) {
+      if (field.fieldType !== FormFieldType.PHONE) continue;
+      const raw = normalized[field.id];
+      if (typeof raw !== 'string' || !raw.trim()) continue;
+      const value = normalizePhoneNumber(raw, this.defaultPhoneRegion);
+      if (value) {
+        normalized[field.id] = value;
+      } else if (field.required) {
+        throw new BadRequestException(
+          `"${field.label}" must be a valid phone number`,
+        );
+      }
+    }
+    return normalized;
+  }
+
+  private computeDedupValue(
+    dedupField: FormField,
+    answers: Record<string, unknown>,
+  ): string | null {
+    const raw = answers[dedupField.id];
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    if (dedupField.fieldType === FormFieldType.PHONE) {
+      return normalizePhoneNumber(raw, this.defaultPhoneRegion);
+    }
+    return raw.trim().toLowerCase();
+  }
+
+  private async saveSubmission(
+    form: Form,
+    answers: Record<string, unknown>,
+    member: Member | null,
+  ): Promise<FormSubmission> {
+    const dedupValueNormalized = form.dedupField
+      ? this.computeDedupValue(form.dedupField, answers)
+      : null;
+    try {
+      return await this.submissionRepo.save(
+        this.submissionRepo.create({
+          form: { id: form.id } as Form,
+          member,
+          answers,
+          dedupValueNormalized,
+        }),
+      );
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code === '23505') {
+        // Structured code (not just a message string) so the fill page can
+        // render a distinct "you're already registered" screen instead of
+        // a generic error banner — the global exception filter spreads
+        // every extra key on the thrown body into the response.
+        throw new BadRequestException({
+          message: "You've already submitted this form.",
+          code: 'DUPLICATE_SUBMISSION',
+        });
+      }
+      throw err;
+    }
+  }
+
+  private buildSubmitResponse(
+    form: Form,
+    answers: Record<string, unknown>,
+    submissionId: string,
+  ): FormSubmitResponseDto {
+    let selectedOption: FormSubmitResponseDto['nextSteps']['selectedOption'] =
+      null;
+    if (form.nextStepsField) {
+      const value = answers[form.nextStepsField.id];
+      if (typeof value === 'string' && value) {
+        const meta = form.nextStepsField.optionMetadata?.[value];
+        selectedOption = {
+          value,
+          url: meta?.url ?? null,
+          description: meta?.description ?? null,
+        };
+      }
+    }
+    return {
+      submissionId,
+      nextSteps: {
+        message: form.postSubmitMessage ?? null,
+        generalAction:
+          form.generalActionUrl && form.generalActionLabel
+            ? { label: form.generalActionLabel, url: form.generalActionUrl }
+            : null,
+        selectedOption,
+      },
+    };
+  }
+
+  private toPublicDto(form: Form): PublicFormDto {
+    return {
+      id: form.id,
+      title: form.title,
+      description: form.description,
+      coverImageUrl: form.coverImageUrl,
+      logoUrl: form.logoUrl,
+      fields: [...form.fields]
+        .sort((a, b) => a.order - b.order)
+        .map((f): PublicFormFieldDto => ({
+          id: f.id,
+          label: f.label,
+          fieldType: f.fieldType,
+          required: f.required,
+          options: f.options,
+          order: f.order,
+          autoFillKey: f.autoFillKey,
+        })),
+    };
   }
 
   private validateAnswers(

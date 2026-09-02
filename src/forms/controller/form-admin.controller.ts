@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,9 +10,12 @@ import {
   Post,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { Response } from 'express';
+import 'multer';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
@@ -20,13 +24,28 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 import { PlanGuard } from '../../billing/guard/plan.guard';
 import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynamic-limited-file.interceptor';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { FormService } from '../service/form.service';
 import { FormSubmissionService } from '../service/form-submission.service';
+import { GroupService } from '../../group/service/group.service';
 import {
   AdminSubmitFormDto,
   CreateFormDto,
   UpdateFormDto,
 } from '../dto/form.dto';
+
+function imageOnlyFilter(
+  _req: Express.Request,
+  file: Express.Multer.File,
+  cb: (error: Error | null, acceptFile: boolean) => void,
+) {
+  if (!file.mimetype.startsWith('image/')) {
+    return cb(new BadRequestException('Only image files are allowed'), false);
+  }
+  cb(null, true);
+}
 
 @RequiresModule('forms')
 @RequiresPlan(PlanFeature.FORMS)
@@ -36,7 +55,19 @@ export class FormAdminController {
   constructor(
     private readonly formService: FormService,
     private readonly submissionService: FormSubmissionService,
+    private readonly groupService: GroupService,
   ) {}
+
+  // Own route + FORMS_WRITE gate rather than reusing GroupController's
+  // GET /groups/lookup (gated on ANNOUNCEMENTS_WRITE) — an admin who can
+  // manage forms shouldn't need a second, unrelated permission grant just
+  // to pick a Contact List to restrict a form's audience to. Must be
+  // registered before ':id' or it'd be swallowed as an id param.
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Get('audience-groups/lookup')
+  getAudienceGroupLookup() {
+    return this.groupService.getLookup();
+  }
 
   @RequiresPermission(AdminPermission.FORMS_WRITE)
   @Post()
@@ -66,6 +97,54 @@ export class FormAdminController {
   @Delete(':id')
   delete(@Param('id', ParseUUIDPipe) id: string) {
     return this.formService.delete(id);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post(':id/cover')
+  @UseInterceptors(
+    DynamicLimitedFileInterceptor(
+      'cover',
+      PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[PlatformSettingKey.MAX_LOGO_UPLOAD_MB],
+      { fileFilter: imageOnlyFilter },
+    ),
+  )
+  uploadCover(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() cover?: Express.Multer.File,
+  ) {
+    if (!cover) throw new BadRequestException('No cover image provided');
+    return this.formService.setCoverImage(id, cover);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Delete(':id/cover')
+  removeCover(@Param('id', ParseUUIDPipe) id: string) {
+    return this.formService.removeCoverImage(id);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post(':id/logo')
+  @UseInterceptors(
+    DynamicLimitedFileInterceptor(
+      'logo',
+      PlatformSettingKey.MAX_LOGO_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[PlatformSettingKey.MAX_LOGO_UPLOAD_MB],
+      { fileFilter: imageOnlyFilter },
+    ),
+  )
+  uploadLogo(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() logo?: Express.Multer.File,
+  ) {
+    if (!logo) throw new BadRequestException('No logo file provided');
+    return this.formService.setLogo(id, logo);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Delete(':id/logo')
+  removeLogo(@Param('id', ParseUUIDPipe) id: string) {
+    return this.formService.removeLogo(id);
   }
 
   @RequiresPermission(AdminPermission.FORMS_READ)

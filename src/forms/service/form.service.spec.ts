@@ -10,10 +10,12 @@ import {
   FormFieldType,
   FormVisibility,
 } from '../enum/form.enum';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 
 const mockFormRepo = {
   create: jest.fn((v) => v),
   save: jest.fn((v) => Promise.resolve({ id: 'form-1', ...v })),
+  update: jest.fn().mockResolvedValue({ affected: 1 }),
   find: jest.fn(),
   findOne: jest.fn(),
   findOneBy: jest.fn(),
@@ -21,11 +23,16 @@ const mockFormRepo = {
 };
 const mockFieldRepo = {
   create: jest.fn((v) => v),
+  save: jest.fn((v) => Promise.resolve(v)),
   remove: jest.fn(),
 };
 const mockSubmissionRepo = {
   findAndCount: jest.fn(),
   find: jest.fn(),
+};
+const mockCloudinaryService = {
+  uploadBuffer: jest.fn(),
+  deleteByPublicId: jest.fn(),
 };
 
 describe('FormService', () => {
@@ -42,6 +49,7 @@ describe('FormService', () => {
           provide: getRepositoryToken(FormSubmission),
           useValue: mockSubmissionRepo,
         },
+        { provide: CloudinaryService, useValue: mockCloudinaryService },
       ],
     }).compile();
     service = module.get(FormService);
@@ -62,16 +70,26 @@ describe('FormService', () => {
         ],
       });
 
+      // A separate fieldRepo.save() call, not a cascade off formRepo.save —
+      // see the comment on Form.fields for why cascading here throws a
+      // TypeORM "Cyclic dependency: FormField" error.
       expect(mockFormRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           title: 'Volunteer Sign-up',
           visibility: FormVisibility.MEMBERS,
-          fields: expect.arrayContaining([
-            expect.objectContaining({ label: 'Name', required: true }),
-          ]),
         }),
       );
+      expect(mockFieldRepo.save).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Name', required: true }),
+        ]),
+      );
       expect(result.title).toBe('Volunteer Sign-up');
+      expect(result.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: 'Name', required: true }),
+        ]),
+      );
     });
 
     it('rejects createsFirstTimers on a non-PUBLIC form', async () => {
@@ -442,6 +460,236 @@ describe('FormService', () => {
       mockFormRepo.findOne.mockResolvedValue(null);
       await expect(service.delete('missing')).rejects.toThrow(
         NotFoundException,
+      );
+    });
+  });
+
+  describe('audience group validation', () => {
+    it('rejects an audienceGroupId on a non-MEMBERS form', async () => {
+      await expect(
+        service.create({
+          title: 'Public Signup',
+          visibility: FormVisibility.PUBLIC,
+          audienceGroupId: 'group-1',
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts an audienceGroupId on a MEMBERS form', async () => {
+      await expect(
+        service.create({
+          title: 'HODs Only',
+          visibility: FormVisibility.MEMBERS,
+          audienceGroupId: 'group-1',
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('option metadata validation', () => {
+    it("rejects a metadata key that is not one of the field's options", async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          fields: [
+            {
+              label: 'Team',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Choir'],
+              optionMetadata: { Ushering: { url: 'https://example.com' } },
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects an invalid URL', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          fields: [
+            {
+              label: 'Team',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Choir'],
+              optionMetadata: { Choir: { url: 'not-a-url' } },
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a valid option metadata map', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          fields: [
+            {
+              label: 'Team',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Choir'],
+              optionMetadata: {
+                Choir: { url: 'https://example.com', description: 'Sing!' },
+              },
+            },
+          ],
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('general action validation', () => {
+    it('rejects a generalActionUrl with no label', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          generalActionUrl: 'https://example.com/main-group',
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a generalActionLabel with no url', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          generalActionLabel: 'Join Main Group',
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects an invalid general action URL', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          generalActionUrl: 'not-a-url',
+          generalActionLabel: 'Join Main Group',
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts both url and label set together', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          generalActionUrl: 'https://example.com/main-group',
+          generalActionLabel: 'Join Main Group',
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('accepts neither being set', async () => {
+      await expect(
+        service.create({
+          title: 'Volunteer Sign-up',
+          visibility: FormVisibility.PUBLIC,
+          fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('dedup/next-steps field wiring', () => {
+    it('sets dedupField to a field already on the form', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Phone', fieldType: FormFieldType.PHONE }],
+        dedupField: null,
+        nextStepsField: null,
+      });
+
+      const result = await service.update('form-1', { dedupFieldId: 'f1' });
+
+      expect(result.dedupField).toEqual(expect.objectContaining({ id: 'f1' }));
+    });
+
+    it('rejects a dedupFieldId that does not match any field', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Phone', fieldType: FormFieldType.PHONE }],
+        dedupField: null,
+        nextStepsField: null,
+      });
+
+      await expect(
+        service.update('form-1', { dedupFieldId: 'unknown-id' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a nextStepsFieldId pointing at a non-DROPDOWN field', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Name', fieldType: FormFieldType.TEXT }],
+        dedupField: null,
+        nextStepsField: null,
+      });
+
+      await expect(
+        service.update('form-1', { nextStepsFieldId: 'f1' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a nextStepsFieldId pointing at a DROPDOWN field', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [
+          {
+            id: 'f1',
+            label: 'Team',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Choir'],
+          },
+        ],
+        dedupField: null,
+        nextStepsField: null,
+      });
+
+      const result = await service.update('form-1', {
+        nextStepsFieldId: 'f1',
+      });
+
+      expect(result.nextStepsField).toEqual(
+        expect.objectContaining({ id: 'f1' }),
+      );
+    });
+
+    it('clears a stale dedupField reference when that field is removed in the same update', async () => {
+      const dedupField = {
+        id: 'f1',
+        label: 'Phone',
+        fieldType: FormFieldType.PHONE,
+      } as FormField;
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [dedupField],
+        dedupField,
+        nextStepsField: null,
+      });
+
+      await service.update('form-1', {
+        fields: [{ label: 'Replacement Field', fieldType: FormFieldType.TEXT }],
+      });
+
+      expect(mockFieldRepo.remove).toHaveBeenCalledWith([dedupField]);
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ dedupField: null }),
       );
     });
   });

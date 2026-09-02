@@ -5,11 +5,13 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import 'multer';
 import { Form } from '../entity/form.entity';
 import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
 import { Event } from '../../event/entity/event.entity';
-import { CreateFormDto, UpdateFormDto } from '../dto/form.dto';
+import { Group } from '../../group/entity/group.entity';
+import { CreateFormDto, FormFieldDto, UpdateFormDto } from '../dto/form.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import {
@@ -21,6 +23,7 @@ import {
   FormAnalyticsDto,
   FormFieldAnalyticsDto,
 } from '../dto/form-analytics.dto';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 
 const FIRST_TIMER_REQUIRED_AUTOFILL_KEYS = [
   FormFieldAutoFill.FIRST_NAME,
@@ -43,19 +46,42 @@ export class FormService {
     private readonly fieldRepo: Repository<FormField>,
     @InjectRepository(FormSubmission)
     private readonly submissionRepo: Repository<FormSubmission>,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   async create(dto: CreateFormDto): Promise<Form> {
     if (dto.createsFirstTimers) {
       this.assertValidFirstTimerConfig(dto.visibility, dto.fields);
     }
+    this.assertValidAudienceGroup(dto.visibility, dto.audienceGroupId);
+    this.assertValidOptionMetadata(dto.fields);
+    this.assertValidCrossFieldRefs(
+      dto.dedupFieldId,
+      dto.nextStepsFieldId,
+      dto.fields,
+    );
+    this.assertValidGeneralAction(dto.generalActionUrl, dto.generalActionLabel);
     const form = this.formRepo.create({
       title: dto.title,
       description: dto.description ?? null,
       visibility: dto.visibility,
       event: dto.eventId ? ({ id: dto.eventId } as Event) : null,
       createsFirstTimers: dto.createsFirstTimers ?? false,
-      fields: dto.fields.map((f, index) =>
+      audienceGroup: dto.audienceGroupId
+        ? ({ id: dto.audienceGroupId } as Group)
+        : null,
+      postSubmitMessage: dto.postSubmitMessage ?? null,
+      generalActionUrl: dto.generalActionUrl ?? null,
+      generalActionLabel: dto.generalActionLabel ?? null,
+    });
+    const saved = await this.formRepo.save(form);
+
+    // A separate fieldRepo.save(), not a cascade off `form.fields` — see
+    // the comment on Form.fields for why cascading here throws a TypeORM
+    // "Cyclic dependency: FormField" error (Form also has dedupField/
+    // nextStepsField relations to FormField).
+    saved.fields = await this.fieldRepo.save(
+      dto.fields.map((f, index) =>
         this.fieldRepo.create({
           label: f.label,
           fieldType: f.fieldType,
@@ -63,10 +89,155 @@ export class FormService {
           options: f.options ?? null,
           order: f.order ?? index,
           autoFillKey: f.autoFillKey ?? null,
+          optionMetadata: f.optionMetadata ?? null,
+          form: saved,
         }),
       ),
+    );
+
+    return this.applyCrossFieldRefs(
+      saved,
+      dto.dedupFieldId,
+      dto.nextStepsFieldId,
+    );
+  }
+
+  // dedupField/nextStepsField reference FormField rows that don't exist
+  // until the fields themselves are saved (a new field has no id before
+  // that), so these can only be wired up as a second save once `form.fields`
+  // holds real, persisted ids. Called from both create() and update().
+  private async applyCrossFieldRefs(
+    form: Form,
+    dedupFieldId: string | null | undefined,
+    nextStepsFieldId: string | null | undefined,
+  ): Promise<Form> {
+    if (dedupFieldId === undefined && nextStepsFieldId === undefined) {
+      return form;
+    }
+    if (dedupFieldId !== undefined) {
+      form.dedupField = dedupFieldId
+        ? this.findFieldOrThrow(form.fields, dedupFieldId, 'dedup field')
+        : null;
+    }
+    if (nextStepsFieldId !== undefined) {
+      form.nextStepsField = nextStepsFieldId
+        ? this.findFieldOrThrow(
+            form.fields,
+            nextStepsFieldId,
+            'next-steps field',
+          )
+        : null;
+    }
+    // A targeted column update, not save(form) — dedupField/nextStepsField
+    // point at a FormField object that's also present in form.fields
+    // (cascade: true, eager: true). save() re-cascades that whole array
+    // alongside the dedup/next-steps FK write, and TypeORM's topological
+    // sorter sees two opposing edges between the same Form/FormField pair
+    // (FormField depends on Form via form_id; Form depends on FormField via
+    // dedup_field_id) and throws "Cyclic dependency: FormField". update()
+    // only touches these two columns and never cascades `fields`.
+    await this.formRepo.update(form.id, {
+      dedupField: form.dedupField,
+      nextStepsField: form.nextStepsField,
     });
-    return this.formRepo.save(form);
+    return form;
+  }
+
+  private findFieldOrThrow(
+    fields: FormField[],
+    fieldId: string,
+    label: string,
+  ): FormField {
+    const field = fields.find((f) => f.id === fieldId);
+    if (!field) {
+      throw new BadRequestException(`Unknown ${label}`);
+    }
+    if (
+      label === 'next-steps field' &&
+      field.fieldType !== FormFieldType.DROPDOWN
+    ) {
+      throw new BadRequestException(
+        'The next-steps field must be a DROPDOWN field',
+      );
+    }
+    return field;
+  }
+
+  private assertValidAudienceGroup(
+    visibility: FormVisibility,
+    audienceGroupId: string | null | undefined,
+  ): void {
+    if (audienceGroupId && visibility !== FormVisibility.MEMBERS) {
+      throw new BadRequestException(
+        'A Contact List restriction only applies to a MEMBERS-visibility form',
+      );
+    }
+  }
+
+  private assertValidOptionMetadata(fields: FormFieldDto[]): void {
+    for (const field of fields) {
+      if (!field.optionMetadata) continue;
+      const options = new Set(field.options ?? []);
+      for (const [key, meta] of Object.entries(field.optionMetadata)) {
+        if (!options.has(key)) {
+          throw new BadRequestException(
+            `optionMetadata key "${key}" isn't one of this field's options`,
+          );
+        }
+        if (meta.url !== undefined && !this.isValidUrl(meta.url)) {
+          throw new BadRequestException(`Invalid URL for option "${key}"`);
+        }
+      }
+    }
+  }
+
+  private isValidUrl(value: unknown): boolean {
+    if (typeof value !== 'string' || !value) return false;
+    try {
+      new URL(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Both fields together or neither — a link with no label has nothing to
+  // put on the button, and a label with no link has nowhere to send them.
+  private assertValidGeneralAction(
+    url: string | null | undefined,
+    label: string | null | undefined,
+  ): void {
+    if (!url && !label) return;
+    if (!url || !label) {
+      throw new BadRequestException(
+        'generalActionUrl and generalActionLabel must both be set, or both left empty',
+      );
+    }
+    if (!this.isValidUrl(url)) {
+      throw new BadRequestException('Invalid general action URL');
+    }
+  }
+
+  private assertValidCrossFieldRefs(
+    dedupFieldId: string | null | undefined,
+    nextStepsFieldId: string | null | undefined,
+    fields: { id?: string }[],
+  ): void {
+    const incomingIds = new Set(fields.filter((f) => f.id).map((f) => f.id));
+    // Only checkable here for an *existing* field id (an update referencing
+    // a field already on the form); a brand-new field (no id yet, create()
+    // or a newly-added field on update()) is resolved after save in
+    // applyCrossFieldRefs instead, once it has a real id.
+    if (dedupFieldId && incomingIds.size && !incomingIds.has(dedupFieldId)) {
+      throw new BadRequestException('Unknown dedup field');
+    }
+    if (
+      nextStepsFieldId &&
+      incomingIds.size &&
+      !incomingIds.has(nextStepsFieldId)
+    ) {
+      throw new BadRequestException('Unknown next-steps field');
+    }
   }
 
   // Requires visibility=PUBLIC (a first-timer, by definition, isn't
@@ -130,6 +301,20 @@ export class FormService {
     if (dto.createsFirstTimers !== undefined) {
       form.createsFirstTimers = dto.createsFirstTimers;
     }
+    if (dto.audienceGroupId !== undefined) {
+      form.audienceGroup = dto.audienceGroupId
+        ? ({ id: dto.audienceGroupId } as Group)
+        : null;
+    }
+    if (dto.postSubmitMessage !== undefined) {
+      form.postSubmitMessage = dto.postSubmitMessage;
+    }
+    if (dto.generalActionUrl !== undefined) {
+      form.generalActionUrl = dto.generalActionUrl;
+    }
+    if (dto.generalActionLabel !== undefined) {
+      form.generalActionLabel = dto.generalActionLabel;
+    }
 
     if (dto.fields) {
       const incomingIds = new Set(
@@ -137,31 +322,133 @@ export class FormService {
       );
       const toDelete = form.fields.filter((f) => !incomingIds.has(f.id));
       if (toDelete.length) {
+        const deletedIds = new Set(toDelete.map((f) => f.id));
+        // A deleted field can't remain the dedup/next-steps designee — the
+        // DB's ON DELETE SET NULL will null the column regardless, but the
+        // in-memory `form` still holds the stale reference; clearing it
+        // here first stops the impending save from trying to write a
+        // dedup_field_id/next_steps_field_id back to a row that's about to
+        // no longer exist (which would otherwise fail the FK constraint).
+        if (form.dedupField && deletedIds.has(form.dedupField.id)) {
+          form.dedupField = null;
+        }
+        if (form.nextStepsField && deletedIds.has(form.nextStepsField.id)) {
+          form.nextStepsField = null;
+        }
         await this.fieldRepo.remove(toDelete);
       }
-      form.fields = dto.fields.map((f, index) =>
-        this.fieldRepo.create({
-          id: f.id,
-          label: f.label,
-          fieldType: f.fieldType,
-          required: f.required ?? false,
-          options: f.options ?? null,
-          order: f.order ?? index,
-          autoFillKey: f.autoFillKey ?? null,
-        }),
+      // A separate fieldRepo.save(), not a cascade off `form.fields` — see
+      // the comment on Form.fields for why cascading here throws a
+      // TypeORM "Cyclic dependency: FormField" error.
+      form.fields = await this.fieldRepo.save(
+        dto.fields.map((f, index) =>
+          this.fieldRepo.create({
+            id: f.id,
+            label: f.label,
+            fieldType: f.fieldType,
+            required: f.required ?? false,
+            options: f.options ?? null,
+            order: f.order ?? index,
+            autoFillKey: f.autoFillKey ?? null,
+            optionMetadata: f.optionMetadata ?? null,
+            form,
+          }),
+        ),
       );
     }
 
     if (form.createsFirstTimers) {
       this.assertValidFirstTimerConfig(form.visibility, form.fields);
     }
+    this.assertValidAudienceGroup(
+      form.visibility,
+      form.audienceGroup?.id ?? null,
+    );
+    if (dto.fields) this.assertValidOptionMetadata(dto.fields);
+    this.assertValidCrossFieldRefs(
+      dto.dedupFieldId,
+      dto.nextStepsFieldId,
+      form.fields,
+    );
+    this.assertValidGeneralAction(
+      form.generalActionUrl,
+      form.generalActionLabel,
+    );
 
-    return this.formRepo.save(form);
+    const saved = await this.formRepo.save(form);
+    return this.applyCrossFieldRefs(
+      saved,
+      dto.dedupFieldId,
+      dto.nextStepsFieldId,
+    );
   }
 
   async delete(id: string): Promise<void> {
     const form = await this.getById(id);
     await this.formRepo.remove(form);
+  }
+
+  // Mirrors TenantInfoController.uploadLogo/removeLogo's "delete the
+  // previous asset only after the new one is safely saved" ordering, so a
+  // failed re-upload never leaves a form with no cover image at all.
+  async setCoverImage(id: string, file: Express.Multer.File): Promise<Form> {
+    const form = await this.getById(id);
+    const previousPublicId = form.coverImagePublicId;
+    const uploaded = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      'form-covers',
+      undefined,
+      file.mimetype,
+    );
+    form.coverImageUrl = uploaded.secureUrl;
+    form.coverImagePublicId = uploaded.publicId;
+    const saved = await this.formRepo.save(form);
+    if (previousPublicId) {
+      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
+    }
+    return saved;
+  }
+
+  async removeCoverImage(id: string): Promise<Form> {
+    const form = await this.getById(id);
+    const previousPublicId = form.coverImagePublicId;
+    form.coverImageUrl = null;
+    form.coverImagePublicId = null;
+    const saved = await this.formRepo.save(form);
+    if (previousPublicId) {
+      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
+    }
+    return saved;
+  }
+
+  async setLogo(id: string, file: Express.Multer.File): Promise<Form> {
+    const form = await this.getById(id);
+    const previousPublicId = form.logoPublicId;
+    const uploaded = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      'form-logos',
+      undefined,
+      file.mimetype,
+    );
+    form.logoUrl = uploaded.secureUrl;
+    form.logoPublicId = uploaded.publicId;
+    const saved = await this.formRepo.save(form);
+    if (previousPublicId) {
+      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
+    }
+    return saved;
+  }
+
+  async removeLogo(id: string): Promise<Form> {
+    const form = await this.getById(id);
+    const previousPublicId = form.logoPublicId;
+    form.logoUrl = null;
+    form.logoPublicId = null;
+    const saved = await this.formRepo.save(form);
+    if (previousPublicId) {
+      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
+    }
+    return saved;
   }
 
   async getSubmissions(

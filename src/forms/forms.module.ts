@@ -10,11 +10,13 @@ import { FormAdminController } from './controller/form-admin.controller';
 import { FormMemberController } from './controller/form-member.controller';
 import { FormPublicController } from './controller/form-public.controller';
 import { FollowUpModule } from '../follow-up/follow-up.module';
+import { GroupModule } from '../group/group.module';
 
 @Module({
   imports: [
     TenantTypeOrmModule.forFeature([Form, FormField, FormSubmission, Member]),
     FollowUpModule,
+    GroupModule,
   ],
   providers: [FormService, FormSubmissionService],
   // Order matters: Nest/Express matches routes in registration order, and

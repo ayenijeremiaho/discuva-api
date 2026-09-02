@@ -33,6 +33,13 @@ export class FormField extends BaseEntity {
   @Column({ type: 'text', array: true, nullable: true })
   options: string[] | null;
 
+  // Per-option url/description, keyed by the option's own string value —
+  // e.g. {"Media/Sound": {"url": "...", "description": "..."}}. Only
+  // ever surfaced to a visitor for the option they actually chose, via
+  // Form.nextStepsField — never returned in full on the public GET.
+  @Column({ name: 'option_metadata', type: 'jsonb', nullable: true })
+  optionMetadata: Record<string, { url?: string; description?: string }> | null;
+
   @Column({ type: 'smallint', default: 0 })
   order: number;
 

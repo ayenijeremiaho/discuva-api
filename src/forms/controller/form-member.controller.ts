@@ -27,8 +27,8 @@ export class FormMemberController {
   constructor(private readonly submissionService: FormSubmissionService) {}
 
   @Get()
-  list(@Query('eventId') eventId?: string) {
-    return this.submissionService.listForMembers(eventId);
+  list(@CurrentUser() user: MemberAuth, @Query('eventId') eventId?: string) {
+    return this.submissionService.listForMembers(eventId, user.id);
   }
 
   @Get(':id')
