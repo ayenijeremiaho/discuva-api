@@ -70,7 +70,7 @@ src/
 ```
 
 **Stack:** NestJS · TypeORM · PostgreSQL · Redis · Bull · ioredis · Argon2 · Passport (JWT + Local) · class-validator · nestjs-schedule ·
-@nestjs/throttler · Handlebars · DOMPurify · ExcelJS · PDFKit · Cloudinary · Nodemailer (Gmail SMTP) · Resend SDK
+@nestjs/throttler · Handlebars · DOMPurify · ExcelJS · PDFKit · Cloudinary · Nodemailer (Gmail SMTP) · Resend SDK · libphonenumber-js
 
 ---
 
@@ -245,7 +245,7 @@ A church gathering on a specific date.
 ### Venue
 
 A named, reusable physical location. Referenced by `EventConfig.defaultVenue` and optionally overridden per slot via
-`ServiceSlot.venueOverride`.
+`ServiceSlot.venueOverride`; also optionally referenced by `SmallGroup.venue` (see Small Group Module).
 
 | Field     | Type   | Notes           |
 |-----------|--------|-----------------|
@@ -263,37 +263,50 @@ venue that is a slot-level `venueOverride` sets that field to `null` (SET NULL).
 The actual check-in target within an event. One event can have multiple slots.
 
 | Field             | Type        | Notes                                                             |
-|-------------------|-------------|-------------------------------------------------------------------|
+|-------------------|-------------|--------------------------------------------------------------------|
 | id                | UUID        | PK                                                                |
 | event             | Event       | ManyToOne                                                         |
 | name              | string      | Default: "Service"                                                |
 | startTime         | timestamptz |                                                                   |
 | endTime           | timestamptz |                                                                   |
 | config            | EventConfig | ManyToOne, nullable                                               |
-| venueOverride     | Venue       | ManyToOne, nullable — overrides config.defaultVenue for this slot |
+| venueOverride     | Venue \| null | ManyToOne, nullable — overrides config.defaultVenue for this slot |
+| formatOverride    | MeetingFormatEnum \| null | Nullable — overrides config.defaultFormat for this slot (`IN_PERSON` \| `ONLINE`) |
 | *Override columns | int         | Per-slot overrides that take priority over EventConfig            |
 
 Override columns: `workerCheckinStartOverride`, `workerLateOverride`, `memberCheckinStartOverride`,
 `checkinStopOverride`, `allowedDistanceOverride`
 
-**effectiveVenue:** computed as `slot.venueOverride ?? slot.config.defaultVenue`. Throws 400 if neither is set.
+**Resolution (`EventService.resolveSlotConfig`):** `format = slot.formatOverride ?? config.defaultFormat`;
+`venue = slot.venueOverride ?? config.defaultVenue`. Throws 400 only when the resolved `format` is `IN_PERSON` and
+`venue` is still null — an `ONLINE`-resolved slot never requires a venue. A slot overriding an `ONLINE` config back
+to `IN_PERSON` must supply its own `venueOverride`; enforced at save time (`EventService.buildSlotFromDto`), not
+just at first check-in.
 
 ### EventConfig
 
-A reusable timing template assigned to service slots. Venue is now a first-class relation rather than raw lat/lon.
+A reusable timing template assigned to service slots. Venue is a first-class relation rather than raw lat/lon.
 
 | Field                           | Type   | Description                                                                                 |
-|---------------------------------|--------|---------------------------------------------------------------------------------------------|
+|---------------------------------|--------|-----------------------------------------------------------------------------------------------|
 | name                            | string | Unique                                                                                      |
-| defaultVenue                    | Venue  | ManyToOne, NOT NULL — the venue used by all slots referencing this config unless overridden |
+| defaultVenue                    | Venue \| null | ManyToOne, nullable, RESTRICT on delete — required when `defaultFormat` is `IN_PERSON`, forbidden when `ONLINE` (enforced in `EventConfigService`, not a DB constraint) |
+| defaultFormat                   | MeetingFormatEnum | `IN_PERSON` \| `ONLINE`. Default `IN_PERSON` — every pre-existing config keeps its behavior unchanged |
+| onlineMeetingUrl                | string \| null | Optional join link shown to members/workers when the resolved format is `ONLINE` |
 | workerCheckinStartOffsetSeconds | int    | Seconds relative to `startTime` when workers can start checking in. Negative = before start |
 | workerLateOffsetSeconds         | int    | Seconds after `startTime` after which workers are LATE                                      |
 | memberCheckinStartOffsetSeconds | int    | When members can start checking in                                                          |
 | checkinStopOffsetSeconds        | int    | When check-in closes for everyone                                                           |
-| allowedDistanceInMeters         | int    | Max distance from effectiveVenue for location validation                                    |
+| allowedDistanceInMeters         | int    | Max distance from the resolved venue for location validation (ignored for `ONLINE`)          |
 | autoStartSession                | bool   | Default `false`. See `ProgrammeAutoStartScheduler` (Service Programme section) below         |
 
 **Constraint:** `workerLateOffset > workerCheckinStartOffset` and `checkinStopOffset > workerLateOffset`
+
+**MeetingFormatEnum** (`src/utility/enum/meeting-format.enum.ts`, shared with `SmallGroup`): `IN_PERSON` | `ONLINE`.
+Deliberately two values, no `HYBRID`.
+
+**Check-in behavior for ONLINE slots:** `AttendanceService.checkin` skips the "workers must provide location"
+requirement when the resolved slot format is `ONLINE`, and never runs distance validation against a null venue.
 
 ### Attendance
 
@@ -3649,6 +3662,72 @@ or shown during a livestream (generated client-side in discuva-admin — no back
 not a normalized per-answer table — editing or removing a field later never requires migrating past submissions; a
 removed field just leaves a harmless orphaned key behind in old submissions' JSON, still readable/exportable.
 
+**Per-option link + description, an always-shown general action, and dynamic post-submission "next steps":** a
+`DROPDOWN`/`CHECKBOX` field's `options` can each carry `optionMetadata: Record<option, { url?, description? }>` —
+e.g. a "Department" dropdown where each department option has its own WhatsApp group link and one-line
+description. A form separately designates one `DROPDOWN` field (`Form.nextStepsField`, `nextStepsFieldId` on
+create/update — CHECKBOX is rejected here, since its multi-select answers don't map to "one selected option's
+metadata") and every submit endpoint now returns `{ submissionId, nextSteps: { message, generalAction,
+selectedOption } }` instead of the raw `FormSubmission` row: `message` is the form's own `postSubmitMessage` (or
+`null`); `generalAction` — `{ label, url } | null` — is the form's own `generalActionUrl`/`generalActionLabel`
+(`FormService.assertValidGeneralAction`: both must be set together, or both left empty, and the URL must parse),
+an always-shown second call-to-action independent of what was answered (e.g. "Join the Main Volunteer Group",
+same for every submitter); `selectedOption` — `{ value, url, description }` — is resolved from whichever option
+the visitor actually picked, or `null` if no `nextStepsField` is configured. These two links are independent and
+both optional — a form can have either, both, or neither. **Only the chosen option's metadata is ever returned**
+— the public `GET /forms/public/:id` (and the member-facing equivalents) strip `optionMetadata` from every field
+entirely, so no other department's link is ever visible before that option is submitted, and `generalActionUrl`/
+`generalActionLabel` are likewise omitted from that response — both call-to-actions only ever appear on the
+post-submission response, never before. Validated at create/update (`FormService.assertValidOptionMetadata`):
+every `optionMetadata` key must be one of that field's own `options`, and any `url` must parse as a real URL.
+
+**Duplicate-submission prevention:** a form can designate one field (`Form.dedupField`, `dedupFieldId` on
+create/update — DROPDOWN/CHECKBOX excluded as poor dedup keys) whose submitted value must be unique per form. On
+submit, that field's value is normalized (phone-normalized if it's a `PHONE` field, else trimmed+lowercased) into
+`FormSubmission.dedupValueNormalized`, enforced by a **DB-level partial unique index**
+(`(form_id, dedup_value_normalized) WHERE dedup_value_normalized IS NOT NULL`) — not just an application check, so
+two near-simultaneous duplicate submissions can't both slip through a race. A unique-constraint violation
+(`err.code === '23505'`, same pattern as `SmallGroupService`) is translated into a friendly `BadRequestException`
+carrying a structured `code: 'DUPLICATE_SUBMISSION'` alongside its message (same "extra keys spread into the
+response body" convention as `PlanGuard`'s `PLAN_UPGRADE_REQUIRED` — see `http-exception.filter.ts`), so the fill
+page can render a distinct "you're already registered" screen instead of routing it through a generic error
+banner, rather than just matching a display string.
+
+**Phone normalization** (`src/utility/decorators/normalize-phone.decorator.ts`, `normalizePhoneNumber`, backed by
+`libphonenumber-js` — this platform is multi-tenant/multi-country, not Nigeria-only, so hand-rolled Nigeria-shaped
+regex would incorrectly reject or mangle any other country's number): every `PHONE`-type field's submitted value is
+parsed and normalized to E.164 before it's persisted. A number already carrying its own country code (a leading
+`+`, or a bare international dialing code) parses correctly for *any* country regardless of the tenant's own
+default — e.g. a Nigerian church's diaspora member submitting a UK number still normalizes correctly. A
+LOCAL-format number with no country code (e.g. a bare `0801234567`) is interpreted against `defaultPhoneRegion`,
+derived once per `FormSubmissionService` instance from the `CURRENCY_LOCALE` env var's region subtag (`en-NG` →
+`NG`) — the same per-deployment default already used for currency/date formatting elsewhere (`TitheService`,
+`PdfService`, `EventReminderService`), not a Nigeria-specific hardcode. Anything that doesn't parse as valid for
+its (explicit or assumed) country returns `null` (a *required* PHONE field that fails to normalize is rejected
+with a 400 — never silently mangled or dropped). The normalized value is what's actually stored in `answers`, so
+exports, analytics, and dedup all ever see one canonical shape for the same real number. This is the first
+phone-normalization logic anywhere in the codebase — `Member.phoneNumber` still stores whatever raw string was
+typed, unaffected by this.
+
+**Form branding — cover image and logo:** `Form.coverImageUrl`/`coverImagePublicId` and `Form.logoUrl`/
+`logoPublicId` (mirrors `Tenant.logoUrl`/`logoPublicId`'s shape) are set via dedicated upload endpoints (see table
+below), Cloudinary-backed (`CloudinaryService.uploadBuffer`, folders `form-covers`/`form-logos`) with the same
+"delete the previous asset only after the new one is safely saved" ordering used by `TenantInfoController`'s own
+logo upload. Both are optional and independent of the tenant's own logo — the public fill page renders a form's
+own logo in place of the generic tenant logo when set, and falls back to the tenant logo otherwise; a cover image
+renders as a banner above the form title when set, with no fallback (most forms have none).
+
+**Audience restriction via Contact List:** a `MEMBERS`-visibility form can be restricted to members of one `Group`
+("Contact List" in the admin UI) — `Form.audienceGroup`/`audienceGroupId`. `audienceGroupId` is rejected outright
+on a `PUBLIC`/`ADMIN_ONLY` form (`FormService.assertValidAudienceGroup`) — there's no member identity to check
+against there. When set, `GET /forms/member` filters it out of the list for anyone not in that group (an `EXISTS`
+subquery against `group_members`, mirroring `AnnouncementService.getForMember`'s own group-membership check), and
+`GET /forms/member/:id` / `POST /forms/member/:id/submit` 404 for an outside member exactly as if the form didn't
+exist — no distinct "you're not allowed" response that would leak the form's existence. `audienceGroupId: null`
+(explicit) clears the restriction; omitting it on a `PATCH` leaves the current value untouched. This deliberately
+reuses the existing Group/Contact-List feature rather than introducing a parallel "specific list" concept — e.g. a
+church restricting a form to department heads first builds a "HODs" Contact List, then points the form at it.
+
 **Field diff-sync on update:** `PATCH /forms/:id`'s `fields` array is diffed against the form's existing fields —
 an incoming field with an `id` updates that row in place (keeping the id stable so existing submissions' answer
 keys stay meaningful), one without an `id` is a new field, and an existing row missing from the incoming array is
@@ -3661,20 +3740,25 @@ configured `options`.
 
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
+| GET    | `/forms/audience-groups/lookup`     | AdminGuard (FORMS_WRITE) | `{id, name}[]` of every Contact List, for the audience-restriction picker. Own route + gate rather than reusing `GET /groups/lookup` (gated on `ANNOUNCEMENTS_WRITE`) — a forms admin shouldn't need a second, unrelated permission grant |
 | POST   | `/forms`                            | AdminGuard (FORMS_WRITE) | Create a form with its fields in one call |
 | GET    | `/forms`                            | AdminGuard (FORMS_READ)  | List all forms — unpaginated, same policy as departments/event-configs |
 | GET    | `/forms/:id`                        | AdminGuard (FORMS_READ)  | Get one form with fields |
-| PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above) |
+| PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above). `audienceGroupId`/`dedupFieldId`/`nextStepsFieldId`/`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` all follow the same "explicit `null` clears, omit to leave untouched" convention as `eventId` |
 | DELETE | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Cascades fields + submissions |
-| POST   | `/forms/:id/submissions`            | AdminGuard (FORMS_WRITE) | Admin records a submission on someone's behalf — `{ answers, memberId? }`. Works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in) |
+| POST   | `/forms/:id/cover`                  | AdminGuard (FORMS_WRITE) | Multipart, field name `cover`. Sets `Form.coverImageUrl` |
+| DELETE | `/forms/:id/cover`                  | AdminGuard (FORMS_WRITE) | Clears the cover image |
+| POST   | `/forms/:id/logo`                   | AdminGuard (FORMS_WRITE) | Multipart, field name `logo`. Sets `Form.logoUrl` |
+| DELETE | `/forms/:id/logo`                   | AdminGuard (FORMS_WRITE) | Clears the logo |
+| POST   | `/forms/:id/submissions`            | AdminGuard (FORMS_WRITE) | Admin records a submission on someone's behalf — `{ answers, memberId? }`. Works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in). Returns `{ submissionId, nextSteps }`, same shape as the member/public submit endpoints |
 | GET    | `/forms/:id/submissions`            | AdminGuard (FORMS_READ)  | Paginated (`?page=&limit=`) — this list is attendance-scale, unlike the forms list itself |
 | GET    | `/forms/:id/submissions/export`     | AdminGuard (FORMS_READ)  | CSV, one column per field (ordered), `Submitted By` shows the member's name or "Public" |
 | GET    | `/forms/:id/analytics`              | AdminGuard (FORMS_READ)  | At-a-glance summary across all submissions, computed per field type (see below) |
-| GET    | `/forms/member`                     | JwtAuthGuard             | Forms visible to the caller (`isActive`, `MEMBERS` or `PUBLIC`) — optional `?eventId=` filter |
-| GET    | `/forms/member/:id`                 | JwtAuthGuard             | Form fields + `suggestedValues` auto-filled from the caller's own profile |
-| POST   | `/forms/member/:id/submit`          | JwtAuthGuard             | `memberId` comes from the token, never the body |
-| GET    | `/forms/public/:id`                 | Public, `404` unless `isActive && visibility === PUBLIC` | No tenant subdomain restriction beyond the usual Host-header resolution |
-| POST   | `/forms/public/:id/submit`          | Public, rate-limited (5/min) | `memberId` is always `null` — an open, unauthenticated write endpoint, throttled from day one rather than retrofitted |
+| GET    | `/forms/member`                     | JwtAuthGuard             | Forms visible to the caller (`isActive`, `MEMBERS` or `PUBLIC`) — optional `?eventId=` filter. A `MEMBERS` form with an `audienceGroup` is filtered out for anyone outside that Contact List |
+| GET    | `/forms/member/:id`                 | JwtAuthGuard             | Form fields + `suggestedValues` auto-filled from the caller's own profile. 404s (not 403) if the form has an `audienceGroup` the caller isn't in |
+| POST   | `/forms/member/:id/submit`          | JwtAuthGuard             | `memberId` comes from the token, never the body. Returns `{ submissionId, nextSteps }` |
+| GET    | `/forms/public/:id`                 | Public, `404` unless `isActive && visibility === PUBLIC` | No tenant subdomain restriction beyond the usual Host-header resolution. Response is a sanitized `PublicFormDto` — every field's `optionMetadata` is stripped |
+| POST   | `/forms/public/:id/submit`          | Public, rate-limited (5/min) | `memberId` is always `null` — an open, unauthenticated write endpoint, throttled from day one rather than retrofitted. Returns `{ submissionId, nextSteps }` |
 
 `forms` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`) *and* Pro-plan-gated
 (`@RequiresPlan(PlanFeature.FORMS)`, `PlanGuard`) on all three controllers, including the public one — `PlanGuard`
@@ -5550,6 +5634,16 @@ not an enum), `SmallGroupMember` (join table, unique on `(group, member)`), `Sma
 `(group, member, meetingDate)` — re-recording the same date edits in place, same upsert idiom as
 `ServiceHeadcount`).
 
+**Venue + online meeting support:** `SmallGroup` also carries `venue` (`Venue | null`, ManyToOne, `SET NULL` on
+delete — informational only, unlike `EventConfig.defaultVenue`'s `RESTRICT`, since losing the link on venue
+deletion doesn't break any live check-in flow), `meetingFormat` (`MeetingFormatEnum`, shared with `EventConfig`,
+default `IN_PERSON`), and `meetingLink` (`string | null`). `venue` is added **alongside**, not instead of, the
+existing free-text `meetingLocation` — most fellowships meet informally (e.g. a member's home) with no registered
+`Venue` row, so `venue` only covers the minority case of a fellowship meeting at an actual church-registered venue.
+No cross-field validation is enforced server-side (unlike `EventConfig`'s IN_PERSON/ONLINE venue requirement) — a
+fellowship is a much softer entity than a live check-in service, so an admin can freely leave both `venue` and
+`meetingLocation` unset, or set either/both regardless of `meetingFormat`.
+
 **Membership is self-service, no approval step:** `POST small-groups/:id/join` upserts-by-returning-existing
 (mirrors `VolunteerService.signUp`'s "already confirmed → return the existing row" shape) rather than erroring on
 a duplicate join — including under a concurrent double-tap: the initial existence check leaves a race window before
@@ -5993,7 +6087,7 @@ outside the requested `?months=` window).
 | PATCH  | /admin/users/:id                                           | AdminGuard (ADMIN_WRITE)                                      | Update admin user role/status                                                                                 |
 | POST   | /admin/users/:id/revoke                                    | AdminGuard (ADMIN_WRITE)                                      | Revoke admin access                                                                                           |
 | GET    | /admin/audit-logs                                          | AdminGuard (AUDIT_READ)                                       | Paginated audit log; filterable by action, actorId, targetId, dateFrom, dateTo                                |
-| POST   | /attendances/checkin                                       | Any                                                           | Check in to a service slot (workers must include `location`; one record per event per member)                 |
+| POST   | /attendances/checkin                                       | Any                                                           | Check in to a service slot (workers must include `location` when the resolved slot format is `IN_PERSON`; not required for `ONLINE`; one record per event per member) |
 | GET    | /attendances/me/distance-check                             | Any (JwtAuthGuard)                                            | `{ enabled, isPlatformDefault }` — member-readable mirror of the admin distance-check setting below, so the member app can skip its own client-side distance block when enforcement is off |
 | GET    | /attendances/my-history                                    | Any                                                           | Own attendance records                                                                                        |
 | GET    | /attendances/my-summary                                    | Any                                                           | Own lifetime rate/streak, computed in SQL over full history (not just the current page) — `{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` |
@@ -6080,9 +6174,9 @@ outside the requested `?months=` window).
 | GET    | /volunteer-opportunities?page=&limit=                      | JwtAuthGuard + Module: volunteering                             | Open, upcoming opportunities; each row includes the caller's own `mySignupStatus`                               |
 | POST   | /volunteer-opportunities/:id/signup                        | JwtAuthGuard + Module: volunteering                              | Sign up (upsert — re-signing after a cancel re-confirms the same row). 400 if not OPEN or at capacity.          |
 | DELETE | /volunteer-opportunities/:id/signup                        | JwtAuthGuard + Module: volunteering                              | Cancel the caller's own signup                                                                                  |
-| POST   | /admin/small-groups                                        | AdminGuard (SMALL_GROUP_WRITE)                                   | Create a group — body: name, description?, leaderId?, meetingDay?, meetingLocation?                             |
+| POST   | /admin/small-groups                                        | AdminGuard (SMALL_GROUP_WRITE)                                   | Create a group — body: name, description?, leaderId?, meetingDay?, meetingLocation?, venueId?, meetingFormat?, meetingLink? |
 | GET    | /admin/small-groups?page=&limit=                           | AdminGuard (SMALL_GROUP_READ)                                    | Paginated list, alphabetical by name                                                                            |
-| PATCH  | /admin/small-groups/:id                                    | AdminGuard (SMALL_GROUP_WRITE)                                   | Update any field; `leaderId: null` explicitly unassigns the leader                                              |
+| PATCH  | /admin/small-groups/:id                                    | AdminGuard (SMALL_GROUP_WRITE)                                   | Update any field; `leaderId: null`/`venueId: null` explicitly unassigns the leader/venue                        |
 | DELETE | /admin/small-groups/:id                                    | AdminGuard (SMALL_GROUP_WRITE)                                   | Hard delete — removes membership and attendance history too (CASCADE)                                          |
 | GET    | /admin/small-groups/:id/members                            | AdminGuard (SMALL_GROUP_READ)                                    | Full roster                                                                                                     |
 | DELETE | /admin/small-groups/:id/members/:memberId                 | AdminGuard (SMALL_GROUP_WRITE)                                   | Force-remove a member; logs SMALL_GROUP_MEMBER_REMOVED                                                          |
@@ -6100,8 +6194,8 @@ outside the requested `?months=` window).
 | GET    | /events                                                    | Any                                                           | List events. Query: `page`, `limit`, `orderBy`, `order`, `from` (YYYY-MM-DD), `to` (YYYY-MM-DD), `upcoming=true`, `search` (case-insensitive match on event name — powers searchable event pickers in the admin frontend) |
 | DELETE | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Delete single event — blocked if `attendanceMarked = true` or event is in the past                           |
 | DELETE | /events/recurring/:recurringEventId                        | AdminGuard (EVENTS_WRITE)                                     | Delete future recurring events                                                                                |
-| POST   | /event-config                                              | AdminGuard (EVENTS_WRITE)                                     | Create timing config                                                                                          |
-| PATCH  | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Update timing config                                                                                          |
+| POST   | /event-config                                              | AdminGuard (EVENTS_WRITE)                                     | Create timing config — body gains `defaultFormat?` (`IN_PERSON`\|`ONLINE`), `onlineMeetingUrl?`; `defaultVenueId` is now optional (required only when `defaultFormat` is `IN_PERSON`) |
+| PATCH  | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Update timing config — `defaultVenueId: null` explicitly clears the venue (needed when switching to `ONLINE`) |
 | GET    | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Get config by ID                                                                                              |
 | GET    | /event-config                                              | AdminGuard (EVENTS_WRITE)                                     | List configs                                                                                                  |
 | DELETE | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Delete config                                                                                                 |
@@ -6461,22 +6555,26 @@ POST /attendances/checkin
 3. **Assert active** — throws 400 if `member.status = INACTIVE`. Also throws if the member is a WORKER with
    `workerProfile.status = INACTIVE`.
 
-4. **Worker location** — workers **must** provide `location` coordinates. Throws 400 if `location` is absent for a WORKER.
+4. **Resolve config** — `EventService.resolveSlotConfig(slot)` merges per-slot overrides over EventConfig values,
+   including `format` (`slot.formatOverride ?? config.defaultFormat`). Throws 400 if no config, or if the resolved
+   `format` is `IN_PERSON` with no resolvable venue.
 
-5. **Duplicate check** — throws 400 if an attendance record already exists for `(member, event)`. One record per event, regardless of which slot the member enters.
+5. **Worker location** — workers **must** provide `location` coordinates, but only when the resolved `format` is
+   `IN_PERSON`. An `ONLINE`-resolved slot never requires location from anyone. Throws 400 if `location` is absent
+   for a WORKER checking into an `IN_PERSON` slot.
 
-6. **Resolve config** — merges per-slot overrides over EventConfig values. Throws 400 if no config and no overrides.
+6. **Duplicate check** — throws 400 if an attendance record already exists for `(member, event)`. One record per event, regardless of which slot the member enters.
 
 7. **Validate window:**
     - Workers: window opens at `startTime + workerCheckinStartOffsetSeconds` (typically negative)
     - Members: window opens at `startTime + memberCheckinStartOffsetSeconds`
     - Both close at `startTime + checkinStopOffsetSeconds`
 
-8. **Validate location** *(if location provided)*: Resolves `effectiveVenue` (
-   `slot.venueOverride ?? slot.config.defaultVenue`). Calculates Haversine distance between submitted coordinates and
-   the venue's `latitude`/`longitude`. If distance exceeds `allowedDistanceInMeters` and enforcement is on for this
-   tenant (`AttendanceSettingsService.isEnabled()` — see "Attendance Distance Check Setting" below; no longer a
-   single global `ENFORCE_DISTANCE_CHECK=true` for every tenant), throws 400.
+8. **Validate location** *(if location provided AND the resolved venue is non-null)*: Calculates Haversine distance
+   between submitted coordinates and the venue's `latitude`/`longitude`. If distance exceeds
+   `allowedDistanceInMeters` and enforcement is on for this tenant (`AttendanceSettingsService.isEnabled()` — see
+   "Attendance Distance Check Setting" below; no longer a single global `ENFORCE_DISTANCE_CHECK=true` for every
+   tenant), throws 400. Never runs for an `ONLINE`-resolved slot, since its resolved venue is null.
 
 9. **Resolve status:**
     - Member → always `PRESENT`
