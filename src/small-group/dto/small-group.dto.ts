@@ -1,4 +1,12 @@
-import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  IsUrl,
+} from 'class-validator';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 
 export class CreateSmallGroupDto {
   @IsString()
@@ -20,6 +28,18 @@ export class CreateSmallGroupDto {
   @IsOptional()
   @IsString()
   meetingLocation?: string;
+
+  @IsOptional()
+  @IsUUID()
+  venueId?: string;
+
+  @IsOptional()
+  @IsEnum(MeetingFormatEnum)
+  meetingFormat?: MeetingFormatEnum;
+
+  @IsOptional()
+  @IsUrl()
+  meetingLink?: string;
 }
 
 export class UpdateSmallGroupDto {
@@ -42,4 +62,16 @@ export class UpdateSmallGroupDto {
   @IsOptional()
   @IsString()
   meetingLocation?: string;
+
+  @IsOptional()
+  @IsUUID()
+  venueId?: string | null;
+
+  @IsOptional()
+  @IsEnum(MeetingFormatEnum)
+  meetingFormat?: MeetingFormatEnum;
+
+  @IsOptional()
+  @IsUrl()
+  meetingLink?: string;
 }

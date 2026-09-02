@@ -80,6 +80,44 @@ describe('SmallGroupService', () => {
       );
       expect(result).toBe(saved);
     });
+
+    it('defaults meetingFormat to IN_PERSON and venue/link to null when not provided', async () => {
+      mockGroupRepo.create.mockReturnValue({});
+      mockGroupRepo.save.mockResolvedValue({});
+
+      await service.create({ name: 'Cell 1' }, mockAdmin);
+
+      expect(mockGroupRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          venue: null,
+          meetingFormat: 'IN_PERSON',
+          meetingLink: null,
+        }),
+      );
+    });
+
+    it('links the venue and format/link when provided', async () => {
+      mockGroupRepo.create.mockReturnValue({});
+      mockGroupRepo.save.mockResolvedValue({});
+
+      await service.create(
+        {
+          name: 'Cell 1',
+          venueId: 'venue-1',
+          meetingFormat: 'ONLINE' as any,
+          meetingLink: 'https://zoom.example/live',
+        },
+        mockAdmin,
+      );
+
+      expect(mockGroupRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          venue: { id: 'venue-1' },
+          meetingFormat: 'ONLINE',
+          meetingLink: 'https://zoom.example/live',
+        }),
+      );
+    });
   });
 
   describe('update', () => {
@@ -105,6 +143,60 @@ describe('SmallGroupService', () => {
 
       expect(result.leader).toBeNull();
     });
+
+    it('clears the venue when venueId is explicitly null', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        venue: { id: 'venue-1' },
+      });
+      mockGroupRepo.save.mockImplementation((g) => Promise.resolve(g));
+
+      const result = await service.update(
+        'group-1',
+        { venueId: null },
+        mockAdmin,
+      );
+
+      expect(result.venue).toBeNull();
+    });
+
+    it('leaves the venue untouched when venueId is omitted', async () => {
+      const existingVenue = { id: 'venue-1' };
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        venue: existingVenue,
+      });
+      mockGroupRepo.save.mockImplementation((g) => Promise.resolve(g));
+
+      const result = await service.update(
+        'group-1',
+        { name: 'New Name' },
+        mockAdmin,
+      );
+
+      expect(result.venue).toBe(existingVenue);
+    });
+
+    it('updates meetingFormat and meetingLink when provided', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        meetingFormat: 'IN_PERSON',
+        meetingLink: null,
+      });
+      mockGroupRepo.save.mockImplementation((g) => Promise.resolve(g));
+
+      const result = await service.update(
+        'group-1',
+        {
+          meetingFormat: 'ONLINE' as any,
+          meetingLink: 'https://zoom.example/live',
+        },
+        mockAdmin,
+      );
+
+      expect(result.meetingFormat).toBe('ONLINE');
+      expect(result.meetingLink).toBe('https://zoom.example/live');
+    });
   });
 
   describe('delete', () => {
@@ -125,6 +217,66 @@ describe('SmallGroupService', () => {
   describe('list', () => {
     it('throws BadRequestException when page is less than 1', async () => {
       await expect(service.list(0)).rejects.toThrow(BadRequestException);
+    });
+
+    it('joins the venue relation alongside leader', async () => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      mockGroupRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.list(1, 20);
+
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('g.leader', 'leader');
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('g.venue', 'venue');
+    });
+  });
+
+  describe('getOne', () => {
+    it('requests the leader and venue relations', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'group-1' });
+
+      await service.getOne('group-1');
+
+      expect(mockGroupRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'group-1' },
+        relations: ['leader', 'venue'],
+      });
+    });
+  });
+
+  describe('listGroupsWithMemberCount', () => {
+    it('joins the venue relation alongside leader', async () => {
+      const qb: any = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      mockGroupRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.listGroupsWithMemberCount(1, 20);
+
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('g.leader', 'leader');
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('g.venue', 'venue');
+    });
+  });
+
+  describe('listMine', () => {
+    it('requests the group.venue relation alongside group.leader', async () => {
+      mockMemberRepo.find.mockResolvedValue([]);
+
+      await service.listMine('member-1');
+
+      expect(mockMemberRepo.find).toHaveBeenCalledWith({
+        where: { member: { id: 'member-1' } },
+        relations: ['group', 'group.leader', 'group.venue'],
+      });
     });
   });
 

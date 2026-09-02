@@ -16,6 +16,8 @@ import {
 import { RecordAttendanceDto } from '../dto/record-attendance.dto';
 import { Member } from '../../member/entity/member.entity';
 import { Admin } from '../../admin/entity/admin.entity';
+import { Venue } from '../../venue/entity/venue.entity';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -41,6 +43,9 @@ export class SmallGroupService {
       leader: dto.leaderId ? ({ id: dto.leaderId } as Member) : null,
       meetingDay: dto.meetingDay ?? null,
       meetingLocation: dto.meetingLocation ?? null,
+      venue: dto.venueId ? ({ id: dto.venueId } as Venue) : null,
+      meetingFormat: dto.meetingFormat ?? MeetingFormatEnum.IN_PERSON,
+      meetingLink: dto.meetingLink ?? null,
       createdBy: { id: admin.id } as Admin,
     });
 
@@ -68,6 +73,12 @@ export class SmallGroupService {
     if (dto.meetingDay !== undefined) group.meetingDay = dto.meetingDay;
     if (dto.meetingLocation !== undefined)
       group.meetingLocation = dto.meetingLocation;
+    if (dto.venueId !== undefined) {
+      group.venue = dto.venueId ? ({ id: dto.venueId } as Venue) : null;
+    }
+    if (dto.meetingFormat !== undefined)
+      group.meetingFormat = dto.meetingFormat;
+    if (dto.meetingLink !== undefined) group.meetingLink = dto.meetingLink;
 
     const saved = await this.groupRepo.save(group);
     this.auditLogService.log('SMALL_GROUP_UPDATED', {
@@ -94,6 +105,7 @@ export class SmallGroupService {
     const [data, total] = await this.groupRepo
       .createQueryBuilder('g')
       .leftJoinAndSelect('g.leader', 'leader')
+      .leftJoinAndSelect('g.venue', 'venue')
       .orderBy('g.name', 'ASC')
       .skip((page - 1) * limit)
       .take(limit)
@@ -105,7 +117,7 @@ export class SmallGroupService {
   async getOne(id: string): Promise<SmallGroup> {
     const group = await this.groupRepo.findOne({
       where: { id },
-      relations: ['leader'],
+      relations: ['leader', 'venue'],
     });
     if (!group) throw new NotFoundException('Small group not found');
     return group;
@@ -169,6 +181,7 @@ export class SmallGroupService {
     const [groups, total] = await this.groupRepo
       .createQueryBuilder('g')
       .leftJoinAndSelect('g.leader', 'leader')
+      .leftJoinAndSelect('g.venue', 'venue')
       .orderBy('g.name', 'ASC')
       .skip((page - 1) * limit)
       .take(limit)
@@ -198,7 +211,7 @@ export class SmallGroupService {
   async listMine(memberId: string): Promise<SmallGroup[]> {
     const memberships = await this.memberRepo.find({
       where: { member: { id: memberId } },
-      relations: ['group', 'group.leader'],
+      relations: ['group', 'group.leader', 'group.venue'],
     });
     return memberships.map((m) => m.group);
   }
@@ -323,7 +336,7 @@ export class SmallGroupService {
   private async getOrThrow(id: string): Promise<SmallGroup> {
     const group = await this.groupRepo.findOne({
       where: { id },
-      relations: ['leader'],
+      relations: ['leader', 'venue'],
     });
     if (!group) throw new NotFoundException('Small group not found');
     return group;
