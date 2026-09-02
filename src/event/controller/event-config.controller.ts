@@ -10,11 +10,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import {
-  EventConfigService,
-  UpdateEventConfigDto,
-} from '../service/event-config.service';
+import { EventConfigService } from '../service/event-config.service';
 import { CreateEventConfigDto } from '../dto/create-event-config.dto';
+import { UpdateEventConfigDto } from '../dto/update-event-config.dto';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';

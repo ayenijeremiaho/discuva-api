@@ -22,6 +22,7 @@ import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { DepartmentService } from '../../department/service/department.service';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { DateService } from '../../utility/service/date.service';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { ExcelService } from '../../utility/service/excel.service';
@@ -152,6 +153,8 @@ const defaultConfig = {
   checkinStopOffsetSeconds: 7200,
   venue: defaultVenue,
   allowedDistanceInMeters: 100,
+  format: MeetingFormatEnum.IN_PERSON,
+  onlineMeetingUrl: null,
 };
 
 const defaultLocation = { latitude: 6.5244, longitude: 3.3792 };
@@ -278,6 +281,7 @@ describe('AttendanceService', () => {
         status: MemberStatusEnum.ACTIVE,
         workerProfile: { id: 'wp-1', status: WorkerStatusEnum.ACTIVE },
       });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
 
       await expect(
         service.checkin(
@@ -285,6 +289,32 @@ describe('AttendanceService', () => {
           { serviceSlotId: 'slot-1' } as any,
         ),
       ).rejects.toThrow('Workers must provide their location to check in.');
+    });
+
+    it('should not require location from a worker when the resolved format is ONLINE', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'worker-1',
+        role: MemberRoleEnum.WORKER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: { id: 'wp-1', status: WorkerStatusEnum.ACTIVE },
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue({
+        ...defaultConfig,
+        venue: null,
+        format: MeetingFormatEnum.ONLINE,
+        onlineMeetingUrl: 'https://zoom.example/live',
+      });
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.checkin(
+          { ...user, id: 'worker-1', role: MemberRoleEnum.WORKER },
+          { serviceSlotId: 'slot-1' } as any,
+        ),
+      ).resolves.toEqual({ message: 'Check-in successful' });
     });
 
     it('should throw BadRequestException if member already checked in', async () => {

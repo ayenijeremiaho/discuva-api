@@ -13,8 +13,9 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { ConfigService } from '@nestjs/config';
 import { VenueService } from '../../venue/service/venue.service';
 import { CacheService } from '../../utility/service/cache.service';
-
-export type UpdateEventConfigDto = Partial<CreateEventConfigDto>;
+import { UpdateEventConfigDto } from '../dto/update-event-config.dto';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
+import { Venue } from '../../venue/entity/venue.entity';
 
 @Injectable()
 export class EventConfigService {
@@ -39,8 +40,12 @@ export class EventConfigService {
       throw new BadRequestException('Event config name already in use');
     }
     this.validateOffsets(dto);
+    const format = dto.defaultFormat ?? MeetingFormatEnum.IN_PERSON;
+    this.assertValidFormat(format, dto.defaultVenueId);
 
-    const defaultVenue = await this.venueService.getById(dto.defaultVenueId);
+    const defaultVenue = dto.defaultVenueId
+      ? await this.venueService.getById(dto.defaultVenueId)
+      : null;
 
     const config = this.repo.create({
       name: dto.name,
@@ -52,6 +57,8 @@ export class EventConfigService {
       allowedDistanceInMeters: dto.allowedDistanceInMeters,
       autoStartSession: dto.autoStartSession ?? false,
       defaultVenue,
+      defaultFormat: format,
+      onlineMeetingUrl: dto.onlineMeetingUrl ?? null,
     });
     const saved = await this.repo.save(config);
     this.cacheService.del(EventConfigService.CACHE_KEY);
@@ -68,9 +75,15 @@ export class EventConfigService {
       }
     }
 
-    if (dto.defaultVenueId) {
-      config.defaultVenue = await this.venueService.getById(dto.defaultVenueId);
+    let venue: Venue | null = config.defaultVenue;
+    if (dto.defaultVenueId !== undefined) {
+      venue = dto.defaultVenueId
+        ? await this.venueService.getById(dto.defaultVenueId)
+        : null;
     }
+    const format = dto.defaultFormat ?? config.defaultFormat;
+    this.assertValidFormat(format, venue?.id);
+    config.defaultVenue = venue;
 
     const { defaultVenueId: _dv, ...rest } = dto;
     Object.assign(config, rest);
@@ -79,6 +92,22 @@ export class EventConfigService {
     this.cacheService.del(EventConfigService.CACHE_KEY);
     this.logger.log(`Updated event config "${saved.name}" (${id})`);
     return saved;
+  }
+
+  private assertValidFormat(
+    format: MeetingFormatEnum,
+    venueId: string | null | undefined,
+  ): void {
+    if (format === MeetingFormatEnum.IN_PERSON && !venueId) {
+      throw new BadRequestException(
+        'An in-person event config requires a default venue',
+      );
+    }
+    if (format === MeetingFormatEnum.ONLINE && venueId) {
+      throw new BadRequestException(
+        'An online event config cannot have a default venue',
+      );
+    }
   }
 
   async get(id: string): Promise<EventConfig> {

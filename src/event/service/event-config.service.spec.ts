@@ -6,6 +6,7 @@ import { EventConfig } from '../entity/event-config.entity';
 import { VenueService } from '../../venue/service/venue.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { ConfigService } from '@nestjs/config';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 
 const mockCacheService = {
   key: jest.fn().mockImplementation((ns: string, id: string) => `${ns}:${id}`),
@@ -168,6 +169,52 @@ describe('EventConfigService', () => {
 
       expect(mockRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ autoStartSession: true }),
+      );
+    });
+
+    it('throws BadRequestException for an IN_PERSON config with no defaultVenueId', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      const { defaultVenueId: _dv, ...dtoWithoutVenue } = validDto;
+
+      await expect(
+        service.create({
+          ...dtoWithoutVenue,
+          defaultFormat: MeetingFormatEnum.IN_PERSON,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockVenueService.getById).not.toHaveBeenCalled();
+    });
+
+    it('throws BadRequestException for an ONLINE config that still has a defaultVenueId', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+
+      await expect(
+        service.create({
+          ...validDto,
+          defaultFormat: MeetingFormatEnum.ONLINE,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('saves an ONLINE config with no venue and an onlineMeetingUrl', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      const { defaultVenueId: _dv, ...dtoWithoutVenue } = validDto;
+      mockRepo.create.mockReturnValue({});
+      mockRepo.save.mockResolvedValue({});
+
+      await service.create({
+        ...dtoWithoutVenue,
+        defaultFormat: MeetingFormatEnum.ONLINE,
+        onlineMeetingUrl: 'https://zoom.example/live',
+      });
+
+      expect(mockVenueService.getById).not.toHaveBeenCalled();
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          defaultVenue: null,
+          defaultFormat: MeetingFormatEnum.ONLINE,
+          onlineMeetingUrl: 'https://zoom.example/live',
+        }),
       );
     });
   });
@@ -369,6 +416,60 @@ describe('EventConfigService', () => {
 
       await expect(
         service.update('config-1', { workerLateOffsetSeconds: 8000 }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('clears defaultVenue and switches to ONLINE when defaultVenueId is explicitly null', async () => {
+      const existingConfig = {
+        id: 'config-1',
+        name: 'Config',
+        defaultVenue,
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
+        ...validOffsets,
+      };
+      mockRepo.findOne.mockResolvedValue(existingConfig);
+      mockRepo.save.mockResolvedValue({
+        ...existingConfig,
+        defaultVenue: null,
+        defaultFormat: MeetingFormatEnum.ONLINE,
+      });
+
+      const result = await service.update('config-1', {
+        defaultVenueId: null,
+        defaultFormat: MeetingFormatEnum.ONLINE,
+      });
+
+      expect(mockVenueService.getById).not.toHaveBeenCalled();
+      expect(result.defaultVenue).toBeNull();
+    });
+
+    it('throws BadRequestException when clearing defaultVenueId while staying IN_PERSON', async () => {
+      const existingConfig = {
+        id: 'config-1',
+        name: 'Config',
+        defaultVenue,
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
+        ...validOffsets,
+      };
+      mockRepo.findOne.mockResolvedValue(existingConfig);
+
+      await expect(
+        service.update('config-1', { defaultVenueId: null }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('throws BadRequestException when switching to ONLINE without clearing an existing defaultVenue', async () => {
+      const existingConfig = {
+        id: 'config-1',
+        name: 'Config',
+        defaultVenue,
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
+        ...validOffsets,
+      };
+      mockRepo.findOne.mockResolvedValue(existingConfig);
+
+      await expect(
+        service.update('config-1', { defaultFormat: MeetingFormatEnum.ONLINE }),
       ).rejects.toThrow(BadRequestException);
     });
   });

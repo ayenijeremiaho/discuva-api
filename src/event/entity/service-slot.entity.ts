@@ -12,6 +12,7 @@ import { EventConfig } from './event-config.entity';
 import { Venue } from '../../venue/entity/venue.entity';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 
 @Entity({ name: 'service_slots' })
 export class ServiceSlot extends BaseEntity {
@@ -66,6 +67,12 @@ export class ServiceSlot extends BaseEntity {
 
   @Column({ name: 'allowed_distance_override', nullable: true, type: 'int' })
   allowedDistanceOverride: number | null;
+
+  // Per-slot format override — null means "use config.defaultFormat". Lets
+  // one occurrence of a recurring config go online (or back in-person)
+  // without touching the shared config every other slot points at.
+  @Column({ name: 'format_override', nullable: true })
+  formatOverride: MeetingFormatEnum | null;
 
   /**
    * Per-slot venue override. When null the slot inherits config.defaultVenue.

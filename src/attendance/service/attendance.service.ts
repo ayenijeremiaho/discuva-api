@@ -31,6 +31,8 @@ import { MemberService } from '../../member/service/member.service';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Event } from '../../event/entity/event.entity';
 import { EventService } from '../../event/service/event.service';
+import { Venue } from '../../venue/entity/venue.entity';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 import { DepartmentService } from '../../department/service/department.service';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -131,8 +133,16 @@ export class AttendanceService {
     this.assertMemberActive(member);
 
     const isWorker = member.role === MemberRoleEnum.WORKER;
+    const cfg = this.eventService.resolveSlotConfig(slot);
 
-    if (isWorker && !dto.location) {
+    // Online services have no physical location for anyone to verify —
+    // this requirement only ever applied to workers, and only makes sense
+    // when there's a venue to be near in the first place.
+    if (
+      isWorker &&
+      cfg.format === MeetingFormatEnum.IN_PERSON &&
+      !dto.location
+    ) {
       throw new BadRequestException(
         'Workers must provide their location to check in.',
       );
@@ -148,13 +158,12 @@ export class AttendanceService {
       );
     }
 
-    const cfg = this.eventService.resolveSlotConfig(slot);
     const now = this.dateService.now();
 
     this.validateCheckinWindow(now, slot, cfg, isWorker);
 
-    if (dto.location) {
-      await this.validateLocation(dto.location, cfg);
+    if (dto.location && cfg.venue) {
+      await this.validateLocation(dto.location, cfg.venue, cfg);
     }
 
     const status = this.resolveStatus(now, slot, cfg, isWorker);
@@ -1252,13 +1261,14 @@ export class AttendanceService {
 
   private async validateLocation(
     location: { latitude: number; longitude: number },
+    venue: Venue,
     cfg: ReturnType<EventService['resolveSlotConfig']>,
   ): Promise<void> {
     const distance = UtilityService.calculateDistanceInMeters(
       location.latitude,
       location.longitude,
-      cfg.venue.latitude,
-      cfg.venue.longitude,
+      venue.latitude,
+      venue.longitude,
     );
     if (
       distance > cfg.allowedDistanceInMeters &&

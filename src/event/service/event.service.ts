@@ -17,6 +17,7 @@ import { CreateServiceSlotDto } from '../dto/create-service-slot.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 import { EventConfigService } from './event-config.service';
 import { VenueService } from '../../venue/service/venue.service';
 import { OrderBy } from '../types/order-by.type';
@@ -269,8 +270,10 @@ export class EventService {
     workerLateOffsetSeconds: number;
     memberCheckinStartOffsetSeconds: number;
     checkinStopOffsetSeconds: number;
-    venue: Venue;
+    venue: Venue | null;
     allowedDistanceInMeters: number;
+    format: MeetingFormatEnum;
+    onlineMeetingUrl: string | null;
   } {
     const c = slot.config;
     if (!c)
@@ -278,8 +281,9 @@ export class EventService {
         `Service slot "${slot.name}" has no config`,
       );
 
+    const format = slot.formatOverride ?? c.defaultFormat;
     const venue = slot.venueOverride ?? c.defaultVenue;
-    if (!venue)
+    if (format === MeetingFormatEnum.IN_PERSON && !venue)
       throw new BadRequestException(
         `Service slot "${slot.name}" has no venue configured`,
       );
@@ -296,6 +300,8 @@ export class EventService {
       venue,
       allowedDistanceInMeters:
         slot.allowedDistanceOverride ?? c.allowedDistanceInMeters,
+      format,
+      onlineMeetingUrl: c.onlineMeetingUrl,
     };
   }
 
@@ -440,6 +446,20 @@ export class EventService {
     if (dto.venueOverrideId) {
       venueOverride = await this.venueService.getById(dto.venueOverrideId);
     }
+    const formatOverride = dto.formatOverride ?? null;
+
+    // A slot resolving to IN_PERSON (whether via its own override or the
+    // config's default) must resolve to a real venue too — checked here,
+    // at save time, rather than leaving it to surface only when the first
+    // person tries to check in (EventService.resolveSlotConfig throws the
+    // same way, but that's too late for the admin who saved a broken slot).
+    const resolvedFormat = formatOverride ?? config?.defaultFormat;
+    const resolvedVenue = venueOverride ?? config?.defaultVenue;
+    if (resolvedFormat === MeetingFormatEnum.IN_PERSON && !resolvedVenue) {
+      throw new BadRequestException(
+        `Slot "${dto.name ?? 'Service'}" is in-person but has no venue configured — set a venue override or use a config with a default venue`,
+      );
+    }
 
     return this.slotRepository.create({
       name: dto.name ?? 'Service',
@@ -452,6 +472,7 @@ export class EventService {
       checkinStopOverride: dto.checkinStopOverride ?? null,
       allowedDistanceOverride: dto.allowedDistanceOverride ?? null,
       venueOverride,
+      formatOverride,
     });
   }
 

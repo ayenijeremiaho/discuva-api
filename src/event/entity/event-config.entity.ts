@@ -9,6 +9,7 @@ import {
 import { ServiceSlot } from './service-slot.entity';
 import { Venue } from '../../venue/entity/venue.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 
 @Entity({ name: 'event_config' })
 export class EventConfig extends BaseEntity {
@@ -23,15 +24,27 @@ export class EventConfig extends BaseEntity {
 
   /**
    * Default venue for any slot that uses this config and has no venueOverride.
-   * Deleting a venue that is a defaultVenue on any config will be rejected by the DB FK constraint.
+   * Null when defaultFormat is ONLINE — an online service has no physical
+   * location to resolve. Deleting a venue that is a defaultVenue on any
+   * config will still be rejected by the DB FK constraint (RESTRICT),
+   * since an IN_PERSON config can never legitimately lose its venue.
    */
   @ManyToOne(() => Venue, {
-    nullable: false,
+    nullable: true,
     eager: false,
     onDelete: 'RESTRICT',
   })
   @JoinColumn({ name: 'default_venue_id' })
-  defaultVenue: Venue;
+  defaultVenue: Venue | null;
+
+  // IN_PERSON (default, matches every config's behavior before this column
+  // existed) requires defaultVenue; ONLINE requires defaultVenue to be
+  // null instead — enforced in EventConfigService, not here.
+  @Column({ name: 'default_format', default: MeetingFormatEnum.IN_PERSON })
+  defaultFormat: MeetingFormatEnum;
+
+  @Column({ name: 'online_meeting_url', nullable: true })
+  onlineMeetingUrl: string | null;
 
   /**
    * Seconds before slot startTime that workers can begin checking in.

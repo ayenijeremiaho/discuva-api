@@ -1,10 +1,12 @@
 import {
   IsDateString,
+  IsEnum,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
 } from 'class-validator';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 
 export class CreateServiceSlotDto {
   @IsOptional()
@@ -45,4 +47,9 @@ export class CreateServiceSlotDto {
   @IsOptional()
   @IsUUID()
   venueOverrideId?: string;
+
+  /** Format override for this specific slot. When omitted the slot uses config.defaultFormat. */
+  @IsOptional()
+  @IsEnum(MeetingFormatEnum)
+  formatOverride?: MeetingFormatEnum;
 }

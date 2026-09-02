@@ -8,6 +8,7 @@ import { ServiceSlot } from '../entity/service-slot.entity';
 import { EventConfigService } from './event-config.service';
 import { VenueService } from '../../venue/service/venue.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 
 const mockEventRepo = {
   findOne: jest.fn(),
@@ -396,6 +397,7 @@ describe('EventService', () => {
         checkinStopOffsetSeconds: 7200,
         allowedDistanceInMeters: 100,
         defaultVenue: null,
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
       } as any;
 
       const slot = {
@@ -403,6 +405,7 @@ describe('EventService', () => {
         name: 'Service',
         config,
         venueOverride: null,
+        formatOverride: null,
         workerCheckinStartOverride: null,
         workerLateOverride: null,
         memberCheckinStartOverride: null,
@@ -413,6 +416,38 @@ describe('EventService', () => {
       expect(() => service.resolveSlotConfig(slot)).toThrow(
         BadRequestException,
       );
+    });
+
+    it('should not require a venue when the resolved format is ONLINE', () => {
+      const config = {
+        workerCheckinStartOffsetSeconds: -7200,
+        workerLateOffsetSeconds: 0,
+        memberCheckinStartOffsetSeconds: -3600,
+        checkinStopOffsetSeconds: 7200,
+        allowedDistanceInMeters: 100,
+        defaultVenue: null,
+        defaultFormat: MeetingFormatEnum.ONLINE,
+        onlineMeetingUrl: 'https://zoom.example/live',
+      } as any;
+
+      const slot = {
+        id: 'slot-1',
+        name: 'Service',
+        config,
+        venueOverride: null,
+        formatOverride: null,
+        workerCheckinStartOverride: null,
+        workerLateOverride: null,
+        memberCheckinStartOverride: null,
+        checkinStopOverride: null,
+        allowedDistanceOverride: null,
+      } as any;
+
+      const result = service.resolveSlotConfig(slot);
+
+      expect(result.venue).toBeNull();
+      expect(result.format).toBe(MeetingFormatEnum.ONLINE);
+      expect(result.onlineMeetingUrl).toBe('https://zoom.example/live');
     });
 
     it('should use venueOverride when present and fall back to config.defaultVenue', () => {
@@ -429,6 +464,7 @@ describe('EventService', () => {
         checkinStopOffsetSeconds: 7200,
         allowedDistanceInMeters: 100,
         defaultVenue,
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
       } as any;
 
       const slot = {
@@ -459,6 +495,7 @@ describe('EventService', () => {
         checkinStopOffsetSeconds: 7200,
         allowedDistanceInMeters: 100,
         defaultVenue,
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
       } as any;
 
       const slot = {
