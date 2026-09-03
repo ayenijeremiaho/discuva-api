@@ -73,6 +73,7 @@ export class Form extends BaseEntity {
   // twice. Null means no dedup. SET NULL rather than a hard block on field
   // removal, matching this module's existing tolerance for a designated
   // field being deleted later (see FormSubmission.answers' own comment).
+  @Index('IDX_forms_dedup_field_id')
   @ManyToOne(() => FormField, {
     nullable: true,
     onDelete: 'SET NULL',
@@ -85,6 +86,7 @@ export class Form extends BaseEntity {
   // description) drives the dynamic post-submission response. Restricted
   // to DROPDOWN at the service layer — CHECKBOX's multi-value answers
   // don't map to "one selected option's metadata".
+  @Index('IDX_forms_next_steps_field_id')
   @ManyToOne(() => FormField, {
     nullable: true,
     onDelete: 'SET NULL',
