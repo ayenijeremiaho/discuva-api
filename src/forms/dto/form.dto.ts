@@ -6,10 +6,12 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsObject,
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
   Min,
   ValidateIf,
   ValidateNested,
@@ -18,8 +20,24 @@ import {
   FIELD_TYPES_REQUIRING_OPTIONS,
   FormFieldAutoFill,
   FormFieldType,
+  FormFieldVisibilityOperator,
   FormVisibility,
 } from '../enum/form.enum';
+
+// A raw fieldId string, not a relation — the referenced field must already
+// exist among the request's own `fields` (validated in
+// FormService.assertValidVisibilityRules, since that depends on sibling
+// data a decorator alone can't see).
+export class FormFieldVisibilityRuleDto {
+  @IsUUID()
+  fieldId: string;
+
+  @IsEnum(FormFieldVisibilityOperator)
+  operator: FormFieldVisibilityOperator;
+
+  @IsString()
+  value: string;
+}
 
 export class FormFieldDto {
   // Present when updating an existing field (keeps its answers linkage
@@ -58,6 +76,15 @@ export class FormFieldDto {
   @Min(0)
   order?: number;
 
+  // Which page of a multi-page form this field appears on — grouping only,
+  // no backend pagination logic (PaginatedFormFillFields on the frontend
+  // does the grouping/rendering). Omitted defaults to 0, same as the
+  // entity's own default.
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  pageIndex?: number;
+
   @IsOptional()
   @IsEnum(FormFieldAutoFill)
   autoFillKey?: FormFieldAutoFill;
@@ -69,6 +96,64 @@ export class FormFieldDto {
   @IsOptional()
   @IsObject()
   optionMetadata?: Record<string, { url?: string; description?: string }>;
+
+  // Bound checks — each only valid for its matching fieldType (NUMBER for
+  // min/maxValue, TEXT/TEXTAREA for min/maxLength, CHECKBOX for
+  // min/maxSelections), enforced in FormService.assertValidFieldConstraints
+  // since that depends on the sibling `fieldType`. Omitted = unbounded on
+  // that side.
+  @IsOptional()
+  @IsNumber()
+  minValue?: number;
+
+  @IsOptional()
+  @IsNumber()
+  maxValue?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  minLength?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  maxLength?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  minSelections?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  maxSelections?: number;
+
+  // TEXT/TEXTAREA only. Syntax + fieldType validated in
+  // FormService.assertValidFieldPattern (a raw regex source string can't be
+  // checked by a decorator alone — needs `new RegExp()` to catch a syntax
+  // error). MaxLength is defense-in-depth against a pathological
+  // catastrophic-backtracking pattern — this is admin-authored, not
+  // visitor input, but the length cap costs nothing and narrows the blast
+  // radius regardless.
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  validationRegex?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  validationMessage?: string;
+
+  // Conditional visibility — see FormFieldVisibilityRuleDto and the
+  // entity column's own comment. Omitted = always visible.
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => FormFieldVisibilityRuleDto)
+  visibilityRule?: FormFieldVisibilityRuleDto;
 }
 
 export class CreateFormDto {
@@ -93,6 +178,19 @@ export class CreateFormDto {
   @IsOptional()
   @IsBoolean()
   createsFirstTimers?: boolean;
+
+  // Emails every admin with FORMS_WRITE on each member/public submission —
+  // see Form.notifyOnSubmission.
+  @IsOptional()
+  @IsBoolean()
+  notifyOnSubmission?: boolean;
+
+  // Admin kill-switch for a member editing their own submission after the
+  // fact — see Form.editableAfterSubmit. Defaults true (same as the
+  // entity's own column default) when omitted.
+  @IsOptional()
+  @IsBoolean()
+  editableAfterSubmit?: boolean;
 
   // Restricts a MEMBERS-visibility form to members of this Group ("Contact
   // List"). Rejected in FormService if set alongside PUBLIC/ADMIN_ONLY
@@ -161,6 +259,14 @@ export class UpdateFormDto {
   @IsBoolean()
   createsFirstTimers?: boolean;
 
+  @IsOptional()
+  @IsBoolean()
+  notifyOnSubmission?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  editableAfterSubmit?: boolean;
+
   // Explicit null clears the restriction (form becomes unrestricted again);
   // omitted leaves the current value untouched, same convention as eventId
   // above.
@@ -194,6 +300,60 @@ export class UpdateFormDto {
   @ValidateNested({ each: true })
   @Type(() => FormFieldDto)
   fields?: FormFieldDto[];
+}
+
+// Every field except `title` follows the same "omitted = inherited from
+// source, explicit null = cleared, value = override" convention as
+// UpdateFormDto's own nullable fields (PrayerConfigService.cloneProgram's
+// simpler "omitted = inherited" convention doesn't need a clear case since
+// PrayerProgram has no nullable FKs to clear). Deliberately carries no
+// `fields` — FormService.cloneForm always deep-copies the source's fields
+// verbatim (with fresh ids); a clone's fields are edited afterwards via the
+// normal PATCH, not at clone time.
+export class CloneFormDto {
+  @IsString()
+  @IsNotEmpty()
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string | null;
+
+  @IsOptional()
+  @IsEnum(FormVisibility)
+  visibility?: FormVisibility;
+
+  @IsOptional()
+  @IsUUID()
+  eventId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  createsFirstTimers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  notifyOnSubmission?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  editableAfterSubmit?: boolean;
+
+  @IsOptional()
+  @IsUUID()
+  audienceGroupId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  postSubmitMessage?: string | null;
+
+  @IsOptional()
+  @IsString()
+  generalActionUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  generalActionLabel?: string | null;
 }
 
 export class SubmitFormDto {
@@ -244,7 +404,28 @@ export interface PublicFormFieldDto {
   required: boolean;
   options: string[] | null;
   order: number;
+  pageIndex: number;
   autoFillKey: FormFieldAutoFill | null;
+  // Browser-level hinting only (native input min/max/minLength/maxLength
+  // attributes) — the real enforcement is server-side, in
+  // FormSubmissionService.validateAnswers.
+  minValue: number | null;
+  maxValue: number | null;
+  minLength: number | null;
+  maxLength: number | null;
+  minSelections: number | null;
+  maxSelections: number | null;
+  validationRegex: string | null;
+  validationMessage: string | null;
+  // Evaluated client-side against the visitor's in-progress answers to
+  // decide whether to render this field at all — real enforcement is
+  // still server-side (FormSubmissionService.validateAnswers skips a
+  // hidden field's checks entirely, so it never blocks submission).
+  visibilityRule: {
+    fieldId: string;
+    operator: FormFieldVisibilityOperator;
+    value: string;
+  } | null;
 }
 
 export interface PublicFormDto {

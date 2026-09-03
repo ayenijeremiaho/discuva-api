@@ -10,6 +10,9 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { Member } from '../../member/entity/member.entity';
 import { Form } from './form.entity';
 
+// FormSubmissionService.getMySubmission looks up by (form, member) together
+// — the "you already submitted this form, want to edit it?" lookup.
+@Index('IDX_form_submissions_form_id_member_id', ['form', 'member'])
 @Entity({ name: 'form_submissions' })
 export class FormSubmission extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')

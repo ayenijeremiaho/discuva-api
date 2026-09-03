@@ -159,6 +159,7 @@ export class EmailQueueService {
       [EmailCategory.ASSIGNMENT_REMINDER]: 'EMAIL_ASSIGNMENT_REMINDER_ENABLED',
       [EmailCategory.CLASS_SESSION_REMINDER]:
         'EMAIL_CLASS_SESSION_REMINDER_ENABLED',
+      [EmailCategory.FORM_SUBMISSION]: 'EMAIL_FORM_SUBMISSION_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);

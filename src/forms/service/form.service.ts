@@ -11,7 +11,12 @@ import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
 import { Event } from '../../event/entity/event.entity';
 import { Group } from '../../group/entity/group.entity';
-import { CreateFormDto, FormFieldDto, UpdateFormDto } from '../dto/form.dto';
+import {
+  CloneFormDto,
+  CreateFormDto,
+  FormFieldDto,
+  UpdateFormDto,
+} from '../dto/form.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import {
@@ -55,6 +60,8 @@ export class FormService {
     }
     this.assertValidAudienceGroup(dto.visibility, dto.audienceGroupId);
     this.assertValidOptionMetadata(dto.fields);
+    this.assertValidFieldConstraints(dto.fields);
+    this.assertValidVisibilityRules(dto.fields);
     this.assertValidCrossFieldRefs(
       dto.dedupFieldId,
       dto.nextStepsFieldId,
@@ -67,6 +74,8 @@ export class FormService {
       visibility: dto.visibility,
       event: dto.eventId ? ({ id: dto.eventId } as Event) : null,
       createsFirstTimers: dto.createsFirstTimers ?? false,
+      notifyOnSubmission: dto.notifyOnSubmission ?? false,
+      editableAfterSubmit: dto.editableAfterSubmit ?? true,
       audienceGroup: dto.audienceGroupId
         ? ({ id: dto.audienceGroupId } as Group)
         : null,
@@ -91,6 +100,16 @@ export class FormService {
           order: f.order ?? index,
           autoFillKey: f.autoFillKey ?? null,
           optionMetadata: f.optionMetadata ?? null,
+          minValue: f.minValue ?? null,
+          maxValue: f.maxValue ?? null,
+          minLength: f.minLength ?? null,
+          maxLength: f.maxLength ?? null,
+          minSelections: f.minSelections ?? null,
+          maxSelections: f.maxSelections ?? null,
+          validationRegex: f.validationRegex ?? null,
+          validationMessage: f.validationMessage ?? null,
+          visibilityRule: f.visibilityRule ?? null,
+          pageIndex: f.pageIndex ?? 0,
           form: saved,
         }),
       ),
@@ -101,6 +120,178 @@ export class FormService {
       dto.dedupFieldId,
       dto.nextStepsFieldId,
     );
+  }
+
+  // Modeled on PrayerConfigService.cloneProgram: only `title` is required,
+  // every other scalar is inherited from `source` unless the dto overrides
+  // it (see CloneFormDto's own comment for the omitted/null/value
+  // convention). Starts inactive and branding-less regardless of the
+  // source — see the comments on isActive/cover/logo in
+  // buildCloneScalars(). Never clones FormSubmission[].
+  async cloneForm(sourceId: string, dto: CloneFormDto): Promise<Form> {
+    const source = await this.getById(sourceId);
+    const scalars = this.buildCloneScalars(source, dto);
+
+    this.assertValidAudienceGroup(scalars.visibility, scalars.audienceGroupId);
+    this.assertValidGeneralAction(
+      scalars.generalActionUrl,
+      scalars.generalActionLabel,
+    );
+
+    const newForm = this.formRepo.create({
+      title: dto.title,
+      description: scalars.description,
+      visibility: scalars.visibility,
+      event: scalars.eventId ? ({ id: scalars.eventId } as Event) : null,
+      isActive: false,
+      createsFirstTimers: scalars.createsFirstTimers,
+      notifyOnSubmission: scalars.notifyOnSubmission,
+      editableAfterSubmit: scalars.editableAfterSubmit,
+      audienceGroup: scalars.audienceGroupId
+        ? ({ id: scalars.audienceGroupId } as Group)
+        : null,
+      postSubmitMessage: scalars.postSubmitMessage,
+      generalActionUrl: scalars.generalActionUrl,
+      generalActionLabel: scalars.generalActionLabel,
+    });
+    const saved = await this.formRepo.save(newForm);
+
+    // A separate fieldRepo.save(), not a cascade — same cyclic-dependency
+    // reason as create()/update().
+    saved.fields = await this.fieldRepo.save(
+      source.fields.map((f) =>
+        this.fieldRepo.create({
+          label: f.label,
+          description: f.description,
+          fieldType: f.fieldType,
+          required: f.required,
+          options: f.options,
+          order: f.order,
+          autoFillKey: f.autoFillKey,
+          optionMetadata: f.optionMetadata,
+          minValue: f.minValue,
+          maxValue: f.maxValue,
+          minLength: f.minLength,
+          maxLength: f.maxLength,
+          minSelections: f.minSelections,
+          maxSelections: f.maxSelections,
+          validationRegex: f.validationRegex,
+          validationMessage: f.validationMessage,
+          // Not copied verbatim — a source rule's fieldId points at a
+          // FormField row that no longer exists post-clone (fresh ids).
+          // remapClonedVisibilityRules fills in the re-matched version
+          // below, once every field has its new id.
+          visibilityRule: null,
+          pageIndex: f.pageIndex,
+          form: saved,
+        }),
+      ),
+    );
+
+    if (scalars.createsFirstTimers) {
+      this.assertValidFirstTimerConfig(scalars.visibility, saved.fields);
+    }
+
+    // dedupField/nextStepsField point at FormField rows that no longer
+    // exist post-clone (fresh ids) — re-matched by label, the only stable
+    // key that survives the copy, same idea as applyCrossFieldRefs' own
+    // "resolve after save" step.
+    const dedupFieldId = source.dedupField
+      ? this.matchClonedFieldByLabel(saved.fields, source.dedupField)
+      : undefined;
+    const nextStepsFieldId = source.nextStepsField
+      ? this.matchClonedFieldByLabel(saved.fields, source.nextStepsField)
+      : undefined;
+    const result = await this.applyCrossFieldRefs(
+      saved,
+      dedupFieldId,
+      nextStepsFieldId,
+    );
+    await this.remapClonedVisibilityRules(source.fields, result.fields);
+    return result;
+  }
+
+  // Same by-label re-matching dedupField/nextStepsField use, applied per
+  // field instead of per form: a rule referencing a source field that
+  // didn't survive the clone (shouldn't happen — every source field is
+  // always cloned) is silently dropped rather than left dangling with a
+  // stale source-form field id. Mutates `clonedFields` in place so the
+  // Form object cloneForm ultimately returns already reflects the
+  // remapped rules, not just the DB rows. Plain `fieldRepo.save()` is safe
+  // here (no `.update()` workaround needed) — visibilityRule is jsonb, not
+  // a relation, so it never enters TypeORM's cyclic-dependency territory.
+  private async remapClonedVisibilityRules(
+    sourceFields: FormField[],
+    clonedFields: FormField[],
+  ): Promise<void> {
+    const toUpdate: FormField[] = [];
+    for (const sourceField of sourceFields) {
+      if (!sourceField.visibilityRule) continue;
+      const clonedOwner = clonedFields.find(
+        (cf) => cf.label === sourceField.label,
+      );
+      const referencedSource = sourceFields.find(
+        (sf) => sf.id === sourceField.visibilityRule!.fieldId,
+      );
+      const clonedTargetId = referencedSource
+        ? this.matchClonedFieldByLabel(clonedFields, referencedSource)
+        : null;
+      if (!clonedOwner || !clonedTargetId) continue;
+      clonedOwner.visibilityRule = {
+        ...sourceField.visibilityRule,
+        fieldId: clonedTargetId,
+      };
+      toUpdate.push(clonedOwner);
+    }
+    if (toUpdate.length) {
+      await this.fieldRepo.save(toUpdate);
+    }
+  }
+
+  // omitted (undefined) = inherited from source, explicit null = cleared,
+  // value = override — see CloneFormDto's own comment. isActive and
+  // cover/logo are deliberately absent here: a clone always starts inactive
+  // (an admin reviews/edits it before it goes live) and branding-less
+  // (sharing a Cloudinary publicId across two Forms means removing the
+  // clone's cover would delete the original's — setCoverImage/
+  // removeCoverImage both unconditionally deleteByPublicId the previous
+  // asset), regardless of what the source had.
+  private buildCloneScalars(source: Form, dto: CloneFormDto) {
+    const scalars = {
+      description: source.description,
+      visibility: dto.visibility ?? source.visibility,
+      eventId: source.event?.id ?? null,
+      createsFirstTimers: dto.createsFirstTimers ?? source.createsFirstTimers,
+      notifyOnSubmission: dto.notifyOnSubmission ?? source.notifyOnSubmission,
+      editableAfterSubmit:
+        dto.editableAfterSubmit ?? source.editableAfterSubmit,
+      audienceGroupId: source.audienceGroup?.id ?? null,
+      postSubmitMessage: source.postSubmitMessage,
+      generalActionUrl: source.generalActionUrl,
+      generalActionLabel: source.generalActionLabel,
+    };
+    if (dto.description !== undefined) scalars.description = dto.description;
+    if (dto.eventId !== undefined) scalars.eventId = dto.eventId;
+    if (dto.audienceGroupId !== undefined) {
+      scalars.audienceGroupId = dto.audienceGroupId;
+    }
+    if (dto.postSubmitMessage !== undefined) {
+      scalars.postSubmitMessage = dto.postSubmitMessage;
+    }
+    if (dto.generalActionUrl !== undefined) {
+      scalars.generalActionUrl = dto.generalActionUrl;
+    }
+    if (dto.generalActionLabel !== undefined) {
+      scalars.generalActionLabel = dto.generalActionLabel;
+    }
+    return scalars;
+  }
+
+  private matchClonedFieldByLabel(
+    clonedFields: FormField[],
+    sourceField: FormField,
+  ): string | null {
+    return clonedFields.find((f) => f.label === sourceField.label)?.id ?? null;
   }
 
   // dedupField/nextStepsField reference FormField rows that don't exist
@@ -188,6 +379,107 @@ export class FormService {
         if (meta.url !== undefined && !this.isValidUrl(meta.url)) {
           throw new BadRequestException(`Invalid URL for option "${key}"`);
         }
+      }
+    }
+  }
+
+  // Mirrors assertValidGeneralAction's simple relational-check shape,
+  // applied to each of the three bound pairs a field can carry. A bound is
+  // only meaningful for its matching fieldType — set on the wrong type is
+  // rejected outright rather than silently ignored, so a form builder finds
+  // out immediately rather than the bound quietly never taking effect.
+  private assertValidFieldConstraints(fields: FormFieldDto[]): void {
+    for (const field of fields) {
+      this.assertBoundPairValid(
+        field,
+        'minValue',
+        'maxValue',
+        FormFieldType.NUMBER,
+      );
+      this.assertBoundPairValid(field, 'minLength', 'maxLength', [
+        FormFieldType.TEXT,
+        FormFieldType.TEXTAREA,
+      ]);
+      this.assertBoundPairValid(field, 'minSelections', 'maxSelections', [
+        FormFieldType.CHECKBOX,
+      ]);
+      this.assertValidFieldPattern(field);
+    }
+  }
+
+  private assertBoundPairValid(
+    field: FormFieldDto,
+    minKey: 'minValue' | 'minLength' | 'minSelections',
+    maxKey: 'maxValue' | 'maxLength' | 'maxSelections',
+    allowedTypes: FormFieldType | FormFieldType[],
+  ): void {
+    const min = field[minKey];
+    const max = field[maxKey];
+    if (min === undefined && max === undefined) return;
+
+    const allowed = Array.isArray(allowedTypes) ? allowedTypes : [allowedTypes];
+    if (!allowed.includes(field.fieldType)) {
+      throw new BadRequestException(
+        `"${field.label}": ${minKey}/${maxKey} only apply to ${allowed.join('/')} fields`,
+      );
+    }
+    if (min !== undefined && max !== undefined && max < min) {
+      throw new BadRequestException(
+        `"${field.label}": ${maxKey} must be greater than or equal to ${minKey}`,
+      );
+    }
+  }
+
+  // TEXT/TEXTAREA only, same "wrong fieldType is rejected outright" stance
+  // as assertBoundPairValid. A regex is admin-authored (AdminGuard +
+  // FORMS_WRITE), not visitor input, but its *syntax* still needs checking
+  // here — `new RegExp()` throws a SyntaxError on a malformed pattern, and
+  // that must surface as a 400 at save time, not as an unhandled 500 the
+  // first time someone submits against it.
+  private assertValidFieldPattern(field: FormFieldDto): void {
+    if (field.validationRegex === undefined) return;
+    if (
+      field.fieldType !== FormFieldType.TEXT &&
+      field.fieldType !== FormFieldType.TEXTAREA
+    ) {
+      throw new BadRequestException(
+        `"${field.label}": validationRegex only applies to TEXT/TEXTAREA fields`,
+      );
+    }
+    try {
+      new RegExp(field.validationRegex);
+    } catch {
+      throw new BadRequestException(
+        `"${field.label}": validationRegex is not a valid regular expression`,
+      );
+    }
+  }
+
+  // A rule's fieldId can only reference a field that already exists among
+  // the incoming `fields` (has an `id`) — same constraint the admin UI's
+  // own picker enforces (only offers fields with an id, mirroring
+  // dedupFieldId/nextStepsFieldId's own select). On create(), every
+  // incoming field is brand-new (no ids yet), so incomingIds is always
+  // empty and any visibilityRule is rejected outright — conditional
+  // visibility can only be added once a form has been saved at least once,
+  // same real-world constraint dedupField/nextStepsField already have.
+  // Unlike those two, there's no separate post-save resolution phase here:
+  // visibilityRule is a plain jsonb column (not a `@ManyToOne` relation),
+  // so it's set directly in the same fieldRepo.create() call as every
+  // other field property — no cyclic-dependency workaround needed.
+  private assertValidVisibilityRules(fields: FormFieldDto[]): void {
+    const incomingIds = new Set(fields.filter((f) => f.id).map((f) => f.id));
+    for (const field of fields) {
+      if (!field.visibilityRule) continue;
+      if (field.id && field.visibilityRule.fieldId === field.id) {
+        throw new BadRequestException(
+          `"${field.label}": a visibility condition can't depend on the field's own answer`,
+        );
+      }
+      if (!incomingIds.has(field.visibilityRule.fieldId)) {
+        throw new BadRequestException(
+          `"${field.label}": visibility condition references an unknown field`,
+        );
       }
     }
   }
@@ -302,6 +594,12 @@ export class FormService {
     if (dto.createsFirstTimers !== undefined) {
       form.createsFirstTimers = dto.createsFirstTimers;
     }
+    if (dto.notifyOnSubmission !== undefined) {
+      form.notifyOnSubmission = dto.notifyOnSubmission;
+    }
+    if (dto.editableAfterSubmit !== undefined) {
+      form.editableAfterSubmit = dto.editableAfterSubmit;
+    }
     if (dto.audienceGroupId !== undefined) {
       form.audienceGroup = dto.audienceGroupId
         ? ({ id: dto.audienceGroupId } as Group)
@@ -353,6 +651,16 @@ export class FormService {
             order: f.order ?? index,
             autoFillKey: f.autoFillKey ?? null,
             optionMetadata: f.optionMetadata ?? null,
+            minValue: f.minValue ?? null,
+            maxValue: f.maxValue ?? null,
+            minLength: f.minLength ?? null,
+            maxLength: f.maxLength ?? null,
+            minSelections: f.minSelections ?? null,
+            maxSelections: f.maxSelections ?? null,
+            validationRegex: f.validationRegex ?? null,
+            validationMessage: f.validationMessage ?? null,
+            visibilityRule: f.visibilityRule ?? null,
+            pageIndex: f.pageIndex ?? 0,
             form,
           }),
         ),
@@ -367,6 +675,8 @@ export class FormService {
       form.audienceGroup?.id ?? null,
     );
     if (dto.fields) this.assertValidOptionMetadata(dto.fields);
+    if (dto.fields) this.assertValidFieldConstraints(dto.fields);
+    if (dto.fields) this.assertValidVisibilityRules(dto.fields);
     this.assertValidCrossFieldRefs(
       dto.dedupFieldId,
       dto.nextStepsFieldId,
@@ -487,16 +797,26 @@ export class FormService {
       const submittedBy = s.member
         ? `${s.member.firstname} ${s.member.lastname}`
         : 'Public';
-      const answerCells = fields.map((f) => {
-        const value = s.answers[f.id];
-        if (Array.isArray(value)) return value.join('; ');
-        return value === null || value === undefined ? '' : String(value);
-      });
+      const answerCells = fields.map((f) =>
+        this.formatCsvCell(f, s.answers[f.id]),
+      );
       return [s.createdAt.toISOString(), submittedBy, ...answerCells];
     });
 
     const escape = (cell: string) => `"${cell.replaceAll('"', '""')}"`;
     return [header, ...rows].map((row) => row.map(escape).join(',')).join('\n');
+  }
+
+  // A FILE answer is a { url, publicId } object, not something String()
+  // can meaningfully render — emit the URL instead so the CSV stays a
+  // clickable link to the uploaded file.
+  private formatCsvCell(field: FormField, value: unknown): string {
+    if (field.fieldType === FormFieldType.FILE) {
+      const url = (value as { url?: unknown } | null)?.url;
+      return typeof url === 'string' ? url : '';
+    }
+    if (Array.isArray(value)) return value.join('; ');
+    return value === null || value === undefined ? '' : String(value);
   }
 
   async getAnalytics(formId: string): Promise<FormAnalyticsDto> {
@@ -576,6 +896,10 @@ export class FormService {
         min: numbers.length === 0 ? null : Math.min(...numbers),
         max: numbers.length === 0 ? null : Math.max(...numbers),
       };
+    }
+
+    if (field.fieldType === FormFieldType.FILE) {
+      return { ...base, uploadCount: answers.length };
     }
 
     return {

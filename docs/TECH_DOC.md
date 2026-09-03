@@ -3668,6 +3668,15 @@ or shown during a livestream (generated client-side in discuva-admin — no back
 not a normalized per-answer table — editing or removing a field later never requires migrating past submissions; a
 removed field just leaves a harmless orphaned key behind in old submissions' JSON, still readable/exportable.
 
+**Admin notification on submission (`Form.notifyOnSubmission`, default `false`):** a per-form opt-in — when on,
+`FormSubmissionService.notifyAdmins` emails every active `Admin` whose `adminRole.permissions` includes
+`FORMS_WRITE` (`form-submission-new` template) after a successful save, fire-and-forget (a failure here is logged,
+never surfaces to the submitter). Gated by **both** this per-form flag **and** the tenant-wide
+`EmailCategory.FORM_SUBMISSION` toggle (§10's `EMAIL_FORM_SUBMISSION_ENABLED` platform kill switch, and the
+per-church override under Notification Settings → Automated Emails) — the same defense-in-depth every other
+`EmailCategory` already has. Only fires from `submitAsMember`/`submitAsPublic`; `submitAsAdmin` never notifies,
+since an admin recording something on someone's behalf doesn't need to be told about it.
+
 **Per-option link + description, an always-shown general action, and dynamic post-submission "next steps":** a
 `DROPDOWN`/`CHECKBOX` field's `options` can each carry `optionMetadata: Record<option, { url?, description? }>` —
 e.g. a "Department" dropdown where each department option has its own WhatsApp group link and one-line
@@ -3739,10 +3748,167 @@ an incoming field with an `id` updates that row in place (keeping the id stable 
 keys stay meaningful), one without an `id` is a new field, and an existing row missing from the incoming array is
 deleted. Omitting `fields` entirely from the PATCH body leaves them untouched.
 
+**Cloning (`POST /forms/:id/clone`, `FormService.cloneForm`):** modeled on `PrayerConfigService.cloneProgram` —
+`title` is the only required field on `CloneFormDto`; every other scalar follows an "omitted = inherited from the
+source, explicit `null` = cleared, value = override" convention (same as `UpdateFormDto`'s nullable fields). The
+clone always starts `isActive: false` (an admin reviews it before it goes live) and with no cover/logo — the two
+Forms would otherwise share a Cloudinary `publicId`, so removing the clone's cover would delete the original's.
+`fields` themselves are **not** part of the DTO: they're always deep-copied from the source verbatim, each getting
+a fresh id — a clone's fields are edited afterwards via the normal `PATCH`, not at clone time. `dedupField`/
+`nextStepsField` are re-matched by **label** against the freshly-cloned fields (the only stable key once ids are
+gone), the same `.update()`-not-`.save()` two-phase approach `applyCrossFieldRefs` already uses. `FormSubmission`s
+are never cloned.
+
 **Answer validation happens server-side against the form's actual field definitions**, not via a fixed DTO shape
 (`SubmitFormDto.answers` is just `Record<string, unknown>` — the schema is per-form, not knowable at compile time):
-required fields must be present and non-empty, and `DROPDOWN`/`CHECKBOX` values must be one of the field's
-configured `options`.
+required fields must be present and non-empty, `DROPDOWN`/`CHECKBOX` values must be one of the field's
+configured `options`, and `EMAIL`/`NUMBER`/`DATE` fields are format-checked (`isValidEmail`/`isValidNumber`/
+`isValidDateString`, `src/utility/decorators/form-answer-validators.ts` — thin wrappers around class-validator's
+`isEmail`/`isNumberString`/`isDateString`). Format checks are validate-only: unlike `PHONE`'s
+`normalizePhoneNumber`, the stored answer is never rewritten — a `NUMBER` answer stays whatever numeric string was
+submitted, so CSV export/analytics' existing string-tolerant handling of answers is unaffected. An empty optional
+field skips both the options and format checks, same as it always has.
+
+**Bound constraints (`minValue`/`maxValue`, `minLength`/`maxLength`, `minSelections`/`maxSelections`, all nullable
+on `FormField`):** each pair only applies to its matching `fieldType` — `minValue`/`maxValue` to `NUMBER`,
+`minLength`/`maxLength` to `TEXT`/`TEXTAREA`, `minSelections`/`maxSelections` to `CHECKBOX` — enforced at
+create/update time by `FormService.assertValidFieldConstraints` (rejects a bound set on the wrong `fieldType`
+outright, and `max < min` when both are set on the same field). `FormSubmissionService.validateAnswers` re-checks
+the bound at submit time (`validateFieldBounds`, after `validateFieldFormat` so a malformed `NUMBER` answer is
+already rejected before its value bound is even checked) — a `null` bound means unbounded on that side, and an
+empty optional field skips bound checks the same way it skips every other check. `PublicFormFieldDto` carries all
+six through unchanged for the fill UI's own native-input hinting (`min`/`max`/`minLength`/`maxLength` HTML
+attributes; `minSelections`/`maxSelections` has no native HTML equivalent, shown as helper text instead) — that
+client-side hinting is convenience only, not the real enforcement.
+
+**Custom pattern validation (`FormField.validationRegex`/`validationMessage`, both nullable strings):** TEXT/
+TEXTAREA only — a submitted answer must match `new RegExp(validationRegex).test(value)`
+(`FormSubmissionService.validateFieldPattern`, run after `validateFieldFormat`/`validateFieldBounds` in
+`validateAnswers`), rejected with `validationMessage` if set, else a generic `"<label>" is not in the required
+format`. `FormService.assertValidFieldPattern` (called from both `create`/`update`, alongside
+`assertValidFieldConstraints`) rejects a pattern set on the wrong `fieldType` outright, and rejects a
+syntactically invalid regex (`new RegExp()` throwing) as a `400` at save time rather than only surfacing the
+first time someone submits against it. Both fields are capped at 200 characters at the DTO level
+(`@MaxLength(200)`) — defense-in-depth against a pathological catastrophic-backtracking pattern; the value is
+admin-authored (`AdminGuard` + `FORMS_WRITE`), not visitor input, but the cap costs nothing and narrows the blast
+radius regardless. `PublicFormFieldDto` carries both through for the fill UI's own hinting: the native HTML
+`pattern`/`title` attributes only apply to `<input type="text">` (not `<textarea>`, not `type="email"`/`"tel"`/
+`"number"`/`"date"`), so `TEXT` gets the real browser-native attributes and `TEXTAREA` falls back to a plain
+helper-text hint — both convenience only, not the real enforcement. The admin field builder shows a live
+client-side regex-syntax check (red border + inline warning) purely as authoring feedback; the server re-checks
+syntax independently at save time regardless.
+
+**Multi-page forms (`FormField.pageIndex`, smallint, default `0`):** a plain grouping key, not a first-class
+`FormPage` entity — every field defaults to page 0, so an older form (or one that never opts into pagination)
+renders and submits exactly as before. Grouping/rendering is entirely a member-frontend concern
+(`components/forms/paginated-form-fill-fields.tsx`'s `PaginatedFormFillFields`, wrapping `FormFillFields` per
+page rather than replacing it — used by both the member and public fill pages): page count is derived from
+`Math.max(...fields.map(f => f.pageIndex))`, `Back`/`Next` navigate between pages, and a `Next` click does a
+client-side required-field check on the *current* page only (mirrors `validateAnswers`' own `isEmpty` check, but
+is convenience-only — a page not yet visited is unmounted, so it never gets native HTML5 validation at all).
+There is deliberately **no backend pagination logic and no draft/partial-save**: a submission is still one atomic
+final `POST` of every page's answers together, same as a single-page form always was — an abandoned mid-form
+visitor simply never submits. `PublicFormFieldDto` carries `pageIndex` through unchanged for the fill UI's own
+grouping. The admin field builder (`field-editor.tsx`) gets a numeric "Page" input per field (1-based in the UI,
+0-based in `pageIndex`) and visually groups the field list by page once a form actually uses more than one —
+each page section is independently collapsible; a new field added via "Add Field" continues on whichever page
+was last in use rather than always resetting to page 1.
+
+**Conditional/branching logic (`FormField.visibilityRule`, nullable jsonb — `{ fieldId, operator, value }`,
+`operator` one of `equals`/`notEquals`/`includes`):** one rule concept, lives on `FormField` only — there's no
+separate page-level rule; a page effectively disappears when every one of its fields is hidden by its own rule,
+evaluated by the same function on both the admin builder and the fill renderer. Deliberately a **plain jsonb
+column, not a `@ManyToOne` relation** — unlike `dedupField`/`nextStepsField`, this never enters TypeORM's
+topological sorter at all (a jsonb column carries no relation semantics for it to see), so it sidesteps the
+`Form.fields` cyclic-dependency class of bug entirely rather than needing that pair's `.update()`-not-`.save()`
+workaround — set directly in the same `fieldRepo.create()`/`fieldRepo.save()` call as every other field property.
+`fieldId` must reference another field on the *same* form that **already has an id** — the same constraint
+`dedupFieldId`/`nextStepsFieldId` have in practice, since the admin picker only ever offers existing fields
+(`FormService.assertValidVisibilityRules`, called from both `create`/`update`; rejects a self-reference too). A
+direct consequence: **a rule can never be set at `create` time** (no field has an id yet at that point) — same
+real-world constraint as dedup/next-steps, which are also edit-only in the admin UI. `cloneForm` re-matches each
+rule's `fieldId` to the freshly-cloned target by label (`remapClonedVisibilityRules`, the same by-label technique
+`applyCrossFieldRefs` uses) — a rule whose target somehow didn't survive the clone is silently dropped rather
+than left dangling.
+
+`FormSubmissionService.isFieldVisible` evaluates a rule against the submitted (or, client-side, in-progress)
+answers: `equals`/`notEquals` compare a scalar answer as a string (an array/object answer — CHECKBOX/FILE — is
+never treated as "equal" to a typed value, rather than falling back to a meaningless `Object`-stringified
+comparison); `includes` array-contains for a CHECKBOX target or substring-matches for free text. `validateAnswers`
+calls this **before** a field's `required` check and skips every other check too when hidden — a
+conditionally-hidden field never blocks submission and its leftover value (if any) is never validated, regardless
+of what the client happened to render. No cycle detection anywhere: each field's visibility is evaluated
+independently against the answers, never against another field's own computed visibility, so a rule chain (or an
+accidental cycle) can't recurse.
+
+**A hidden field's leftover value is stripped before it's ever persisted**, not just exempted from validation
+(`FormSubmissionService.stripHiddenAnswers`, run after `validateAnswers` succeeds so validation itself keeps seeing
+every raw submitted value — only what actually gets saved is affected). The fill UIs only stop *rendering* a field
+once a prior answer hides it; they never clear that field's own local edit state, so a value typed before the
+field went hidden is still present in the submit payload. Left in the saved record, that stale answer would
+silently pollute CSV export and `FormService.getAnalytics` with a response the submitter never actually confirmed
+seeing. Applied on `submitAsMember`/`submitAsPublic`/`updateSubmission` — **deliberately not** on `submitAsAdmin`,
+since the admin's own record-entry UI shows every field unconditionally regardless of `visibilityRule`, so any
+answer reaching that path was something an admin actually saw and typed, never a stale leftover. Every field's
+hidden/visible determination is evaluated against the same fixed pre-strip snapshot regardless of which order
+fields happen to be stripped in, so one field being hidden can never change another field's own visibility result.
+A FILE field's now-unclaimed upload (hidden, so its `{url, publicId}` answer is stripped rather than saved) is
+picked up by the normal 48h orphan sweep like any other abandoned upload, rather than being treated as claimed.
+
+On the member/public fill side, `form-fill-fields.tsx` exports the identical evaluation logic
+(`isFieldVisible`, duplicated rather than shared across the repo boundary) and filters fields live on every
+render; `PaginatedFormFillFields` uses the same function to skip a page with zero currently-visible fields during
+Back/Next navigation and on initial mount — but doesn't re-scan the *current* page reactively while the visitor
+is sitting on it (changing an earlier answer that would hide the current page doesn't yank them off it
+mid-view), and structural page count (progress bar, single-vs-multi-page chrome) is fixed at mount rather than
+recomputed as pages become runtime-hidden. The admin field builder's "Show this field only if…" control
+(`field-editor.tsx`) lives in each field's own state, reusing the exact `fields.filter((f) => f.id && ...)`
+pattern the dedup/next-steps pickers already use; deleting a field client-side also proactively clears any other
+field's `visibilityRule` pointing at it, rather than letting the save round-trip fail with an "unknown field"
+error.
+
+**Submitter response editing (`Form.editableAfterSubmit`, boolean, default `true`):** member-only — a public/
+anonymous submission carries no member identity to look one back up by, and there's no login for an anonymous
+visitor to come back through anyway, so the edit surface is unreachable for `submitAsPublic` regardless of this
+flag. `GET /forms/member/:id/submission` (`FormSubmissionService.getMySubmission`) powers the member fill page's
+"you already submitted — edit it?" flow, reached from the `DUPLICATE_SUBMISSION` error `submit` already throws: it
+returns the caller's most recent submission for that form (`{ submissionId, answers, editable }`, most recent wins
+when more than one exists — only possible when the form has no `dedupField`) via a composite `(form_id, member_id)`
+index (`IDX_form_submissions_form_id_member_id`, since the base migration only ever indexed those columns
+separately) with `editable` mirroring
+`Form.editableAfterSubmit`, so the frontend can show a read-only "no longer editable" message instead of an edit
+link without a second round trip. `PATCH /forms/member/submissions/:submissionId` (`updateSubmission`) re-runs the
+exact same `normalizeAnswers`/`validateAnswers` pipeline a fresh submit does — 4a's bounds and 4c's
+visibility-aware required-skipping both apply — but never calls `notifyAdmins` (an edit isn't a new-submission
+event), and only recomputes/rewrites `dedupValueNormalized` when the dedup field's value actually changed. A `23505`
+conflict on save (the edited value collides with a *different* submission's dedup value) is reported the same
+`DUPLICATE_SUBMISSION` way a fresh submit's own conflict is. Ownership is resolved entirely from the submission
+record itself (`submission.member.id === callerId`) rather than trusting anything from the URL beyond the
+submission id, matching how every other check in this module resolves from the form/member tokens. Both endpoints
+additionally 404 on an `ADMIN_ONLY` form even when the caller happens to be the `memberId` attached to one of its
+submissions (e.g. a baptism record an admin filed on the member's behalf via `submitAsAdmin`'s optional `memberId`)
+— those forms have no member-facing fill surface at all, and a subject shouldn't be able to fetch or edit that
+record just because they're linked to it. A known, accepted limitation: editing a `FILE` answer to replace it does
+not clean up the *old* file from Cloudinary — its `FormFieldAttachment` tracking row was already deleted at the
+original submit time, and no `resourceType` is available at edit time to delete it correctly; judged too narrow an
+edge case to justify redundantly storing `resourceType` in the answer shape or a fragile Cloudinary lookup.
+
+**`FILE` fields (upload-then-reference):** the three submit endpoints stay pure JSON — a file is uploaded first, to
+its own `POST .../fields/:fieldId/attachment` endpoint (member/public/admin variants, each gated by the same
+visibility/audience-group rules as that audience's own submit path, via `FormSubmissionService.uploadAttachment`),
+which uploads to Cloudinary (`form-submissions` folder) and returns `{ url, publicId }`. That object becomes the
+FILE field's answer in the normal submit call; `validateAnswers` checks only that it's a well-formed `{url,
+publicId}` shape, not a format like `EMAIL`/`NUMBER`/`DATE`. Each upload also writes a `FormFieldAttachment`
+tracking row (`formId`, `fieldId`, `publicId`, `url`, `resourceType`) — pure bookkeeping, not a real relation to
+`Form`/`FormField` (plain UUID columns, deliberately no `@ManyToOne`, to avoid resurrecting the Form/FormField
+cyclic-dependency issue documented on `Form.fields` for no benefit). On a successful submission,
+`saveSubmission` deletes the tracking row for every FILE answer actually referenced (awaited, not fire-and-forget,
+since a silent failure here would let the row survive to the sweep below and delete a file a real submission still
+relies on). `FormAttachmentCleanupScheduler` (same `forEachActiveTenant` shape as `SocialMediaRetentionScheduler`)
+sweeps nightly (`0 4 * * *`) for tracking rows older than 48h — a row's mere continued existence past that window
+**is** the signal the upload was abandoned, since a claimed one is deleted immediately — and deletes both the row
+and the Cloudinary asset. Upload size is capped by the new `MAX_FORM_ATTACHMENT_UPLOAD_MB` platform setting
+(`DynamicLimitedFileInterceptor`, same convention as cover/logo/class-material/finance-proof uploads).
 
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
@@ -3752,19 +3918,25 @@ configured `options`.
 | GET    | `/forms/:id`                        | AdminGuard (FORMS_READ)  | Get one form with fields |
 | PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above). `audienceGroupId`/`dedupFieldId`/`nextStepsFieldId`/`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` all follow the same "explicit `null` clears, omit to leave untouched" convention as `eventId` |
 | DELETE | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Cascades fields + submissions |
+| POST   | `/forms/:id/clone`                  | AdminGuard (FORMS_WRITE) | Clone a form — `{ title, ... }` (see `CloneFormDto`; `title` is the only required field). Clone starts `isActive: false` with no cover/logo, fields copied verbatim with fresh ids, `dedupField`/`nextStepsField` re-matched by label. Never clones submissions |
 | POST   | `/forms/:id/cover`                  | AdminGuard (FORMS_WRITE) | Multipart, field name `cover`. Sets `Form.coverImageUrl` |
 | DELETE | `/forms/:id/cover`                  | AdminGuard (FORMS_WRITE) | Clears the cover image |
 | POST   | `/forms/:id/logo`                   | AdminGuard (FORMS_WRITE) | Multipart, field name `logo`. Sets `Form.logoUrl` |
 | DELETE | `/forms/:id/logo`                   | AdminGuard (FORMS_WRITE) | Clears the logo |
 | POST   | `/forms/:id/submissions`            | AdminGuard (FORMS_WRITE) | Admin records a submission on someone's behalf — `{ answers, memberId? }`. Works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in). Returns `{ submissionId, nextSteps }`, same shape as the member/public submit endpoints |
 | GET    | `/forms/:id/submissions`            | AdminGuard (FORMS_READ)  | Paginated (`?page=&limit=`) — this list is attendance-scale, unlike the forms list itself |
-| GET    | `/forms/:id/submissions/export`     | AdminGuard (FORMS_READ)  | CSV, one column per field (ordered), `Submitted By` shows the member's name or "Public" |
+| GET    | `/forms/:id/submissions/export`     | AdminGuard (FORMS_READ)  | CSV, one column per field (ordered), `Submitted By` shows the member's name or "Public". A `FILE` field's cell is the uploaded file's URL |
 | GET    | `/forms/:id/analytics`              | AdminGuard (FORMS_READ)  | At-a-glance summary across all submissions, computed per field type (see below) |
+| POST   | `/forms/:id/fields/:fieldId/attachment` | AdminGuard (FORMS_WRITE) | Multipart, field name `file`. Same shared upload path as the member/public equivalents below (see FILE fields, further down) — lets an admin attach a file while recording a submission via `POST /forms/:id/submissions` |
 | GET    | `/forms/member`                     | JwtAuthGuard             | Forms visible to the caller (`isActive`, `MEMBERS` or `PUBLIC`) — optional `?eventId=` filter. A `MEMBERS` form with an `audienceGroup` is filtered out for anyone outside that Contact List |
 | GET    | `/forms/member/:id`                 | JwtAuthGuard             | Form fields + `suggestedValues` auto-filled from the caller's own profile. 404s (not 403) if the form has an `audienceGroup` the caller isn't in |
 | POST   | `/forms/member/:id/submit`          | JwtAuthGuard             | `memberId` comes from the token, never the body. Returns `{ submissionId, nextSteps }` |
+| GET    | `/forms/member/:id/submission`      | JwtAuthGuard             | The caller's own most recent submission for this form — `{ submissionId, answers, editable }`. Powers the "edit your response" flow off a `DUPLICATE_SUBMISSION` error. 404s on an `ADMIN_ONLY` form even for a linked member |
+| PATCH  | `/forms/member/submissions/:submissionId` | JwtAuthGuard        | Edit the caller's own submission — `{ answers }`, same shape as `submit`. `400` if `Form.editableAfterSubmit` is off; `404` if the submission isn't the caller's or the form is `ADMIN_ONLY` |
+| POST   | `/forms/member/:id/fields/:fieldId/attachment` | JwtAuthGuard | Multipart, field name `file`, max size `MAX_FORM_ATTACHMENT_UPLOAD_MB`. Returns `{ url, publicId }` — the answer value for a `FILE` field in the `submit` call above. Subject to the same `MEMBERS`/`PUBLIC` visibility + audience-group gating as `submit` |
 | GET    | `/forms/public/:id`                 | Public, `404` unless `isActive && visibility === PUBLIC` | No tenant subdomain restriction beyond the usual Host-header resolution. Response is a sanitized `PublicFormDto` — every field's `optionMetadata` is stripped |
 | POST   | `/forms/public/:id/submit`          | Public, rate-limited (5/min) | `memberId` is always `null` — an open, unauthenticated write endpoint, throttled from day one rather than retrofitted. Returns `{ submissionId, nextSteps }` |
+| POST   | `/forms/public/:id/fields/:fieldId/attachment` | Public, rate-limited (5/min) | Multipart, field name `file`. Same upload-then-reference contract as the member endpoint, no member identity involved |
 
 `forms` is a toggleable module (`KNOWN_MODULES`, `ModuleEnabledGuard`) *and* Pro-plan-gated
 (`@RequiresPlan(PlanFeature.FORMS)`, `PlanGuard`) on all three controllers, including the public one — `PlanGuard`
@@ -3776,10 +3948,12 @@ toggle's state.
 **Analytics** (`GET /forms/:id/analytics`, a Google-Forms-style summary, not raw rows): computed in-memory per
 field from every submission's `answers[fieldId]`, shaped by that field's type — `DROPDOWN`/`CHECKBOX` get a
 per-option `{count, percentage}` breakdown (`CHECKBOX` counts every selected value, since one submission can pick
-several options); `NUMBER` gets `{average, min, max}`; every other type (`TEXT`, `EMAIL`, `PHONE`, `TEXTAREA`,
-`DATE`) gets up to the 20 most recent non-blank answers as `sampleAnswers`, since there's no meaningful aggregate
-for free text. Blank/null/undefined answers are excluded from `responseCount` and every computation — a field
-added after some submissions already exist doesn't drag its stats toward zero.
+several options); `NUMBER` gets `{average, min, max}`; `FILE` gets `{uploadCount}` (same number as
+`responseCount` — a `{url, publicId}` answer isn't a meaningful "sample" the way free text is); every other type
+(`TEXT`, `EMAIL`, `PHONE`, `TEXTAREA`, `DATE`) gets up to the 20 most recent non-blank answers as `sampleAnswers`,
+since there's no meaningful aggregate for free text. Blank/null/undefined answers are excluded from
+`responseCount` and every computation — a field added after some submissions already exist doesn't drag its
+stats toward zero.
 
 ### Social Media Module (`src/social-media/`)
 
@@ -4242,6 +4416,7 @@ dedicated host).
 | `PASTOR_FEEDBACK` | `EMAIL_PASTOR_FEEDBACK_ENABLED` | `true` |
 | `ASSIGNMENT_REMINDER` | `EMAIL_ASSIGNMENT_REMINDER_ENABLED` | `true` |
 | `CLASS_SESSION_REMINDER` | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` |
+| `FORM_SUBMISSION` | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
 conditionals, and `{{#each}}` for loops. Values are HTML-escaped automatically; use `{{{variable}}}` only for
@@ -5814,7 +5989,7 @@ being visible outside this service. All four routes now return the identical cur
 | POST | `/platform/auth/forgot-password` | Public, rate-limited (5/min). Request a password-reset OTP for a platform admin. |
 | POST | `/platform/auth/reset-password` | Public, rate-limited (5/min). Verify the OTP and set a new password — also how a newly-onboarded admin sets their initial one. |
 | POST | `/platform/broadcast` | `{ subject, message }` (plain text, not HTML) — one email to every active tenant's oldest active admin. See "Tenant Broadcasts" below. |
-| GET | `/platform/settings` | List platform-wide settings (grace period + the four upload-size limits) — see "Platform Settings" below. |
+| GET | `/platform/settings` | List platform-wide settings (grace period + the five upload-size limits) — see "Platform Settings" below. |
 | PATCH | `/platform/settings/:key` | `{ value: number }` — edit a platform-wide setting live, no redeploy. `BILLING_WRITE`. |
 
 #### Platform Settings
@@ -5837,7 +6012,7 @@ distinction from the tenant-facing Reminder Settings module above, which covers 
 The `GRACE_PERIOD_DAYS` env var and its Joi entry have been removed; any deployed value for it is now inert.
 
 **Consumer 2 — upload size limits:** `MAX_LOGO_UPLOAD_MB`, `MAX_AVATAR_UPLOAD_MB`, `MAX_CLASS_MATERIAL_UPLOAD_MB`,
-`MAX_FINANCE_PROOF_UPLOAD_MB` — stored in **MB** (not bytes, since that's what a platform admin actually types into
+`MAX_FINANCE_PROOF_UPLOAD_MB`, `MAX_FORM_ATTACHMENT_UPLOAD_MB` — stored in **MB** (not bytes, since that's what a platform admin actually types into
 the settings form), read via `PlatformSettingsService.getMaxUploadBytes(key)` which converts to bytes. These
 replace the `MAX_LOGO_UPLOAD_BYTES`/`MAX_AVATAR_UPLOAD_BYTES`/`MAX_CLASS_MATERIAL_UPLOAD_BYTES`/
 `MAX_FINANCE_PROOF_UPLOAD_BYTES` env vars entirely (removed from `env.validation.ts`) — `MAX_FILE_UPLOAD_BYTES`
@@ -6900,6 +7075,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_PASTOR_FEEDBACK_ENABLED` | `true` | Weekly feedback reminders and pastor-response notifications |
 | `EMAIL_ASSIGNMENT_REMINDER_ENABLED` | `true` | Assignment due-date reminders |
 | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` | Class next-session reminders |
+| `EMAIL_FORM_SUBMISSION_ENABLED` | `true` | Admin notification on a new form submission (also requires the form's own `notifyOnSubmission` to be on) |
 
 ### Auth / OTP
 
@@ -7000,9 +7176,9 @@ Used for finance request attachments and payment proofs.
 | `CLOUDINARY_API_SECRET`      | — *(required)* | Cloudinary API secret                                                      |
 | `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | Fallback default for routes with no more specific category — incident report photos, member bulk-import spreadsheets |
 
-Logo/appearance, avatar, class-material, and finance-proof upload limits are **not** env vars — they're
-platform-admin-configurable via `PlatformSettingKey.MAX_LOGO_UPLOAD_MB`/`MAX_AVATAR_UPLOAD_MB`/
-`MAX_CLASS_MATERIAL_UPLOAD_MB`/`MAX_FINANCE_PROOF_UPLOAD_MB` (see "Platform Settings" under the platform-admin
+Logo/appearance, avatar, class-material, finance-proof, and form-attachment upload limits are **not** env vars —
+they're platform-admin-configurable via `PlatformSettingKey.MAX_LOGO_UPLOAD_MB`/`MAX_AVATAR_UPLOAD_MB`/
+`MAX_CLASS_MATERIAL_UPLOAD_MB`/`MAX_FINANCE_PROOF_UPLOAD_MB`/`MAX_FORM_ATTACHMENT_UPLOAD_MB` (see "Platform Settings" under the platform-admin
 section) and enforced via `DynamicLimitedFileInterceptor`, which rewrites Multer's generic "File too large" error
 into `"The uploaded file exceeds the maximum allowed size of {N} MB..."` using the *live* limit for that route —
 not a guess. `HttpExceptionFilter`'s own `PayloadTooLargeException` handling (using `MAX_FILE_UPLOAD_BYTES`) is a

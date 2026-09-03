@@ -46,6 +46,23 @@ export class Form extends BaseEntity {
   @Column({ name: 'creates_first_timers', default: false })
   createsFirstTimers: boolean;
 
+  // Per-form opt-in: when true, a member/public submission emails every
+  // admin with FORMS_WRITE. Gated by BOTH this AND the tenant-wide
+  // EmailCategory.FORM_SUBMISSION toggle (defense-in-depth, same as every
+  // other EmailCategory's own kill switch) — see
+  // FormSubmissionService.notifyAdmins. Never fires for submitAsAdmin.
+  @Column({ name: 'notify_on_submission', default: false })
+  notifyOnSubmission: boolean;
+
+  // Admin kill-switch for FormSubmissionService.updateSubmission — off for
+  // a one-time form (e.g. a consent form) where a submitter changing their
+  // answer after the fact wouldn't make sense. Editing is member-only
+  // regardless (a public/anonymous submission has no account to log back
+  // into and find its own submission through), so this has no effect on
+  // ADMIN_ONLY or public-only usage.
+  @Column({ name: 'editable_after_submit', default: true })
+  editableAfterSubmit: boolean;
+
   @Column({ name: 'cover_image_url', nullable: true })
   coverImageUrl: string | null;
 

@@ -272,6 +272,15 @@
       "type": "string"
     },
     {
+      "key": "formFieldId2",
+      "value": ""
+    },
+    {
+      "key": "formSubmissionId",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "firstTimerFormId",
       "value": "",
       "type": "string"
@@ -9867,7 +9876,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Baptism Record\",\n  \"description\": \"Recorded by an officiating pastor \\u2014 not self-submitted.\",\n  \"visibility\": \"ADMIN_ONLY\",\n  \"fields\": [\n    {\n      \"label\": \"Person Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"description\": \"Enter the full legal name as it appears on official records\"\n    },\n    {\n      \"label\": \"Baptism Date\",\n      \"fieldType\": \"DATE\",\n      \"required\": true\n    },\n    {\n      \"label\": \"Officiated By\",\n      \"fieldType\": \"TEXT\",\n      \"required\": false\n    }\n  ]\n}",
+              "raw": "{\n  \"title\": \"Baptism Record\",\n  \"description\": \"Recorded by an officiating pastor \\u2014 not self-submitted.\",\n  \"visibility\": \"ADMIN_ONLY\",\n  \"fields\": [\n    {\n      \"label\": \"Person Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"description\": \"Enter the full legal name as it appears on official records\",\n      \"minLength\": 2,\n      \"maxLength\": 100\n    },\n    {\n      \"label\": \"Baptism Date\",\n      \"fieldType\": \"DATE\",\n      \"required\": true,\n      \"pageIndex\": 0\n    },\n    {\n      \"label\": \"Officiated By\",\n      \"fieldType\": \"TEXT\",\n      \"required\": false,\n      \"pageIndex\": 1,\n      \"validationRegex\": \"^[A-Za-z ]+$\",\n      \"validationMessage\": \"Letters and spaces only\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9895,7 +9904,8 @@
                 "type": "text/javascript"
               }
             }
-          ]
+          ],
+          "description": " \"Person Name\" demonstrates minLength/maxLength (only valid on TEXT/TEXTAREA fields) \u2014 see FormField bound constraints in TECH_DOC.md. \"Officiated By\" is on pageIndex 1 (page 2) to demonstrate multi-page grouping \u2014 purely a frontend grouping concern, still one atomic submission. \"Officiated By\" also demonstrates validationRegex/validationMessage (TEXT/TEXTAREA only) \u2014 see custom pattern validation in TECH_DOC.md."
         },
         {
           "name": "Create Public First-Timer Intake Form (Admin)",
@@ -9919,7 +9929,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"First-Timer Welcome Form\",\n  \"description\": \"Scan the QR code at the entrance or during livestream to let us know you visited.\",\n  \"visibility\": \"PUBLIC\",\n  \"createsFirstTimers\": true,\n  \"fields\": [\n    { \"label\": \"First Name\", \"fieldType\": \"TEXT\", \"required\": true, \"autoFillKey\": \"FIRST_NAME\" },\n    { \"label\": \"Last Name\", \"fieldType\": \"TEXT\", \"required\": true, \"autoFillKey\": \"LAST_NAME\" },\n    { \"label\": \"Phone Number\", \"fieldType\": \"PHONE\", \"required\": true, \"autoFillKey\": \"PHONE_NUMBER\" },\n    { \"label\": \"Email\", \"fieldType\": \"EMAIL\", \"required\": false, \"autoFillKey\": \"EMAIL\" }\n  ]\n}",
+              "raw": "{\n  \"title\": \"First-Timer Welcome Form\",\n  \"description\": \"Scan the QR code at the entrance or during livestream to let us know you visited.\",\n  \"visibility\": \"PUBLIC\",\n  \"createsFirstTimers\": true,\n  \"notifyOnSubmission\": true,\n  \"fields\": [\n    {\n      \"label\": \"First Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"autoFillKey\": \"FIRST_NAME\"\n    },\n    {\n      \"label\": \"Last Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"autoFillKey\": \"LAST_NAME\"\n    },\n    {\n      \"label\": \"Phone Number\",\n      \"fieldType\": \"PHONE\",\n      \"required\": true,\n      \"autoFillKey\": \"PHONE_NUMBER\"\n    },\n    {\n      \"label\": \"Email\",\n      \"fieldType\": \"EMAIL\",\n      \"required\": false,\n      \"autoFillKey\": \"EMAIL\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9962,8 +9972,49 @@
           ]
         },
         {
+          "name": "Clone Form (Admin)",
+          "description": "Clones an existing form. Only title is required \u2014 every other scalar is inherited from the source unless overridden here (explicit null clears a nullable field, e.g. audienceGroupId). Fields are always copied verbatim from the source with fresh ids (not editable in this request); dedupField/nextStepsField are re-matched by label on the clone automatically. The clone starts isActive:false and with no cover/logo image. Submissions are never cloned.",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/clone",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "clone"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"First-Timer Welcome Form (Copy)\",\n  \"visibility\": \"PUBLIC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"new-form-id\",\n  \"title\": \"First-Timer Welcome Form (Copy)\",\n  \"visibility\": \"PUBLIC\",\n  \"isActive\": false,\n  \"coverImageUrl\": null,\n  \"logoUrl\": null,\n  \"fields\": [\n    {\n      \"id\": \"new-field-id\",\n      \"label\": \"First Name\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
           "name": "Update Form \u2014 Audience, Dedup, Next Steps",
-          "description": "Restricts a MEMBERS-visibility form to a Contact List, designates a dedup field (blocks a second submission with the same normalized value), a next-steps DROPDOWN field (its selected option's url/description is returned after submit), and a thank-you message. audienceGroupId is rejected on a PUBLIC/ADMIN_ONLY form. generalActionUrl/generalActionLabel are an independent, always-shown second call-to-action (e.g. \"Join the Main Volunteer Group\") \u2014 both must be set together or both left empty.",
+          "description": "Restricts a MEMBERS-visibility form to a Contact List, designates a dedup field (blocks a second submission with the same normalized value), a next-steps DROPDOWN field (its selected option's url/description is returned after submit), and a thank-you message. audienceGroupId is rejected on a PUBLIC/ADMIN_ONLY form. generalActionUrl/generalActionLabel are an independent, always-shown second call-to-action (e.g. \"Join the Main Volunteer Group\") \u2014 both must be set together or both left empty. Also demonstrates editableAfterSubmit:false \u2014 a kill-switch for a one-time form (e.g. a consent form) where a member editing their answer afterward wouldn't make sense; PATCH forms/member/submissions/:submissionId then 400s for any member trying to edit their response (GET forms/member/:id/submission still succeeds, just returns editable:false).",
           "request": {
             "method": "PATCH",
             "header": [
@@ -9984,7 +10035,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"audienceGroupId\": \"g1a2b3c4-1111-4c5d-8e9f-0a1b2c3d4e5f\",\n  \"dedupFieldId\": \"{{formFieldId}}\",\n  \"nextStepsFieldId\": \"{{formFieldId}}\",\n  \"postSubmitMessage\": \"Thanks for signing up!\",\n  \"generalActionUrl\": \"https://chat.whatsapp.com/exampleMainGroup\",\n  \"generalActionLabel\": \"Join Main Volunteer Group\"\n}",
+              "raw": "{\n  \"audienceGroupId\": \"g1a2b3c4-1111-4c5d-8e9f-0a1b2c3d4e5f\",\n  \"dedupFieldId\": \"{{formFieldId}}\",\n  \"nextStepsFieldId\": \"{{formFieldId}}\",\n  \"postSubmitMessage\": \"Thanks for signing up!\",\n  \"generalActionUrl\": \"https://chat.whatsapp.com/exampleMainGroup\",\n  \"generalActionLabel\": \"Join Main Volunteer Group\",\n  \"notifyOnSubmission\": true,\n  \"editableAfterSubmit\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10004,6 +10055,52 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{ \"statusCode\": 400, \"message\": \"A Contact List restriction only applies to a MEMBERS-visibility form\" }"
+            }
+          ]
+        },
+        {
+          "name": "Update Form \u2014 Conditional Visibility",
+          "description": "Adds a per-field visibilityRule \u2014 the \"Team Lead Name\" field only shows/is required once \"Team\" is answered \"Choir\". fieldId must reference a field that already has an id (existing field) \u2014 a rule can never be set at create time, only via this kind of update, same real-world constraint dedupFieldId/nextStepsFieldId have. operator is one of equals/notEquals/includes. This example assumes the form already has fields with ids {{formFieldId}} (Team) and a second field being updated in place.",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fields\": [\n    {\n      \"id\": \"{{formFieldId}}\",\n      \"label\": \"Team\",\n      \"fieldType\": \"DROPDOWN\",\n      \"options\": [\n        \"Choir\",\n        \"Ushering\"\n      ]\n    },\n    {\n      \"id\": \"{{formFieldId2}}\",\n      \"label\": \"Team Lead Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"visibilityRule\": {\n        \"fieldId\": \"{{formFieldId}}\",\n        \"operator\": \"equals\",\n        \"value\": \"Choir\"\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{formId}}\",\n  \"fields\": [\n    {\n      \"id\": \"{{formFieldId}}\",\n      \"label\": \"Team\"\n    },\n    {\n      \"id\": \"{{formFieldId2}}\",\n      \"label\": \"Team Lead Name\",\n      \"visibilityRule\": {\n        \"fieldId\": \"{{formFieldId}}\",\n        \"operator\": \"equals\",\n        \"value\": \"Choir\"\n      }\n    }\n  ]\n}"
+            },
+            {
+              "name": "400 unknown field referenced",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"\"Team Lead Name\": visibility condition references an unknown field\" }"
             }
           ]
         },
@@ -10182,6 +10279,82 @@
           ]
         },
         {
+          "name": "Get My Form Submission (Member)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms/member/{{formId}}/submission",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "member",
+                "{{formId}}",
+                "submission"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"submissionId\": \"e7f6a5b4-3c2d-4e5f-0a1b-2c3d4e5f6a7b\",\n  \"answers\": {\n    \"{{formFieldId}}\": \"Chris Okafor\"\n  },\n  \"editable\": true\n}"
+            }
+          ],
+          "description": "Powers the member fill page's \"you already submitted \u2014 edit it?\" flow, reached from the DUPLICATE_SUBMISSION error the submit endpoint throws. Returns the caller's most recent submission for this form.  mirrors Form.editableAfterSubmit \u2014 the frontend shows a read-only message instead of an edit link when false. 404s if the form is ADMIN_ONLY, even if the caller is the member linked to a submission."
+        },
+        {
+          "name": "Update My Form Submission (Member)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/member/submissions/{{formSubmissionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "member",
+                "submissions",
+                "{{formSubmissionId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"{{formFieldId}}\": \"Chris O. Okafor\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"submissionId\": \"e7f6a5b4-3c2d-4e5f-0a1b-2c3d4e5f6a7b\",\n  \"nextSteps\": {\n    \"message\": null,\n    \"generalAction\": null,\n    \"selectedOption\": null\n  }\n}"
+            },
+            {
+              "name": "400 Editing turned off for this form",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"This form no longer accepts changes to your response.\"\n}"
+            }
+          ],
+          "description": "Re-runs the same normalize/validate pipeline a fresh submit does (4a bounds + 4c visibility-aware required-skipping both apply), but never re-triggers the admin submission notification. 400s if Form.editableAfterSubmit is off. 404s if the submission isn't the caller's own, or the form is ADMIN_ONLY."
+        },
+        {
           "name": "Create Submission as Admin",
           "request": {
             "method": "POST",
@@ -10224,6 +10397,51 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{ \"statusCode\": 400, \"message\": \"\\\"Person Name\\\" is required\" }"
+            }
+          ]
+        },
+        {
+          "name": "Upload Form Field Attachment (Admin)",
+          "description": "Multipart upload, field name \"file\". Uploads to Cloudinary (folder form-submissions) and tracks a FormFieldAttachment row for orphan cleanup. Returns { url, publicId } \u2014 use that object as the answer value for this FILE field in the normal POST /forms/:id/submissions call. The same shared upload path (FormSubmissionService.uploadAttachment) backs the member and public equivalents at POST forms/member/:id/fields/:fieldId/attachment and POST forms/public/:id/fields/:fieldId/attachment, each gated by that audience own visibility rules instead of AdminGuard.",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}/fields/{{formFieldId}}/attachment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}",
+                "fields",
+                "{{formFieldId}}",
+                "attachment"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"url\": \"https://res.cloudinary.com/.../form-submissions/abc123.pdf\",\n  \"publicId\": \"form-submissions/abc123\"\n}"
+            },
+            {
+              "name": "400 not a FILE field",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"This field does not accept file uploads\" }"
             }
           ]
         }

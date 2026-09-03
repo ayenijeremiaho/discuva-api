@@ -52,6 +52,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 1,
     max: 50,
   },
+  [PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB]: {
+    label: 'Form Attachment Upload Limit',
+    unit: 'MB — files uploaded to a FILE-type field on a form',
+    defaultValue: 10,
+    min: 1,
+    max: 50,
+  },
   [PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT]: {
     label: 'Enforce Attendance Distance Check',
     unit: 'default for churches that have not set their own override — 0 = off, 1 = on',
@@ -83,7 +90,8 @@ export const UPLOAD_HARD_CEILING_BYTES: Record<
   | PlatformSettingKey.MAX_LOGO_UPLOAD_MB
   | PlatformSettingKey.MAX_AVATAR_UPLOAD_MB
   | PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB
-  | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB,
+  | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB
+  | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB,
   number
 > = {
   [PlatformSettingKey.MAX_LOGO_UPLOAD_MB]:
@@ -101,6 +109,11 @@ export const UPLOAD_HARD_CEILING_BYTES: Record<
     1024,
   [PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB]:
     KNOWN_PLATFORM_SETTINGS[PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB]
+      .max *
+    1024 *
+    1024,
+  [PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB]:
+    KNOWN_PLATFORM_SETTINGS[PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB]
       .max *
     1024 *
     1024,

@@ -32,9 +32,11 @@ import { FormSubmissionService } from '../service/form-submission.service';
 import { GroupService } from '../../group/service/group.service';
 import {
   AdminSubmitFormDto,
+  CloneFormDto,
   CreateFormDto,
   UpdateFormDto,
 } from '../dto/form.dto';
+import { FormVisibility } from '../enum/form.enum';
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -97,6 +99,12 @@ export class FormAdminController {
   @Delete(':id')
   delete(@Param('id', ParseUUIDPipe) id: string) {
     return this.formService.delete(id);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post(':id/clone')
+  clone(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CloneFormDto) {
+    return this.formService.cloneForm(id, dto);
   }
 
   @RequiresPermission(AdminPermission.FORMS_WRITE)
@@ -171,6 +179,35 @@ export class FormAdminController {
     @Body() dto: AdminSubmitFormDto,
   ) {
     return this.submissionService.submitAsAdmin(id, dto.answers, dto.memberId);
+  }
+
+  // Same shape as the member/public upload endpoints — lets an admin
+  // attach a file while recording a submission on someone's behalf
+  // ("Add Record"). No audience-group check (admins aren't subject to it,
+  // matching submitAsAdmin's own unrestricted access) and no visibility
+  // restriction — works against any visibility, same as submitAsAdmin.
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post(':id/fields/:fieldId/attachment')
+  @UseInterceptors(
+    DynamicLimitedFileInterceptor(
+      'file',
+      PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB,
+      UPLOAD_HARD_CEILING_BYTES[
+        PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB
+      ],
+    ),
+  )
+  uploadAttachment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('fieldId', ParseUUIDPipe) fieldId: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('No file provided');
+    return this.submissionService.uploadAttachment(id, fieldId, file, [
+      FormVisibility.MEMBERS,
+      FormVisibility.PUBLIC,
+      FormVisibility.ADMIN_ONLY,
+    ]);
   }
 
   @RequiresPermission(AdminPermission.FORMS_READ)

@@ -21,6 +21,11 @@ export interface FormFieldAnalyticsDto {
   // DATE) — most recent answers first, capped so a heavily-used form
   // doesn't return an unbounded payload.
   sampleAnswers?: string[];
+  // Populated for FILE only — a { url, publicId } answer isn't a
+  // meaningful "sample", so this reports how many were actually uploaded
+  // instead (same value as responseCount, kept distinct for the frontend
+  // to key its FILE-specific rendering off without inspecting fieldType).
+  uploadCount?: number;
 }
 
 export interface FormAnalyticsDto {

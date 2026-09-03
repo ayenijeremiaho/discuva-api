@@ -4,18 +4,21 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import 'multer';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import type { CountryCode } from 'libphonenumber-js';
 import { Form } from '../entity/form.entity';
 import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
+import { FormFieldAttachment } from '../entity/form-field-attachment.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
   FIELD_TYPES_REQUIRING_OPTIONS,
   FormFieldAutoFill,
   FormFieldType,
+  FormFieldVisibilityOperator,
   FormVisibility,
 } from '../enum/form.enum';
 import {
@@ -27,6 +30,17 @@ import { FollowUpService } from '../../follow-up/service/follow-up.service';
 import { CreateFirstTimerDto } from '../../follow-up/dto/create-first-timer.dto';
 import { GroupService } from '../../group/service/group.service';
 import { normalizePhoneNumber } from '../../utility/decorators/normalize-phone.decorator';
+import {
+  isValidDateString,
+  isValidEmail,
+  isValidNumber,
+} from '../../utility/decorators/form-answer-validators';
+import { UtilityService } from '../../utility/service/utility.service';
+import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { Admin } from '../../admin/entity/admin.entity';
+import { AdminPermission } from '../../admin/enum/admin-permission.enum';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 
 @Injectable()
 export class FormSubmissionService {
@@ -49,9 +63,16 @@ export class FormSubmissionService {
     private readonly submissionRepo: Repository<FormSubmission>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(Admin)
+    private readonly adminRepo: Repository<Admin>,
+    @InjectRepository(FormFieldAttachment)
+    private readonly attachmentRepo: Repository<FormFieldAttachment>,
     private readonly followUpService: FollowUpService,
     private readonly groupService: GroupService,
     private readonly config: ConfigService,
+    private readonly utilityService: UtilityService,
+    private readonly emailCategorySettingsService: EmailCategorySettingsService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {
     const locale = this.config.get<string>('CURRENCY_LOCALE', 'en-NG');
     this.defaultPhoneRegion = (locale.split('-')[1]?.toUpperCase() ??
@@ -94,14 +115,7 @@ export class FormSubmissionService {
     ) {
       throw new NotFoundException('Form not found');
     }
-    if (form.visibility === FormVisibility.MEMBERS && form.audienceGroup) {
-      const allowedIds = await this.groupService.getMemberIdsForGroup(
-        form.audienceGroup.id,
-      );
-      if (!allowedIds.includes(memberId)) {
-        throw new NotFoundException('Form not found');
-      }
-    }
+    await this.assertMemberInAudienceGroup(form, memberId);
 
     const member = await this.memberRepo.findOneBy({ id: memberId });
     const suggestedValues: Record<string, string> = {};
@@ -134,20 +148,20 @@ export class FormSubmissionService {
       FormVisibility.MEMBERS,
       FormVisibility.PUBLIC,
     ]);
-    if (form.visibility === FormVisibility.MEMBERS && form.audienceGroup) {
-      const allowedIds = await this.groupService.getMemberIdsForGroup(
-        form.audienceGroup.id,
-      );
-      if (!allowedIds.includes(memberId)) {
-        throw new NotFoundException('Form not found');
-      }
-    }
+    await this.assertMemberInAudienceGroup(form, memberId);
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
-    const saved = await this.saveSubmission(form, normalized, {
+    const cleaned = this.stripHiddenAnswers(form.fields, normalized);
+    const saved = await this.saveSubmission(form, cleaned, {
       id: memberId,
     } as Member);
-    return this.buildSubmitResponse(form, normalized, saved.id);
+    this.notifyAdmins(form, saved.id).catch((err: unknown) =>
+      this.logger.error(
+        `Failed to notify admins of form ${form.id} submission ${saved.id}`,
+        err instanceof Error ? err.stack : err,
+      ),
+    );
+    return this.buildSubmitResponse(form, cleaned, saved.id);
   }
 
   async submitAsPublic(
@@ -159,7 +173,15 @@ export class FormSubmissionService {
     ]);
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
-    const saved = await this.saveSubmission(form, normalized, null);
+    const cleaned = this.stripHiddenAnswers(form.fields, normalized);
+    const saved = await this.saveSubmission(form, cleaned, null);
+
+    this.notifyAdmins(form, saved.id).catch((err: unknown) =>
+      this.logger.error(
+        `Failed to notify admins of form ${form.id} submission ${saved.id}`,
+        err instanceof Error ? err.stack : err,
+      ),
+    );
 
     if (form.createsFirstTimers) {
       // Deliberately awaited but fault-tolerant: a failure here (e.g. no
@@ -169,7 +191,7 @@ export class FormSubmissionService {
       // discoverable, not silently lost.
       try {
         await this.followUpService.createFirstTimerFromPublicForm(
-          this.buildFirstTimerDto(form.fields, normalized),
+          this.buildFirstTimerDto(form.fields, cleaned),
         );
       } catch (err: unknown) {
         this.logger.error(
@@ -179,7 +201,7 @@ export class FormSubmissionService {
       }
     }
 
-    return this.buildSubmitResponse(form, normalized, saved.id);
+    return this.buildSubmitResponse(form, cleaned, saved.id);
   }
 
   // No visibility restriction — an admin can record a submission against
@@ -198,12 +220,127 @@ export class FormSubmissionService {
     if (!form) throw new NotFoundException('Form not found');
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
+    // Deliberately no stripHiddenAnswers pass here, unlike the member/
+    // public paths — the admin's own record-entry UI shows every field
+    // unconditionally, ignoring visibilityRule entirely, so an answer
+    // reaching here is always something an admin actually saw and typed,
+    // never a stale leftover from a field that went hidden underneath
+    // them.
     const saved = await this.saveSubmission(
       form,
       normalized,
       memberId ? ({ id: memberId } as Member) : null,
     );
     return this.buildSubmitResponse(form, normalized, saved.id);
+  }
+
+  // Powers the member fill page's "you already submitted — edit it?" flow,
+  // reached from the DUPLICATE_SUBMISSION error saveSubmission throws.
+  // Public/anonymous submissions are never reachable here — they carry no
+  // member identity to look one up by, and there's no login for an
+  // anonymous visitor to come back through anyway. `editable` reflects
+  // Form.editableAfterSubmit so the frontend can show a read-only view
+  // instead of an edit link when an admin has turned editing off, without
+  // a second round trip. If more than one submission exists for the same
+  // member+form (only possible when the form has no dedupField — nothing
+  // stops a repeat submission in that case), the most recent one wins.
+  // ADMIN_ONLY forms are excluded even if the caller happens to be the
+  // memberId attached to one of their submissions (e.g. a baptism record an
+  // admin filed on the member's behalf via submitAsAdmin) — those forms
+  // have no member-facing fill surface at all, and a subject shouldn't be
+  // able to fetch or edit that record just because they're linked to it.
+  async getMySubmission(
+    formId: string,
+    memberId: string,
+  ): Promise<{
+    submissionId: string;
+    answers: Record<string, unknown>;
+    editable: boolean;
+  }> {
+    const form = await this.formRepo.findOneBy({ id: formId, isActive: true });
+    if (!form || form.visibility === FormVisibility.ADMIN_ONLY) {
+      throw new NotFoundException('Form not found');
+    }
+    const submission = await this.submissionRepo.findOne({
+      where: { form: { id: formId }, member: { id: memberId } },
+      order: { createdAt: 'DESC' },
+    });
+    if (!submission) throw new NotFoundException('No submission found');
+    return {
+      submissionId: submission.id,
+      answers: submission.answers,
+      editable: form.editableAfterSubmit,
+    };
+  }
+
+  // Runs the same normalize/validate pipeline a fresh submit does (so 4a's
+  // bounds and 4c's visibility-aware required-skipping both apply), but
+  // never calls notifyAdmins — an edit isn't a new-submission event. The
+  // dedup value is only recomputed/rewritten when it actually changed, so
+  // an edit that leaves the dedup field untouched doesn't even attempt a
+  // write to that column. A `23505` conflict here means the *new* value
+  // collides with a *different* submission's — reported the same
+  // DUPLICATE_SUBMISSION way saveSubmission's own does.
+  async updateSubmission(
+    submissionId: string,
+    memberId: string,
+    answers: Record<string, unknown>,
+  ): Promise<FormSubmitResponseDto> {
+    const submission = await this.submissionRepo.findOne({
+      where: { id: submissionId },
+      relations: ['form', 'member'],
+    });
+    if (!submission || submission.member?.id !== memberId) {
+      throw new NotFoundException('Submission not found');
+    }
+
+    const form = await this.formRepo.findOneBy({
+      id: submission.form.id,
+      isActive: true,
+    });
+    if (!form || form.visibility === FormVisibility.ADMIN_ONLY) {
+      throw new NotFoundException('Form not found');
+    }
+    if (!form.editableAfterSubmit) {
+      throw new BadRequestException(
+        'This form no longer accepts changes to your response',
+      );
+    }
+
+    const normalized = this.normalizeAnswers(form.fields, answers);
+    this.validateAnswers(form.fields, normalized);
+    const cleaned = this.stripHiddenAnswers(form.fields, normalized);
+
+    const dedupValueNormalized = form.dedupField
+      ? this.computeDedupValue(form.dedupField, cleaned)
+      : null;
+    submission.answers = cleaned;
+    if (dedupValueNormalized !== submission.dedupValueNormalized) {
+      submission.dedupValueNormalized = dedupValueNormalized;
+    }
+
+    try {
+      const saved = await this.submissionRepo.save(submission);
+      // Not fire-and-forget — same reasoning as saveSubmission's own call:
+      // a silent failure here would let a re-uploaded file's tracking row
+      // survive to the orphan sweep and delete an asset this edit still
+      // references. Note: the file being *replaced* (the old answer's own
+      // upload) isn't cleaned up here — its tracking row was already
+      // deleted when the original submission first succeeded, so there's
+      // no resourceType available to delete it by at edit time. A known,
+      // narrow gap (an edited-away FILE answer leaks its old asset) rather
+      // than a speculative fix for a rare case.
+      await this.cleanupClaimedAttachments(form.fields, cleaned);
+      return this.buildSubmitResponse(form, cleaned, saved.id);
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code === '23505') {
+        throw new BadRequestException({
+          message: 'Another submission already uses that value.',
+          code: 'DUPLICATE_SUBMISSION',
+        });
+      }
+      throw err;
+    }
   }
 
   private async getVisibleFormOrThrow(
@@ -215,6 +352,67 @@ export class FormSubmissionService {
       throw new NotFoundException('Form not found');
     }
     return form;
+  }
+
+  // Shared by getForMember/submitAsMember/uploadAttachment — a no-op unless
+  // the form is both MEMBERS-visibility and actually restricted to a
+  // Contact List (most MEMBERS forms aren't).
+  private async assertMemberInAudienceGroup(
+    form: Form,
+    memberId: string,
+  ): Promise<void> {
+    if (form.visibility !== FormVisibility.MEMBERS || !form.audienceGroup) {
+      return;
+    }
+    const allowedIds = await this.groupService.getMemberIdsForGroup(
+      form.audienceGroup.id,
+    );
+    if (!allowedIds.includes(memberId)) {
+      throw new NotFoundException('Form not found');
+    }
+  }
+
+  // Upload-then-reference: a FILE field's answer is the { url, publicId }
+  // this returns, not the file itself — the 3 submit endpoints stay pure
+  // JSON. `allowedVisibilities` is the same per-caller allowlist
+  // getVisibleFormOrThrow already uses (member/public/admin each pass their
+  // own), so uploading to a field is gated by exactly the same
+  // authorization a submission to that form would be. `memberId` is only
+  // passed by the member-facing caller — admin/public uploads skip the
+  // audience-group check (matching submitAsAdmin's own unrestricted access,
+  // and public forms have no member identity to check against anyway).
+  async uploadAttachment(
+    formId: string,
+    fieldId: string,
+    file: Express.Multer.File,
+    allowedVisibilities: FormVisibility[],
+    memberId?: string,
+  ): Promise<{ url: string; publicId: string }> {
+    const form = await this.getVisibleFormOrThrow(formId, allowedVisibilities);
+    if (memberId) {
+      await this.assertMemberInAudienceGroup(form, memberId);
+    }
+    const field = form.fields.find((f) => f.id === fieldId);
+    if (field?.fieldType !== FormFieldType.FILE) {
+      throw new BadRequestException('This field does not accept file uploads');
+    }
+
+    const uploaded = await this.cloudinaryService.uploadBuffer(
+      file.buffer,
+      'form-submissions',
+      undefined,
+      file.mimetype,
+    );
+    await this.attachmentRepo.save(
+      this.attachmentRepo.create({
+        formId,
+        fieldId,
+        publicId: uploaded.publicId,
+        url: uploaded.secureUrl,
+        resourceType: uploaded.resourceType,
+      }),
+    );
+    return { url: uploaded.secureUrl, publicId: uploaded.publicId };
   }
 
   // Runs every PHONE-type field's submitted value through
@@ -246,6 +444,34 @@ export class FormSubmissionService {
     return normalized;
   }
 
+  // Run AFTER validateAnswers, never before — validateAnswers must see
+  // every raw submitted value (including a hidden field's stale leftover
+  // one) to preserve its documented "each field's visibility is evaluated
+  // independently against the raw answers" semantics; this pass only
+  // decides what actually gets persisted. The member/public fill UIs only
+  // filter which fields *render* when a prior answer hides one — they
+  // never clear that field's own local edit state, so a value entered
+  // before it went hidden is still sent in the submit payload. Left
+  // alone, that stale value would be saved verbatim into the submission
+  // record, polluting CSV export and FormService.getAnalytics with an
+  // answer the submitter never actually saw the field to confirm. Every
+  // field's visibility is evaluated against the same fixed `answers`
+  // snapshot (never the partially-stripped `cleaned` result), so which
+  // order fields happen to be stripped in can't change another field's
+  // own hidden/visible determination.
+  private stripHiddenAnswers(
+    fields: FormField[],
+    answers: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const cleaned = { ...answers };
+    for (const field of fields) {
+      if (field.visibilityRule && !this.isFieldVisible(field, answers)) {
+        delete cleaned[field.id];
+      }
+    }
+    return cleaned;
+  }
+
   private computeDedupValue(
     dedupField: FormField,
     answers: Record<string, unknown>,
@@ -258,6 +484,44 @@ export class FormSubmissionService {
     return raw.trim().toLowerCase();
   }
 
+  // Modeled on IncidentReportService.notifyAdmins. Gated by BOTH the form's
+  // own opt-in AND the tenant-wide category toggle (defense-in-depth, same
+  // as every other EmailCategory) — checked here rather than left entirely
+  // to EmailQueueService so a disabled form never even queries the Admin
+  // table. Called fire-and-forget from submitAsMember/submitAsPublic only.
+  private async notifyAdmins(form: Form, submissionId: string): Promise<void> {
+    if (!form.notifyOnSubmission) return;
+    const categoryEnabled = await this.emailCategorySettingsService.isEnabled(
+      EmailCategory.FORM_SUBMISSION,
+    );
+    if (!categoryEnabled) return;
+
+    const admins = await this.adminRepo
+      .createQueryBuilder('a')
+      .leftJoinAndSelect('a.member', 'm')
+      .leftJoinAndSelect('a.adminRole', 'role')
+      .where('a.isActive = true')
+      .getMany();
+
+    const recipients = admins
+      .filter((a) =>
+        a.adminRole?.permissions?.includes(AdminPermission.FORMS_WRITE),
+      )
+      .map((a) => a.member?.email)
+      .filter((e): e is string => !!e);
+
+    for (const email of recipients) {
+      this.utilityService.sendEmailWithTemplate(
+        email,
+        `New Submission: ${form.title}`,
+        'form-submission-new',
+        { formTitle: form.title, submissionId },
+        undefined,
+        EmailCategory.FORM_SUBMISSION,
+      );
+    }
+  }
+
   private async saveSubmission(
     form: Form,
     answers: Record<string, unknown>,
@@ -267,7 +531,7 @@ export class FormSubmissionService {
       ? this.computeDedupValue(form.dedupField, answers)
       : null;
     try {
-      return await this.submissionRepo.save(
+      const saved = await this.submissionRepo.save(
         this.submissionRepo.create({
           form: { id: form.id } as Form,
           member,
@@ -275,6 +539,8 @@ export class FormSubmissionService {
           dedupValueNormalized,
         }),
       );
+      await this.cleanupClaimedAttachments(form.fields, answers);
+      return saved;
     } catch (err: unknown) {
       if ((err as { code?: string })?.code === '23505') {
         // Structured code (not just a message string) so the fill page can
@@ -287,6 +553,40 @@ export class FormSubmissionService {
         });
       }
       throw err;
+    }
+  }
+
+  // Deletes the FormFieldAttachment tracking row for every FILE answer this
+  // submission actually references, so FormAttachmentCleanupScheduler's
+  // sweep never touches a Cloudinary asset a real submission still relies
+  // on. Awaited (not fire-and-forget, unlike notifyAdmins) — letting this
+  // silently fail leaves the row for the sweep to eventually delete out
+  // from under a saved submission. A failure here is logged but never
+  // fails the submission itself, since the file staying "at risk" for one
+  // sweep cycle is a smaller cost than losing an otherwise-successful save.
+  private async cleanupClaimedAttachments(
+    fields: FormField[],
+    answers: Record<string, unknown>,
+  ): Promise<void> {
+    const publicIds = fields
+      .filter((f) => f.fieldType === FormFieldType.FILE)
+      .map((f) => answers[f.id])
+      .filter(
+        (v): v is { publicId: string } =>
+          !!v &&
+          typeof v === 'object' &&
+          typeof (v as { publicId?: unknown }).publicId === 'string',
+      )
+      .map((v) => v.publicId);
+    if (!publicIds.length) return;
+
+    try {
+      await this.attachmentRepo.delete({ publicId: In(publicIds) });
+    } catch (err: unknown) {
+      this.logger.error(
+        'Failed to clean up claimed form attachment tracking rows',
+        err instanceof Error ? err.stack : err,
+      );
     }
   }
 
@@ -338,7 +638,17 @@ export class FormSubmissionService {
           required: f.required,
           options: f.options,
           order: f.order,
+          pageIndex: f.pageIndex,
           autoFillKey: f.autoFillKey,
+          minValue: f.minValue,
+          maxValue: f.maxValue,
+          minLength: f.minLength,
+          maxLength: f.maxLength,
+          minSelections: f.minSelections,
+          maxSelections: f.maxSelections,
+          validationRegex: f.validationRegex,
+          validationMessage: f.validationMessage,
+          visibilityRule: f.visibilityRule,
         })),
     };
   }
@@ -348,6 +658,12 @@ export class FormSubmissionService {
     answers: Record<string, unknown>,
   ): void {
     for (const field of fields) {
+      // Evaluated before the required check — a conditionally-hidden field
+      // must never block submission, regardless of what the client
+      // rendered, and none of its other checks apply to an answer the
+      // visitor was never shown the field to give.
+      if (!this.isFieldVisible(field, answers)) continue;
+
       const value = answers[field.id];
       const isEmpty =
         value === undefined ||
@@ -360,18 +676,198 @@ export class FormSubmissionService {
       }
       if (isEmpty) continue;
 
-      if (FIELD_TYPES_REQUIRING_OPTIONS.has(field.fieldType) && field.options) {
-        const submitted = Array.isArray(value) ? value : [value];
-        const invalid = submitted.some(
-          (v) => typeof v !== 'string' || !field.options!.includes(v),
-        );
-        if (invalid) {
+      this.validateFieldOptions(field, value);
+      this.validateFieldFormat(field, value);
+      this.validateFieldBounds(field, value);
+      this.validateFieldPattern(field, value);
+    }
+  }
+
+  // Same evaluation logic the member/public fill UIs run client-side
+  // (form-fill-fields.tsx's isFieldVisible) — duplicated rather than
+  // shared across the api/frontend repo boundary, kept simple and small
+  // enough that drift risk is low. No cycle detection: each field's
+  // visibility is evaluated independently against the submitted answers,
+  // never against another field's own computed visibility, so a rule
+  // chain (or even an accidental cycle) can't recurse.
+  private isFieldVisible(
+    field: FormField,
+    answers: Record<string, unknown>,
+  ): boolean {
+    if (!field.visibilityRule) return true;
+    const { fieldId, operator, value } = field.visibilityRule;
+    const actual = answers[fieldId];
+
+    if (operator === FormFieldVisibilityOperator.INCLUDES) {
+      if (Array.isArray(actual)) return actual.includes(value);
+      return typeof actual === 'string' && actual.includes(value);
+    }
+
+    // equals/notEquals only make sense against a scalar answer — an array
+    // (CHECKBOX) or object (FILE) answer is never sensibly "equal" to a
+    // typed string, rather than falling back to a meaningless
+    // Object-stringified comparison.
+    const isScalar =
+      actual === null || actual === undefined || typeof actual !== 'object';
+    const matches = isScalar && String(actual ?? '') === value;
+    return operator === FormFieldVisibilityOperator.NOT_EQUALS
+      ? !matches
+      : matches;
+  }
+
+  private validateFieldOptions(field: FormField, value: unknown): void {
+    if (!FIELD_TYPES_REQUIRING_OPTIONS.has(field.fieldType) || !field.options) {
+      return;
+    }
+    const submitted = Array.isArray(value) ? value : [value];
+    const invalid = submitted.some(
+      (v) => typeof v !== 'string' || !field.options!.includes(v),
+    );
+    if (invalid) {
+      throw new BadRequestException(
+        `"${field.label}" must be one of the provided options`,
+      );
+    }
+  }
+
+  // Per-type format checks (EMAIL/NUMBER/DATE) — split out of validateAnswers
+  // so each new type is a flat, independent branch rather than compounding
+  // that method's cyclomatic complexity.
+  private validateFieldFormat(field: FormField, value: unknown): void {
+    switch (field.fieldType) {
+      case FormFieldType.EMAIL:
+        if (typeof value !== 'string' || !isValidEmail(value)) {
           throw new BadRequestException(
-            `"${field.label}" must be one of the provided options`,
+            `"${field.label}" must be a valid email address`,
           );
         }
+        break;
+      case FormFieldType.NUMBER: {
+        const asString = typeof value === 'number' ? String(value) : value;
+        if (typeof asString !== 'string' || !isValidNumber(asString)) {
+          throw new BadRequestException(
+            `"${field.label}" must be a valid number`,
+          );
+        }
+        break;
       }
+      case FormFieldType.DATE:
+        if (typeof value !== 'string' || !isValidDateString(value)) {
+          throw new BadRequestException(
+            `"${field.label}" must be a valid date`,
+          );
+        }
+        break;
+      case FormFieldType.FILE:
+        if (!this.isValidFileAnswer(value)) {
+          throw new BadRequestException(
+            `"${field.label}" must be a valid file upload`,
+          );
+        }
+        break;
     }
+  }
+
+  // Runs after validateFieldFormat, so a NUMBER answer that already failed
+  // format validation never reaches here — Number(value) below can assume
+  // a well-formed numeric string. Bounds themselves are set at create/
+  // update time by FormService.assertValidFieldConstraints, one per
+  // fieldType — this only ever checks the pair that applies to `field`.
+  private validateFieldBounds(field: FormField, value: unknown): void {
+    switch (field.fieldType) {
+      case FormFieldType.NUMBER:
+        this.assertNumberBounds(field, Number(value));
+        break;
+      case FormFieldType.TEXT:
+      case FormFieldType.TEXTAREA:
+        this.assertLengthBounds(
+          field,
+          typeof value === 'string' ? value.length : 0,
+        );
+        break;
+      case FormFieldType.CHECKBOX:
+        this.assertSelectionBounds(
+          field,
+          Array.isArray(value) ? value.length : 0,
+        );
+        break;
+    }
+  }
+
+  private assertNumberBounds(field: FormField, num: number): void {
+    if (field.minValue != null && num < field.minValue) {
+      throw new BadRequestException(
+        `"${field.label}" must be at least ${field.minValue}`,
+      );
+    }
+    if (field.maxValue != null && num > field.maxValue) {
+      throw new BadRequestException(
+        `"${field.label}" must be at most ${field.maxValue}`,
+      );
+    }
+  }
+
+  private assertLengthBounds(field: FormField, length: number): void {
+    if (field.minLength != null && length < field.minLength) {
+      throw new BadRequestException(
+        `"${field.label}" must be at least ${field.minLength} characters`,
+      );
+    }
+    if (field.maxLength != null && length > field.maxLength) {
+      throw new BadRequestException(
+        `"${field.label}" must be at most ${field.maxLength} characters`,
+      );
+    }
+  }
+
+  private assertSelectionBounds(field: FormField, count: number): void {
+    if (field.minSelections != null && count < field.minSelections) {
+      throw new BadRequestException(
+        `"${field.label}" needs at least ${field.minSelections} selection(s)`,
+      );
+    }
+    if (field.maxSelections != null && count > field.maxSelections) {
+      throw new BadRequestException(
+        `"${field.label}" allows at most ${field.maxSelections} selection(s)`,
+      );
+    }
+  }
+
+  // TEXT/TEXTAREA only — validationRegex's syntax was already checked at
+  // create/update time by FormService.assertValidFieldPattern, so
+  // `new RegExp()` here is never expected to throw against admin-authored
+  // data; it's still a plain string field on the entity, not something
+  // this method re-validates the shape of.
+  private validateFieldPattern(field: FormField, value: unknown): void {
+    if (!field.validationRegex) return;
+    if (
+      field.fieldType !== FormFieldType.TEXT &&
+      field.fieldType !== FormFieldType.TEXTAREA
+    ) {
+      return;
+    }
+    if (
+      typeof value !== 'string' ||
+      !new RegExp(field.validationRegex).test(value)
+    ) {
+      throw new BadRequestException(
+        field.validationMessage ||
+          `"${field.label}" is not in the required format`,
+      );
+    }
+  }
+
+  // A FILE answer is the { url, publicId } POST forms/.../attachment
+  // returned — presence/shape only, no format check the way EMAIL/NUMBER/
+  // DATE get, since there's nothing further to validate about it here.
+  private isValidFileAnswer(value: unknown): boolean {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      !Array.isArray(value) &&
+      typeof (value as { url?: unknown }).url === 'string' &&
+      typeof (value as { publicId?: unknown }).publicId === 'string'
+    );
   }
 
   // Reverse of resolveAutoFillValue below — pulls a submitted answer back

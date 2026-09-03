@@ -18,6 +18,10 @@ export enum FormFieldType {
   DATE = 'DATE',
   DROPDOWN = 'DROPDOWN',
   CHECKBOX = 'CHECKBOX',
+  // Answer is a { url, publicId } object referencing a prior upload to
+  // POST forms/:formId/fields/:fieldId/attachment — see
+  // FormFieldAttachment and FormSubmissionService.uploadAttachment.
+  FILE = 'FILE',
 }
 
 // Fields flagged with one of these pre-fill from the logged-in member's own
@@ -35,3 +39,12 @@ export const FIELD_TYPES_REQUIRING_OPTIONS = new Set([
   FormFieldType.DROPDOWN,
   FormFieldType.CHECKBOX,
 ]);
+
+// Operators for FormField.visibilityRule — see that column's own comment.
+export enum FormFieldVisibilityOperator {
+  EQUALS = 'equals',
+  NOT_EQUALS = 'notEquals',
+  // Array-contains for a CHECKBOX target's selected options; substring
+  // match for a free-text target.
+  INCLUDES = 'includes',
+}

@@ -84,4 +84,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         "Sent to class enrollees (members and guests) ahead of a class's next scheduled session/meeting time.",
     },
+    [EmailCategory.FORM_SUBMISSION]: {
+      label: 'Form Submission Notifications',
+      description:
+        'Sent to admins with Forms access when a member or public submission comes in, for forms with this turned on.',
+    },
   };
