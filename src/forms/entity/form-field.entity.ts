@@ -23,6 +23,12 @@ export class FormField extends BaseEntity {
   @Column()
   label: string;
 
+  // Optional helper text shown under the label while filling out the
+  // form — e.g. "Enter your legal name as it appears on your ID". Distinct
+  // from Form.description, which introduces the form as a whole.
+  @Column({ type: 'text', nullable: true })
+  description: string | null;
+
   @Column({ default: FormFieldType.TEXT })
   fieldType: FormFieldType;
 

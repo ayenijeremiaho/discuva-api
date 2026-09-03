@@ -3637,6 +3637,12 @@ pastoral-record types the way a hardcoded "Notes" module would be — an admin d
 record type needs, and gets the same generic per-field analytics (see below) any other form gets, with zero new
 backend code per record type.
 
+**Field description:** each `FormField` has its own optional `description` (text, nullable) — helper text shown
+under that field's label while filling out the form (e.g. "Enter your legal name as it appears on your ID"),
+distinct from `Form.description`, which introduces the form as a whole. Returned on every field DTO (create/update
+request, and the public/member-facing `PublicFormFieldDto`) with no visibility restriction — unlike `optionMetadata`,
+there's nothing to hide here before submission.
+
 **Auto-fill:** a field can carry an `autoFillKey` (`FIRST_NAME`/`LAST_NAME`/`EMAIL`/`PHONE_NUMBER`) — the
 member-facing "get form for filling" endpoint resolves these against the logged-in member's own profile and
 returns them as `suggestedValues` alongside the field definitions, so the frontend can pre-fill without needing its

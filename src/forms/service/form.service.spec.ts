@@ -61,7 +61,12 @@ describe('FormService', () => {
         title: 'Volunteer Sign-up',
         visibility: FormVisibility.MEMBERS,
         fields: [
-          { label: 'Name', fieldType: FormFieldType.TEXT, required: true },
+          {
+            label: 'Name',
+            description: 'Enter your legal name as it appears on your ID',
+            fieldType: FormFieldType.TEXT,
+            required: true,
+          },
           {
             label: 'Team',
             fieldType: FormFieldType.DROPDOWN,
@@ -81,7 +86,11 @@ describe('FormService', () => {
       );
       expect(mockFieldRepo.save).toHaveBeenCalledWith(
         expect.arrayContaining([
-          expect.objectContaining({ label: 'Name', required: true }),
+          expect.objectContaining({
+            label: 'Name',
+            description: 'Enter your legal name as it appears on your ID',
+            required: true,
+          }),
         ]),
       );
       expect(result.title).toBe('Volunteer Sign-up');

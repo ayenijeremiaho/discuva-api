@@ -333,6 +333,7 @@ export class FormSubmissionService {
         .map((f): PublicFormFieldDto => ({
           id: f.id,
           label: f.label,
+          description: f.description,
           fieldType: f.fieldType,
           required: f.required,
           options: f.options,

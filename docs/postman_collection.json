@@ -9867,7 +9867,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Baptism Record\",\n  \"description\": \"Recorded by an officiating pastor \u2014 not self-submitted.\",\n  \"visibility\": \"ADMIN_ONLY\",\n  \"fields\": [\n    { \"label\": \"Person Name\", \"fieldType\": \"TEXT\", \"required\": true },\n    { \"label\": \"Baptism Date\", \"fieldType\": \"DATE\", \"required\": true },\n    { \"label\": \"Officiated By\", \"fieldType\": \"TEXT\", \"required\": false }\n  ]\n}",
+              "raw": "{\n  \"title\": \"Baptism Record\",\n  \"description\": \"Recorded by an officiating pastor \\u2014 not self-submitted.\",\n  \"visibility\": \"ADMIN_ONLY\",\n  \"fields\": [\n    {\n      \"label\": \"Person Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"description\": \"Enter the full legal name as it appears on official records\"\n    },\n    {\n      \"label\": \"Baptism Date\",\n      \"fieldType\": \"DATE\",\n      \"required\": true\n    },\n    {\n      \"label\": \"Officiated By\",\n      \"fieldType\": \"TEXT\",\n      \"required\": false\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"

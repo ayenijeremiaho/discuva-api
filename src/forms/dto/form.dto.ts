@@ -32,6 +32,12 @@ export class FormFieldDto {
   @IsNotEmpty()
   label: string;
 
+  // Optional helper text shown under the label while filling out the
+  // form — e.g. "Enter your legal name as it appears on your ID".
+  @IsOptional()
+  @IsString()
+  description?: string;
+
   @IsEnum(FormFieldType)
   fieldType: FormFieldType;
 
@@ -233,6 +239,7 @@ export interface FormSubmitResponseDto {
 export interface PublicFormFieldDto {
   id: string;
   label: string;
+  description: string | null;
   fieldType: FormFieldType;
   required: boolean;
   options: string[] | null;

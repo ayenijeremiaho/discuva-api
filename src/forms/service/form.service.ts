@@ -84,6 +84,7 @@ export class FormService {
       dto.fields.map((f, index) =>
         this.fieldRepo.create({
           label: f.label,
+          description: f.description ?? null,
           fieldType: f.fieldType,
           required: f.required ?? false,
           options: f.options ?? null,
@@ -345,6 +346,7 @@ export class FormService {
           this.fieldRepo.create({
             id: f.id,
             label: f.label,
+            description: f.description ?? null,
             fieldType: f.fieldType,
             required: f.required ?? false,
             options: f.options ?? null,
