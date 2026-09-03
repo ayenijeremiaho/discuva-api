@@ -3773,7 +3773,12 @@ field skips both the options and format checks, same as it always has.
 on `FormField`):** each pair only applies to its matching `fieldType` — `minValue`/`maxValue` to `NUMBER`,
 `minLength`/`maxLength` to `TEXT`/`TEXTAREA`, `minSelections`/`maxSelections` to `CHECKBOX` — enforced at
 create/update time by `FormService.assertValidFieldConstraints` (rejects a bound set on the wrong `fieldType`
-outright, and `max < min` when both are set on the same field). `FormSubmissionService.validateAnswers` re-checks
+outright, and `max < min` when both are set on the same field) — this check treats an explicit `null` the same as
+omitted (`== null`, not `=== undefined`): the admin field editor sends an explicit `null` for every bound that
+doesn't apply to whatever `fieldType` a field is switched to (e.g. picking PHONE clears `minValue`/`maxValue`), and
+since a form's `fields` array is always saved as a full replace rather than a per-property patch, "omitted" and
+"explicitly cleared" mean the same thing here — unlike the top-level `Form` scalars in `update()`, which do
+distinguish the two. `FormSubmissionService.validateAnswers` re-checks
 the bound at submit time (`validateFieldBounds`, after `validateFieldFormat` so a malformed `NUMBER` answer is
 already rejected before its value bound is even checked) — a `null` bound means unbounded on that side, and an
 empty optional field skips bound checks the same way it skips every other check. `PublicFormFieldDto` carries all

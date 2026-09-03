@@ -12,6 +12,7 @@ import {
   FormVisibility,
 } from '../enum/form.enum';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { FormFieldDto } from '../dto/form.dto';
 
 const mockFormRepo = {
   create: jest.fn((v) => v),
@@ -712,6 +713,38 @@ describe('FormService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    // Regression: the admin field editor sends an explicit `null` (not
+    // omitted) for every bound that doesn't apply to a newly-selected
+    // fieldType — e.g. switching a field to PHONE sends
+    // { minValue: null, maxValue: null, minLength: null, maxLength: null,
+    // minSelections: null, maxSelections: null, validationRegex: null,
+    // validationMessage: null }. A guard that only special-cased `undefined`
+    // (not `null`) rejected this on every single save with "minValue/
+    // maxValue only apply to NUMBER fields", even though nothing was ever
+    // actually configured.
+    it('accepts explicit null minValue/maxValue/minLength/maxLength/minSelections/maxSelections/validationRegex on a PHONE field', async () => {
+      await expect(
+        service.create({
+          title: 'Signup',
+          visibility: FormVisibility.PUBLIC,
+          fields: [
+            {
+              label: 'Phone Number',
+              fieldType: FormFieldType.PHONE,
+              minValue: null,
+              maxValue: null,
+              minLength: null,
+              maxLength: null,
+              minSelections: null,
+              maxSelections: null,
+              validationRegex: null,
+              validationMessage: null,
+            } as unknown as FormFieldDto,
+          ],
+        }),
+      ).resolves.toBeDefined();
+    });
+
     it('rejects maxValue less than minValue', async () => {
       await expect(
         service.create({
@@ -876,6 +909,36 @@ describe('FormService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    // Regression: this is the actual real-world trigger — the admin field
+    // editor's fieldType <select> onChange sends explicit `null` (not
+    // omitted) for every bound that doesn't apply to whatever type is newly
+    // picked. Saving a PHONE field (or any non-NUMBER type) through the
+    // normal "choose a type from the dropdown, then Save" flow must not
+    // 400.
+    it('accepts explicit null bounds on update, not just create', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [],
+      });
+      await expect(
+        service.update('form-1', {
+          fields: [
+            {
+              label: 'Phone Number',
+              fieldType: FormFieldType.PHONE,
+              minValue: null,
+              maxValue: null,
+              minLength: null,
+              maxLength: null,
+              minSelections: null,
+              maxSelections: null,
+            } as unknown as FormFieldDto,
+          ],
+        }),
+      ).resolves.toBeDefined();
+    });
   });
 
   describe('validationRegex validation', () => {
@@ -961,6 +1024,26 @@ describe('FormService', () => {
           ],
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    // Regression, same root cause as the field-constraints one above — the
+    // field editor sends validationRegex: null (not omitted) whenever a
+    // field is switched away from TEXT/TEXTAREA.
+    it('accepts an explicit null validationRegex on a non-TEXT field', async () => {
+      await expect(
+        service.create({
+          title: 'Signup',
+          visibility: FormVisibility.PUBLIC,
+          fields: [
+            {
+              label: 'Phone Number',
+              fieldType: FormFieldType.PHONE,
+              validationRegex: null,
+              validationMessage: null,
+            } as unknown as FormFieldDto,
+          ],
+        }),
+      ).resolves.toBeDefined();
     });
   });
 

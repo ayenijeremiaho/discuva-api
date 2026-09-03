@@ -415,7 +415,14 @@ export class FormService {
   ): void {
     const min = field[minKey];
     const max = field[maxKey];
-    if (min === undefined && max === undefined) return;
+    // Loose `== null` (not `=== undefined`) — the admin field editor sends
+    // an explicit `null` for every bound that doesn't apply to whatever
+    // fieldType is newly selected (e.g. switching a field to PHONE clears
+    // minValue/maxValue), and a full-field-array replace like this has no
+    // meaningful distinction between "omitted" and "explicitly cleared" the
+    // way the top-level Form scalars in update() do — both just mean "no
+    // bound configured".
+    if (min == null && max == null) return;
 
     const allowed = Array.isArray(allowedTypes) ? allowedTypes : [allowedTypes];
     if (!allowed.includes(field.fieldType)) {
@@ -423,7 +430,7 @@ export class FormService {
         `"${field.label}": ${minKey}/${maxKey} only apply to ${allowed.join('/')} fields`,
       );
     }
-    if (min !== undefined && max !== undefined && max < min) {
+    if (min != null && max != null && max < min) {
       throw new BadRequestException(
         `"${field.label}": ${maxKey} must be greater than or equal to ${minKey}`,
       );
@@ -437,7 +444,10 @@ export class FormService {
   // that must surface as a 400 at save time, not as an unhandled 500 the
   // first time someone submits against it.
   private assertValidFieldPattern(field: FormFieldDto): void {
-    if (field.validationRegex === undefined) return;
+    // Loose `== null` — see assertBoundPairValid's own comment on why an
+    // explicit null (sent whenever the field editor switches a field away
+    // from TEXT/TEXTAREA) must be treated the same as omitted here.
+    if (field.validationRegex == null) return;
     if (
       field.fieldType !== FormFieldType.TEXT &&
       field.fieldType !== FormFieldType.TEXTAREA
