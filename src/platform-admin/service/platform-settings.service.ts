@@ -167,7 +167,8 @@ export class PlatformSettingsService {
       | PlatformSettingKey.MAX_AVATAR_UPLOAD_MB
       | PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB
       | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB
-      | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB,
+      | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB
+      | PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB,
   ): Promise<number> {
     const cacheKey = this.cacheKey(key);
     const cached = await this.cacheService.getGlobal<number>(cacheKey);

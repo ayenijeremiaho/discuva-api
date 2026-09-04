@@ -18,7 +18,8 @@ type UploadLimitSettingKey =
   | PlatformSettingKey.MAX_AVATAR_UPLOAD_MB
   | PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB
   | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB
-  | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB;
+  | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB
+  | PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB;
 
 // Like LimitedFileInterceptor, but the enforced limit is a live
 // platform-admin setting (PlatformSettingsService.getMaxUploadBytes)

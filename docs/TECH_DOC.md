@@ -4021,6 +4021,92 @@ since there's no meaningful aggregate for free text. Blank/null/undefined answer
 `responseCount` and every computation — a field added after some submissions already exist doesn't drag its
 stats toward zero.
 
+### Pages (`src/pages/`)
+
+Per-church public web pages — a homepage or a shareable landing page (e.g. a conference page), assembled from a
+fixed library of section types rather than a free-form drag-and-drop canvas, mirroring the Forms builder's own
+"admin assembles typed, ordered items" shape. A `Page` has a unique-per-tenant `slug` (url-safe, `^[a-z0-9-]+$`),
+a `title`, an `isPublished` flag (only a published page is ever reachable publicly — an unpublished draft 404s
+identically to an unknown slug, so a visitor can never distinguish "never existed" from "not live yet"), optional
+`seoDescription`/`ogImageUrl` for link-preview metadata, and an ordered `sections: PageSection[]` (`{ id, type,
+content }`, plain `jsonb`, whole-array replace on every save — same convention `Form.postSubmitOutcomes` uses,
+since there's no per-section DB row to diff against). `id` is client-generated (a uuid), not server-assigned —
+sections have no relation of their own for TypeORM to assign an id to.
+
+**Section toolkit (`PageSectionType`, 8 fixed types)** — `content`'s shape depends on `type`:
+
+| Type | Content shape |
+|---|---|
+| `HERO` | `title, subtitle?, dateRangeText?, backgroundImageUrl?, ctaLabel?, ctaUrl?` (`ctaLabel`/`ctaUrl` paired — both or neither) |
+| `ABOUT` | `heading, body, imageUrl?` |
+| `STATS` | `items: { label, value }[]` (≥1) |
+| `SPEAKERS` | `heading?, items: { name, title?, photoUrl? }[]` (≥1) |
+| `SCHEDULE` | `heading?, days: { label, entries: { time?, title }[] }[]` (≥1 day, each with ≥1 entry) |
+| `REGISTRATION` | `heading?, body?, formId, ctaLabel?` — embeds an existing `Form` inline (rendered client-side via the same `FormFillFields`/`PaginatedFormFillFields` components a form's own public fill page already uses) rather than reimplementing registration. Reuses the whole Forms feature (validation, dedup, notifications, `postSubmitOutcomes`) for free |
+| `TESTIMONIALS` | `heading?, items: { quote, name?, photoUrl? }[]` (≥1) |
+| `FAQ` | `heading?, items: { question, answer }[]` (≥1) |
+
+**Validation is envelope-only at the DTO layer** (`PageSectionDto`: `id`/`type`/`content` as a plain object) —
+per-type structural validation happens in `PageService.assertValidSections`, a `switch (section.type)` checking
+each type's required fields, the same "jsonb content a decorator alone can't cross-check" pattern
+`FormService.assertValidOptionMetadata`/`assertValidPostSubmitOutcomes` already use, rather than a
+class-transformer discriminated union (deliberately not introduced, to keep this module's validation style
+consistent with the rest of the codebase). `REGISTRATION`'s `formId` is the one genuinely cross-referential check
+— it must reference a `Form` that actually exists in this tenant (`formRepo.findOneBy`).
+
+**Endpoints — two controllers, not three like Forms** (a Page has no authenticated-member behavior; it's purely
+public or admin-managed):
+- `PageAdminController` (`AdminGuard` + `PAGES_READ`/`PAGES_WRITE`): full CRUD (`GET/POST /pages`,
+  `GET/PATCH/DELETE /pages/:id`), `POST /pages/:id/images` — one generic multipart upload endpoint reused by every
+  image slot in every section type (hero background, each speaker photo, gallery), returning `{url, publicId}`
+  only, never touching the `Page` row itself (the client embeds the url into whichever section's content it
+  belongs to on the next save) — and `POST`/`DELETE /pages/:id/og-image` (mirrors `FormService.setCoverImage`/
+  `removeCoverImage`'s "delete the previous Cloudinary asset only after the new one is safely saved" ordering).
+  Admin-only image uploads mean the volume of an abandoned upload (started, page edit never saved) is low enough
+  that — unlike `FormFieldAttachment`'s visitor-facing uploads — no orphan-cleanup sweep is built for this; an
+  accepted v1 tradeoff, not an oversight.
+- `PagePublicController` (`@Public()`, no guard): `GET /pages/public/:slug` — published-only, returns the full
+  `Page` including every section verbatim. Unlike Forms' `PublicFormDto`, nothing is stripped — every section is
+  content the church chose to show publicly, there's no "spoiler" concern the way an unselected `DROPDOWN`
+  option's `optionMetadata` has. Not rate-limited (read-only, unlike Forms' public write endpoints).
+
+**Early-access rollout, gated entirely through `Tenant.moduleOverrides`** — `pages` is a toggleable module
+(`KNOWN_MODULES`) but deliberately **never added to any `Plan.features` array** (no `@RequiresPlan`/`PlanGuard` on
+either controller, unlike Forms), same posture Social Media used before it went GA
+(`MakeSocialMediaOverrideOnly1793736000000`'s own comment). `ModuleEnabledGuard`'s own plan-feature resolution
+(`PlanFeatureResolverService`) already checks `Tenant.moduleOverrides[moduleKey]` ahead of plan membership either
+direction — `true` grants access regardless of plan, `false` blocks it regardless of plan — so a platform admin
+grants specific churches under test access via a Force On/Off toggle on discuva-platform's Tenant detail page
+(`PATCH platform/tenants/:id/module-overrides`, generic across any `KNOWN_MODULES` key), with every other tenant
+getting a `403` from `isEnabled`'s plan-membership fallback. `PageAdminController.isPlatformEnabled`
+(`GET /pages/platform-enabled`) is a lightweight, side-effect-free access ping the discuva-admin frontend reads to
+decide whether to render the real builder or a "Coming Soon" panel — reaching the handler at all already proves
+access, since `ModuleEnabledGuard` 403s first otherwise. `PagePublicController` carries the same `@RequiresModule`
++ `ModuleEnabledGuard` (no separate plan check needed there either) — a tenant without access could never have
+created a page to view publicly anyway. `PageAdminController`'s `GET /pages/:id` is a wildcard route, so
+`PagePublicController` is registered first in `PagesModule.controllers` — otherwise it would swallow
+`GET /pages/public/:slug`, the same route-ordering issue `FormsModule` already documents.
+
+**No custom-domain resolution, no auto-provisioned homepage.** A page is reachable at
+`member.<church-subdomain>.<baseDomain>/p/<slug>` today, resolved the same way `discuva-member`'s existing public
+form-fill pages resolve tenant (subdomain read from the `Host` header server-side, or the `X-Tenant-Subdomain`
+header client-side — see that app's own tenant-resolution notes). There's no `isHomepage` designation and no
+"every tenant gets a default page" provisioning — a church's first page can be a homepage or a conference page,
+same feature either way; both are natural fast-follows once this is in active use, not built for v1.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| GET    | `/pages/platform-enabled`   | AdminGuard (PAGES_READ)  | `{ enabled: true }` always — the "Coming Soon" gate; reaching this handler at all already proves access (see above) |
+| POST   | `/pages`                    | AdminGuard (PAGES_WRITE) | Create a page with its sections in one call |
+| GET    | `/pages`                    | AdminGuard (PAGES_READ)  | List all pages — unpaginated, same policy as Forms |
+| GET    | `/pages/:id`                | AdminGuard (PAGES_READ)  | Get one page with sections |
+| PATCH  | `/pages/:id`                | AdminGuard (PAGES_WRITE) | Update page. `sections` omitted = untouched, an array = replace wholesale (no per-section id to diff against) |
+| DELETE | `/pages/:id`                | AdminGuard (PAGES_WRITE) | Delete a page |
+| POST   | `/pages/:id/images`         | AdminGuard (PAGES_WRITE) | Multipart, field name `file`, max size `MAX_PAGE_IMAGE_UPLOAD_MB`. Generic upload for any section's image slot — returns `{ url, publicId }` only, doesn't touch the page row |
+| POST   | `/pages/:id/og-image`       | AdminGuard (PAGES_WRITE) | Multipart, field name `file`. Sets `Page.ogImageUrl` |
+| DELETE | `/pages/:id/og-image`       | AdminGuard (PAGES_WRITE) | Clears the OG image |
+| GET    | `/pages/public/:slug`       | Public, `404` unless `isPublished` | Returns the full `PublicPageDto` — every section verbatim, nothing stripped |
+
 ### Social Media Module (`src/social-media/`)
 
 Central, tenant-scoped connector framework for cross-posting to a church's social accounts from one compose box.
@@ -6078,7 +6164,7 @@ distinction from the tenant-facing Reminder Settings module above, which covers 
 The `GRACE_PERIOD_DAYS` env var and its Joi entry have been removed; any deployed value for it is now inert.
 
 **Consumer 2 — upload size limits:** `MAX_LOGO_UPLOAD_MB`, `MAX_AVATAR_UPLOAD_MB`, `MAX_CLASS_MATERIAL_UPLOAD_MB`,
-`MAX_FINANCE_PROOF_UPLOAD_MB`, `MAX_FORM_ATTACHMENT_UPLOAD_MB` — stored in **MB** (not bytes, since that's what a platform admin actually types into
+`MAX_FINANCE_PROOF_UPLOAD_MB`, `MAX_FORM_ATTACHMENT_UPLOAD_MB`, `MAX_PAGE_IMAGE_UPLOAD_MB` — stored in **MB** (not bytes, since that's what a platform admin actually types into
 the settings form), read via `PlatformSettingsService.getMaxUploadBytes(key)` which converts to bytes. These
 replace the `MAX_LOGO_UPLOAD_BYTES`/`MAX_AVATAR_UPLOAD_BYTES`/`MAX_CLASS_MATERIAL_UPLOAD_BYTES`/
 `MAX_FINANCE_PROOF_UPLOAD_BYTES` env vars entirely (removed from `env.validation.ts`) — `MAX_FILE_UPLOAD_BYTES`
@@ -7242,9 +7328,10 @@ Used for finance request attachments and payment proofs.
 | `CLOUDINARY_API_SECRET`      | — *(required)* | Cloudinary API secret                                                      |
 | `MAX_FILE_UPLOAD_BYTES`      | `5242880`      | Fallback default for routes with no more specific category — incident report photos, member bulk-import spreadsheets |
 
-Logo/appearance, avatar, class-material, finance-proof, and form-attachment upload limits are **not** env vars —
-they're platform-admin-configurable via `PlatformSettingKey.MAX_LOGO_UPLOAD_MB`/`MAX_AVATAR_UPLOAD_MB`/
-`MAX_CLASS_MATERIAL_UPLOAD_MB`/`MAX_FINANCE_PROOF_UPLOAD_MB`/`MAX_FORM_ATTACHMENT_UPLOAD_MB` (see "Platform Settings" under the platform-admin
+Logo/appearance, avatar, class-material, finance-proof, form-attachment, and page-image upload limits are **not**
+env vars — they're platform-admin-configurable via `PlatformSettingKey.MAX_LOGO_UPLOAD_MB`/`MAX_AVATAR_UPLOAD_MB`/
+`MAX_CLASS_MATERIAL_UPLOAD_MB`/`MAX_FINANCE_PROOF_UPLOAD_MB`/`MAX_FORM_ATTACHMENT_UPLOAD_MB`/
+`MAX_PAGE_IMAGE_UPLOAD_MB` (see "Platform Settings" under the platform-admin
 section) and enforced via `DynamicLimitedFileInterceptor`, which rewrites Multer's generic "File too large" error
 into `"The uploaded file exceeds the maximum allowed size of {N} MB..."` using the *live* limit for that route —
 not a guess. `HttpExceptionFilter`'s own `PayloadTooLargeException` handling (using `MAX_FILE_UPLOAD_BYTES`) is a

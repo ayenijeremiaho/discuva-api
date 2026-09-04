@@ -75,6 +75,8 @@ export enum AdminPermission {
   BRANCH_WRITE = 'branch:write',
   FORMS_READ = 'forms:read',
   FORMS_WRITE = 'forms:write',
+  PAGES_READ = 'pages:read',
+  PAGES_WRITE = 'pages:write',
   SOCIAL_MEDIA_READ = 'social_media:read',
   SOCIAL_MEDIA_WRITE = 'social_media:write',
   // Admin-side is read-only by design — members manage their own directory
@@ -163,6 +165,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.BRANCH_WRITE]: 'Manage Branches',
   [AdminPermission.FORMS_READ]: 'View Forms & Submissions',
   [AdminPermission.FORMS_WRITE]: 'Build & Manage Forms',
+  [AdminPermission.PAGES_READ]: 'View Pages',
+  [AdminPermission.PAGES_WRITE]: 'Build & Manage Pages',
   [AdminPermission.SOCIAL_MEDIA_READ]: 'View Social Media Accounts & Posts',
   [AdminPermission.SOCIAL_MEDIA_WRITE]: 'Connect Accounts & Publish Posts',
   [AdminPermission.MEMBER_DIRECTORY_READ]: 'View Member Directory Analytics',
@@ -315,6 +319,9 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'View forms and their submissions, and export submissions as CSV',
   [AdminPermission.FORMS_WRITE]:
     'Create, edit, and delete forms and their fields',
+  [AdminPermission.PAGES_READ]: 'View public pages and their published status',
+  [AdminPermission.PAGES_WRITE]:
+    'Create, edit, publish, and delete public pages',
   [AdminPermission.SOCIAL_MEDIA_READ]:
     'View connected social media accounts and post history',
   [AdminPermission.SOCIAL_MEDIA_WRITE]:
@@ -535,6 +542,11 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'Forms',
     [AdminPermission.FORMS_READ, AdminPermission.FORMS_WRITE],
     'forms',
+  ),
+  buildGroup(
+    'Pages',
+    [AdminPermission.PAGES_READ, AdminPermission.PAGES_WRITE],
+    'pages',
   ),
   buildGroup(
     'Social Media',

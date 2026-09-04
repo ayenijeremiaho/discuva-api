@@ -67,6 +67,7 @@ import { CommunicationProviderModule } from './communication-provider/communicat
 import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
 import { BranchModule } from './branch/branch.module';
 import { FormsModule } from './forms/forms.module';
+import { PagesModule } from './pages/pages.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { MemberDirectoryModule } from './member-directory/member-directory.module';
 
@@ -244,6 +245,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     GivingCheckoutModule,
     BranchModule,
     FormsModule,
+    PagesModule,
     SocialMediaModule,
     MemberDirectoryModule,
     EnumsModule,

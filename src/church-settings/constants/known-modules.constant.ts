@@ -37,6 +37,7 @@ export const KNOWN_MODULES = [
   { key: 'volunteering', moduleName: 'Volunteering', required: false },
   { key: 'small_groups', moduleName: 'Fellowships', required: false },
   { key: 'forms', moduleName: 'Forms', required: false },
+  { key: 'pages', moduleName: 'Pages', required: false },
   { key: 'social_media', moduleName: 'Social Media', required: false },
   { key: 'member_directory', moduleName: 'Member Directory', required: false },
   {

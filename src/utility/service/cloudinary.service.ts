@@ -21,7 +21,8 @@ export type CloudinaryFolder =
   | 'social-media'
   | 'form-covers'
   | 'form-logos'
-  | 'form-submissions';
+  | 'form-submissions'
+  | 'page-images';
 
 export interface CloudinaryUploadResult {
   secureUrl: string;

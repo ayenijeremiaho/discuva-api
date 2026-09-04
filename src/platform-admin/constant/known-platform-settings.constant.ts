@@ -59,6 +59,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 1,
     max: 50,
   },
+  [PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB]: {
+    label: 'Page Image Upload Limit',
+    unit: 'MB — hero, speaker, gallery, and OG images on a public Page',
+    defaultValue: 5,
+    min: 1,
+    max: 25,
+  },
   [PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT]: {
     label: 'Enforce Attendance Distance Check',
     unit: 'default for churches that have not set their own override — 0 = off, 1 = on',
@@ -91,7 +98,8 @@ export const UPLOAD_HARD_CEILING_BYTES: Record<
   | PlatformSettingKey.MAX_AVATAR_UPLOAD_MB
   | PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB
   | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB
-  | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB,
+  | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB
+  | PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB,
   number
 > = {
   [PlatformSettingKey.MAX_LOGO_UPLOAD_MB]:
@@ -115,6 +123,10 @@ export const UPLOAD_HARD_CEILING_BYTES: Record<
   [PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB]:
     KNOWN_PLATFORM_SETTINGS[PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB]
       .max *
+    1024 *
+    1024,
+  [PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB]:
+    KNOWN_PLATFORM_SETTINGS[PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB].max *
     1024 *
     1024,
 };

@@ -284,6 +284,16 @@
       "key": "firstTimerFormId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "pageId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pageSlug",
+      "value": "",
+      "type": "string"
     }
   ],
   "auth": {
@@ -10490,6 +10500,306 @@
               "body": "{ \"statusCode\": 400, \"message\": \"This field does not accept file uploads\" }"
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Pages (Admin)",
+      "item": [
+        {
+          "name": "Get Pages Platform-Enabled (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/platform-enabled",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "platform-enabled"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"enabled\": true\n}"
+            },
+            {
+              "name": "403 not granted yet",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"This module is currently disabled.\"\n}"
+            }
+          ],
+          "description": "The admin frontend's Coming-Soon gate. Pages is early-access, gated entirely through Tenant.moduleOverrides (never added to any plan by default) \u2014 a platform admin grants access per-church from discuva-platform's Tenant detail page (Force On). Reaching this handler at all already proves access."
+        },
+        {
+          "name": "Create Page (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slug\": \"higher-ground-2026\",\n  \"title\": \"Higher Ground Conference 2026\",\n  \"seoDescription\": \"Three days of worship and teaching \\u2014 August 28-30, 2026.\",\n  \"isPublished\": false,\n  \"sections\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"type\": \"HERO\",\n      \"content\": {\n        \"title\": \"Higher Ground 2026\",\n        \"subtitle\": \"Get empowered to be transformed.\",\n        \"dateRangeText\": \"August 28-30, 2026\",\n        \"ctaLabel\": \"Register Now\",\n        \"ctaUrl\": \"#register\"\n      }\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"type\": \"REGISTRATION\",\n      \"content\": {\n        \"heading\": \"Reserve Your Seat\",\n        \"formId\": \"{{formId}}\",\n        \"ctaLabel\": \"Register\"\n      }\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"type\": \"FAQ\",\n      \"content\": {\n        \"items\": [\n          {\n            \"question\": \"Is parking available?\",\n            \"answer\": \"Yes, free parking on-site.\"\n          }\n        ]\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"a1b2c3d4-1111-4c5d-8e9f-0a1b2c3d4e5f\",\n  \"slug\": \"higher-ground-2026\",\n  \"title\": \"Higher Ground Conference 2026\",\n  \"isPublished\": false,\n  \"sections\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"type\": \"HERO\"\n    }\n  ]\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('pageId', res.id);",
+                  "if (res.slug) pm.collectionVariables.set('pageSlug', res.slug);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "description": "Demonstrates 3 of the 8 section types \u2014 HERO, REGISTRATION (embeds an existing Form by id \u2014 create one via the Forms folder first and it'll be picked up via {{formId}}), and FAQ. See the Pages module in TECH_DOC.md for the full section toolkit and each type's content shape."
+        },
+        {
+          "name": "Get All Pages (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Page by ID (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/{{pageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "{{pageId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Page \u2014 Publish (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/pages/{{pageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "{{pageId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isPublished\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{pageId}}\",\n  \"isPublished\": true\n}"
+            }
+          ],
+          "description": "isPublished is the only thing toggled here \u2014 sections omitted, so they're left untouched (see PATCH /pages/:id's own convention in TECH_DOC.md)."
+        },
+        {
+          "name": "Upload Page Section Image (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/{{pageId}}/images",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "{{pageId}}",
+                "images"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"url\": \"https://res.cloudinary.com/.../hero.jpg\",\n  \"publicId\": \"page-images/abc123\"\n}"
+            }
+          ],
+          "description": "Generic upload reused by every image slot in every section type (hero background, speaker photos, gallery) \u2014 returns a reference only, doesn't touch the page row. Embed the returned url into whichever section's content it belongs to on the next PATCH."
+        },
+        {
+          "name": "Upload Page OG Image (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/{{pageId}}/og-image",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "{{pageId}}",
+                "og-image"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Page OG Image (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/{{pageId}}/og-image",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "{{pageId}}",
+                "og-image"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Public Page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/public/{{pageSlug}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "public",
+                "{{pageSlug}}"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{pageId}}\",\n  \"slug\": \"higher-ground-2026\",\n  \"title\": \"Higher Ground Conference 2026\",\n  \"sections\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"type\": \"HERO\",\n      \"content\": {\n        \"title\": \"Higher Ground 2026\"\n      }\n    }\n  ]\n}"
+            },
+            {
+              "name": "404 not published",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Page not found\"\n}"
+            }
+          ],
+          "description": "No auth required. 404s identically for an unpublished page and a slug that never existed \u2014 a visitor can never tell the difference."
+        },
+        {
+          "name": "Delete Page (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/pages/{{pageId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "pages",
+                "{{pageId}}"
+              ]
+            }
+          },
+          "response": []
         }
       ]
     },
