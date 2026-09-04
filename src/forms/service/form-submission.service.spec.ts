@@ -22,7 +22,7 @@ import {
 
 const mockFormRepo = {
   find: jest.fn(),
-  findOneBy: jest.fn(),
+  findOne: jest.fn(),
 };
 const mockSubmissionRepo = {
   create: jest.fn((v) => v),
@@ -110,14 +110,14 @@ describe('FormSubmissionService', () => {
 
   describe('getForMember', () => {
     it('404s on an inactive or non-member-visible form', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(null);
+      mockFormRepo.findOne.mockResolvedValue(null);
       await expect(service.getForMember('form-1', 'member-1')).rejects.toThrow(
         NotFoundException,
       );
     });
 
     it('pre-fills suggested values from the member profile for auto-fill fields', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
         isActive: true,
         visibility: FormVisibility.MEMBERS,
@@ -145,12 +145,14 @@ describe('FormSubmissionService', () => {
 
   describe('getForPublic', () => {
     it('404s on a MEMBERS-only form even if active', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(null);
+      mockFormRepo.findOne.mockResolvedValue(null);
       await expect(service.getForPublic('form-1')).rejects.toThrow(
         NotFoundException,
       );
-      expect(mockFormRepo.findOneBy).toHaveBeenCalledWith(
-        expect.objectContaining({ visibility: FormVisibility.PUBLIC }),
+      expect(mockFormRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ visibility: FormVisibility.PUBLIC }),
+        }),
       );
     });
   });
@@ -171,14 +173,14 @@ describe('FormSubmissionService', () => {
     };
 
     it('rejects a missing required field', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(formWithRequiredField);
+      mockFormRepo.findOne.mockResolvedValue(formWithRequiredField);
       await expect(service.submitAsPublic('form-1', {})).rejects.toThrow(
         BadRequestException,
       );
     });
 
     it('rejects a DROPDOWN answer outside the configured options', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
         isActive: true,
         visibility: FormVisibility.PUBLIC,
@@ -198,7 +200,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('saves a valid public submission with member null', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(formWithRequiredField);
+      mockFormRepo.findOne.mockResolvedValue(formWithRequiredField);
       const result = await service.submitAsPublic('form-1', {
         f1: 'Jane Doe',
       });
@@ -209,7 +211,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('saves a valid member submission with memberId from the token, not the body', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...formWithRequiredField,
         visibility: FormVisibility.MEMBERS,
       });
@@ -220,7 +222,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('rejects a member submission to a form that is not member-visible', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(null);
+      mockFormRepo.findOne.mockResolvedValue(null);
       await expect(
         service.submitAsMember('form-1', 'member-42', { f1: 'x' }),
       ).rejects.toThrow(NotFoundException);
@@ -243,7 +245,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('saves a submission with member null when no memberId is given', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(adminOnlyForm);
+      mockFormRepo.findOne.mockResolvedValue(adminOnlyForm);
       const result = await service.submitAsAdmin('form-1', { f1: 'Baby Jane' });
       expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ member: null, answers: { f1: 'Baby Jane' } }),
@@ -252,7 +254,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('links the submission to the given member when memberId is provided', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(adminOnlyForm);
+      mockFormRepo.findOne.mockResolvedValue(adminOnlyForm);
       await service.submitAsAdmin('form-1', { f1: 'Baby Jane' }, 'member-42');
       expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ member: { id: 'member-42' } }),
@@ -260,7 +262,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('works against a MEMBERS-visibility form too, not just ADMIN_ONLY', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...adminOnlyForm,
         visibility: FormVisibility.MEMBERS,
       });
@@ -270,18 +272,18 @@ describe('FormSubmissionService', () => {
     });
 
     it('404s on an inactive form', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(null);
+      mockFormRepo.findOne.mockResolvedValue(null);
       await expect(
         service.submitAsAdmin('form-1', { f1: 'Baby Jane' }),
       ).rejects.toThrow(NotFoundException);
-      expect(mockFormRepo.findOneBy).toHaveBeenCalledWith({
-        id: 'form-1',
-        isActive: true,
+      expect(mockFormRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'form-1', isActive: true },
+        order: { fields: { order: 'ASC' } },
       });
     });
 
     it('still validates answers against the form fields', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(adminOnlyForm);
+      mockFormRepo.findOne.mockResolvedValue(adminOnlyForm);
       await expect(service.submitAsAdmin('form-1', {})).rejects.toThrow(
         BadRequestException,
       );
@@ -291,7 +293,7 @@ describe('FormSubmissionService', () => {
       // The admin record-entry UI shows every field unconditionally,
       // ignoring visibilityRule — so an answer reaching here was always
       // something an admin actually saw and typed, never a stale leftover.
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
         isActive: true,
         visibility: FormVisibility.ADMIN_ONLY,
@@ -362,7 +364,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('maps submitted answers to a CreateFirstTimerDto via each field autoFillKey', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(firstTimerForm);
+      mockFormRepo.findOne.mockResolvedValue(firstTimerForm);
 
       await service.submitAsPublic('form-1', {
         f1: 'Chris',
@@ -382,7 +384,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('leaves email undefined when not answered', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(firstTimerForm);
+      mockFormRepo.findOne.mockResolvedValue(firstTimerForm);
 
       await service.submitAsPublic('form-1', {
         f1: 'Chris',
@@ -396,7 +398,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('does not call FollowUpService when createsFirstTimers is false', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...firstTimerForm,
         createsFirstTimers: false,
       });
@@ -413,7 +415,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('still saves the submission even if first-timer creation fails', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(firstTimerForm);
+      mockFormRepo.findOne.mockResolvedValue(firstTimerForm);
       mockFollowUpService.createFirstTimerFromPublicForm.mockRejectedValueOnce(
         new Error('No active Follow-Up team members available.'),
       );
@@ -444,7 +446,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('normalizes a leading-zero Nigerian number before saving', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(phoneForm);
+      mockFormRepo.findOne.mockResolvedValue(phoneForm);
       await service.submitAsPublic('form-1', { f1: '08012345678' });
       expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ answers: { f1: '+2348012345678' } }),
@@ -452,7 +454,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('rejects a required phone field that fails to normalize', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(phoneForm);
+      mockFormRepo.findOne.mockResolvedValue(phoneForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'not a phone number' }),
       ).rejects.toThrow(BadRequestException);
@@ -476,7 +478,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('computes a normalized dedup value on save', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(dedupForm);
+      mockFormRepo.findOne.mockResolvedValue(dedupForm);
       await service.submitAsPublic('form-1', { f1: '08012345678' });
       expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ dedupValueNormalized: '+2348012345678' }),
@@ -485,7 +487,7 @@ describe('FormSubmissionService', () => {
 
     it('translates a unique-constraint violation into a friendly error carrying a distinct code', async () => {
       expect.assertions(2);
-      mockFormRepo.findOneBy.mockResolvedValue(dedupForm);
+      mockFormRepo.findOne.mockResolvedValue(dedupForm);
       mockSubmissionRepo.save.mockRejectedValueOnce({ code: '23505' });
       await service
         .submitAsPublic('form-1', { f1: '08012345678' })
@@ -499,7 +501,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('rethrows any other save error unchanged', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(dedupForm);
+      mockFormRepo.findOne.mockResolvedValue(dedupForm);
       mockSubmissionRepo.save.mockRejectedValueOnce(new Error('db down'));
       await expect(
         service.submitAsPublic('form-1', { f1: '08012345678' }),
@@ -536,7 +538,7 @@ describe('FormSubmissionService', () => {
     };
 
     it("returns only the selected option's metadata, not the others", async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(nextStepsForm);
+      mockFormRepo.findOne.mockResolvedValue(nextStepsForm);
       const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
       expect(result.nextSteps).toEqual({
         message: 'Thanks for signing up!',
@@ -551,7 +553,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('returns null selectedOption when no next-steps field is configured', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...nextStepsForm,
         nextStepsField: null,
       });
@@ -560,7 +562,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('returns the general action alongside the selected option when both are configured', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...nextStepsForm,
         generalActionUrl: 'https://chat.example.com/main-group',
         generalActionLabel: 'Join Main Volunteer Group',
@@ -574,7 +576,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('omits the general action when only one of url/label is set on the entity', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...nextStepsForm,
         generalActionUrl: 'https://chat.example.com/main-group',
         generalActionLabel: null,
@@ -626,49 +628,49 @@ describe('FormSubmissionService', () => {
     };
 
     it('accepts a valid EMAIL answer', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(emailForm);
+      mockFormRepo.findOne.mockResolvedValue(emailForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'jane@example.com' }),
       ).resolves.toBeDefined();
     });
 
     it('rejects an EMAIL answer that is not a valid email address', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(emailForm);
+      mockFormRepo.findOne.mockResolvedValue(emailForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'not-an-email' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('accepts a valid NUMBER answer', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(numberForm);
+      mockFormRepo.findOne.mockResolvedValue(numberForm);
       await expect(
         service.submitAsPublic('form-1', { f1: '42' }),
       ).resolves.toBeDefined();
     });
 
     it('rejects a NUMBER answer that is not numeric', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(numberForm);
+      mockFormRepo.findOne.mockResolvedValue(numberForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'not a number' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('accepts a valid DATE answer', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(dateForm);
+      mockFormRepo.findOne.mockResolvedValue(dateForm);
       await expect(
         service.submitAsPublic('form-1', { f1: '2026-01-15' }),
       ).resolves.toBeDefined();
     });
 
     it('rejects a DATE answer that is not a valid date', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(dateForm);
+      mockFormRepo.findOne.mockResolvedValue(dateForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'not a date' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('skips type validation for an empty optional DATE field', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(dateForm);
+      mockFormRepo.findOne.mockResolvedValue(dateForm);
       await expect(service.submitAsPublic('form-1', {})).resolves.toBeDefined();
     });
   });
@@ -722,56 +724,56 @@ describe('FormSubmissionService', () => {
     };
 
     it('accepts a NUMBER answer within bounds', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(numberForm);
+      mockFormRepo.findOne.mockResolvedValue(numberForm);
       await expect(
         service.submitAsPublic('form-1', { f1: '30' }),
       ).resolves.toBeDefined();
     });
 
     it('rejects a NUMBER answer below minValue', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(numberForm);
+      mockFormRepo.findOne.mockResolvedValue(numberForm);
       await expect(
         service.submitAsPublic('form-1', { f1: '10' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects a NUMBER answer above maxValue', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(numberForm);
+      mockFormRepo.findOne.mockResolvedValue(numberForm);
       await expect(
         service.submitAsPublic('form-1', { f1: '99' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects a TEXT answer shorter than minLength', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(textForm);
+      mockFormRepo.findOne.mockResolvedValue(textForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'hi' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects a TEXT answer longer than maxLength', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(textForm);
+      mockFormRepo.findOne.mockResolvedValue(textForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'way too long a bio' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('accepts a TEXT answer within length bounds', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(textForm);
+      mockFormRepo.findOne.mockResolvedValue(textForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'hello!' }),
       ).resolves.toBeDefined();
     });
 
     it('rejects fewer CHECKBOX selections than minSelections', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(checkboxForm);
+      mockFormRepo.findOne.mockResolvedValue(checkboxForm);
       await expect(
         service.submitAsPublic('form-1', { f1: [] }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects more CHECKBOX selections than maxSelections', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(checkboxForm);
+      mockFormRepo.findOne.mockResolvedValue(checkboxForm);
       await expect(
         service.submitAsPublic('form-1', {
           f1: ['Choir', 'Ushering', 'Media'],
@@ -780,14 +782,14 @@ describe('FormSubmissionService', () => {
     });
 
     it('accepts a CHECKBOX selection count within bounds', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(checkboxForm);
+      mockFormRepo.findOne.mockResolvedValue(checkboxForm);
       await expect(
         service.submitAsPublic('form-1', { f1: ['Choir'] }),
       ).resolves.toBeDefined();
     });
 
     it('skips bound checks entirely when no bounds are configured', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...numberForm,
         fields: [{ ...numberForm.fields[0], minValue: null, maxValue: null }],
       });
@@ -815,21 +817,21 @@ describe('FormSubmissionService', () => {
     };
 
     it('accepts an answer matching the pattern', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(ninForm);
+      mockFormRepo.findOne.mockResolvedValue(ninForm);
       await expect(
         service.submitAsPublic('form-1', { f1: '12345678901' }),
       ).resolves.toBeDefined();
     });
 
     it('rejects an answer that does not match the pattern, using the custom message', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(ninForm);
+      mockFormRepo.findOne.mockResolvedValue(ninForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'not-a-nin' }),
       ).rejects.toThrow('Must be an 11-digit NIN');
     });
 
     it('falls back to a generic message when no validationMessage is set', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...ninForm,
         fields: [{ ...ninForm.fields[0], validationMessage: null }],
       });
@@ -839,7 +841,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('skips the check entirely when no validationRegex is configured', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...ninForm,
         fields: [{ ...ninForm.fields[0], validationRegex: null }],
       });
@@ -880,7 +882,7 @@ describe('FormSubmissionService', () => {
     }
 
     it('does not require a conditionally-hidden field, even though it is required', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(
+      mockFormRepo.findOne.mockResolvedValue(
         formWithLeadRule({
           operator: FormFieldVisibilityOperator.EQUALS,
           value: 'Choir',
@@ -894,7 +896,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('requires a conditionally-visible field once its condition is met', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(
+      mockFormRepo.findOne.mockResolvedValue(
         formWithLeadRule({
           operator: FormFieldVisibilityOperator.EQUALS,
           value: 'Choir',
@@ -906,7 +908,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('accepts the submission once the now-visible required field is answered', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(
+      mockFormRepo.findOne.mockResolvedValue(
         formWithLeadRule({
           operator: FormFieldVisibilityOperator.EQUALS,
           value: 'Choir',
@@ -918,7 +920,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('notEquals shows the field whenever the target does NOT match', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(
+      mockFormRepo.findOne.mockResolvedValue(
         formWithLeadRule({
           operator: FormFieldVisibilityOperator.NOT_EQUALS,
           value: 'Choir',
@@ -930,7 +932,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('includes matches against a CHECKBOX-style array answer', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
         isActive: true,
         visibility: FormVisibility.PUBLIC,
@@ -964,7 +966,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('never blocks submission on a hidden field even with other validation configured (bounds/format)', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
         isActive: true,
         visibility: FormVisibility.PUBLIC,
@@ -996,7 +998,7 @@ describe('FormSubmissionService', () => {
     });
 
     it("strips a hidden field's leftover answer before persisting, on submit", async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(
+      mockFormRepo.findOne.mockResolvedValue(
         formWithLeadRule({
           operator: FormFieldVisibilityOperator.EQUALS,
           value: 'Choir',
@@ -1016,7 +1018,7 @@ describe('FormSubmissionService', () => {
     });
 
     it("keeps a field's answer once it becomes visible", async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(
+      mockFormRepo.findOne.mockResolvedValue(
         formWithLeadRule({
           operator: FormFieldVisibilityOperator.EQUALS,
           value: 'Choir',
@@ -1052,7 +1054,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('emails admins with forms:write when both the form and category toggles are on', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(notifyingForm);
+      mockFormRepo.findOne.mockResolvedValue(notifyingForm);
       mockAdminQb.getMany.mockResolvedValue([notifiedAdmin]);
 
       await service.submitAsPublic('form-1', { f1: 'Jane' });
@@ -1069,7 +1071,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('does not email admins lacking forms:write', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(notifyingForm);
+      mockFormRepo.findOne.mockResolvedValue(notifyingForm);
       mockAdminQb.getMany.mockResolvedValue([
         {
           isActive: true,
@@ -1085,7 +1087,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('skips notification entirely when the form has notifyOnSubmission off', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...notifyingForm,
         notifyOnSubmission: false,
       });
@@ -1099,7 +1101,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('skips notification when the tenant-wide FORM_SUBMISSION category is disabled', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(notifyingForm);
+      mockFormRepo.findOne.mockResolvedValue(notifyingForm);
       mockAdminQb.getMany.mockResolvedValue([notifiedAdmin]);
       mockEmailCategorySettingsService.isEnabled.mockResolvedValue(false);
 
@@ -1110,7 +1112,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('never notifies on submitAsAdmin', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(notifyingForm);
+      mockFormRepo.findOne.mockResolvedValue(notifyingForm);
       mockAdminQb.getMany.mockResolvedValue([notifiedAdmin]);
 
       await service.submitAsAdmin('form-1', { f1: 'Jane' });
@@ -1138,7 +1140,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('getForMember 404s for a member outside the audience group', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(restrictedForm);
+      mockFormRepo.findOne.mockResolvedValue(restrictedForm);
       mockGroupService.getMemberIdsForGroup.mockResolvedValue([
         'member-in-group',
       ]);
@@ -1148,7 +1150,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('getForMember succeeds for a member inside the audience group', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(restrictedForm);
+      mockFormRepo.findOne.mockResolvedValue(restrictedForm);
       mockGroupService.getMemberIdsForGroup.mockResolvedValue([
         'member-in-group',
       ]);
@@ -1159,7 +1161,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('submitAsMember rejects a member outside the audience group', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(restrictedForm);
+      mockFormRepo.findOne.mockResolvedValue(restrictedForm);
       mockGroupService.getMemberIdsForGroup.mockResolvedValue([
         'member-in-group',
       ]);
@@ -1188,7 +1190,7 @@ describe('FormSubmissionService', () => {
     } as Express.Multer.File;
 
     it('uploads to Cloudinary, tracks the row, and returns url+publicId', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
 
       const result = await service.uploadAttachment('form-1', 'f1', fakeFile, [
         FormVisibility.PUBLIC,
@@ -1215,7 +1217,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('rejects an unknown field id', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
       await expect(
         service.uploadAttachment('form-1', 'unknown-field', fakeFile, [
           FormVisibility.PUBLIC,
@@ -1224,7 +1226,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('rejects a field that is not FILE type', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...fileForm,
         fields: [{ ...fileField, fieldType: FormFieldType.TEXT }],
       });
@@ -1236,7 +1238,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('404s when the form is not visible to the given allowlist', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...fileForm,
         visibility: FormVisibility.ADMIN_ONLY,
       });
@@ -1248,7 +1250,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('rejects a member outside the audience group', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...fileForm,
         visibility: FormVisibility.MEMBERS,
         audienceGroup: { id: 'group-1' },
@@ -1268,7 +1270,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('skips the audience-group check when no memberId is given (public/admin uploads)', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...fileForm,
         visibility: FormVisibility.MEMBERS,
         audienceGroup: { id: 'group-1' },
@@ -1291,7 +1293,7 @@ describe('FormSubmissionService', () => {
     };
 
     it('returns the most recent submission for the caller, with editable from the form', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(editableForm);
+      mockFormRepo.findOne.mockResolvedValue(editableForm);
       mockSubmissionRepo.findOne.mockResolvedValue({
         id: 'sub-1',
         answers: { f1: 'Jane' },
@@ -1312,7 +1314,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('reflects editableAfterSubmit:false from the form', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         editableAfterSubmit: false,
       });
@@ -1327,7 +1329,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('404s when the caller has no submission for this form', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(editableForm);
+      mockFormRepo.findOne.mockResolvedValue(editableForm);
       mockSubmissionRepo.findOne.mockResolvedValue(null);
 
       await expect(
@@ -1336,7 +1338,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('404s when the form itself is gone/inactive', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(null);
+      mockFormRepo.findOne.mockResolvedValue(null);
 
       await expect(
         service.getMySubmission('form-1', 'member-1'),
@@ -1344,7 +1346,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('404s for an ADMIN_ONLY form even if the caller is the linked member', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         visibility: FormVisibility.ADMIN_ONLY,
       });
@@ -1379,7 +1381,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue(editableForm);
+      mockFormRepo.findOne.mockResolvedValue(editableForm);
 
       const result = await service.updateSubmission('sub-1', 'member-1', {
         f1: 'New Name',
@@ -1430,7 +1432,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         visibility: FormVisibility.ADMIN_ONLY,
       });
@@ -1447,7 +1449,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         editableAfterSubmit: false,
       });
@@ -1464,7 +1466,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue(editableForm);
+      mockFormRepo.findOne.mockResolvedValue(editableForm);
 
       await expect(
         service.updateSubmission('sub-1', 'member-1', {}),
@@ -1478,7 +1480,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         fields: [
           {
@@ -1522,7 +1524,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         dedupField: { id: 'f1', fieldType: FormFieldType.PHONE },
         fields: [
@@ -1552,7 +1554,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         dedupField: { id: 'f1', fieldType: FormFieldType.PHONE },
         fields: [
@@ -1582,7 +1584,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue(editableForm);
+      mockFormRepo.findOne.mockResolvedValue(editableForm);
       mockSubmissionRepo.save.mockRejectedValueOnce({ code: '23505' });
 
       await service
@@ -1603,7 +1605,7 @@ describe('FormSubmissionService', () => {
         member: { id: 'member-1' },
         form: { id: 'form-1' },
       });
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...editableForm,
         notifyOnSubmission: true,
       });
@@ -1637,21 +1639,21 @@ describe('FormSubmissionService', () => {
     };
 
     it('accepts a well-formed { url, publicId } answer', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
       await expect(
         service.submitAsPublic('form-1', { f1: validAnswer }),
       ).resolves.toBeDefined();
     });
 
     it('rejects a FILE answer that is a bare string, not an object', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
       await expect(
         service.submitAsPublic('form-1', { f1: 'not-an-object' }),
       ).rejects.toThrow(BadRequestException);
     });
 
     it('rejects a FILE answer missing publicId', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
       await expect(
         service.submitAsPublic('form-1', {
           f1: { url: 'https://cdn.example.com/f.pdf' },
@@ -1660,7 +1662,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('deletes the claimed attachment tracking row on a successful save', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
       await service.submitAsPublic('form-1', { f1: validAnswer });
       expect(mockAttachmentRepo.delete).toHaveBeenCalledWith({
         publicId: expect.anything(),
@@ -1668,7 +1670,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('does not touch the attachment repo when no FILE field was answered', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue({
+      mockFormRepo.findOne.mockResolvedValue({
         ...fileForm,
         fields: [{ ...fileForm.fields[0], required: false }],
       });
@@ -1677,7 +1679,7 @@ describe('FormSubmissionService', () => {
     });
 
     it('still saves the submission even if attachment cleanup fails', async () => {
-      mockFormRepo.findOneBy.mockResolvedValue(fileForm);
+      mockFormRepo.findOne.mockResolvedValue(fileForm);
       mockAttachmentRepo.delete.mockRejectedValueOnce(new Error('db down'));
       const result = await service.submitAsPublic('form-1', {
         f1: validAnswer,

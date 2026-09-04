@@ -105,9 +105,9 @@ export class FormSubmissionService {
     id: string,
     memberId: string,
   ): Promise<{ form: Form; suggestedValues: Record<string, string> }> {
-    const form = await this.formRepo.findOneBy({
-      id,
-      isActive: true,
+    const form = await this.formRepo.findOne({
+      where: { id, isActive: true },
+      order: { fields: { order: 'ASC' } },
     });
     if (
       !form ||
@@ -130,10 +130,9 @@ export class FormSubmissionService {
   }
 
   async getForPublic(id: string): Promise<PublicFormDto> {
-    const form = await this.formRepo.findOneBy({
-      id,
-      isActive: true,
-      visibility: FormVisibility.PUBLIC,
+    const form = await this.formRepo.findOne({
+      where: { id, isActive: true, visibility: FormVisibility.PUBLIC },
+      order: { fields: { order: 'ASC' } },
     });
     if (!form) throw new NotFoundException('Form not found');
     return this.toPublicDto(form);
@@ -216,7 +215,10 @@ export class FormSubmissionService {
     answers: Record<string, unknown>,
     memberId?: string,
   ): Promise<FormSubmitResponseDto> {
-    const form = await this.formRepo.findOneBy({ id: formId, isActive: true });
+    const form = await this.formRepo.findOne({
+      where: { id: formId, isActive: true },
+      order: { fields: { order: 'ASC' } },
+    });
     if (!form) throw new NotFoundException('Form not found');
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
@@ -257,7 +259,10 @@ export class FormSubmissionService {
     answers: Record<string, unknown>;
     editable: boolean;
   }> {
-    const form = await this.formRepo.findOneBy({ id: formId, isActive: true });
+    const form = await this.formRepo.findOne({
+      where: { id: formId, isActive: true },
+      order: { fields: { order: 'ASC' } },
+    });
     if (!form || form.visibility === FormVisibility.ADMIN_ONLY) {
       throw new NotFoundException('Form not found');
     }
@@ -294,9 +299,9 @@ export class FormSubmissionService {
       throw new NotFoundException('Submission not found');
     }
 
-    const form = await this.formRepo.findOneBy({
-      id: submission.form.id,
-      isActive: true,
+    const form = await this.formRepo.findOne({
+      where: { id: submission.form.id, isActive: true },
+      order: { fields: { order: 'ASC' } },
     });
     if (!form || form.visibility === FormVisibility.ADMIN_ONLY) {
       throw new NotFoundException('Form not found');
@@ -347,7 +352,10 @@ export class FormSubmissionService {
     id: string,
     allowedVisibilities: FormVisibility[],
   ): Promise<Form> {
-    const form = await this.formRepo.findOneBy({ id, isActive: true });
+    const form = await this.formRepo.findOne({
+      where: { id, isActive: true },
+      order: { fields: { order: 'ASC' } },
+    });
     if (!form || !allowedVisibilities.includes(form.visibility)) {
       throw new NotFoundException('Form not found');
     }

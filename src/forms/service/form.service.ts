@@ -576,11 +576,24 @@ export class FormService {
   }
 
   async getAll(): Promise<Form[]> {
-    return this.formRepo.find({ order: { createdAt: 'DESC' } });
+    // fields is eager-loaded (Form.fields) but that alone doesn't order the
+    // joined rows — without this, Postgres returns them in whatever order
+    // its query planner picks, which isn't guaranteed to match each field's
+    // own `order` column and can genuinely change between otherwise-
+    // identical requests. The admin builder reads `fields` straight off
+    // this response (openEdit never does its own per-form GET), so an
+    // unordered join here was surfacing as the field list visibly
+    // reshuffling itself on every page load/refresh.
+    return this.formRepo.find({
+      order: { createdAt: 'DESC', fields: { order: 'ASC' } },
+    });
   }
 
   async getById(id: string): Promise<Form> {
-    const form = await this.formRepo.findOne({ where: { id } });
+    const form = await this.formRepo.findOne({
+      where: { id },
+      order: { fields: { order: 'ASC' } },
+    });
     if (!form) throw new NotFoundException('Form not found');
     return form;
   }

@@ -3637,6 +3637,17 @@ pastoral-record types the way a hardcoded "Notes" module would be — an admin d
 record type needs, and gets the same generic per-field analytics (see below) any other form gets, with zero new
 backend code per record type.
 
+**Field order is always explicit, never left to Postgres's default row order.** `Form.fields` is an eager
+`@OneToMany` relation with no `orderBy` of its own, so every `formRepo.find`/`findOne` call across
+`FormService`/`FormSubmissionService` passes `order: { fields: { order: 'ASC' } }` explicitly — an unordered join
+doesn't reliably return rows in `FormField.order` order (or even the same order twice in a row), which surfaced as
+the admin builder's field list visibly reshuffling itself on every page load/refresh, with no reordering ever
+actually requested. `getById`'s ordering alone covers most call sites (`update`, `cloneForm`, `getAnalytics`,
+`getSubmissionsCsv`, the field-mapping in `create`/`update` all route through it); `FormSubmissionService` has its
+own separate `formRepo.findOne` calls (`getForMember`, `getForPublic`, `submitAsMember`/`submitAsPublic`/
+`submitAsAdmin`, `updateSubmission`, `getMySubmission`) and needed the same fix independently, since none of them
+share `getById`.
+
 **Field description:** each `FormField` has its own optional `description` (text, nullable) — helper text shown
 under that field's label while filling out the form (e.g. "Enter your legal name as it appears on your ID"),
 distinct from `Form.description`, which introduces the form as a whole. Returned on every field DTO (create/update
