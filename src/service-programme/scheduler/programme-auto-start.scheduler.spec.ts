@@ -7,11 +7,16 @@ import { ProgrammeAutoStartScheduler } from './programme-auto-start.scheduler';
 import { ServiceProgramme } from '../entity/service-programme.entity';
 import { ServiceSessionService } from '../service/service-session.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { DateService } from '../../utility/service/date.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 
 const mockCacheService = {
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
+};
+
+const mockDateService = {
+  startOfDay: jest.fn().mockReturnValue(new Date('2026-08-02T00:00:00.000Z')),
 };
 
 const mockTenantRepo = {
@@ -61,6 +66,9 @@ describe('ProgrammeAutoStartScheduler', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCacheService.acquireLock.mockResolvedValue(true);
+    mockDateService.startOfDay.mockReturnValue(
+      new Date('2026-08-02T00:00:00.000Z'),
+    );
     mockTenantRepo.find.mockResolvedValue([
       { id: 't1', subdomain: 'a', schemaName: 'church_a' },
     ]);
@@ -75,6 +83,7 @@ describe('ProgrammeAutoStartScheduler', () => {
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: ServiceSessionService, useValue: mockSessionService },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: DateService, useValue: mockDateService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -103,6 +112,27 @@ describe('ProgrammeAutoStartScheduler', () => {
       'programme-event-1',
     );
     expect(mockCacheService.releaseLock).toHaveBeenCalled();
+  });
+
+  // Regression test: the window used to be a tight 10-minute trailing
+  // lookback from `now`, so a later slot in a multi-slot event (e.g. Second
+  // Service) blocked by a still-LIVE prior session could scroll past its
+  // own startTime + 10 minutes before ever getting unblocked — permanently
+  // stranding it in DRAFT even once the prior session was finally ended.
+  // The window must be anchored to start-of-day, not a short trailing gap
+  // from `now`, so a due slot stays eligible all day.
+  it('queries slots due since start of the church-local day, not a short trailing window from now', async () => {
+    const startOfDay = new Date('2026-08-02T00:00:00.000Z');
+    mockDateService.startOfDay.mockReturnValue(startOfDay);
+    mockProgrammeQb.getMany.mockResolvedValue([]);
+
+    await scheduler.autoStartDueProgrammes();
+
+    expect(mockDateService.startOfDay).toHaveBeenCalled();
+    expect(mockProgrammeQb.andWhere).toHaveBeenCalledWith(
+      'slot.start_time BETWEEN :windowStart AND :now',
+      expect.objectContaining({ windowStart: startOfDay }),
+    );
   });
 
   it('does nothing when no programmes are due', async () => {

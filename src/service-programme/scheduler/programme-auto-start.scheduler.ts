@@ -9,18 +9,12 @@ import { ServiceProgramme } from '../entity/service-programme.entity';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { ServiceSessionService } from '../service/service-session.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { DateService } from '../../utility/service/date.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 
 const AUTO_START_LOCK = 'lock:programme-auto-start';
-
-// How far back a slot's startTime can be and still get auto-started.
-// Bounded deliberately — with no lower bound this would resurrect every
-// DRAFT programme ever forgotten, not just today's. 10 minutes comfortably
-// covers this scheduler's own 5-minute cadence plus one missed run, while
-// keeping "auto-started" feeling like it actually happened on time.
-const LOOKBACK_MINUTES = 10;
 
 @Injectable()
 export class ProgrammeAutoStartScheduler {
@@ -33,6 +27,7 @@ export class ProgrammeAutoStartScheduler {
     private readonly tenantRepo: Repository<Tenant>,
     private readonly sessionService: ServiceSessionService,
     private readonly cacheService: CacheService,
+    private readonly dateService: DateService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
@@ -61,7 +56,16 @@ export class ProgrammeAutoStartScheduler {
 
   private async runAutoStart(): Promise<void> {
     const now = new Date();
-    const windowStart = new Date(now.getTime() - LOOKBACK_MINUTES * 60 * 1000);
+    // Bounded to "today" (church-local), not a short trailing window — a
+    // later slot in a multi-slot event (e.g. Second Service) only becomes
+    // startable once the prior slot's session is ended, which a front-desk
+    // worker might do well after the slot's own nominal startTime. A tight
+    // lookback (this used to be 10 minutes) would then permanently strand
+    // it in DRAFT, since by the time it's finally unblocked its startTime
+    // has already scrolled out of the window. Anchoring to start-of-day
+    // still prevents resurrecting a DRAFT programme genuinely forgotten
+    // from a previous day.
+    const windowStart = this.dateService.startOfDay(now);
 
     const programmes = await this.programmeRepo
       .createQueryBuilder('programme')
