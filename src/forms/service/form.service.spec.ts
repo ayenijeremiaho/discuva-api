@@ -1140,6 +1140,347 @@ describe('FormService', () => {
         }),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it("rejects a visibilityRule value that isn't one of the trigger DROPDOWN field's options", async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [
+          {
+            id: 'f1',
+            label: 'Team',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Choir', 'Ushering'],
+          },
+        ],
+      });
+      await expect(
+        service.update('form-1', {
+          fields: [
+            {
+              id: 'f1',
+              label: 'Team',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Choir', 'Ushering'],
+            },
+            {
+              label: 'Team Lead',
+              fieldType: FormFieldType.TEXT,
+              visibilityRule: {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                // Typo/case mismatch against the trigger's real option
+                // ("Choir") — this must be caught here rather than silently
+                // never matching a real submission.
+                value: 'choir',
+              },
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("accepts a visibilityRule value that matches one of the trigger DROPDOWN field's options", async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [
+          {
+            id: 'f1',
+            label: 'Team',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Choir', 'Ushering'],
+          },
+        ],
+      });
+      await expect(
+        service.update('form-1', {
+          fields: [
+            {
+              id: 'f1',
+              label: 'Team',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Choir', 'Ushering'],
+            },
+            {
+              label: 'Team Lead',
+              fieldType: FormFieldType.TEXT,
+              visibilityRule: {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            },
+          ],
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('does not require the value to match any option when the trigger field has no fixed option set (free text)', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Age', fieldType: FormFieldType.NUMBER }],
+      });
+      await expect(
+        service.update('form-1', {
+          fields: [
+            { id: 'f1', label: 'Age', fieldType: FormFieldType.NUMBER },
+            {
+              label: 'Guardian Name',
+              fieldType: FormFieldType.TEXT,
+              visibilityRule: {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: '17',
+              },
+            },
+          ],
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  describe('postSubmitOutcomes validation', () => {
+    it('rejects a postSubmitOutcome on create, since no field has an id yet', async () => {
+      await expect(
+        service.create({
+          title: 'Signup',
+          visibility: FormVisibility.PUBLIC,
+          fields: [{ label: 'Team', fieldType: FormFieldType.TEXT }],
+          postSubmitOutcomes: [
+            {
+              conditions: [
+                {
+                  fieldId: 'some-id',
+                  operator: FormFieldVisibilityOperator.EQUALS,
+                  value: 'Choir',
+                },
+              ],
+              message: 'Welcome to Choir!',
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a postSubmitOutcome on update referencing an existing field', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await expect(
+        service.update('form-1', {
+          postSubmitOutcomes: [
+            {
+              conditions: [
+                {
+                  fieldId: 'f1',
+                  operator: FormFieldVisibilityOperator.EQUALS,
+                  value: 'Choir',
+                },
+              ],
+              message: 'Welcome to Choir!',
+              actionUrl: 'https://chat.whatsapp.com/choir',
+              actionLabel: 'Join Choir Group',
+            },
+          ],
+        }),
+      ).resolves.toBeDefined();
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          postSubmitOutcomes: [
+            expect.objectContaining({ message: 'Welcome to Choir!' }),
+          ],
+        }),
+      );
+    });
+
+    it('rejects a condition referencing an unknown field id', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await expect(
+        service.update('form-1', {
+          postSubmitOutcomes: [
+            {
+              conditions: [
+                {
+                  fieldId: 'unknown-id',
+                  operator: FormFieldVisibilityOperator.EQUALS,
+                  value: 'Choir',
+                },
+              ],
+              message: 'Welcome!',
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects an outcome with actionUrl but no actionLabel', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await expect(
+        service.update('form-1', {
+          postSubmitOutcomes: [
+            {
+              conditions: [
+                {
+                  fieldId: 'f1',
+                  operator: FormFieldVisibilityOperator.EQUALS,
+                  value: 'Choir',
+                },
+              ],
+              actionUrl: 'https://chat.whatsapp.com/choir',
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('validates against the current form fields when the update omits `fields`', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await expect(
+        service.update('form-1', {
+          postSubmitOutcomes: [
+            {
+              conditions: [
+                {
+                  fieldId: 'unknown-id',
+                  operator: FormFieldVisibilityOperator.EQUALS,
+                  value: 'Choir',
+                },
+              ],
+              message: 'Welcome!',
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('clears postSubmitOutcomes with an explicit empty array', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'Welcome!',
+            actionUrl: null,
+            actionLabel: null,
+          },
+        ],
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await service.update('form-1', { postSubmitOutcomes: [] });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ postSubmitOutcomes: [] }),
+      );
+    });
+
+    it('leaves postSubmitOutcomes untouched when omitted on update', async () => {
+      const existingOutcomes = [
+        {
+          conditions: [
+            {
+              fieldId: 'f1',
+              operator: FormFieldVisibilityOperator.EQUALS,
+              value: 'Choir',
+            },
+          ],
+          message: 'Welcome!',
+          actionUrl: null,
+          actionLabel: null,
+        },
+      ];
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        title: 'Old Title',
+        visibility: FormVisibility.PUBLIC,
+        postSubmitOutcomes: existingOutcomes,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await service.update('form-1', { title: 'New Title' });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ postSubmitOutcomes: existingOutcomes }),
+      );
+    });
+
+    it('re-matches an outcome condition to the cloned target field by label', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'Welcome to Choir!',
+            actionUrl: null,
+            actionLabel: null,
+          },
+        ],
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      mockFieldRepo.save.mockResolvedValueOnce([
+        { id: 'cloned-0', label: 'Team', fieldType: FormFieldType.TEXT },
+      ]);
+      const result = await service.cloneForm('form-1', { title: 'Copy' });
+      expect(result.postSubmitOutcomes).toEqual([
+        expect.objectContaining({
+          message: 'Welcome to Choir!',
+          conditions: [expect.objectContaining({ fieldId: 'cloned-0' })],
+        }),
+      ]);
+    });
+
+    it("drops a postSubmitOutcome whose condition target didn't survive the clone", async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'missing-id',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'Welcome to Choir!',
+            actionUrl: null,
+            actionLabel: null,
+          },
+        ],
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      mockFieldRepo.save.mockResolvedValueOnce([
+        { id: 'cloned-0', label: 'Team', fieldType: FormFieldType.TEXT },
+      ]);
+      const result = await service.cloneForm('form-1', { title: 'Copy' });
+      expect(result.postSubmitOutcomes).toBeNull();
+    });
   });
 
   describe('editableAfterSubmit', () => {

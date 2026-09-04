@@ -6,7 +6,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import 'multer';
-import { Form } from '../entity/form.entity';
+import {
+  Form,
+  PostSubmitOutcome,
+  PostSubmitOutcomeCondition,
+} from '../entity/form.entity';
 import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
 import { Event } from '../../event/entity/event.entity';
@@ -15,6 +19,7 @@ import {
   CloneFormDto,
   CreateFormDto,
   FormFieldDto,
+  PostSubmitOutcomeDto,
   UpdateFormDto,
 } from '../dto/form.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -68,6 +73,7 @@ export class FormService {
       dto.fields,
     );
     this.assertValidGeneralAction(dto.generalActionUrl, dto.generalActionLabel);
+    this.assertValidPostSubmitOutcomes(dto.fields, dto.postSubmitOutcomes);
     const form = this.formRepo.create({
       title: dto.title,
       description: dto.description ?? null,
@@ -82,6 +88,9 @@ export class FormService {
       postSubmitMessage: dto.postSubmitMessage ?? null,
       generalActionUrl: dto.generalActionUrl ?? null,
       generalActionLabel: dto.generalActionLabel ?? null,
+      postSubmitOutcomes: this.normalizePostSubmitOutcomes(
+        dto.postSubmitOutcomes,
+      ),
     });
     const saved = await this.formRepo.save(form);
 
@@ -153,6 +162,14 @@ export class FormService {
       postSubmitMessage: scalars.postSubmitMessage,
       generalActionUrl: scalars.generalActionUrl,
       generalActionLabel: scalars.generalActionLabel,
+      // Not copied verbatim, same reasoning as fields' own visibilityRule
+      // below — every condition's fieldId points at a source field id that
+      // no longer exists post-clone. remapClonedPostSubmitOutcomes fills
+      // in the re-matched version once the cloned fields have their new
+      // ids; CloneFormDto deliberately has no override for this (there's
+      // no sensible fieldId an admin could supply before the clone's own
+      // fields exist).
+      postSubmitOutcomes: null,
     });
     const saved = await this.formRepo.save(newForm);
 
@@ -208,6 +225,15 @@ export class FormService {
       nextStepsFieldId,
     );
     await this.remapClonedVisibilityRules(source.fields, result.fields);
+
+    const remappedOutcomes = this.remapClonedPostSubmitOutcomes(
+      source,
+      result.fields,
+    );
+    if (remappedOutcomes) {
+      result.postSubmitOutcomes = remappedOutcomes;
+      await this.formRepo.save(result);
+    }
     return result;
   }
 
@@ -246,6 +272,44 @@ export class FormService {
     if (toUpdate.length) {
       await this.fieldRepo.save(toUpdate);
     }
+  }
+
+  // Same by-label re-matching remapClonedVisibilityRules uses, applied to
+  // Form.postSubmitOutcomes instead of a per-field rule — every
+  // condition's fieldId across every outcome points at a source field id
+  // that no longer exists post-clone. Unlike a single visibilityRule
+  // condition, an outcome can have several conditions (ALL must match to
+  // apply) — if even one of them can't be remapped, the whole outcome is
+  // dropped rather than left partially-broken, same "drop rather than
+  // leave dangling" stance remapClonedVisibilityRules takes. Returns null
+  // (not an empty array) when there's nothing to carry over, so the
+  // caller can skip an unnecessary extra save.
+  private remapClonedPostSubmitOutcomes(
+    source: Form,
+    clonedFields: FormField[],
+  ): PostSubmitOutcome[] | null {
+    if (!source.postSubmitOutcomes?.length) return null;
+    const remapped: PostSubmitOutcome[] = [];
+    for (const outcome of source.postSubmitOutcomes) {
+      const remappedConditions: PostSubmitOutcomeCondition[] = [];
+      let unresolvable = false;
+      for (const condition of outcome.conditions) {
+        const referencedSource = source.fields.find(
+          (sf) => sf.id === condition.fieldId,
+        );
+        const clonedTargetId = referencedSource
+          ? this.matchClonedFieldByLabel(clonedFields, referencedSource)
+          : null;
+        if (!clonedTargetId) {
+          unresolvable = true;
+          break;
+        }
+        remappedConditions.push({ ...condition, fieldId: clonedTargetId });
+      }
+      if (unresolvable) continue;
+      remapped.push({ ...outcome, conditions: remappedConditions });
+    }
+    return remapped.length ? remapped : null;
   }
 
   // omitted (undefined) = inherited from source, explicit null = cleared,
@@ -491,7 +555,66 @@ export class FormService {
           `"${field.label}": visibility condition references an unknown field`,
         );
       }
+      // A condition value that isn't one of the trigger field's own
+      // options can never match anything a visitor actually submits —
+      // caught here rather than left to silently never fire. Only
+      // meaningful when the trigger has a fixed option set at all
+      // (DROPDOWN/CHECKBOX); free-text triggers (TEXT, NUMBER, ...) have
+      // no fixed set to check against.
+      const referencedField = fields.find(
+        (f) => f.id === field.visibilityRule!.fieldId,
+      );
+      if (
+        referencedField?.options?.length &&
+        !referencedField.options.includes(field.visibilityRule.value)
+      ) {
+        throw new BadRequestException(
+          `"${field.label}": visibility condition value "${field.visibilityRule.value}" isn't one of "${referencedField.label}"'s options`,
+        );
+      }
     }
+  }
+
+  // Same "only an existing field can be referenced" constraint
+  // assertValidVisibilityRules enforces, applied to every condition across
+  // every outcome — same real-world consequence too: a fresh create() call
+  // rejects any outcome outright, since none of `fields` have ids yet.
+  // actionUrl/actionLabel reuse assertValidGeneralAction's own pairing
+  // check, just once per outcome instead of once for the whole form.
+  private assertValidPostSubmitOutcomes(
+    fields: { id?: string }[],
+    outcomes: PostSubmitOutcomeDto[] | null | undefined,
+  ): void {
+    if (!outcomes) return;
+    const incomingIds = new Set(fields.filter((f) => f.id).map((f) => f.id));
+    outcomes.forEach((outcome, index) => {
+      for (const condition of outcome.conditions) {
+        if (!incomingIds.has(condition.fieldId)) {
+          throw new BadRequestException(
+            `Post-submit outcome #${index + 1}: condition references an unknown field`,
+          );
+        }
+      }
+      this.assertValidGeneralAction(outcome.actionUrl, outcome.actionLabel);
+    });
+  }
+
+  // DTO -> entity shape: the DTO's per-outcome message/actionUrl/
+  // actionLabel are each `?: string | null` (omitted meaning "not
+  // provided in this outcome", same as everywhere else in this DTO), but
+  // the stored PostSubmitOutcome always carries all three explicitly —
+  // there's no partial-outcome-patch concept the way Form's own top-level
+  // scalars have, a save always replaces the whole outcomes array.
+  private normalizePostSubmitOutcomes(
+    outcomes: PostSubmitOutcomeDto[] | null | undefined,
+  ): PostSubmitOutcome[] | null {
+    if (!outcomes) return null;
+    return outcomes.map((o) => ({
+      conditions: o.conditions,
+      message: o.message ?? null,
+      actionUrl: o.actionUrl ?? null,
+      actionLabel: o.actionLabel ?? null,
+    }));
   }
 
   private isValidUrl(value: unknown): boolean {
@@ -709,6 +832,20 @@ export class FormService {
       form.generalActionUrl,
       form.generalActionLabel,
     );
+    if (dto.postSubmitOutcomes !== undefined) {
+      // dto.fields (when present) carries the ids this update actually
+      // intends to keep — validating against form.fields instead could
+      // wrongly accept a reference to a field this same request is about
+      // to delete. Falls back to the form's current fields only when this
+      // request doesn't touch fields at all.
+      this.assertValidPostSubmitOutcomes(
+        dto.fields ?? form.fields,
+        dto.postSubmitOutcomes,
+      );
+      form.postSubmitOutcomes = this.normalizePostSubmitOutcomes(
+        dto.postSubmitOutcomes,
+      );
+    }
 
     const saved = await this.formRepo.save(form);
     return this.applyCrossFieldRefs(

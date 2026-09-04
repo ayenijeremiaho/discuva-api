@@ -10,9 +10,30 @@ import {
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { Event } from '../../event/entity/event.entity';
 import { Group } from '../../group/entity/group.entity';
-import { FormVisibility } from '../enum/form.enum';
+import { FormVisibility, FormFieldVisibilityOperator } from '../enum/form.enum';
 import { FormField } from './form-field.entity';
 import { FormSubmission } from './form-submission.entity';
+
+// Same {fieldId, operator, value} shape FormField.visibilityRule uses —
+// fieldId must reference a field on this same form, evaluated against the
+// submitted answers the same way (FormSubmissionService.evaluateCondition,
+// shared with isFieldVisible rather than duplicated).
+export interface PostSubmitOutcomeCondition {
+  fieldId: string;
+  operator: FormFieldVisibilityOperator;
+  value: string;
+}
+
+// One ranked rule on Form.postSubmitOutcomes — see that column's own
+// comment for the evaluation/fallback semantics.
+export interface PostSubmitOutcome {
+  // ALL conditions must match (AND) for this outcome to apply — at least
+  // one, enforced at create/update time.
+  conditions: PostSubmitOutcomeCondition[];
+  message: string | null;
+  actionUrl: string | null;
+  actionLabel: string | null;
+}
 
 @Entity({ name: 'forms' })
 export class Form extends BaseEntity {
@@ -124,6 +145,21 @@ export class Form extends BaseEntity {
 
   @Column({ name: 'general_action_label', nullable: true })
   generalActionLabel: string | null;
+
+  // Ranked overrides for the post-submission Thank-You Message / General
+  // Action Button, evaluated in array order against the just-submitted
+  // answers at submit time — the first outcome whose conditions all match
+  // wins, fully replacing both `postSubmitMessage` and
+  // `generalActionUrl`/`generalActionLabel` for that response (an outcome
+  // with message:null means "show no message" for that case, not
+  // "fall back to the static one" — same for a null action pair). If none
+  // match (or this is empty/null), the static fields above are used
+  // unchanged — an older form with no outcomes configured behaves exactly
+  // as before. Deliberately independent of nextStepsField/optionMetadata's
+  // per-selected-option link, which still resolves and displays alongside
+  // whatever this produces.
+  @Column({ name: 'post_submit_outcomes', type: 'jsonb', nullable: true })
+  postSubmitOutcomes: PostSubmitOutcome[] | null;
 
   // Deliberately no `cascade: true` here — Form also has two other
   // relations to FormField (dedupField/nextStepsField below). Cascading

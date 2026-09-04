@@ -3707,6 +3707,41 @@ entirely, so no other department's link is ever visible before that option is su
 post-submission response, never before. Validated at create/update (`FormService.assertValidOptionMetadata`):
 every `optionMetadata` key must be one of that field's own `options`, and any `url` must parse as a real URL.
 
+**Ranked conditional overrides for the post-submission message/action (`Form.postSubmitOutcomes`, nullable jsonb
+array):** each entry is `{ conditions: [{ fieldId, operator, value }, ...], message, actionUrl, actionLabel }` —
+`conditions` reuses `FormField.visibilityRule`'s exact same shape/operator set (`equals`/`notEquals`/`includes`),
+just as an array instead of a single condition, ALL of which must match (AND) for that outcome to apply.
+`FormSubmissionService.resolvePostSubmitContent` evaluates `postSubmitOutcomes` in array order at submit time
+against the just-submitted answers — the **first** outcome whose conditions all match wins. Resolution is
+**per-field, not a paired all-or-nothing swap**: the winning outcome's own `message`/`actionUrl`/`actionLabel` are
+used wherever it sets them, and each one it leaves `null` falls back to the form's own static
+`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` independently — so one rule can condition just the
+button while another form always keeps its default message, or vice versa, without needing to retype the piece
+it isn't changing into every rule. No match (or no outcomes configured) falls back to the static fields
+unchanged, so an older form with none behaves exactly as before. This also gives "show the button only for these
+specific rules, never otherwise" for free: leave the form's own static `generalActionUrl`/`generalActionLabel`
+blank (so the no-match fallback is "no button") and only set `actionUrl`/`actionLabel` on the rules meant to show
+one — a rule matching with both left blank falls back to that same blank static default, i.e. still no button,
+not one inherited from elsewhere. Condition evaluation is shared with `isFieldVisible` via a new
+`evaluateCondition` helper rather than duplicated. Deliberately independent of `nextStepsField`/`optionMetadata`'s
+per-selected-option `selectedOption` link (see above), which still resolves and is returned alongside whatever
+`postSubmitOutcomes` produces — the two mechanisms answer different questions ("what does the option they picked
+lead to" vs. "does this whole submission, considered together, warrant a different message/action") and compose
+rather than conflict.
+
+Validated at create/update (`FormService.assertValidPostSubmitOutcomes`): every condition's `fieldId` must reference
+a field already present among the incoming `fields` — the same real-world constraint `visibilityRule` has, since no
+field has an id yet on `create()`, outcomes are edit-only in practice — and each outcome's own `actionUrl`/
+`actionLabel` reuse `assertValidGeneralAction`'s pairing check (both set or both empty). On `update`, validated
+against `dto.fields` when the request touches fields (so a field this same request is about to delete can't be
+referenced) or the form's current `fields` otherwise. `CloneFormDto` has no override for `postSubmitOutcomes` — like
+`visibilityRule`, every condition's `fieldId` points at a source field id that won't exist post-clone, so there's no
+sensible value an admin could supply before the clone's own fields exist. Instead `cloneForm` always inherits and
+re-matches it from the source by label (`FormService.remapClonedPostSubmitOutcomes`, the same by-label technique
+`remapClonedVisibilityRules` uses) — if even one condition inside an outcome can't be re-matched, the **whole**
+outcome is dropped rather than left partially broken (an outcome needs every one of its conditions to mean
+anything), mirroring `remapClonedVisibilityRules`'s own "drop rather than leave dangling" stance.
+
 **Duplicate-submission prevention:** a form can designate one field (`Form.dedupField`, `dedupFieldId` on
 create/update — DROPDOWN/CHECKBOX excluded as poor dedup keys) whose submitted value must be unique per form. On
 submit, that field's value is normalized (phone-normalized if it's a `PHONE` field, else trimmed+lowercased) into
@@ -3847,6 +3882,14 @@ rule's `fieldId` to the freshly-cloned target by label (`remapClonedVisibilityRu
 `applyCrossFieldRefs` uses) — a rule whose target somehow didn't survive the clone is silently dropped rather
 than left dangling.
 
+When the trigger field has a fixed option set (`DROPDOWN`/`CHECKBOX`), `assertValidVisibilityRules` also rejects a
+`value` that isn't one of that field's own `options` — a value that can never match anything a visitor actually
+submits would otherwise fail silently (the rule just never fires, with no error anywhere to explain why). The
+admin field builder avoids this case by construction: once a trigger with options is selected, the condition's
+`value` input becomes a `<select>` of that field's own options instead of free text, so a typo or case mismatch
+can't be typed in the first place — this validation is the server-side backstop for anyone calling the API
+directly.
+
 `FormSubmissionService.isFieldVisible` evaluates a rule against the submitted (or, client-side, in-progress)
 answers: `equals`/`notEquals` compare a scalar answer as a string (an array/object answer — CHECKBOX/FILE — is
 never treated as "equal" to a typed value, rather than falling back to a meaningless `Object`-stringified
@@ -3932,7 +3975,7 @@ and the Cloudinary asset. Upload size is capped by the new `MAX_FORM_ATTACHMENT_
 | POST   | `/forms`                            | AdminGuard (FORMS_WRITE) | Create a form with its fields in one call |
 | GET    | `/forms`                            | AdminGuard (FORMS_READ)  | List all forms — unpaginated, same policy as departments/event-configs |
 | GET    | `/forms/:id`                        | AdminGuard (FORMS_READ)  | Get one form with fields |
-| PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above). `audienceGroupId`/`dedupFieldId`/`nextStepsFieldId`/`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` all follow the same "explicit `null` clears, omit to leave untouched" convention as `eventId` |
+| PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above). `audienceGroupId`/`dedupFieldId`/`nextStepsFieldId`/`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` all follow the same "explicit `null` clears, omit to leave untouched" convention as `eventId`. `postSubmitOutcomes` follows it too, but replaces the whole array wholesale rather than diff-syncing per-outcome (see Ranked conditional overrides, above) |
 | DELETE | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Cascades fields + submissions |
 | POST   | `/forms/:id/clone`                  | AdminGuard (FORMS_WRITE) | Clone a form — `{ title, ... }` (see `CloneFormDto`; `title` is the only required field). Clone starts `isActive: false` with no cover/logo, fields copied verbatim with fresh ids, `dedupField`/`nextStepsField` re-matched by label. Never clones submissions |
 | POST   | `/forms/:id/cover`                  | AdminGuard (FORMS_WRITE) | Multipart, field name `cover`. Sets `Form.coverImageUrl` |

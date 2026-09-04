@@ -586,6 +586,233 @@ describe('FormSubmissionService', () => {
     });
   });
 
+  describe('postSubmitOutcomes (ranked conditional message/action)', () => {
+    const outcomesForm = {
+      id: 'form-1',
+      isActive: true,
+      visibility: FormVisibility.PUBLIC,
+      postSubmitMessage: 'Thanks for signing up!',
+      generalActionUrl: 'https://chat.example.com/main-group',
+      generalActionLabel: 'Join Main Volunteer Group',
+      nextStepsField: null,
+      postSubmitOutcomes: [
+        {
+          conditions: [
+            {
+              fieldId: 'f1',
+              operator: FormFieldVisibilityOperator.EQUALS,
+              value: 'Choir',
+            },
+          ],
+          message: 'Welcome to Choir!',
+          actionUrl: 'https://chat.example.com/choir',
+          actionLabel: 'Join Choir Group',
+        },
+        {
+          conditions: [
+            {
+              fieldId: 'f1',
+              operator: FormFieldVisibilityOperator.EQUALS,
+              value: 'Ushering',
+            },
+          ],
+          message: 'Welcome to Ushering!',
+          actionUrl: null,
+          actionLabel: null,
+        },
+      ],
+      fields: [
+        {
+          id: 'f1',
+          label: 'Department',
+          required: true,
+          fieldType: FormFieldType.DROPDOWN,
+          options: ['Choir', 'Ushering', 'Media'],
+        },
+      ],
+    };
+
+    it('replaces both message and generalAction when a matching outcome is found', async () => {
+      mockFormRepo.findOne.mockResolvedValue(outcomesForm);
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBe('Welcome to Choir!');
+      expect(result.nextSteps.generalAction).toEqual({
+        label: 'Join Choir Group',
+        url: 'https://chat.example.com/choir',
+      });
+    });
+
+    it("falls back to the form's static general action when the matching outcome leaves it blank", async () => {
+      mockFormRepo.findOne.mockResolvedValue(outcomesForm);
+      const result = await service.submitAsPublic('form-1', {
+        f1: 'Ushering',
+      });
+      expect(result.nextSteps.message).toBe('Welcome to Ushering!');
+      expect(result.nextSteps.generalAction).toEqual({
+        label: 'Join Main Volunteer Group',
+        url: 'https://chat.example.com/main-group',
+      });
+    });
+
+    it('hides the general action when both the matching outcome and the static default leave it blank — lets a rule opt out without inheriting an unrelated default', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        generalActionUrl: null,
+        generalActionLabel: null,
+      });
+      const result = await service.submitAsPublic('form-1', {
+        f1: 'Ushering',
+      });
+      expect(result.nextSteps.generalAction).toBeNull();
+    });
+
+    it("uses the matching outcome's own message while falling back to the static general action independently", async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'Welcome to Choir!',
+            actionUrl: null,
+            actionLabel: null,
+          },
+        ],
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBe('Welcome to Choir!');
+      expect(result.nextSteps.generalAction).toEqual({
+        label: 'Join Main Volunteer Group',
+        url: 'https://chat.example.com/main-group',
+      });
+    });
+
+    it('falls back to the static message/generalAction when no outcome matches', async () => {
+      mockFormRepo.findOne.mockResolvedValue(outcomesForm);
+      const result = await service.submitAsPublic('form-1', { f1: 'Media' });
+      expect(result.nextSteps.message).toBe('Thanks for signing up!');
+      expect(result.nextSteps.generalAction).toEqual({
+        label: 'Join Main Volunteer Group',
+        url: 'https://chat.example.com/main-group',
+      });
+    });
+
+    it('falls back to the static values when no outcomes are configured at all', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: null,
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBe('Thanks for signing up!');
+    });
+
+    it('the first matching outcome wins over a later one that would also match', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.NOT_EQUALS,
+                value: 'Media',
+              },
+            ],
+            message: 'First rule wins',
+            actionUrl: null,
+            actionLabel: null,
+          },
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'Second rule',
+            actionUrl: null,
+            actionLabel: null,
+          },
+        ],
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBe('First rule wins');
+    });
+
+    it('requires every condition in an outcome to match (AND), not just one', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        fields: [
+          ...outcomesForm.fields,
+          {
+            id: 'f2',
+            label: 'Experience',
+            required: false,
+            fieldType: FormFieldType.TEXT,
+          },
+        ],
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+              {
+                fieldId: 'f2',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: '5+ years',
+              },
+            ],
+            message: 'Welcome back to the choir family!',
+            actionUrl: null,
+            actionLabel: null,
+          },
+        ],
+      });
+      const partialMatch = await service.submitAsPublic('form-1', {
+        f1: 'Choir',
+        f2: '1 year',
+      });
+      expect(partialMatch.nextSteps.message).toBe('Thanks for signing up!');
+
+      const fullMatch = await service.submitAsPublic('form-1', {
+        f1: 'Choir',
+        f2: '5+ years',
+      });
+      expect(fullMatch.nextSteps.message).toBe(
+        'Welcome back to the choir family!',
+      );
+    });
+
+    it('still resolves the selectedOption from nextStepsField independently of outcomes', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        nextStepsField: {
+          id: 'f1',
+          fieldType: FormFieldType.DROPDOWN,
+          optionMetadata: {
+            Choir: { url: 'https://chat.example.com/choir-info' },
+          },
+        },
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBe('Welcome to Choir!');
+      expect(result.nextSteps.selectedOption).toEqual({
+        value: 'Choir',
+        url: 'https://chat.example.com/choir-info',
+        description: null,
+      });
+    });
+  });
+
   describe('type validation', () => {
     const emailForm = {
       id: 'form-1',

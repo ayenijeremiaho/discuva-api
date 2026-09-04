@@ -10060,7 +10060,7 @@
         },
         {
           "name": "Update Form \u2014 Conditional Visibility",
-          "description": "Adds a per-field visibilityRule \u2014 the \"Team Lead Name\" field only shows/is required once \"Team\" is answered \"Choir\". fieldId must reference a field that already has an id (existing field) \u2014 a rule can never be set at create time, only via this kind of update, same real-world constraint dedupFieldId/nextStepsFieldId have. operator is one of equals/notEquals/includes. This example assumes the form already has fields with ids {{formFieldId}} (Team) and a second field being updated in place.",
+          "description": "Adds a per-field visibilityRule \u2014 the \"Referral Source\" field only shows/is required once \"Heard About Us Via\" is answered \"Friend Invite\". fieldId must reference a field that already has an id (existing field) \u2014 a rule can never be set at create time, only via this kind of update, same real-world constraint dedupFieldId/nextStepsFieldId have. operator is one of equals/notEquals/includes. This example assumes the form already has fields with ids {{formFieldId}} (Heard About Us Via) and a second field being updated in place.",
           "request": {
             "method": "PATCH",
             "header": [
@@ -10081,7 +10081,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fields\": [\n    {\n      \"id\": \"{{formFieldId}}\",\n      \"label\": \"Team\",\n      \"fieldType\": \"DROPDOWN\",\n      \"options\": [\n        \"Choir\",\n        \"Ushering\"\n      ]\n    },\n    {\n      \"id\": \"{{formFieldId2}}\",\n      \"label\": \"Team Lead Name\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"visibilityRule\": {\n        \"fieldId\": \"{{formFieldId}}\",\n        \"operator\": \"equals\",\n        \"value\": \"Choir\"\n      }\n    }\n  ]\n}",
+              "raw": "{\n  \"fields\": [\n    {\n      \"id\": \"{{formFieldId}}\",\n      \"label\": \"Heard About Us Via\",\n      \"fieldType\": \"DROPDOWN\",\n      \"options\": [\n        \"Friend Invite\",\n        \"Social Media\",\n        \"Walk-in\"\n      ]\n    },\n    {\n      \"id\": \"{{formFieldId2}}\",\n      \"label\": \"Referral Source\",\n      \"fieldType\": \"TEXT\",\n      \"required\": true,\n      \"visibilityRule\": {\n        \"fieldId\": \"{{formFieldId}}\",\n        \"operator\": \"equals\",\n        \"value\": \"Friend Invite\"\n      }\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10094,13 +10094,59 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"{{formId}}\",\n  \"fields\": [\n    {\n      \"id\": \"{{formFieldId}}\",\n      \"label\": \"Team\"\n    },\n    {\n      \"id\": \"{{formFieldId2}}\",\n      \"label\": \"Team Lead Name\",\n      \"visibilityRule\": {\n        \"fieldId\": \"{{formFieldId}}\",\n        \"operator\": \"equals\",\n        \"value\": \"Choir\"\n      }\n    }\n  ]\n}"
+              "body": "{\n  \"id\": \"{{formId}}\",\n  \"fields\": [\n    {\n      \"id\": \"{{formFieldId}}\",\n      \"label\": \"Heard About Us Via\"\n    },\n    {\n      \"id\": \"{{formFieldId2}}\",\n      \"label\": \"Referral Source\",\n      \"visibilityRule\": {\n        \"fieldId\": \"{{formFieldId}}\",\n        \"operator\": \"equals\",\n        \"value\": \"Friend Invite\"\n      }\n    }\n  ]\n}"
             },
             {
               "name": "400 unknown field referenced",
               "status": "Bad Request",
               "code": 400,
-              "body": "{ \"statusCode\": 400, \"message\": \"\"Team Lead Name\": visibility condition references an unknown field\" }"
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"\\\"Referral Source\\\": visibility condition references an unknown field\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Form \u2014 Post-Submission Outcomes",
+          "description": "Adds ranked postSubmitOutcomes \u2014 the first outcome whose conditions all match the submitted answers wins. Resolution is per-field, not all-or-nothing: whichever of message/actionUrl/actionLabel an outcome leaves null falls back to the form's own static postSubmitMessage/generalActionUrl/generalActionLabel independently, so a rule can override just the button, just the message, or both. conditions use the same {fieldId, operator, value} shape as a field visibilityRule (fieldId must reference an existing field, same edit-only constraint). This example: Rule 1 overrides only the message for a Minor age group (the button falls back to the form's own default, if any); Rule 2 shows a button ONLY for the Adult group by setting it explicitly \u2014 leave the form's own generalActionUrl/generalActionLabel blank if you want the button to appear for some rules and never otherwise.",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/forms/{{formId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "{{formId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postSubmitOutcomes\": [\n    {\n      \"conditions\": [\n        {\n          \"fieldId\": \"{{formFieldId}}\",\n          \"operator\": \"equals\",\n          \"value\": \"Minor\"\n        }\n      ],\n      \"message\": \"A parent or guardian must also complete the consent form we emailed you.\",\n      \"actionUrl\": null,\n      \"actionLabel\": null\n    },\n    {\n      \"conditions\": [\n        {\n          \"fieldId\": \"{{formFieldId}}\",\n          \"operator\": \"equals\",\n          \"value\": \"Adult\"\n        }\n      ],\n      \"message\": null,\n      \"actionUrl\": \"https://chat.whatsapp.com/adultOrientationGroup\",\n      \"actionLabel\": \"Join Orientation Group\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{formId}}\",\n  \"postSubmitOutcomes\": [\n    {\n      \"conditions\": [\n        {\n          \"fieldId\": \"{{formFieldId}}\",\n          \"operator\": \"equals\",\n          \"value\": \"Minor\"\n        }\n      ],\n      \"message\": \"A parent or guardian must also complete the consent form we emailed you.\",\n      \"actionUrl\": null,\n      \"actionLabel\": null\n    },\n    {\n      \"conditions\": [\n        {\n          \"fieldId\": \"{{formFieldId}}\",\n          \"operator\": \"equals\",\n          \"value\": \"Adult\"\n        }\n      ],\n      \"message\": null,\n      \"actionUrl\": \"https://chat.whatsapp.com/adultOrientationGroup\",\n      \"actionLabel\": \"Join Orientation Group\"\n    }\n  ]\n}"
+            },
+            {
+              "name": "400 outcome condition references an unknown field",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Post-submit outcome #1: condition references an unknown field\"\n}"
             }
           ]
         },

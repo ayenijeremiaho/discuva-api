@@ -39,6 +39,43 @@ export class FormFieldVisibilityRuleDto {
   value: string;
 }
 
+// Same shape as FormFieldVisibilityRuleDto (reused instead of re-declared
+// since the two are structurally identical) — one AND-condition inside a
+// PostSubmitOutcomeDto's `conditions` array. `fieldId` must reference a
+// field already among the request's own `fields`, validated in
+// FormService.assertValidPostSubmitOutcomes for the same reason
+// assertValidVisibilityRules can't be a decorator: it depends on sibling
+// data.
+export class PostSubmitOutcomeConditionDto extends FormFieldVisibilityRuleDto {}
+
+// One ranked rule on CreateFormDto/UpdateFormDto's `postSubmitOutcomes` —
+// see Form.postSubmitOutcomes' own comment for the evaluation/fallback
+// semantics. actionUrl/actionLabel must be both set or both empty, same
+// pairing rule as the form-level generalActionUrl/generalActionLabel
+// (checked in FormService, not here — same "depends on a sibling field"
+// reason).
+export class PostSubmitOutcomeDto {
+  @IsArray()
+  @ArrayMinSize(1, {
+    message: 'Each outcome needs at least one condition',
+  })
+  @ValidateNested({ each: true })
+  @Type(() => PostSubmitOutcomeConditionDto)
+  conditions: PostSubmitOutcomeConditionDto[];
+
+  @IsOptional()
+  @IsString()
+  message?: string | null;
+
+  @IsOptional()
+  @IsString()
+  actionUrl?: string | null;
+
+  @IsOptional()
+  @IsString()
+  actionLabel?: string | null;
+}
+
 export class FormFieldDto {
   // Present when updating an existing field (keeps its answers linkage
   // stable across edits); omitted when adding a new one.
@@ -226,6 +263,19 @@ export class CreateFormDto {
   @IsString()
   generalActionLabel?: string;
 
+  // Ranked conditional overrides for postSubmitMessage/generalAction* above
+  // — see Form.postSubmitOutcomes' own comment. Each condition's fieldId
+  // can only reference a field that already has an id, same real-world
+  // constraint visibilityRule/dedupFieldId/nextStepsFieldId already have —
+  // every field in `fields` below is brand-new on create(), so a
+  // postSubmitOutcomes condition is rejected here just like a
+  // visibilityRule would be; outcomes are edit-only in practice.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PostSubmitOutcomeDto)
+  postSubmitOutcomes?: PostSubmitOutcomeDto[];
+
   @IsArray()
   @ArrayMinSize(1, { message: 'A form needs at least one field' })
   @ValidateNested({ each: true })
@@ -293,6 +343,16 @@ export class UpdateFormDto {
   @IsOptional()
   @IsString()
   generalActionLabel?: string | null;
+
+  // Omitted = leave untouched, explicit [] or null = clear every outcome,
+  // an array = replace the whole list wholesale (not diff-synced the way
+  // `fields` is — there's no id to diff against, each save just replaces
+  // the set). See CreateFormDto's own comment on the same field.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PostSubmitOutcomeDto)
+  postSubmitOutcomes?: PostSubmitOutcomeDto[] | null;
 
   @IsOptional()
   @IsArray()

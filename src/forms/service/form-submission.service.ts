@@ -616,16 +616,13 @@ export class FormSubmissionService {
         };
       }
     }
+    const { message, generalAction } = this.resolvePostSubmitContent(
+      form,
+      answers,
+    );
     return {
       submissionId,
-      nextSteps: {
-        message: form.postSubmitMessage ?? null,
-        generalAction:
-          form.generalActionUrl && form.generalActionLabel
-            ? { label: form.generalActionLabel, url: form.generalActionUrl }
-            : null,
-        selectedOption,
-      },
+      nextSteps: { message, generalAction, selectedOption },
     };
   }
 
@@ -703,7 +700,23 @@ export class FormSubmissionService {
     answers: Record<string, unknown>,
   ): boolean {
     if (!field.visibilityRule) return true;
-    const { fieldId, operator, value } = field.visibilityRule;
+    return this.evaluateCondition(field.visibilityRule, answers);
+  }
+
+  // Shared by isFieldVisible (FormField.visibilityRule, a single
+  // condition) and resolvePostSubmitOutcome (Form.postSubmitOutcomes,
+  // several ANDed conditions per outcome) — both are the exact same
+  // {fieldId, operator, value} shape evaluated against the submitted
+  // answers the exact same way.
+  private evaluateCondition(
+    condition: {
+      fieldId: string;
+      operator: FormFieldVisibilityOperator;
+      value: string;
+    },
+    answers: Record<string, unknown>,
+  ): boolean {
+    const { fieldId, operator, value } = condition;
     const actual = answers[fieldId];
 
     if (operator === FormFieldVisibilityOperator.INCLUDES) {
@@ -721,6 +734,50 @@ export class FormSubmissionService {
     return operator === FormFieldVisibilityOperator.NOT_EQUALS
       ? !matches
       : matches;
+  }
+
+  // First outcome (in array order) whose conditions ALL match the
+  // submitted answers wins — null when none match (or none are
+  // configured), letting the caller fall back to the form's own static
+  // postSubmitMessage/generalActionUrl/generalActionLabel unchanged. An
+  // outcome that matches always fully replaces both message and
+  // generalAction together, even when one of them is null on that
+  // outcome — a deliberate "this outcome fully determines what's shown"
+  // semantics rather than a partial merge with the static fallback.
+  // First outcome (in array order) whose conditions ALL match the
+  // submitted answers wins. Resolution is per-field, not a paired
+  // all-or-nothing swap: a matching outcome's own message/actionUrl/
+  // actionLabel are used where it sets them, and each field it *doesn't*
+  // set (null) falls back to the form's own static
+  // postSubmitMessage/generalActionUrl/generalActionLabel independently —
+  // so a rule can condition just the button while leaving the default
+  // message alone, or vice versa. This also gives "show the button only
+  // for these rules, never otherwise" for free: leave the form's own
+  // static action blank (so the no-match fallback is "no button") and
+  // only fill in actionUrl/actionLabel on the rules meant to show one —
+  // a rule matching with both left blank falls back to that same blank
+  // static default, i.e. still no button, not an inherited one from
+  // elsewhere.
+  private resolvePostSubmitContent(
+    form: Form,
+    answers: Record<string, unknown>,
+  ): {
+    message: string | null;
+    generalAction: { label: string; url: string } | null;
+  } {
+    const outcome = form.postSubmitOutcomes?.find((o) =>
+      o.conditions.every((c) => this.evaluateCondition(c, answers)),
+    );
+    const message = outcome?.message ?? form.postSubmitMessage ?? null;
+    const actionUrl = outcome?.actionUrl ?? form.generalActionUrl ?? null;
+    const actionLabel = outcome?.actionLabel ?? form.generalActionLabel ?? null;
+    return {
+      message,
+      generalAction:
+        actionUrl && actionLabel
+          ? { label: actionLabel, url: actionUrl }
+          : null,
+    };
   }
 
   private validateFieldOptions(field: FormField, value: unknown): void {
