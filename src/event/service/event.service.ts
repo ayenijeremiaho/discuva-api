@@ -82,9 +82,12 @@ export class EventService {
       await this.slotRepository.delete({ event: { id } });
       const slots = await this.buildSlots(dto.serviceSlots);
       event.serviceSlots = slots;
-      const { eventDate, endDate } = this.deriveDateRange(slots);
+      const { eventDate, endDate, startTime, endTime } =
+        this.deriveDateRange(slots);
       event.eventDate = eventDate;
       event.endDate = endDate;
+      event.startTime = startTime;
+      event.endTime = endTime;
     }
 
     if (dto.onlineAttendanceEnabled !== undefined)
@@ -222,13 +225,11 @@ export class EventService {
   }
 
   async findEventsReadyForAbsenceMarking(): Promise<Event[]> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     return this.eventRepository
       .createQueryBuilder('event')
       .leftJoinAndSelect('event.serviceSlots', 'slot')
       .where('event.attendanceMarked = false')
-      .andWhere('event.endDate < :today', { today })
+      .andWhere('event.endTime < :now', { now: new Date() })
       .andWhere(
         'EXISTS (SELECT 1 FROM service_slots s WHERE s.event_id = event.id)',
       )
@@ -236,33 +237,17 @@ export class EventService {
   }
 
   async getUpcomingEvents(limit = 5): Promise<Event[]> {
-    // `eventDate` is a date-only column, so filtering on it alone treats an
-    // event as "upcoming" for its entire calendar day even once every one of
-    // its slots has actually finished (e.g. a 9am-1pm Sunday service still
-    // showing as upcoming at 4pm). Fetch date-level candidates first (cheap),
-    // then drop any whose slots have all already ended before taking `limit`.
-    const now = new Date();
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const candidates = await this.eventRepository.find({
-      where: { eventDate: MoreThanOrEqual(startOfToday) },
-      order: { eventDate: 'ASC', serviceSlots: { startTime: 'ASC' } },
+    return this.eventRepository.find({
+      where: { endTime: MoreThanOrEqual(new Date()) },
+      order: { startTime: 'ASC', serviceSlots: { startTime: 'ASC' } },
       relations: [
         'serviceSlots',
         'serviceSlots.config',
         'serviceSlots.config.defaultVenue',
         'serviceSlots.venueOverride',
       ],
+      take: limit,
     });
-
-    const stillUpcoming = candidates.filter(
-      (event) =>
-        !event.serviceSlots?.length ||
-        event.serviceSlots.some((slot) => new Date(slot.endTime) >= now),
-    );
-
-    return stillUpcoming.slice(0, limit);
   }
 
   resolveSlotConfig(slot: ServiceSlot): {
@@ -307,12 +292,15 @@ export class EventService {
 
   private async createSingle(dto: CreateEventDto): Promise<Event> {
     const slots = await this.buildSlots(dto.serviceSlots);
-    const { eventDate, endDate } = this.deriveDateRange(slots);
+    const { eventDate, endDate, startTime, endTime } =
+      this.deriveDateRange(slots);
     const event = this.eventRepository.create({
       name: dto.name,
       description: dto.description,
       eventDate,
       endDate,
+      startTime,
+      endTime,
       onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
     });
     event.serviceSlots = slots;
@@ -353,12 +341,15 @@ export class EventService {
         ).toISOString(),
       }));
       const slots = await this.buildSlots(adjustedSlotDtos);
-      const { eventDate, endDate } = this.deriveDateRange(slots);
+      const { eventDate, endDate, startTime, endTime } =
+        this.deriveDateRange(slots);
       const event = this.eventRepository.create({
         name: dto.name,
         description: dto.description,
         eventDate,
         endDate,
+        startTime,
+        endTime,
         recurringEventId,
         onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
       });
@@ -374,18 +365,24 @@ export class EventService {
     return this.eventRepository.save(events);
   }
 
-  /** Event.eventDate/endDate are derived from the slots, not entered independently. */
+  /** Event.eventDate/endDate/startTime/endTime are all derived from the slots, not entered independently. */
   private deriveDateRange(slots: ServiceSlot[]): {
     eventDate: Date;
     endDate: Date;
+    startTime: Date;
+    endTime: Date;
   } {
+    const startTime = new Date(
+      Math.min(...slots.map((s) => s.startTime.getTime())),
+    );
+    const endTime = new Date(
+      Math.max(...slots.map((s) => s.endTime.getTime())),
+    );
     return {
-      eventDate: this.truncateToUtcDate(
-        new Date(Math.min(...slots.map((s) => s.startTime.getTime()))),
-      ),
-      endDate: this.truncateToUtcDate(
-        new Date(Math.max(...slots.map((s) => s.endTime.getTime()))),
-      ),
+      eventDate: this.truncateToUtcDate(startTime),
+      endDate: this.truncateToUtcDate(endTime),
+      startTime,
+      endTime,
     };
   }
 

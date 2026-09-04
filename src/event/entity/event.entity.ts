@@ -27,6 +27,15 @@ export class Event extends BaseEntity {
   @Column({ name: 'end_date', type: 'date' })
   endDate: Date;
 
+  /** Precise instant of the earliest slot's startTime — for "is this event live/past" checks; eventDate stays date-only for date-range queries. */
+  @Column({ name: 'start_time', type: 'timestamptz' })
+  startTime: Date;
+
+  /** Precise instant of the latest slot's endTime — for "is this event live/past" checks; endDate stays date-only for date-range queries. */
+  @Index()
+  @Column({ name: 'end_time', type: 'timestamptz' })
+  endTime: Date;
+
   @Column({ name: 'attendance_marked', default: false })
   attendanceMarked: boolean;
 

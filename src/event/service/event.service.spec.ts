@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, MoreThanOrEqual } from 'typeorm';
 import { EventService } from './event.service';
 import { Event } from '../entity/event.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
@@ -132,6 +132,8 @@ describe('EventService', () => {
         expect.objectContaining({
           eventDate: new Date('2025-06-01T00:00:00.000Z'),
           endDate: new Date('2025-06-01T00:00:00.000Z'),
+          startTime: new Date(slotDto.startTime),
+          endTime: new Date(slotDto.endTime),
         }),
       );
       expect(mockEventRepo.save).toHaveBeenCalled();
@@ -522,62 +524,48 @@ describe('EventService', () => {
   });
 
   describe('getUpcomingEvents', () => {
-    it('excludes an event whose slots have all already ended today', async () => {
-      const now = new Date();
-      const pastEvent = {
-        id: 'event-past',
-        serviceSlots: [{ endTime: new Date(now.getTime() - 60 * 60 * 1000) }],
-      };
-      const futureEvent = {
-        id: 'event-future',
-        serviceSlots: [{ endTime: new Date(now.getTime() + 60 * 60 * 1000) }],
-      };
-      mockEventRepo.find.mockResolvedValue([pastEvent, futureEvent]);
+    it('queries by event.endTime >= now, ordered by startTime, limited', async () => {
+      mockEventRepo.find.mockResolvedValue([]);
 
-      const result = await service.getUpcomingEvents(5);
+      await service.getUpcomingEvents(5);
 
-      expect(result.map((e: any) => e.id)).toEqual(['event-future']);
+      expect(mockEventRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { endTime: MoreThanOrEqual(expect.any(Date)) },
+          order: { startTime: 'ASC', serviceSlots: { startTime: 'ASC' } },
+          take: 5,
+        }),
+      );
     });
 
-    it('includes an event where at least one slot has not yet ended', async () => {
-      const now = new Date();
-      const event = {
-        id: 'event-mixed',
-        serviceSlots: [
-          { endTime: new Date(now.getTime() - 60 * 60 * 1000) },
-          { endTime: new Date(now.getTime() + 60 * 60 * 1000) },
-        ],
+    it('returns whatever events the repository resolves, defaulting the limit to 5', async () => {
+      const events = [{ id: 'event-future' }];
+      mockEventRepo.find.mockResolvedValue(events);
+
+      const result = await service.getUpcomingEvents();
+
+      expect(result).toBe(events);
+      expect(mockEventRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ take: 5 }),
+      );
+    });
+  });
+
+  describe('findEventsReadyForAbsenceMarking', () => {
+    it('filters on event.endTime < now rather than the date-only endDate', async () => {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
       };
-      mockEventRepo.find.mockResolvedValue([event]);
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
 
-      const result = await service.getUpcomingEvents(5);
+      await service.findEventsReadyForAbsenceMarking();
 
-      expect(result.map((e: any) => e.id)).toEqual(['event-mixed']);
-    });
-
-    it('includes an event with no slots yet scheduled', async () => {
-      const event = { id: 'event-no-slots', serviceSlots: [] };
-      mockEventRepo.find.mockResolvedValue([event]);
-
-      const result = await service.getUpcomingEvents(5);
-
-      expect(result.map((e: any) => e.id)).toEqual(['event-no-slots']);
-    });
-
-    it('respects the limit after filtering', async () => {
-      const now = new Date();
-      const futureSlot = [
-        { endTime: new Date(now.getTime() + 60 * 60 * 1000) },
-      ];
-      mockEventRepo.find.mockResolvedValue([
-        { id: 'e1', serviceSlots: futureSlot },
-        { id: 'e2', serviceSlots: futureSlot },
-        { id: 'e3', serviceSlots: futureSlot },
-      ]);
-
-      const result = await service.getUpcomingEvents(2);
-
-      expect(result).toHaveLength(2);
+      expect(qb.andWhere).toHaveBeenCalledWith('event.endTime < :now', {
+        now: expect.any(Date),
+      });
     });
   });
 

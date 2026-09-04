@@ -232,8 +232,10 @@ A church gathering on a specific date.
 | id                | UUID             | PK                                                                                                      |
 | name              | string           |                                                                                                         |
 | description       | string           | Optional                                                                                                |
-| eventDate         | Date (date only) | Derived, not user-entered: the earliest `serviceSlots[].startTime` (UTC date). Recomputed whenever slots are (re)created via `EventService`. |
-| endDate           | Date (date only) | Derived: the latest `serviceSlots[].endTime` (UTC date). Recomputed alongside `eventDate`.               |
+| eventDate         | Date (date only) | Derived, not user-entered: the earliest `serviceSlots[].startTime` (UTC date). Recomputed whenever slots are (re)created via `EventService`. Date-level only — use for date-range filtering, not "is this event over" checks. |
+| endDate           | Date (date only) | Derived: the latest `serviceSlots[].endTime` (UTC date). Recomputed alongside `eventDate`. Same date-only caveat as `eventDate`.               |
+| startTime         | timestamptz      | Derived: the precise instant of the earliest slot's `startTime` (not truncated). Recomputed alongside `eventDate`.                              |
+| endTime           | timestamptz      | Derived: the precise instant of the latest slot's `endTime` (not truncated). Use this — not `endDate` — for "is this event past/live" checks, since `endDate` only has day-level granularity. |
 | attendanceMarked           | boolean          | Set to `true` by the cron job after absence records are created. Guards against double-processing.      |
 | onlineAttendanceEnabled    | boolean          | Default `false`. When `true`, absent members receive an online-confirm email after the event ends.      |
 | onlineNotificationSentAt   | timestamptz \| null | Set when the online-confirm emails are dispatched. Used to calculate the confirmation window.        |
@@ -2482,12 +2484,18 @@ is required at creation — each slot carries an optional `configId` pointing to
 the same slot template (including `configId`) is stamped onto every generated occurrence; updating the config later
 propagates to all check-ins that reference it.
 
-`CreateEventDto` takes no `eventDate`/`endDate` fields — `Event.eventDate`/`endDate` are always derived from the
-supplied `serviceSlots` (`eventDate` = earliest `startTime`, `endDate` = latest `endTime`, both UTC-date-truncated so
-the result doesn't depend on server timezone). This applies on both `create` (including each recurring occurrence,
-computed from its own offset-shifted slots) and `update` (whenever `serviceSlots` is replaced). There is no longer a
-"manual" date range independent of the slots — previously a caller could set an event date range that didn't match
-its slot times (e.g. editing a slot's time left the event's dates stale), which this removes by construction.
+`CreateEventDto` takes no `eventDate`/`endDate`/`startTime`/`endTime` fields — all four are always derived from the
+supplied `serviceSlots` (`eventDate`/`endDate` = earliest `startTime`/latest `endTime`, UTC-date-truncated so the
+result doesn't depend on server timezone; `startTime`/`endTime` are the same two instants kept at full precision).
+This applies on both `create` (including each recurring occurrence, computed from its own offset-shifted slots) and
+`update` (whenever `serviceSlots` is replaced). There is no longer a "manual" date range independent of the slots —
+previously a caller could set an event date range that didn't match its slot times (e.g. editing a slot's time left
+the event's dates stale), which this removes by construction.
+
+`eventDate`/`endDate` stay date-only because several queries filter on a calendar day (e.g. "events today or later").
+`startTime`/`endTime` exist alongside them specifically because a date-only comparison can't tell whether an event
+that ends later *today* has actually finished yet — `getUpcomingEvents` and `findEventsReadyForAbsenceMarking` both
+filter on `endTime`, not `endDate`, for this reason, and both frontends' "Past" badge logic does the same.
 
 **Routes prefix:** `/events`, `/event-config`
 
@@ -6927,7 +6935,7 @@ A cron job runs every 5 minutes (`EVERY_5_MINUTES`).
 
 **Logic:**
 
-1. Finds all `Event` records where `attendanceMarked = false` AND `endDate < today` AND the event has at least one service slot.
+1. Finds all `Event` records where `attendanceMarked = false` AND `endTime < now` (the precise instant, not the date-only `endDate`) AND the event has at least one service slot. Served by a partial index (`IDX_events_end_time_unmarked`, `end_time WHERE attendance_marked = false`) so the query stays cheap regardless of how much event history a tenant accumulates — a plain index on `end_time` alone would match nearly every past event, not just the small rolling set still awaiting marking.
 2. For each event:
     - Gets all **members** (ACTIVE, role=MEMBER) who have no `PRESENT` or `LATE` attendance record for the event → creates one `ABSENT` record per member referencing the event (`serviceSlot = null`).
     - Gets all **workers** (ACTIVE, role=WORKER) who have no `PRESENT` or `LATE` record for the event:
