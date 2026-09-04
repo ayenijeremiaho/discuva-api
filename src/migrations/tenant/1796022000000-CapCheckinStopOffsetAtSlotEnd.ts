@@ -8,7 +8,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 // now rejects this going forward; this is the one-time cleanup for existing
 // rows. Only touches the offending slot's own checkin_stop_override (setting
 // it explicitly, capped to that slot's duration) — never the shared
-// event_configs row, so other slots using the same config are unaffected.
+// event_config row, so other slots using the same config are unaffected.
 export class CapCheckinStopOffsetAtSlotEnd1796022000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
@@ -17,7 +17,7 @@ export class CapCheckinStopOffsetAtSlotEnd1796022000000 implements MigrationInte
           COALESCE(s.checkin_stop_override, c.checkin_stop_offset_seconds),
           EXTRACT(EPOCH FROM (s.end_time - s.start_time))::int
       )
-      FROM event_configs c
+      FROM event_config c
       WHERE s.config_id = c.id
         AND COALESCE(s.checkin_stop_override, c.checkin_stop_offset_seconds)
             > EXTRACT(EPOCH FROM (s.end_time - s.start_time))::int
