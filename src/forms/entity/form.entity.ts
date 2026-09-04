@@ -25,14 +25,23 @@ export interface PostSubmitOutcomeCondition {
 }
 
 // One ranked rule on Form.postSubmitOutcomes — see that column's own
-// comment for the evaluation/fallback semantics.
+// comment for the evaluation/fallback semantics. message and the
+// actionUrl/actionLabel pair are each an independent tri-state: null +
+// hideMessage/hideAction false = inherit the form's static default; a
+// real value = use this custom one; hideMessage/hideAction true = show
+// none of that piece for this outcome, even though a static default
+// exists (message/actionUrl/actionLabel are forced null whenever their
+// own hide flag is true, so there's never an ambiguous "hidden but a
+// value is also set" state in storage).
 export interface PostSubmitOutcome {
   // ALL conditions must match (AND) for this outcome to apply — at least
   // one, enforced at create/update time.
   conditions: PostSubmitOutcomeCondition[];
   message: string | null;
+  hideMessage: boolean;
   actionUrl: string | null;
   actionLabel: string | null;
+  hideAction: boolean;
 }
 
 @Entity({ name: 'forms' })

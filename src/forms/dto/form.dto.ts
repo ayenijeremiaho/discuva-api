@@ -67,6 +67,13 @@ export class PostSubmitOutcomeDto {
   @IsString()
   message?: string | null;
 
+  // True = show no message for this outcome, even though the form has a
+  // static postSubmitMessage — distinct from omitted/null, which inherits
+  // that static default instead. See Form.postSubmitOutcomes' own comment.
+  @IsOptional()
+  @IsBoolean()
+  hideMessage?: boolean;
+
   @IsOptional()
   @IsString()
   actionUrl?: string | null;
@@ -74,6 +81,11 @@ export class PostSubmitOutcomeDto {
   @IsOptional()
   @IsString()
   actionLabel?: string | null;
+
+  // Same idea as hideMessage, for the general action button.
+  @IsOptional()
+  @IsBoolean()
+  hideAction?: boolean;
 }
 
 export class FormFieldDto {

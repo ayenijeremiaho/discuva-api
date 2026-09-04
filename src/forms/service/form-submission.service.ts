@@ -737,27 +737,19 @@ export class FormSubmissionService {
   }
 
   // First outcome (in array order) whose conditions ALL match the
-  // submitted answers wins — null when none match (or none are
-  // configured), letting the caller fall back to the form's own static
-  // postSubmitMessage/generalActionUrl/generalActionLabel unchanged. An
-  // outcome that matches always fully replaces both message and
-  // generalAction together, even when one of them is null on that
-  // outcome — a deliberate "this outcome fully determines what's shown"
-  // semantics rather than a partial merge with the static fallback.
-  // First outcome (in array order) whose conditions ALL match the
   // submitted answers wins. Resolution is per-field, not a paired
-  // all-or-nothing swap: a matching outcome's own message/actionUrl/
-  // actionLabel are used where it sets them, and each field it *doesn't*
-  // set (null) falls back to the form's own static
-  // postSubmitMessage/generalActionUrl/generalActionLabel independently —
-  // so a rule can condition just the button while leaving the default
-  // message alone, or vice versa. This also gives "show the button only
-  // for these rules, never otherwise" for free: leave the form's own
-  // static action blank (so the no-match fallback is "no button") and
-  // only fill in actionUrl/actionLabel on the rules meant to show one —
-  // a rule matching with both left blank falls back to that same blank
-  // static default, i.e. still no button, not an inherited one from
-  // elsewhere.
+  // all-or-nothing swap, and each field is its own three-way choice:
+  //   - hideMessage/hideAction true -> show none of that piece, even
+  //     though the form has a static default (message/actionUrl/
+  //     actionLabel are already forced null for these by
+  //     normalizePostSubmitOutcomes, never read here).
+  //   - the value is null (and not hidden) -> inherit the form's own
+  //     static postSubmitMessage/generalActionUrl/generalActionLabel.
+  //   - the value is set -> use it.
+  // So a rule can condition just the button while leaving the default
+  // message alone, or vice versa, and independently choose "inherit",
+  // "custom", or "show none" for each. No match (or no outcomes at all)
+  // falls back to the static fields unchanged.
   private resolvePostSubmitContent(
     form: Form,
     answers: Record<string, unknown>,
@@ -768,9 +760,15 @@ export class FormSubmissionService {
     const outcome = form.postSubmitOutcomes?.find((o) =>
       o.conditions.every((c) => this.evaluateCondition(c, answers)),
     );
-    const message = outcome?.message ?? form.postSubmitMessage ?? null;
-    const actionUrl = outcome?.actionUrl ?? form.generalActionUrl ?? null;
-    const actionLabel = outcome?.actionLabel ?? form.generalActionLabel ?? null;
+    const message = outcome?.hideMessage
+      ? null
+      : (outcome?.message ?? form.postSubmitMessage ?? null);
+    const actionUrl = outcome?.hideAction
+      ? null
+      : (outcome?.actionUrl ?? form.generalActionUrl ?? null);
+    const actionLabel = outcome?.hideAction
+      ? null
+      : (outcome?.actionLabel ?? form.generalActionLabel ?? null);
     return {
       message,
       generalAction:

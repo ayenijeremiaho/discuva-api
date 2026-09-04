@@ -3708,39 +3708,46 @@ post-submission response, never before. Validated at create/update (`FormService
 every `optionMetadata` key must be one of that field's own `options`, and any `url` must parse as a real URL.
 
 **Ranked conditional overrides for the post-submission message/action (`Form.postSubmitOutcomes`, nullable jsonb
-array):** each entry is `{ conditions: [{ fieldId, operator, value }, ...], message, actionUrl, actionLabel }` —
-`conditions` reuses `FormField.visibilityRule`'s exact same shape/operator set (`equals`/`notEquals`/`includes`),
-just as an array instead of a single condition, ALL of which must match (AND) for that outcome to apply.
-`FormSubmissionService.resolvePostSubmitContent` evaluates `postSubmitOutcomes` in array order at submit time
-against the just-submitted answers — the **first** outcome whose conditions all match wins. Resolution is
-**per-field, not a paired all-or-nothing swap**: the winning outcome's own `message`/`actionUrl`/`actionLabel` are
-used wherever it sets them, and each one it leaves `null` falls back to the form's own static
-`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` independently — so one rule can condition just the
-button while another form always keeps its default message, or vice versa, without needing to retype the piece
-it isn't changing into every rule. No match (or no outcomes configured) falls back to the static fields
-unchanged, so an older form with none behaves exactly as before. This also gives "show the button only for these
-specific rules, never otherwise" for free: leave the form's own static `generalActionUrl`/`generalActionLabel`
-blank (so the no-match fallback is "no button") and only set `actionUrl`/`actionLabel` on the rules meant to show
-one — a rule matching with both left blank falls back to that same blank static default, i.e. still no button,
-not one inherited from elsewhere. Condition evaluation is shared with `isFieldVisible` via a new
-`evaluateCondition` helper rather than duplicated. Deliberately independent of `nextStepsField`/`optionMetadata`'s
-per-selected-option `selectedOption` link (see above), which still resolves and is returned alongside whatever
-`postSubmitOutcomes` produces — the two mechanisms answer different questions ("what does the option they picked
-lead to" vs. "does this whole submission, considered together, warrant a different message/action") and compose
-rather than conflict.
+array):** each entry is `{ conditions: [{ fieldId, operator, value }, ...], message, hideMessage, actionUrl,
+actionLabel, hideAction }` — `conditions` reuses `FormField.visibilityRule`'s exact same shape/operator set
+(`equals`/`notEquals`/`includes`), just as an array instead of a single condition, ALL of which must match (AND)
+for that outcome to apply. `FormSubmissionService.resolvePostSubmitContent` evaluates `postSubmitOutcomes` in
+array order at submit time against the just-submitted answers — the **first** outcome whose conditions all match
+wins. Resolution is **per-field, not a paired all-or-nothing swap**, and the message and the `actionUrl`/
+`actionLabel` pair are each an independent **three-way** choice on the winning outcome:
+- `hideMessage`/`hideAction` `true` → show none of that piece for this response, even though the form has a
+  static `postSubmitMessage`/`generalActionUrl`+`generalActionLabel` default. `normalizePostSubmitOutcomes` forces
+  `message`/`actionUrl`/`actionLabel` to `null` whenever their own hide flag is `true`, so there's never an
+  ambiguous "hidden but a value is also set" state in storage — `resolvePostSubmitContent` never even reads those
+  fields when the hide flag is set.
+- hide flag `false` and the value is `null` → inherit the form's own static default, independently per piece — so
+  one rule can override just the button while leaving the default message alone, or vice versa.
+- hide flag `false` and the value is set → use that custom value.
+
+No match (or no outcomes configured) falls back to the static fields unchanged, so an older form with none
+behaves exactly as before, and a form created before this three-way choice existed (both hide flags absent) reads
+as `false` for both — identical to its old inherit-on-null-only behaviour. Condition evaluation is shared with
+`isFieldVisible` via a new `evaluateCondition` helper rather than duplicated. Deliberately independent of
+`nextStepsField`/`optionMetadata`'s per-selected-option `selectedOption` link (see above), which still resolves
+and is returned alongside whatever `postSubmitOutcomes` produces — the two mechanisms answer different questions
+("what does the option they picked lead to" vs. "does this whole submission, considered together, warrant a
+different message/action") and compose rather than conflict.
 
 Validated at create/update (`FormService.assertValidPostSubmitOutcomes`): every condition's `fieldId` must reference
 a field already present among the incoming `fields` — the same real-world constraint `visibilityRule` has, since no
 field has an id yet on `create()`, outcomes are edit-only in practice — and each outcome's own `actionUrl`/
-`actionLabel` reuse `assertValidGeneralAction`'s pairing check (both set or both empty). On `update`, validated
-against `dto.fields` when the request touches fields (so a field this same request is about to delete can't be
-referenced) or the form's current `fields` otherwise. `CloneFormDto` has no override for `postSubmitOutcomes` — like
-`visibilityRule`, every condition's `fieldId` points at a source field id that won't exist post-clone, so there's no
-sensible value an admin could supply before the clone's own fields exist. Instead `cloneForm` always inherits and
-re-matches it from the source by label (`FormService.remapClonedPostSubmitOutcomes`, the same by-label technique
-`remapClonedVisibilityRules` uses) — if even one condition inside an outcome can't be re-matched, the **whole**
-outcome is dropped rather than left partially broken (an outcome needs every one of its conditions to mean
-anything), mirroring `remapClonedVisibilityRules`'s own "drop rather than leave dangling" stance.
+`actionLabel` reuse `assertValidGeneralAction`'s pairing check (both set or both empty), **skipped entirely when
+`hideAction` is `true`** (the pair is forced to `null` regardless, so there's nothing meaningful to pair-check, and
+a stray value the client didn't clear shouldn't block the save). On `update`, validated against `dto.fields` when
+the request touches fields (so a field this same request is about to delete can't be referenced) or the form's
+current `fields` otherwise. `CloneFormDto` has no override for `postSubmitOutcomes` — like `visibilityRule`, every
+condition's `fieldId` points at a source field id that won't exist post-clone, so there's no sensible value an admin
+could supply before the clone's own fields exist. Instead `cloneForm` always inherits and re-matches it from the
+source by label (`FormService.remapClonedPostSubmitOutcomes`, the same by-label technique `remapClonedVisibilityRules`
+uses, carrying `hideMessage`/`hideAction` through unchanged via its object spread) — if even one condition inside an
+outcome can't be re-matched, the **whole** outcome is dropped rather than left partially broken (an outcome needs
+every one of its conditions to mean anything), mirroring `remapClonedVisibilityRules`'s own "drop rather than leave
+dangling" stance.
 
 **Duplicate-submission prevention:** a form can designate one field (`Form.dedupField`, `dedupFieldId` on
 create/update — DROPDOWN/CHECKBOX excluded as poor dedup keys) whose submitted value must be unique per form. On

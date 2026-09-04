@@ -595,25 +595,36 @@ export class FormService {
           );
         }
       }
-      this.assertValidGeneralAction(outcome.actionUrl, outcome.actionLabel);
+      // Skipped entirely when hideAction is set — actionUrl/actionLabel
+      // are forced null regardless in normalizePostSubmitOutcomes below,
+      // so there's nothing meaningful to pair-check, and any stray value
+      // the client didn't clear shouldn't block the save.
+      if (!outcome.hideAction) {
+        this.assertValidGeneralAction(outcome.actionUrl, outcome.actionLabel);
+      }
     });
   }
 
   // DTO -> entity shape: the DTO's per-outcome message/actionUrl/
   // actionLabel are each `?: string | null` (omitted meaning "not
   // provided in this outcome", same as everywhere else in this DTO), but
-  // the stored PostSubmitOutcome always carries all three explicitly —
+  // the stored PostSubmitOutcome always carries every field explicitly —
   // there's no partial-outcome-patch concept the way Form's own top-level
   // scalars have, a save always replaces the whole outcomes array.
+  // hideMessage/hideAction forcing message/actionUrl/actionLabel to null
+  // keeps storage unambiguous — "hidden" can never coexist with a leftover
+  // value that a naive read might mistake for a custom override.
   private normalizePostSubmitOutcomes(
     outcomes: PostSubmitOutcomeDto[] | null | undefined,
   ): PostSubmitOutcome[] | null {
     if (!outcomes) return null;
     return outcomes.map((o) => ({
       conditions: o.conditions,
-      message: o.message ?? null,
-      actionUrl: o.actionUrl ?? null,
-      actionLabel: o.actionLabel ?? null,
+      hideMessage: o.hideMessage ?? false,
+      message: o.hideMessage ? null : (o.message ?? null),
+      hideAction: o.hideAction ?? false,
+      actionUrl: o.hideAction ? null : (o.actionUrl ?? null),
+      actionLabel: o.hideAction ? null : (o.actionLabel ?? null),
     }));
   }
 

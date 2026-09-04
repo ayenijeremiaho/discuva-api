@@ -811,6 +811,112 @@ describe('FormSubmissionService', () => {
         description: null,
       });
     });
+
+    it('hides the message when the matching outcome sets hideMessage, even though a static default exists', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: null,
+            hideMessage: true,
+            actionUrl: null,
+            actionLabel: null,
+            hideAction: false,
+          },
+        ],
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBeNull();
+      expect(result.nextSteps.generalAction).toEqual({
+        label: 'Join Main Volunteer Group',
+        url: 'https://chat.example.com/main-group',
+      });
+    });
+
+    it('hides the general action when the matching outcome sets hideAction, even though a static default exists', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: null,
+            hideMessage: false,
+            actionUrl: null,
+            actionLabel: null,
+            hideAction: true,
+          },
+        ],
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBe('Thanks for signing up!');
+      expect(result.nextSteps.generalAction).toBeNull();
+    });
+
+    it('resolves hideMessage and hideAction independently — one hidden, the other custom', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: null,
+            hideMessage: true,
+            actionUrl: 'https://chat.example.com/choir',
+            actionLabel: 'Join Choir Group',
+            hideAction: false,
+          },
+        ],
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBeNull();
+      expect(result.nextSteps.generalAction).toEqual({
+        label: 'Join Choir Group',
+        url: 'https://chat.example.com/choir',
+      });
+    });
+
+    it('hides both message and action when the matching outcome sets both flags', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...outcomesForm,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: null,
+            hideMessage: true,
+            actionUrl: null,
+            actionLabel: null,
+            hideAction: true,
+          },
+        ],
+      });
+      const result = await service.submitAsPublic('form-1', { f1: 'Choir' });
+      expect(result.nextSteps.message).toBeNull();
+      expect(result.nextSteps.generalAction).toBeNull();
+    });
   });
 
   describe('type validation', () => {

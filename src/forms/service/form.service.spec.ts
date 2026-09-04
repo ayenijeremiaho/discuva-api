@@ -1345,6 +1345,99 @@ describe('FormService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('accepts an outcome with actionUrl but no actionLabel when hideAction is set — the pairing check does not apply to a hidden action', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await expect(
+        service.update('form-1', {
+          postSubmitOutcomes: [
+            {
+              conditions: [
+                {
+                  fieldId: 'f1',
+                  operator: FormFieldVisibilityOperator.EQUALS,
+                  value: 'Choir',
+                },
+              ],
+              actionUrl: 'https://chat.whatsapp.com/choir',
+              hideAction: true,
+            },
+          ],
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('forces message/actionUrl/actionLabel to null when hideMessage/hideAction are set, regardless of any stray value sent', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await service.update('form-1', {
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'stray message',
+            hideMessage: true,
+            actionUrl: 'https://chat.whatsapp.com/choir',
+            actionLabel: 'stray label',
+            hideAction: true,
+          },
+        ],
+      });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          postSubmitOutcomes: [
+            expect.objectContaining({
+              message: null,
+              hideMessage: true,
+              actionUrl: null,
+              actionLabel: null,
+              hideAction: true,
+            }),
+          ],
+        }),
+      );
+    });
+
+    it('defaults hideMessage/hideAction to false when omitted', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      await service.update('form-1', {
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: 'Welcome!',
+          },
+        ],
+      });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          postSubmitOutcomes: [
+            expect.objectContaining({ hideMessage: false, hideAction: false }),
+          ],
+        }),
+      );
+    });
+
     it('validates against the current form fields when the update omits `fields`', async () => {
       mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
@@ -1450,6 +1543,41 @@ describe('FormService', () => {
       expect(result.postSubmitOutcomes).toEqual([
         expect.objectContaining({
           message: 'Welcome to Choir!',
+          conditions: [expect.objectContaining({ fieldId: 'cloned-0' })],
+        }),
+      ]);
+    });
+
+    it('carries hideMessage/hideAction through the clone remap unchanged', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        visibility: FormVisibility.PUBLIC,
+        postSubmitOutcomes: [
+          {
+            conditions: [
+              {
+                fieldId: 'f1',
+                operator: FormFieldVisibilityOperator.EQUALS,
+                value: 'Choir',
+              },
+            ],
+            message: null,
+            hideMessage: true,
+            actionUrl: null,
+            actionLabel: null,
+            hideAction: false,
+          },
+        ],
+        fields: [{ id: 'f1', label: 'Team', fieldType: FormFieldType.TEXT }],
+      });
+      mockFieldRepo.save.mockResolvedValueOnce([
+        { id: 'cloned-0', label: 'Team', fieldType: FormFieldType.TEXT },
+      ]);
+      const result = await service.cloneForm('form-1', { title: 'Copy' });
+      expect(result.postSubmitOutcomes).toEqual([
+        expect.objectContaining({
+          hideMessage: true,
+          hideAction: false,
           conditions: [expect.objectContaining({ fieldId: 'cloned-0' })],
         }),
       ]);
