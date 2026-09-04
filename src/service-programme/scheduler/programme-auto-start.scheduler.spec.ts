@@ -89,7 +89,7 @@ describe('ProgrammeAutoStartScheduler', () => {
     expect(mockProgrammeRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('auto-starts a due, eligible event with no human actor (null memberId)', async () => {
+  it('auto-starts a due, eligible event with no human actor (null memberId), pinning the specific due programme', async () => {
     mockProgrammeQb.getMany.mockResolvedValue([makeProgramme('event-1')]);
     mockSessionService.startEvent.mockResolvedValue({
       sessionCode: 'ABC123',
@@ -97,7 +97,11 @@ describe('ProgrammeAutoStartScheduler', () => {
 
     await scheduler.autoStartDueProgrammes();
 
-    expect(mockSessionService.startEvent).toHaveBeenCalledWith('event-1', null);
+    expect(mockSessionService.startEvent).toHaveBeenCalledWith(
+      'event-1',
+      null,
+      'programme-event-1',
+    );
     expect(mockCacheService.releaseLock).toHaveBeenCalled();
   });
 
@@ -107,16 +111,46 @@ describe('ProgrammeAutoStartScheduler', () => {
     expect(mockSessionService.startEvent).not.toHaveBeenCalled();
   });
 
-  it('starts each distinct event only once, even with two due slots for the same event', async () => {
-    mockProgrammeQb.getMany.mockResolvedValue([
-      makeProgramme('event-1'),
-      { ...makeProgramme('event-1'), id: 'programme-2' },
-    ]);
+  // Regression test: startEvent() used to be called with just the eventId,
+  // leaving it to fall back to "earliest DRAFT programme for the whole
+  // event" — which could pick a still-DRAFT sibling slot that was never due
+  // (or never auto-start-eligible at all) instead of the one this batch
+  // actually determined was due. Passing the specific due programmeId
+  // closes that gap; this test pins the earlier of two due slots by
+  // explicit startTime, not object-creation-order, so it can't pass by
+  // accident.
+  it('starts each distinct event only once, passing the earliest-due programme id when two due slots share an event', async () => {
+    const earlier = {
+      ...makeProgramme('event-1'),
+      id: 'programme-earlier',
+      serviceSlot: {
+        id: 'slot-earlier',
+        startTime: new Date('2026-08-02T08:00:00.000Z'),
+        event: { id: 'event-1' },
+      },
+    };
+    const later = {
+      ...makeProgramme('event-1'),
+      id: 'programme-later',
+      serviceSlot: {
+        id: 'slot-later',
+        startTime: new Date('2026-08-02T10:00:00.000Z'),
+        event: { id: 'event-1' },
+      },
+    };
+    // Deliberately queued out of chronological order — the picker must sort
+    // by startTime itself, not trust array order.
+    mockProgrammeQb.getMany.mockResolvedValue([later, earlier]);
     mockSessionService.startEvent.mockResolvedValue({ sessionCode: 'X' });
 
     await scheduler.autoStartDueProgrammes();
 
     expect(mockSessionService.startEvent).toHaveBeenCalledTimes(1);
+    expect(mockSessionService.startEvent).toHaveBeenCalledWith(
+      'event-1',
+      null,
+      'programme-earlier',
+    );
   });
 
   it('treats a ConflictException (already live) as an expected skip, not a failure', async () => {

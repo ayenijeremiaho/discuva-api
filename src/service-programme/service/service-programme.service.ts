@@ -74,6 +74,32 @@ export interface MyAssignment {
   sessionCode: string | null;
 }
 
+export interface UpcomingProgrammeSlotView {
+  id: string;
+  position: number;
+  type: ServiceSlotTypeEnum;
+  topic: string | null;
+  allocatedMinutes: number;
+  // memberName ?? guestName — never the raw Member row (email/phone etc.),
+  // since this is returned to any authenticated member, not just admins.
+  speakerName: string | null;
+  backupSpeakerName: string | null;
+}
+
+export interface UpcomingProgrammeView {
+  programmeId: string;
+  eventName: string | null;
+  serviceSlotName: string;
+  startTime: Date;
+  endTime: Date;
+  status: ServiceProgrammeStatusEnum;
+  // Only populated once LIVE — lets the frontend link straight into the
+  // existing running-order view (GET /service-session/:code/my-status) for
+  // whoever has their own slot in it, same as MyAssignment.sessionCode.
+  sessionCode: string | null;
+  slots: UpcomingProgrammeSlotView[];
+}
+
 @Injectable()
 export class ServiceProgrammeService {
   constructor(
@@ -284,6 +310,61 @@ export class ServiceProgrammeService {
       programmeStatus: slot.programme.status,
       sessionCode: slot.programme.session?.sessionCode ?? null,
     }));
+  }
+
+  // The general "order of service" view — every member, not just whoever
+  // has a slot in it (that narrower view is getMyUpcomingAssignments
+  // above). A LIVE programme always qualifies regardless of its scheduled
+  // start time (a service running long shouldn't vanish from view just
+  // because the clock passed its original start), a DRAFT one only while
+  // still upcoming. Returns null when nothing qualifies rather than 404ing
+  // — "no service scheduled right now" is a normal state, not an error.
+  // Member-safe by construction: slots map to speakerName/backupSpeakerName
+  // strings only, never the raw Member row.
+  async getUpcomingForMembers(): Promise<UpcomingProgrammeView | null> {
+    const programme = await this.programmeRepo
+      .createQueryBuilder('programme')
+      .innerJoinAndSelect('programme.serviceSlot', 'serviceSlot')
+      .leftJoinAndSelect('serviceSlot.event', 'event')
+      .leftJoinAndSelect('programme.session', 'session')
+      .leftJoinAndSelect('programme.slots', 'slots')
+      .leftJoinAndSelect('slots.member', 'member')
+      .leftJoinAndSelect('slots.backupMember', 'backupMember')
+      .where(
+        `(programme.status = :live OR (programme.status = :draft AND serviceSlot.start_time >= :now))`,
+        {
+          live: ServiceProgrammeStatusEnum.LIVE,
+          draft: ServiceProgrammeStatusEnum.DRAFT,
+          now: new Date(),
+        },
+      )
+      .orderBy('serviceSlot.start_time', 'ASC')
+      .getOne();
+
+    if (!programme) return null;
+
+    const slots = withMemberNamesList(
+      [...programme.slots].sort((a, b) => a.position - b.position),
+    );
+
+    return {
+      programmeId: programme.id,
+      eventName: programme.serviceSlot.event?.name ?? null,
+      serviceSlotName: programme.serviceSlot.name,
+      startTime: programme.serviceSlot.startTime,
+      endTime: programme.serviceSlot.endTime,
+      status: programme.status,
+      sessionCode: programme.session?.sessionCode ?? null,
+      slots: slots.map((slot) => ({
+        id: slot.id,
+        position: slot.position,
+        type: slot.type,
+        topic: slot.topic,
+        allocatedMinutes: slot.allocatedMinutes,
+        speakerName: slot.memberName ?? slot.guestName,
+        backupSpeakerName: slot.backupMemberName ?? slot.backupGuestName,
+      })),
+    };
   }
 
   async findOne(id: string): Promise<ServiceProgrammeWithSummary> {

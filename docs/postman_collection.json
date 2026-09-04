@@ -19222,6 +19222,44 @@
               ]
             },
             {
+              "name": "Get Upcoming Order of Service",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{member_token}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/service-programme/upcoming",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "service-programme",
+                    "upcoming"
+                  ]
+                },
+                "description": "The general order-of-service view \u2014 every member, not just whoever has a slot in it (that's Get My Upcoming Assignments above). Returns the soonest programme that's LIVE, or DRAFT with a still-future start time; a LIVE programme always qualifies regardless of its original scheduled time. Returns `null` (never a 404) when nothing qualifies. Slots map to speakerName/backupSpeakerName strings only, never the raw Member row. sessionCode is populated once LIVE, for linking into the front-desk control / live views."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\n  \"programmeId\": \"uuid\",\n  \"eventName\": \"Sunday Service\",\n  \"serviceSlotName\": \"First Service\",\n  \"startTime\": \"2026-07-19T08:00:00.000Z\",\n  \"endTime\": \"2026-07-19T10:00:00.000Z\",\n  \"status\": \"DRAFT\",\n  \"sessionCode\": null,\n  \"slots\": [\n    {\n      \"id\": \"uuid\",\n      \"position\": 0,\n      \"type\": \"SPEAKER\",\n      \"topic\": \"Faith in Action\",\n      \"allocatedMinutes\": 30,\n      \"speakerName\": \"Jane Doe\",\n      \"backupSpeakerName\": \"John Smith\"\n    }\n  ]\n}"
+                },
+                {
+                  "name": "200 OK \u2014 nothing scheduled",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "null"
+                }
+              ]
+            },
+            {
               "name": "Get Share Links (Admin)",
               "request": {
                 "method": "GET",

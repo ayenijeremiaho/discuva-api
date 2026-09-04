@@ -240,9 +240,23 @@ export class ServiceSessionService {
   // mirroring the same `if (memberId)` pattern already used by several
   // sibling methods below (e.g. getShareLinks, pause) for their own
   // optional-actor call sites.
+  //
+  // programmeId lets a caller that already knows exactly which programme is
+  // due pin that one down, instead of falling back to "earliest DRAFT for
+  // the whole event" — ProgrammeAutoStartScheduler is the only caller that
+  // passes it. Without this, an event with two configured sub-services where
+  // only the later one has auto-start enabled (the earlier one is meant to
+  // be started manually, and is still sitting DRAFT because nobody has
+  // gotten to it yet) would auto-start the wrong one: the scheduler's own
+  // query already correctly restricts to due, auto-start-eligible
+  // programmes, but "earliest DRAFT for the event" doesn't know or care
+  // about that eligibility, so it would silently pick the untouched earlier
+  // one instead of the one that was actually due. The discuva-admin "Start"
+  // button keeps the old default behavior (omits programmeId) unchanged.
   async startEvent(
     eventId: string,
     memberId: string | null,
+    programmeId?: string,
   ): Promise<ServiceSession> {
     if (memberId) await this.assertCanControlSession(memberId);
 
@@ -258,15 +272,19 @@ export class ServiceSessionService {
       );
     }
 
-    const programmes =
-      await this.programmeSvc.findStartableDraftProgrammesForEvent(eventId);
-    if (!programmes.length) {
-      throw new BadRequestException(
-        'No draft programmes with slots are ready to start for this event',
-      );
+    let targetProgrammeId = programmeId;
+    if (!targetProgrammeId) {
+      const programmes =
+        await this.programmeSvc.findStartableDraftProgrammesForEvent(eventId);
+      if (!programmes.length) {
+        throw new BadRequestException(
+          'No draft programmes with slots are ready to start for this event',
+        );
+      }
+      targetProgrammeId = programmes[0].id;
     }
 
-    return this.start(programmes[0].id, memberId);
+    return this.start(targetProgrammeId, memberId);
   }
 
   async start(
@@ -1821,6 +1839,16 @@ export class ServiceSessionService {
   // fetchAnalytics (override takes precedence, else the draft-assigned
   // member; a listed backup who never actually went on gets no entry here),
   // so the two stay consistent about what counts as "their" contribution.
+  //
+  // Includes LIVE sessions, not just COMPLETED ones — a slot that already
+  // finished mid-service (its own status flips to COMPLETED with
+  // actualSeconds the moment it's advanced past, well before the session as
+  // a whole is ended) should show up immediately rather than waiting for
+  // someone to end the whole session. The per-slot COMPLETED filter below is
+  // what actually does that filtering; it also incidentally excludes
+  // SKIPPED slots (end() marks any still-PENDING slot SKIPPED, not
+  // COMPLETED, when a session is ended early) from ever surfacing here as if
+  // they were performed.
   async getMyServiceHistory(
     memberId: string,
     page = 1,
@@ -1835,8 +1863,11 @@ export class ServiceSessionService {
       .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
       .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
       .leftJoinAndSelect('programmeSlot.member', 'member')
-      .where('session.status = :status', {
-        status: ServiceSessionStatusEnum.COMPLETED,
+      .where('session.status IN (:...statuses)', {
+        statuses: [
+          ServiceSessionStatusEnum.LIVE,
+          ServiceSessionStatusEnum.COMPLETED,
+        ],
       })
       .andWhere(
         `session.id IN (
@@ -1857,6 +1888,10 @@ export class ServiceSessionService {
 
     for (const session of sessions) {
       for (const slot of session.sessionSlots ?? []) {
+        // Only a slot that has actually finished counts as "history" — a
+        // still-PENDING/IN_PROGRESS slot in a LIVE session hasn't happened
+        // yet, and a SKIPPED one never did.
+        if (slot.status !== ServiceSessionSlotStatusEnum.COMPLETED) continue;
         const effectiveMemberId =
           slot.overriddenMember?.id ?? slot.programmeSlot?.member?.id;
         if (effectiveMemberId !== memberId) continue;
@@ -1913,12 +1948,15 @@ export class ServiceSessionService {
   }
 
   // Session control (start, advance/rewind/pause/..., managing share links
-  // and named PM access grants) is restricted to Admins holding
-  // SERVICE_PROGRAMME_WRITE. Admin-department workers no longer get an
-  // authenticated control path here — like anyone else, they use the public
-  // Programme Manager link with a named PIN grant instead, so every control
-  // action is attributable to a specific named person regardless of whether
-  // they're staff or an external collaborator.
+  // and named PM access grants) is open to two groups, both already
+  // individually attributable via their own authenticated identity
+  // (memberId), same as any other control action: Admins holding
+  // SERVICE_PROGRAMME_WRITE, and workers in a department with
+  // FRONT_DESK_OPERATIONS (they run the room week to week and need to be
+  // able to start/manage a service from their own logged-in member-app
+  // session, not just via the public Programme Manager link + PIN — that
+  // link stays the path for anyone else, e.g. an external production
+  // collaborator with no Discuva account at all).
   private async assertCanControlSession(memberId: string): Promise<void> {
     const admin = await this.adminRepo.findOne({
       where: { member: { id: memberId }, isActive: true },
@@ -1932,8 +1970,17 @@ export class ServiceSessionService {
       return;
     }
 
+    if (
+      await this.departmentAccessService.hasCapability(
+        memberId,
+        DepartmentCapability.FRONT_DESK_OPERATIONS,
+      )
+    ) {
+      return;
+    }
+
     throw new ForbiddenException(
-      'Only admins with service programme access can perform this action',
+      'Only admins with service programme access, or Front Desk Operations workers, can perform this action',
     );
   }
 

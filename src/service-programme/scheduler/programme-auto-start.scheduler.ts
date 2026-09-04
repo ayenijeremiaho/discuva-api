@@ -81,17 +81,36 @@ export class ProgrammeAutoStartScheduler {
     if (!programmes.length) return;
 
     // Several DRAFT programmes in this batch can belong to the same
-    // multi-slot event (e.g. First and Second Service both due) —
-    // startEvent() already resolves "the correct next one" and guards
-    // against a second concurrently-LIVE session for the event, so each
-    // distinct event only needs to be started once.
-    const eventIds = [
-      ...new Set(programmes.map((p) => p.serviceSlot.event.id)),
-    ];
+    // multi-slot event (e.g. First and Second Service both due) — group by
+    // event and only start the earliest-due one per event; a second due
+    // slot for the same event on this run (or a later run) gets picked up
+    // once the first has ended, same as the manual "Start" button's own
+    // one-slot-at-a-time behavior. Passing that specific programme's id to
+    // startEvent() (rather than leaving it to fall back to "earliest DRAFT
+    // for the whole event") matters: this batch is already filtered to
+    // DRAFT + auto_start_session=true + due-within-window, so it can
+    // correctly skip over an *earlier*, still-DRAFT sibling slot that was
+    // deliberately left for a manual start (auto_start_session=false, or
+    // just not due yet) instead of mistakenly starting that one.
+    const dueProgrammeIdByEvent = new Map<string, string>();
+    const dueStartTimeByEvent = new Map<string, number>();
+    for (const programme of programmes) {
+      const eventId = programme.serviceSlot.event.id;
+      const startMs = programme.serviceSlot.startTime.getTime();
+      const earliestSoFar = dueStartTimeByEvent.get(eventId);
+      if (earliestSoFar === undefined || startMs < earliestSoFar) {
+        dueStartTimeByEvent.set(eventId, startMs);
+        dueProgrammeIdByEvent.set(eventId, programme.id);
+      }
+    }
 
-    for (const eventId of eventIds) {
+    for (const [eventId, programmeId] of dueProgrammeIdByEvent) {
       try {
-        const session = await this.sessionService.startEvent(eventId, null);
+        const session = await this.sessionService.startEvent(
+          eventId,
+          null,
+          programmeId,
+        );
         this.logger.log(
           `Auto-started service session ${session.sessionCode} for event ${eventId}`,
         );

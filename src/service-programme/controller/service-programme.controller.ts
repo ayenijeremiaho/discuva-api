@@ -104,6 +104,15 @@ export class ServiceProgrammeController {
     return this.programmeSvc.getMyUpcomingAssignments(user.id);
   }
 
+  // The general order-of-service view — any authenticated member, not just
+  // whoever has a slot in it. Must stay registered before ':id' below,
+  // which would otherwise swallow this as a (malformed) uuid param.
+  @Get('upcoming')
+  @UseGuards(JwtAuthGuard)
+  getUpcoming() {
+    return this.programmeSvc.getUpcomingForMembers();
+  }
+
   @Get(':id')
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_READ)

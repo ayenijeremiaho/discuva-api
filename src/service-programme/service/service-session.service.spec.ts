@@ -140,21 +140,6 @@ const mockManager = {
 
 const mockTxHost = { tx: mockManager };
 
-const adminDeptProfile = {
-  id: 'wp-1',
-  department: {
-    id: 'dept-1',
-    capabilities: [DepartmentCapability.FRONT_DESK_OPERATIONS],
-  },
-  secondaryDepartment: null,
-};
-
-const nonAdminProfile = {
-  id: 'wp-2',
-  department: { id: 'dept-2', capabilities: [] },
-  secondaryDepartment: null,
-};
-
 const validAdmin = {
   isActive: true,
   adminRole: { permissions: [AdminPermission.SERVICE_PROGRAMME_WRITE] },
@@ -233,6 +218,11 @@ describe('ServiceSessionService', () => {
     mockActionEntryRepo.save.mockResolvedValue({});
     mockMemberRepo.findOne.mockResolvedValue(mockMember);
     mockAdminRepo.findOne.mockResolvedValue(null);
+    // Safe default so a test that grants FRONT_DESK_OPERATIONS access
+    // (via mockResolvedValue) can't leak into a later test — jest.fn()
+    // mock implementations survive clearAllMocks(), only .mock.calls/
+    // .mock.instances get cleared, so this has to be reasserted every run.
+    mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -300,24 +290,33 @@ describe('ServiceSessionService', () => {
       );
     });
 
-    it('throws ForbiddenException for an Admin-department worker — department-based control access was removed', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue(adminDeptProfile);
+    it('throws ForbiddenException for a worker without the FRONT_DESK_OPERATIONS capability', async () => {
       mockAdminRepo.findOne.mockResolvedValue(null);
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
       await expect(service.advance('SVC-ABC123', 'member-1')).rejects.toThrow(
         ForbiddenException,
       );
     });
 
-    it('throws ForbiddenException even when secondary department key is ADMIN', async () => {
-      mockWorkerProfileRepo.findOne.mockResolvedValue({
-        ...nonAdminProfile,
-        secondaryDepartment: {
-          capabilities: [DepartmentCapability.FRONT_DESK_OPERATIONS],
-        },
-      });
+    // Both groups are already individually attributable via their own
+    // authenticated memberId — this is the same authenticated control path
+    // SERVICE_PROGRAMME_WRITE admins use, just with a different capability
+    // check, not a new/separate mechanism. Anyone without either stays on
+    // the public Programme Manager link + PIN.
+    it('allows access when caller is a Front Desk Operations worker, even without any admin permission', async () => {
       mockAdminRepo.findOne.mockResolvedValue(null);
-      await expect(service.advance('SVC-ABC123', 'member-1')).rejects.toThrow(
-        ForbiddenException,
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      mockCacheService.get.mockResolvedValue(liveAnchor);
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      mockSessionSlotRepo.count.mockResolvedValue(2);
+      mockSessionSlotRepo.update.mockResolvedValue(undefined);
+
+      await expect(
+        service.advance('SVC-ABC123', 'member-1'),
+      ).resolves.toBeDefined();
+      expect(mockDepartmentAccessService.hasCapability).toHaveBeenCalledWith(
+        'member-1',
+        DepartmentCapability.FRONT_DESK_OPERATIONS,
       );
     });
 
@@ -468,6 +467,34 @@ describe('ServiceSessionService', () => {
       expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledTimes(1);
       expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
         'prog-1',
+        ServiceProgrammeStatusEnum.LIVE,
+      );
+    });
+
+    // Regression coverage for the auto-start bug: when a caller (only
+    // ProgrammeAutoStartScheduler does this) already knows exactly which
+    // programme is due, startEvent must start that one directly rather than
+    // falling back to "earliest DRAFT for the whole event" — an untouched,
+    // not-yet-due (or not auto-start-eligible at all) earlier sibling slot
+    // must never be picked over it.
+    it('starts the given programmeId directly when provided, without querying findStartableDraftProgrammesForEvent', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(null);
+      mockProgrammeSvc.assertProgrammeIsDraft.mockResolvedValue({
+        ...draftProgramme,
+        id: 'prog-later',
+      });
+
+      const session = await service.startEvent('event-1', null, 'prog-later');
+
+      expect(session).toEqual(mockSession);
+      expect(
+        mockProgrammeSvc.findStartableDraftProgrammesForEvent,
+      ).not.toHaveBeenCalled();
+      expect(mockProgrammeSvc.assertProgrammeIsDraft).toHaveBeenCalledWith(
+        'prog-later',
+      );
+      expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
+        'prog-later',
         ServiceProgrammeStatusEnum.LIVE,
       );
     });
@@ -1957,6 +1984,7 @@ describe('ServiceSessionService', () => {
       const session = buildSession({
         sessionSlots: [
           {
+            status: ServiceSessionSlotStatusEnum.COMPLETED,
             programmeSlot: {
               type: ServiceSlotTypeEnum.SPEAKER,
               topic: 'Faith',
@@ -1969,6 +1997,7 @@ describe('ServiceSessionService', () => {
             actualSeconds: 1800,
           },
           {
+            status: ServiceSessionSlotStatusEnum.COMPLETED,
             // member-1 is listed as backup here but never actually presented
             programmeSlot: {
               type: ServiceSlotTypeEnum.WORSHIP,
@@ -2005,6 +2034,7 @@ describe('ServiceSessionService', () => {
       const session = buildSession({
         sessionSlots: [
           {
+            status: ServiceSessionSlotStatusEnum.COMPLETED,
             programmeSlot: {
               type: ServiceSlotTypeEnum.SPEAKER,
               topic: 'Faith',
@@ -2027,6 +2057,7 @@ describe('ServiceSessionService', () => {
 
     it('aggregates totals by slot type across sessions', async () => {
       const speakerSlot = (actualSeconds: number) => ({
+        status: ServiceSessionSlotStatusEnum.COMPLETED,
         programmeSlot: {
           type: ServiceSlotTypeEnum.SPEAKER,
           topic: 'A topic',
@@ -2056,6 +2087,7 @@ describe('ServiceSessionService', () => {
 
     it('paginates entries while keeping summary totals computed over the full set', async () => {
       const slot = (n: number) => ({
+        status: ServiceSessionSlotStatusEnum.COMPLETED,
         programmeSlot: {
           type: ServiceSlotTypeEnum.SPEAKER,
           topic: `Topic ${n}`,
@@ -2079,6 +2111,79 @@ describe('ServiceSessionService', () => {
       expect(result.entries).toHaveLength(5); // page 2 of 10 — remaining 5
       expect(result.page).toBe(2);
       expect(result.totalPages).toBe(2);
+    });
+
+    // A slot's own status flips to COMPLETED (with actualSeconds set) the
+    // moment it's advanced past, well before the session as a whole is
+    // ended — history should reflect that immediately rather than waiting
+    // for someone to end the whole session.
+    it('includes an already-completed slot from a still-LIVE session', async () => {
+      const session = buildSession({
+        status: ServiceSessionStatusEnum.LIVE,
+        sessionSlots: [
+          {
+            status: ServiceSessionSlotStatusEnum.COMPLETED,
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.SPEAKER,
+              topic: 'Faith',
+              allocatedMinutes: 30,
+              member: { id: 'member-1' },
+            },
+            overriddenMember: null,
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: 1800,
+          },
+        ],
+      });
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb([session]));
+
+      const result = await service.getMyServiceHistory('member-1');
+
+      expect(result.totalSlots).toBe(1);
+      expect(result.entries[0]).toEqual(
+        expect.objectContaining({ actualSeconds: 1800 }),
+      );
+    });
+
+    it('excludes a still-PENDING/IN_PROGRESS slot from a LIVE session, and a SKIPPED slot', async () => {
+      const session = buildSession({
+        status: ServiceSessionStatusEnum.LIVE,
+        sessionSlots: [
+          {
+            status: ServiceSessionSlotStatusEnum.IN_PROGRESS,
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.SPEAKER,
+              topic: 'Not done yet',
+              allocatedMinutes: 30,
+              member: { id: 'member-1' },
+            },
+            overriddenMember: null,
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: null,
+          },
+          {
+            status: ServiceSessionSlotStatusEnum.SKIPPED,
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.WORSHIP,
+              topic: null,
+              allocatedMinutes: 20,
+              member: { id: 'member-1' },
+            },
+            overriddenMember: null,
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: null,
+          },
+        ],
+      });
+      mockSessionRepo.createQueryBuilder.mockReturnValue(buildQb([session]));
+
+      const result = await service.getMyServiceHistory('member-1');
+
+      expect(result.totalSlots).toBe(0);
+      expect(result.entries).toHaveLength(0);
     });
   });
 

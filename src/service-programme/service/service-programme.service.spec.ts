@@ -21,12 +21,15 @@ import { NotificationDispatchService } from '../../utility/service/notification-
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 
 const mockProgrammeQueryBuilder = {
+  innerJoinAndSelect: jest.fn().mockReturnThis(),
   leftJoinAndSelect: jest.fn().mockReturnThis(),
   loadRelationCountAndMap: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
   orderBy: jest.fn().mockReturnThis(),
   skip: jest.fn().mockReturnThis(),
   take: jest.fn().mockReturnThis(),
   getManyAndCount: jest.fn(),
+  getOne: jest.fn(),
 };
 
 const mockProgrammeRepo = {
@@ -509,6 +512,74 @@ describe('ServiceProgrammeService', () => {
       const result = await service.getMyUpcomingAssignments('member-1');
       expect(result[0].sessionCode).toBe('ABC123');
       expect(result[1].sessionCode).toBeNull();
+    });
+  });
+
+  describe('getUpcomingForMembers', () => {
+    it('returns the programme mapped to member-safe slot views (speaker/backup names only)', async () => {
+      mockProgrammeQueryBuilder.getOne.mockResolvedValueOnce({
+        id: 'prog-1',
+        status: ServiceProgrammeStatusEnum.LIVE,
+        serviceSlot: {
+          name: 'First Service',
+          startTime: new Date('2026-08-02T09:00:00.000Z'),
+          endTime: new Date('2026-08-02T11:00:00.000Z'),
+          event: { name: 'Sunday Service' },
+        },
+        session: { sessionCode: 'ABC123' },
+        slots: [
+          {
+            id: 'ps-2',
+            position: 1,
+            type: ServiceSlotTypeEnum.WORSHIP,
+            topic: null,
+            allocatedMinutes: 20,
+            member: null,
+            guestName: 'Guest Worship Leader',
+            backupMember: null,
+            backupGuestName: null,
+          },
+          {
+            id: 'ps-1',
+            position: 0,
+            type: ServiceSlotTypeEnum.SPEAKER,
+            topic: 'Faith',
+            allocatedMinutes: 30,
+            member: { firstname: 'Jane', lastname: 'Doe' },
+            guestName: null,
+            backupMember: { firstname: 'John', lastname: 'Smith' },
+            backupGuestName: null,
+          },
+        ],
+      });
+
+      const result = await service.getUpcomingForMembers();
+
+      expect(result).not.toBeNull();
+      expect(result?.eventName).toBe('Sunday Service');
+      expect(result?.sessionCode).toBe('ABC123');
+      // Sorted by position, regardless of array order returned by the query.
+      expect(result?.slots.map((s) => s.id)).toEqual(['ps-1', 'ps-2']);
+      expect(result?.slots[0]).toEqual(
+        expect.objectContaining({
+          speakerName: 'Jane Doe',
+          backupSpeakerName: 'John Smith',
+        }),
+      );
+      expect(result?.slots[1]).toEqual(
+        expect.objectContaining({
+          speakerName: 'Guest Worship Leader',
+          backupSpeakerName: null,
+        }),
+      );
+      // Never leaks the raw Member row (e.g. email/phone) into the response.
+      expect(result?.slots[0]).not.toHaveProperty('member');
+    });
+
+    it('returns null when nothing qualifies', async () => {
+      mockProgrammeQueryBuilder.getOne.mockResolvedValueOnce(null);
+      const result = await service.getUpcomingForMembers();
+      expect(result).toBeNull();
     });
   });
 
