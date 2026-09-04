@@ -135,17 +135,26 @@ export class AttendanceService {
     const isWorker = member.role === MemberRoleEnum.WORKER;
     const cfg = this.eventService.resolveSlotConfig(slot);
 
-    // Online services have no physical location for anyone to verify —
-    // this requirement only ever applied to workers, and only makes sense
-    // when there's a venue to be near in the first place.
-    if (
-      isWorker &&
-      cfg.format === MeetingFormatEnum.IN_PERSON &&
-      !dto.location
-    ) {
-      throw new BadRequestException(
-        'Workers must provide their location to check in.',
-      );
+    // Online services have no physical location for anyone to verify.
+    if (cfg.format === MeetingFormatEnum.IN_PERSON) {
+      if (isWorker && !dto.location) {
+        throw new BadRequestException(
+          'Workers must provide their location to check in.',
+        );
+      }
+      // Per-slot-config setting (EventConfig.enforceMemberLocation, resolved
+      // above via resolveSlotConfig), deliberately separate from
+      // enforceDistance() (whether a too-far check-in gets rejected) — a
+      // church can require members to submit location for one service
+      // without necessarily rejecting them for being far away, or require
+      // it for their main Sunday service but not a small group meeting.
+      // Without this, a member could simply omit location to skip distance
+      // checking entirely even with distance enforcement enabled.
+      if (!isWorker && !dto.location && cfg.enforceMemberLocation) {
+        throw new BadRequestException(
+          'Your location is required to check in for this service.',
+        );
+      }
     }
 
     const existing = await this.alreadyCheckedIn(user.id, slot.event.id);
@@ -245,6 +254,14 @@ export class AttendanceService {
     this.logger.log(`Processing ${events.length} event(s) for absence marking`);
 
     const manager = this.txHost.tx;
+    // Collected and only enqueued once every event in this batch has been
+    // written — followUpQueue.add() is a Redis/Bull side effect outside
+    // this Postgres transaction, so it can't roll back with it. If a later
+    // event in the loop throws (e.g. a race with a concurrent check-in
+    // hitting the unique constraint), the whole transaction rolls back;
+    // without this, jobs already enqueued for earlier events in the same
+    // run would still fire for events whose absence rows no longer exist.
+    const eventsToNotify: Event[] = [];
     for (const event of events) {
       this.logger.log(`Processing event: ${event.name} (${event.id})`);
 
@@ -284,6 +301,10 @@ export class AttendanceService {
       }
 
       await manager.update(Event, event.id, { attendanceMarked: true });
+      eventsToNotify.push(event);
+    }
+
+    for (const event of eventsToNotify) {
       this.followUpQueue.add(
         POST_EVENT_JOB,
         { eventId: event.id, ...buildJobEnvelope(this.cls) },
@@ -571,24 +592,30 @@ export class AttendanceService {
       .findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');
 
-    if (!event.onlineAttendanceEnabled) {
+    // onlineNotificationSentAt being set means the confirm window was
+    // already opened for this event (emails went out) — that stays valid
+    // even if onlineAttendanceEnabled is later toggled off, since a member
+    // who already received the email shouldn't be locked out mid-window by
+    // an unrelated settings change. Only block on the toggle itself when
+    // the window was never opened at all.
+    if (!event.onlineNotificationSentAt) {
+      if (!event.onlineAttendanceEnabled) {
+        throw new BadRequestException(
+          'Online attendance is not enabled for this event',
+        );
+      }
       throw new BadRequestException(
-        'Online attendance is not enabled for this event',
+        'Online attendance window has not opened yet',
       );
     }
 
     const windowHours = this.configService.get<number>(
       'ONLINE_CHECKIN_WINDOW_HOURS',
     );
-    if (!event.onlineNotificationSentAt) {
-      throw new BadRequestException(
-        'Online attendance window has not opened yet',
-      );
-    }
     const windowCloseTime = new Date(
       event.onlineNotificationSentAt.getTime() + windowHours * 60 * 60 * 1000,
     );
-    if (new Date() > windowCloseTime) {
+    if (this.dateService.now() > windowCloseTime) {
       throw new BadRequestException('The online attendance window has closed');
     }
 
@@ -1344,10 +1371,28 @@ export class AttendanceService {
       )
       .where('profile.member_id IN (:...memberIds)', { memberIds })
       .andWhere('leave.status = :status', { status: 'APPROVED' })
-      .andWhere('leave.date_from <= :eventDate', { eventDate: event.eventDate })
-      .andWhere('leave.date_to >= :eventDate', { eventDate: event.eventDate })
+      // event.eventDate is a `date` column, hydrated by pg's driver as a JS
+      // Date via local-timezone midnight — passed as a plain Date parameter,
+      // the driver would re-serialize it (e.g. via toISOString(), UTC),
+      // which can shift the calendar date by a day off the server's local
+      // timezone. Passing a plain 'YYYY-MM-DD' string instead sidesteps
+      // that round-trip entirely: Postgres parses it as a DATE literal with
+      // no timezone reinterpretation, regardless of server TZ.
+      .andWhere('leave.date_from <= :eventDate', {
+        eventDate: this.toDateOnlyString(event.eventDate),
+      })
+      .andWhere('leave.date_to >= :eventDate', {
+        eventDate: this.toDateOnlyString(event.eventDate),
+      })
       .getRawMany<{ memberId: string }>();
     return new Set(rows.map((r) => r.memberId));
+  }
+
+  private toDateOnlyString(d: Date): string {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   private async enforceDistance(): Promise<boolean> {

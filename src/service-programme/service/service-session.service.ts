@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { randomUUID, randomInt } from 'node:crypto';
@@ -312,7 +312,27 @@ export class ServiceSessionService {
       startedAt: now,
       endedAt: null,
     });
-    const session = await manager.save(ServiceSession, newSession);
+    // assertProgrammeIsDraft above has no row lock, so two concurrent
+    // starts for the same programme (a double-tap, or the auto-start
+    // scheduler racing a manual start) can both pass it — the DB's
+    // service_sessions_programme_id_key unique constraint is the real
+    // backstop. Without this catch the loser gets a raw 23505 error
+    // instead of the same friendly "still live" message the pre-check
+    // above gives when it wins the race instead.
+    let session: ServiceSession;
+    try {
+      session = await manager.save(ServiceSession, newSession);
+    } catch (err) {
+      if (
+        err instanceof QueryFailedError &&
+        (err as any).driverError?.code === '23505'
+      ) {
+        throw new ConflictException(
+          'A service session for this programme was just started — refresh and try again',
+        );
+      }
+      throw err;
+    }
 
     const sortedSlots = [...programme.slots].sort(
       (a, b) => a.position - b.position,

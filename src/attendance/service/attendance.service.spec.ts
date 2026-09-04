@@ -105,10 +105,13 @@ const mockConfigService = {
   get: jest.fn(),
 };
 
+const mockEventRepoForDataSource = { findOne: jest.fn() };
+
 const mockDataSource = {
   transaction: jest.fn(),
   createQueryBuilder: jest.fn(),
   query: jest.fn(),
+  getRepository: jest.fn().mockReturnValue(mockEventRepoForDataSource),
 };
 
 const mockTxManager = { save: jest.fn(), update: jest.fn() };
@@ -155,6 +158,7 @@ const defaultConfig = {
   allowedDistanceInMeters: 100,
   format: MeetingFormatEnum.IN_PERSON,
   onlineMeetingUrl: null,
+  enforceMemberLocation: false,
 };
 
 const defaultLocation = { latitude: 6.5244, longitude: 3.3792 };
@@ -337,6 +341,74 @@ describe('AttendanceService', () => {
       await expect(service.checkin(user, dto as any)).rejects.toThrow(
         BadRequestException,
       );
+    });
+
+    it('throws BadRequestException if a member omits location while the resolved config has enforceMemberLocation on', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue({
+        ...defaultConfig,
+        enforceMemberLocation: true,
+      });
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Your location is required to check in for this service.',
+      );
+    });
+
+    it('allows a member to check in without location when enforceMemberLocation is off (the default)', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.create.mockReturnValue({
+        status: AttendanceStatusEnum.PRESENT,
+      });
+      mockAttendanceRepo.save.mockResolvedValue({});
+
+      await expect(service.checkin(user, dto as any)).resolves.toEqual({
+        message: 'Check-in successful',
+      });
+    });
+
+    // These are two genuinely independent settings — a tenant enabling
+    // distance-check enforcement (is a too-far check-in rejected) must not
+    // implicitly also require members to submit location at all.
+    it('does not require member location just because distance-check enforcement is on', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceSettingsService.isEnabled.mockResolvedValue(true);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.create.mockReturnValue({
+        status: AttendanceStatusEnum.PRESENT,
+      });
+      mockAttendanceRepo.save.mockResolvedValue({});
+
+      await expect(service.checkin(user, dto as any)).resolves.toEqual({
+        message: 'Check-in successful',
+      });
     });
 
     it('should mark PRESENT for a regular member checking in within window', async () => {
@@ -585,6 +657,75 @@ describe('AttendanceService', () => {
     });
   });
 
+  describe('confirmOnlineAttendance', () => {
+    it('throws NotFoundException when the event does not exist', async () => {
+      mockEventRepoForDataSource.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.confirmOnlineAttendance('member-1', 'event-1'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('throws "not enabled" when the window was never opened and the toggle is off', async () => {
+      mockEventRepoForDataSource.findOne.mockResolvedValue({
+        id: 'event-1',
+        onlineAttendanceEnabled: false,
+        onlineNotificationSentAt: null,
+      });
+
+      await expect(
+        service.confirmOnlineAttendance('member-1', 'event-1'),
+      ).rejects.toThrow('Online attendance is not enabled for this event');
+    });
+
+    it('throws "window has not opened yet" when enabled but no emails have gone out yet', async () => {
+      mockEventRepoForDataSource.findOne.mockResolvedValue({
+        id: 'event-1',
+        onlineAttendanceEnabled: true,
+        onlineNotificationSentAt: null,
+      });
+
+      await expect(
+        service.confirmOnlineAttendance('member-1', 'event-1'),
+      ).rejects.toThrow('Online attendance window has not opened yet');
+    });
+
+    // Regression test: a member who already received the confirm email
+    // (onlineNotificationSentAt set) must not be locked out just because
+    // an admin later toggled onlineAttendanceEnabled off for the event —
+    // that's an unrelated settings change, not the window closing.
+    it('still allows confirming within the window even if onlineAttendanceEnabled was toggled off afterward', async () => {
+      mockEventRepoForDataSource.findOne.mockResolvedValue({
+        id: 'event-1',
+        onlineAttendanceEnabled: false,
+        onlineNotificationSentAt: subHours(new Date(), 1),
+      });
+      mockConfigService.get.mockReturnValue(3);
+      mockAttendanceRepo.findOne.mockResolvedValue({
+        id: 'att-1',
+        status: AttendanceStatusEnum.ABSENT,
+      });
+      mockAttendanceRepo.save.mockResolvedValue({});
+
+      await expect(
+        service.confirmOnlineAttendance('member-1', 'event-1'),
+      ).resolves.toBeDefined();
+    });
+
+    it('throws once the window has closed', async () => {
+      mockEventRepoForDataSource.findOne.mockResolvedValue({
+        id: 'event-1',
+        onlineAttendanceEnabled: true,
+        onlineNotificationSentAt: subHours(new Date(), 4),
+      });
+      mockConfigService.get.mockReturnValue(3);
+
+      await expect(
+        service.confirmOnlineAttendance('member-1', 'event-1'),
+      ).rejects.toThrow('The online attendance window has closed');
+    });
+  });
+
   describe('markAbsentees', () => {
     it('should do nothing when no events are ready', async () => {
       mockEventService.findEventsReadyForAbsenceMarking.mockResolvedValue([]);
@@ -672,6 +813,72 @@ describe('AttendanceService', () => {
           expect.objectContaining({ status: AttendanceStatusEnum.ON_LEAVE }),
         ]),
       );
+    });
+
+    // Regression test: event.eventDate is a `date` column hydrated as a JS
+    // Date at local-timezone midnight. Passing that Date object directly as
+    // a query parameter risks the driver re-serializing it (e.g. via UTC
+    // toISOString()), which can shift the calendar date by a day depending
+    // on server timezone. Must be passed as a plain 'YYYY-MM-DD' string so
+    // Postgres parses it as a DATE literal with no reinterpretation.
+    it('compares leave dates against eventDate as a plain YYYY-MM-DD string, not a Date object', async () => {
+      const eventDate = new Date(2026, 5, 1); // June 1 2026, local midnight
+      const event = { id: 'event-1', name: 'Sunday Service', eventDate };
+      mockEventService.findEventsReadyForAbsenceMarking.mockResolvedValue([
+        event,
+      ]);
+      mockMemberService.getMembersNotCheckedInForEvent.mockResolvedValue([]);
+      mockMemberService.getWorkersNotCheckedInForEvent.mockResolvedValue([
+        { id: 'worker-2' },
+      ]);
+      mockTxManager.save.mockResolvedValue(undefined);
+      mockTxManager.update.mockResolvedValue(undefined);
+      const qb = { ...makeQb(), getRawMany: jest.fn().mockResolvedValue([]) };
+      mockDataSource.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.markAbsentees();
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'leave.date_from <= :eventDate',
+        {
+          eventDate: '2026-06-01',
+        },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith('leave.date_to >= :eventDate', {
+        eventDate: '2026-06-01',
+      });
+    });
+
+    // Regression test: followUpQueue.add() is a Redis/Bull side effect
+    // outside the Postgres transaction wrapping this whole batch. If a
+    // later event's DB write throws, the transaction rolls back — but jobs
+    // already enqueued for earlier events in the same run wouldn't roll
+    // back with it unless enqueuing is deferred until the whole batch
+    // (all events) has been written without error.
+    it('does not enqueue any follow-up job if a later event in the batch fails', async () => {
+      const event1 = { id: 'event-1', name: 'First', eventDate: new Date() };
+      const event2 = { id: 'event-2', name: 'Second', eventDate: new Date() };
+      mockEventService.findEventsReadyForAbsenceMarking.mockResolvedValue([
+        event1,
+        event2,
+      ]);
+      mockMemberService.getMembersNotCheckedInForEvent.mockResolvedValue([
+        { id: 'member-2' },
+      ]);
+      mockMemberService.getWorkersNotCheckedInForEvent.mockResolvedValue([]);
+      mockDataSource.createQueryBuilder = jest.fn().mockReturnValue({
+        ...makeQb(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      });
+      mockTxManager.update.mockResolvedValue(undefined);
+      mockTxManager.save
+        .mockResolvedValueOnce(undefined) // event-1 succeeds
+        .mockRejectedValueOnce(new Error('unique constraint violation')); // event-2 fails
+
+      await expect(service.markAbsentees()).rejects.toThrow(
+        'unique constraint violation',
+      );
+      expect(mockFollowUpQueue.add).not.toHaveBeenCalled();
     });
   });
 

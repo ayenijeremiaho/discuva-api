@@ -56,6 +56,7 @@ export class EventConfigService {
       checkinStopOffsetSeconds: dto.checkinStopOffsetSeconds,
       allowedDistanceInMeters: dto.allowedDistanceInMeters,
       autoStartSession: dto.autoStartSession ?? false,
+      enforceMemberLocation: dto.enforceMemberLocation ?? false,
       defaultVenue,
       defaultFormat: format,
       onlineMeetingUrl: dto.onlineMeetingUrl ?? null,
@@ -182,6 +183,16 @@ export class EventConfigService {
     if (cfg.checkinStopOffsetSeconds <= cfg.workerLateOffsetSeconds) {
       throw new BadRequestException(
         'Check-in must close after the late threshold',
+      );
+    }
+    // Without this, a config could pass every check above yet still leave
+    // members with an impossible window — e.g. workerCheckinStart=-600,
+    // workerLate=-30, checkinStop=-15 (all valid against workers' own
+    // offsets) but memberCheckinStart=-10, meaning members' window would
+    // only open at -10s, after check-in already closed at -15s.
+    if (cfg.checkinStopOffsetSeconds <= cfg.memberCheckinStartOffsetSeconds) {
+      throw new BadRequestException(
+        'Check-in must close after members are allowed to start checking in',
       );
     }
   }

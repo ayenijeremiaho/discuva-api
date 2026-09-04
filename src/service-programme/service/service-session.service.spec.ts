@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { QueryFailedError } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import {
@@ -369,6 +370,26 @@ describe('ServiceSessionService', () => {
       expect(mockProgrammeSvc.setProgrammeStatus).toHaveBeenCalledWith(
         'prog-1',
         ServiceProgrammeStatusEnum.LIVE,
+      );
+    });
+
+    // Regression test: assertProgrammeIsDraft has no row lock, so two
+    // concurrent starts for the same programme can both pass it. The DB's
+    // service_sessions_programme_id_key unique constraint is the real
+    // backstop — the loser must get the same friendly ConflictException as
+    // the "still live" pre-check, not a raw 23505 driver error.
+    it('converts a concurrent-start unique-violation into a friendly ConflictException', async () => {
+      mockManager.create.mockImplementation((_e: unknown, data: unknown) =>
+        mockSessionRepo.create(data),
+      );
+      const dupError = Object.assign(
+        new QueryFailedError('insert', [], new Error('duplicate key')),
+        { driverError: { code: '23505' } },
+      );
+      mockManager.save.mockRejectedValue(dupError);
+
+      await expect(service.start('prog-1', 'member-1')).rejects.toThrow(
+        ConflictException,
       );
     });
 

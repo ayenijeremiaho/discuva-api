@@ -68,6 +68,13 @@ export class ServiceSlot extends BaseEntity {
   @Column({ name: 'allowed_distance_override', nullable: true, type: 'int' })
   allowedDistanceOverride: number | null;
 
+  @Column({
+    name: 'enforce_member_location_override',
+    nullable: true,
+    type: 'boolean',
+  })
+  enforceMemberLocationOverride: boolean | null;
+
   // Per-slot format override — null means "use config.defaultFormat". Lets
   // one occurrence of a recurring config go online (or back in-person)
   // without touching the shared config every other slot points at.

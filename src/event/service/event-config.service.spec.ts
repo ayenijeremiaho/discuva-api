@@ -119,6 +119,25 @@ describe('EventConfigService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    // Regression test: this ordering rule was previously only checked
+    // against workerLateOffsetSeconds — a config could pass every existing
+    // check yet still leave members with an impossible window, since
+    // nothing tied checkinStopOffsetSeconds to memberCheckinStartOffsetSeconds.
+    it('should throw BadRequestException if checkinStopOffsetSeconds <= memberCheckinStartOffsetSeconds', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+
+      await expect(
+        service.create({
+          ...validDto,
+          workerCheckinStartOffsetSeconds: -600,
+          workerLateOffsetSeconds: -30,
+          checkinStopOffsetSeconds: -15,
+          memberCheckinStartOffsetSeconds: -10,
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('should save config on valid input', async () => {
       mockRepo.exists.mockResolvedValue(false);
       mockVenueService.getById.mockResolvedValue(defaultVenue);
@@ -169,6 +188,32 @@ describe('EventConfigService', () => {
 
       expect(mockRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ autoStartSession: true }),
+      );
+    });
+
+    it('defaults enforceMemberLocation to false when not provided', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+      mockRepo.create.mockReturnValue({});
+      mockRepo.save.mockResolvedValue({});
+
+      await service.create(validDto);
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ enforceMemberLocation: false }),
+      );
+    });
+
+    it('passes enforceMemberLocation through when explicitly set to true', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+      mockRepo.create.mockReturnValue({});
+      mockRepo.save.mockResolvedValue({});
+
+      await service.create({ ...validDto, enforceMemberLocation: true });
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ enforceMemberLocation: true }),
       );
     });
 

@@ -2507,6 +2507,12 @@ Each slot can have multiple reminder schedules via sub-resource `/events/slots/:
 
 **Service slot ordering:** `EventService.getAll()`, `getById()`, and `getUpcomingEvents()` all explicitly order the `serviceSlots` relation by `startTime` ASC (query-builder `.addOrderBy('serviceSlots.startTime', 'ASC')` for `getAll`; TypeORM's relation `order` option for the other two, e.g. `order: { serviceSlots: { startTime: 'ASC' } }`). Without this, a joined one-to-many relation has no guaranteed order — First/Second Service could come back in either order depending on DB/join internals, which showed up as the admin portal's event list not consistently showing slots in the order they begin.
 
+**Editing an event's slots is blocked once the event has any recorded history.** `EventService.update()`'s slot-replacement path (`slotRepository.delete` + recreate) previously ran unconditionally — `ServiceProgramme`/`ServiceSession`/session-slots/action-log all cascade off `ServiceSlot`, and `Attendance.serviceSlot` is `ON DELETE SET NULL`, so replacing the slots on an event that had already run would silently destroy its programme/session history and detach any recorded attendance from the slot it was for. `hasRecordedHistory(eventId)` now checks (via two raw `dataSource` queries, matching `attachMyAttendance`'s existing pattern rather than adding new repository injections) whether any `attendances` row or any `service_sessions` row (joined through `service_programmes`/`service_slots`) exists for the event; if either does, the whole `PATCH` is rejected with a 400 before touching any slot. Cosmetic fields (`name`/`description`) remain editable regardless — only `serviceSlots` replacement is gated. This is a one-way door: once an event has history, its schedule can never be edited again, only replaced by creating a new event (a deliberate, safer default over a more capable diff-based in-place slot update, which was considered and explicitly deferred).
+
+**`deleteEvent`/`deleteFutureRecurring`/`getAll`'s `upcoming` filter now use precise `startTime`/`endTime`, not the date-only `eventDate`/`endDate`** — same class of fix as `findEventsReadyForAbsenceMarking`/`getUpcomingEvents` above, just not originally carried through to these three call sites. Concretely: `deleteEvent` previously compared `eventDate` (start date) to today, so a same-day event that had already fully ended hours ago was still deletable; now blocks on `endTime < now`. `deleteFutureRecurring` previously selected occurrences via `eventDate >= today`, so an already-started (or already-ended) same-day occurrence still counted as "future"; now uses `startTime >= now`, and — previously entirely missing — also filters `attendanceMarked = false`, matching `deleteEvent`'s own guard (this bulk path bypasses `deleteEvent` entirely, so it needs the same safety check independently). `getAll`'s `upcoming` filter now matches `getUpcomingEvents`' own semantics (`endTime >= now`) instead of showing an already-ended-today event as still upcoming.
+
+**Recurring event occurrence spacing is computed in UTC explicitly, not the runtime's local calendar.** `advanceDate()` used `date-fns`' `addDays`/`addWeeks`/`addMonths`, which advance via the process's *local* timezone; the resulting date-to-date millisecond delta is then applied directly to each generated occurrence's absolute slot `startTime`/`endTime`. If the runtime's local timezone ever observed DST, a transition between occurrences would skew every subsequent occurrence's actual time by up to an hour — the same category of server-timezone dependence `truncateToUtcDate` already guards against elsewhere in this service. Rewritten to advance via `setUTCDate`/`setUTCMonth` instead, so occurrence spacing is exact regardless of server `TZ`.
+
 ### Venue Module
 
 Manages named venue records referenced by event configs and individual service slots. Venues decouple location data from
@@ -2527,6 +2533,70 @@ event creation — create a venue once, reference it by ID in any config or slot
 - Window closes: `slot.startTime + checkinStopOffsetSeconds` (same for all)
 - Workers are LATE if they check in after `slot.startTime + workerLateOffsetSeconds`
 - Members are always PRESENT if within the window
+
+**Location is required from members too when the tenant enforces distance checking, not just workers.**
+Workers on an `IN_PERSON` slot have always had a hard requirement (`checkin()` throws if `!dto.location`), unconditional
+regardless of the enforce-distance setting. Members previously had no equivalent — `location` is `@IsOptional()` on
+`CheckInDto`, so a member could simply omit it and skip distance validation entirely (`validateLocation()` only
+runs `if (dto.location && cfg.venue)`), independent of whether the tenant had enforcement turned on. Now, for an
+`IN_PERSON` slot, a member omitting `location` while `enforceDistance()` is `true` gets a `BadRequestException`
+("Your location is required to check in for this service"); when enforcement is off, location stays fully optional
+for members (matches `validateLocation()`'s own behavior — it never rejects on distance when unenforced, so
+requiring location unconditionally would add friction with no effect).
+
+**`EventConfigService.validateOffsets` cross-checks `checkinStopOffsetSeconds` against `memberCheckinStartOffsetSeconds`
+too, not just `workerLateOffsetSeconds`.** Without this a config could pass every existing check yet still leave
+members with an impossible window — e.g. `workerCheckinStart=-600, workerLate=-30, checkinStop=-15` all validate
+fine against each other, but `memberCheckinStart=-10` means members' window would only *open* at -10s, after
+check-in had already *closed* at -15s.
+
+**Per-event, not per-slot, check-in dedup is intentional, not a bug.** `Attendance` has `@Unique(['member', 'event'])`
+— a worker rostered for multiple slots of the same event (e.g. serving both First and Second Service) checks in
+*once* for the whole event, not once per slot. This is a deliberate compromise: requiring a separate check-in per
+slot for every service someone serves in the same event was judged worse than the alternative. Do not "fix" this
+by moving to a per-slot unique constraint without revisiting the product decision first.
+
+**`markAbsentees()` defers all `followUpQueue.add()` calls until the entire batch has been written without error.**
+The whole per-tenant cron run is one Postgres transaction (`this.txHost.tx`, entered by `forEachActiveTenant`), but
+`followUpQueue.add()` is a Redis/Bull side effect that isn't part of that transaction and can't roll back with it.
+Previously each event's Bull job was enqueued immediately after its own DB writes, inside the same loop — so if a
+*later* event in the batch threw (e.g. a race with a concurrent check-in hitting the unique constraint above),
+the whole transaction rolled back, but jobs already enqueued for *earlier* events in that same run did not, leaving
+`POST_EVENT_JOB`s scheduled for events whose absence rows no longer existed. Now every event's `{event}` is
+collected during the loop and only enqueued in a second pass after the loop completes successfully — if anything
+throws mid-batch, nothing has been enqueued for any event in that run, matching the transaction's own all-or-nothing
+semantics.
+
+**`AttendanceService.getBatchApprovedLeave` compares leave dates against `event.eventDate` as a plain `'YYYY-MM-DD'`
+string, not the raw `Date` object.** `event.eventDate` is a `date` column, hydrated by the pg driver as a JS `Date`
+at local-timezone midnight; passing that `Date` directly as a query parameter risks the driver re-serializing it
+(e.g. via UTC `toISOString()`) before Postgres compares it against `request_leave.date_from`/`date_to` (also `date`
+columns), which can shift the effective calendar date by a day depending on server timezone. Formatting it as a
+plain date string first (via local getters, which round-trip the same y/m/d the pg driver used to construct the
+`Date` in the first place, regardless of what the server's actual local timezone is) sidesteps that reinterpretation
+entirely — Postgres parses the string as a `DATE` literal with no timezone involved.
+
+**`AttendanceService.confirmOnlineAttendance` no longer locks a member out mid-window if `onlineAttendanceEnabled`
+is toggled off after the confirm emails already went out.** Previously checked `event.onlineAttendanceEnabled`
+unconditionally first — an admin disabling the toggle after `onlineNotificationSentAt` (but before the window
+closes) meant every member clicking their already-sent confirmation link got "Online attendance is not enabled for
+this event" instead of the window simply running its course. Now checks `onlineNotificationSentAt` first: if it's
+set, the window was already opened for this event and stays valid regardless of the toggle's current state; the
+toggle is only checked (for the clearer "not enabled" vs. "window has not opened yet" message) when the window was
+never opened at all. Also now compares against `this.dateService.now()` instead of a bare `new Date()`, matching
+the rest of the module's convention.
+
+**`checkinStopOffsetSeconds` cannot leave check-in open past a slot's own end time.** Enforced in
+`EventService.buildSlotFromDto` (not `EventConfigService`, since the same config can be reused across slots of
+different durations — only at slot-save time, once a specific `startTime`/`endTime` is known, can "does this offset
+exceed the slot's own length" be judged): the effective value (`serviceSlot.checkinStopOverride ?? config.checkinStopOffsetSeconds`)
+must be `<= (endTime - startTime)` in seconds, else `BadRequestException`. discuva-member's home hero card previously
+kept showing "Live Now" for as long as this window stayed open, which — before this constraint existed — could
+outlive the admin side's own "ended" determination by however long a positive offset was configured, since the
+offset is relative to `startTime`, not `endTime`. Tenant migration `CapCheckinStopOffsetAtSlotEnd` clamps any
+existing `service_slots.checkin_stop_override` (setting one explicitly, capped to that slot's own duration, only for
+the offending slot — the shared `event_configs` row is left untouched so other slots using the same config are
+unaffected) for rows where the effective offset already exceeded their own slot's length.
 
 **Attendance Distance Check Setting — two layers, per-tenant override on top of a platform-admin default.**
 Previously `ENFORCE_DISTANCE_CHECK` was a single global env var — one on/off switch shared by every tenant, no
@@ -2568,6 +2638,33 @@ distanceMeters, allowedDistanceInMeters })` — extra keys beyond `message` are 
 by the global exception filter (`HttpExceptionFilter`, same mechanism `PlanGuard`'s `code: 'PLAN_UPGRADE_REQUIRED'`
 already uses). `distanceMeters` is the member's actual computed distance (rounded), included so the frontend can
 show it even when the failure came from the server rather than the client's own pre-check.
+
+**`EventConfig.enforceMemberLocation` — a separate, per-config setting from distance-check above.** Workers on an
+`IN_PERSON` slot have always had a hard, unconditional requirement to submit location (`checkin()` throws if
+`!dto.location`, regardless of the distance-check setting). Members had no equivalent — `location` is
+`@IsOptional()` on `CheckInDto`, so a member could simply omit it and skip `validateLocation()` entirely (which
+only runs `if (dto.location && cfg.venue)`), independent of whether distance-check enforcement was on. This setting
+lets a tenant require the same of members, **scoped per `EventConfig`** (like `allowedDistanceInMeters`, not the
+tenant-wide `AttendanceSettingsService`/distance-check toggle) — a church can require it for their main Sunday
+service's config while leaving a small-group config unaffected. Deliberately **not** merged into
+`enforceDistance()`/the distance-check setting — the two answer different questions ("is a too-far check-in
+rejected" vs. "must location be submitted at all") and a config may want either without the other (e.g. requiring
+members to share location for record-keeping without necessarily blocking anyone who happens to be far away).
+
+- **Storage**: `EventConfig.enforceMemberLocation` (boolean column, default `false`), with a per-slot override —
+  `ServiceSlot.enforceMemberLocationOverride` (nullable boolean, `null` = inherit from config) — same override
+  pattern as `checkinStopOverride`/`allowedDistanceOverride`. Resolved in `EventService.resolveSlotConfig()`
+  (`slot.enforceMemberLocationOverride ?? config.enforceMemberLocation`) alongside every other per-slot-resolved
+  setting, so `AttendanceService.checkin()` reads it synchronously off the already-resolved config rather than a
+  separate settings lookup.
+- **Enforcement**: `AttendanceService.checkin()` — for an `IN_PERSON` slot, a member omitting `location` while the
+  resolved `cfg.enforceMemberLocation` is `true` gets `BadRequestException('Your location is required to check in
+  for this service.')`.
+- **DTOs**: `CreateEventConfigDto.enforceMemberLocation?: boolean` (defaults to `false` in `EventConfigService.create()`
+  when omitted, same as `autoStartSession`), `CreateServiceSlotDto.enforceMemberLocationOverride?: boolean`.
+- **Frontend (admin)**: discuva-admin's Event Config page — a toggle inside each config's create/edit form
+  (alongside "Auto-Start Programme"), not a standalone tenant-wide banner like distance-check. Reflected as a
+  small "Member location required" badge on the config list row and detail view when on.
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
@@ -5627,6 +5724,7 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 - Admin frontend information architecture: the `GET /service-programme` list groups programmes under their parent event (using the `event`/`serviceSlotDetail` fields above) instead of rendering every service slot as an unrelated row, so multi-slot events (e.g. First/Second Service on the same Sunday) visibly belong together. A persistent "Live" pill in the admin top bar (`useActiveSessions`, polling `GET /service-session/active`) is reachable from any page and deep-links straight into a dedicated full-width Live Session Dashboard at `/service-programme/live/:sessionCode` — replacing the old cramped side-panel controls, which now show only a status summary with a link to the dashboard. The poll interval backs off adaptively: 20s while at least one session is LIVE, 60s while idle (the common case, since most of the time nothing is live) — this cut the steady-state request volume from this always-mounted, every-page component by 3x without slowing detection of a session actually starting/ending.
 - All four live-session frontend surfaces (Live Session Dashboard, Programme Manager, Presentation, Audience) explicitly check `anchor.status === 'COMPLETED'` and render a dedicated "Session Ended" screen — previously they only checked whether the anchor/payload existed at all, so once a session legitimately ended, `currentSlot` (looked up by `anchor.currentSlotPosition`) still resolved fine and every view kept showing the ordinary live stage with no active slot to display, reading as a stuck/broken UI rather than a finished session.
 - Starting a session late (after its `ServiceSlot.startTime` has passed) has never been restricted — `ServiceSessionService.start()` has no time-window check, so any DRAFT programme with slots can be started at any time via `POST /service-session/programme/:programmeId/start`.
+- **A concurrent double-start of the same programme now surfaces the same friendly `ConflictException` as the "still live" pre-check, instead of a raw driver error.** `assertProgrammeIsDraft` takes no row lock, so two near-simultaneous `start()` calls for the same programme (a double-tap on the button, or the auto-start scheduler racing a manual start) can both pass it; the DB's `service_sessions_programme_id_key` unique constraint is the real backstop that prevents an actual duplicate `LIVE` session, but the loser previously got an unhandled `QueryFailedError` straight from the driver. The `manager.save(ServiceSession, ...)` call is now wrapped the same way `AttendanceService.checkin()` already handles its own unique-constraint race: catch, check `driverError.code === '23505'`, throw `ConflictException('A service session for this programme was just started — refresh and try again')`; anything else rethrows unchanged.
 - A DRAFT programme that was created but never started can be permanently deleted via the pre-existing `DELETE /service-programme/:id` (blocked once a programme leaves DRAFT). The admin Programmes list now surfaces this directly on each DRAFT row (a small trash icon, previously only reachable from inside the detail panel) so an abandoned programme can be removed from the "ready to start" list without opening it first.
 - When the session ends, remaining PENDING slots are marked SKIPPED, the programme status moves to COMPLETED, and if `saveAsTemplate = true` the programme is auto-saved as a `ServiceProgrammeTemplate`. A session-report email is fire-and-forget dispatched to all active Admin department workers via Bull queue (template: `service-session-report`).
 - **Indexes** (migration `AddServiceProgrammeQueryIndexes`): `service_sessions(status)` backs the frequently-polled `getActiveSessions()` (global Live pill, every 20s from every open admin tab); `service_programme_slots(member_id)` backs the synchronous double-booking conflict check run on every slot assignment; `service_programmes(status)` backs the daily reminder scheduler's DRAFT filter; a partial index on `service_programme_slots(reminder_sent_at) WHERE reminder_sent_at IS NULL` matches that scheduler's exact predicate and stays small regardless of table growth. `service_slots(start_time)`/`(end_time)` (pre-existing) already cover the conflict check's time-overlap comparison and the reminder scheduler's 24–48h window.

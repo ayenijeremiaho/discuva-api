@@ -5141,7 +5141,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"defaultVenueId\": \"{{venueId}}\",\n  \"defaultFormat\": \"IN_PERSON\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150,\n  \"autoStartSession\": false\n}",
+              "raw": "{\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"defaultVenueId\": \"{{venueId}}\",\n  \"defaultFormat\": \"IN_PERSON\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150,\n  \"autoStartSession\": false,\n  \"enforceMemberLocation\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"

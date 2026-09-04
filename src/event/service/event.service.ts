@@ -10,7 +10,6 @@ import { Event } from '../entity/event.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { EventConfig } from '../entity/event-config.entity';
 import { Venue } from '../../venue/entity/venue.entity';
-import { addDays, addMonths, addWeeks } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
 import { CreateEventDto } from '../dto/create-event.dto';
 import { CreateServiceSlotDto } from '../dto/create-service-slot.dto';
@@ -79,6 +78,18 @@ export class EventService {
     if (dto.description !== undefined) event.description = dto.description;
 
     if (dto.serviceSlots?.length) {
+      // Replacing the slot set deletes and recreates every ServiceSlot row,
+      // and ServiceProgramme/ServiceSession/session-slots/action-log all
+      // cascade off ServiceSlot (and any Attendance still pointing at the
+      // deleted slot loses that reference, since the FK is ON DELETE SET
+      // NULL) — so once this event has any recorded history, replacing its
+      // slots would silently destroy it. Block that outright rather than
+      // risk it; cosmetic fields (name/description) remain editable either way.
+      if (await this.hasRecordedHistory(id)) {
+        throw new BadRequestException(
+          'This event has recorded session or attendance history — its schedule can no longer be edited',
+        );
+      }
       await this.slotRepository.delete({ event: { id } });
       const slots = await this.buildSlots(dto.serviceSlots);
       event.serviceSlots = slots;
@@ -140,9 +151,9 @@ export class EventService {
       .take(limit);
 
     if (filter.upcoming) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      qb.andWhere('event.eventDate >= :upcomingFrom', { upcomingFrom: today });
+      qb.andWhere('event.endTime >= :upcomingFrom', {
+        upcomingFrom: new Date(),
+      });
     }
     if (filter.from)
       qb.andWhere('event.eventDate >= :from', { from: filter.from });
@@ -166,12 +177,7 @@ export class EventService {
 
     if (!event) throw new NotFoundException('Event not found');
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const eventDay = new Date(event.eventDate);
-    eventDay.setHours(0, 0, 0, 0);
-
-    if (eventDay < today) {
+    if (event.endTime < new Date()) {
       this.logger.warn(
         `Delete of event "${event.name}" (id: ${eventId}) blocked — event is in the past`,
       );
@@ -199,13 +205,17 @@ export class EventService {
     recurringEventId: string,
     actorId: string,
   ): Promise<void> {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
+    // startTime, not eventDate — a same-day occurrence that's already
+    // started (or already ended) shouldn't count as "future" just because
+    // its calendar date hasn't rolled over yet. attendanceMarked = false
+    // matches deleteEvent's own guard against removing an occurrence that
+    // already has recorded attendance, which this bulk path — unlike
+    // deleteEvent — previously had no equivalent check for at all.
     const events = await this.eventRepository
       .createQueryBuilder('event')
       .where('event.recurringEventId = :recurringEventId', { recurringEventId })
-      .andWhere('event.eventDate >= :today', { today })
+      .andWhere('event.startTime >= :now', { now: new Date() })
+      .andWhere('event.attendanceMarked = false')
       .getMany();
 
     if (!events.length)
@@ -259,6 +269,7 @@ export class EventService {
     allowedDistanceInMeters: number;
     format: MeetingFormatEnum;
     onlineMeetingUrl: string | null;
+    enforceMemberLocation: boolean;
   } {
     const c = slot.config;
     if (!c)
@@ -287,6 +298,8 @@ export class EventService {
         slot.allowedDistanceOverride ?? c.allowedDistanceInMeters,
       format,
       onlineMeetingUrl: c.onlineMeetingUrl,
+      enforceMemberLocation:
+        slot.enforceMemberLocationOverride ?? c.enforceMemberLocation,
     };
   }
 
@@ -458,6 +471,22 @@ export class EventService {
       );
     }
 
+    // checkinStopOffsetSeconds is relative to the slot's own startTime (see
+    // AttendanceService.validateCheckinWindow), so whether it leaves
+    // check-in open past the slot's actual end depends on this specific
+    // slot's duration — a config shared across slots of different lengths
+    // can't be validated for this at config-save time, only here.
+    const effectiveCheckinStopOffsetSeconds =
+      dto.checkinStopOverride ?? config?.checkinStopOffsetSeconds;
+    if (effectiveCheckinStopOffsetSeconds !== undefined) {
+      const durationSeconds = (end.getTime() - start.getTime()) / 1000;
+      if (effectiveCheckinStopOffsetSeconds > durationSeconds) {
+        throw new BadRequestException(
+          `Slot "${dto.name ?? 'Service'}" would leave check-in open past its own end time (closes ${effectiveCheckinStopOffsetSeconds}s after start, but the slot is only ${durationSeconds}s long) — reduce the check-in stop offset for this slot or its config`,
+        );
+      }
+    }
+
     return this.slotRepository.create({
       name: dto.name ?? 'Service',
       startTime: start,
@@ -468,9 +497,33 @@ export class EventService {
       memberCheckinStartOverride: dto.memberCheckinStartOverride ?? null,
       checkinStopOverride: dto.checkinStopOverride ?? null,
       allowedDistanceOverride: dto.allowedDistanceOverride ?? null,
+      enforceMemberLocationOverride: dto.enforceMemberLocationOverride ?? null,
       venueOverride,
       formatOverride,
     });
+  }
+
+  /** True if this event has any recorded attendance or any service session (LIVE or COMPLETED) ever started for one of its slots. */
+  private async hasRecordedHistory(eventId: string): Promise<boolean> {
+    const [attendance, session] = await Promise.all([
+      this.dataSource
+        .createQueryBuilder()
+        .select('1')
+        .from('attendances', 'a')
+        .where('a.event_id = :eventId', { eventId })
+        .limit(1)
+        .getRawOne(),
+      this.dataSource
+        .createQueryBuilder()
+        .select('1')
+        .from('service_sessions', 'ss')
+        .innerJoin('service_programmes', 'sp', 'sp.id = ss.programme_id')
+        .innerJoin('service_slots', 'slot', 'slot.id = sp.service_slot_id')
+        .where('slot.event_id = :eventId', { eventId })
+        .limit(1)
+        .getRawOne(),
+    ]);
+    return !!attendance || !!session;
   }
 
   private async attachMyAttendance(
@@ -515,14 +568,25 @@ export class EventService {
     }
   }
 
+  // Advances by whole calendar days/months in UTC specifically (not
+  // date-fns' addDays/addWeeks/addMonths, which use the *runtime's local*
+  // calendar) — the resulting date-to-date millisecond delta gets applied
+  // directly to each slot's absolute startTime/endTime below, so a DST
+  // transition in the runtime's local timezone would otherwise skew every
+  // subsequent occurrence's actual time by up to an hour. Same reasoning
+  // as truncateToUtcDate: this must not depend on the server's timezone.
   private advanceDate(date: Date, pattern: string, interval: number): Date {
+    const d = new Date(date);
     switch (pattern) {
       case 'daily':
-        return addDays(date, interval);
+        d.setUTCDate(d.getUTCDate() + interval);
+        return d;
       case 'weekly':
-        return addWeeks(date, interval);
+        d.setUTCDate(d.getUTCDate() + interval * 7);
+        return d;
       case 'monthly':
-        return addMonths(date, interval);
+        d.setUTCMonth(d.getUTCMonth() + interval);
+        return d;
       default:
         throw new BadRequestException(`Unknown recurrence pattern: ${pattern}`);
     }

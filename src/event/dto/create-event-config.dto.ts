@@ -48,6 +48,11 @@ export class CreateEventConfigDto {
   @Max(-1)
   memberCheckinStartOffsetSeconds: number;
 
+  // Relative to the slot's startTime (see AttendanceService.validateCheckinWindow),
+  // not endTime — must be non-negative so check-in can't close before it
+  // even opens. The upper bound (must not exceed slot duration, so
+  // check-in can't stay open past the slot's own end) can only be checked
+  // once a specific slot's duration is known — see EventService.buildSlotFromDto.
   @IsInt()
   @Min(0)
   checkinStopOffsetSeconds: number;
@@ -59,4 +64,11 @@ export class CreateEventConfigDto {
   @IsOptional()
   @IsBoolean()
   autoStartSession?: boolean;
+
+  // Separate from the tenant-wide distance-check-enforcement setting — see
+  // EventConfig.enforceMemberLocation. A slot can override this via
+  // CreateServiceSlotDto.enforceMemberLocationOverride.
+  @IsOptional()
+  @IsBoolean()
+  enforceMemberLocation?: boolean;
 }
