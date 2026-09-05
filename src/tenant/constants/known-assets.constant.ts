@@ -37,6 +37,11 @@ export const KNOWN_ASSETS = [
     description: 'Header on the events list',
   },
   {
+    key: 'church-calendar-hero',
+    label: 'Church Calendar',
+    description: 'Header on the church calendar list',
+  },
+  {
     key: 'attendance-backdrop',
     label: 'Attendance',
     description: 'Header on the check-in / attendance screen',

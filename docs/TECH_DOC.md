@@ -4311,6 +4311,8 @@ Admin-configurable, dated programme calendars — the in-app equivalent of the f
 
 New `CloudinaryFolder` member `'church-calendar-images'` and new `PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB` (default 5MB, same shape as `MAX_PAGE_IMAGE_UPLOAD_MB`).
 
+The member app's list-page header is its own `KNOWN_ASSETS` entry (`church-calendar-hero`, `src/tenant/constants/known-assets.constant.ts`), overridable from discuva-admin's Mobile App Appearance page like every other page header. It was initially built reusing the existing `events-hero` key to save a step — fixed once flagged, since that would have meant a church customizing the Events page's header silently changed Church Calendar's too (or vice versa). Each page header gets its own key unless it's one of the few *deliberately* shared ones (e.g. `prayer-hands-bible` across prayer/prayer-requests/evangelism) — reusing one should be a conscious choice, not a shortcut.
+
 **`DateService.today()`** (new): today's date as a plain `'yyyy-MM-dd'` string in the church's configured timezone, for comparing against a `date`-typed column. Added because nothing on `DateService` already did this — `format(new Date(), 'yyyy-MM-dd')` renders using the *server process's* timezone, which can land on the wrong calendar day near midnight for a church whose timezone differs from the server's; `today()` runs `new Date()` through the same `toZonedTime` shift `startOfDay()`/`endOfDay()` already use before formatting, so the date components come out right regardless of what timezone the Node process itself is running in.
 
 | Method | Route | Auth | Notes |
