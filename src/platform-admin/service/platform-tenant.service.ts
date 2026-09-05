@@ -205,7 +205,7 @@ export class PlatformTenantService {
     // EmailQueueService caches this tenant's branding under the same key —
     // an admin edit here must invalidate it or emails keep the old
     // name/logo/address for up to the cache TTL.
-    this.cacheService.del(`tenant-branding:${tenant.id}`);
+    this.delTenantCache(tenant.id, `tenant-branding:${tenant.id}`);
     return this.toHealthShape(saved);
   }
 
@@ -249,7 +249,7 @@ export class PlatformTenantService {
     // PlanGuard caches resolved features under this exact key (§4.11) — a
     // manual plan change has to invalidate it or the tenant keeps the old
     // plan's access for up to the cache TTL.
-    await this.cacheService.del(`plan-features:${tenant.id}`);
+    await this.delTenantCache(tenant.id, `plan-features:${tenant.id}`);
     return saved;
   }
 
@@ -314,7 +314,7 @@ export class PlatformTenantService {
     // PlanFeatureResolverService caches resolved overrides under this exact
     // key alongside plan features — same reasoning changeTenantPlan already
     // documents for its own cache invalidation.
-    await this.cacheService.del(`plan-features:${tenant.id}`);
+    await this.delTenantCache(tenant.id, `plan-features:${tenant.id}`);
     return this.toHealthShape(saved);
   }
 
@@ -340,12 +340,14 @@ export class PlatformTenantService {
     if (!dto.enabled) {
       await this.removeModuleFromAllPlans(moduleKey);
       await this.clearAllOverridesFor(moduleKey);
+      await this.invalidateAllTenantCaches();
       return { enabled: false, tenantIds: [] };
     }
 
     if (dto.tenantIds.length === 0) {
       await this.addModuleToAllPlans(moduleKey);
       await this.clearAllOverridesFor(moduleKey);
+      await this.invalidateAllTenantCaches();
       return { enabled: true, tenantIds: [] };
     }
 
@@ -368,11 +370,46 @@ export class PlatformTenantService {
     }
     if (affected.length) {
       await this.tenantRepo.save(affected);
-      await Promise.all(
-        affected.map((t) => this.cacheService.del(`plan-features:${t.id}`)),
-      );
     }
+    // Every plan just lost `moduleKey` (the removeModuleFromAllPlans call
+    // above), which affects any tenant on one of those plans — not just the
+    // ones whose override changed in the loop above — so every tenant's
+    // cached resolution needs invalidating, not just `affected`.
+    await this.invalidateAllTenantCaches();
     return { enabled: true, tenantIds: dto.tenantIds };
+  }
+
+  // A plan's `features` gaining or losing a module key (via the rollout
+  // above, or a direct Plan edit in updatePlan()) changes what every tenant
+  // on that plan resolves to — but PlanFeatureResolverService.resolve()
+  // caches per tenant, keyed by tenant id, with no reverse index from plan
+  // to its subscribed tenants. Rather than query which tenants are
+  // currently on the affected plan(s) (subscriptions can also be mid-change
+  // concurrently), invalidate every tenant's cache — a full table scan plus
+  // a Redis DEL per tenant, cheap at this platform's tenant counts and
+  // simplest to reason about as correct.
+  private async invalidateAllTenantCaches(): Promise<void> {
+    const tenants = await this.tenantRepo.find();
+    await Promise.all(
+      tenants.map((t) => this.delTenantCache(t.id, `plan-features:${t.id}`)),
+    );
+  }
+
+  // CacheService.scopedKey() reads the tenant id out of CLS, defaulting to
+  // 'global' when absent — which is every request into this service, since
+  // platform-admin routes are excluded from TenantMiddleware. Every key this
+  // service invalidates was SET from inside an actual tenant-scoped request
+  // (e.g. PlanFeatureResolverService.resolve() inside ModuleEnabledGuard),
+  // so a bare `cacheService.del()` call here computes `tenant:global:...`
+  // and silently misses the real `tenant:${tenantId}:...` entry every
+  // time — the change never takes visible effect until the entry's own TTL
+  // expires on its own. Re-entering the target tenant's CLS context for the
+  // duration of the del() call is the fix; every cache invalidation in this
+  // file must go through this rather than calling cacheService.del() bare.
+  private async delTenantCache(tenantId: string, key: string): Promise<void> {
+    await this.cls.runWith({ tenantId } as AppClsStore, () =>
+      this.cacheService.del(key),
+    );
   }
 
   private async getModuleRollout(moduleKey: string): Promise<{
@@ -451,7 +488,7 @@ export class PlatformTenantService {
     }
     await this.tenantRepo.save(affected);
     await Promise.all(
-      affected.map((t) => this.cacheService.del(`plan-features:${t.id}`)),
+      affected.map((t) => this.delTenantCache(t.id, `plan-features:${t.id}`)),
     );
   }
 

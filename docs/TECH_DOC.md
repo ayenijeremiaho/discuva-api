@@ -3582,6 +3582,45 @@ byte-identical to Social Media's, just keyed on `pages` instead — a plan gaini
 "everyone" case) or a tenant gaining `moduleOverrides.pages = true` (the "specific churches" case) both flow
 through the exact code path already covered above.
 
+**Two bugs found and fixed while wiring up Pages Rollout, both around cache invalidation from platform-admin
+requests.** Reported symptom: a platform admin enabled Pages for a tenant, but that tenant's discuva-admin kept
+showing the plan-upgrade-required gate.
+
+1. **Missing invalidation entirely, in `setSocialMediaRollout`'s "disabled" and "enabled, empty tenantIds"
+   branches.** `PlanFeatureResolverService.resolve(tenantId)` caches its result under `plan-features:${tenantId}`
+   for 300s. Those two branches only called `cacheService.del()` for tenants whose *override* changed in the loop
+   that follows them — a tenant gaining or losing access purely because the **plan's** `features` array changed
+   (the common case for both branches, and for any plain `PATCH /platform/plans/:id` edit to a plan's `features`
+   via the Plans admin page) had no cache invalidated at all. Fixed two places: `setModuleRollout()` now calls a
+   new `invalidateAllTenantCaches()` (a full tenant scan + one cache invalidation per tenant — no reverse index
+   exists from a plan to its subscribers, and tenant counts at this platform's scale make a full scan cheap enough
+   not to warrant one) at the end of all three branches, superseding the old per-affected-tenant-only
+   invalidation; `PlatformPlanService.updatePlan()` (previously had no `CacheService` dependency at all) now
+   invalidates every tenant subscribed to the edited plan whenever `features` or `featureLimits` changes.
+
+2. **The deeper bug: every invalidation in this file — including the pre-existing ones in `changeTenantPlan` and
+   `setModuleOverride` that predate this Pages work entirely — was computing the wrong Redis key.**
+   `CacheService.del()`/`.get()`/`.set()` all route through a private `scopedKey()` that prefixes the key with
+   `tenant:${cls.get('tenantId') ?? 'global'}:`. Platform-admin routes are deliberately excluded from
+   `TenantMiddleware` (see `PlanFeatureResolverService`'s own comment), so every request into
+   `PlatformTenantService`/`PlatformPlanService` has **no tenant id in CLS at all** — a bare
+   `cacheService.del(\`plan-features:${tenant.id}\`)` call from here always resolved to
+   `tenant:global:plan-features:${tenant.id}`, while the entry actually written by
+   `PlanFeatureResolverService.resolve()` (called from inside an actual tenant-scoped request, where CLS
+   genuinely holds that tenant's id) lives at `tenant:${tenant.id}:plan-features:${tenant.id}` — a different key
+   entirely, so the "invalidation" was always a silent no-op. This had gone unnoticed for as long as caching has
+   existed here (`tenant-branding` cache invalidation in `updateTenant` has the identical bug) because the TTL is
+   only 300s — most manual testing outlasted the staleness window without anyone noticing the del() call never
+   actually did anything. It surfaced clearly this time because the Pages tenant under test had a warm cache from
+   moments earlier. **Fix:** a new `PlatformTenantService.delTenantCache(tenantId, key)` re-enters that tenant's
+   CLS context via `cls.runWith({tenantId}, () => cacheService.del(key))` before deleting — every cache
+   invalidation in the file (branding, plan-features, the rollout's blanket invalidation) now goes through it
+   instead of calling `cacheService.del()` bare; `PlatformPlanService.updatePlan()` does the equivalent inline
+   with its own newly-injected `ClsService`. Regression-tested by asserting `ClsService.runWith` is actually
+   called with the correct `{tenantId}` before the cache key is touched — a test that would have passed under the
+   old bare-`del()` code by simply never noticing the key was wrong, if it only asserted `cacheService.del` was
+   called with the right raw key.
+
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
 | GET | `/platform/pages/rollout` | PlatformAdminGuard (TENANTS_READ) | `{enabled: boolean, tenantIds: string[]}`, same derivation as Social Media's but keyed on `pages` |

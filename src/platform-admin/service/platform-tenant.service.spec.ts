@@ -39,6 +39,7 @@ const mockProvisioningService = {
   provision: jest.fn(),
 };
 const mockCacheService = { del: jest.fn() };
+const mockClsService = { runWith: jest.fn((_ctx, fn) => fn()) };
 
 const baseTenant = {
   id: 'tenant-1',
@@ -87,7 +88,7 @@ describe('PlatformTenantService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue('secret') },
         },
-        { provide: ClsService, useValue: { runWith: jest.fn() } },
+        { provide: ClsService, useValue: mockClsService },
         {
           provide: TransactionHost,
           useValue: { tx: {}, withTransaction: jest.fn() },
@@ -478,6 +479,16 @@ describe('PlatformTenantService', () => {
       expect(mockCacheService.del).toHaveBeenCalledWith(
         'plan-features:tenant-1',
       );
+      // CacheService.del() scopes its key by the tenant id in CLS — a
+      // platform-admin request carries none of its own, so this cache
+      // invalidation only hits the entry actually written by a real
+      // tenant-scoped request if it re-enters that tenant's CLS context
+      // first. Regression coverage for the bug where every del() call in
+      // this file silently computed `tenant:global:...` instead.
+      expect(mockClsService.runWith).toHaveBeenCalledWith(
+        { tenantId: 'tenant-1' },
+        expect.any(Function),
+      );
     });
 
     it('preserves existing overrides on other modules when setting a new one', async () => {
@@ -566,6 +577,12 @@ describe('PlatformTenantService', () => {
         expect.objectContaining({ id: 't1', moduleOverrides: null }),
       ]);
       expect(result).toEqual({ enabled: false, tenantIds: [] });
+      // Every tenant's cached plan resolution is invalidated, not just t1
+      // (whose override changed) — t2's access came purely from the plan
+      // now losing the feature, which its own cache wouldn't reflect
+      // otherwise for up to the cache's TTL.
+      expect(mockCacheService.del).toHaveBeenCalledWith('plan-features:t1');
+      expect(mockCacheService.del).toHaveBeenCalledWith('plan-features:t2');
     });
 
     it('enabled + empty tenantIds: adds social_media to every plan missing it and clears overrides', async () => {
@@ -575,6 +592,7 @@ describe('PlatformTenantService', () => {
       ]);
       mockTenantRepo.find.mockResolvedValue([
         { ...baseTenant, id: 't1', moduleOverrides: { social_media: true } },
+        { ...baseTenant, id: 't2', moduleOverrides: null },
       ]);
 
       const result = await service.setSocialMediaRollout({
@@ -592,6 +610,11 @@ describe('PlatformTenantService', () => {
         expect.objectContaining({ id: 't1', moduleOverrides: null }),
       ]);
       expect(result).toEqual({ enabled: true, tenantIds: [] });
+      // t2 never had an override, so it's the case that would otherwise be
+      // missed: it only gains access via the plan-level feature just added,
+      // and without a blanket invalidation its cached "not included" result
+      // would linger for up to the cache TTL.
+      expect(mockCacheService.del).toHaveBeenCalledWith('plan-features:t2');
     });
 
     it('enabled + specific tenantIds: strips social_media from plans, sets overrides only for selected tenants, clears it for previously-selected ones no longer in the list', async () => {
