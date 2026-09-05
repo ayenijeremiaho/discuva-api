@@ -344,6 +344,189 @@ describe('ServiceProgrammeService', () => {
       ]);
     });
 
+    describe('assignment notifications', () => {
+      it('sends one consolidated email (not one per slot) when the same member is assigned to multiple parts', async () => {
+        mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+        mockProgrammeRepo.find
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([draftProgramme]);
+        mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
+        mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
+        const memberA = {
+          id: 'member-a',
+          firstname: 'A',
+          lastname: 'A',
+          email: 'a@example.com',
+        };
+        mockMemberRepo.find.mockResolvedValue([memberA]);
+        mockSlotRepo.create.mockImplementation((d) => d);
+        mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+        await service.create(
+          {
+            programmes: [
+              {
+                serviceSlotId: 'slot-1',
+                slots: [
+                  {
+                    type: ServiceSlotTypeEnum.WORSHIP,
+                    allocatedMinutes: 20,
+                    memberId: 'member-a',
+                  },
+                  {
+                    type: ServiceSlotTypeEnum.SPEAKER,
+                    allocatedMinutes: 40,
+                    memberId: 'member-a',
+                  },
+                ],
+              },
+            ],
+          },
+          mockAdmin,
+        );
+
+        const emailCalls =
+          mockNotificationDispatchService.notifyMember.mock.calls.filter(
+            ([opts]: any) => opts.email,
+          );
+        expect(emailCalls).toHaveLength(1);
+        expect(emailCalls[0][0]).toMatchObject({
+          email: expect.objectContaining({
+            to: 'a@example.com',
+            template: 'service-programme-assignments',
+            data: expect.objectContaining({ count: 2, multiple: true }),
+          }),
+        });
+        expect(emailCalls[0][0].email.data.assignments).toHaveLength(2);
+
+        // Push is unaffected — still one per assignment.
+        const pushCalls =
+          mockNotificationDispatchService.notifyMember.mock.calls.filter(
+            ([opts]: any) => opts.push,
+          );
+        expect(pushCalls).toHaveLength(2);
+      });
+
+      it('sends separate emails to different members assigned in the same create() call', async () => {
+        mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+        mockProgrammeRepo.find
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([draftProgramme]);
+        mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
+        mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
+        const memberA = {
+          id: 'member-a',
+          firstname: 'A',
+          lastname: 'A',
+          email: 'a@example.com',
+        };
+        const memberB = {
+          id: 'member-b',
+          firstname: 'B',
+          lastname: 'B',
+          email: 'b@example.com',
+        };
+        mockMemberRepo.find.mockResolvedValue([memberA, memberB]);
+        mockSlotRepo.create.mockImplementation((d) => d);
+        mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+        await service.create(
+          {
+            programmes: [
+              {
+                serviceSlotId: 'slot-1',
+                slots: [
+                  {
+                    type: ServiceSlotTypeEnum.WORSHIP,
+                    allocatedMinutes: 20,
+                    memberId: 'member-a',
+                  },
+                  {
+                    type: ServiceSlotTypeEnum.SPEAKER,
+                    allocatedMinutes: 40,
+                    memberId: 'member-b',
+                  },
+                ],
+              },
+            ],
+          },
+          mockAdmin,
+        );
+
+        const emailCalls =
+          mockNotificationDispatchService.notifyMember.mock.calls.filter(
+            ([opts]: any) => opts.email,
+          );
+        expect(emailCalls).toHaveLength(2);
+        expect(emailCalls.map(([opts]: any) => opts.email.to).sort()).toEqual([
+          'a@example.com',
+          'b@example.com',
+        ]);
+        expect(emailCalls[0][0].email.data.count).toBe(1);
+        expect(emailCalls[1][0].email.data.count).toBe(1);
+      });
+
+      it('combines a primary assignment and a backup assignment for the same member into one email', async () => {
+        mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+        mockProgrammeRepo.find
+          .mockResolvedValueOnce([])
+          .mockResolvedValueOnce([draftProgramme]);
+        mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
+        mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
+        const memberA = {
+          id: 'member-a',
+          firstname: 'A',
+          lastname: 'A',
+          email: 'a@example.com',
+        };
+        const memberB = {
+          id: 'member-b',
+          firstname: 'B',
+          lastname: 'B',
+          email: 'b@example.com',
+        };
+        mockMemberRepo.find.mockResolvedValue([memberA, memberB]);
+        mockSlotRepo.create.mockImplementation((d) => d);
+        mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+        await service.create(
+          {
+            programmes: [
+              {
+                serviceSlotId: 'slot-1',
+                slots: [
+                  {
+                    type: ServiceSlotTypeEnum.WORSHIP,
+                    allocatedMinutes: 20,
+                    memberId: 'member-a',
+                  },
+                  {
+                    type: ServiceSlotTypeEnum.SPEAKER,
+                    allocatedMinutes: 40,
+                    memberId: 'member-b',
+                    backupMemberId: 'member-a',
+                  },
+                ],
+              },
+            ],
+          },
+          mockAdmin,
+        );
+
+        const emailCalls =
+          mockNotificationDispatchService.notifyMember.mock.calls.filter(
+            ([opts]: any) => opts.email?.to === 'a@example.com',
+          );
+        expect(emailCalls).toHaveLength(1);
+        const assignments = emailCalls[0][0].email.data.assignments;
+        expect(assignments).toHaveLength(2);
+        expect(assignments.map((a: any) => a.isBackup).sort()).toEqual([
+          false,
+          true,
+        ]);
+      });
+    });
+
     it('throws NotFoundException when a slot references a member that does not exist', async () => {
       mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
       mockProgrammeRepo.find.mockResolvedValueOnce([]);

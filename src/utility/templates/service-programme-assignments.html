@@ -1,0 +1,272 @@
+<!DOCTYPE html
+  PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <title></title>
+  <style type="text/css" rel="stylesheet" media="all">
+      body {
+          width: 100% !important;
+          height: 100%;
+          margin: 0;
+          -webkit-text-size-adjust: none;
+          background-color: #F4F1EA;
+          color: #121212;
+      }
+
+      a {
+          color: #8A817C;
+          text-decoration: underline;
+      }
+
+      a img {
+          border: none;
+      }
+
+      td {
+          word-break: break-word;
+      }
+
+      .preheader {
+          display: none !important;
+          visibility: hidden;
+          mso-hide: all;
+          font-size: 1px;
+          line-height: 1px;
+          max-height: 0;
+          max-width: 0;
+          opacity: 0;
+          overflow: hidden;
+      }
+
+      body,
+      td,
+      th {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      h1 {
+          margin-top: 0;
+          color: #121212;
+          font-size: 24px;
+          font-weight: 300;
+          tracking-tight: -0.025em;
+          text-align: left;
+      }
+
+      td,
+      th {
+          font-size: 16px;
+      }
+
+      p,
+      ul,
+      ol,
+      blockquote {
+          margin: .4em 0 1.1875em;
+          font-size: 15px;
+          line-height: 1.625;
+          font-weight: 300;
+      }
+
+      p {
+          color: #121212;
+      }
+
+      p.sub {
+          font-size: 12px;
+          color: #8A817C;
+      }
+
+      .attributes {
+          margin: 0 0 21px;
+      }
+
+      .attributes_content {
+          background-color: #EADCC9;
+          padding: 16px;
+          border-radius: 0px;
+      }
+
+      .attributes_item {
+          padding: 4px 0;
+          color: #121212;
+          font-size: 14px;
+      }
+
+      .part-heading {
+          font-weight: 600;
+          font-size: 14px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          color: #8A817C;
+          margin-top: 25px;
+      }
+
+      .email-wrapper {
+          width: 100%;
+          margin: 0;
+          padding: 0;
+          background-color: #F4F1EA;
+      }
+
+      .email-content {
+          width: 100%;
+          margin: 0;
+          padding: 0;
+      }
+
+      .email-masthead {
+          padding: 40px 0 25px 0;
+          text-align: center;
+          color: #121212;
+          font-size: 18px;
+          font-weight: 300;
+          letter-spacing: -0.01em;
+      }
+
+      .email-body {
+          width: 100%;
+          margin: 0;
+          padding: 0;
+      }
+
+      .email-body_inner {
+          width: 570px;
+          margin: 0 auto;
+          padding: 0;
+          background-color: #FFFFFF;
+          border-radius: 0px;
+          border: 1px solid rgba(18, 18, 18, 0.05);
+      }
+
+      .email-footer {
+          width: 570px;
+          margin: 0 auto;
+          padding: 0;
+          text-align: center;
+      }
+
+      .content-cell {
+          padding: 40px;
+      }
+
+      @media only screen and (max-width: 600px) {
+
+          .email-body_inner,
+          .email-footer {
+              width: 100% !important;
+          }
+      }
+  </style>
+</head>
+
+<body>
+<span class="preheader">{{#if multiple}}You've been added to {{ count }} parts of the programme.{{else}}You've been added to the order of service.{{/if}}</span>
+<table class="email-wrapper" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+  <tr>
+    <td align="center">
+      <table class="email-content" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+        <tr>
+          <td class="email-masthead">
+            <img src="{{logo_url}}" alt="Logo"
+                 style="width: 100px; height: 50px; vertical-align: middle; margin-right: 8px;" />
+            <div style="margin-top: 10px;">{{ church_name }}</div>
+          </td>
+        </tr>
+        <tr>
+          <td class="email-body" width="570" cellpadding="0" cellspacing="0">
+            <table class="email-body_inner" align="center" width="570" cellpadding="0" cellspacing="0"
+                   role="presentation">
+              <tr>
+                <td class="content-cell">
+                  <div>
+                    {{#if multiple}}
+                    <h1>You're on the Programme, {{ memberName }}!</h1>
+                    <p>You've been added to <strong>{{ count }} parts</strong> of the order of service.</p>
+                    {{else}}
+                    <h1>You're on the Programme, {{ memberName }}!</h1>
+                    <p>You've been added to the order of service.</p>
+                    {{/if}}
+
+                    {{#each assignments}}
+                    <p class="part-heading">{{#if this.isBackup}}Backup for{{else}}Part {{ this.partNumber }}{{/if}}: {{ this.serviceSlotName }}</p>
+                    <table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td class="attributes_content">
+                          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            {{#if this.isBackup}}
+                            <tr>
+                              <td class="attributes_item">You're the <strong>backup</strong> — please be ready to step in if the primary assignee is unavailable.</td>
+                            </tr>
+                            {{/if}}
+                            {{#if this.serviceDate}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Date:</strong> {{ this.serviceDate }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            {{#if this.serviceTime}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Time:</strong> {{ this.serviceTime }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Type:</strong> {{ this.slotType }}
+                              </td>
+                            </tr>
+                            {{#if this.topic}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Topic:</strong> {{ this.topic }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Allocated Time:</strong> {{ this.allocatedMinutes }} min
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    {{/each}}
+
+                    <p>Please be ready and reach out to the service coordinator if you have any questions.</p>
+
+                    <p style="margin-top: 35px; color: #8A817C;">God bless you,<br><span
+                      style="color: #121212; font-weight: 500;">{{ church_name }}</span></p>
+                  </div>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <table class="email-footer" align="center" width="570" cellpadding="0" cellspacing="0"
+                   role="presentation">
+              <tr>
+                <td class="content-cell" align="center" style="padding: 30px 40px;">
+                  <p class="sub" style="text-align: center;">
+                    {{ church_name }}<br>{{ church_address }}{{#if support_email}}<br>Need help? Contact us at {{ support_email }}{{/if}}
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+
+</html>

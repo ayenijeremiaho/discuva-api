@@ -216,17 +216,30 @@ export class ServiceProgrammeService {
     // even before this method was batched) — skipped here entirely rather
     // than computed-and-thrown-away, unlike addSlot()/updateSlot() which do
     // return it.
+    const assignmentItems: {
+      programme: ServiceProgramme;
+      slot: ServiceProgrammeSlot;
+      member: Member;
+      isBackup: boolean;
+    }[] = [];
     for (const slot of savedSlots) {
       if (slot.member)
-        this.notifySlotAssignment(slot.member, slot.programme, slot);
-      if (slot.backupMember) {
-        this.notifySlotAssignment(
-          slot.backupMember,
-          slot.programme,
+        assignmentItems.push({
+          programme: slot.programme,
           slot,
-          true,
-        );
-      }
+          member: slot.member,
+          isBackup: false,
+        });
+      if (slot.backupMember)
+        assignmentItems.push({
+          programme: slot.programme,
+          slot,
+          member: slot.backupMember,
+          isBackup: true,
+        });
+    }
+    if (assignmentItems.length) {
+      this.notifyBulkSlotAssignments(assignmentItems);
     }
 
     const summaries = await this.findManyWithSummary(
@@ -685,6 +698,47 @@ export class ServiceProgrammeService {
     });
   }
 
+  // Pure data shape for one slot assignment — shared by notifySlotAssignment
+  // (one email per assignment, used by addSlot/updateSlot) and
+  // notifyBulkSlotAssignments (one email covering several assignments at
+  // once, used by create()) so both compute serviceSlotName/date/time
+  // identically rather than duplicating the logic.
+  private buildAssignmentLine(
+    programme: ServiceProgramme,
+    slot: ServiceProgrammeSlot,
+    isBackup: boolean,
+  ): {
+    serviceSlotName: string;
+    slotType: string;
+    topic: string;
+    allocatedMinutes: number;
+    isBackup: boolean;
+    serviceDate: string;
+    serviceTime: string;
+  } {
+    const serviceSlotName = programme.serviceSlot
+      ? [programme.serviceSlot.event?.name, programme.serviceSlot.name]
+          .filter(Boolean)
+          .join(' — ')
+      : 'the service';
+    const serviceDate = programme.serviceSlot?.startTime
+      ? this.fmtAssignmentDate(programme.serviceSlot.startTime)
+      : '';
+    const serviceTime =
+      programme.serviceSlot?.startTime && programme.serviceSlot?.endTime
+        ? `${this.fmtAssignmentTime(programme.serviceSlot.startTime)} – ${this.fmtAssignmentTime(programme.serviceSlot.endTime)}`
+        : '';
+    return {
+      serviceSlotName,
+      slotType: ServiceSlotTypeLabels[slot.type] ?? slot.type,
+      topic: slot.topic ?? '',
+      allocatedMinutes: slot.allocatedMinutes,
+      isBackup,
+      serviceDate,
+      serviceTime,
+    };
+  }
+
   // Fire-and-forget notification when a member is assigned a service-programme
   // slot — both an email (guests, no member record, never reach here) and a
   // push notification, since a member may have one channel but not the other
@@ -696,24 +750,12 @@ export class ServiceProgrammeService {
     slot: ServiceProgrammeSlot,
     isBackup = false,
   ): void {
-    const serviceSlotName = programme.serviceSlot
-      ? [programme.serviceSlot.event?.name, programme.serviceSlot.name]
-          .filter(Boolean)
-          .join(' — ')
-      : 'the service';
-    const slotType = ServiceSlotTypeLabels[slot.type] ?? slot.type;
+    const line = this.buildAssignmentLine(programme, slot, isBackup);
+    const { serviceSlotName, slotType, serviceDate, serviceTime } = line;
 
     const subject = isBackup
       ? `You're the Backup for: ${serviceSlotName}`
       : `You've Been Added to the Programme: ${serviceSlotName}`;
-
-    const serviceDate = programme.serviceSlot?.startTime
-      ? this.fmtAssignmentDate(programme.serviceSlot.startTime)
-      : '';
-    const serviceTime =
-      programme.serviceSlot?.startTime && programme.serviceSlot?.endTime
-        ? `${this.fmtAssignmentTime(programme.serviceSlot.startTime)} – ${this.fmtAssignmentTime(programme.serviceSlot.endTime)}`
-        : '';
 
     const templateData = {
       memberName: member.firstname,
@@ -769,6 +811,115 @@ export class ServiceProgrammeService {
         idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
       },
     });
+  }
+
+  // create() can assign the same member to several parts of the order of
+  // service in one request — group by member and send ONE email listing
+  // every part they've been assigned, instead of notifySlotAssignment's one
+  // email per part. Push notifications are unaffected (still one per
+  // assignment, same idempotencyKey shape as notifySlotAssignment) — only
+  // the email is consolidated. addSlot/updateSlot build a DRAFT programme
+  // one slot at a time across separate requests, so they keep using
+  // notifySlotAssignment unchanged; batching those would need a
+  // delayed/debounced send, which is a different problem from this one.
+  private notifyBulkSlotAssignments(
+    items: {
+      programme: ServiceProgramme;
+      slot: ServiceProgrammeSlot;
+      member: Member;
+      isBackup: boolean;
+    }[],
+  ): void {
+    const byMember = new Map<string, { member: Member; items: typeof items }>();
+    for (const item of items) {
+      const existing = byMember.get(item.member.id);
+      if (existing) existing.items.push(item);
+      else byMember.set(item.member.id, { member: item.member, items: [item] });
+    }
+
+    for (const { member, items: memberItems } of byMember.values()) {
+      for (const { programme, slot, isBackup } of memberItems) {
+        const line = this.buildAssignmentLine(programme, slot, isBackup);
+        const subject = isBackup
+          ? `You're the Backup for: ${line.serviceSlotName}`
+          : `You've Been Added to the Programme: ${line.serviceSlotName}`;
+        let pushBody = `${line.slotType} — ${line.serviceSlotName}`;
+        if (line.serviceDate) pushBody += ` on ${line.serviceDate}`;
+        if (line.serviceDate && line.serviceTime)
+          pushBody += ` at ${line.serviceTime}`;
+
+        this.notificationDispatchService.notifyMember({
+          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+          push: {
+            memberIds: [member.id],
+            title: subject,
+            body: pushBody,
+            url: '/events',
+            idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
+          },
+        });
+      }
+
+      if (!member.email) continue;
+
+      // partNumber is precomputed here (not read via Handlebars' @index)
+      // since no custom helpers are registered for these templates — see
+      // EmailQueueService's plain Handlebars.compile() call — so 1-based
+      // numbering has to come from the data, not the template.
+      const assignments = memberItems.map(
+        ({ programme, slot, isBackup }, i) => ({
+          ...this.buildAssignmentLine(programme, slot, isBackup),
+          partNumber: i + 1,
+        }),
+      );
+
+      const subject =
+        assignments.length === 1
+          ? assignments[0].isBackup
+            ? `You're the Backup for: ${assignments[0].serviceSlotName}`
+            : `You've Been Added to the Programme: ${assignments[0].serviceSlotName}`
+          : `You've Been Added to ${assignments.length} Parts of the Programme`;
+
+      const attachments = memberItems
+        .map(({ programme, slot, isBackup }, index) => {
+          if (
+            !programme.serviceSlot?.startTime ||
+            !programme.serviceSlot?.endTime
+          )
+            return null;
+          const line = assignments[index];
+          const topicSuffix = slot.topic ? `: ${slot.topic}` : '';
+          return {
+            filename: `service-slot-${index + 1}.ics`,
+            content: buildIcsEvent({
+              uid: `${slot.id}@service-programme`,
+              startTime: programme.serviceSlot.startTime,
+              endTime: programme.serviceSlot.endTime,
+              summary: `${line.slotType}${topicSuffix} — ${line.serviceSlotName}`,
+              description: isBackup
+                ? `You're the backup for ${line.slotType} for ${line.serviceSlotName}.`
+                : `You're assigned to ${line.slotType} for ${line.serviceSlotName}.`,
+            }),
+          };
+        })
+        .filter((a): a is { filename: string; content: Buffer } => a !== null);
+
+      this.notificationDispatchService.notifyMember({
+        category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+        email: {
+          to: member.email,
+          subject,
+          template: 'service-programme-assignments',
+          data: {
+            memberName: member.firstname,
+            count: assignments.length,
+            multiple: assignments.length > 1,
+            assignments,
+          },
+          attachments: attachments.length ? attachments : undefined,
+        },
+      });
+    }
   }
 
   async reorderSlots(
