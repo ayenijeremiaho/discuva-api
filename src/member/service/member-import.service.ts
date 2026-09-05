@@ -60,7 +60,6 @@ const TEMPLATE_COLUMNS: TemplateColumn[] = [
 @Injectable()
 export class MemberImportService {
   private readonly logger = new Logger(MemberImportService.name);
-  private readonly productName: string;
   private readonly churchName: string;
   private readonly churchAddress: string;
 
@@ -80,7 +79,6 @@ export class MemberImportService {
     private readonly auditLogService: AuditLogService,
     private readonly configService: ConfigService,
   ) {
-    this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
   }
@@ -443,6 +441,7 @@ export class MemberImportService {
         },
       );
 
+      const churchName = await this.utilityService.resolveChurchName();
       for (let i = 0; i < eligible.length; i++) {
         const { row, tempPassword } = eligible[i];
         const savedMember = savedMembers[i];
@@ -455,7 +454,7 @@ export class MemberImportService {
         );
         this.utilityService.sendEmailWithTemplate(
           savedMember.email,
-          `${firstName}, Welcome to ${this.productName}`,
+          `${firstName}, Welcome to ${churchName}`,
           'welcome-member',
           {
             name: firstName,

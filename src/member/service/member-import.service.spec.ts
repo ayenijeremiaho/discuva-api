@@ -80,12 +80,16 @@ describe('MemberImportService', () => {
     buildWorkbook: jest.fn().mockResolvedValue(Buffer.from('xlsx')),
   };
 
-  const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
+  const mockUtilityService = {
+    sendEmailWithTemplate: jest.fn(),
+    resolveChurchName: jest.fn(),
+  };
   const mockAuditLogService = { log: jest.fn() };
   const mockConfigService = { get: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockUtilityService.resolveChurchName.mockResolvedValue('Test Church');
     mockMemberRepository.findOneBy.mockResolvedValue(null);
     mockMemberRepository.find.mockResolvedValue([]);
     mockDepartmentRepository.find.mockResolvedValue([]);

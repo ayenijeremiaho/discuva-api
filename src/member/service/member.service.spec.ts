@@ -64,6 +64,7 @@ const mockClergyTitleRepo = {
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
   sendEmail: jest.fn(),
+  resolveChurchName: jest.fn(),
 };
 
 const mockAuditLogService = { log: jest.fn() };
@@ -99,6 +100,7 @@ describe('MemberService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockUtilityService.resolveChurchName.mockResolvedValue('Test Church');
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -378,6 +380,15 @@ describe('MemberService', () => {
         role: MemberRoleEnum.WORKER,
       });
       expect(result.role).toBe(MemberRoleEnum.WORKER);
+      // The subject must name the tenant's own church (resolved per-request
+      // via EmailQueueService), never the generic SaaS product name — this
+      // used to read "Welcome to Discuva Workforce" for every tenant.
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        member.email,
+        'Jane, Welcome to Test Church Workforce',
+        'welcome-worker',
+        expect.any(Object),
+      );
     });
 
     it('reactivates a previously revoked WorkerProfile instead of creating a new one, preserving prior progress', async () => {

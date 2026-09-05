@@ -38,7 +38,6 @@ import { CloudinaryService } from '../../utility/service/cloudinary.service';
 @Injectable()
 export class MemberService {
   private readonly logger = new Logger(MemberService.name);
-  private readonly productName: string;
   private readonly churchName: string;
   private readonly churchAddress: string;
 
@@ -60,7 +59,6 @@ export class MemberService {
     private readonly pushService: PushNotificationService,
     private readonly cloudinaryService: CloudinaryService,
   ) {
-    this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
   }
@@ -126,9 +124,10 @@ export class MemberService {
     this.logger.log(`New member created: ${saved.id}`);
 
     const firstName = UtilityService.capitalizeFirstLetter(saved.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       saved.email,
-      `${firstName}, Welcome to ${this.productName}`,
+      `${firstName}, Welcome to ${churchName}`,
       'welcome-member',
       {
         name: firstName,
@@ -217,11 +216,12 @@ export class MemberService {
     );
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
       isReinstatement
-        ? `${firstName}, Welcome Back to ${this.productName} Workforce`
-        : `${firstName}, Welcome to ${this.productName} Workforce`,
+        ? `${firstName}, Welcome Back to ${churchName} Workforce`
+        : `${firstName}, Welcome to ${churchName} Workforce`,
       'welcome-worker',
       {
         name: `${firstName} ${member.lastname[0].toUpperCase()}.`,
@@ -319,6 +319,7 @@ export class MemberService {
         },
       );
 
+      const churchName = await this.utilityService.resolveChurchName();
       for (const member of eligible) {
         this.logger.log(
           `Member ${member.id} promoted to worker in department ${dto.departmentId}`,
@@ -328,7 +329,7 @@ export class MemberService {
         );
         this.utilityService.sendEmailWithTemplate(
           member.email,
-          `${firstName}, Welcome to ${this.productName} Workforce`,
+          `${firstName}, Welcome to ${churchName} Workforce`,
           'welcome-worker',
           {
             name: `${firstName} ${member.lastname[0].toUpperCase()}.`,
@@ -405,9 +406,10 @@ export class MemberService {
     });
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Your ${this.productName} Role Has Been Updated`,
+      `${firstName}, Your ${churchName} Role Has Been Updated`,
       'worker-revoked',
       {
         name: firstName,
@@ -459,9 +461,10 @@ export class MemberService {
     });
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Your ${this.productName} Training Has Ended`,
+      `${firstName}, Your ${churchName} Training Has Ended`,
       'trainee-demoted',
       {
         name: firstName,
@@ -830,10 +833,11 @@ export class MemberService {
     );
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     if (status === MemberStatusEnum.INACTIVE) {
       this.utilityService.sendEmailWithTemplate(
         member.email,
-        `${firstName}, Your ${this.productName} Account Has Been Deactivated`,
+        `${firstName}, Your ${churchName} Account Has Been Deactivated`,
         'account-deactivated',
         {
           name: firstName,
@@ -844,7 +848,7 @@ export class MemberService {
     } else if (status === MemberStatusEnum.ACTIVE) {
       this.utilityService.sendEmailWithTemplate(
         member.email,
-        `${firstName}, Your ${this.productName} Account Has Been Reactivated`,
+        `${firstName}, Your ${churchName} Account Has Been Reactivated`,
         'account-reactivated',
         {
           name: firstName,
@@ -871,9 +875,10 @@ export class MemberService {
     });
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Your ${this.productName} Password Has Been Reset`,
+      `${firstName}, Your ${churchName} Password Has Been Reset`,
       'password-reset',
       {
         name: firstName,
@@ -912,9 +917,10 @@ export class MemberService {
     await this.memberRepository.save(member);
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Your ${this.productName} Password Has Been Changed`,
+      `${firstName}, Your ${churchName} Password Has Been Changed`,
       'password-changed',
       {
         name: firstName,

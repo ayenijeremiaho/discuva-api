@@ -213,7 +213,10 @@ describe('AttendanceService', () => {
         },
         {
           provide: UtilityService,
-          useValue: { sendEmailWithTemplate: jest.fn() },
+          useValue: {
+            sendEmailWithTemplate: jest.fn(),
+            resolveChurchName: jest.fn().mockResolvedValue('Test Church'),
+          },
         },
         {
           provide: DateService,

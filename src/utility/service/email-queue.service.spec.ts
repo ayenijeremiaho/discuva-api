@@ -343,4 +343,43 @@ describe('EmailQueueService', () => {
       );
     });
   });
+
+  describe('resolveChurchName', () => {
+    // Regression coverage: several services used to cache CHURCH_NAME/
+    // PRODUCT_NAME once in their own constructor for building an email
+    // SUBJECT line, which meant every tenant's subject showed the same
+    // static value (or the generic product name) regardless of which
+    // church the recipient actually belonged to.
+    it("returns the current tenant's own name, not the SaaS product name", async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'RCCG Discovery Centre',
+      });
+
+      await expect(service.resolveChurchName()).resolves.toBe(
+        'RCCG Discovery Centre',
+      );
+    });
+
+    it('falls back to the env CHURCH_NAME when there is no tenant CLS context', async () => {
+      mockCls.get.mockReturnValue(undefined);
+
+      await expect(service.resolveChurchName()).resolves.toBe(
+        ENV_DEFAULTS.CHURCH_NAME,
+      );
+    });
+
+    it('falls back to the env CHURCH_NAME when the tenant has no name set', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: '',
+      });
+
+      await expect(service.resolveChurchName()).resolves.toBe(
+        ENV_DEFAULTS.CHURCH_NAME,
+      );
+    });
+  });
 });

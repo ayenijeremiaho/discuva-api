@@ -87,7 +87,6 @@ export interface MyAttendanceSummary {
 export class AttendanceService {
   private readonly logger = new Logger(AttendanceService.name);
   private readonly leaderboardTtl: number;
-  private readonly productName: string;
   private readonly churchName: string;
   private readonly churchAddress: string;
 
@@ -116,7 +115,6 @@ export class AttendanceService {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
     );
-    this.productName = this.configService.get<string>('PRODUCT_NAME');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
   }
@@ -215,9 +213,10 @@ export class AttendanceService {
       DateService.PATTERNS.EMAIL_TIME,
     );
 
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, ${this.productName} Check-in Confirmed`,
+      `${firstName}, ${churchName} Check-in Confirmed`,
       'checkin-confirmation',
       {
         name: firstName,

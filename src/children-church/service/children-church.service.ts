@@ -36,7 +36,6 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { randomBytes } from 'node:crypto';
-import { ConfigService } from '@nestjs/config';
 
 const PICKUP_CODE_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const PICKUP_CODE_LENGTH = 6;
@@ -44,7 +43,6 @@ const PICKUP_CODE_LENGTH = 6;
 @Injectable()
 export class ChildrenChurchService {
   private readonly logger = new Logger(ChildrenChurchService.name);
-  private readonly productName: string;
 
   constructor(
     @InjectRepository(ChildAgeGroup)
@@ -58,11 +56,8 @@ export class ChildrenChurchService {
     @InjectRepository(ChildCheckIn)
     private readonly checkInRepo: Repository<ChildCheckIn>,
     private readonly utilityService: UtilityService,
-    private readonly configService: ConfigService,
     private readonly departmentAccessService: DepartmentAccessService,
-  ) {
-    this.productName = this.configService.get<string>('PRODUCT_NAME');
-  }
+  ) {}
 
   // ─── Age Groups ───────────────────────────────────────────────────────────
 
@@ -785,12 +780,13 @@ export class ChildrenChurchService {
         }).format(checkIn.checkoutTime)
       : 'Unknown';
 
+    const churchName = await this.utilityService.resolveChurchName();
     for (const guardian of child.guardians) {
       const email = (guardian as ChildGuardian).email ?? guardian.member?.email;
       if (!email) continue;
       this.utilityService.sendEmailWithTemplate(
         email,
-        `${this.productName} Pickup Confirmation: ${childName}`,
+        `${churchName} Pickup Confirmation: ${childName}`,
         'child-pickup',
         {
           guardianName: guardian.fullName,

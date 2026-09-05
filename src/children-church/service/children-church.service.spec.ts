@@ -19,7 +19,6 @@ import { DepartmentCapability } from '../../department/enums/department-capabili
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
-import { ConfigService } from '@nestjs/config';
 
 const mockAgeGroupRepo = {
   create: jest.fn(),
@@ -71,6 +70,7 @@ const mockDepartmentAccessService = {
 
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
+  resolveChurchName: jest.fn().mockResolvedValue('Test Church'),
 };
 
 // ─── User fixtures ─────────────────────────────────────────────────────────
@@ -157,10 +157,6 @@ describe('ChildrenChurchService', () => {
           useValue: mockDepartmentAccessService,
         },
         { provide: UtilityService, useValue: mockUtilityService },
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn().mockReturnValue('Test App') },
-        },
       ],
     }).compile();
 

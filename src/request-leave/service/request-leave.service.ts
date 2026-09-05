@@ -15,12 +15,9 @@ import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { DepartmentService } from '../../department/service/department.service';
-import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class RequestLeaveService {
-  private readonly productName: string;
-
   constructor(
     @InjectRepository(RequestLeave)
     private readonly repo: Repository<RequestLeave>,
@@ -28,10 +25,7 @@ export class RequestLeaveService {
     private readonly departmentService: DepartmentService,
     private readonly utilityService: UtilityService,
     private readonly auditLogService: AuditLogService,
-    private readonly configService: ConfigService,
-  ) {
-    this.productName = this.configService.get<string>('PRODUCT_NAME');
-  }
+  ) {}
 
   private readonly logger = new Logger(RequestLeaveService.name);
 
@@ -93,9 +87,10 @@ export class RequestLeaveService {
     );
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, ${this.productName} Leave Request Received`,
+      `${firstName}, ${churchName} Leave Request Received`,
       'leave-submitted',
       {
         name: firstName,
@@ -153,9 +148,10 @@ export class RequestLeaveService {
       );
       const actionStatus =
         status === LeaveStatusEnum.APPROVED ? 'Approved' : 'Rejected';
+      const churchName = await this.utilityService.resolveChurchName();
       this.utilityService.sendEmailWithTemplate(
         workerMember.email,
-        `${firstName}, ${this.productName} Leave Request ${actionStatus}`,
+        `${firstName}, ${churchName} Leave Request ${actionStatus}`,
         'leave-actioned',
         {
           name: firstName,

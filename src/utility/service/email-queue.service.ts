@@ -244,6 +244,21 @@ export class EmailQueueService {
     return tenant ? buildTenantUrl(base, tenant.subdomain, path) : base;
   }
 
+  // Public escape hatch for the many call sites across the codebase that
+  // build a plain-string email SUBJECT (not run through compileTemplate/
+  // resolveBrandingData) yet still need the current tenant's real name —
+  // several services used to cache CHURCH_NAME or PRODUCT_NAME once in
+  // their own constructor instead, which is exactly the bug
+  // resolveBrandingData's own comment already documents for template
+  // bodies: it's a single global value, wrong for every tenant except
+  // whichever one happened to be in .env at boot. Returns the tenant's
+  // actual name (never the SaaS product name) so a subject reads "Welcome
+  // to {Church} Workforce", not "Welcome to Discuva Workforce".
+  async resolveChurchName(): Promise<string> {
+    const tenant = await this.getCurrentTenant();
+    return tenant?.name || this.config.get<string>('CHURCH_NAME');
+  }
+
   private async getCurrentTenant(): Promise<Tenant | null> {
     const tenantId = this.cls.get('tenantId');
     if (!tenantId) return null;

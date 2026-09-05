@@ -37,6 +37,7 @@ const mockUtilityService = {
   resolveTenantLoginUrl: jest
     .fn()
     .mockResolvedValue('https://login.example.com'),
+  resolveChurchName: jest.fn().mockResolvedValue('Test Church'),
 };
 
 const mockAuditLogService = { log: jest.fn() };

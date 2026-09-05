@@ -72,7 +72,6 @@ export class AuthService {
   private readonly deviceResetWindowSeconds: number;
   private readonly otpVerifyMaxAttempts: number;
   private readonly timezone: string;
-  private readonly productName: string;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -122,7 +121,6 @@ export class AuthService {
       'OTP_VERIFY_MAX_ATTEMPTS',
     );
     this.timezone = this.configService.get<string>('TIMEZONE');
-    this.productName = this.configService.get<string>('PRODUCT_NAME');
   }
 
   async validateMember(email: string, password: string): Promise<MemberAuth> {
@@ -151,9 +149,10 @@ export class AuthService {
         const lockoutMinutes = Math.ceil(
           this.loginWindowSeconds / 60,
         ).toString();
+        const churchName = await this.utilityService.resolveChurchName();
         this.utilityService.sendEmailWithTemplate(
           member.email,
-          `${firstName}, Your ${this.productName} Account Has Been Temporarily Locked`,
+          `${firstName}, Your ${churchName} Account Has Been Temporarily Locked`,
           'login-security-alert',
           { name: firstName, lockoutMinutes },
         );
@@ -245,9 +244,10 @@ export class AuthService {
       const loginTime = new Date().toLocaleString('en-GB', {
         timeZone: this.timezone,
       });
+      const churchName = await this.utilityService.resolveChurchName();
       this.utilityService.sendEmailWithTemplate(
         member.email,
-        `${firstName}, New ${this.productName} Login Detected`,
+        `${firstName}, New ${churchName} Login Detected`,
         'login-notification',
         { name: firstName, loginTime },
         undefined,
@@ -556,9 +556,10 @@ export class AuthService {
     );
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Your ${this.productName} Password Reset Code`,
+      `${firstName}, Your ${churchName} Password Reset Code`,
       'forgot-password-otp',
       {
         name: firstName,
@@ -615,9 +616,10 @@ export class AuthService {
     });
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
       member.email,
-      `${firstName}, Your ${this.productName} Password Has Been Changed`,
+      `${firstName}, Your ${churchName} Password Has Been Changed`,
       'password-changed',
       { name: firstName },
     );
@@ -1057,12 +1059,13 @@ export class AuthService {
       this.utilityService.resolveTenantLoginUrl(
         surface === SessionSurface.ADMIN ? 'admin' : 'member',
       ),
+      this.utilityService.resolveChurchName(),
     ])
-      .then(([member, login_url]) => {
+      .then(([member, login_url, churchName]) => {
         const name = UtilityService.capitalizeFirstLetter(member.firstname);
         this.utilityService.sendEmailWithTemplate(
           member.email,
-          `${name}, Security Alert — Your ${this.productName} Session Was Signed Out`,
+          `${name}, Security Alert — Your ${churchName} Session Was Signed Out`,
           'session-security-alert',
           { name, login_url },
         );

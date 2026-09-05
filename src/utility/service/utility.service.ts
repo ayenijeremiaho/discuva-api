@@ -150,6 +150,14 @@ export class UtilityService {
     return this.emailQueueService.resolveMemberUrl(path);
   }
 
+  // Delegates to EmailQueueService.resolveChurchName — the current
+  // tenant's actual name, for building a plain-string email subject (a
+  // template body gets this automatically via {{ church_name }}, but a
+  // subject line is built in TS before any template is ever touched).
+  public resolveChurchName(): Promise<string> {
+    return this.emailQueueService.resolveChurchName();
+  }
+
   public sendEmailWithAttachment(
     to: string | [string],
     subject: string,
