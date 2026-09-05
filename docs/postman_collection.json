@@ -294,6 +294,11 @@
       "key": "pageSlug",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "churchCalendarId",
+      "value": "",
+      "type": "string"
     }
   ],
   "auth": {
@@ -10796,6 +10801,223 @@
               "path": [
                 "pages",
                 "{{pageId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Church Calendar (Admin)",
+      "item": [
+        {
+          "name": "Create Church Calendar (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"September Programme\",\n  \"theme\": \"REMEMBERED\",\n  \"startDate\": \"2026-09-01\",\n  \"endDate\": \"2026-09-30\",\n  \"accentColor\": \"#C0392B\",\n  \"isPublished\": false,\n  \"entries\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"date\": \"2026-09-06\",\n      \"title\": \"Special Thanksgiving Service\"\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"date\": \"2026-09-09\",\n      \"title\": \"Holy Communion\"\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"date\": \"2026-09-13\",\n      \"title\": \"Members and Workers Appreciation Service\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"a1b2c3d4-1111-4c5d-8e9f-0a1b2c3d4e5f\",\n  \"title\": \"September Programme\",\n  \"isPublished\": false,\n  \"entries\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"date\": \"2026-09-06\",\n      \"title\": \"Special Thanksgiving Service\"\n    }\n  ]\n}"
+            }
+          ],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.id) pm.collectionVariables.set('churchCalendarId', res.id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "description": "Entries are automatically sorted by date on save, regardless of the order sent here. Each entry's date must fall within [startDate, endDate]."
+        },
+        {
+          "name": "Get All Church Calendars (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Unpaginated, same policy as Pages/Forms \u2014 admin-curated reference data."
+        },
+        {
+          "name": "Get Church Calendar by ID (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar/{{churchCalendarId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar",
+                "{{churchCalendarId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Church Calendar \u2014 Publish (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar/{{churchCalendarId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar",
+                "{{churchCalendarId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isPublished\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{churchCalendarId}}\",\n  \"isPublished\": true\n}"
+            }
+          ],
+          "description": "isPublished is the only thing toggled here \u2014 entries omitted, so they're left untouched (see PATCH /church-calendar/:id's own convention in TECH_DOC.md)."
+        },
+        {
+          "name": "Upload Church Calendar Entry Image (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar/{{churchCalendarId}}/images",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar",
+                "{{churchCalendarId}}",
+                "images"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"url\": \"https://res.cloudinary.com/.../thanksgiving.jpg\",\n  \"publicId\": \"church-calendar-images/abc123\"\n}"
+            }
+          ],
+          "description": "Generic upload reused by every entry's photo slot \u2014 returns a reference only, doesn't touch the calendar row. Embed the returned url into whichever entry it belongs to on the next PATCH."
+        },
+        {
+          "name": "Get Current Church Calendars (Member)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar/member/current",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar",
+                "member",
+                "current"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Published calendars with endDate >= today (church-timezone-aware), ordered startDate ascending."
+        },
+        {
+          "name": "Delete Church Calendar (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/church-calendar/{{churchCalendarId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "church-calendar",
+                "{{churchCalendarId}}"
               ]
             }
           },

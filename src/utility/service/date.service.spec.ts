@@ -29,4 +29,22 @@ describe('DateService', () => {
       expect(result.toISOString()).toBe('2026-07-17T22:59:59.999Z');
     });
   });
+
+  describe('today', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('returns the church-timezone date, not the day it still is in UTC', () => {
+      // 23:30 UTC on the 16th is already the 17th in Africa/Lagos (UTC+1) —
+      // a plain format(new Date(), ...) would wrongly return the 16th.
+      jest.useFakeTimers().setSystemTime(new Date('2026-07-16T23:30:00.000Z'));
+      expect(service.today()).toBe('2026-07-17');
+    });
+
+    it('returns the same-day date when well within the church-timezone day', () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-07-16T10:00:00.000Z'));
+      expect(service.today()).toBe('2026-07-16');
+    });
+  });
 });

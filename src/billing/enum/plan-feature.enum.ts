@@ -17,4 +17,5 @@ export enum PlanFeature {
   BULK_EXPORT = 'bulk_export',
   FORMS = 'forms',
   MEMBER_DIRECTORY = 'member_directory',
+  CHURCH_CALENDAR = 'church_calendar',
 }

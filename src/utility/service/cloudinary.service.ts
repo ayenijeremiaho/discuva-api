@@ -22,7 +22,8 @@ export type CloudinaryFolder =
   | 'form-covers'
   | 'form-logos'
   | 'form-submissions'
-  | 'page-images';
+  | 'page-images'
+  | 'church-calendar-images';
 
 export interface CloudinaryUploadResult {
   secureUrl: string;

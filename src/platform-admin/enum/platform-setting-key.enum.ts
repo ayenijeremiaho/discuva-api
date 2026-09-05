@@ -8,6 +8,7 @@ export enum PlatformSettingKey {
   MAX_FINANCE_PROOF_UPLOAD_MB = 'max_finance_proof_upload_mb',
   MAX_FORM_ATTACHMENT_UPLOAD_MB = 'max_form_attachment_upload_mb',
   MAX_PAGE_IMAGE_UPLOAD_MB = 'max_page_image_upload_mb',
+  MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB = 'max_church_calendar_image_upload_mb',
   // Boolean (0/1) — whether attendance check-in enforces the venue distance
   // check by default, for tenants that haven't set their own override (see
   // AttendanceSettingsService). Falls back to the ENFORCE_DISTANCE_CHECK env

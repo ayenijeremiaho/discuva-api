@@ -68,6 +68,7 @@ import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
 import { BranchModule } from './branch/branch.module';
 import { FormsModule } from './forms/forms.module';
 import { PagesModule } from './pages/pages.module';
+import { ChurchCalendarModule } from './church-calendar/church-calendar.module';
 import { SocialMediaModule } from './social-media/social-media.module';
 import { MemberDirectoryModule } from './member-directory/member-directory.module';
 
@@ -246,6 +247,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     BranchModule,
     FormsModule,
     PagesModule,
+    ChurchCalendarModule,
     SocialMediaModule,
     MemberDirectoryModule,
     EnumsModule,

@@ -4292,6 +4292,37 @@ same feature either way; both are natural fast-follows once this is in active us
 | DELETE | `/pages/:id/og-image`       | AdminGuard (PAGES_WRITE) | Clears the OG image |
 | GET    | `/pages/public/:slug`       | Public, `404` unless `isPublished` | Returns the full `PublicPageDto` — every section verbatim, nothing stripped |
 
+### Church Calendar (`src/church-calendar/`)
+
+Admin-configurable, dated programme calendars — the in-app equivalent of the flyer a church already designs each month for social media ("Programs in the month of September, themed REMEMBERED — Special Thanksgiving on the 6th, Holy Communion on the 9th, ..."). A `ChurchCalendar` has a `title`, an optional `theme`, a `startDate`/`endDate` range (a single month, a full year, or anything in between — not a fixed month field), an optional `accentColor` (hex, drives the admin-side exported flyer's gradient bands — there's no tenant-wide brand-color setting to fall back to, so the flyer template falls back to a built-in default when unset), an `isPublished` flag, and an ordered `entries: ChurchCalendarEntry[]` (`{ id, date, title, description?, imageUrl? }`, plain `jsonb`, whole-array replace on save — same convention `Page.sections`/`Form.postSubmitOutcomes` already use, since there's no per-entry DB row to diff against). `id` is client-generated.
+
+**Validation** (`ChurchCalendarService`, mirrors `PageService.assertValidSections`'s "structural checks the decorator layer can't express" pattern): `endDate` cannot be before `startDate`; every entry's own `date` must fall inside `[startDate, endDate]`, and every entry needs a non-empty `title`. Entries are sorted by `date` before persisting (on both `create` and any `update` that replaces `entries`) so the admin list and the member view always render in date order regardless of the order entries arrived in the request.
+
+**Two controllers, deliberately on different base paths to avoid a route-ordering hazard** — `PagesModule`'s own public/admin controllers share one base path and depend on registration order in the module's `controllers` array to keep the wildcard `:id` route from swallowing the more specific one; `ChurchCalendarMemberController` sidesteps that entirely by mounting at `church-calendar/member` instead of sharing `church-calendar` with the admin controller's `:id` wildcard.
+
+- `ChurchCalendarAdminController` (`AdminGuard` + `CHURCH_CALENDAR_READ`/`WRITE`, `@RequiresModule('church_calendar')`, **and** `@RequiresPlan(PlanFeature.CHURCH_CALENDAR)` + `PlanGuard` — unlike Pages, Church Calendar is a normal Pro-plan feature, not override-only early access): full CRUD plus `POST /church-calendar/:id/images`, a generic multipart upload reused by every entry's photo slot (mirrors `PageAdminController`'s image endpoint exactly — `{ url, publicId }` only, doesn't touch the calendar row; the caller embeds the url into whichever entry it belongs to on the next save). Same "no orphan-cleanup sweep for an abandoned upload" accepted tradeoff as Pages' section images, for the same reason (admin-only, low volume).
+- `ChurchCalendarMemberController` (`JwtAuthGuard`, member+worker, same `@RequiresModule`/`@RequiresPlan`/`PlanGuard` gating): `GET /church-calendar/member/current` — published calendars whose `endDate` hasn't passed yet, ordered by `startDate` ascending (so a shorter "this month" calendar and a longer-running "this year" one can both surface together). "Today" is computed via a new `DateService.today()` method (see below) rather than a bare `new Date()`, so a calendar doesn't disappear a few hours early/late for a church whose timezone differs from the server's.
+
+**Plan/permission plumbing — the same three pieces Pages needed, done proactively this time instead of as a follow-up fix:**
+- `AdminPermission.CHURCH_CALENDAR_READ`/`CHURCH_CALENDAR_WRITE`, a new `Church Calendar` permission group.
+- `KNOWN_MODULES` key `church_calendar`.
+- `PlanFeature.CHURCH_CALENDAR`, added to **all four** Pro plan variants' `features` by `AddChurchCalendarToProPlans1793908800000` — `AddFormsToProPlan` (the precedent) only targeted the bare `pro` row, leaving `pro-annual`/`pro-usd`/`pro-usd-annual` without `forms`; this one covers all four so the feature isn't inconsistently available depending on which Pro variant a tenant happens to be subscribed to.
+- `GrantChurchCalendarPermissions1796367600000` backfills `church_calendar:read`/`write` onto every existing tenant's `SuperAdmin` role. This is the exact fix `GrantPagesPermissions` had to ship as a follow-up after the Pages sidebar entry silently never appeared for any pre-existing tenant — done as part of the same PR here instead of after the fact.
+
+New `CloudinaryFolder` member `'church-calendar-images'` and new `PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB` (default 5MB, same shape as `MAX_PAGE_IMAGE_UPLOAD_MB`).
+
+**`DateService.today()`** (new): today's date as a plain `'yyyy-MM-dd'` string in the church's configured timezone, for comparing against a `date`-typed column. Added because nothing on `DateService` already did this — `format(new Date(), 'yyyy-MM-dd')` renders using the *server process's* timezone, which can land on the wrong calendar day near midnight for a church whose timezone differs from the server's; `today()` runs `new Date()` through the same `toZonedTime` shift `startOfDay()`/`endOfDay()` already use before formatting, so the date components come out right regardless of what timezone the Node process itself is running in.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| POST   | `/church-calendar`                  | AdminGuard (CHURCH_CALENDAR_WRITE) | Create a calendar with its entries in one call |
+| GET    | `/church-calendar`                  | AdminGuard (CHURCH_CALENDAR_READ)  | List all calendars — unpaginated, same policy as Pages/Forms |
+| GET    | `/church-calendar/:id`               | AdminGuard (CHURCH_CALENDAR_READ)  | Get one calendar with entries |
+| PATCH  | `/church-calendar/:id`               | AdminGuard (CHURCH_CALENDAR_WRITE) | Update calendar. `entries` omitted = untouched, an array = replace wholesale |
+| DELETE | `/church-calendar/:id`               | AdminGuard (CHURCH_CALENDAR_WRITE) | Delete a calendar |
+| POST   | `/church-calendar/:id/images`        | AdminGuard (CHURCH_CALENDAR_WRITE) | Multipart, field name `file`, max size `MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB`. Generic upload for any entry's photo slot — returns `{ url, publicId }` only |
+| GET    | `/church-calendar/member/current`    | JwtAuthGuard (member+worker)       | Published calendars with `endDate >= today` (church-timezone-aware), ordered `startDate` ascending |
+
 ### Social Media Module (`src/social-media/`)
 
 Central, tenant-scoped connector framework for cross-posting to a church's social accounts from one compose box.

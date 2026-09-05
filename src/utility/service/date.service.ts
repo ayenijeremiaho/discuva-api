@@ -144,6 +144,18 @@ export class DateService {
     return format(date, pattern);
   }
 
+  // Today's date, as a plain 'yyyy-MM-dd' string, in the church's configured
+  // timezone — for comparing against a `date`-typed column (e.g.
+  // `endDate >= today`). Plain `format(new Date(), ...)` would render using
+  // the server process's own timezone, which can land on the wrong
+  // calendar day near midnight when the server runs in UTC and the church
+  // doesn't (toZonedTime shifts the underlying instant so format()'s local
+  // getters read back the church's own wall-clock date, the same trick
+  // startOfDay()/endOfDay() above already rely on).
+  today(): string {
+    return format(toZonedTime(new Date(), this.timezone), 'yyyy-MM-dd');
+  }
+
   /**
    * Check if date1 is before date2
    * @param date1 - First date

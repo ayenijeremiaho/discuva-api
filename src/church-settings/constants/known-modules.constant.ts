@@ -40,6 +40,7 @@ export const KNOWN_MODULES = [
   { key: 'pages', moduleName: 'Pages', required: false },
   { key: 'social_media', moduleName: 'Social Media', required: false },
   { key: 'member_directory', moduleName: 'Member Directory', required: false },
+  { key: 'church_calendar', moduleName: 'Church Calendar', required: false },
   {
     key: 'youtube_integration',
     moduleName: 'YouTube Integration',

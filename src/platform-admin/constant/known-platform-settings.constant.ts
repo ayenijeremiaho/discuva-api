@@ -66,6 +66,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 1,
     max: 25,
   },
+  [PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB]: {
+    label: 'Church Calendar Image Upload Limit',
+    unit: 'MB — per-entry photos on a Church Calendar',
+    defaultValue: 5,
+    min: 1,
+    max: 25,
+  },
   [PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT]: {
     label: 'Enforce Attendance Distance Check',
     unit: 'default for churches that have not set their own override — 0 = off, 1 = on',
@@ -99,7 +106,8 @@ export const UPLOAD_HARD_CEILING_BYTES: Record<
   | PlatformSettingKey.MAX_CLASS_MATERIAL_UPLOAD_MB
   | PlatformSettingKey.MAX_FINANCE_PROOF_UPLOAD_MB
   | PlatformSettingKey.MAX_FORM_ATTACHMENT_UPLOAD_MB
-  | PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB,
+  | PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB
+  | PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB,
   number
 > = {
   [PlatformSettingKey.MAX_LOGO_UPLOAD_MB]:
@@ -127,6 +135,12 @@ export const UPLOAD_HARD_CEILING_BYTES: Record<
     1024,
   [PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB]:
     KNOWN_PLATFORM_SETTINGS[PlatformSettingKey.MAX_PAGE_IMAGE_UPLOAD_MB].max *
+    1024 *
+    1024,
+  [PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB]:
+    KNOWN_PLATFORM_SETTINGS[
+      PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB
+    ].max *
     1024 *
     1024,
 };

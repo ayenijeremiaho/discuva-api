@@ -83,6 +83,8 @@ export enum AdminPermission {
   // profile entirely themselves; admin only ever views aggregate
   // profession/skill statistics, never edits an individual member's entry.
   MEMBER_DIRECTORY_READ = 'member_directory:read',
+  CHURCH_CALENDAR_READ = 'church_calendar:read',
+  CHURCH_CALENDAR_WRITE = 'church_calendar:write',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -170,6 +172,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.SOCIAL_MEDIA_READ]: 'View Social Media Accounts & Posts',
   [AdminPermission.SOCIAL_MEDIA_WRITE]: 'Connect Accounts & Publish Posts',
   [AdminPermission.MEMBER_DIRECTORY_READ]: 'View Member Directory Analytics',
+  [AdminPermission.CHURCH_CALENDAR_READ]: 'View Church Calendar',
+  [AdminPermission.CHURCH_CALENDAR_WRITE]: 'Build & Manage Church Calendar',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -328,6 +332,10 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     'Connect/disconnect social accounts, compose posts, and publish to multiple platforms at once',
   [AdminPermission.MEMBER_DIRECTORY_READ]:
     "View aggregate profession/skill statistics for opted-in members — never an individual member's directory entry beyond what search already shows",
+  [AdminPermission.CHURCH_CALENDAR_READ]:
+    'View the monthly/yearly programme calendar and its entries',
+  [AdminPermission.CHURCH_CALENDAR_WRITE]:
+    'Create, edit, publish, and delete programme calendars and their entries',
 };
 
 export interface AdminPermissionGroupItem {
@@ -557,6 +565,14 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     'Member Directory',
     [AdminPermission.MEMBER_DIRECTORY_READ],
     'member_directory',
+  ),
+  buildGroup(
+    'Church Calendar',
+    [
+      AdminPermission.CHURCH_CALENDAR_READ,
+      AdminPermission.CHURCH_CALENDAR_WRITE,
+    ],
+    'church_calendar',
   ),
   buildGroup('System', [
     AdminPermission.DASHBOARD_READ,
