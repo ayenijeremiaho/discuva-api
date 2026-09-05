@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   ValidateNested,
 } from 'class-validator';
 
@@ -25,6 +26,13 @@ export class ChurchCalendarEntryDto {
 
   @IsDateString()
   date: string;
+
+  // 24-hour 'HH:mm' — optional, an all-day/time-TBD entry omits it.
+  @IsOptional()
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'time must be in 24-hour HH:mm format',
+  })
+  time?: string;
 
   @IsString()
   @IsNotEmpty()

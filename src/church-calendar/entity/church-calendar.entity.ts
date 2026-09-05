@@ -8,6 +8,7 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 export interface ChurchCalendarEntry {
   id: string;
   date: string; // must fall within [startDate, endDate] — see ChurchCalendarService.assertValidEntries
+  time?: string; // 24-hour 'HH:mm', optional — an all-day/time-TBD entry omits it
   title: string;
   description?: string;
   imageUrl?: string;

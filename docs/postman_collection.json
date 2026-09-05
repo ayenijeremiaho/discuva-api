@@ -10832,7 +10832,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"September Programme\",\n  \"theme\": \"REMEMBERED\",\n  \"startDate\": \"2026-09-01\",\n  \"endDate\": \"2026-09-30\",\n  \"accentColor\": \"#C0392B\",\n  \"isPublished\": false,\n  \"entries\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"date\": \"2026-09-06\",\n      \"title\": \"Special Thanksgiving Service\"\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"date\": \"2026-09-09\",\n      \"title\": \"Holy Communion\"\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"date\": \"2026-09-13\",\n      \"title\": \"Members and Workers Appreciation Service\"\n    }\n  ]\n}",
+              "raw": "{\n  \"title\": \"September Programme\",\n  \"theme\": \"REMEMBERED\",\n  \"startDate\": \"2026-09-01\",\n  \"endDate\": \"2026-09-30\",\n  \"accentColor\": \"#C0392B\",\n  \"isPublished\": false,\n  \"entries\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"date\": \"2026-09-06\",\n      \"title\": \"Special Thanksgiving Service\",\n      \"time\": \"08:00\"\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"date\": \"2026-09-09\",\n      \"title\": \"Holy Communion\",\n      \"time\": \"18:00\"\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"date\": \"2026-09-13\",\n      \"title\": \"Members and Workers Appreciation Service\",\n      \"time\": \"09:00\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
