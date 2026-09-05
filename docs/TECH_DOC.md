@@ -4175,6 +4175,15 @@ public or admin-managed):
   content the church chose to show publicly, there's no "spoiler" concern the way an unselected `DROPDOWN`
   option's `optionMetadata` has. Not rate-limited (read-only, unlike Forms' public write endpoints).
 
+`pages:read`/`pages:write` are backfilled onto every existing tenant's `SuperAdmin` role by
+`GrantPagesPermissions1796194800000` (same class of fix as `GrantFormsPermissions`/`GrantSocialMediaPermissions`
+— a brand-new `AdminPermission` is only auto-granted to a `SuperAdmin` role at the moment that role row is
+*created*, a one-time `Object.values(AdminPermission)` snapshot, so every tenant provisioned before this module
+existed needs the new permission strings appended explicitly). `CreatePagesTable1795849200000` shipped without
+this grant migration, which is why the "Pages" sidebar entry (gated behind `pages:read` in discuva-admin's
+`NAV_STRUCTURE`) silently never appeared for any pre-existing tenant even though the module itself worked once
+reached directly.
+
 **Early-access rollout, gated entirely through `Tenant.moduleOverrides`** — `pages` is a toggleable module
 (`KNOWN_MODULES`) but deliberately **never added to any `Plan.features` array** (no `@RequiresPlan`/`PlanGuard` on
 either controller, unlike Forms), same posture Social Media used before it went GA
