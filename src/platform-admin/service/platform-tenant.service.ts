@@ -32,7 +32,7 @@ import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
-import { SetSocialMediaRolloutDto } from '../dto/set-social-media-rollout.dto';
+import { SetModuleRolloutDto } from '../dto/set-module-rollout.dto';
 import { DiscountType } from '../../billing/enum/discount-type.enum';
 import { KNOWN_MODULES } from '../../church-settings/constants/known-modules.constant';
 
@@ -318,23 +318,25 @@ export class PlatformTenantService {
     return this.toHealthShape(saved);
   }
 
-  // The single control surface for the Social Media rollout: a platform
-  // admin doesn't reason about Plan.features vs Tenant.moduleOverrides
-  // separately — they pick a toggle + an optional searchable list of
-  // churches, and this method decides which underlying mechanism to write.
-  // "Enabled for all" (empty tenantIds) goes through Plan.features so it's
-  // forward-looking — a tenant created next week is covered automatically,
-  // same as any other plan-included module. "Enabled for specific accounts"
-  // goes through Tenant.moduleOverrides instead, since Plan.features can't
-  // express a curated allowlist. The two are kept mutually exclusive: going
-  // from "all" back to "specific" strips the plan grant so it doesn't leak
-  // access to unselected tenants, and going from "specific" to "all" clears
-  // every override so a previously-excluded tenant doesn't stay excluded.
-  async setSocialMediaRollout(
-    dto: SetSocialMediaRolloutDto,
+  // The single control surface for a module's early-access rollout: a
+  // platform admin doesn't reason about Plan.features vs
+  // Tenant.moduleOverrides separately — they pick a toggle + an optional
+  // searchable list of churches, and this method decides which underlying
+  // mechanism to write. "Enabled for all" (empty tenantIds) goes through
+  // Plan.features so it's forward-looking — a tenant created next week is
+  // covered automatically, same as any other plan-included module.
+  // "Enabled for specific accounts" goes through Tenant.moduleOverrides
+  // instead, since Plan.features can't express a curated allowlist. The two
+  // are kept mutually exclusive: going from "all" back to "specific" strips
+  // the plan grant so it doesn't leak access to unselected tenants, and
+  // going from "specific" to "all" clears every override so a
+  // previously-excluded tenant doesn't stay excluded. Shared by every
+  // module that goes through this same pre-GA lifecycle (Social Media,
+  // Pages, ...) rather than one copy of this logic per module.
+  private async setModuleRollout(
+    moduleKey: string,
+    dto: SetModuleRolloutDto,
   ): Promise<{ enabled: boolean; tenantIds: string[] }> {
-    const moduleKey = 'social_media';
-
     if (!dto.enabled) {
       await this.removeModuleFromAllPlans(moduleKey);
       await this.clearAllOverridesFor(moduleKey);
@@ -373,11 +375,10 @@ export class PlatformTenantService {
     return { enabled: true, tenantIds: dto.tenantIds };
   }
 
-  async getSocialMediaRollout(): Promise<{
+  private async getModuleRollout(moduleKey: string): Promise<{
     enabled: boolean;
     tenantIds: string[];
   }> {
-    const moduleKey = 'social_media';
     const plans = await this.planRepo.find();
     if (plans.some((p) => p.features.includes(moduleKey))) {
       return { enabled: true, tenantIds: [] };
@@ -388,6 +389,32 @@ export class PlatformTenantService {
       .filter((t) => t.moduleOverrides?.[moduleKey] === true)
       .map((t) => t.id);
     return { enabled: tenantIds.length > 0, tenantIds };
+  }
+
+  async setSocialMediaRollout(
+    dto: SetModuleRolloutDto,
+  ): Promise<{ enabled: boolean; tenantIds: string[] }> {
+    return this.setModuleRollout('social_media', dto);
+  }
+
+  async getSocialMediaRollout(): Promise<{
+    enabled: boolean;
+    tenantIds: string[];
+  }> {
+    return this.getModuleRollout('social_media');
+  }
+
+  async setPagesRollout(
+    dto: SetModuleRolloutDto,
+  ): Promise<{ enabled: boolean; tenantIds: string[] }> {
+    return this.setModuleRollout('pages', dto);
+  }
+
+  async getPagesRollout(): Promise<{
+    enabled: boolean;
+    tenantIds: string[];
+  }> {
+    return this.getModuleRollout('pages');
   }
 
   private async removeModuleFromAllPlans(moduleKey: string): Promise<void> {

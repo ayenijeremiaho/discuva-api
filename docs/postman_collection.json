@@ -30374,6 +30374,80 @@
           "response": []
         },
         {
+          "name": "Get Pages Rollout",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/pages/rollout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "pages",
+                "rollout"
+              ]
+            },
+            "description": "Current Pages rollout state: {enabled: boolean, tenantIds: string[]}. Same shared mechanism as the Social Media Rollout above (PlatformTenantService.getModuleRollout, keyed on 'pages') \u2014 derived live, not stored separately."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Pages Rollout",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"tenantIds\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/pages/rollout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "pages",
+                "rollout"
+              ]
+            },
+            "description": "The single control surface for the Pages rollout \u2014 a full replace, not incremental. Same shared mechanism as Set Social Media Rollout above (PlatformTenantService.setModuleRollout, keyed on 'pages'): enabled:false strips 'pages' from every plan's features and clears every tenant's moduleOverrides.pages. enabled:true with empty tenantIds adds 'pages' to every plan's features (all tiers) and clears every override \u2014 everyone, including tenants created later. enabled:true with a non-empty tenantIds strips 'pages' from every plan and sets moduleOverrides.pages=true for exactly the listed tenant IDs."
+          },
+          "response": []
+        },
+        {
           "name": "Impersonate Tenant",
           "request": {
             "method": "POST",

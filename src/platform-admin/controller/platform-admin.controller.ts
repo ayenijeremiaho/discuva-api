@@ -48,7 +48,7 @@ import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
-import { SetSocialMediaRolloutDto } from '../dto/set-social-media-rollout.dto';
+import { SetModuleRolloutDto } from '../dto/set-module-rollout.dto';
 import { CreatePlanDto } from '../dto/create-plan.dto';
 import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { RegisterCommunicationProviderDto } from '../dto/register-communication-provider.dto';
@@ -431,8 +431,27 @@ export class PlatformAdminController {
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.SOCIAL_MEDIA_APPS_WRITE)
   @Put('social-media/rollout')
-  async setSocialMediaRollout(@Body() dto: SetSocialMediaRolloutDto) {
+  async setSocialMediaRollout(@Body() dto: SetModuleRolloutDto) {
     return this.tenantService.setSocialMediaRollout(dto);
+  }
+
+  // Same rollout mechanism as Social Media above, for the Pages module's
+  // own early-access rollout — gated by the Tenants permission (not a
+  // dedicated Pages one) since this is fundamentally the same tenant-access
+  // management action as the per-tenant module-override endpoint above,
+  // just with the "everyone" shortcut social media's own rollout also has.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('pages/rollout')
+  async getPagesRollout() {
+    return this.tenantService.getPagesRollout();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Put('pages/rollout')
+  async setPagesRollout(@Body() dto: SetModuleRolloutDto) {
+    return this.tenantService.setPagesRollout(dto);
   }
 
   @UseGuards(PlatformAdminGuard)

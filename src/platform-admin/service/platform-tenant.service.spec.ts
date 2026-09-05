@@ -638,6 +638,85 @@ describe('PlatformTenantService', () => {
     });
   });
 
+  describe('setPagesRollout', () => {
+    it('enabled + specific tenantIds: sets the pages override only for selected tenants, using the same shared mechanism as social media', async () => {
+      mockPlanRepo.find.mockResolvedValue([
+        { id: 'free', tierKey: 'free', features: [] },
+      ]);
+      mockTenantRepo.find.mockResolvedValue([
+        { ...baseTenant, id: 't1', moduleOverrides: null },
+        { ...baseTenant, id: 't2', moduleOverrides: { pages: true } },
+      ]);
+
+      const result = await service.setPagesRollout({
+        enabled: true,
+        tenantIds: ['t1'],
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 't1', moduleOverrides: { pages: true } }),
+        expect.objectContaining({ id: 't2', moduleOverrides: null }),
+      ]);
+      expect(result).toEqual({ enabled: true, tenantIds: ['t1'] });
+    });
+
+    it('disabled: strips pages from every plan and clears every override, without touching social_media', async () => {
+      mockPlanRepo.find.mockResolvedValue([
+        { id: 'free', tierKey: 'free', features: ['pages', 'social_media'] },
+      ]);
+      mockTenantRepo.find.mockResolvedValue([
+        {
+          ...baseTenant,
+          id: 't1',
+          moduleOverrides: { pages: true, social_media: true },
+        },
+      ]);
+
+      const result = await service.setPagesRollout({
+        enabled: false,
+        tenantIds: [],
+      });
+
+      expect(mockPlanRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ id: 'free', features: ['social_media'] }),
+      ]);
+      expect(mockTenantRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          id: 't1',
+          moduleOverrides: { social_media: true },
+        }),
+      ]);
+      expect(result).toEqual({ enabled: false, tenantIds: [] });
+    });
+  });
+
+  describe('getPagesRollout', () => {
+    it('reports the specific tenant allowlist, independent of social_media overrides on the same tenant', async () => {
+      mockPlanRepo.find.mockResolvedValue([{ id: 'pro', features: [] }]);
+      mockTenantRepo.find.mockResolvedValue([
+        {
+          ...baseTenant,
+          id: 't1',
+          moduleOverrides: { pages: true, social_media: false },
+        },
+        { ...baseTenant, id: 't2', moduleOverrides: { social_media: true } },
+      ]);
+
+      const result = await service.getPagesRollout();
+
+      expect(result).toEqual({ enabled: true, tenantIds: ['t1'] });
+    });
+
+    it('reports enabled for all when any plan includes pages', async () => {
+      mockPlanRepo.find.mockResolvedValue([{ id: 'pro', features: ['pages'] }]);
+
+      const result = await service.getPagesRollout();
+
+      expect(result).toEqual({ enabled: true, tenantIds: [] });
+      expect(mockTenantRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getSocialMediaRollout', () => {
     it('reports enabled for all when any plan includes social_media', async () => {
       mockPlanRepo.find.mockResolvedValue([

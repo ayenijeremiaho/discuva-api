@@ -3567,6 +3567,37 @@ read-only status text (resolved from the same `moduleOverrides`/plan data) with 
 generic `PATCH /platform/tenants/:id/module-overrides` endpoint and `setModuleOverride()` still exist underneath
 and remain usable for any other `KNOWN_MODULES` key that later needs the same per-tenant-override treatment.
 
+**Pages Rollout — same mechanism, generalized.** `setSocialMediaRollout`/`getSocialMediaRollout` were the only
+implementation of this rollout lifecycle until Pages needed the identical "opt-in, still-early-access module with
+no platform-admin control surface at all" treatment the Pages section above already flags (it shipped gated purely
+through `Tenant.moduleOverrides`, with no dedicated rollout UI, requiring a platform admin to Force On each church
+individually via the generic module-overrides endpoint). Rather than duplicate the whole all-vs-specific/
+`Plan.features`-vs-`moduleOverrides` branch a second time, that logic moved into private
+`PlatformTenantService.setModuleRollout(moduleKey, dto)`/`getModuleRollout(moduleKey)`, with
+`setSocialMediaRollout`/`getSocialMediaRollout` now one-line delegates (`moduleKey: 'social_media'`) and two new
+public delegates, `setPagesRollout`/`getPagesRollout` (`moduleKey: 'pages'`), added alongside them. The request DTO
+was renamed accordingly (`set-social-media-rollout.dto.ts` → `set-module-rollout.dto.ts`,
+`SetSocialMediaRolloutDto` → `SetModuleRolloutDto`) since its shape was already module-agnostic. Behavior is
+byte-identical to Social Media's, just keyed on `pages` instead — a plan gaining `pages` in its `features` (the
+"everyone" case) or a tenant gaining `moduleOverrides.pages = true` (the "specific churches" case) both flow
+through the exact code path already covered above.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| GET | `/platform/pages/rollout` | PlatformAdminGuard (TENANTS_READ) | `{enabled: boolean, tenantIds: string[]}`, same derivation as Social Media's but keyed on `pages` |
+| PUT | `/platform/pages/rollout` | PlatformAdminGuard (TENANTS_WRITE) | `{enabled: boolean, tenantIds: string[]}` — full replace, not incremental |
+
+Gated by the `Tenants` permission rather than a dedicated `PAGES_*` platform permission — unlike Social Media
+(which has its own permission pair because it already needs one for the Social Media Apps/OAuth-credentials page
+this rollout card lives on), Pages has no other platform-admin surface, so this is fundamentally the same
+tenant-access-management action as the generic per-tenant module-override endpoint above, just gated the same way.
+
+**Frontend:** a standalone "Pages" page in discuva-platform's sidebar (`/pages`, `pages:read`/`pages:write` in the
+frontend's own permission scheme — unrelated to the tenant-schema `AdminPermission.PAGES_READ`/`PAGES_WRITE`
+documented in the Pages module section above, which gates the church-side admin builder instead), containing
+nothing but the same `RolloutPanel` pattern Social Media uses (on/off switch + searchable multi-select of
+churches). No apps/credentials section, since Pages has no third-party OAuth concept to register.
+
 **`departments` was Pro-only by accident, corrected via `AddDepartmentsToFreePlan`.** Unlike `tithe`, this had no
 migration or comment ever recording it as a deliberate gate — and it directly contradicted `KNOWN_MODULES`'s own
 `required: true` flag on `departments` (`src/church-settings/constants/known-modules.constant.ts`), which marks it
@@ -4184,15 +4215,16 @@ this grant migration, which is why the "Pages" sidebar entry (gated behind `page
 `NAV_STRUCTURE`) silently never appeared for any pre-existing tenant even though the module itself worked once
 reached directly.
 
-**Early-access rollout, gated entirely through `Tenant.moduleOverrides`** — `pages` is a toggleable module
-(`KNOWN_MODULES`) but deliberately **never added to any `Plan.features` array** (no `@RequiresPlan`/`PlanGuard` on
-either controller, unlike Forms), same posture Social Media used before it went GA
+**Early-access rollout, controlled by the Pages Rollout control (§Platform Admin — Tenant Management)** — `pages`
+is a toggleable module (`KNOWN_MODULES`) not included in any plan's `features` by default (no `@RequiresPlan`/
+`PlanGuard` on either controller, unlike Forms), same posture Social Media used before it went GA
 (`MakeSocialMediaOverrideOnly1793736000000`'s own comment). `ModuleEnabledGuard`'s own plan-feature resolution
 (`PlanFeatureResolverService`) already checks `Tenant.moduleOverrides[moduleKey]` ahead of plan membership either
 direction — `true` grants access regardless of plan, `false` blocks it regardless of plan — so a platform admin
-grants specific churches under test access via a Force On/Off toggle on discuva-platform's Tenant detail page
-(`PATCH platform/tenants/:id/module-overrides`, generic across any `KNOWN_MODULES` key), with every other tenant
-getting a `403` from `isEnabled`'s plan-membership fallback. `PageAdminController.isPlatformEnabled`
+grants specific churches under test access from discuva-platform's dedicated Pages page (`GET`/`PUT
+/platform/pages/rollout`, the same one-toggle-plus-multi-select mechanism Social Media Rollout uses, see below),
+with every other tenant getting a `403` from `isEnabled`'s plan-membership fallback until the rollout is flipped to
+"everyone." `PageAdminController.isPlatformEnabled`
 (`GET /pages/platform-enabled`) is a lightweight, side-effect-free access ping the discuva-admin frontend reads to
 decide whether to render the real builder or a "Coming Soon" panel — reaching the handler at all already proves
 access, since `ModuleEnabledGuard` 403s first otherwise. `PagePublicController` carries the same `@RequiresModule`
