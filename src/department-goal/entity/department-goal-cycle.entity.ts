@@ -1,5 +1,6 @@
 import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
+import { ApprovalLevelConfig } from '../interface/approval-level.interface';
 
 // One cycle is global/church-wide — every department drafts goals inside the
 // same shared window, not per-department cycles (inferred from "every
@@ -30,4 +31,12 @@ export class DepartmentGoalCycle extends BaseEntity {
   // running past its dates — see GoalCycleStage.INACTIVE.
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
+
+  // Optional, up to 3 levels, in order. null/empty = no approval gate for
+  // this cycle at all — every department behaves exactly as before this
+  // feature existed. See DepartmentGoalApprovalService for how this drives
+  // per-department blocking (never the cycle's own OPENING/IN_PROGRESS/
+  // REVIEWED stage, which stays a pure function of dates).
+  @Column({ name: 'approval_chain', type: 'jsonb', nullable: true })
+  approvalChain: ApprovalLevelConfig[] | null;
 }

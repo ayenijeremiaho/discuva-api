@@ -10,6 +10,7 @@ import { Department } from '../entity/department.entity';
 import { DepartmentLead } from '../entity/department-lead.entity';
 import { DepartmentLeadTypeEnum } from '../enums/department-lead-type.enum';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
+import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { RequestLeave } from '../../request-leave/enitity/request-leave.entity';
@@ -156,7 +157,12 @@ describe('DepartmentService', () => {
       const existingLead = { workerProfile: { id: 'wp-other' } };
       mockDepartmentRepo.findOneBy.mockResolvedValue(department);
       mockWorkerProfileRepo.findOne.mockResolvedValue(profile);
-      mockLeadRepo.findOne.mockResolvedValue(existingLead);
+      // First call: the existing HOD row being replaced. Second call: the
+      // new cross-role conflict check (see below) — no Deputy HOD row for
+      // this worker in this department, so it resolves clean.
+      mockLeadRepo.findOne
+        .mockResolvedValueOnce(existingLead)
+        .mockResolvedValueOnce(null);
       mockLeadRepo.remove.mockResolvedValue(undefined);
       mockLeadRepo.create.mockReturnValue({
         workerProfile: profile,
@@ -184,6 +190,44 @@ describe('DepartmentService', () => {
       expect(mockLeadRepo.remove).not.toHaveBeenCalled();
       expect(mockLeadRepo.save).toHaveBeenCalled();
       expect(result).toEqual(department);
+    });
+
+    // The old UNIQUE(worker_profile_id) constraint used to block this only
+    // as a side effect of blocking every multi-row case for a worker — now
+    // that leading multiple DIFFERENT departments is legitimate, holding
+    // BOTH lead types within the SAME department needs its own explicit
+    // guard, since HOD and Deputy HOD must be two different people.
+    it('rejects assigning a worker as HOD when they already hold Deputy HOD for the same department', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue(department);
+      mockWorkerProfileRepo.findOne.mockResolvedValue(profile);
+      mockLeadRepo.findOne
+        .mockResolvedValueOnce(null) // no existing HOD row to replace
+        .mockResolvedValueOnce({
+          workerProfile: { id: profile.id },
+          leadType: DepartmentLeadTypeEnum.D_HOD,
+        }); // but this worker already holds Deputy HOD here
+
+      await expect(service.assignLead(dto, 'actor-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockLeadRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects assigning a worker as Deputy HOD when they already hold HOD for the same department', async () => {
+      const assistantDto = { ...dto, type: 'assistant' as const };
+      mockDepartmentRepo.findOneBy.mockResolvedValue(department);
+      mockWorkerProfileRepo.findOne.mockResolvedValue(profile);
+      mockLeadRepo.findOne
+        .mockResolvedValueOnce(null) // no existing Deputy HOD row to replace
+        .mockResolvedValueOnce({
+          workerProfile: { id: profile.id },
+          leadType: DepartmentLeadTypeEnum.HOD,
+        }); // but this worker already holds HOD here
+
+      await expect(service.assignLead(assistantDto, 'actor-1')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockLeadRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -239,21 +283,67 @@ describe('DepartmentService', () => {
     });
   });
 
-  describe('getDepartmentIdForLead', () => {
-    it('should return the departmentId when member is a lead', async () => {
-      mockLeadRepo.findOne.mockResolvedValue({ department: { id: 'dept-1' } });
+  describe('resolveLeadDepartmentId', () => {
+    it('validates and returns an explicitly-supplied departmentId via assertIsDepartmentLead', async () => {
+      mockLeadRepo.findOne.mockResolvedValue({
+        department: { id: 'dept-2' },
+      });
 
-      const result = await service.getDepartmentIdForLead('member-1');
+      const result = await service.resolveLeadDepartmentId(
+        'member-1',
+        'dept-2',
+      );
+
+      expect(result).toBe('dept-2');
+      expect(mockLeadRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            department: { id: 'dept-2' },
+          }),
+        }),
+      );
+    });
+
+    it('rejects an explicit departmentId the member does not lead', async () => {
+      mockLeadRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.resolveLeadDepartmentId('member-1', 'dept-2'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('auto-detects the department when the member leads exactly one', async () => {
+      mockLeadRepo.find.mockResolvedValue([
+        { department: { id: 'dept-1', name: 'Sound' }, leadType: 'HOD' },
+      ]);
+
+      const result = await service.resolveLeadDepartmentId('member-1');
 
       expect(result).toBe('dept-1');
     });
 
-    it('should return null when member is not a lead', async () => {
-      mockLeadRepo.findOne.mockResolvedValue(null);
+    it('throws ForbiddenException when the member leads no department', async () => {
+      mockLeadRepo.find.mockResolvedValue([]);
 
-      const result = await service.getDepartmentIdForLead('member-1');
+      await expect(service.resolveLeadDepartmentId('member-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
 
-      expect(result).toBeNull();
+    // This is the exact scenario a real UNIQUE(worker_profile_id) DB
+    // constraint used to make impossible — now that a worker can lead
+    // multiple departments, silently picking one (the old
+    // getDepartmentIdForLead behavior) would be wrong, so this must reject
+    // and ask the caller to disambiguate instead.
+    it('throws BadRequestException when the member leads more than one department and none was specified', async () => {
+      mockLeadRepo.find.mockResolvedValue([
+        { department: { id: 'dept-1', name: 'Sound' }, leadType: 'HOD' },
+        { department: { id: 'dept-2', name: 'Visuals' }, leadType: 'HOD' },
+      ]);
+
+      await expect(service.resolveLeadDepartmentId('member-1')).rejects.toThrow(
+        BadRequestException,
+      );
     });
   });
 
@@ -274,9 +364,15 @@ describe('DepartmentService', () => {
       const result = await service.getWorkersInDepartment('dept-1');
 
       expect(result).toHaveLength(2);
+      // Array where = OR — a worker whose ONLY connection to this
+      // department is as their secondary/alternate one must still match,
+      // not just workers with it as their primary.
       expect(mockWorkerProfileRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { department: { id: 'dept-1' } },
+          where: [
+            { department: { id: 'dept-1' } },
+            { secondaryDepartment: { id: 'dept-1' } },
+          ],
           relations: ['member'],
         }),
       );
@@ -331,6 +427,16 @@ describe('DepartmentService', () => {
         2,
       );
       expect(result).toBeDefined();
+      // Same OR-on-primary-or-secondary shape as getWorkersInDepartment —
+      // the department roster must include alternate-department workers.
+      expect(mockWorkerProfileRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [
+            { department: { id: 'dept-1' } },
+            { secondaryDepartment: { id: 'dept-1' } },
+          ],
+        }),
+      );
     });
 
     it('should annotate assistant lead role correctly', async () => {
@@ -380,7 +486,7 @@ describe('DepartmentService', () => {
     };
 
     it('should throw ForbiddenException if member is not a lead', async () => {
-      mockLeadRepo.findOne.mockResolvedValue(null);
+      mockLeadRepo.find.mockResolvedValue([]);
 
       await expect(service.getDepartmentSummary(user)).rejects.toThrow(
         ForbiddenException,
@@ -388,6 +494,7 @@ describe('DepartmentService', () => {
     });
 
     it('should return department summary with correct structure', async () => {
+      mockLeadRepo.find.mockResolvedValue([lead]);
       mockLeadRepo.findOne.mockResolvedValue(lead);
       mockWorkerProfileRepo.count
         .mockResolvedValueOnce(10) // totalWorkers
@@ -423,7 +530,54 @@ describe('DepartmentService', () => {
       });
     });
 
+    // A worker whose ALTERNATE (secondary) department is this one must be
+    // counted here too — otherwise the Summary's totals silently disagree
+    // with the Attendance screen's roster, which already includes them via
+    // getWorkersInDepartment's own OR fix.
+    it('counts workers via EITHER primary or secondary department, same as getWorkersInDepartment', async () => {
+      mockLeadRepo.find.mockResolvedValue([lead]);
+      mockLeadRepo.findOne.mockResolvedValue(lead);
+      mockWorkerProfileRepo.count.mockResolvedValue(0);
+      mockLeaveRepo.find.mockResolvedValue([]);
+      const qb = makeQb();
+      qb.getRawOne.mockResolvedValue({ attended: '0' });
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getDepartmentSummary(user);
+
+      expect(mockWorkerProfileRepo.count).toHaveBeenNthCalledWith(1, {
+        where: [
+          { department: { id: 'dept-1' } },
+          { secondaryDepartment: { id: 'dept-1' } },
+        ],
+      });
+      expect(mockWorkerProfileRepo.count).toHaveBeenNthCalledWith(2, {
+        where: [
+          { department: { id: 'dept-1' }, status: WorkerStatusEnum.ACTIVE },
+          {
+            secondaryDepartment: { id: 'dept-1' },
+            status: WorkerStatusEnum.ACTIVE,
+          },
+        ],
+      });
+      expect(mockLeaveRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.arrayContaining([
+            expect.objectContaining({
+              workerProfile: { secondaryDepartment: { id: 'dept-1' } },
+              status: LeaveStatusEnum.PENDING,
+            }),
+          ]),
+        }),
+      );
+      expect(qb.where).toHaveBeenCalledWith(
+        '(wp.department_id = :deptId OR wp.secondary_department_id = :deptId)',
+        { deptId: 'dept-1' },
+      );
+    });
+
     it('should return 0 attendance percentage when no active workers', async () => {
+      mockLeadRepo.find.mockResolvedValue([lead]);
       mockLeadRepo.findOne.mockResolvedValue(lead);
       mockWorkerProfileRepo.count
         .mockResolvedValueOnce(0)
@@ -439,6 +593,7 @@ describe('DepartmentService', () => {
     });
 
     it('should cap attendance percentage at 100', async () => {
+      mockLeadRepo.find.mockResolvedValue([lead]);
       mockLeadRepo.findOne.mockResolvedValue(lead);
       mockWorkerProfileRepo.count
         .mockResolvedValueOnce(5)
@@ -454,10 +609,9 @@ describe('DepartmentService', () => {
     });
 
     it('should identify assistant lead role correctly', async () => {
-      mockLeadRepo.findOne.mockResolvedValue({
-        ...lead,
-        leadType: DepartmentLeadTypeEnum.D_HOD,
-      });
+      const assistantLead = { ...lead, leadType: DepartmentLeadTypeEnum.D_HOD };
+      mockLeadRepo.find.mockResolvedValue([assistantLead]);
+      mockLeadRepo.findOne.mockResolvedValue(assistantLead);
       mockWorkerProfileRepo.count.mockResolvedValue(0);
       mockLeaveRepo.find.mockResolvedValue([]);
       const qb = makeQb();
@@ -539,9 +693,12 @@ describe('DepartmentService', () => {
       selectQb.getRawMany.mockResolvedValue([{ memberId: 'm-1' }]);
       const updateQb = makeQb();
       updateQb.execute.mockResolvedValue({ affected: 1 });
+      const clearSecondaryQb = makeQb();
+      clearSecondaryQb.execute.mockResolvedValue({ affected: 0 });
       mockWorkerProfileRepo.createQueryBuilder
         .mockReturnValueOnce(selectQb)
-        .mockReturnValueOnce(updateQb);
+        .mockReturnValueOnce(updateQb)
+        .mockReturnValueOnce(clearSecondaryQb);
 
       const result = await service.bulkAssignDepartment(
         'dept-1',
@@ -553,6 +710,16 @@ describe('DepartmentService', () => {
       expect(updateQb.set).toHaveBeenCalledWith({
         department: { id: 'dept-1' },
       });
+      // A worker who already held dept-1 as their SECONDARY department must
+      // have it cleared there too, once it becomes their primary — a
+      // department can't be both at once.
+      expect(clearSecondaryQb.set).toHaveBeenCalledWith({
+        secondaryDepartment: null,
+      });
+      expect(clearSecondaryQb.andWhere).toHaveBeenCalledWith(
+        'secondary_department_id = :departmentId',
+        { departmentId: 'dept-1' },
+      );
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'BULK_DEPARTMENT_ASSIGNED',
         expect.objectContaining({

@@ -11359,6 +11359,39 @@
           ]
         },
         {
+          "name": "Create Goal Cycle with Approval Chain (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Q3 2026 Goals\",\n  \"startDate\": \"2026-07-01\",\n  \"graceDeadline\": \"2026-07-14\",\n  \"endDate\": \"2026-09-30\",\n  \"approvalChain\": [\n    { \"level\": 1, \"adminId\": \"a1a2a3a4-1111-4c5d-8e9f-0a1b2c3d4e5f\" },\n    { \"level\": 2, \"adminId\": \"b1b2b3b4-2222-4c5d-8e9f-0a1b2c3d4e5f\" }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "description": "Optional, up to 3 levels, in order. Each department's goals must then pass every level before they can be rated. Omit entirely (or send null) for the default, ungated behavior. Once any department under this cycle has a recorded decision, the chain's structure (which levels exist) locks \u2014 reassigning an existing level's adminId stays allowed at any time."
+        },
+        {
           "name": "Get All Goal Cycles (Admin)",
           "request": {
             "method": "GET",
@@ -11376,6 +11409,26 @@
           },
           "response": [],
           "description": "Unpaginated, same policy as Pages/Church Calendar \u2014 admin-controlled reference data."
+        },
+        {
+          "name": "Get Approval Chain Admin Options (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/admin-options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "admin-options"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Active admins as {id, name, email}[], to populate an approval-chain level picker. Scoped to DEPARTMENT_GOALS_WRITE rather than ADMIN_READ \u2014 an admin who manages goal cycles doesn't need admin-management access just to pick an approver."
         },
         {
           "name": "Update Goal Cycle \u2014 Move Grace Deadline (Admin)",
@@ -11481,6 +11534,29 @@
           "description": "IN_PROGRESS stage only, and only while the goal is unrated. Always audit-logged as DEPARTMENT_GOAL_CORRECTED \u2014 visible to the HOD via the member-facing history endpoint."
         },
         {
+          "name": "Get Goal History (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/goals/{{departmentGoalId}}/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "goals",
+                "{{departmentGoalId}}",
+                "history"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Admin-facing equivalent of the HOD-only member history endpoint \u2014 same DEPARTMENT_GOAL_CORRECTED audit data, no department-lead gate."
+        },
+        {
           "name": "Submit Church Rating (Admin)",
           "request": {
             "method": "POST",
@@ -11537,6 +11613,131 @@
           },
           "response": [],
           "description": "Per-department { avgSelfScore, avgChurchScore, gap } for this cycle \u2014 a large positive gap (self consistently higher than church) is worth a conversation on its own."
+        },
+        {
+          "name": "Get Department Approvals for Cycle (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/approvals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "approvals"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Bulk per-department approval status for the cycle \u2014 { departmentId, departmentName, currentLevel, totalLevels, status, completedAt, currentApproverId, currentApproverName } per department. Empty array if the cycle has no approvalChain configured."
+        },
+        {
+          "name": "Submit Approval Decision (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/approval-decisions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "approval-decisions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"APPROVE\",\n  \"comment\": \"Looks good \\u2014 approved.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "403 \u2014 Not the Current Level's Approver",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Only the Level 1 approver can act on this decision.\"\n}"
+            }
+          ],
+          "description": "decision is APPROVE or REQUEST_CHANGES. comment is required for REQUEST_CHANGES (what needs to change), optional for APPROVE. Only the admin assigned to the department's CURRENT level may call this \u2014 and not if they're the department's own registered HOD (self-review block). APPROVE advances to the next level, or marks the department COMPLETE at the last level. REQUEST_CHANGES reopens the HOD's write access without advancing the level \u2014 the same approver re-reviews the revision."
+        },
+        {
+          "name": "Get Department Comments (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "comments"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Full comment + decision feed for the department, chronological, with the posting admin's real name. Includes both general comments and formal approve/reject decision echoes."
+        },
+        {
+          "name": "Add Department Comment (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "comments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Can you add a measurable target to this goal before we finalize?\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "description": "General comment \u2014 always available to any DEPARTMENT_GOALS_WRITE admin, regardless of whether this cycle has an approval chain configured. An alternative to directly editing via the Correct a Goal endpoint."
         }
       ]
     },
@@ -11767,6 +11968,74 @@
           },
           "response": [],
           "description": "HOD or Deputy-HOD of this department only \u2014 every DEPARTMENT_GOAL_CORRECTED audit entry for this goal, so a church correction is something they can verify, not discover secondhand."
+        },
+        {
+          "name": "Get Department Approval Status (Member)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/member/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/approval",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "member",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "approval"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "description": "HOD or Deputy-HOD of this department only. Null if the cycle has no approvalChain configured, or this department hasn't written a goal yet. When set, drives whether goal-writing is still open past OPENING (status !== COMPLETE) and whether ratings are unblocked (status === COMPLETE)."
+        },
+        {
+          "name": "Get Department Comments (Member)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/member/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/comments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "member",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "comments"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "description": "HOD or Deputy-HOD of this department only. Read-only \u2014 same feed as the admin view, no member-facing POST since comments stay admin-authored."
         },
         {
           "name": "Download Goals PDF (HOD)",

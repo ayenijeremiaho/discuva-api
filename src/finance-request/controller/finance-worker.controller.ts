@@ -2,7 +2,6 @@ import {
   BadRequestException,
   Body,
   Controller,
-  ForbiddenException,
   Get,
   NotFoundException,
   Param,
@@ -74,17 +73,14 @@ export class FinanceWorkerController {
     @CurrentUser() user: MemberAuth,
     @UploadedFile() attachment?: Express.Multer.File,
   ) {
-    const departmentId = await this.departmentService.getDepartmentIdForLead(
+    // The target department is already explicit in the request body — just
+    // confirm this worker actually leads it, rather than resolving "my
+    // department" separately and comparing (which breaks once a worker can
+    // legitimately lead more than one department).
+    await this.departmentService.assertIsDepartmentLead(
       user.id,
+      dto.departmentId,
     );
-    if (!departmentId)
-      throw new ForbiddenException(
-        'Only department heads can raise finance requests',
-      );
-    if (departmentId !== dto.departmentId)
-      throw new ForbiddenException(
-        'You can only raise requests for your own department',
-      );
 
     return this.financeRequestService.createRequest(dto, user, attachment);
   }
@@ -94,17 +90,16 @@ export class FinanceWorkerController {
     @CurrentUser() user: MemberAuth,
     @Query('page') page = 1,
     @Query('limit') limit = 20,
+    @Query('departmentId') departmentId?: string,
   ) {
-    const departmentId = await this.departmentService.getDepartmentIdForLead(
-      user.id,
-    );
-    if (!departmentId)
-      throw new ForbiddenException(
-        'Only department heads can view department finance requests',
+    const resolvedDepartmentId =
+      await this.departmentService.resolveLeadDepartmentId(
+        user.id,
+        departmentId,
       );
 
     return this.financeRequestService.getMyDepartmentRequests(
-      departmentId,
+      resolvedDepartmentId,
       Number(page),
       Number(limit),
     );
@@ -115,18 +110,16 @@ export class FinanceWorkerController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: MemberAuth,
   ) {
-    const departmentId = await this.departmentService.getDepartmentIdForLead(
-      user.id,
-    );
-    if (!departmentId)
-      throw new ForbiddenException(
-        'Only department heads can view finance requests',
-      );
-
+    // The request itself names its department — check the caller leads
+    // THAT one, rather than resolving an ambiguous "my department" first.
     const request = await this.financeRequestService.getRequest(id);
-    if (request.department?.id !== departmentId) {
+    if (!request.department) {
       throw new NotFoundException('Finance request not found');
     }
+    await this.departmentService.assertIsDepartmentLead(
+      user.id,
+      request.department.id,
+    );
     return request;
   }
 }

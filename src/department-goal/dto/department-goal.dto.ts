@@ -1,4 +1,6 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsInt,
@@ -7,7 +9,10 @@ import {
   IsString,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ApprovalLevelDto } from './department-goal-approval.dto';
 
 export class CreateGoalCycleDto {
   @IsString()
@@ -22,6 +27,13 @@ export class CreateGoalCycleDto {
 
   @IsDateString()
   endDate: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => ApprovalLevelDto)
+  approvalChain?: ApprovalLevelDto[] | null;
 }
 
 export class UpdateGoalCycleDto {
@@ -47,6 +59,13 @@ export class UpdateGoalCycleDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @ValidateNested({ each: true })
+  @Type(() => ApprovalLevelDto)
+  approvalChain?: ApprovalLevelDto[] | null;
 }
 
 export class CreateGoalDto {

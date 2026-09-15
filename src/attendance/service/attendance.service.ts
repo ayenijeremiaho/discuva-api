@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -487,14 +486,14 @@ export class AttendanceService {
     slotId: string,
     page = 1,
     limit = 20,
+    departmentId?: string,
   ): Promise<PaginationResponseDto<Attendance>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
-    const deptId = await this.departmentService.getDepartmentIdForLead(user.id);
-    if (!deptId)
-      throw new ForbiddenException(
-        "You must be a department lead to view this department's attendance history.",
-      );
+    const deptId = await this.departmentService.resolveLeadDepartmentId(
+      user.id,
+      departmentId,
+    );
 
     const [data, total] = await this.attendanceRepository
       .createQueryBuilder('attendance')
@@ -516,12 +515,12 @@ export class AttendanceService {
   async getDepartmentEventAttendance(
     user: MemberAuth,
     eventId: string,
+    departmentId?: string,
   ): Promise<DepartmentEventAttendanceResult> {
-    const deptId = await this.departmentService.getDepartmentIdForLead(user.id);
-    if (!deptId)
-      throw new ForbiddenException(
-        "You must be a department lead to view this department's event attendance.",
-      );
+    const deptId = await this.departmentService.resolveLeadDepartmentId(
+      user.id,
+      departmentId,
+    );
 
     const [slots, workers] = await Promise.all([
       this.slotRepository.find({

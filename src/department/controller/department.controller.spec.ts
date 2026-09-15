@@ -15,6 +15,7 @@ const mockDepartmentService = {
   getAllLeads: jest.fn(),
   getWorkersByDepartment: jest.fn(),
   getDepartmentSummary: jest.fn(),
+  getLeadRoles: jest.fn(),
 };
 
 describe('DepartmentController', () => {
@@ -141,10 +142,40 @@ describe('DepartmentController', () => {
 
       const result = await controller.getDepartmentSummary(req);
 
-      expect(mockDepartmentService.getDepartmentSummary).toHaveBeenCalledWith({
-        id: 'member-1',
-      });
+      expect(mockDepartmentService.getDepartmentSummary).toHaveBeenCalledWith(
+        { id: 'member-1' },
+        undefined,
+      );
       expect(result).toEqual(summary);
+    });
+
+    it('passes an explicit departmentId through when supplied', async () => {
+      mockDepartmentService.getDepartmentSummary.mockResolvedValue({});
+      const req = { user: { id: 'member-1' } };
+
+      await controller.getDepartmentSummary(req, 'dept-2');
+
+      expect(mockDepartmentService.getDepartmentSummary).toHaveBeenCalledWith(
+        { id: 'member-1' },
+        'dept-2',
+      );
+    });
+  });
+
+  describe('getMyLeadRoles', () => {
+    it('delegates to service.getLeadRoles with the authenticated user id', async () => {
+      const roles = [
+        { departmentId: 'dept-1', departmentName: 'Sound', leadType: 'HOD' },
+        { departmentId: 'dept-2', departmentName: 'Visuals', leadType: 'HOD' },
+      ];
+      mockDepartmentService.getLeadRoles.mockResolvedValue(roles);
+
+      const result = await controller.getMyLeadRoles({ id: 'member-1' } as any);
+
+      expect(mockDepartmentService.getLeadRoles).toHaveBeenCalledWith(
+        'member-1',
+      );
+      expect(result).toEqual(roles);
     });
   });
 });

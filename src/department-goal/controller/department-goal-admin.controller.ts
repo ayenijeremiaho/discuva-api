@@ -16,12 +16,18 @@ import { Admin } from '../../admin/entity/admin.entity';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { DepartmentGoalService } from '../service/department-goal.service';
+import { DepartmentGoalApprovalService } from '../service/department-goal-approval.service';
 import {
   CreateGoalCycleDto,
   SubmitRatingDto,
   UpdateGoalCycleDto,
   UpdateGoalDto,
 } from '../dto/department-goal.dto';
+import {
+  AddDepartmentGoalCommentDto,
+  ApprovalDecisionDto,
+  SetApprovalLevelOverrideDto,
+} from '../dto/department-goal-approval.dto';
 
 // ModuleEnabledGuard alone, deliberately not stacked with PlanGuard — the
 // latter never consults Tenant.moduleOverrides, so a platform-admin comp
@@ -32,7 +38,10 @@ import {
 @UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('department-goals')
 export class DepartmentGoalAdminController {
-  constructor(private readonly goalService: DepartmentGoalService) {}
+  constructor(
+    private readonly goalService: DepartmentGoalService,
+    private readonly approvalService: DepartmentGoalApprovalService,
+  ) {}
 
   @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_WRITE)
   @Post('cycles')
@@ -44,6 +53,15 @@ export class DepartmentGoalAdminController {
   @Get('cycles')
   getAllCycles() {
     return this.goalService.getAllCycles();
+  }
+
+  // Scoped to DEPARTMENT_GOALS_WRITE rather than reusing the admin-user-list
+  // endpoint (which requires ADMIN_READ) — an admin picking an approval
+  // chain shouldn't need admin-management access to do it.
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_WRITE)
+  @Get('cycles/admin-options')
+  listAdminOptions() {
+    return this.approvalService.listActiveAdmins();
   }
 
   @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_WRITE)
@@ -88,5 +106,67 @@ export class DepartmentGoalAdminController {
   @Get('cycles/:id/report')
   getReport(@Param('id', ParseUUIDPipe) id: string) {
     return this.goalService.getReport(id);
+  }
+
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_READ)
+  @Get('cycles/:id/approvals')
+  getApprovalsForCycle(@Param('id', ParseUUIDPipe) id: string) {
+    return this.approvalService.getApprovalsForCycle(id);
+  }
+
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_WRITE)
+  @Post('cycles/:id/departments/:departmentId/approval-decisions')
+  decide(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('departmentId', ParseUUIDPipe) departmentId: string,
+    @Body() dto: ApprovalDecisionDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.approvalService.decide(id, departmentId, dto, admin);
+  }
+
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_READ)
+  @Get('cycles/:id/departments/:departmentId/comments')
+  getComments(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('departmentId', ParseUUIDPipe) departmentId: string,
+  ) {
+    return this.approvalService.getThread(id, departmentId);
+  }
+
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_WRITE)
+  @Post('cycles/:id/departments/:departmentId/comments')
+  addComment(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('departmentId', ParseUUIDPipe) departmentId: string,
+    @Body() dto: AddDepartmentGoalCommentDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.approvalService.addComment(
+      id,
+      departmentId,
+      dto.content,
+      admin,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_WRITE)
+  @Patch('cycles/:id/departments/:departmentId/approval-level-override')
+  setLevelOverride(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('departmentId', ParseUUIDPipe) departmentId: string,
+    @Body() dto: SetApprovalLevelOverrideDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.approvalService.setLevelOverride(id, departmentId, dto, admin);
+  }
+
+  @RequiresPermission(AdminPermission.DEPARTMENT_GOALS_READ)
+  @Get('cycles/:id/goals/:goalId/history')
+  getGoalHistoryForAdmin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('goalId', ParseUUIDPipe) goalId: string,
+  ) {
+    return this.goalService.getGoalHistoryForAdmin(id, goalId);
   }
 }

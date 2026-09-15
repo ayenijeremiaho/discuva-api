@@ -24,6 +24,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Admin } from '../../admin/entity/admin.entity';
 import { Member } from '../../member/entity/member.entity';
 import { PdfService } from '../../utility/service/pdf.service';
+import { DepartmentGoalApprovalService } from './department-goal-approval.service';
 
 export interface GoalView {
   id: string;
@@ -77,6 +78,7 @@ export class DepartmentGoalService {
     private readonly dateService: DateService,
     private readonly auditLogService: AuditLogService,
     private readonly pdfService: PdfService,
+    private readonly approvalService: DepartmentGoalApprovalService,
   ) {}
 
   // The single place a cycle's stage is derived — see the plan's own note
@@ -100,11 +102,13 @@ export class DepartmentGoalService {
     admin: Admin,
   ): Promise<DepartmentGoalCycle> {
     this.assertValidDateRange(dto.startDate, dto.graceDeadline, dto.endDate);
+    await this.approvalService.validateChain(dto.approvalChain);
     const cycle = this.cycleRepo.create({
       name: dto.name,
       startDate: dto.startDate,
       graceDeadline: dto.graceDeadline,
       endDate: dto.endDate,
+      approvalChain: dto.approvalChain ?? null,
     });
     const saved = await this.cycleRepo.save(cycle);
     this.auditLogService.log('DEPARTMENT_GOAL_CYCLE_CREATED', {
@@ -152,6 +156,16 @@ export class DepartmentGoalService {
     cycle.endDate = nextEnd;
     if (dto.isActive !== undefined) cycle.isActive = dto.isActive;
 
+    if (dto.approvalChain !== undefined) {
+      await this.approvalService.validateChain(dto.approvalChain);
+      await this.approvalService.assertChainMutable(
+        id,
+        cycle.approvalChain,
+        dto.approvalChain,
+      );
+      cycle.approvalChain = dto.approvalChain;
+    }
+
     const saved = await this.cycleRepo.save(cycle);
     this.auditLogService.log('DEPARTMENT_GOAL_CYCLE_UPDATED', {
       actorId: admin.id,
@@ -194,7 +208,7 @@ export class DepartmentGoalService {
     const saved = await this.goalRepo.save(goal);
 
     this.auditLogService.log('DEPARTMENT_GOAL_CORRECTED', {
-      actorId: admin.id,
+      actorId: admin.member?.id,
       targetId: goalId,
       targetName: saved.title,
       metadata: {
@@ -218,6 +232,7 @@ export class DepartmentGoalService {
       );
     }
     const goal = await this.getGoalOrThrow(cycleId, goalId);
+    await this.assertApprovalComplete(cycle, goal.department.id);
     if (goal.churchRating !== null) {
       throw new BadRequestException(
         'This goal has already been rated by the church.',
@@ -231,7 +246,7 @@ export class DepartmentGoalService {
     const saved = await this.goalRepo.save(goal);
 
     this.auditLogService.log('DEPARTMENT_GOAL_CHURCH_RATED', {
-      actorId: admin.id,
+      actorId: admin.member?.id,
       targetId: goalId,
       targetName: saved.title,
       metadata: { rating: dto.rating },
@@ -391,11 +406,7 @@ export class DepartmentGoalService {
       departmentId,
       DepartmentLeadTypeEnum.HOD,
     );
-    if (this.getEffectiveStage(cycle) !== GoalCycleStage.OPENING) {
-      throw new BadRequestException(
-        'Goals can only be added while the cycle is open.',
-      );
-    }
+    await this.assertGoalWritable(cycle, departmentId);
 
     const goal = this.goalRepo.create({
       cycle,
@@ -410,6 +421,9 @@ export class DepartmentGoalService {
       targetName: saved.title,
       metadata: { cycleId, departmentId },
     });
+    if (cycle.approvalChain?.length) {
+      await this.approvalService.onHodGoalWrite(cycle, departmentId, memberId);
+    }
     return saved;
   }
 
@@ -426,11 +440,7 @@ export class DepartmentGoalService {
       departmentId,
       DepartmentLeadTypeEnum.HOD,
     );
-    if (this.getEffectiveStage(cycle) !== GoalCycleStage.OPENING) {
-      throw new BadRequestException(
-        'Goals can only be edited while the cycle is open.',
-      );
-    }
+    await this.assertGoalWritable(cycle, departmentId);
     const goal = await this.getGoalOrThrow(cycleId, goalId, departmentId);
     this.assertNotFrozen(goal);
 
@@ -443,6 +453,9 @@ export class DepartmentGoalService {
       targetName: saved.title,
       metadata: { cycleId, departmentId },
     });
+    if (cycle.approvalChain?.length) {
+      await this.approvalService.onHodGoalWrite(cycle, departmentId, memberId);
+    }
     return saved;
   }
 
@@ -458,11 +471,7 @@ export class DepartmentGoalService {
       departmentId,
       DepartmentLeadTypeEnum.HOD,
     );
-    if (this.getEffectiveStage(cycle) !== GoalCycleStage.OPENING) {
-      throw new BadRequestException(
-        'Goals can only be removed while the cycle is open.',
-      );
-    }
+    await this.assertGoalWritable(cycle, departmentId);
     const goal = await this.getGoalOrThrow(cycleId, goalId, departmentId);
     this.assertNotFrozen(goal);
 
@@ -473,6 +482,9 @@ export class DepartmentGoalService {
       targetName: goal.title,
       metadata: { cycleId, departmentId },
     });
+    if (cycle.approvalChain?.length) {
+      await this.approvalService.onHodGoalWrite(cycle, departmentId, memberId);
+    }
   }
 
   async submitSelfRating(
@@ -493,6 +505,7 @@ export class DepartmentGoalService {
         'Self-ratings can only be submitted once the cycle has ended.',
       );
     }
+    await this.assertApprovalComplete(cycle, departmentId);
     const goal = await this.getGoalOrThrow(cycleId, goalId, departmentId);
     if (goal.selfRating !== null) {
       throw new BadRequestException('You have already rated this goal.');
@@ -524,7 +537,18 @@ export class DepartmentGoalService {
     await this.getCycleOrThrow(cycleId);
     await this.departmentService.assertIsDepartmentLead(memberId, departmentId);
     await this.getGoalOrThrow(cycleId, goalId, departmentId);
+    return this.getCorrectionHistory(goalId);
+  }
 
+  // Admin-facing equivalent of getGoalHistory above — existence check only,
+  // no HOD-lead gate, since any admin with DEPARTMENT_GOALS_READ should be
+  // able to see what another admin changed directly on a goal.
+  async getGoalHistoryForAdmin(cycleId: string, goalId: string) {
+    await this.getGoalOrThrow(cycleId, goalId);
+    return this.getCorrectionHistory(goalId);
+  }
+
+  private async getCorrectionHistory(goalId: string) {
     const { data } = await this.auditLogService.findAll(1, 100, {
       targetId: goalId,
       action: 'DEPARTMENT_GOAL_CORRECTED',
@@ -577,6 +601,45 @@ export class DepartmentGoalService {
     if (goal.churchRating !== null || goal.selfRating !== null) {
       throw new BadRequestException(
         'This goal has already been rated and can no longer be changed.',
+      );
+    }
+  }
+
+  // Replaces the old flat "only while OPENING" check. A cycle with no
+  // approval chain configured behaves exactly as before — only the branch
+  // this method is new for is a chain-gated cycle, where the HOD keeps
+  // write access at ANY stage until their department's chain completes
+  // (including after a level requests changes, past the OPENING window).
+  private async assertGoalWritable(
+    cycle: DepartmentGoalCycle,
+    departmentId: string,
+  ): Promise<void> {
+    if (this.getEffectiveStage(cycle) === GoalCycleStage.INACTIVE) {
+      throw new BadRequestException('This goal cycle has been deactivated.');
+    }
+    if (cycle.approvalChain?.length) {
+      if (await this.approvalService.isApprovalComplete(cycle, departmentId)) {
+        throw new BadRequestException(
+          "This department's goals have been fully approved and can no longer be edited.",
+        );
+      }
+      return;
+    }
+    if (this.getEffectiveStage(cycle) !== GoalCycleStage.OPENING) {
+      throw new BadRequestException(
+        'Goals can only be added, edited, or removed while the cycle is open.',
+      );
+    }
+  }
+
+  private async assertApprovalComplete(
+    cycle: DepartmentGoalCycle,
+    departmentId: string,
+  ): Promise<void> {
+    if (!cycle.approvalChain?.length) return;
+    if (!(await this.approvalService.isApprovalComplete(cycle, departmentId))) {
+      throw new BadRequestException(
+        "This department's goals must complete the approval chain before ratings can be submitted.",
       );
     }
   }

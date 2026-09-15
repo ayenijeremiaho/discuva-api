@@ -189,6 +189,31 @@ export class DepartmentService {
       );
     }
 
+    // A worker can now legitimately hold lead rows in several DIFFERENT
+    // departments (see department-lead.entity.ts's ManyToOne), but holding
+    // BOTH lead types within the SAME department is never valid — HOD and
+    // Deputy HOD are supposed to be two different people. The old
+    // UNIQUE(worker_profile_id) constraint used to block this only as an
+    // accidental side effect of blocking every multi-row case; removing it
+    // to enable multi-department leadership reopened this specific gap, so
+    // it needs its own explicit check now.
+    const otherLeadType =
+      leadType === DepartmentLeadTypeEnum.HOD
+        ? DepartmentLeadTypeEnum.D_HOD
+        : DepartmentLeadTypeEnum.HOD;
+    const conflictingLead = await this.leadRepository.findOne({
+      where: {
+        department: { id: departmentId },
+        leadType: otherLeadType,
+        workerProfile: { id: profile.id },
+      },
+    });
+    if (conflictingLead) {
+      throw new BadRequestException(
+        `This worker already holds the ${otherLeadType === DepartmentLeadTypeEnum.HOD ? 'HOD' : 'Deputy HOD'} role for this department — remove that assignment first if you want to reassign them.`,
+      );
+    }
+
     if (existing) await this.leadRepository.remove(existing);
 
     await this.leadRepository.save(
@@ -266,21 +291,39 @@ export class DepartmentService {
     });
   }
 
-  async getDepartmentIdForLead(memberId: string): Promise<string | null> {
-    const lead = await this.leadRepository.findOne({
-      where: { workerProfile: { member: { id: memberId } } },
-      relations: ['department'],
-    });
-    return lead?.department?.id ?? null;
+  // Resolves which department a lead-scoped action applies to, now that a
+  // worker can genuinely lead more than one department (see
+  // department-lead.entity.ts's ManyToOne — this used to be impossible, so
+  // the old getDepartmentIdForLead's arbitrary findOne() was safe by
+  // accident). If departmentId is supplied, the caller must actually lead
+  // it. If not supplied, auto-detect ONLY when the member leads exactly
+  // one department — preserving today's no-param call sites for the common
+  // single-department case — otherwise reject rather than silently guess.
+  async resolveLeadDepartmentId(
+    memberId: string,
+    departmentId?: string,
+  ): Promise<string> {
+    if (departmentId) {
+      await this.assertIsDepartmentLead(memberId, departmentId);
+      return departmentId;
+    }
+    const roles = await this.getLeadRoles(memberId);
+    const uniqueDeptIds = Array.from(new Set(roles.map((r) => r.departmentId)));
+    if (uniqueDeptIds.length === 0) {
+      throw new ForbiddenException('You are not a lead of any department.');
+    }
+    if (uniqueDeptIds.length > 1) {
+      throw new BadRequestException(
+        'You lead more than one department — specify which department this request is for.',
+      );
+    }
+    return uniqueDeptIds[0];
   }
 
-  // Scoped to a SPECIFIC department, unlike getDepartmentIdForLead above
-  // (which resolves "the" department for a member via an arbitrary
-  // findOne and is not safe to reuse for authorization — a member can lead
-  // more than one department, since DepartmentLead has no uniqueness
-  // constraint on workerProfile, only on (department, leadType)). Callers
-  // needing "is this member allowed to act on department X" must use this,
-  // not getDepartmentIdForLead.
+  // Scoped to a SPECIFIC department — a member can lead more than one, so
+  // there's no such thing as safely resolving "the" department for them
+  // without a department already in hand. Callers needing "is this member
+  // allowed to act on department X" must use this.
   async assertIsDepartmentLead(
     memberId: string,
     departmentId: string,
@@ -301,8 +344,7 @@ export class DepartmentService {
   }
 
   // Every department a member leads (HOD or Deputy-HOD) — a member can lead
-  // more than one, so this returns a list rather than assuming one, unlike
-  // getDepartmentIdForLead.
+  // more than one, so this returns a list rather than assuming one.
   async getLeadRoles(memberId: string): Promise<
     {
       departmentId: string;
@@ -321,9 +363,17 @@ export class DepartmentService {
     }));
   }
 
+  // A worker counts as "in" a department via EITHER their primary or their
+  // alternate (secondary) department — mirrors the same OR already applied
+  // in delete()'s hasPrimaryWorkers/hasSecondaryWorkers check below, so a
+  // department's roster/lead-eligible-worker list doesn't silently exclude
+  // someone who's only assigned to it as an alternate.
   async getWorkersInDepartment(departmentId: string): Promise<WorkerProfile[]> {
     return this.workerProfileRepository.find({
-      where: { department: { id: departmentId } },
+      where: [
+        { department: { id: departmentId } },
+        { secondaryDepartment: { id: departmentId } },
+      ],
       relations: ['member'],
       order: { createdAt: 'ASC' },
     });
@@ -344,7 +394,10 @@ export class DepartmentService {
 
     const [[profiles, total], leads] = await Promise.all([
       this.workerProfileRepository.findAndCount({
-        where: { department: { id: departmentId } },
+        where: [
+          { department: { id: departmentId } },
+          { secondaryDepartment: { id: departmentId } },
+        ],
         relations: ['member'],
         skip: (page - 1) * limit,
         take: limit,
@@ -377,16 +430,25 @@ export class DepartmentService {
     );
   }
 
-  async getDepartmentSummary(user: MemberAuth): Promise<DepartmentSummary> {
+  async getDepartmentSummary(
+    user: MemberAuth,
+    departmentId?: string,
+  ): Promise<DepartmentSummary> {
+    const deptId = await this.resolveLeadDepartmentId(user.id, departmentId);
+    // Already confirmed the caller leads deptId above — this fetch is now
+    // fully scoped (not the old ambiguous findOne), just re-loading the row
+    // for its department name/leadType.
     const lead = await this.leadRepository.findOne({
-      where: { workerProfile: { member: { id: user.id } } },
+      where: {
+        workerProfile: { member: { id: user.id } },
+        department: { id: deptId },
+      },
       relations: ['department'],
     });
     if (!lead)
       throw new ForbiddenException(
         'You must be a department lead to perform this action.',
       );
-    const deptId = lead.department.id;
     const departmentName = lead.department.name;
     const myLeadRole =
       lead.leadType === DepartmentLeadTypeEnum.HOD ? 'head' : 'assistant';
@@ -395,16 +457,29 @@ export class DepartmentService {
     const since = new Date();
     since.setDate(since.getDate() - 30);
 
+    // Every count below is OR'd across primary/secondary department — same
+    // reasoning as getWorkersInDepartment/getWorkersByDepartment above, and
+    // the same fix those two already got. Without this, a worker whose
+    // ALTERNATE department is deptId would show up in the Attendance
+    // screen's roster (which goes through getWorkersInDepartment) but be
+    // invisible in this summary's totals — an inconsistency between the
+    // two screens, not just an undercount on its own.
     const [totalWorkers, activeWorkers, onLeave, attendanceResult] =
       await Promise.all([
         this.workerProfileRepository.count({
-          where: { department: { id: deptId } },
+          where: [
+            { department: { id: deptId } },
+            { secondaryDepartment: { id: deptId } },
+          ],
         }),
         this.workerProfileRepository.count({
-          where: {
-            department: { id: deptId },
-            status: WorkerStatusEnum.ACTIVE,
-          },
+          where: [
+            { department: { id: deptId }, status: WorkerStatusEnum.ACTIVE },
+            {
+              secondaryDepartment: { id: deptId },
+              status: WorkerStatusEnum.ACTIVE,
+            },
+          ],
         }),
         this.leaveRepository.find({
           where: [
@@ -414,6 +489,15 @@ export class DepartmentService {
             },
             {
               workerProfile: { department: { id: deptId } },
+              status: LeaveStatusEnum.APPROVED,
+              dateTo: MoreThanOrEqual(today),
+            },
+            {
+              workerProfile: { secondaryDepartment: { id: deptId } },
+              status: LeaveStatusEnum.PENDING,
+            },
+            {
+              workerProfile: { secondaryDepartment: { id: deptId } },
               status: LeaveStatusEnum.APPROVED,
               dateTo: MoreThanOrEqual(today),
             },
@@ -429,7 +513,10 @@ export class DepartmentService {
             'wp',
             "wp.member_id = a.member_id AND wp.status = 'ACTIVE'",
           )
-          .where('wp.department_id = :deptId', { deptId })
+          .where(
+            '(wp.department_id = :deptId OR wp.secondary_department_id = :deptId)',
+            { deptId },
+          )
           .andWhere("a.status IN ('PRESENT', 'LATE')")
           .andWhere('a.createdAt >= :since', { since })
           .andWhere('a.roleAtCheckin = :role', { role: 'WORKER' })
@@ -486,6 +573,18 @@ export class DepartmentService {
         .update(WorkerProfile)
         .set({ department: { id: departmentId } as Department })
         .where('member_id IN (:...ids)', { ids: existingIds })
+        .execute();
+      // Bulk-assigning this department as PRIMARY makes it redundant for
+      // anyone who already held it as their secondary — a worker can't
+      // have the same department as both, so clear it rather than leave a
+      // silent collision (this raw update bypasses entity hydration, so
+      // the same check inside updateWorkerProfile never runs for this path).
+      await this.workerProfileRepository
+        .createQueryBuilder()
+        .update(WorkerProfile)
+        .set({ secondaryDepartment: null })
+        .where('member_id IN (:...ids)', { ids: existingIds })
+        .andWhere('secondary_department_id = :departmentId', { departmentId })
         .execute();
     }
 

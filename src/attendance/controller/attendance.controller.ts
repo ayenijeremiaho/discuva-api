@@ -147,12 +147,14 @@ export class AttendanceController {
     @Query('slotId', ParseUUIDPipe) slotId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('departmentId') departmentId?: string,
   ) {
     return this.attendanceService.getDepartmentHistory(
       req.user,
       slotId,
       page ? +page : 1,
       limit ? +limit : 20,
+      departmentId,
     );
   }
 
@@ -179,10 +181,12 @@ export class AttendanceController {
   async getDepartmentEventAttendance(
     @Request() req: any,
     @Param('eventId', ParseUUIDPipe) eventId: string,
+    @Query('departmentId') departmentId?: string,
   ) {
     return this.attendanceService.getDepartmentEventAttendance(
       req.user,
       eventId,
+      departmentId,
     );
   }
 

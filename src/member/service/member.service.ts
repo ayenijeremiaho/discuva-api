@@ -157,6 +157,13 @@ export class MemberService {
     profile.member = member;
     profile.department = department;
     profile.status = WorkerStatusEnum.ACTIVE;
+    // A reinstated profile keeps whatever secondaryDepartment it had before
+    // (see the comment above) — but if that leftover value now matches the
+    // NEW primary, a worker can't have the same department as both, so the
+    // now-redundant secondary is cleared rather than left silently colliding.
+    if (profile.secondaryDepartment?.id === department.id) {
+      profile.secondaryDepartment = null;
+    }
     if (!isReinstatement || dto.profession !== undefined) {
       profile.profession = dto.profession;
     }
@@ -173,7 +180,10 @@ export class MemberService {
     dto: PromoteToWorkerDto,
     actorId: string,
   ): Promise<Member> {
-    const member = await this.getById(memberId, ['workerProfile']);
+    const member = await this.getById(memberId, [
+      'workerProfile',
+      'workerProfile.secondaryDepartment',
+    ]);
 
     if (member.workerProfile?.status === WorkerStatusEnum.ACTIVE) {
       throw new BadRequestException(
@@ -279,7 +289,7 @@ export class MemberService {
     // inside a single transaction, regardless of batch size.
     const members = await this.memberRepository.find({
       where: { id: In(uniqueIds) },
-      relations: ['workerProfile'],
+      relations: ['workerProfile', 'workerProfile.secondaryDepartment'],
     });
     const membersById = new Map(members.map((m) => [m.id, m]));
 
@@ -776,13 +786,35 @@ export class MemberService {
         dto.departmentId,
         'Department not found',
       );
+      // The primary just changed out from under a leftover secondary — if
+      // they now match, the secondary is redundant (a worker can't hold the
+      // same department as both), so it's cleared rather than left
+      // silently colliding. Only when secondaryDepartmentId isn't ALSO
+      // being set in this same call — if it is, the explicit check below
+      // handles it (and should reject a deliberate primary===secondary,
+      // not silently accept it).
+      if (
+        !('secondaryDepartmentId' in dto) &&
+        profile.secondaryDepartment?.id === dto.departmentId
+      ) {
+        profile.secondaryDepartment = null;
+      }
     }
 
     if ('secondaryDepartmentId' in dto) {
-      profile.secondaryDepartment = await this.resolveSecondaryDepartment(
+      const resolvedSecondary = await this.resolveSecondaryDepartment(
         dto.secondaryDepartmentId,
         profile.secondaryDepartment,
       );
+      if (
+        resolvedSecondary &&
+        resolvedSecondary.id === profile.department?.id
+      ) {
+        throw new BadRequestException(
+          "A worker's secondary department cannot be the same as their primary department.",
+        );
+      }
+      profile.secondaryDepartment = resolvedSecondary;
     }
 
     if (dto.status) profile.status = dto.status;
@@ -1003,6 +1035,10 @@ export class MemberService {
       .createQueryBuilder('member')
       .leftJoinAndSelect('member.workerProfile', 'workerProfile')
       .leftJoinAndSelect('workerProfile.department', 'department')
+      .leftJoinAndSelect(
+        'workerProfile.secondaryDepartment',
+        'secondaryDepartment',
+      )
       .leftJoinAndSelect('member.clergy', 'clergy')
       .leftJoinAndSelect('clergy.title', 'clergyTitle')
       .orderBy('member.createdAt', 'DESC')
@@ -1059,6 +1095,7 @@ export class MemberService {
       .createQueryBuilder('member')
       .innerJoinAndSelect('member.workerProfile', 'profile')
       .innerJoinAndSelect('profile.department', 'department')
+      .leftJoinAndSelect('profile.secondaryDepartment', 'secondaryDepartment')
       .leftJoinAndSelect('member.clergy', 'clergy')
       .leftJoinAndSelect('clergy.title', 'clergyTitle')
       .where('member.role = :role', { role: MemberRoleEnum.WORKER });

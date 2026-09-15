@@ -94,4 +94,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Sent when a student asks a Sunday School question and when a teacher answers it.',
     },
+    [EmailCategory.DEPARTMENT_GOAL_ACTIVITY]: {
+      label: 'Department Goal Approval & Comments',
+      description:
+        'Sent to a HOD/Deputy-HOD when an approval decision or comment is posted on their department’s goals.',
+    },
   };

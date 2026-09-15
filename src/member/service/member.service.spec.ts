@@ -450,6 +450,49 @@ describe('MemberService', () => {
         expect.objectContaining({ actorId: 'actor-1', targetId: 'member-1' }),
       );
     });
+
+    it('clears a leftover secondaryDepartment that now collides with the new primary on reinstatement', async () => {
+      const existingProfile = {
+        id: 'wp-1',
+        status: WorkerStatusEnum.INACTIVE,
+        secondaryDepartment: { id: 'dept-2', name: 'Media' },
+      };
+      const member = {
+        id: 'member-1',
+        email: 'worker@test.com',
+        firstname: 'Jane',
+        lastname: 'Doe',
+        role: MemberRoleEnum.MEMBER,
+        workerProfile: existingProfile,
+      };
+      const department = { id: 'dept-2', name: 'Media' };
+      const mockTxManager = {
+        save: jest.fn().mockResolvedValue(existingProfile),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      };
+
+      mockMemberRepo.findOne
+        .mockResolvedValueOnce(member)
+        .mockResolvedValueOnce({ ...member, role: MemberRoleEnum.WORKER });
+      mockDepartmentRepo.findOneBy.mockResolvedValue(department);
+      mockMemberRepo.manager.transaction.mockImplementation(
+        async (cb: (em: typeof mockTxManager) => Promise<void>) =>
+          cb(mockTxManager),
+      );
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockReturnValue('Jane');
+
+      await service.promoteToWorker(
+        'member-1',
+        { departmentId: 'dept-2' } as any,
+        'actor-1',
+      );
+
+      expect(mockTxManager.save).toHaveBeenCalledWith(
+        expect.objectContaining({ department, secondaryDepartment: null }),
+      );
+    });
   });
 
   describe('bulkPromoteToWorker', () => {
@@ -552,6 +595,105 @@ describe('MemberService', () => {
         failures: [{ memberId: 'm1', reason: 'Member not found' }],
       });
       expect(mockMemberRepo.manager.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updateWorkerProfile', () => {
+    it('rejects setting secondaryDepartmentId equal to the current primary department', async () => {
+      const member = {
+        id: 'member-1',
+        workerProfile: {
+          id: 'wp-1',
+          department: { id: 'dept-1', name: 'Sound' },
+          secondaryDepartment: null,
+        },
+      };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+
+      await expect(
+        service.updateWorkerProfile(
+          'member-1',
+          { secondaryDepartmentId: 'dept-1' } as any,
+          'actor-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockWorkerProfileRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects setting departmentId and secondaryDepartmentId to the same department in one call', async () => {
+      const member = {
+        id: 'member-1',
+        workerProfile: {
+          id: 'wp-1',
+          department: { id: 'dept-1', name: 'Sound' },
+          secondaryDepartment: { id: 'dept-2', name: 'Media' },
+        },
+      };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'dept-3',
+        name: 'Visuals',
+      });
+
+      await expect(
+        service.updateWorkerProfile(
+          'member-1',
+          { departmentId: 'dept-3', secondaryDepartmentId: 'dept-3' } as any,
+          'actor-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockWorkerProfileRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('auto-clears the secondary department when the primary is changed to match it', async () => {
+      const profile = {
+        id: 'wp-1',
+        department: { id: 'dept-1', name: 'Sound' },
+        secondaryDepartment: { id: 'dept-2', name: 'Media' },
+      };
+      const member = { id: 'member-1', workerProfile: profile };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'dept-2',
+        name: 'Media',
+      });
+      mockWorkerProfileRepo.save.mockImplementation((p) => Promise.resolve(p));
+
+      const result = await service.updateWorkerProfile(
+        'member-1',
+        { departmentId: 'dept-2' } as any,
+        'actor-1',
+      );
+
+      expect(result.secondaryDepartment).toBeNull();
+      expect(mockWorkerProfileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ secondaryDepartment: null }),
+      );
+    });
+
+    it('allows an unrelated update to proceed normally (regression)', async () => {
+      const profile = {
+        id: 'wp-1',
+        department: { id: 'dept-1', name: 'Sound' },
+        secondaryDepartment: { id: 'dept-2', name: 'Media' },
+        status: WorkerStatusEnum.ACTIVE,
+      };
+      const member = { id: 'member-1', workerProfile: profile };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockWorkerProfileRepo.save.mockImplementation((p) => Promise.resolve(p));
+
+      const result = await service.updateWorkerProfile(
+        'member-1',
+        { profession: 'Sound Engineer' } as any,
+        'actor-1',
+      );
+
+      expect(result.department).toEqual({ id: 'dept-1', name: 'Sound' });
+      expect(result.secondaryDepartment).toEqual({
+        id: 'dept-2',
+        name: 'Media',
+      });
+      expect((result as any).profession).toBe('Sound Engineer');
     });
   });
 

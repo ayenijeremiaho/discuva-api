@@ -17,6 +17,7 @@ import { MemberAuth } from '../../auth/interface/auth.interface';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { DepartmentGoalService } from '../service/department-goal.service';
+import { DepartmentGoalApprovalService } from '../service/department-goal-approval.service';
 import {
   CreateGoalDto,
   SubmitRatingDto,
@@ -31,7 +32,10 @@ import {
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('department-goals/member')
 export class DepartmentGoalMemberController {
-  constructor(private readonly goalService: DepartmentGoalService) {}
+  constructor(
+    private readonly goalService: DepartmentGoalService,
+    private readonly approvalService: DepartmentGoalApprovalService,
+  ) {}
 
   @Get('current')
   getCurrent(@CurrentUser() user: MemberAuth) {
@@ -93,6 +97,32 @@ export class DepartmentGoalMemberController {
       departmentId,
       goalId,
       dto,
+      user.id,
+    );
+  }
+
+  @Get('cycles/:cycleId/departments/:departmentId/approval')
+  getApproval(
+    @Param('cycleId', ParseUUIDPipe) cycleId: string,
+    @Param('departmentId', ParseUUIDPipe) departmentId: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.approvalService.getApprovalStatusForMember(
+      cycleId,
+      departmentId,
+      user.id,
+    );
+  }
+
+  @Get('cycles/:cycleId/departments/:departmentId/comments')
+  getComments(
+    @Param('cycleId', ParseUUIDPipe) cycleId: string,
+    @Param('departmentId', ParseUUIDPipe) departmentId: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.approvalService.getThreadForMember(
+      cycleId,
+      departmentId,
       user.id,
     );
   }

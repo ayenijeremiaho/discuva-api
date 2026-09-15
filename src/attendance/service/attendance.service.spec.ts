@@ -118,7 +118,7 @@ const mockTxManager = { save: jest.fn(), update: jest.fn() };
 const mockTxHost = { tx: mockTxManager };
 
 const mockDepartmentService = {
-  getDepartmentIdForLead: jest.fn(),
+  resolveLeadDepartmentId: jest.fn(),
   getWorkersInDepartment: jest.fn(),
   isMemberDepartmentLead: jest.fn(),
 };
@@ -1668,7 +1668,9 @@ describe('AttendanceService', () => {
     };
 
     it('should throw ForbiddenException if user is not a department lead', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue(null);
+      mockDepartmentService.resolveLeadDepartmentId.mockRejectedValue(
+        new ForbiddenException('You are not a lead of any department.'),
+      );
 
       await expect(
         service.getDepartmentHistory(user, 'slot-1'),
@@ -1676,7 +1678,7 @@ describe('AttendanceService', () => {
     });
 
     it('should return attendance records filtered by department and slot', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      mockDepartmentService.resolveLeadDepartmentId.mockResolvedValue('dept-1');
       const records = [{ id: 'att-1' }, { id: 'att-2' }];
       const qb = makeQb();
       qb.getManyAndCount.mockResolvedValue([records, 2]);
@@ -1695,7 +1697,7 @@ describe('AttendanceService', () => {
     });
 
     it('should paginate results', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      mockDepartmentService.resolveLeadDepartmentId.mockResolvedValue('dept-1');
       const qb = makeQb();
       qb.getManyAndCount.mockResolvedValue([[], 0]);
       mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
@@ -1709,7 +1711,7 @@ describe('AttendanceService', () => {
     });
 
     it('should throw BadRequestException for a non-positive page', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      mockDepartmentService.resolveLeadDepartmentId.mockResolvedValue('dept-1');
 
       await expect(
         service.getDepartmentHistory(user, 'slot-1', 0),
@@ -1726,7 +1728,9 @@ describe('AttendanceService', () => {
     };
 
     it('should throw ForbiddenException if user is not a department lead', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue(null);
+      mockDepartmentService.resolveLeadDepartmentId.mockRejectedValue(
+        new ForbiddenException('You are not a lead of any department.'),
+      );
 
       await expect(
         service.getDepartmentEventAttendance(user, 'event-1'),
@@ -1734,7 +1738,7 @@ describe('AttendanceService', () => {
     });
 
     it('should throw NotFoundException if event has no slots', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      mockDepartmentService.resolveLeadDepartmentId.mockResolvedValue('dept-1');
       mockDepartmentService.getWorkersInDepartment.mockResolvedValue([]);
       mockSlotRepo.find = jest.fn().mockResolvedValue([]);
 
@@ -1744,7 +1748,7 @@ describe('AttendanceService', () => {
     });
 
     it('should return attendance matrix with null status for absent workers', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      mockDepartmentService.resolveLeadDepartmentId.mockResolvedValue('dept-1');
 
       const event = { id: 'event-1', name: 'Sunday Service' };
       const slots = [
@@ -1796,7 +1800,7 @@ describe('AttendanceService', () => {
     });
 
     it('should return empty workers array when department has no workers', async () => {
-      mockDepartmentService.getDepartmentIdForLead.mockResolvedValue('dept-1');
+      mockDepartmentService.resolveLeadDepartmentId.mockResolvedValue('dept-1');
 
       const slots = [
         {

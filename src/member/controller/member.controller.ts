@@ -147,6 +147,7 @@ export class MemberController {
     const member = await this.memberService.getById(id, [
       'workerProfile',
       'workerProfile.department',
+      'workerProfile.secondaryDepartment',
       'clergy',
       'clergy.title',
     ]);

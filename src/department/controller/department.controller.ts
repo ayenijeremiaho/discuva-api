@@ -148,7 +148,23 @@ export class DepartmentController {
   @UseGuards(RolesGuard)
   @Roles(MemberRoleEnum.WORKER)
   @Get('my/summary')
-  async getDepartmentSummary(@Request() req: any) {
-    return this.departmentService.getDepartmentSummary(req.user);
+  async getDepartmentSummary(
+    @Request() req: any,
+    @Query('departmentId') departmentId?: string,
+  ) {
+    return this.departmentService.getDepartmentSummary(req.user, departmentId);
+  }
+
+  // Backs a department picker on the frontend — the only member-facing way
+  // to discover which department(s) a caller leads, now that leading more
+  // than one is possible. Every lead-scoped member endpoint
+  // (my/summary, attendance department views, finance requests) needs the
+  // caller to know this list to disambiguate when resolveLeadDepartmentId
+  // would otherwise reject an unspecified departmentId as ambiguous.
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('my/leads')
+  async getMyLeadRoles(@CurrentUser() user: MemberAuth) {
+    return this.departmentService.getLeadRoles(user.id);
   }
 }

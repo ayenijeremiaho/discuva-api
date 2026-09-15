@@ -161,6 +161,8 @@ export class EmailQueueService {
         'EMAIL_CLASS_SESSION_REMINDER_ENABLED',
       [EmailCategory.FORM_SUBMISSION]: 'EMAIL_FORM_SUBMISSION_ENABLED',
       [EmailCategory.SUNDAY_SCHOOL_QA]: 'EMAIL_SUNDAY_SCHOOL_QA_ENABLED',
+      [EmailCategory.DEPARTMENT_GOAL_ACTIVITY]:
+        'EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);

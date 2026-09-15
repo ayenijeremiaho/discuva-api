@@ -5121,7 +5121,9 @@ a cycle per department.
 
 - `DepartmentGoalCycle` (`department_goal_cycles`) — `name`, `startDate`/`graceDeadline`/`endDate` (plain
   `date` columns, `'yyyy-MM-dd'`, compared via `DateService.today()` — same convention as `PledgeCampaign`/
-  `ChurchCalendar`), `isActive` (church can deactivate/cancel a cycle early).
+  `ChurchCalendar`), `isActive` (church can deactivate/cancel a cycle early), `approvalChain` (nullable `jsonb`,
+  an ordered array of up to 3 `{level, adminId}` entries — same jsonb-array-of-plain-object pattern
+  `Form.postSubmitOutcomes` uses; `null`/empty is the default and means this cycle has no approval gate at all).
 - `DepartmentGoal` (`department_goals`) — `cycle` (M:1, `CASCADE` — a goal doesn't outlive its cycle),
   `department` (M:1, **`RESTRICT`**, not `CASCADE` — this is a compliance record; department deletion is
   blocked by existing goal history rather than silently erasing it, the same posture
@@ -5130,6 +5132,20 @@ a cycle per department.
   `churchRatedAt`/`selfRatedAt` (nullable timestamptz), `churchRatedByAdmin`/`selfRatedByMember` (nullable FK,
   `SET NULL`). A goal's `title`/`description` become immutable (service-layer check, not a DB constraint) the
   instant either rating is set.
+- `DepartmentGoalApproval` (`department_goal_approvals`) — one row per `(cycle, department)`, `@Unique(['cycle',
+  'department'])`, created **lazily** the moment that department's HOD writes their first goal in a
+  chain-configured cycle (never eagerly backfilled across every department). `currentLevel` (smallint, default
+  1 — which of the cycle's `approvalChain` levels is currently active), `status` (`PENDING` |
+  `CHANGES_REQUESTED` | `COMPLETE`, default `PENDING`), `completedAt` (nullable timestamptz, set when the last
+  level approves). `currentLevel` is never decremented — a `REQUEST_CHANGES` decision keeps the same level
+  active so the same approver re-reviews the HOD's revision, rather than restarting the chain from level 1.
+- `DepartmentGoalComment` (`department_goal_comments`) — mirrors `FollowUpNote`'s shape. `cycle` (M:1,
+  `CASCADE`), `department` (M:1, `RESTRICT`), `postedByAdmin` (nullable FK, `SET NULL`), `content` (text),
+  `approvalLevel` (nullable smallint — set only when this row is a formal approve/reject decision echoed into
+  the feed) and `decision` (`'APPROVED'` | `'CHANGES_REQUESTED'` | `null` — `null` for a general, non-decision
+  comment). One table backs two distinct use cases: a formal per-level decision (always tied to a level) and a
+  free-standing comment any `DEPARTMENT_GOALS_WRITE` admin can post regardless of whether a chain is
+  configured — the HOD sees both in one chronological feed.
 
 **Indexes on `department_goals`**: a composite `(cycle_id, department_id)`, not two standalone single-column
 indexes — `getCurrentForMember` (the hottest read path, hit on every load of a member's or HOD's goals page)
@@ -5327,21 +5343,70 @@ isModuleEnabled("department_goals")` — deliberately its own category rather th
 folding a Pro-plan-gated feature's FAQ into an always-visible category would show HODs on non-Pro tenants
 questions about a feature they can't reach.
 
+**Optional hierarchical approval chain + comments (per-cycle, opt-in).** A church can configure an ordered chain
+of up to 3 admin approvers on a cycle (`approvalChain`); a department's goals then must pass through every level,
+in order, before they can be rated. This is layered on top of the stage machine above, never a replacement for
+it — see `DepartmentGoalApprovalService`:
+
+- **Blocking is per-department, not per-cycle.** `getEffectiveStage` stays a pure function of dates, shared by
+  every department, completely unchanged. A chain-gated department's goals additionally can't be rated
+  (`submitChurchRating`/`submitSelfRating` both still require `REVIEWED` first, unchanged) until that specific
+  department's `DepartmentGoalApproval.status` is `COMPLETE` — a slow approver on one department never freezes
+  any other department or the cycle's own calendar.
+- **The HOD keeps write access past `OPENING`** for any department whose approval isn't yet `COMPLETE` — this is
+  what makes "reopen editing after changes are requested" work even after the grace deadline has passed.
+  `createGoal`/`updateGoalAsHod`/`deleteGoalAsHod` each call the new private `assertGoalWritable`, which branches
+  on whether `cycle.approvalChain` is configured; for a cycle with no chain, behavior is byte-for-byte the same
+  `OPENING`-only gate as before.
+- **Decisions** (`DepartmentGoalApprovalService.decide`) — only the admin assigned to the department's
+  `currentLevel` may act (403 otherwise), and that admin may not be the department's own registered HOD (403,
+  mirrors Finance Request's self-approval block). `REQUEST_CHANGES` requires a non-blank comment, sets
+  `status = CHANGES_REQUESTED` without advancing the level, and writes a decision-echo `DepartmentGoalComment`.
+  `APPROVE` advances `currentLevel` (or sets `status = COMPLETE` at the last level) and also echoes a comment.
+  Once the HOD saves any edit while `CHANGES_REQUESTED`, status silently flips back to `PENDING` at the **same**
+  level (`onHodGoalWrite`) — the same approver re-reviews the revision.
+- **Chain mutability** — once any department under a cycle has a recorded decision, the chain's *structure*
+  (which level numbers exist) is locked (`assertChainMutable`); reassigning which admin holds an existing level
+  stays allowed at any time, so a deactivated/departed approver doesn't permanently stall a department.
+- **General comments** are independent of the chain — any `DEPARTMENT_GOALS_WRITE` admin can post one on any
+  department at any time (even with no chain configured at all), as an alternative to the existing `correctGoal`
+  direct-edit flow.
+- **Push notification on every decision and comment** — `DepartmentGoalApprovalService` fires
+  `NotificationDispatchService.notifyMember` (push-only, no email leg yet) to the department's HOD **and**
+  Deputy-HOD after every `decide()` call and every `addComment()` call, gated by the new `EmailCategory.
+  DEPARTMENT_GOAL_ACTIVITY` category toggle (same per-tenant on/off mechanism every other notification type in
+  this codebase already uses — a church can disable it from the existing category-settings UI).
+- **Admin-facing correction history** — `getGoalHistoryForAdmin` is a new, parallel method next to the existing
+  HOD-only `getGoalHistory` (not a relaxation of it — zero behavior change to the member-facing path), exposed
+  at `GET /department-goals/cycles/:id/goals/:goalId/history`.
+- No new `AdminPermission` was introduced — the picker/decide/comment endpoints reuse the existing
+  `DEPARTMENT_GOALS_READ`/`WRITE`. `GET /department-goals/cycles/admin-options` is deliberately scoped to
+  `DEPARTMENT_GOALS_WRITE` rather than reusing the `ADMIN_READ`-gated admin-user-list endpoint, so an admin who
+  can manage goal cycles isn't also required to hold admin-management access just to pick an approver.
+
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
 | POST   | `/department-goals/cycles`                              | AdminGuard (DEPARTMENT_GOALS_WRITE) | Create a cycle |
 | GET    | `/department-goals/cycles`                              | AdminGuard (DEPARTMENT_GOALS_READ)  | List all cycles — unpaginated |
-| PATCH  | `/department-goals/cycles/:id`                          | AdminGuard (DEPARTMENT_GOALS_WRITE) | Edit dates (incl. moving `graceDeadline` anytime — re-validated), toggle `isActive` |
+| PATCH  | `/department-goals/cycles/:id`                          | AdminGuard (DEPARTMENT_GOALS_WRITE) | Edit dates (incl. moving `graceDeadline` anytime — re-validated), toggle `isActive`, set/reassign `approvalChain` |
+| GET    | `/department-goals/cycles/admin-options`                | AdminGuard (DEPARTMENT_GOALS_WRITE) | Active admins as `{id, name, email}[]`, to populate an approval-chain picker |
 | GET    | `/department-goals/cycles/:id/goals`                    | AdminGuard (DEPARTMENT_GOALS_READ)  | Cross-department goal list for the cycle |
 | PATCH  | `/department-goals/cycles/:id/goals/:goalId`            | AdminGuard (DEPARTMENT_GOALS_WRITE) | Church correction — `IN_PROGRESS` only, audit-logged |
-| POST   | `/department-goals/cycles/:id/goals/:goalId/church-rating` | AdminGuard (DEPARTMENT_GOALS_WRITE) | Write-once, `REVIEWED` only |
+| POST   | `/department-goals/cycles/:id/goals/:goalId/church-rating` | AdminGuard (DEPARTMENT_GOALS_WRITE) | Write-once, `REVIEWED` only, and (if a chain is configured) only once that department's approval is `COMPLETE` |
+| GET    | `/department-goals/cycles/:id/goals/:goalId/history`    | AdminGuard (DEPARTMENT_GOALS_READ)  | Admin-facing correction history — same audit data as the HOD-only member route, no department-lead gate |
 | GET    | `/department-goals/cycles/:id/report`                   | AdminGuard (DEPARTMENT_GOALS_READ)  | Per-department avg self/church score + the gap |
+| GET    | `/department-goals/cycles/:id/approvals`                | AdminGuard (DEPARTMENT_GOALS_READ)  | Bulk per-department approval status for the cycle |
+| POST   | `/department-goals/cycles/:id/departments/:departmentId/approval-decisions` | AdminGuard (DEPARTMENT_GOALS_WRITE) | `{decision: 'APPROVE'\|'REQUEST_CHANGES', comment?}` — only the department's current-level approver may call this |
+| GET    | `/department-goals/cycles/:id/departments/:departmentId/comments` | AdminGuard (DEPARTMENT_GOALS_READ)  | Full comment + decision feed for the department, real admin names |
+| POST   | `/department-goals/cycles/:id/departments/:departmentId/comments` | AdminGuard (DEPARTMENT_GOALS_WRITE) | `{content}` — general comment, always available regardless of chain config |
 | GET    | `/department-goals/member/current`                      | JwtAuthGuard (member+worker)        | Every department relevant to the caller, at their role's visibility |
 | POST   | `/department-goals/member/cycles/:cycleId/departments/:departmentId/goals`            | JwtAuthGuard (HOD only) | `OPENING` only |
 | PATCH  | `/department-goals/member/cycles/:cycleId/departments/:departmentId/goals/:goalId`    | JwtAuthGuard (HOD only) | `OPENING` only, frozen once rated |
 | DELETE | `/department-goals/member/cycles/:cycleId/departments/:departmentId/goals/:goalId`    | JwtAuthGuard (HOD only) | `OPENING` only, frozen once rated |
 | POST   | `/department-goals/member/cycles/:cycleId/departments/:departmentId/goals/:goalId/self-rating` | JwtAuthGuard (HOD only) | Write-once, `REVIEWED` only |
 | GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/goals/:goalId/history` | JwtAuthGuard (dept. lead only) | Audit log, filtered to `DEPARTMENT_GOAL_CORRECTED` for this goal |
+| GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/approval`         | JwtAuthGuard (dept. lead only) | This department's approval status — `null` if no chain configured or no goal written yet |
+| GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/comments`         | JwtAuthGuard (dept. lead only) | Read-only comment + decision feed (no member-facing POST — comments stay admin-authored) |
 | GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/pdf`              | JwtAuthGuard (HOD only) | `application/pdf` download |
 
 ### Social Media Module (`src/social-media/`)
@@ -5809,6 +5874,7 @@ dedicated host).
 | `CLASS_SESSION_REMINDER` | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` |
 | `FORM_SUBMISSION` | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` |
 | `SUNDAY_SCHOOL_QA` | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` |
+| `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
 conditionals, and `{{#each}}` for loops. Values are HTML-escaped automatically; use `{{{variable}}}` only for
@@ -8833,6 +8899,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` | Class next-session reminders |
 | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` | Admin notification on a new form submission (also requires the form's own `notifyOnSubmission` to be on) |
 | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` | Sunday School question-asked / question-answered notifications |
+| `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
 

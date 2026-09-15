@@ -12,6 +12,7 @@ import { DateService } from '../../utility/service/date.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { PdfService } from '../../utility/service/pdf.service';
 import { Admin } from '../../admin/entity/admin.entity';
+import { DepartmentGoalApprovalService } from './department-goal-approval.service';
 
 const mockCycleRepo = {
   create: jest.fn((v) => v),
@@ -45,8 +46,14 @@ const mockAuditLogService = {
 const mockPdfService = {
   generateDepartmentGoalReport: jest.fn().mockResolvedValue(Buffer.from('pdf')),
 };
+const mockApprovalService = {
+  validateChain: jest.fn().mockResolvedValue(undefined),
+  assertChainMutable: jest.fn().mockResolvedValue(undefined),
+  isApprovalComplete: jest.fn().mockResolvedValue(false),
+  onHodGoalWrite: jest.fn().mockResolvedValue(undefined),
+};
 
-const admin = { id: 'admin-1' } as Admin;
+const admin = { id: 'admin-1', member: { id: 'member-admin-1' } } as Admin;
 
 function makeCycle(
   overrides: Partial<DepartmentGoalCycle> = {},
@@ -58,6 +65,7 @@ function makeCycle(
     graceDeadline: '2026-06-14',
     endDate: '2026-06-30',
     isActive: true,
+    approvalChain: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -74,6 +82,7 @@ describe('DepartmentGoalService', () => {
     mockWorkerProfileRepo.findOne.mockResolvedValue(null);
     mockGoalRepo.find.mockResolvedValue([]);
     mockAuditLogService.findAll.mockResolvedValue({ data: [] });
+    mockApprovalService.isApprovalComplete.mockResolvedValue(false);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -91,6 +100,10 @@ describe('DepartmentGoalService', () => {
         { provide: DateService, useValue: mockDateService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: PdfService, useValue: mockPdfService },
+        {
+          provide: DepartmentGoalApprovalService,
+          useValue: mockApprovalService,
+        },
       ],
     }).compile();
     service = module.get(DepartmentGoalService);
@@ -550,6 +563,219 @@ describe('DepartmentGoalService', () => {
         gap: 1.5,
       });
       expect(result[1].gap).toBeNull();
+    });
+  });
+
+  describe('approval-chain-gated cycles', () => {
+    const chainCycle = makeCycle({
+      graceDeadline: '2026-06-14', // past — would normally lock writes
+      approvalChain: [{ level: 1, adminId: 'approver-1' }],
+    });
+
+    it('lets the HOD edit a goal past OPENING when the department approval is not yet complete', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(chainCycle);
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+      mockApprovalService.isApprovalComplete.mockResolvedValue(false);
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        title: 'Old title',
+        churchRating: null,
+        selfRating: null,
+        department: { id: 'dept-1' },
+      });
+
+      const result = await service.updateGoalAsHod(
+        'cycle-1',
+        'dept-1',
+        'goal-1',
+        { title: 'New title' },
+        'member-1',
+      );
+      expect(result.title).toBe('New title');
+      expect(mockApprovalService.onHodGoalWrite).toHaveBeenCalledWith(
+        chainCycle,
+        'dept-1',
+        'member-1',
+      );
+    });
+
+    it('blocks the HOD from editing once the department approval is COMPLETE, even mid-cycle', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(chainCycle);
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+      mockApprovalService.isApprovalComplete.mockResolvedValue(true);
+
+      await expect(
+        service.updateGoalAsHod(
+          'cycle-1',
+          'dept-1',
+          'goal-1',
+          { title: 'New title' },
+          'member-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('a cycle with no approvalChain still locks HOD writes outside OPENING — unchanged backward-compatible behavior', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({ graceDeadline: '2026-06-14', approvalChain: null }),
+      );
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+
+      await expect(
+        service.updateGoalAsHod(
+          'cycle-1',
+          'dept-1',
+          'goal-1',
+          { title: 'New title' },
+          'member-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockApprovalService.onHodGoalWrite).not.toHaveBeenCalled();
+    });
+
+    it('blocks church rating until the department approval is complete, even when the cycle is REVIEWED', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({
+          endDate: '2026-06-01', // REVIEWED
+          approvalChain: [{ level: 1, adminId: 'approver-1' }],
+        }),
+      );
+      mockApprovalService.isApprovalComplete.mockResolvedValue(false);
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        title: 'Goal',
+        churchRating: null,
+        department: { id: 'dept-1' },
+      });
+
+      await expect(
+        service.submitChurchRating(
+          'cycle-1',
+          'goal-1',
+          { rating: 5, reason: 'Great' },
+          admin,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows church rating once the department approval is complete', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({
+          endDate: '2026-06-01', // REVIEWED
+          approvalChain: [{ level: 1, adminId: 'approver-1' }],
+        }),
+      );
+      mockApprovalService.isApprovalComplete.mockResolvedValue(true);
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        title: 'Goal',
+        churchRating: null,
+        department: { id: 'dept-1' },
+      });
+
+      const result = await service.submitChurchRating(
+        'cycle-1',
+        'goal-1',
+        { rating: 5, reason: 'Great' },
+        admin,
+      );
+      expect(result.churchRating).toBe(5);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'DEPARTMENT_GOAL_CHURCH_RATED',
+        expect.objectContaining({ actorId: 'member-admin-1' }),
+      );
+    });
+
+    it('blocks self-rating until the department approval is complete', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({
+          endDate: '2026-06-01', // REVIEWED
+          approvalChain: [{ level: 1, adminId: 'approver-1' }],
+        }),
+      );
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+      mockApprovalService.isApprovalComplete.mockResolvedValue(false);
+
+      await expect(
+        service.submitSelfRating(
+          'cycle-1',
+          'dept-1',
+          'goal-1',
+          { rating: 4, reason: 'Good progress' },
+          'member-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('a rating still cannot be submitted before REVIEWED, chain or no chain', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({
+          graceDeadline: '2026-12-01', // still OPENING
+          approvalChain: [{ level: 1, adminId: 'approver-1' }],
+        }),
+      );
+      mockApprovalService.isApprovalComplete.mockResolvedValue(true);
+      await expect(
+        service.submitChurchRating(
+          'cycle-1',
+          'goal-1',
+          { rating: 5, reason: 'Great' },
+          admin,
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('correctGoal audit actor', () => {
+    it("logs actorId as the admin's member id, not the admin id", async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({ graceDeadline: '2026-06-01', endDate: '2026-12-01' }),
+      ); // IN_PROGRESS
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        title: 'Old title',
+        description: null,
+        churchRating: null,
+        selfRating: null,
+        department: { id: 'dept-1' },
+      });
+
+      await service.correctGoal(
+        'cycle-1',
+        'goal-1',
+        { title: 'New title' },
+        admin,
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'DEPARTMENT_GOAL_CORRECTED',
+        expect.objectContaining({ actorId: 'member-admin-1' }),
+      );
+    });
+  });
+
+  describe('getGoalHistoryForAdmin', () => {
+    it('returns correction history without requiring the caller to be a department lead', async () => {
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        department: { id: 'dept-1' },
+      });
+      mockAuditLogService.findAll.mockResolvedValue({
+        data: [{ action: 'DEPARTMENT_GOAL_CORRECTED' }],
+      });
+
+      const result = await service.getGoalHistoryForAdmin('cycle-1', 'goal-1');
+      expect(result).toHaveLength(1);
+      expect(
+        mockDepartmentService.assertIsDepartmentLead,
+      ).not.toHaveBeenCalled();
+      expect(mockAuditLogService.findAll).toHaveBeenCalledWith(
+        1,
+        100,
+        expect.objectContaining({
+          targetId: 'goal-1',
+          action: 'DEPARTMENT_GOAL_CORRECTED',
+        }),
+      );
     });
   });
 });
