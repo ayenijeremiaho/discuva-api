@@ -30,6 +30,7 @@ export interface GoalView {
   id: string;
   title: string;
   description: string | null;
+  timelineToAchieve: string | null;
   churchRating: number | null;
   churchRatingReason: string | null;
   selfRating: number | null;
@@ -53,6 +54,12 @@ export interface MemberCurrentGoalsResponse {
     graceDeadline: string;
     endDate: string;
     stage: GoalCycleStage;
+    // Lets the member frontend avoid promising review starts exactly at
+    // endDate — when a chain is configured, submitSelfRating also
+    // requires that department's approval to be COMPLETE
+    // (assertApprovalComplete), which can push review later than the
+    // date alone would suggest.
+    hasApprovalChain: boolean;
   } | null;
   departments: MemberDepartmentGoals[];
 }
@@ -202,9 +209,16 @@ export class DepartmentGoalService {
     const goal = await this.getGoalOrThrow(cycleId, goalId);
     this.assertNotFrozen(goal);
 
-    const before = { title: goal.title, description: goal.description };
+    const before = {
+      title: goal.title,
+      description: goal.description,
+      timelineToAchieve: goal.timelineToAchieve,
+    };
     if (dto.title !== undefined) goal.title = dto.title;
     if (dto.description !== undefined) goal.description = dto.description;
+    if (dto.timelineToAchieve !== undefined) {
+      goal.timelineToAchieve = dto.timelineToAchieve;
+    }
     const saved = await this.goalRepo.save(goal);
 
     this.auditLogService.log('DEPARTMENT_GOAL_CORRECTED', {
@@ -213,7 +227,11 @@ export class DepartmentGoalService {
       targetName: saved.title,
       metadata: {
         before,
-        after: { title: saved.title, description: saved.description },
+        after: {
+          title: saved.title,
+          description: saved.description,
+          timelineToAchieve: saved.timelineToAchieve,
+        },
       },
     });
     return saved;
@@ -389,6 +407,7 @@ export class DepartmentGoalService {
         graceDeadline: cycle.graceDeadline,
         endDate: cycle.endDate,
         stage,
+        hasApprovalChain: !!cycle.approvalChain?.length,
       },
       departments,
     };
@@ -413,6 +432,7 @@ export class DepartmentGoalService {
       department: { id: departmentId } as Department,
       title: dto.title,
       description: dto.description ?? null,
+      timelineToAchieve: dto.timelineToAchieve ?? null,
     });
     const saved = await this.goalRepo.save(goal);
     this.auditLogService.log('DEPARTMENT_GOAL_CREATED', {
@@ -446,6 +466,9 @@ export class DepartmentGoalService {
 
     if (dto.title !== undefined) goal.title = dto.title;
     if (dto.description !== undefined) goal.description = dto.description;
+    if (dto.timelineToAchieve !== undefined) {
+      goal.timelineToAchieve = dto.timelineToAchieve;
+    }
     const saved = await this.goalRepo.save(goal);
     this.auditLogService.log('DEPARTMENT_GOAL_UPDATED', {
       actorId: memberId,
@@ -667,6 +690,7 @@ export class DepartmentGoalService {
       id: g.id,
       title: g.title,
       description: g.description,
+      timelineToAchieve: g.timelineToAchieve,
       churchRating: revealed ? g.churchRating : null,
       churchRatingReason: revealed ? g.churchRatingReason : null,
       selfRating: revealed ? g.selfRating : null,

@@ -35,11 +35,25 @@ export class DepartmentGoal extends BaseEntity {
   @JoinColumn({ name: 'department_id' })
   department: Department;
 
+  // Displayed as "KPI" (Key Performance Indicator) in both admin/member
+  // UIs — kept named `title` internally (no migration needed for a
+  // display-only relabel).
   @Column()
   title: string;
 
+  // Displayed as "KPI Description" — previously informally doubled as
+  // "the measurable target" in discuva-member's placeholder copy; that
+  // role now belongs to timelineToAchieve below.
   @Column({ type: 'text', nullable: true })
   description: string | null;
+
+  // "Timeline to Achieve Target" — freeform text (e.g. "Q3 2026", "by end
+  // of cycle"), not a strict date: matches how the source KPI table this
+  // was modeled on reads, and avoids implying the same hard-deadline
+  // enforcement DepartmentGoalCycle.graceDeadline/endDate already carry
+  // at the cycle level. Purely descriptive, never validated/enforced.
+  @Column({ name: 'timeline_to_achieve', type: 'text', nullable: true })
+  timelineToAchieve: string | null;
 
   // Frozen the instant either rating is set — enforced in
   // DepartmentGoalService, not a DB constraint (see assertNotFrozen).

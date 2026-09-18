@@ -47,6 +47,7 @@ export interface DepartmentGoalPdfReport {
   goals: {
     title: string;
     description: string | null;
+    timelineToAchieve: string | null;
     selfRating: number | null;
     selfRatingReason: string | null;
     churchRating: number | null;
@@ -1684,7 +1685,13 @@ export class PdfService {
       margin: { left: MARGIN, right: MARGIN },
       head: [['Goal', 'Self Rating', 'Church Rating']],
       body: report.goals.map((g) => [
-        g.description ? `${g.title}\n${g.description}` : g.title,
+        [
+          g.title,
+          g.description,
+          g.timelineToAchieve ? `Timeline: ${g.timelineToAchieve}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n'),
         g.selfRating !== null
           ? `${g.selfRating}/5${g.selfRatingReason ? ` — ${g.selfRatingReason}` : ''}`
           : '—',

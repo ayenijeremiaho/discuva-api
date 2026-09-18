@@ -316,6 +316,94 @@ describe('DepartmentGoalService', () => {
     });
   });
 
+  describe('timelineToAchieve ("Timeline to Achieve Target")', () => {
+    it('is persisted on create', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({ graceDeadline: '2026-12-01' }),
+      );
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+
+      const result = await service.createGoal(
+        'cycle-1',
+        'dept-1',
+        { title: 'Grow the choir', timelineToAchieve: 'Q3 2026' },
+        'member-1',
+      );
+      expect(result.timelineToAchieve).toBe('Q3 2026');
+    });
+
+    it('defaults to null on create when omitted', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({ graceDeadline: '2026-12-01' }),
+      );
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+
+      const result = await service.createGoal(
+        'cycle-1',
+        'dept-1',
+        { title: 'Grow the choir' },
+        'member-1',
+      );
+      expect(result.timelineToAchieve).toBeNull();
+    });
+
+    it('is updated by the HOD alongside title/description', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({ graceDeadline: '2026-12-01' }),
+      );
+      mockDepartmentService.assertIsDepartmentLead.mockResolvedValue({});
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        title: 'Old title',
+        timelineToAchieve: 'Q1 2026',
+        churchRating: null,
+        selfRating: null,
+        department: { id: 'dept-1' },
+      });
+
+      const result = await service.updateGoalAsHod(
+        'cycle-1',
+        'dept-1',
+        'goal-1',
+        { timelineToAchieve: 'By end of cycle' },
+        'member-1',
+      );
+      expect(result.timelineToAchieve).toBe('By end of cycle');
+    });
+
+    it('is updated via an admin correction, and included in the audit before/after', async () => {
+      mockCycleRepo.findOneBy.mockResolvedValue(
+        makeCycle({ graceDeadline: '2026-06-01' }), // IN_PROGRESS
+      );
+      mockGoalRepo.findOne.mockResolvedValue({
+        id: 'goal-1',
+        title: 'Grow the choir',
+        description: null,
+        timelineToAchieve: 'Q1 2026',
+        churchRating: null,
+        selfRating: null,
+        department: { id: 'dept-1' },
+      });
+
+      const result = await service.correctGoal(
+        'cycle-1',
+        'goal-1',
+        { timelineToAchieve: 'Q4 2026' },
+        admin,
+      );
+      expect(result.timelineToAchieve).toBe('Q4 2026');
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'DEPARTMENT_GOAL_CORRECTED',
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            before: expect.objectContaining({ timelineToAchieve: 'Q1 2026' }),
+            after: expect.objectContaining({ timelineToAchieve: 'Q4 2026' }),
+          }),
+        }),
+      );
+    });
+  });
+
   describe('write-once ratings', () => {
     it('rejects a second church rating on the same goal', async () => {
       mockCycleRepo.findOneBy.mockResolvedValue(
@@ -390,6 +478,26 @@ describe('DepartmentGoalService', () => {
       mockCycleRepo.findOne.mockResolvedValue(null);
       const result = await service.getCurrentForMember('member-1');
       expect(result).toEqual({ cycle: null, departments: [] });
+    });
+
+    it('reports hasApprovalChain: false when the cycle has no approval chain configured', async () => {
+      mockCycleRepo.findOne.mockResolvedValue(makeCycle());
+      mockDepartmentService.getLeadRoles.mockResolvedValue([]);
+      mockWorkerProfileRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getCurrentForMember('member-1');
+      expect(result.cycle?.hasApprovalChain).toBe(false);
+    });
+
+    it('reports hasApprovalChain: true when the cycle has one configured — so the member UI can avoid promising review starts exactly at endDate', async () => {
+      mockCycleRepo.findOne.mockResolvedValue(
+        makeCycle({ approvalChain: [{ level: 1, adminId: 'admin-1' }] }),
+      );
+      mockDepartmentService.getLeadRoles.mockResolvedValue([]);
+      mockWorkerProfileRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.getCurrentForMember('member-1');
+      expect(result.cycle?.hasApprovalChain).toBe(true);
     });
 
     it('withholds goals from a plain department member while the cycle is still OPENING', async () => {

@@ -69,13 +69,21 @@ export class UpdateGoalCycleDto {
 }
 
 export class CreateGoalDto {
+  // Displayed as "KPI" in both admin/member UIs.
   @IsString()
   @IsNotEmpty()
   title: string;
 
+  // Displayed as "KPI Description".
   @IsOptional()
   @IsString()
   description?: string;
+
+  // "Timeline to Achieve Target" — freeform text, never validated as a
+  // date (see DepartmentGoal.timelineToAchieve).
+  @IsOptional()
+  @IsString()
+  timelineToAchieve?: string;
 }
 
 export class UpdateGoalDto {
@@ -87,6 +95,10 @@ export class UpdateGoalDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  timelineToAchieve?: string;
 }
 
 export class SubmitRatingDto {
