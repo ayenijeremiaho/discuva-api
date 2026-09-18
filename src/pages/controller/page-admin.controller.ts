@@ -80,7 +80,7 @@ export class PageAdminController {
   @RequiresPermission(AdminPermission.PAGES_READ)
   @Get(':id')
   getById(@Param('id', ParseUUIDPipe) id: string) {
-    return this.pageService.getById(id);
+    return this.pageService.getByIdForAdmin(id);
   }
 
   @RequiresPermission(AdminPermission.PAGES_WRITE)

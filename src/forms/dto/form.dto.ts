@@ -3,7 +3,9 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -21,6 +23,7 @@ import {
   FormFieldAutoFill,
   FormFieldType,
   FormFieldVisibilityOperator,
+  FormPurpose,
   FormVisibility,
 } from '../enum/form.enum';
 
@@ -119,6 +122,23 @@ export class FormFieldDto {
   })
   @IsString({ each: true })
   options?: string[];
+
+  // QUIZ forms only (parent Form.purpose === QUIZ) — DROPDOWN/CHECKBOX
+  // only. Deep-validated in FormService (each value must be one of this
+  // field's own `options`) rather than via decorator, same reason
+  // optionMetadata is — depends on the sibling `options` array.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  correctOptions?: string[];
+
+  // QUIZ forms only, meaningful only alongside correctOptions — how many
+  // marks this question is worth. Omitted = 1 (FormSubmissionService.
+  // scoreQuizSubmission's `field.points ?? 1`).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  points?: number;
 
   @IsOptional()
   @IsInt()
@@ -221,6 +241,42 @@ export class CreateFormDto {
   @IsUUID()
   eventId?: string;
 
+  // Defaults to STANDARD (every existing form's behaviour) when omitted.
+  // VOTE requires visibility=MEMBERS — validated in FormService, since
+  // that depends on the sibling `visibility` field. See Form.purpose.
+  @IsOptional()
+  @IsEnum(FormPurpose)
+  purpose?: FormPurpose;
+
+  // Identity-based one-response enforcement — see Form.oneResponsePerMember.
+  @IsOptional()
+  @IsBoolean()
+  oneResponsePerMember?: boolean;
+
+  // Naive date-time strings (no UTC offset) interpreted as the church's own
+  // wall-clock time — see DateService.toChurchInstant and Form.opensAt's
+  // own comment. Both optional; null/omitted means always open.
+  @IsOptional()
+  @IsDateString()
+  opensAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  closesAt?: string;
+
+  // QUIZ only — validated against `purpose` in FormService (a sibling-field
+  // dependency a decorator alone can't check).
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  timeLimitMinutes?: number;
+
+  // QUIZ only. Defaults to true (score shown right away) when omitted —
+  // see Form.revealScoreImmediately.
+  @IsOptional()
+  @IsBoolean()
+  revealScoreImmediately?: boolean;
+
   // Requires visibility=PUBLIC and at least one field each carrying
   // autoFillKey FIRST_NAME/LAST_NAME/PHONE_NUMBER — validated in
   // FormService, not here, since it depends on the sibling `fields` array.
@@ -316,6 +372,39 @@ export class UpdateFormDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // Structural change (STANDARD <-> QUIZ/VOTE) is allowed at any time in
+  // v1 — there's no locking mechanism the way DepartmentGoal's approval
+  // chain has, since a Form's own submissions are keyed by field id, not
+  // by purpose. VOTE requires visibility=MEMBERS, checked in FormService
+  // against the resulting (possibly also-just-updated) visibility.
+  @IsOptional()
+  @IsEnum(FormPurpose)
+  purpose?: FormPurpose;
+
+  @IsOptional()
+  @IsBoolean()
+  oneResponsePerMember?: boolean;
+
+  // Explicit null clears the bound (always open on that side again);
+  // omitted leaves the current value untouched — same convention as
+  // eventId above.
+  @IsOptional()
+  @IsDateString()
+  opensAt?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  closesAt?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  timeLimitMinutes?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  revealScoreImmediately?: boolean;
 
   @IsOptional()
   @IsBoolean()
@@ -428,6 +517,40 @@ export class CloneFormDto {
   generalActionLabel?: string | null;
 }
 
+export class FormListQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number = 20;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+
+  @IsOptional()
+  @IsEnum(FormPurpose)
+  purpose?: FormPurpose;
+
+  @IsOptional()
+  @IsEnum(FormVisibility)
+  visibility?: FormVisibility;
+
+  // A plain boolean here would need @Type(() => Boolean), which coerces
+  // any non-empty string (including "false") to true — string enum avoids
+  // that trap and mirrors discuva-admin's own "ACTIVE"/"INACTIVE" filter
+  // vocabulary exactly.
+  @IsOptional()
+  @IsIn(['ACTIVE', 'INACTIVE'])
+  status?: 'ACTIVE' | 'INACTIVE';
+}
+
 export class SubmitFormDto {
   // Keyed by FormField.id — validated against the form's actual fields in
   // the service, not here, since the DTO can't know a given form's schema
@@ -462,6 +585,13 @@ export interface FormSubmitResponseDto {
       description: string | null;
     } | null;
   };
+  // QUIZ forms only. `score`/`maxScore` are present when the score is
+  // shown immediately (Form.revealScoreImmediately, the default); when
+  // withheld until the window closes, `scorePendingUntil` (Form.closesAt)
+  // is present instead — see FormSubmissionService.resolveScoreVisibility.
+  score?: number | null;
+  maxScore?: number | null;
+  scorePendingUntil?: Date | null;
 }
 
 // What GET forms/public/:id and the member-facing list/fetch return —
@@ -507,4 +637,13 @@ export interface PublicFormDto {
   coverImageUrl: string | null;
   logoUrl: string | null;
   fields: PublicFormFieldDto[];
+}
+
+// FormService.getFormOptions — a "pick a form to embed" dropdown (Pages'
+// Registration-section editor) only needs enough of each field to compute
+// a page count client-side, not the full FormField shape.
+export interface FormOptionDto {
+  id: string;
+  title: string;
+  fields: { id: string; pageIndex: number }[];
 }

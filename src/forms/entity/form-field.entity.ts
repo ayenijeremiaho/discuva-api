@@ -118,6 +118,27 @@ export class FormField extends BaseEntity {
   @Column({ name: 'visibility_rule', type: 'jsonb', nullable: true })
   visibilityRule: FormFieldVisibilityRule | null;
 
+  // QUIZ forms only (Form.purpose === QUIZ) — DROPDOWN/CHECKBOX only, each
+  // value must be one of this field's own `options` (enforced in
+  // FormService, same deep-validation style as optionMetadata). Null for
+  // every non-quiz field. CHECKBOX is scored correct only when the
+  // submitted set exactly equals this array — see
+  // FormSubmissionService.scoreQuizSubmission.
+  @Column({
+    name: 'correct_options',
+    type: 'text',
+    array: true,
+    nullable: true,
+  })
+  correctOptions: string[] | null;
+
+  // QUIZ forms only, meaningful only alongside correctOptions — how many
+  // marks this question is worth. Null (every field before this existed)
+  // means 1, the flat per-question value scoring always used — see
+  // FormSubmissionService.scoreQuizSubmission's `field.points ?? 1`.
+  @Column({ type: 'smallint', nullable: true })
+  points: number | null;
+
   // Which page of a multi-page form this field appears on — a plain
   // grouping key, not a relation to a first-class "page" entity (per
   // design choice). Default 0 means every field lands on the same single

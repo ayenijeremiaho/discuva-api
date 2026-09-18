@@ -30,6 +30,23 @@ export enum PageSectionType {
   // church contact info) — see PageService.assertValidSections' FOOTER
   // case for its content shape.
   FOOTER = 'FOOTER',
+  // A responsive image grid — content.images is authored directly (like
+  // SPEAKERS' items), not pulled from elsewhere. Free on any tenant with
+  // the 'pages' module enabled, no plan gate.
+  GALLERY = 'GALLERY',
+  // content.calendarId references an existing ChurchCalendar by id — this
+  // section does NOT re-author entries, it pulls the referenced calendar's
+  // `entries` live at render time (PageService.withChurchCalendarEntries),
+  // the same "reference another entity, merge its data server-side"
+  // pattern REGISTRATION's formId already uses. Paid-plan gated
+  // (PlanFeature.CHURCH_CALENDAR) — see assertValidSections' own case and
+  // withChurchCalendarEntries for the downgrade-handling story.
+  CHURCH_CALENDAR = 'CHURCH_CALENDAR',
+  // No content to author beyond a heading/offline message — always
+  // reflects "is a service live right now, tenant-wide" at render time
+  // (PageService.withLiveStatus), pulled from ServiceSessionService. Free,
+  // no plan gate.
+  LIVE_NOW = 'LIVE_NOW',
 }
 
 // The only status values allowed for TestimonialSubmission.status — plain

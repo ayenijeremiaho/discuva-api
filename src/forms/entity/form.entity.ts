@@ -10,7 +10,11 @@ import {
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { Event } from '../../event/entity/event.entity';
 import { Group } from '../../group/entity/group.entity';
-import { FormVisibility, FormFieldVisibilityOperator } from '../enum/form.enum';
+import {
+  FormPurpose,
+  FormVisibility,
+  FormFieldVisibilityOperator,
+} from '../enum/form.enum';
 import { FormField } from './form-field.entity';
 import { FormSubmission } from './form-submission.entity';
 
@@ -169,6 +173,46 @@ export class Form extends BaseEntity {
   // whatever this produces.
   @Column({ name: 'post_submit_outcomes', type: 'jsonb', nullable: true })
   postSubmitOutcomes: PostSubmitOutcome[] | null;
+
+  // Indexed — FormService.listForms filters on this server-side (the admin
+  // Purpose dropdown), unlike when this comment first said otherwise.
+  @Index()
+  @Column({ default: FormPurpose.STANDARD })
+  purpose: FormPurpose;
+
+  // Identity-based "no repeat submission," independent of dedupField (which
+  // dedupes on a submitted *value*, not on *who* submitted). Enforced in
+  // FormSubmissionService.submitAsMember against getMySubmission — this has
+  // no effect on submitAsPublic/submitAsAdmin, which have no stable member
+  // identity (public) or are exempt by design (admin record-entry).
+  @Column({ name: 'one_response_per_member', default: false })
+  oneResponsePerMember: boolean;
+
+  // Exact date-and-time instants (not date-only) — a form can open/close
+  // mid-day, not only at midnight. Both null = always open, today's
+  // behaviour for every existing form. Independent of `isActive`: both
+  // gates must pass for a submission to be accepted. See
+  // FormSubmissionService's window checks and DateService.toChurchInstant
+  // for how an admin-entered wall-clock time becomes this UTC instant.
+  @Column({ name: 'opens_at', type: 'timestamptz', nullable: true })
+  opensAt: Date | null;
+
+  @Column({ name: 'closes_at', type: 'timestamptz', nullable: true })
+  closesAt: Date | null;
+
+  // QUIZ only. Null = no per-attempt timer (the open/close window above is
+  // the only time-boxing that applies). See FormAttemptService for how this
+  // combines with closesAt.
+  @Column({ name: 'time_limit_minutes', type: 'smallint', nullable: true })
+  timeLimitMinutes: number | null;
+
+  // QUIZ only. When false, a submitter's score is computed and stored at
+  // submit time as usual but withheld from THEM until `closesAt` passes —
+  // stops an early finisher's result (and by extension which questions
+  // they got right) leaking to classmates who haven't taken it yet during
+  // a shared open window. Meaningless without a closesAt set.
+  @Column({ name: 'reveal_score_immediately', default: true })
+  revealScoreImmediately: boolean;
 
   // Deliberately no `cascade: true` here — Form also has two other
   // relations to FormField (dedupField/nextStepsField below). Cascading

@@ -153,6 +153,16 @@ separately also be an HOD. At most one row per member (`OneToOne` on `member`).
 Managed via `POST/PATCH/DELETE /members/:id/clergy` (see Member Module). Surfaced on `MemberDto` as
 `clergy: { title: {id, name}, canReviewFeedback: boolean } | null`, computed from the `clergy` relation.
 
+**Legacy `type` column, finally dropped (`DropLegacyClergyType1798268400000`).** The original `pastors` table
+(pre-`ClergyTitle`) had `type character varying NOT NULL` — a closed 3-value enum (LEAD/PARISH/ASSOCIATE).
+`AddClergyTitles1792382400000` replaced it with the `clergy_title_id` FK and backfilled `type`, but its own
+comment deferred actually dropping the column to "a later, separate migration once the new code has baked with
+no incidents" — that migration was never written. The `Clergy` entity had already dropped `type` as a property
+entirely, so `MemberService.assignClergy`'s insert (`{member, title}`, no `type`) had no way to know the column
+still existed — every new clergy assignment failed in production with `null value in column "type" ... violates
+not-null constraint`, since the column had no default. Confirmed no code anywhere (backend or either frontend)
+still reads or writes `clergy.type` before dropping it for real.
+
 ### ClergyTitle
 
 Tenant-configurable clergy title catalog (added 2026-08, replacing the old hardcoded `PastorTypeEnum`). A tenant
@@ -2781,9 +2791,10 @@ members to share location for record-keeping without necessarily blocking anyone
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
-**Duplicate check-in:** The `(member, event)` unique constraint is enforced at DB level. If a member tries to check in twice for the same event, the service catches the `QueryFailedError` (PG error code `23505`) and returns `409 Conflict` with the message "You have already checked in for this event."
+**Duplicate check-in:** The `(member, event)` unique constraint is enforced at DB level. If a member tries to check in twice for the same event, the service catches the `QueryFailedError` (PG error code `23505`) and returns `409 Conflict` with the message "You have already checked in for this event." `checkin()` itself only rejects as a duplicate when the **existing** row is genuinely attended
+(`GENUINELY_ATTENDED_STATUSES` — `PRESENT`/`LATE`/`ATTENDED_ONLINE`, the exact set `getAttendanceStreak` already uses). An `ABSENT`/`ON_LEAVE` row (auto-marked before the member showed up, or left behind by an admin's "Correct Attendance") isn't a real check-in, so it's updated in place with the real check-in instead of being rejected — previously any existing row, regardless of status, blocked a fresh check-in with a misleading "already checked in at &lt;time&gt;" (the stale row's leftover `checkinTime`), while the same status gap in `EventService.attachMyAttendance` (the query behind `GET /events`'s per-event `checkedIn`/`myCheckin` flags — see Events Module) made the member app's own check-in button/icon look clickable at the same time — the two disagreed on what "checked in" meant. Both now use the same `PRESENT`/`LATE`/`ATTENDED_ONLINE` definition.
 
-**Event data on absent records:** Absence records have `serviceSlot = null` (no physical slot was entered). History endpoints (`GET /attendances/my-history`, `GET /attendances/history`, `GET /attendances/history/department`) join the `event` relation directly on the `Attendance` entity rather than through `serviceSlot`, so `event` is always populated regardless of status.
+**Event data on absent records:** Absence records have `serviceSlot = null` (no physical slot was entered). History endpoints (`GET /attendances/my-history`, `GET /attendances/history`, `GET /attendances/history/department`) join the `event` relation directly on the `Attendance` entity rather than through `serviceSlot`, so `event` is always populated regardless of status. `buildHistoryQb` also joins `slot.event` (aliased `slotEvent`) separately — discuva-admin's `AttendanceServiceSlot` type expects `event` nested *under* `serviceSlot` too (`record.serviceSlot.event.name`, read unguarded on the Attendance page), which the direct `attendance.event` join above doesn't satisfy; omitting this second join left `record.serviceSlot.event` `undefined` for every record with a slot, crashing the whole admin Attendance page on load.
 
 **Lifetime summary (`GET /attendances/my-summary`), computed in SQL not client-side:** Returns
 `{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` for the calling
@@ -4131,6 +4142,124 @@ an incoming field with an `id` updates that row in place (keeping the id stable 
 keys stay meaningful), one without an `id` is a new field, and an existing row missing from the incoming array is
 deleted. Omitting `fields` entirely from the PATCH body leaves them untouched.
 
+**Quiz + Voting (`Form.purpose`: `STANDARD` | `QUIZ` | `VOTE`, default `STANDARD`):** two purpose-built configurations
+of the same engine — every existing form is `STANDARD` and behaves byte-for-byte as before this existed.
+
+- **`VOTE`** must be `MEMBERS` visibility (`FormService.assertValidPurposeConfig` rejects `PUBLIC`/`ADMIN_ONLY`
+  outright — there's no secret-ballot/anonymity design here, a vote's submissions carry the same `member` identity
+  every other `MEMBERS` submission does). `Form.oneResponsePerMember` (boolean) enforces **identity-based**
+  one-submission — distinct from the pre-existing `dedupField` mechanism, which dedupes on a submitted *value*
+  (e.g. a phone number), not on *who* submitted. `submitAsMember` checks this before saving and throws the same
+  `DUPLICATE_SUBMISSION` shape `dedupField`'s `23505` path already throws (`"You've already voted."`), so the
+  frontend's existing duplicate-submission handling needs no changes. A `VOTE` field's `options` may not contain a
+  case-insensitive-trimmed duplicate (`"Vote choices must be unique — ... is listed twice."`) — a data-quality
+  guard so two candidates can't accidentally collide. The tally itself needs no new code at all: `GET
+  /forms/:id/analytics`'s existing `choices: [{option, count, percentage}]` breakdown (any `DROPDOWN`/`CHECKBOX`
+  field) already **is** the vote count. `choices` is sorted `count DESC` (stable — a tie keeps the options'
+  original declared order), so the leading choice is always index 0 rather than something an admin has to scan
+  every percentage to find; discuva-admin's Analytics panel renders a "Leading" badge on it for `VOTE` forms
+  specifically ("Tied" instead, when the top two choices are exactly even).
+- **`QUIZ`** adds auto-grading. `FormField.correctOptions` (nullable text array, `DROPDOWN`/`CHECKBOX` only,
+  validated against that field's own `options`) marks which value(s) are correct; `FormField.points` (nullable
+  smallint, meaningful only alongside `correctOptions`; `null` means `1`, the flat per-question value scoring
+  always used before this column existed) is how many marks that question is worth. `FormSubmissionService.
+  scoreQuizSubmission` compares each scorable field's submitted answer at submit time and writes `FormSubmission.
+  score`/`maxScore` (both nullable, both `null` for non-`QUIZ` submissions) — `DROPDOWN` is correct when the
+  single submitted value is in `correctOptions`, `CHECKBOX` only when the submitted set **exactly equals**
+  `correctOptions` (no partial credit); a correct answer earns that field's `points` (default `1`), and
+  `maxScore` is the sum of every scorable field's `points`, not a flat count of scorable fields. A field with no
+  `correctOptions` set simply doesn't count toward the total — a `TEXT`/`TEXTAREA` short-answer/essay question
+  (allowed on a `QUIZ` — see below — but never auto-gradable) is never scored, reviewed manually by a teacher/
+  admin instead. `Form.revealScoreImmediately` (default `true`) controls whether the score comes back on the
+  submit response right away, or is withheld (`{scorePendingUntil: closesAt}` instead of `{score, maxScore}`)
+  until the window closes — guards against an early finisher's result (and by extension which questions they got
+  right) leaking to classmates sitting the same quiz during a shared open window. A withheld score is still
+  computed and stored at submit time; `GET /forms/member/:id/submission` reveals it once `now > closesAt`. No
+  per-person score list on the member side — a submitter only ever sees their own via that route or `GET
+  /forms/member/history` (below) — but the admin **does** get one: `GET /forms/:id/submissions?sortBy=score`
+  (`FormService.getSubmissions`) sorts `NULLS LAST` by `score DESC` (a query-builder `orderBy`, not TypeORM's
+  plain `order` option, which defaults `DESC` to `NULLS FIRST` in Postgres — that would rank an unscored
+  submission, e.g. one from before an admin added `correctOptions` to a question, above every real score) with
+  `createdAt DESC` as the tiebreak. discuva-admin's Submissions panel surfaces this as a "Most Recent"/"Highest
+  Score" toggle for `QUIZ` forms, rendering a Rank/Participant/Score/Submitted-At table (the same compact-table
+  treatment `VOTE`'s Voter/Choice/Voted-At table already gets, instead of the generic multi-field card layout).
+- **Member-facing gaps found after shipping** (both fixed): (1) discuva-member's `submit()`/`updateSubmission()`
+  (`hooks/use-forms.ts`) only ever extracted `res.data.data.nextSteps`, silently dropping `score`/`maxScore`/
+  `scorePendingUntil` — those three are top-level siblings of `nextSteps` in `FormSubmitResponseDto`, not nested
+  inside it, so a `QUIZ` submitter never actually saw their score even with `revealScoreImmediately: true` and
+  a correctly-computed score server-side. Fixed by a `flattenSubmitResult` helper that merges the two shapes into
+  the one flat object the fill page (`app/forms/[id]/page.tsx`) already reads `result.score`/`result.message`
+  off of interchangeably. (2) `GET /forms/member/:id` (`getForMember`) gains `attemptCount` — how many times this
+  member has already submitted this form (`submissionRepo.count`, scoped to `(form, member)`) — so the fill page
+  can show "You've attempted this N times" alongside `Form.oneResponsePerMember` (already present on the
+  returned `form` object, just not previously surfaced in the member UI) instead of a member only discovering
+  whether retakes are allowed by trying to submit again.
+- **`GET /forms/member/history`** (`FormSubmissionService.getMyHistory`) — "see scores/votes for previous
+  events." Every `QUIZ`/`VOTE` submission the calling member has ever made, most recent first, **regardless of
+  whether the form itself is still active** (a member can still look back at last year's election vote or an old
+  sermon quiz score after the form is deactivated/archived). Optional `?purpose=QUIZ|VOTE` narrows it to one.
+  Paginated (`PaginationResponseDto`), each row `{formId, formTitle, formPurpose, submittedAt, score, maxScore,
+  choice}` — `score`/`maxScore` populated only for `QUIZ` rows, `choice` (the submitted answer, joined if an
+  array) only for `VOTE` rows, since a `VOTE` form is always a single choice question (`assertValidPurposeConfig`
+  enforces `visibility: MEMBERS` and rejects anything but `DROPDOWN`/`CHECKBOX` fields for `VOTE`, so "the first
+  answer" is unambiguous). Deliberately excludes `STANDARD` submissions — an arbitrary multi-field form's answers
+  aren't a score/choice worth surfacing in a history list the same way.
+- **A `VOTE`/`QUIZ` field's `fieldType` is restricted, not the full 9-type picker `STANDARD` forms get**
+  (`FormService.assertValidPurposeConfig`, checked against `CHOICE_FIELD_TYPES`/`QUIZ_FIELD_TYPES` at create/update
+  — the exact allowlist discuva-admin's `field-editor.tsx` also filters its type `<select>` to, so an admin never
+  sees a choice the server would reject). A `VOTE` field must be `DROPDOWN`/`CHECKBOX` — a voter's identity is
+  already the logged-in member, so there's never a reason to collect a name/email/phone/etc. alongside a ballot.
+  A `QUIZ` field may additionally be `TEXT`/`TEXTAREA` (for the manually-reviewed short-answer case above); every
+  other type (`NUMBER`, `EMAIL`, `PHONE`, `DATE`, `FILE`) has no real place on either and is rejected outright —
+  `"<label>": a vote field must be Dropdown or Checkbox`/`"<label>": a quiz field must be Dropdown, Checkbox,
+  Text, or Long Text`. discuva-admin's Purpose switcher coerces any existing field outside the new purpose's
+  allowlist to `DROPDOWN` the moment an admin picks `VOTE`/`QUIZ` (`coerceFieldsForPurpose`), rather than leaving
+  it to block Save with no explanation.
+- **A `QUIZ` submission's `Form.editableAfterSubmit` is always forced to `false`**, regardless of what a create/
+  update/clone request sends — enforced at all three write paths (`FormService.create`/`update`/`cloneForm`) plus
+  a defense-in-depth rejection directly in `FormSubmissionService.updateSubmission`
+  (`"Quiz answers cannot be edited after submitting."`) so the invariant holds even if it were ever set
+  incorrectly upstream. Letting an answer be revised after the score was already computed — and very possibly
+  shown, when `revealScoreImmediately` is on — would turn "test" into "look up the answer key and fix it." The
+  admin edit form reflects this: for `purpose === QUIZ` the usual "Let members edit their response" checkbox is
+  replaced with an explanatory locked notice, and an "Allow retakes" checkbox (wired to `Form.
+  oneResponsePerMember`, inverted — checked means retakes allowed) is the correct way to let a member attempt a
+  `QUIZ` again, via the `FormAttempt`/retake flow below, never a silent edit of the old submission.
+
+**Time-boxing (`Form.opensAt`/`closesAt`, both nullable `timestamptz` — an exact date-and-time instant, not
+date-only like `ChurchCalendar.startDate`/`endDate`):** available on any `purpose` but only surfaced in the admin
+UI for `QUIZ`/`VOTE`. Both null (the default) means always open, unchanged for every existing form.
+`FormSubmissionService.assertWithinWindow` gates `submitAsMember`/`submitAsPublic`/`updateSubmission` (editing an
+already-cast vote after the window closes is blocked too, not just a fresh submission) — **independent of** the
+pre-existing `isActive` flag; both gates must pass. Deliberately **not** applied to `submitAsAdmin` — an admin
+backfilling/correcting a record is an intentional override, the same posture that method's unrestricted-visibility
+access and skipped `stripHiddenAnswers` pass already have. An admin-entered wall-clock value (e.g. "5:00 PM") is
+interpreted in the **church's own configured timezone** via `DateService.toChurchInstant` (`fromZonedTime` against
+the `TIMEZONE` env var, the same trick `DateService.startOfDay`/`endOfDay` already use), not the browsing admin's
+or the server's — so "closes at 5 PM" means 5 PM church time regardless of who sets it or from where.
+
+A `QUIZ` with `Form.timeLimitMinutes` set (smallint, nullable) additionally gets a **per-attempt countdown** —
+scoped to `MEMBERS` visibility only (an anonymous `PUBLIC` submission has no identity for a personal clock to
+track). New entity `FormAttempt` (`form_attempts`: `form`, `member`, `startedAt`, `expiresAt`, `submission`
+nullable — set once consumed) has **no hard unique constraint** on `(form, member)`; a member can accumulate more
+than one row over time, and `FormAttemptService` decides what to do with them:
+- `POST /forms/member/:id/start` (`startOrGetAttemptById` → `startOrGetAttempt`) returns the existing attempt
+  unchanged if one is already in progress (unconsumed, unexpired) — idempotent, so a page refresh mid-quiz doesn't
+  reset the clock. `opensAt`/`closesAt` gate *starting* a new attempt, not finishing one already running.
+- If the most recent attempt is already consumed or expired unconsumed, a **fresh** attempt is only allowed when
+  `Form.oneResponsePerMember` is `false` (retakes allowed) — otherwise `"You've already completed this quiz."`
+- `expiresAt = min(startedAt + timeLimitMinutes, closesAt ?? Infinity)`, computed and **stored once at start** —
+  a later admin edit to `timeLimitMinutes`/`closesAt` never retroactively changes an attempt already in progress
+  (changing the rules mid-exam for people already sitting it would be a bug, not a feature).
+- `submitAsMember` for such a form calls `FormAttemptService.assertValidForSubmit` before saving — requires an
+  unconsumed attempt within its own `expiresAt`, else `"Start the quiz before submitting."` /
+  `"Time's up — this attempt has expired."` — and consumes it (`consumeAttempt`, sets `attempt.submission`) once
+  the submission actually saves.
+- `GET /forms/member/:id`'s response gains `windowState` (`'OPEN' | 'NOT_OPEN_YET' | 'CLOSED'`, computed from
+  `opensAt`/`closesAt`) and `attempt` (`{startedAt, expiresAt} | null`, the current in-progress attempt if any) —
+  lets the fill page show the right state (not-yet-open, closed, or "resume your in-progress attempt") instead of
+  only surfacing a window/attempt error at submit time.
+
 **Cloning (`POST /forms/:id/clone`, `FormService.cloneForm`):** modeled on `PrayerConfigService.cloneProgram` —
 `title` is the only required field on `CloneFormDto`; every other scalar follows an "omitted = inherited from the
 source, explicit `null` = cleared, value = override" convention (same as `UpdateFormDto`'s nullable fields). The
@@ -4140,7 +4269,10 @@ Forms would otherwise share a Cloudinary `publicId`, so removing the clone's cov
 a fresh id — a clone's fields are edited afterwards via the normal `PATCH`, not at clone time. `dedupField`/
 `nextStepsField` are re-matched by **label** against the freshly-cloned fields (the only stable key once ids are
 gone), the same `.update()`-not-`.save()` two-phase approach `applyCrossFieldRefs` already uses. `FormSubmission`s
-are never cloned.
+are never cloned. `purpose`/`oneResponsePerMember`/`timeLimitMinutes`/`revealScoreImmediately` and each field's own
+`correctOptions` are all carried over verbatim (the same "worth preserving structural behaviour" reasoning as
+`fields` itself), but `opensAt`/`closesAt` always reset to `null` — a specific schedule never makes sense to copy
+onto a brand-new, unreviewed clone.
 
 **Answer validation happens server-side against the form's actual field definitions**, not via a fixed DTO shape
 (`SubmitFormDto.answers` is just `Record<string, unknown>` — the schema is per-form, not knowable at compile time):
@@ -4309,8 +4441,9 @@ and the Cloudinary asset. Upload size is capped by the new `MAX_FORM_ATTACHMENT_
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
 | GET    | `/forms/audience-groups/lookup`     | AdminGuard (FORMS_WRITE) | `{id, name}[]` of every Contact List, for the audience-restriction picker. Own route + gate rather than reusing `GET /groups/lookup` (gated on `ANNOUNCEMENTS_WRITE`) — a forms admin shouldn't need a second, unrelated permission grant |
-| POST   | `/forms`                            | AdminGuard (FORMS_WRITE) | Create a form with its fields in one call |
-| GET    | `/forms`                            | AdminGuard (FORMS_READ)  | List all forms — unpaginated, same policy as departments/event-configs |
+| GET    | `/forms/options`                    | AdminGuard (FORMS_READ)  | Unfiltered, unpaginated `{id, title, fields: {id, pageIndex}[]}[]`, for a "pick a form to embed" dropdown (Pages' Registration-section editor) — a picker can't paginate a single-select, so this stays "return everything" even though `GET /forms` below no longer does |
+| POST   | `/forms`                            | AdminGuard (FORMS_WRITE) | Create a form with its fields in one call. Optional `purpose`/`oneResponsePerMember`/`opensAt`/`closesAt`/`timeLimitMinutes`/`revealScoreImmediately` (see Quiz + Voting / Time-boxing, above); a field's `correctOptions` only takes effect when `purpose: 'QUIZ'` |
+| GET    | `/forms?page=&limit=&search=&purpose=&visibility=&status=` | AdminGuard (FORMS_READ)  | Paginated + filtered (`FormService.listForms`) — see below for why this changed from the earlier unpaginated `find()`. `search` is ILIKE across title/description; `purpose`/`visibility` are exact-match; `status` is `ACTIVE`\|`INACTIVE` (maps to `isActive`). Response is `PaginationResponseDto<Form>`, not a bare array |
 | GET    | `/forms/:id`                        | AdminGuard (FORMS_READ)  | Get one form with fields |
 | PATCH  | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Update form + diff-sync fields (see above). `audienceGroupId`/`dedupFieldId`/`nextStepsFieldId`/`postSubmitMessage`/`generalActionUrl`/`generalActionLabel` all follow the same "explicit `null` clears, omit to leave untouched" convention as `eventId`. `postSubmitOutcomes` follows it too, but replaces the whole array wholesale rather than diff-syncing per-outcome (see Ranked conditional overrides, above) |
 | DELETE | `/forms/:id`                        | AdminGuard (FORMS_WRITE) | Cascades fields + submissions |
@@ -4320,14 +4453,16 @@ and the Cloudinary asset. Upload size is capped by the new `MAX_FORM_ATTACHMENT_
 | POST   | `/forms/:id/logo`                   | AdminGuard (FORMS_WRITE) | Multipart, field name `logo`. Sets `Form.logoUrl` |
 | DELETE | `/forms/:id/logo`                   | AdminGuard (FORMS_WRITE) | Clears the logo |
 | POST   | `/forms/:id/submissions`            | AdminGuard (FORMS_WRITE) | Admin records a submission on someone's behalf — `{ answers, memberId? }`. Works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in). Returns `{ submissionId, nextSteps }`, same shape as the member/public submit endpoints |
-| GET    | `/forms/:id/submissions`            | AdminGuard (FORMS_READ)  | Paginated (`?page=&limit=`) — this list is attendance-scale, unlike the forms list itself |
+| GET    | `/forms/:id/submissions?sortBy=`    | AdminGuard (FORMS_READ)  | Paginated (`?page=&limit=`) — this list is attendance-scale, unlike the forms list itself. `sortBy=score` (QUIZ leaderboard) sorts `score DESC NULLS LAST, createdAt DESC` via a query builder instead of the default `createdAt DESC` |
 | GET    | `/forms/:id/submissions/export`     | AdminGuard (FORMS_READ)  | CSV, one column per field (ordered), `Submitted By` shows the member's name or "Public". A `FILE` field's cell is the uploaded file's URL |
 | GET    | `/forms/:id/analytics`              | AdminGuard (FORMS_READ)  | At-a-glance summary across all submissions, computed per field type (see below) |
 | POST   | `/forms/:id/fields/:fieldId/attachment` | AdminGuard (FORMS_WRITE) | Multipart, field name `file`. Same shared upload path as the member/public equivalents below (see FILE fields, further down) — lets an admin attach a file while recording a submission via `POST /forms/:id/submissions` |
 | GET    | `/forms/member`                     | JwtAuthGuard             | Forms visible to the caller (`isActive`, `MEMBERS` or `PUBLIC`) — optional `?eventId=` filter. A `MEMBERS` form with an `audienceGroup` is filtered out for anyone outside that Contact List |
-| GET    | `/forms/member/:id`                 | JwtAuthGuard             | Form fields + `suggestedValues` auto-filled from the caller's own profile. 404s (not 403) if the form has an `audienceGroup` the caller isn't in |
-| POST   | `/forms/member/:id/submit`          | JwtAuthGuard             | `memberId` comes from the token, never the body. Returns `{ submissionId, nextSteps }` |
-| GET    | `/forms/member/:id/submission`      | JwtAuthGuard             | The caller's own most recent submission for this form — `{ submissionId, answers, editable }`. Powers the "edit your response" flow off a `DUPLICATE_SUBMISSION` error. 404s on an `ADMIN_ONLY` form even for a linked member |
+| GET    | `/forms/member/:id`                 | JwtAuthGuard             | Form fields + `suggestedValues` auto-filled from the caller's own profile, plus `windowState` (`OPEN`/`NOT_OPEN_YET`/`CLOSED`), `attempt` (`{startedAt, expiresAt}\|null`, a timed `QUIZ`'s in-progress attempt if any), and `attemptCount` (how many times this member has already submitted this form — pair with the returned `form.oneResponsePerMember` to show whether retakes are allowed). 404s (not 403) if the form has an `audienceGroup` the caller isn't in |
+| GET    | `/forms/member/history?purpose=`    | JwtAuthGuard             | The caller's own past `QUIZ`/`VOTE` submissions, most recent first, across every form regardless of whether it's still active — `{formId, formTitle, formPurpose, submittedAt, score, maxScore, choice}[]`, paginated. Optional `?purpose=QUIZ\|VOTE` narrows it. Must be registered before `:id` or `history` would be swallowed as a form id |
+| POST   | `/forms/member/:id/start`           | JwtAuthGuard             | Starts (or resumes) a timed `QUIZ`'s per-attempt countdown — `FormAttemptService.startOrGetAttempt`. Returns `{startedAt, expiresAt}`. `400` if the form isn't a `QUIZ` with `timeLimitMinutes` set, or already completed with retakes disallowed |
+| POST   | `/forms/member/:id/submit`          | JwtAuthGuard             | `memberId` comes from the token, never the body. Returns `{ submissionId, nextSteps, score?, maxScore?, scorePendingUntil? }` — the score fields are `QUIZ`-only (see Quiz + Voting, above) |
+| GET    | `/forms/member/:id/submission`      | JwtAuthGuard             | The caller's own most recent submission for this form — `{ submissionId, answers, editable, score?, maxScore?, scorePendingUntil? }`. Powers the "edit your response" flow off a `DUPLICATE_SUBMISSION` error, and reveals a withheld `QUIZ` score once its window has closed. 404s on an `ADMIN_ONLY` form even for a linked member |
 | PATCH  | `/forms/member/submissions/:submissionId` | JwtAuthGuard        | Edit the caller's own submission — `{ answers }`, same shape as `submit`. `400` if `Form.editableAfterSubmit` is off; `404` if the submission isn't the caller's or the form is `ADMIN_ONLY` |
 | POST   | `/forms/member/:id/fields/:fieldId/attachment` | JwtAuthGuard | Multipart, field name `file`, max size `MAX_FORM_ATTACHMENT_UPLOAD_MB`. Returns `{ url, publicId }` — the answer value for a `FILE` field in the `submit` call above. Subject to the same `MEMBERS`/`PUBLIC` visibility + audience-group gating as `submit` |
 | GET    | `/forms/public/:id`                 | Public, `404` unless `isActive && visibility === PUBLIC` | No tenant subdomain restriction beyond the usual Host-header resolution. Response is a sanitized `PublicFormDto` — every field's `optionMetadata` is stripped |
@@ -4351,16 +4486,31 @@ since there's no meaningful aggregate for free text. Blank/null/undefined answer
 `responseCount` and every computation — a field added after some submissions already exist doesn't drag its
 stats toward zero.
 
-**discuva-admin UX: search/filter on the list, and a "More Options" disclosure on each field.** Both were
-client-side additions — `GET /forms` was already, and stays, a plain unpaginated `find()` (see the Departments
-Module's own pagination-policy note: admin-authored reference data like this doesn't grow unboundedly the way
-members/attendance/audit logs do, so backend search+pagination would trade an instant, zero-network filter for a
-network round-trip per keystroke at a scale this data doesn't reach). `app/forms/page.tsx` gained a search box
-(title/description) plus Visibility/Status filters over the already-fetched list. `app/forms/field-editor.tsx`'s
-per-field editor gained a collapsible "More Options" section (helper text, length/selection bounds, the
-validation pattern, and the conditional-visibility rule) — collapsed by default with a small dot indicator when
-a field already has any of that configured, so a form with several fields doesn't turn into a long scroll of
-mostly-unused optional settings. The field's actual content (label, type, and its options for
+**`GET /forms` moved from an unpaginated client-filtered list to server-side pagination/search** (`FormService.
+listForms`), reversing an earlier decision recorded in this doc. The original reasoning (admin-authored reference
+data like departments/event-configs doesn't grow unboundedly, so backend pagination just trades an instant
+zero-network filter for a round-trip per keystroke) held for Forms before Quiz + Voting — but a `QUIZ`/`VOTE`
+form is created far more often than a `STANDARD` one ever was (a weekly sermon quiz, a recurring vote), so Forms
+now behaves like `games`/`volunteer_opportunities`/`small_groups` (which already made this same move — see
+their own admin-list search/filter) rather than like `departments`. `search` is `ILIKE '%term%'` across title/
+description, backed by `IDX_forms_title_trgm`/`IDX_forms_description_trgm` (same trigram-index pattern as those
+three modules); `purpose`/`visibility`/`status` are exact-match, backed by `IDX_forms_purpose` and the
+pre-existing `idx_forms_visibility`/`idx_forms_is_active`. `app/forms/page.tsx`'s search box and Visibility/
+Status/Purpose filters now debounce and re-fetch page 1 server-side (matching `app/games/page.tsx`'s own
+debounce pattern) instead of filtering an already-fetched array, and the list gained a `PaginationBar`.
+
+A form picker can't paginate a single-select, though — Pages' Registration-section editor (`sections-editor.
+tsx`) still needs every form to populate its dropdown. `GET /forms/options` (`FormService.getFormOptions`,
+`useFormOptions()` in discuva-admin) exists for exactly that: unfiltered, unpaginated, and deliberately lighter
+than a full `FormRecord` (just `{id, title, fields: {id, pageIndex}[]}`, enough for the picker's own
+`formPageCount` warning) so it stays cheap to fetch on every Pages-editor load regardless of how large Forms
+grows.
+
+**discuva-admin UX: a "More Options" disclosure on each field.** A client-side addition — `app/forms/
+field-editor.tsx`'s per-field editor gained a collapsible "More Options" section (helper text, length/selection
+bounds, the validation pattern, and the conditional-visibility rule) — collapsed by default with a small dot
+indicator when a field already has any of that configured, so a form with several fields doesn't turn into a
+long scroll of mostly-unused optional settings. The field's actual content (label, type, and its options for
 `DROPDOWN`/`CHECKBOX`) stays always visible — only the advanced/optional settings collapse.
 
 **Filter `<select>` styling, reported live as looking out of place** — the Visibility/Status filters initially
@@ -4491,6 +4641,9 @@ REGISTRATION-only today:
 | MERCH | image+CTA block (coupled with `size` — alignment is only visible once `size` caps the image narrower than the section) | — | image width cap | CTA button |
 | COUNTDOWN | row justify | 1–4 | digit size | digit color |
 | FOOTER | text block | — | footer text | links/social links |
+| GALLERY | — | 1–4 | — | — |
+| CHURCH_CALENDAR | — | — | — | entry card border/icons |
+| LIVE_NOW | row justify (centers the live badge / offline text) | — | — | live badge border |
 
 **`spacing` — vertical breathing room above/below a section, universal across every type** (added after real user
 feedback: "the space between the form and the stats counter is too much," and a request that it be
@@ -4621,7 +4774,7 @@ image, same "no orphan-cleanup, accepted simplicity" tradeoff already made elsew
 independent, private preview link. discuva-admin surfaces this as a "Duplicate Page" button in the editor panel
 (prompts for the new slug, then opens the created page for editing) — see `handleDuplicate` in `app/pages/page.tsx`.
 
-**Section toolkit (`PageSectionType`, 11 fixed types)** — `content`'s shape depends on `type`:
+**Section toolkit (`PageSectionType`, 14 fixed types)** — `content`'s shape depends on `type`:
 
 | Type | Content shape |
 |---|---|
@@ -4636,6 +4789,57 @@ independent, private preview link. discuva-admin surfaces this as a "Duplicate P
 | `MERCH` | `heading?, imageUrl, linkLabel?, linkUrl?` (`linkLabel`/`linkUrl` paired — both or neither) — a single promotional image/poster plus an optional CTA link, e.g. a merch flyer or a pre-order banner |
 | `COUNTDOWN` | `heading?, targetDate, expiredMessage?` — a live days/hours/minutes/seconds count down to `targetDate`, the one section whose content carries a **real machine-readable instant** rather than free text (unlike `HERO.dateRangeText`/`SCHEDULE`'s day labels). `targetDate` must be a value `Date.parse` accepts (rejected with a 400 otherwise); discuva-admin's editor captures it via a `datetime-local` input and converts it to a full ISO instant with `new Date(local).toISOString()` at the moment it's picked, so the stored value is timezone-correct for every visitor with no backend timezone plumbing needed — see that repo's `CountdownContent` comment. Rendering (discuva-member's `CountdownTimer`) is a `"use client"` island using `useSyncExternalStore` (not `useState`+`useEffect`) to tick a 1s `setInterval` against `Date.now()`, with `getServerSnapshot` returning `null` so SSR renders nothing rather than baking in the server's clock and mismatching on hydration |
 | `FOOTER` | `heading?, text?, links?: { label, url }[], socialLinks?: { platform, url }[], showCopyright?, showContactInfo?`. `platform` ∈ `FOOTER_SOCIAL_PLATFORMS` (`'instagram' \| 'facebook' \| 'youtube' \| 'tiktok' \| 'x' \| 'website'`) — a small fixed set, not free text. `showCopyright` defaults to `true` (the church name + current year); `showContactInfo` defaults to `false` (the tenant's own `address`/`supportEmail`, never typed per page — see `church` below). See "Every page gets a footer" below for why this type is optional and how it interacts with the automatic default |
+| `GALLERY` | `heading?, images: { url, publicId?, caption? }[]`, `syncFolderUrl?` — a responsive image grid. `images` is authored directly (like `SPEAKERS.items`) and required (≥1) when `syncFolderUrl` is unset; optional/ignorable when it is set, since `PageService.withSyncedGalleryImages` overwrites it at render time — see "Gallery folder sync" below. Free on any tenant with the `pages` module enabled, no plan gate |
+| `CHURCH_CALENDAR` | `heading?, calendarId` — references an existing `ChurchCalendar` by id (must exist and be `isPublished`, checked at save time). Does **not** re-author entries: `PageService.withChurchCalendarEntries` merges that calendar's live `title`/`theme`/`accentColor`/`entries` into `content` server-side on every `getForPublic`/`getForPreview` call, the same "reference another entity, merge its data server-side" pattern `REGISTRATION.formId` already uses for embedding a Form. **Paid-plan gated** on `PlanFeature.CHURCH_CALENDAR` — see "Church Calendar section — plan gating and downgrade handling" below |
+| `LIVE_NOW` | `heading?, offlineMessage?` — no content to author beyond these two; `isLive`/`sessionInfo` are computed fresh on every request (`PageService.withLiveStatus`, backed by `ServiceSessionService.getActiveSessions()`), never authored or cached. Free, no plan gate |
+
+**Gallery folder sync — "a specified path, just update pictures, always up to date."** `GalleryContent.
+syncFolderUrl` (optional) is a public Google Drive folder link — when set, `PageService.
+withSyncedGalleryImages` (`GalleryFolderSyncService`) lists that folder's images at request time and
+overwrites `images` in the `getForPublic`/`getForPreview` response only, never written back to the saved
+section, so an admin can keep dropping new photos into the folder each week instead of re-uploading through
+the Gallery editor. Deliberately the "no OAuth, no connected account" shape the church calendar/social-media
+integrations in this codebase don't use: a single **platform-wide**, read-only `GOOGLE_DRIVE_API_KEY` env var
+(not a per-tenant credential, and not `TenantYoutubeIntegration`'s per-tenant-stored-key pattern) — the folder
+itself just needs "Anyone with the link can view" sharing turned on, no admin authorizes anything. Every
+failure mode degrades gracefully rather than breaking the page: `extractFolderId` (a plain
+`/folders/([a-zA-Z0-9_-]+)/` regex, no live API call) is checked at save time so an admin can save/edit a
+`syncFolderUrl` even with no API key configured yet; at render time, an unset `GOOGLE_DRIVE_API_KEY`, a
+malformed url, a folder that isn't actually public, a Drive API error, or a network failure all come back as
+`[]` from `GalleryFolderSyncService.listImages` and the section falls back to whatever `images` are still
+saved (a visitor never sees a broken or empty gallery just because a sync attempt had a bad day). Listings are
+cached 10 minutes per folder id (`CacheService.getOrSet`, key `gallery_folder_sync:<folderId>`) — long enough
+to spare the one shared API key's quota across every visitor of every tenant using this, short enough that
+photos swapped in before Sunday service show up the same morning.
+
+**Church Calendar section — plan gating and downgrade handling.** `CHURCH_CALENDAR` is the one section type gated
+behind `PlanFeature.CHURCH_CALENDAR` — a **service-level** check (`PageService.assertChurchCalendarEntitled`/
+`isChurchCalendarEntitled`, resolving the tenant's plan via `PlanFeatureResolverService.resolve(tenantId)`, the
+CLS-sourced `tenantId` the exact same pattern `finance-request.service.ts`'s own service-level plan check already
+uses), not a controller-level `@RequiresPlan` guard — a single jsonb section *type* living inside a mixed array of
+otherwise-unrestricted sections can't be gated by a route-level decorator the way a whole endpoint can. The check
+runs in two places, for two different reasons:
+- **At save time** (`assertValidSections`, alongside the `calendarId` existence/published check): a non-entitled
+  tenant's save attempt throws `ForbiddenException({message, code: 'PLAN_UPGRADE_REQUIRED', requiredFeature:
+  PlanFeature.CHURCH_CALENDAR})` — the exact shape discuva-admin's axios interceptor already watches for
+  (`utils/auth/axios-client.ts`) to pop the existing upgrade-required modal, so no new frontend upsell UI was
+  needed for this at all.
+- **At read time** (`getForPublic`/`getForPreview`, via `withChurchCalendarEntries`): a section saved while the
+  tenant *was* entitled does not keep working forever after a downgrade. If no longer entitled, the section is
+  **dropped from the output array entirely** — never returned broken or half-filled — so a visitor never sees a
+  permission error or an empty/awkward gap; the page simply renders as though the section weren't there. The
+  section's own saved `content` (its `calendarId`, `heading`) is never touched by this — purely a response-time
+  filter — so resubscribing makes it reappear automatically with zero reconfiguration. The same re-check also
+  covers the referenced `ChurchCalendar` itself losing its `isPublished` flag after the section was saved — either
+  condition failing drops the section the same way.
+
+The **admin builder's own reads** (`GET /pages` and `GET /pages/:id`, via `PageService.getAll`/`getByIdForAdmin`)
+are deliberately **not** filtered this way — an admin editing their own page should never have a section silently
+vanish from their own view of it. Instead both responses carry a `churchCalendarEntitled: boolean` (the same
+tenant-wide value attached to every row `getAll` returns, since entitlement isn't per-page) so discuva-admin's
+editor can show a small "Requires upgrade — not currently visible to visitors" badge directly on that section's
+card. `discuva-admin` opens a page for editing straight from the `GET /pages` list's own in-memory array, never a
+separate per-id fetch — which is why `getAll` carries the flag too, not only `getByIdForAdmin`.
 
 **`HERO` and `FOOTER` are capped at one per page** (`PageService.assertNoDuplicateSingletonSections`, called at the
 end of `assertValidSections`) — unlike `REGISTRATION` (documented below as deliberately unrestricted, e.g. event
@@ -5056,8 +5260,8 @@ treatment — `notFound()` already produces a real 404, which no crawler indexes
 |--------|-------|------|-------|
 | GET    | `/pages/platform-enabled`   | AdminGuard (PAGES_READ)  | `{ enabled: true }` always — the "Coming Soon" gate; reaching this handler at all already proves access (see above) |
 | POST   | `/pages`                    | AdminGuard (PAGES_WRITE) | Create a page with its sections in one call |
-| GET    | `/pages`                    | AdminGuard (PAGES_READ)  | List all pages — unpaginated, same policy as Forms |
-| GET    | `/pages/:id`                | AdminGuard (PAGES_READ)  | Get one page with sections |
+| GET    | `/pages`                    | AdminGuard (PAGES_READ)  | List all pages — unpaginated, same policy as Forms. Each row also carries `churchCalendarEntitled: boolean` (tenant-wide, same value on every row) — the builder opens a page for editing straight from this list, not a separate per-id fetch, so the "requires upgrade" badge on a `CHURCH_CALENDAR` section needs it here |
+| GET    | `/pages/:id`                | AdminGuard (PAGES_READ)  | Get one page with sections, plus the same `churchCalendarEntitled: boolean` `GET /pages` carries |
 | PATCH  | `/pages/:id`                | AdminGuard (PAGES_WRITE) | Update page. `title`/`seoDescription`/`theme`/`accentColor`/`backgroundColor`/`fontFamily`/`showHeader`/`headerLogoUrl`/`headerLinks`/`sections` write to `draft*` only (arrays = replace wholesale, no per-item id to diff against; each section may carry an optional `style: {align?, columns?, size?, accentColor?}`, an optional `hidden: boolean`, and an optional `navLabel: string`); `slug`/`isPublished` still write live immediately |
 | DELETE | `/pages/:id`                | AdminGuard (PAGES_WRITE) | Delete a page |
 | POST   | `/pages/:id/publish`        | AdminGuard (PAGES_WRITE) | Copies every `draft*` field onto its live counterpart and sets `isPublished = true` |
@@ -5134,11 +5338,17 @@ a cycle per department.
 - `DepartmentGoal` (`department_goals`) — `cycle` (M:1, `CASCADE` — a goal doesn't outlive its cycle),
   `department` (M:1, **`RESTRICT`**, not `CASCADE` — this is a compliance record; department deletion is
   blocked by existing goal history rather than silently erasing it, the same posture
-  `DepartmentService.delete` already takes when workers are still assigned), `title`, `description` (nullable),
+  `DepartmentService.delete` already takes when workers are still assigned), `title` (displayed as "KPI" — Key
+  Performance Indicator — in both admin/member UIs; kept named `title` internally, no migration needed for a
+  display-only relabel), `description` (nullable, displayed as "KPI Description"; previously informally doubled
+  as "the measurable target" in discuva-member's placeholder copy — that role now belongs to
+  `timelineToAchieve`), `timelineToAchieve` (nullable text, displayed as "Timeline to Achieve Target" —
+  freeform, e.g. "Q3 2026" or "by end of cycle", never validated as a date or enforced, deliberately distinct
+  from the cycle-level `startDate`/`graceDeadline`/`endDate` which do carry real enforcement),
   `churchRating`/`selfRating` (nullable smallint, 1–5), `churchRatingReason`/`selfRatingReason` (nullable text),
   `churchRatedAt`/`selfRatedAt` (nullable timestamptz), `churchRatedByAdmin`/`selfRatedByMember` (nullable FK,
-  `SET NULL`). A goal's `title`/`description` become immutable (service-layer check, not a DB constraint) the
-  instant either rating is set.
+  `SET NULL`). A goal's `title`/`description`/`timelineToAchieve` become immutable (service-layer check, not a
+  DB constraint) the instant either rating is set.
 - `DepartmentGoalApproval` (`department_goal_approvals`) — one row per `(cycle, department)`, `@Unique(['cycle',
   'department'])`, created **lazily** the moment that department's HOD writes their first goal in a
   chain-configured cycle (never eagerly backfilled across every department). `currentLevel` (smallint, default
@@ -5205,6 +5415,14 @@ are nulled out server-side unless **both** are non-null, for every role includin
 one side — "neither sees the other's score until both are in" is enforced uniformly, not by role; the HOD's
 own just-submitted rating is confirmed to them via the submit response itself, not by this endpoint reflecting
 it back early.
+
+**`cycle.hasApprovalChain`** (`!!cycle.approvalChain?.length`) — added after discuva-member's `IN_PROGRESS`
+banner was found to overpromise. `getEffectiveStage` flips `IN_PROGRESS` → `REVIEWED` purely on
+`today >= endDate`, but `submitSelfRating` requires **both** `REVIEWED` **and** `assertApprovalComplete` (the
+department's approval chain, if one is configured, must be `COMPLETE`) — so a date-only "review begins
+tomorrow" message can be wrong for a chain-configured cycle whose approval hasn't finished. The member
+frontend now checks this flag to soften that banner's wording (see `app/department-goals` in that repo)
+instead of promising a fixed date whenever a chain might still be pending.
 
 **Two controllers**, same route-ordering rationale as Church Calendar's admin/member split — mounted at
 distinct base paths so the admin controller's `:id` wildcard can't swallow the member controller's routes:
@@ -8088,8 +8306,8 @@ outside the requested `?months=` window).
 | GET    | /attendances/me/distance-check                             | Any (JwtAuthGuard)                                            | `{ enabled, isPlatformDefault }` — member-readable mirror of the admin distance-check setting below, so the member app can skip its own client-side distance block when enforcement is off |
 | GET    | /attendances/my-history                                    | Any                                                           | Own attendance records                                                                                        |
 | GET    | /attendances/my-summary                                    | Any                                                           | Own lifetime rate/streak, computed in SQL over full history (not just the current page) — `{ totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }` |
-| GET    | /attendances/history                                       | AdminGuard (ATTENDANCE_READ)                                  | All attendance records; query: `page`, `limit`, `memberId`, `slotId`, `status`, `dateFrom`, `dateTo`, `search` (ILIKE on firstname, lastname, email) |
-| POST   | /attendances/export-email                                  | AdminGuard (ATTENDANCE_READ)                                  | Email the currently-filtered attendance history as an `.xlsx` attachment (body: `recipientEmail?`, `memberId?`, `slotId?`, `status?`, `dateFrom?`, `dateTo?`, `search?`). `recipientEmail` defaults to the requesting admin's own email. One-off only — not a recurring/scheduled report. Logs `REPORT_EXPORTED`. |
+| GET    | /attendances/history                                       | AdminGuard (ATTENDANCE_READ)                                  | All attendance records; query: `page`, `limit`, `memberId`, `slotId`, `status`, `dateFrom`, `dateTo`, `search` (ILIKE on firstname, lastname, email), `role` (`MEMBER`\|`WORKER` — filters `Attendance.roleAtCheckin`, the role snapshotted at check-in time, not the member's current role) |
+| POST   | /attendances/export-email                                  | AdminGuard (ATTENDANCE_READ)                                  | Email the currently-filtered attendance history as an `.xlsx` attachment (body: `recipientEmail?`, `memberId?`, `slotId?`, `status?`, `dateFrom?`, `dateTo?`, `search?`, `role?`). `recipientEmail` defaults to the requesting admin's own email. One-off only — not a recurring/scheduled report. Logs `REPORT_EXPORTED`. |
 | GET    | /attendances/history/department?slotId=&page=&limit=       | WORKER                                                        | Paginated department attendance for a slot (scoped to caller's own department via lead role); `page` defaults to 1, `limit` to 20 |
 | GET    | /attendances/department/event/:eventId                     | WORKER                                                        | Worker attendance for all slots of an event (scoped to caller's own department via lead role)                 |
 | GET    | /attendances/summary/slot/:slotId                          | AdminGuard (ATTENDANCE_READ)                                  | Status counts for a slot                                                                                      |
@@ -9069,6 +9287,17 @@ trigger instead.
 | `YOUTUBE_WEBSUB_CALLBACK_URL`  | — *(optional)*   | Publicly reachable URL for `GET/POST integrations/youtube/callback` (must be internet-facing for Google's hub to reach it) — one physical endpoint shared by every tenant |
 | `YOUTUBE_WEBSUB_SECRET`        | — *(optional)*   | Shared HMAC secret sent as `hub.secret` on subscribe; the hub signs every notification with it (`X-Hub-Signature`), which the callback verifies. Required alongside the callback URL — without it, `subscribe()` never registers a live subscription and the callback rejects everything it receives. |
 | `PUBSUBHUBBUB_URL`             | `https://pubsubhubbub.appspot.com/subscribe` | Google's PubSubHubbub hub endpoint `YoutubeSubscriptionService` posts subscribe/unsubscribe requests to |
+
+### Pages: Gallery Folder Sync (optional, platform-wide)
+
+Unlike YouTube Live Detection above, this is **not** per-tenant — one read-only Drive API v3 key, shared by
+every tenant's Gallery sections, since listing files in a public folder needs no tenant-specific
+authorization. Leave unset to skip folder sync entirely; a `GALLERY` section with `syncFolderUrl` set just
+falls back to its manually-saved `images`, same as before this existed.
+
+| Variable                | Default        | Description                                                                 |
+|--------------------------|----------------|--------------------------------------------------------------------------|
+| `GOOGLE_DRIVE_API_KEY`  | — *(optional)* | A Google Cloud API key with the Drive API enabled, used only for a read-only `files.list` call against whatever public folder an admin points a Gallery section at (`GalleryFolderSyncService`) — no OAuth, no connected account |
 
 ### Billing: Paystack / Flutterwave (optional, platform-wide)
 

@@ -13,10 +13,12 @@ import { GroupService } from '../../group/service/group.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { FormAttemptService } from './form-attempt.service';
 import {
   FormFieldAutoFill,
   FormFieldType,
   FormFieldVisibilityOperator,
+  FormPurpose,
   FormVisibility,
 } from '../enum/form.enum';
 
@@ -28,7 +30,30 @@ const mockSubmissionRepo = {
   create: jest.fn((v) => v),
   save: jest.fn((v) => Promise.resolve({ id: 'sub-1', ...v })),
   findOne: jest.fn(),
+  count: jest.fn().mockResolvedValue(0),
+  createQueryBuilder: jest.fn(),
 };
+
+function makeHistoryQueryBuilderMock() {
+  const builder: {
+    innerJoinAndSelect: jest.Mock;
+    where: jest.Mock;
+    andWhere: jest.Mock;
+    orderBy: jest.Mock;
+    skip: jest.Mock;
+    take: jest.Mock;
+    getManyAndCount: jest.Mock;
+  } = {
+    innerJoinAndSelect: jest.fn(() => builder),
+    where: jest.fn(() => builder),
+    andWhere: jest.fn(() => builder),
+    orderBy: jest.fn(() => builder),
+    skip: jest.fn(() => builder),
+    take: jest.fn(() => builder),
+    getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+  };
+  return builder;
+}
 const mockMemberRepo = {
   findOneBy: jest.fn(),
 };
@@ -69,6 +94,13 @@ const mockCloudinaryService = {
   }),
   deleteByPublicId: jest.fn(),
 };
+const mockFormAttemptService = {
+  startOrGetAttempt: jest.fn(),
+  startOrGetAttemptById: jest.fn(),
+  getInProgressAttempt: jest.fn().mockResolvedValue(null),
+  assertValidForSubmit: jest.fn(),
+  consumeAttempt: jest.fn().mockResolvedValue(undefined),
+};
 
 describe('FormSubmissionService', () => {
   let service: FormSubmissionService;
@@ -80,6 +112,7 @@ describe('FormSubmissionService', () => {
     });
     mockAdminQb.getMany.mockResolvedValue([]);
     mockEmailCategorySettingsService.isEnabled.mockResolvedValue(true);
+    mockFormAttemptService.getInProgressAttempt.mockResolvedValue(null);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FormSubmissionService,
@@ -103,6 +136,7 @@ describe('FormSubmissionService', () => {
           useValue: mockEmailCategorySettingsService,
         },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
+        { provide: FormAttemptService, useValue: mockFormAttemptService },
       ],
     }).compile();
     service = module.get(FormSubmissionService);
@@ -139,6 +173,114 @@ describe('FormSubmissionService', () => {
       expect(result.suggestedValues).toEqual({
         f1: 'Ada',
         f2: 'ada@example.com',
+      });
+    });
+
+    it('returns how many times this member has already completed this form', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        isActive: true,
+        visibility: FormVisibility.MEMBERS,
+        fields: [],
+      });
+      mockSubmissionRepo.count.mockResolvedValue(3);
+
+      const result = await service.getForMember('form-1', 'member-1');
+
+      expect(mockSubmissionRepo.count).toHaveBeenCalledWith({
+        where: { form: { id: 'form-1' }, member: { id: 'member-1' } },
+      });
+      expect(result.attemptCount).toBe(3);
+    });
+  });
+
+  describe('getMyHistory', () => {
+    it('scopes to QUIZ and VOTE by default, most recent first', async () => {
+      const qb = makeHistoryQueryBuilderMock();
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+      await service.getMyHistory('member-1');
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'form.purpose IN (:...purposes)',
+        { purposes: [FormPurpose.QUIZ, FormPurpose.VOTE] },
+      );
+      expect(qb.orderBy).toHaveBeenCalledWith('submission.createdAt', 'DESC');
+    });
+
+    it('filters to a single purpose when given', async () => {
+      const qb = makeHistoryQueryBuilderMock();
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+      await service.getMyHistory('member-1', 1, 20, FormPurpose.VOTE);
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'form.purpose IN (:...purposes)',
+        { purposes: [FormPurpose.VOTE] },
+      );
+    });
+
+    it('shapes a QUIZ row with score/maxScore and no choice', async () => {
+      const qb = makeHistoryQueryBuilderMock();
+      qb.getManyAndCount.mockResolvedValue([
+        [
+          {
+            id: 'sub-1',
+            createdAt: new Date('2026-01-01'),
+            answers: { q1: 'Paris' },
+            score: 2,
+            maxScore: 2,
+            form: {
+              id: 'form-1',
+              title: 'Bible Quiz',
+              purpose: FormPurpose.QUIZ,
+            },
+          },
+        ],
+        1,
+      ]);
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getMyHistory('member-1');
+
+      expect(result.data[0]).toEqual({
+        formId: 'form-1',
+        formTitle: 'Bible Quiz',
+        formPurpose: FormPurpose.QUIZ,
+        submittedAt: new Date('2026-01-01'),
+        score: 2,
+        maxScore: 2,
+        choice: null,
+      });
+    });
+
+    it('shapes a VOTE row with the selected choice and no score', async () => {
+      const qb = makeHistoryQueryBuilderMock();
+      qb.getManyAndCount.mockResolvedValue([
+        [
+          {
+            id: 'sub-1',
+            createdAt: new Date('2026-01-01'),
+            answers: { q1: 'Candidate A' },
+            score: null,
+            maxScore: null,
+            form: {
+              id: 'form-1',
+              title: 'Elder Election',
+              purpose: FormPurpose.VOTE,
+            },
+          },
+        ],
+        1,
+      ]);
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getMyHistory('member-1');
+
+      expect(result.data[0]).toEqual({
+        formId: 'form-1',
+        formTitle: 'Elder Election',
+        formPurpose: FormPurpose.VOTE,
+        submittedAt: new Date('2026-01-01'),
+        score: null,
+        maxScore: null,
+        choice: 'Candidate A',
       });
     });
   });
@@ -1792,6 +1934,24 @@ describe('FormSubmissionService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('rejects editing a QUIZ submission even when editableAfterSubmit is somehow true', async () => {
+      mockSubmissionRepo.findOne.mockResolvedValue({
+        id: 'sub-1',
+        answers: { f1: 'Old' },
+        member: { id: 'member-1' },
+        form: { id: 'form-1' },
+      });
+      mockFormRepo.findOne.mockResolvedValue({
+        ...editableForm,
+        purpose: FormPurpose.QUIZ,
+        editableAfterSubmit: true,
+      });
+
+      await expect(
+        service.updateSubmission('sub-1', 'member-1', { f1: 'New' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('re-validates the new answers through the normal pipeline', async () => {
       mockSubmissionRepo.findOne.mockResolvedValue({
         id: 'sub-1',
@@ -2018,6 +2178,241 @@ describe('FormSubmissionService', () => {
         f1: validAnswer,
       });
       expect(result.submissionId).toBe('sub-1');
+    });
+  });
+
+  describe('VOTE purpose — one-response-per-member + open/close window', () => {
+    const voteForm = {
+      id: 'form-1',
+      isActive: true,
+      visibility: FormVisibility.MEMBERS,
+      purpose: FormPurpose.VOTE,
+      oneResponsePerMember: true,
+      opensAt: null,
+      closesAt: null,
+      fields: [
+        {
+          id: 'f1',
+          label: 'Choice',
+          required: true,
+          fieldType: FormFieldType.DROPDOWN,
+          options: ['Candidate A', 'Candidate B'],
+        },
+      ],
+    };
+
+    it('allows a member to vote once', async () => {
+      mockFormRepo.findOne.mockResolvedValue(voteForm);
+      mockSubmissionRepo.findOne.mockResolvedValue(null);
+      const result = await service.submitAsMember('form-1', 'member-1', {
+        f1: 'Candidate A',
+      });
+      expect(result.submissionId).toBe('sub-1');
+    });
+
+    it('rejects a second vote from the same member', async () => {
+      mockFormRepo.findOne.mockResolvedValue(voteForm);
+      mockSubmissionRepo.findOne.mockResolvedValue({ id: 'sub-existing' });
+      await expect(
+        service.submitAsMember('form-1', 'member-1', { f1: 'Candidate B' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSubmissionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a submission before opensAt', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...voteForm,
+        opensAt: new Date(Date.now() + 60_000),
+      });
+      mockSubmissionRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.submitAsMember('form-1', 'member-1', { f1: 'Candidate A' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a submission after closesAt, independent of isActive', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...voteForm,
+        isActive: true,
+        closesAt: new Date(Date.now() - 60_000),
+      });
+      mockSubmissionRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.submitAsMember('form-1', 'member-1', { f1: 'Candidate A' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('blocks editing an already-cast vote once the window has closed', async () => {
+      mockSubmissionRepo.findOne.mockResolvedValue({
+        id: 'sub-1',
+        form: { id: 'form-1' },
+        member: { id: 'member-1' },
+        answers: { f1: 'Candidate A' },
+      });
+      mockFormRepo.findOne.mockResolvedValue({
+        ...voteForm,
+        editableAfterSubmit: true,
+        closesAt: new Date(Date.now() - 60_000),
+      });
+      await expect(
+        service.updateSubmission('sub-1', 'member-1', { f1: 'Candidate B' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('QUIZ purpose — scoring and score reveal timing', () => {
+    const quizForm = {
+      id: 'form-1',
+      isActive: true,
+      visibility: FormVisibility.MEMBERS,
+      purpose: FormPurpose.QUIZ,
+      revealScoreImmediately: true,
+      closesAt: null,
+      timeLimitMinutes: null,
+      fields: [
+        {
+          id: 'q1',
+          label: 'Capital of France?',
+          required: true,
+          fieldType: FormFieldType.DROPDOWN,
+          options: ['Paris', 'London'],
+          correctOptions: ['Paris'],
+        },
+        {
+          id: 'q2',
+          label: 'Pick all prime numbers',
+          required: true,
+          fieldType: FormFieldType.CHECKBOX,
+          options: ['2', '3', '4'],
+          correctOptions: ['2', '3'],
+        },
+      ],
+    };
+
+    it('scores a fully correct submission and returns it immediately', async () => {
+      mockFormRepo.findOne.mockResolvedValue(quizForm);
+      const result = await service.submitAsMember('form-1', 'member-1', {
+        q1: 'Paris',
+        q2: ['2', '3'],
+      });
+      expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ score: 2, maxScore: 2 }),
+      );
+      expect(result.score).toBe(2);
+      expect(result.maxScore).toBe(2);
+    });
+
+    it('weights each question by its own points value, defaulting unset ones to 1', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...quizForm,
+        fields: [
+          { ...quizForm.fields[0], points: 5 },
+          quizForm.fields[1], // no points set — defaults to 1
+        ],
+      });
+      const result = await service.submitAsMember('form-1', 'member-1', {
+        q1: 'Paris',
+        q2: ['2', '3'],
+      });
+      expect(mockSubmissionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ score: 6, maxScore: 6 }),
+      );
+      expect(result.score).toBe(6);
+      expect(result.maxScore).toBe(6);
+    });
+
+    it('only credits the points for the question actually answered correctly', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...quizForm,
+        fields: [
+          { ...quizForm.fields[0], points: 5 },
+          { ...quizForm.fields[1], points: 3 },
+        ],
+      });
+      const result = await service.submitAsMember('form-1', 'member-1', {
+        q1: 'London', // wrong — 0 of 5
+        q2: ['2', '3'], // right — 3 of 3
+      });
+      expect(result.score).toBe(3);
+      expect(result.maxScore).toBe(8);
+    });
+
+    it('gives no credit for a CHECKBOX answer that is a superset of the correct set', async () => {
+      mockFormRepo.findOne.mockResolvedValue(quizForm);
+      const result = await service.submitAsMember('form-1', 'member-1', {
+        q1: 'London',
+        q2: ['2', '3', '4'],
+      });
+      expect(result.score).toBe(0);
+      expect(result.maxScore).toBe(2);
+    });
+
+    it('withholds the score until closesAt when revealScoreImmediately is false', async () => {
+      const closesAt = new Date(Date.now() + 60_000);
+      mockFormRepo.findOne.mockResolvedValue({
+        ...quizForm,
+        revealScoreImmediately: false,
+        closesAt,
+      });
+      const result = await service.submitAsMember('form-1', 'member-1', {
+        q1: 'Paris',
+        q2: ['2', '3'],
+      });
+      expect(result.score).toBeUndefined();
+      expect(result.scorePendingUntil).toEqual(closesAt);
+    });
+
+    it('reveals the withheld score via getMySubmission once closesAt has passed', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...quizForm,
+        revealScoreImmediately: false,
+        closesAt: new Date(Date.now() - 60_000),
+      });
+      mockSubmissionRepo.findOne.mockResolvedValue({
+        id: 'sub-1',
+        answers: { q1: 'Paris', q2: ['2', '3'] },
+        score: 2,
+        maxScore: 2,
+      });
+      const result = await service.getMySubmission('form-1', 'member-1');
+      expect(result.score).toBe(2);
+      expect(result.maxScore).toBe(2);
+    });
+
+    it('requires a valid attempt before accepting a submission on a timed quiz', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...quizForm,
+        timeLimitMinutes: 10,
+      });
+      mockFormAttemptService.assertValidForSubmit.mockRejectedValue(
+        new BadRequestException('Start the quiz before submitting.'),
+      );
+      await expect(
+        service.submitAsMember('form-1', 'member-1', {
+          q1: 'Paris',
+          q2: ['2', '3'],
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSubmissionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('consumes the attempt once a timed quiz submission succeeds', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        ...quizForm,
+        timeLimitMinutes: 10,
+      });
+      const fakeAttempt = { id: 'attempt-1' };
+      mockFormAttemptService.assertValidForSubmit.mockResolvedValue(
+        fakeAttempt,
+      );
+      await service.submitAsMember('form-1', 'member-1', {
+        q1: 'Paris',
+        q2: ['2', '3'],
+      });
+      expect(mockFormAttemptService.consumeAttempt).toHaveBeenCalledWith(
+        fakeAttempt,
+        expect.objectContaining({ id: 'sub-1' }),
+      );
     });
   });
 });

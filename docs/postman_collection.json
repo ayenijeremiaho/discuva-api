@@ -4138,7 +4138,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/attendances/history?page=1&limit=10&memberId=&slotId=&status=ABSENT&dateFrom=2025-01-01&dateTo=2025-12-31&search=",
+              "raw": "{{baseUrl}}/attendances/history?page=1&limit=10&memberId=&slotId=&status=ABSENT&dateFrom=2025-01-01&dateTo=2025-12-31&search=&role=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -4183,6 +4183,11 @@
                   "value": "",
                   "description": "ILIKE search on member firstname, lastname, or email (optional)",
                   "disabled": true
+                },
+                {
+                  "key": "role",
+                  "value": "",
+                  "description": "MEMBER | WORKER \u2014 filters roleAtCheckin (the role snapshotted at check-in time)"
                 }
               ]
             }
@@ -4228,7 +4233,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"recipientEmail\": \"\",\n  \"memberId\": \"\",\n  \"slotId\": \"\",\n  \"status\": \"\",\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\",\n  \"search\": \"\"\n}"
+              "raw": "{\n  \"recipientEmail\": \"\",\n  \"memberId\": \"\",\n  \"slotId\": \"\",\n  \"status\": \"\",\n  \"dateFrom\": \"\",\n  \"dateTo\": \"\",\n  \"search\": \"\",\n  \"role\": \"\"\n}"
             },
             "description": "Email the currently-filtered attendance history as an .xlsx attachment. All body fields are optional \u2014 recipientEmail defaults to the requesting admin's own email, and the remaining filters match the same query params as All Attendance History (Admin). One-off export only, not a recurring/scheduled report."
           },
@@ -9894,6 +9899,87 @@
           ]
         },
         {
+          "name": "Get Form Options (Admin)",
+          "description": "Unfiltered, unpaginated {id, title, fields: {id, pageIndex}[]}[], for a \"pick a form to embed\" dropdown (Pages' Registration-section editor). A picker can't paginate a single-select, so this deliberately stays \"return everything\" even though GET /forms above no longer does. Lighter than a full FormRecord \u2014 just enough for the picker's own multi-page warning.",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms/options",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "options"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  { \"id\": \"f1a2b3c4-1111-4c5d-8e9f-0a1b2c3d4e5f\", \"title\": \"Volunteer Sign-up\", \"fields\": [ { \"id\": \"fd1a2b3c-1111-4c5d-8e9f-0a1b2c3d4e5f\", \"pageIndex\": 0 } ] }\n]"
+            }
+          ]
+        },
+        {
+          "name": "List Forms (Admin)",
+          "description": "Paginated + filtered (FormService.listForms) \u2014 replaced the old unpaginated find() once Quiz/Vote made Forms grow the way games/volunteer_opportunities/small_groups already do. search is ILIKE across title/description; purpose/visibility are exact-match; status is ACTIVE|INACTIVE (maps to isActive). Response is PaginationResponseDto<Form>, not a bare array.",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms?page=1&limit=20&search=&purpose=&visibility=&status=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "ILIKE across title/description"
+                },
+                {
+                  "key": "purpose",
+                  "value": "",
+                  "description": "STANDARD | QUIZ | VOTE"
+                },
+                {
+                  "key": "visibility",
+                  "value": "",
+                  "description": "MEMBERS | PUBLIC | ADMIN_ONLY"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "description": "ACTIVE | INACTIVE"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    { \"id\": \"f1a2b3c4-1111-4c5d-8e9f-0a1b2c3d4e5f\", \"title\": \"Volunteer Sign-up\", \"purpose\": \"STANDARD\", \"visibility\": \"PUBLIC\", \"isActive\": true }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        },
+        {
           "name": "Create Form (Admin)",
           "request": {
             "method": "POST",
@@ -10008,6 +10094,60 @@
               }
             }
           ]
+        },
+        {
+          "name": "Create Quiz Form (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Chapter 1 Quiz\",\n  \"visibility\": \"MEMBERS\",\n  \"purpose\": \"QUIZ\",\n  \"timeLimitMinutes\": 10,\n  \"revealScoreImmediately\": false,\n  \"closesAt\": \"2026-04-05T23:59:00\",\n  \"fields\": [\n    {\n      \"label\": \"What is the capital of France?\",\n      \"fieldType\": \"DROPDOWN\",\n      \"required\": true,\n      \"options\": [\n        \"Paris\",\n        \"London\",\n        \"Berlin\"\n      ],\n      \"correctOptions\": [\n        \"Paris\"\n      ]\n    },\n    {\n      \"label\": \"Select all prime numbers\",\n      \"fieldType\": \"CHECKBOX\",\n      \"required\": true,\n      \"options\": [\n        \"2\",\n        \"3\",\n        \"4\"\n      ],\n      \"correctOptions\": [\n        \"2\",\n        \"3\"\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "description": "purpose: 'QUIZ' auto-grades DROPDOWN/CHECKBOX fields against their own correctOptions at submit time. revealScoreImmediately: false withholds the score from the submitter until closesAt passes (stops an early finisher tipping off classmates during a shared open window) \u2014 the score is still computed and stored right away. opensAt/closesAt are naive date-time strings (no UTC offset), interpreted as the church's own configured timezone, not the caller's."
+        },
+        {
+          "name": "Create Vote Form (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"2026 Board Election\",\n  \"visibility\": \"MEMBERS\",\n  \"purpose\": \"VOTE\",\n  \"oneResponsePerMember\": true,\n  \"opensAt\": \"2026-04-01T00:00:00\",\n  \"closesAt\": \"2026-04-07T23:59:00\",\n  \"fields\": [\n    {\n      \"label\": \"Choice\",\n      \"fieldType\": \"DROPDOWN\",\n      \"required\": true,\n      \"options\": [\n        \"Candidate A\",\n        \"Candidate B\"\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "description": "purpose: 'VOTE' must be MEMBERS visibility (rejected otherwise) \u2014 no anonymity/secret-ballot design, a vote's submissions carry the same member identity every MEMBERS submission does. oneResponsePerMember enforces one submission per member by identity (distinct from dedupField, which dedupes on a submitted value). A field's options may not contain a case-insensitive duplicate. The tally is GET /forms/:id/analytics's existing choices breakdown \u2014 no new endpoint needed."
         },
         {
           "name": "Clone Form (Admin)",
@@ -10439,6 +10579,76 @@
           "description": "Re-runs the same normalize/validate pipeline a fresh submit does (4a bounds + 4c visibility-aware required-skipping both apply), but never re-triggers the admin submission notification. 400s if Form.editableAfterSubmit is off. 404s if the submission isn't the caller's own, or the form is ADMIN_ONLY."
         },
         {
+          "name": "Start Quiz Attempt (Member)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms/member/{{formId}}/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "member",
+                "{{formId}}",
+                "start"
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"startedAt\": \"2026-04-01T09:00:00.000Z\",\n  \"expiresAt\": \"2026-04-01T09:10:00.000Z\"\n}"
+            }
+          ],
+          "description": "Starts (or resumes, if already in progress) a time-limited QUIZ's per-attempt countdown \u2014 only valid when the form's purpose is QUIZ and timeLimitMinutes is set. Idempotent: calling this again mid-attempt returns the same startedAt/expiresAt rather than resetting the clock. 400s if the form isn't a timed QUIZ, or if a previous attempt is already complete and Form.oneResponsePerMember is true (retakes disallowed)."
+        },
+        {
+          "name": "Get My Form History (Member)",
+          "description": "Every QUIZ/VOTE submission the caller has ever made, most recent first, regardless of whether the form itself is still active. Optional ?purpose=QUIZ|VOTE narrows it. Paginated; each row is {formId, formTitle, formPurpose, submittedAt, score, maxScore, choice} \u2014 score/maxScore populated for QUIZ rows, choice for VOTE rows.",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/forms/member/history?page=1&limit=20&purpose=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "forms",
+                "member",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "purpose",
+                  "value": "",
+                  "description": "QUIZ | VOTE \u2014 omit for both"
+                }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    { \"formId\": \"f1a2b3c4-1111-4c5d-8e9f-0a1b2c3d4e5f\", \"formTitle\": \"Bible Trivia\", \"formPurpose\": \"QUIZ\", \"submittedAt\": \"2026-01-05T10:00:00.000Z\", \"score\": 8, \"maxScore\": 10, \"choice\": null },\n    { \"formId\": \"e2b3c4d5-2222-4c5d-8e9f-0a1b2c3d4e5f\", \"formTitle\": \"Elder Election 2026\", \"formPurpose\": \"VOTE\", \"submittedAt\": \"2026-01-01T09:00:00.000Z\", \"score\": null, \"maxScore\": null, \"choice\": \"Candidate A\" }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 2,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        },
+        {
           "name": "Create Submission as Admin",
           "request": {
             "method": "POST",
@@ -10587,7 +10797,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"slug\": \"higher-ground-2026\",\n  \"title\": \"Higher Ground Conference 2026\",\n  \"seoDescription\": \"Three days of worship and teaching \\u2014 August 28-30, 2026.\",\n  \"isPublished\": false,\n  \"theme\": \"bold\",\n  \"accentColor\": \"#f97316\",\n  \"backgroundColor\": \"#1a1030\",\n  \"fontFamily\": \"poppins\",\n  \"sections\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"type\": \"HERO\",\n      \"content\": {\n        \"title\": \"Higher Ground 2026\",\n        \"subtitle\": \"Get empowered to be transformed.\",\n        \"dateRangeText\": \"August 28-30, 2026\",\n        \"ctaLabel\": \"Register Now\",\n        \"ctaUrl\": \"#register\"\n      },\n      \"style\": {\n        \"size\": \"md\"\n      },\n      \"navLabel\": \"Home\"\n    },\n    {\n      \"id\": \"44444444-4444-4444-8444-444444444444\",\n      \"type\": \"SPEAKERS\",\n      \"content\": {\n        \"heading\": \"Ministering\",\n        \"items\": [\n          {\n            \"name\": \"Pastor Jane Doe\",\n            \"title\": \"Host & Senior Pastor\",\n            \"isHost\": true\n          },\n          {\n            \"name\": \"Apostle John Smith\",\n            \"title\": \"Guest Speaker\"\n          }\n        ]\n      }\n    },\n    {\n      \"id\": \"55555555-5555-4555-8555-555555555555\",\n      \"type\": \"MERCH\",\n      \"content\": {\n        \"heading\": \"Merch\",\n        \"imageUrl\": \"https://res.cloudinary.com/example/merch-flyer.png\",\n        \"linkLabel\": \"Pre-order Now\",\n        \"linkUrl\": \"https://shop.example.com\"\n      },\n      \"style\": {\n        \"align\": \"center\",\n        \"size\": \"md\",\n        \"accentColor\": \"#f97316\"\n      }\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"type\": \"REGISTRATION\",\n      \"content\": {\n        \"heading\": \"Reserve Your Seat\",\n        \"formId\": \"{{formId}}\",\n        \"ctaLabel\": \"Register\",\n        \"hideFormMeta\": true\n      },\n      \"style\": {\n        \"layout\": \"split\",\n        \"align\": \"right\",\n        \"spacing\": \"sm\",\n        \"size\": \"md\"\n      }\n    },\n    {\n      \"id\": \"66666666-6666-4666-8666-666666666666\",\n      \"type\": \"TESTIMONIALS\",\n      \"content\": {\n        \"heading\": \"What Are You Believing For?\",\n        \"acceptSubmissions\": true,\n        \"items\": [\n          {\n            \"quote\": \"This conference changed my life.\",\n            \"name\": \"A previous attendee\"\n          }\n        ]\n      },\n      \"style\": {\n        \"size\": \"md\"\n      }\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"type\": \"FAQ\",\n      \"content\": {\n        \"items\": [\n          {\n            \"question\": \"Is parking available?\",\n            \"answer\": \"Yes, free parking on-site.\"\n          }\n        ]\n      },\n      \"hidden\": true,\n      \"style\": {\n        \"size\": \"lg\"\n      }\n    },\n    {\n      \"id\": \"77777777-7777-4777-8777-777777777777\",\n      \"type\": \"COUNTDOWN\",\n      \"content\": {\n        \"heading\": \"Countdown to YFC 2026\",\n        \"targetDate\": \"2026-11-27T09:00:00.000Z\",\n        \"expiredMessage\": \"We're live!\"\n      },\n      \"style\": {\n        \"align\": \"center\",\n        \"columns\": 2,\n        \"size\": \"lg\",\n        \"spacing\": \"lg\"\n      }\n    },\n    {\n      \"id\": \"88888888-8888-4888-8888-888888888888\",\n      \"type\": \"FOOTER\",\n      \"content\": {\n        \"text\": \"Thanks for being part of this.\",\n        \"links\": [\n          {\n            \"label\": \"Privacy Policy\",\n            \"url\": \"https://example.com/privacy\"\n          }\n        ],\n        \"socialLinks\": [\n          {\n            \"platform\": \"instagram\",\n            \"url\": \"https://instagram.com/example\"\n          }\n        ],\n        \"showContactInfo\": true\n      }\n    }\n  ],\n  \"showHeader\": true,\n  \"headerLogoUrl\": null,\n  \"headerLinks\": [\n    {\n      \"label\": \"Shop\",\n      \"url\": \"https://shop.example.com\"\n    }\n  ]\n}",
+              "raw": "{\n  \"slug\": \"higher-ground-2026\",\n  \"title\": \"Higher Ground Conference 2026\",\n  \"seoDescription\": \"Three days of worship and teaching \\u2014 August 28-30, 2026.\",\n  \"isPublished\": false,\n  \"theme\": \"bold\",\n  \"accentColor\": \"#f97316\",\n  \"backgroundColor\": \"#1a1030\",\n  \"fontFamily\": \"poppins\",\n  \"sections\": [\n    {\n      \"id\": \"11111111-1111-4111-8111-111111111111\",\n      \"type\": \"HERO\",\n      \"content\": {\n        \"title\": \"Higher Ground 2026\",\n        \"subtitle\": \"Get empowered to be transformed.\",\n        \"dateRangeText\": \"August 28-30, 2026\",\n        \"ctaLabel\": \"Register Now\",\n        \"ctaUrl\": \"#register\"\n      },\n      \"style\": {\n        \"size\": \"md\"\n      },\n      \"navLabel\": \"Home\"\n    },\n    {\n      \"id\": \"44444444-4444-4444-8444-444444444444\",\n      \"type\": \"SPEAKERS\",\n      \"content\": {\n        \"heading\": \"Ministering\",\n        \"items\": [\n          {\n            \"name\": \"Pastor Jane Doe\",\n            \"title\": \"Host & Senior Pastor\",\n            \"isHost\": true\n          },\n          {\n            \"name\": \"Apostle John Smith\",\n            \"title\": \"Guest Speaker\"\n          }\n        ]\n      }\n    },\n    {\n      \"id\": \"55555555-5555-4555-8555-555555555555\",\n      \"type\": \"MERCH\",\n      \"content\": {\n        \"heading\": \"Merch\",\n        \"imageUrl\": \"https://res.cloudinary.com/example/merch-flyer.png\",\n        \"linkLabel\": \"Pre-order Now\",\n        \"linkUrl\": \"https://shop.example.com\"\n      },\n      \"style\": {\n        \"align\": \"center\",\n        \"size\": \"md\",\n        \"accentColor\": \"#f97316\"\n      }\n    },\n    {\n      \"id\": \"22222222-2222-4222-8222-222222222222\",\n      \"type\": \"REGISTRATION\",\n      \"content\": {\n        \"heading\": \"Reserve Your Seat\",\n        \"formId\": \"{{formId}}\",\n        \"ctaLabel\": \"Register\",\n        \"hideFormMeta\": true\n      },\n      \"style\": {\n        \"layout\": \"split\",\n        \"align\": \"right\",\n        \"spacing\": \"sm\",\n        \"size\": \"md\"\n      }\n    },\n    {\n      \"id\": \"66666666-6666-4666-8666-666666666666\",\n      \"type\": \"TESTIMONIALS\",\n      \"content\": {\n        \"heading\": \"What Are You Believing For?\",\n        \"acceptSubmissions\": true,\n        \"items\": [\n          {\n            \"quote\": \"This conference changed my life.\",\n            \"name\": \"A previous attendee\"\n          }\n        ]\n      },\n      \"style\": {\n        \"size\": \"md\"\n      }\n    },\n    {\n      \"id\": \"33333333-3333-4333-8333-333333333333\",\n      \"type\": \"FAQ\",\n      \"content\": {\n        \"items\": [\n          {\n            \"question\": \"Is parking available?\",\n            \"answer\": \"Yes, free parking on-site.\"\n          }\n        ]\n      },\n      \"hidden\": true,\n      \"style\": {\n        \"size\": \"lg\"\n      }\n    },\n    {\n      \"id\": \"77777777-7777-4777-8777-777777777777\",\n      \"type\": \"COUNTDOWN\",\n      \"content\": {\n        \"heading\": \"Countdown to YFC 2026\",\n        \"targetDate\": \"2026-11-27T09:00:00.000Z\",\n        \"expiredMessage\": \"We're live!\"\n      },\n      \"style\": {\n        \"align\": \"center\",\n        \"columns\": 2,\n        \"size\": \"lg\",\n        \"spacing\": \"lg\"\n      }\n    },\n    {\n      \"id\": \"99999999-9999-4999-8999-999999999999\",\n      \"type\": \"GALLERY\",\n      \"content\": {\n        \"heading\": \"Photo Wall\",\n        \"syncFolderUrl\": null,\n        \"images\": [\n          {\n            \"url\": \"https://res.cloudinary.com/example/gallery-1.jpg\",\n            \"publicId\": \"page-images/gallery-1\",\n            \"caption\": \"Sunday service\"\n          },\n          {\n            \"url\": \"https://res.cloudinary.com/example/gallery-2.jpg\",\n            \"publicId\": \"page-images/gallery-2\"\n          }\n        ]\n      },\n      \"style\": {\n        \"columns\": 3\n      }\n    },\n    {\n      \"id\": \"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\",\n      \"type\": \"CHURCH_CALENDAR\",\n      \"content\": {\n        \"heading\": \"Upcoming Programs\",\n        \"calendarId\": \"{{churchCalendarId}}\"\n      },\n      \"style\": {\n        \"accentColor\": \"#f97316\"\n      }\n    },\n    {\n      \"id\": \"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb\",\n      \"type\": \"LIVE_NOW\",\n      \"content\": {\n        \"heading\": \"Join Us\",\n        \"offlineMessage\": \"Nothing live right now \\u2014 services are Sundays at 9AM & 11AM.\"\n      }\n    },\n    {\n      \"id\": \"88888888-8888-4888-8888-888888888888\",\n      \"type\": \"FOOTER\",\n      \"content\": {\n        \"text\": \"Thanks for being part of this.\",\n        \"links\": [\n          {\n            \"label\": \"Privacy Policy\",\n            \"url\": \"https://example.com/privacy\"\n          }\n        ],\n        \"socialLinks\": [\n          {\n            \"platform\": \"instagram\",\n            \"url\": \"https://instagram.com/example\"\n          }\n        ],\n        \"showContactInfo\": true\n      }\n    }\n  ],\n  \"showHeader\": true,\n  \"headerLogoUrl\": null,\n  \"headerLinks\": [\n    {\n      \"label\": \"Shop\",\n      \"url\": \"https://shop.example.com\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -10616,7 +10826,7 @@
               }
             }
           ],
-          "description": "Demonstrates 3 of the 8 section types \u2014 HERO, REGISTRATION (embeds an existing Form by id \u2014 create one via the Forms folder first and it'll be picked up via {{formId}}), and FAQ. See the Pages module in TECH_DOC.md for the full section toolkit and each type's content shape."
+          "description": "Demonstrates 11 of the 14 section types \u2014 HERO, SPEAKERS, MERCH, REGISTRATION (embeds an existing Form by id \u2014 create one via the Forms folder first and it'll be picked up via {{formId}}), TESTIMONIALS, FAQ, COUNTDOWN, GALLERY, CHURCH_CALENDAR, LIVE_NOW, and FOOTER. See the Pages module in TECH_DOC.md for the full section toolkit and each type's content shape. CHURCH_CALENDAR requires the tenant's plan to include CHURCH_CALENDAR (400 PLAN_UPGRADE_REQUIRED otherwise) and calendarId must reference an existing, published ChurchCalendar \u2014 its entries are pulled in live server-side, never re-authored here. GALLERY and LIVE_NOW are free, no plan gate."
         },
         {
           "name": "Get All Pages (Admin)",
@@ -11522,7 +11732,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Grow youth attendance by 15%\",\n  \"description\": \"Corrected wording after HOD flagged a typo\"\n}",
+              "raw": "{\n  \"title\": \"Grow youth attendance by 15%\",\n  \"description\": \"Corrected wording after HOD flagged a typo\",\n  \"timelineToAchieve\": \"Q4 2026\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11801,7 +12011,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Grow youth attendance by 15%\",\n  \"description\": \"Track via the weekly headcount\"\n}",
+              "raw": "{\n  \"title\": \"Grow youth attendance by 15%\",\n  \"description\": \"Track via the weekly headcount\",\n  \"timelineToAchieve\": \"Q3 2026\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11862,7 +12072,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Grow youth attendance by 20%\"\n}",
+              "raw": "{\n  \"title\": \"Grow youth attendance by 20%\",\n  \"timelineToAchieve\": \"By end of cycle\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

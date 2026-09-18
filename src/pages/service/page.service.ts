@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -30,6 +31,11 @@ import {
 } from '../enum/page.enum';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { ChurchCalendarService } from '../../church-calendar/service/church-calendar.service';
+import { ServiceSessionService } from '../../service-programme/service/service-session.service';
+import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
+import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { GalleryFolderSyncService } from './gallery-folder-sync.service';
 
 @Injectable()
 export class PageService {
@@ -48,6 +54,10 @@ export class PageService {
     private readonly configService: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly cacheService: CacheService,
+    private readonly churchCalendarService: ChurchCalendarService,
+    private readonly serviceSessionService: ServiceSessionService,
+    private readonly planFeatureResolver: PlanFeatureResolverService,
+    private readonly galleryFolderSyncService: GalleryFolderSyncService,
   ) {
     this.cacheTtl = this.configService.get<number>(
       'CACHE_TTL_REFERENCE_SECONDS',
@@ -146,14 +156,44 @@ export class PageService {
     return this.pageRepo.save(page);
   }
 
-  async getAll(): Promise<Page[]> {
-    return this.pageRepo.find({ order: { createdAt: 'DESC' } });
+  // discuva-admin's builder opens a page for editing straight from this
+  // list's own in-memory array (openEdit(page: PageRecord)) — it never
+  // makes a separate per-id fetch — so `churchCalendarEntitled` is
+  // attached here, not only on getByIdForAdmin below, or the editor would
+  // never actually see it. One resolve() call, reused for every row: the
+  // entitlement is tenant-wide, not per-page.
+  async getAll(): Promise<(Page & { churchCalendarEntitled: boolean })[]> {
+    const [pages, churchCalendarEntitled] = await Promise.all([
+      this.pageRepo.find({ order: { createdAt: 'DESC' } }),
+      this.isChurchCalendarEntitled(),
+    ]);
+    return pages.map((page) => ({ ...page, churchCalendarEntitled }));
   }
 
   async getById(id: string): Promise<Page> {
     const page = await this.pageRepo.findOneBy({ id });
     if (!page) throw new NotFoundException('Page not found');
     return page;
+  }
+
+  // Backs the admin builder's own single-page GET (unlike
+  // getForPublic/getForPreview, this never hides a downgraded
+  // CHURCH_CALENDAR section — an admin editing their own page shouldn't
+  // have their configuration silently vanish from view). Instead surfaces
+  // `churchCalendarEntitled` alongside the untouched page so the editor
+  // can show a "requires upgrade — not currently visible to visitors"
+  // badge on that section's card, same entitlement check
+  // getForPublic/getForPreview use to decide whether to drop the section
+  // for a real visitor. See getAll's own comment for why that list
+  // endpoint carries the identical flag too.
+  async getByIdForAdmin(
+    id: string,
+  ): Promise<Page & { churchCalendarEntitled: boolean }> {
+    const page = await this.getById(id);
+    return {
+      ...page,
+      churchCalendarEntitled: await this.isChurchCalendarEntitled(),
+    };
   }
 
   // Only a published page is ever reachable here — an unpublished draft
@@ -181,7 +221,13 @@ export class PageService {
       headerLinks: page.headerLinks,
       church: await this.resolveChurchInfo(),
       sections: this.withoutHiddenSections(
-        await this.withApprovedTestimonials(page, page.sections),
+        await this.withSyncedGalleryImages(
+          await this.withLiveStatus(
+            await this.withChurchCalendarEntries(
+              await this.withApprovedTestimonials(page, page.sections),
+            ),
+          ),
+        ),
       ),
     };
   }
@@ -216,7 +262,13 @@ export class PageService {
       headerLinks: page.draftHeaderLinks,
       church: await this.resolveChurchInfo(),
       sections: this.withoutHiddenSections(
-        await this.withApprovedTestimonials(page, page.draftSections),
+        await this.withSyncedGalleryImages(
+          await this.withLiveStatus(
+            await this.withChurchCalendarEntries(
+              await this.withApprovedTestimonials(page, page.draftSections),
+            ),
+          ),
+        ),
       ),
     };
   }
@@ -299,6 +351,118 @@ export class PageService {
         content: { ...s.content, items: [...existingItems, ...submittedItems] },
       };
     });
+  }
+
+  // Merges the referenced ChurchCalendar's live entries into each
+  // CHURCH_CALENDAR section's content, server-side — the member/public
+  // renderer just maps over content.entries, no client fetch, same
+  // contract withApprovedTestimonials already establishes for TESTIMONIALS.
+  // Re-checks BOTH the calendar's own isPublished (an admin un-publishing
+  // the calendar later hides it from the page without touching the
+  // section) AND the tenant's current plan entitlement (a section saved
+  // while entitled doesn't keep working forever after a downgrade) — a
+  // section failing either check is dropped from the output array
+  // entirely, never returned broken/half-filled, so a visitor never sees a
+  // permission error. The section's own config is never touched — this
+  // only affects what's returned from this one read.
+  private async withChurchCalendarEntries(
+    sections: PageSection[],
+  ): Promise<PageSection[]> {
+    const calendarSectionIds = sections
+      .filter((s) => s.type === PageSectionType.CHURCH_CALENDAR)
+      .map((s) => s.id);
+    if (calendarSectionIds.length === 0) return sections;
+
+    if (!(await this.isChurchCalendarEntitled())) {
+      return sections.filter((s) => !calendarSectionIds.includes(s.id));
+    }
+
+    const enriched = await Promise.all(
+      sections.map(async (s) => {
+        if (!calendarSectionIds.includes(s.id)) return s;
+        const calendarId = s.content?.calendarId;
+        const calendar =
+          typeof calendarId === 'string'
+            ? await this.churchCalendarService
+                .getById(calendarId)
+                .catch(() => null)
+            : null;
+        if (!calendar?.isPublished) return null;
+        return {
+          ...s,
+          content: {
+            ...s.content,
+            title: calendar.title,
+            theme: calendar.theme,
+            accentColor: calendar.accentColor,
+            entries: calendar.entries,
+          },
+        };
+      }),
+    );
+    return enriched.filter((s): s is PageSection => s !== null);
+  }
+
+  // Merges tenant-wide "is a service live right now" status into every
+  // LIVE_NOW section — always reflects the current moment, no
+  // cross-reference to validate (unlike CHURCH_CALENDAR, this section type
+  // has nothing an admin could point at a deleted/unpublished record, so
+  // there's no equivalent drop-the-section case here).
+  private async withLiveStatus(
+    sections: PageSection[],
+  ): Promise<PageSection[]> {
+    const hasLiveNowSection = sections.some(
+      (s) => s.type === PageSectionType.LIVE_NOW,
+    );
+    if (!hasLiveNowSection) return sections;
+
+    const activeSessions = await this.serviceSessionService.getActiveSessions();
+    const isLive = activeSessions.length > 0;
+    return sections.map((s) => {
+      if (s.type !== PageSectionType.LIVE_NOW) return s;
+      return {
+        ...s,
+        content: {
+          ...s.content,
+          isLive,
+          sessionInfo: isLive
+            ? {
+                serviceSlotName: activeSessions[0].serviceSlotName,
+                startedAt: activeSessions[0].startedAt,
+              }
+            : null,
+        },
+      };
+    });
+  }
+
+  // "A specified path, just updating pictures... always updated" — merges
+  // a live Drive folder listing into any GALLERY section with
+  // syncFolderUrl set, overwriting `images` in the response only (never
+  // written back to the saved section). A sync failure (unset
+  // GOOGLE_DRIVE_API_KEY, folder not public, quota, network) comes back
+  // as [] from GalleryFolderSyncService and falls back to whatever
+  // `images` the section already had saved — a visitor never sees a
+  // broken or empty gallery just because the folder sync had a bad day.
+  private async withSyncedGalleryImages(
+    sections: PageSection[],
+  ): Promise<PageSection[]> {
+    const syncedSectionIds = sections
+      .filter(
+        (s) => s.type === PageSectionType.GALLERY && s.content?.syncFolderUrl,
+      )
+      .map((s) => s.id);
+    if (syncedSectionIds.length === 0) return sections;
+
+    return Promise.all(
+      sections.map(async (s) => {
+        if (!syncedSectionIds.includes(s.id)) return s;
+        const images = await this.galleryFolderSyncService.listImages(
+          s.content.syncFolderUrl as string,
+        );
+        return images.length ? { ...s, content: { ...s.content, images } } : s;
+      }),
+    );
   }
 
   // Feeds discuva-member's sitemap/robots/llms.txt routes — every published
@@ -565,9 +729,86 @@ export class PageService {
             },
           );
           break;
+        case PageSectionType.GALLERY: {
+          this.optionalString(section.content, 'heading', label);
+          this.optionalString(section.content, 'syncFolderUrl', label);
+          const syncFolderUrl = section.content['syncFolderUrl'];
+          const checkImage = (item: Record<string, unknown>, i: number) => {
+            const itemLabel = `${label}, image #${i + 1}`;
+            this.requireString(item, 'url', itemLabel);
+            this.optionalString(item, 'caption', itemLabel);
+          };
+          if (typeof syncFolderUrl === 'string' && syncFolderUrl.trim()) {
+            if (!this.galleryFolderSyncService.extractFolderId(syncFolderUrl)) {
+              throw new BadRequestException(
+                `${label}: "syncFolderUrl" doesn't look like a Google Drive folder link`,
+              );
+            }
+            // Optional here — synced at render time, so a fresh section
+            // doesn't need any manually-saved images to be valid.
+            this.optionalArray(section.content, 'images', label, checkImage);
+          } else {
+            this.requireArray(section.content, 'images', label, checkImage);
+          }
+          break;
+        }
+        case PageSectionType.CHURCH_CALENDAR: {
+          this.optionalString(section.content, 'heading', label);
+          const calendarId = this.requireString(
+            section.content,
+            'calendarId',
+            label,
+          );
+          const calendar = await this.churchCalendarService
+            .getById(calendarId)
+            .catch(() => null);
+          if (!calendar?.isPublished) {
+            throw new BadRequestException(
+              `${label}: calendarId references a calendar that doesn't exist or isn't published`,
+            );
+          }
+          await this.assertChurchCalendarEntitled();
+          break;
+        }
+        case PageSectionType.LIVE_NOW:
+          this.optionalString(section.content, 'heading', label);
+          this.optionalString(section.content, 'offlineMessage', label);
+          break;
       }
     }
     this.assertNoDuplicateSingletonSections(sections);
+  }
+
+  // Service-level plan check (not a controller guard) — a jsonb section
+  // *type* inside a mixed array can't be gated by a route-level @RequiresPlan
+  // the way a whole endpoint can. Same shape finance-request.service.ts's
+  // own service-level check already uses, so the admin frontend's existing
+  // axios interceptor (keyed on this exact `code`/`requiredFeature` pair)
+  // pops the same upgrade-required modal for free — no new frontend needed.
+  private async assertChurchCalendarEntitled(): Promise<void> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return;
+    const { features } = await this.planFeatureResolver.resolve(tenantId);
+    if (!features.includes(PlanFeature.CHURCH_CALENDAR)) {
+      throw new ForbiddenException({
+        message: 'The Church Calendar section requires an upgraded plan.',
+        code: 'PLAN_UPGRADE_REQUIRED',
+        requiredFeature: PlanFeature.CHURCH_CALENDAR,
+      });
+    }
+  }
+
+  // Re-checked at read time (getForPublic/getForPreview), not just at save
+  // time — a section saved while the tenant was entitled must not keep
+  // working forever after a downgrade. Returns true/false rather than
+  // throwing, since a downgrade should silently hide the section from a
+  // visitor (withChurchCalendarEntries below), never surface a permission
+  // error to them.
+  private async isChurchCalendarEntitled(): Promise<boolean> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return true;
+    const { features } = await this.planFeatureResolver.resolve(tenantId);
+    return features.includes(PlanFeature.CHURCH_CALENDAR);
   }
 
   // A page has exactly one opening banner and, if it has one at all,

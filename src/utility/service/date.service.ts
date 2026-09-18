@@ -136,6 +136,20 @@ export class DateService {
   }
 
   /**
+   * Interpret a naive (no UTC offset) date-time string as a wall-clock
+   * moment in the church's configured timezone, returning the correct
+   * absolute UTC instant — e.g. an admin picking "5:00 PM" for a form's
+   * closesAt should mean 5 PM church time regardless of the server's or
+   * the browsing admin's own timezone. Same fromZonedTime/toZonedTime
+   * trick startOfDay()/endOfDay() already rely on, just without snapping
+   * to a day boundary.
+   * @param naiveDateTime - date-time string with no embedded offset (e.g. "2026-03-05T17:00:00")
+   */
+  toChurchInstant(naiveDateTime: string): Date {
+    return fromZonedTime(parseISO(naiveDateTime), this.timezone);
+  }
+
+  /**
    * Format a date using a pattern
    * @param date - The date to format
    * @param pattern - The format pattern (e.g., 'yyyy-MM-dd', 'EEE, MMMM do, yyyy')

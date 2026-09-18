@@ -6,10 +6,14 @@ import { TestimonialSubmission } from './entity/testimonial-submission.entity';
 import { Form } from '../forms/entity/form.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { PageService } from './service/page.service';
+import { GalleryFolderSyncService } from './service/gallery-folder-sync.service';
 import { PageAdminController } from './controller/page-admin.controller';
 import { PagePublicController } from './controller/page-public.controller';
 import { UtilityModule } from '../utility/utility.module';
 import { AdminModule } from '../admin/admin.module';
+import { ChurchCalendarModule } from '../church-calendar/church-calendar.module';
+import { ServiceProgrammeModule } from '../service-programme/service-programme.module';
+import { BillingModule } from '../billing/billing.module';
 
 @Module({
   imports: [
@@ -25,8 +29,17 @@ import { AdminModule } from '../admin/admin.module';
     TypeOrmModule.forFeature([Tenant]),
     UtilityModule,
     AdminModule,
+    // ChurchCalendarService backs the CHURCH_CALENDAR section type
+    // (withChurchCalendarEntries), ServiceSessionService backs LIVE_NOW
+    // (withLiveStatus), PlanFeatureResolverService gates CHURCH_CALENDAR
+    // behind PlanFeature.CHURCH_CALENDAR — same pattern
+    // finance-request.service.ts already uses for a service-level (not
+    // controller-guard) plan check.
+    ChurchCalendarModule,
+    ServiceProgrammeModule,
+    BillingModule,
   ],
-  providers: [PageService],
+  providers: [PageService, GalleryFolderSyncService],
   // PagePublicController must come first — PageAdminController's GET
   // /pages/:id is a wildcard that would otherwise swallow PagePublicController's
   // more specific GET /pages/public/:slug first, same route-ordering issue

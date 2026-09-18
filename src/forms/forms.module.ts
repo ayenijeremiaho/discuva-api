@@ -5,10 +5,12 @@ import { Form } from './entity/form.entity';
 import { FormField } from './entity/form-field.entity';
 import { FormSubmission } from './entity/form-submission.entity';
 import { FormFieldAttachment } from './entity/form-field-attachment.entity';
+import { FormAttempt } from './entity/form-attempt.entity';
 import { Member } from '../member/entity/member.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { FormService } from './service/form.service';
 import { FormSubmissionService } from './service/form-submission.service';
+import { FormAttemptService } from './service/form-attempt.service';
 import { FormAttachmentCleanupScheduler } from './scheduler/form-attachment-cleanup.scheduler';
 import { FormAdminController } from './controller/form-admin.controller';
 import { FormMemberController } from './controller/form-member.controller';
@@ -25,6 +27,7 @@ import { AdminModule } from '../admin/admin.module';
       FormField,
       FormSubmission,
       FormFieldAttachment,
+      FormAttempt,
       Member,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
@@ -38,6 +41,7 @@ import { AdminModule } from '../admin/admin.module';
   providers: [
     FormService,
     FormSubmissionService,
+    FormAttemptService,
     FormAttachmentCleanupScheduler,
   ],
   // Order matters: Nest/Express matches routes in registration order, and

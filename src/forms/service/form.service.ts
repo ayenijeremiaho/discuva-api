@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, ILike, Repository } from 'typeorm';
 import 'multer';
 import {
   Form,
@@ -19,14 +19,17 @@ import {
   CloneFormDto,
   CreateFormDto,
   FormFieldDto,
+  FormOptionDto,
   PostSubmitOutcomeDto,
   UpdateFormDto,
 } from '../dto/form.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import {
+  FIELD_TYPES_REQUIRING_OPTIONS,
   FormFieldAutoFill,
   FormFieldType,
+  FormPurpose,
   FormVisibility,
 } from '../enum/form.enum';
 import {
@@ -34,6 +37,7 @@ import {
   FormFieldAnalyticsDto,
 } from '../dto/form-analytics.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { DateService } from '../../utility/service/date.service';
 
 const FIRST_TIMER_REQUIRED_AUTOFILL_KEYS = [
   FormFieldAutoFill.FIRST_NAME,
@@ -44,6 +48,17 @@ const FIRST_TIMER_REQUIRED_AUTOFILL_KEYS = [
 const CHOICE_FIELD_TYPES = new Set([
   FormFieldType.DROPDOWN,
   FormFieldType.CHECKBOX,
+]);
+// A VOTE field must be a choice — reuses CHOICE_FIELD_TYPES's exact set
+// (a vote is always Dropdown/Checkbox, never anything else). A QUIZ field
+// also allows Text/Long Text for a short-answer/essay question a teacher
+// grades manually (never auto-scored) — everything else (Number, Email,
+// Phone, Date, File) has no real place on either, so both stay a strict
+// allowlist rather than "everything except a denylist".
+const QUIZ_FIELD_TYPES = new Set([
+  ...CHOICE_FIELD_TYPES,
+  FormFieldType.TEXT,
+  FormFieldType.TEXTAREA,
 ]);
 const SAMPLE_ANSWER_LIMIT = 20;
 
@@ -57,6 +72,7 @@ export class FormService {
     @InjectRepository(FormSubmission)
     private readonly submissionRepo: Repository<FormSubmission>,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly dateService: DateService,
   ) {}
 
   async create(dto: CreateFormDto): Promise<Form> {
@@ -74,6 +90,15 @@ export class FormService {
     );
     this.assertValidGeneralAction(dto.generalActionUrl, dto.generalActionLabel);
     this.assertValidPostSubmitOutcomes(dto.fields, dto.postSubmitOutcomes);
+    const purpose = dto.purpose ?? FormPurpose.STANDARD;
+    this.assertValidPurposeConfig(purpose, {
+      visibility: dto.visibility,
+      timeLimitMinutes: dto.timeLimitMinutes ?? null,
+      fields: dto.fields,
+    });
+    const opensAt = this.parseChurchInstant(dto.opensAt);
+    const closesAt = this.parseChurchInstant(dto.closesAt);
+    this.assertValidWindow(opensAt, closesAt);
     const form = this.formRepo.create({
       title: dto.title,
       description: dto.description ?? null,
@@ -81,7 +106,17 @@ export class FormService {
       event: dto.eventId ? ({ id: dto.eventId } as Event) : null,
       createsFirstTimers: dto.createsFirstTimers ?? false,
       notifyOnSubmission: dto.notifyOnSubmission ?? false,
-      editableAfterSubmit: dto.editableAfterSubmit ?? true,
+      // A quiz answer can never be edited after the fact, regardless of
+      // what the request sent — letting someone revise an answer after
+      // their score was already computed (and very possibly shown to
+      // them) turns "test" into "look up the answer key and fix it".
+      // oneResponsePerMember + the retake flow (FormAttemptService) is
+      // the correct, timer-respecting way to let someone try again —
+      // never a silent edit of a past submission.
+      editableAfterSubmit:
+        purpose === FormPurpose.QUIZ
+          ? false
+          : (dto.editableAfterSubmit ?? true),
       audienceGroup: dto.audienceGroupId
         ? ({ id: dto.audienceGroupId } as Group)
         : null,
@@ -91,6 +126,12 @@ export class FormService {
       postSubmitOutcomes: this.normalizePostSubmitOutcomes(
         dto.postSubmitOutcomes,
       ),
+      purpose,
+      oneResponsePerMember: dto.oneResponsePerMember ?? false,
+      opensAt,
+      closesAt,
+      timeLimitMinutes: dto.timeLimitMinutes ?? null,
+      revealScoreImmediately: dto.revealScoreImmediately ?? true,
     });
     const saved = await this.formRepo.save(form);
 
@@ -119,6 +160,9 @@ export class FormService {
           validationMessage: f.validationMessage ?? null,
           visibilityRule: f.visibilityRule ?? null,
           pageIndex: f.pageIndex ?? 0,
+          correctOptions:
+            purpose === FormPurpose.QUIZ ? (f.correctOptions ?? null) : null,
+          points: purpose === FormPurpose.QUIZ ? (f.points ?? null) : null,
           form: saved,
         }),
       ),
@@ -155,7 +199,14 @@ export class FormService {
       isActive: false,
       createsFirstTimers: scalars.createsFirstTimers,
       notifyOnSubmission: scalars.notifyOnSubmission,
-      editableAfterSubmit: scalars.editableAfterSubmit,
+      // A QUIZ clone stays locked-after-submit too — see the identical
+      // override in create()/update() for why. source.purpose (not
+      // scalars, which has no purpose field of its own — see below) since
+      // purpose always carries over verbatim on a clone.
+      editableAfterSubmit:
+        source.purpose === FormPurpose.QUIZ
+          ? false
+          : scalars.editableAfterSubmit,
       audienceGroup: scalars.audienceGroupId
         ? ({ id: scalars.audienceGroupId } as Group)
         : null,
@@ -170,6 +221,18 @@ export class FormService {
       // no sensible fieldId an admin could supply before the clone's own
       // fields exist).
       postSubmitOutcomes: null,
+      // Structural behaviour (purpose, one-vote enforcement, quiz timer
+      // length, reveal timing) is worth preserving on a duplicate — it's
+      // the same reasoning as carrying over `fields` verbatim. A specific
+      // schedule is not: opensAt/closesAt are always reset to null,
+      // consistent with "always starts inactive... regardless of what the
+      // source had" above — a clone always needs its own explicit window.
+      purpose: source.purpose,
+      oneResponsePerMember: source.oneResponsePerMember,
+      opensAt: null,
+      closesAt: null,
+      timeLimitMinutes: source.timeLimitMinutes,
+      revealScoreImmediately: source.revealScoreImmediately,
     });
     const saved = await this.formRepo.save(newForm);
 
@@ -186,6 +249,8 @@ export class FormService {
           order: f.order,
           autoFillKey: f.autoFillKey,
           optionMetadata: f.optionMetadata,
+          correctOptions: f.correctOptions,
+          points: f.points,
           minValue: f.minValue,
           maxValue: f.maxValue,
           minLength: f.minLength,
@@ -417,6 +482,114 @@ export class FormService {
       );
     }
     return field;
+  }
+
+  // Naive date-time string (no UTC offset) -> the correct UTC instant for
+  // the church's configured timezone. Null/undefined pass through as null
+  // (always-open, the default) — matches this DTO field's own convention.
+  private parseChurchInstant(value: string | null | undefined): Date | null {
+    return value ? this.dateService.toChurchInstant(value) : null;
+  }
+
+  private assertValidWindow(opensAt: Date | null, closesAt: Date | null): void {
+    if (opensAt && closesAt && closesAt <= opensAt) {
+      throw new BadRequestException('"Closes At" must be after "Opens At"');
+    }
+  }
+
+  // VOTE requires MEMBERS visibility (no anonymity/secret-ballot design
+  // exists yet — see the plan's own note) and rejects a duplicate option
+  // value within a single field's choice list, so two candidates/choices
+  // can never accidentally collide. QUIZ validates correctOptions against
+  // each field's own `options`, and requires MEMBERS visibility whenever a
+  // per-attempt timer is configured — an anonymous PUBLIC submission has no
+  // identity for FormAttempt to track a personal countdown against.
+  private assertValidPurposeConfig(
+    purpose: FormPurpose,
+    config: {
+      visibility: FormVisibility;
+      timeLimitMinutes: number | null;
+      fields: {
+        label: string;
+        fieldType: FormFieldType;
+        options?: string[] | null;
+        correctOptions?: string[] | null;
+      }[];
+    },
+  ): void {
+    if (purpose === FormPurpose.VOTE) {
+      if (config.visibility !== FormVisibility.MEMBERS) {
+        throw new BadRequestException('A vote must be MEMBERS visibility');
+      }
+      // A vote is always a choice — a voter's identity is already the
+      // logged-in member (MEMBERS-only, enforced above), so there's never
+      // a reason to collect a name/email/phone/etc. alongside it. Kept
+      // narrow rather than "whatever an admin happens to pick," since the
+      // full 9-type picker (built for STANDARD forms) reads as confusing
+      // clutter here — every option other than a choice is a dead end.
+      for (const field of config.fields) {
+        if (!CHOICE_FIELD_TYPES.has(field.fieldType)) {
+          throw new BadRequestException(
+            `"${field.label}": a vote field must be Dropdown or Checkbox`,
+          );
+        }
+      }
+      for (const field of config.fields) {
+        if (!field.options?.length) continue;
+        const seen = new Set<string>();
+        for (const option of field.options) {
+          const key = option.trim().toLowerCase();
+          if (seen.has(key)) {
+            throw new BadRequestException(
+              `Vote choices must be unique — "${option}" is listed twice.`,
+            );
+          }
+          seen.add(key);
+        }
+      }
+    }
+
+    if (purpose === FormPurpose.QUIZ) {
+      if (
+        config.timeLimitMinutes != null &&
+        config.visibility !== FormVisibility.MEMBERS
+      ) {
+        throw new BadRequestException(
+          'A timed quiz must be MEMBERS visibility',
+        );
+      }
+      // Dropdown/Checkbox are the only auto-graded types; Text/Long Text
+      // stay allowed for a short-answer/essay question a teacher reviews
+      // manually (never scored — see FormSubmissionService.
+      // scoreQuizSubmission). Every other type (Number, Email, Phone,
+      // Date, File) has no real place on a quiz question, so it's left
+      // out of the picker/rejected here rather than left in "just in
+      // case" — the same clutter/confusion problem VOTE_FIELD_TYPES
+      // above avoids.
+      for (const field of config.fields) {
+        if (!QUIZ_FIELD_TYPES.has(field.fieldType)) {
+          throw new BadRequestException(
+            `"${field.label}": a quiz field must be Dropdown, Checkbox, Text, or Long Text`,
+          );
+        }
+      }
+      for (const field of config.fields) {
+        if (!field.correctOptions?.length) continue;
+        if (!FIELD_TYPES_REQUIRING_OPTIONS.has(field.fieldType)) {
+          throw new BadRequestException(
+            `"${field.label}": correctOptions only applies to DROPDOWN/CHECKBOX fields`,
+          );
+        }
+        const options = new Set(field.options ?? []);
+        for (const correct of field.correctOptions) {
+          if (!options.has(correct)) {
+            throw new BadRequestException(
+              `"${field.label}": correctOptions value "${correct}" isn't one of this field's own options`,
+            );
+          }
+        }
+      }
+    }
   }
 
   private assertValidAudienceGroup(
@@ -709,7 +882,37 @@ export class FormService {
     }
   }
 
-  async getAll(): Promise<Form[]> {
+  // Server-side paginated/filtered replacement for the old getAll() — Quiz/
+  // Vote turned Forms from a handful of long-lived things into something
+  // that genuinely accumulates (a weekly sermon quiz, a recurring vote),
+  // so this now matches the pattern GameService/VolunteerService/
+  // SmallGroupService already use rather than shipping every row and
+  // filtering client-side. search is ILIKE across title/description
+  // (IDX_forms_title_trgm/IDX_forms_description_trgm back it); purpose/
+  // visibility/status are exact-match (IDX_forms_purpose and the
+  // pre-existing idx_forms_visibility/idx_forms_is_active back those).
+  async listForms(
+    page = 1,
+    limit = 20,
+    search?: string,
+    purpose?: FormPurpose,
+    visibility?: FormVisibility,
+    status?: 'ACTIVE' | 'INACTIVE',
+  ): Promise<PaginationResponseDto<Form>> {
+    const baseWhere: FindOptionsWhere<Form> = {};
+    if (purpose) baseWhere.purpose = purpose;
+    if (visibility) baseWhere.visibility = visibility;
+    if (status) baseWhere.isActive = status === 'ACTIVE';
+
+    const trimmedSearch = search?.trim();
+    const where: FindOptionsWhere<Form> | FindOptionsWhere<Form>[] =
+      trimmedSearch
+        ? [
+            { ...baseWhere, title: ILike(`%${trimmedSearch}%`) },
+            { ...baseWhere, description: ILike(`%${trimmedSearch}%`) },
+          ]
+        : baseWhere;
+
     // fields is eager-loaded (Form.fields) but that alone doesn't order the
     // joined rows — without this, Postgres returns them in whatever order
     // its query planner picks, which isn't guaranteed to match each field's
@@ -718,9 +921,34 @@ export class FormService {
     // this response (openEdit never does its own per-form GET), so an
     // unordered join here was surfacing as the field list visibly
     // reshuffling itself on every page load/refresh.
-    return this.formRepo.find({
+    const [forms, total] = await this.formRepo.findAndCount({
+      where,
       order: { createdAt: 'DESC', fields: { order: 'ASC' } },
+      skip: (page - 1) * limit,
+      take: limit,
     });
+    return UtilityService.createPaginationResponse(forms, page, limit, total);
+  }
+
+  // Lightweight, unfiltered, unpaginated — for a "pick a form to embed"
+  // dropdown (discuva-admin's Pages Registration-section editor) rather
+  // than the admin Forms list. A picker can't paginate a single-select, so
+  // this deliberately stays "return everything" (CLAUDE.md's Pagination
+  // Policy category for admin-curated reference data), separate from
+  // listForms above which is the one that actually grows unboundedly.
+  // Mirrors GroupService.getLookup's shape.
+  async getFormOptions(): Promise<FormOptionDto[]> {
+    const forms = await this.formRepo.find({
+      order: { title: 'ASC', fields: { order: 'ASC' } },
+    });
+    return forms.map((form) => ({
+      id: form.id,
+      title: form.title,
+      fields: form.fields.map((field) => ({
+        id: field.id,
+        pageIndex: field.pageIndex ?? 0,
+      })),
+    }));
   }
 
   async getById(id: string): Promise<Form> {
@@ -771,6 +999,32 @@ export class FormService {
     if (dto.generalActionLabel !== undefined) {
       form.generalActionLabel = dto.generalActionLabel;
     }
+    if (dto.purpose !== undefined) form.purpose = dto.purpose;
+    if (dto.oneResponsePerMember !== undefined) {
+      form.oneResponsePerMember = dto.oneResponsePerMember;
+    }
+    if (dto.opensAt !== undefined) {
+      form.opensAt = this.parseChurchInstant(dto.opensAt);
+    }
+    if (dto.closesAt !== undefined) {
+      form.closesAt = this.parseChurchInstant(dto.closesAt);
+    }
+    if (dto.timeLimitMinutes !== undefined) {
+      form.timeLimitMinutes = dto.timeLimitMinutes;
+    }
+    if (dto.revealScoreImmediately !== undefined) {
+      form.revealScoreImmediately = dto.revealScoreImmediately;
+    }
+    // A quiz answer can never be edited after the fact, regardless of what
+    // the request sent — see the identical override in create() for why:
+    // letting someone revise an answer after their score was already
+    // computed (and very possibly shown to them) turns "test" into "look
+    // up the answer key and fix it". oneResponsePerMember + the retake
+    // flow (FormAttemptService) is the correct, timer-respecting way to
+    // let someone try again — never a silent edit of a past submission.
+    if (form.purpose === FormPurpose.QUIZ) {
+      form.editableAfterSubmit = false;
+    }
 
     if (dto.fields) {
       const incomingIds = new Set(
@@ -818,6 +1072,12 @@ export class FormService {
             validationMessage: f.validationMessage ?? null,
             visibilityRule: f.visibilityRule ?? null,
             pageIndex: f.pageIndex ?? 0,
+            correctOptions:
+              form.purpose === FormPurpose.QUIZ
+                ? (f.correctOptions ?? null)
+                : null,
+            points:
+              form.purpose === FormPurpose.QUIZ ? (f.points ?? null) : null,
             form,
           }),
         ),
@@ -834,6 +1094,12 @@ export class FormService {
     if (dto.fields) this.assertValidOptionMetadata(dto.fields);
     if (dto.fields) this.assertValidFieldConstraints(dto.fields);
     if (dto.fields) this.assertValidVisibilityRules(dto.fields);
+    this.assertValidPurposeConfig(form.purpose, {
+      visibility: form.visibility,
+      timeLimitMinutes: form.timeLimitMinutes,
+      fields: dto.fields ?? form.fields,
+    });
+    this.assertValidWindow(form.opensAt, form.closesAt);
     this.assertValidCrossFieldRefs(
       dto.dedupFieldId,
       dto.nextStepsFieldId,
@@ -938,15 +1204,37 @@ export class FormService {
     formId: string,
     page = 1,
     limit = 20,
+    // QUIZ leaderboard — highest score first, most recent first among ties.
+    // Meaningless for a non-QUIZ form (score is always null there), but
+    // harmless to accept regardless rather than 400ing on it.
+    sortBy?: 'createdAt' | 'score',
   ): Promise<PaginationResponseDto<FormSubmission>> {
     await this.getById(formId);
-    const [data, total] = await this.submissionRepo.findAndCount({
-      where: { form: { id: formId } },
-      relations: ['member'],
-      order: { createdAt: 'DESC' },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    let data: FormSubmission[];
+    let total: number;
+    if (sortBy === 'score') {
+      // NULLS LAST, not TypeORM's plain `order` option (Postgres defaults
+      // DESC to NULLS FIRST) — otherwise a submission from before an admin
+      // added correctOptions to a question (still null score) would
+      // outrank every real scored submission on the leaderboard.
+      const qb = this.submissionRepo
+        .createQueryBuilder('submission')
+        .leftJoinAndSelect('submission.member', 'member')
+        .where('submission.form_id = :formId', { formId })
+        .orderBy('submission.score', 'DESC', 'NULLS LAST')
+        .addOrderBy('submission.createdAt', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+      [data, total] = await qb.getManyAndCount();
+    } else {
+      [data, total] = await this.submissionRepo.findAndCount({
+        where: { form: { id: formId } },
+        relations: ['member'],
+        order: { createdAt: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+    }
     return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
@@ -1039,17 +1327,23 @@ export class FormService {
           totalSelections++;
         }
       }
-      return {
-        ...base,
-        choices: [...counts.entries()].map(([option, count]) => ({
+      // Sorted highest-count first (stable — ties keep their original
+      // options-declaration order) so the leading choice is always
+      // index 0, not just discoverable by scanning every percentage.
+      // Matters most for VOTE ("who's leading the poll"), but a
+      // STANDARD form's own choice field (e.g. "Which ministry
+      // interests you?") reads better most-popular-first too.
+      const choices = [...counts.entries()]
+        .map(([option, count]) => ({
           option,
           count,
           percentage:
             totalSelections === 0
               ? 0
               : Math.round((count / totalSelections) * 1000) / 10,
-        })),
-      };
+        }))
+        .sort((a, b) => b.count - a.count);
+      return { ...base, choices };
     }
 
     if (field.fieldType === FormFieldType.NUMBER) {

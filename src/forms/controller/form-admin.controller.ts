@@ -34,6 +34,7 @@ import {
   AdminSubmitFormDto,
   CloneFormDto,
   CreateFormDto,
+  FormListQueryDto,
   UpdateFormDto,
 } from '../dto/form.dto';
 import { FormVisibility } from '../enum/form.enum';
@@ -71,6 +72,15 @@ export class FormAdminController {
     return this.groupService.getLookup();
   }
 
+  // Unfiltered/unpaginated, for a "pick a form to embed" dropdown (Pages'
+  // Registration-section editor) — see FormService.getFormOptions. Must be
+  // registered before ':id' or it'd be swallowed as an id param.
+  @RequiresPermission(AdminPermission.FORMS_READ)
+  @Get('options')
+  getOptions() {
+    return this.formService.getFormOptions();
+  }
+
   @RequiresPermission(AdminPermission.FORMS_WRITE)
   @Post()
   create(@Body() dto: CreateFormDto) {
@@ -79,8 +89,16 @@ export class FormAdminController {
 
   @RequiresPermission(AdminPermission.FORMS_READ)
   @Get()
-  getAll() {
-    return this.formService.getAll();
+  getAll(@Query() query: FormListQueryDto) {
+    const { page = 1, limit = 20, search, purpose, visibility, status } = query;
+    return this.formService.listForms(
+      page,
+      limit,
+      search,
+      purpose,
+      visibility,
+      status,
+    );
   }
 
   @RequiresPermission(AdminPermission.FORMS_READ)
@@ -161,11 +179,13 @@ export class FormAdminController {
     @Param('id', ParseUUIDPipe) id: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('sortBy') sortBy?: 'createdAt' | 'score',
   ) {
     return this.formService.getSubmissions(
       id,
       page ? Number(page) : 1,
       limit ? Number(limit) : 20,
+      sortBy,
     );
   }
 

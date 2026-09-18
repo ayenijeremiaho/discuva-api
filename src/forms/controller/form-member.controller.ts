@@ -25,19 +25,41 @@ import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynami
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { FormSubmissionService } from '../service/form-submission.service';
+import { FormAttemptService } from '../service/form-attempt.service';
 import { SubmitFormDto } from '../dto/form.dto';
-import { FormVisibility } from '../enum/form.enum';
+import { FormPurpose, FormVisibility } from '../enum/form.enum';
 
 @RequiresModule('forms')
 @RequiresPlan(PlanFeature.FORMS)
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard, PlanGuard)
 @Controller('forms/member')
 export class FormMemberController {
-  constructor(private readonly submissionService: FormSubmissionService) {}
+  constructor(
+    private readonly submissionService: FormSubmissionService,
+    private readonly attemptService: FormAttemptService,
+  ) {}
 
   @Get()
   list(@CurrentUser() user: MemberAuth, @Query('eventId') eventId?: string) {
     return this.submissionService.listForMembers(eventId, user.id);
+  }
+
+  // "See scores/votes for previous events" — must be registered before
+  // ':id' below or "history" would be swallowed as a form id and 400 on
+  // ParseUUIDPipe.
+  @Get('history')
+  getHistory(
+    @CurrentUser() user: MemberAuth,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('purpose') purpose?: 'QUIZ' | 'VOTE',
+  ) {
+    return this.submissionService.getMyHistory(
+      user.id,
+      page ? Number(page) : 1,
+      limit ? Number(limit) : 20,
+      purpose as FormPurpose.QUIZ | FormPurpose.VOTE | undefined,
+    );
   }
 
   @Get(':id')
@@ -46,6 +68,17 @@ export class FormMemberController {
     @CurrentUser() user: MemberAuth,
   ) {
     return this.submissionService.getForMember(id, user.id);
+  }
+
+  // Starts (or returns, if one's already in progress) a time-limited
+  // QUIZ's per-attempt countdown — see FormAttemptService.startOrGetAttempt.
+  // A no-op call against a form with no timer, or that isn't a QUIZ, 400s.
+  @Post(':id/start')
+  startAttempt(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.attemptService.startOrGetAttemptById(id, user.id);
   }
 
   @Post(':id/submit')

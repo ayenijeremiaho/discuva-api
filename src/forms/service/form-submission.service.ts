@@ -13,14 +13,17 @@ import { Form } from '../entity/form.entity';
 import { FormField } from '../entity/form-field.entity';
 import { FormSubmission } from '../entity/form-submission.entity';
 import { FormFieldAttachment } from '../entity/form-field-attachment.entity';
+import { FormAttempt } from '../entity/form-attempt.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
   FIELD_TYPES_REQUIRING_OPTIONS,
   FormFieldAutoFill,
   FormFieldType,
   FormFieldVisibilityOperator,
+  FormPurpose,
   FormVisibility,
 } from '../enum/form.enum';
+import { FormAttemptService } from './form-attempt.service';
 import {
   FormSubmitResponseDto,
   PublicFormDto,
@@ -36,6 +39,7 @@ import {
   isValidNumber,
 } from '../../utility/decorators/form-answer-validators';
 import { UtilityService } from '../../utility/service/utility.service';
+import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -73,6 +77,7 @@ export class FormSubmissionService {
     private readonly utilityService: UtilityService,
     private readonly emailCategorySettingsService: EmailCategorySettingsService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly formAttemptService: FormAttemptService,
   ) {
     const locale = this.config.get<string>('CURRENCY_LOCALE', 'en-NG');
     this.defaultPhoneRegion = (locale.split('-')[1]?.toUpperCase() ??
@@ -104,7 +109,17 @@ export class FormSubmissionService {
   async getForMember(
     id: string,
     memberId: string,
-  ): Promise<{ form: Form; suggestedValues: Record<string, string> }> {
+  ): Promise<{
+    form: Form;
+    suggestedValues: Record<string, string>;
+    windowState: 'OPEN' | 'NOT_OPEN_YET' | 'CLOSED';
+    attempt: { startedAt: Date; expiresAt: Date } | null;
+    // How many times this member has already completed this form — lets
+    // the fill page show "You've attempted this N times" alongside
+    // Form.oneResponsePerMember (already on `form` above) rather than the
+    // member only discovering retakes are/aren't allowed at submit time.
+    attemptCount: number;
+  }> {
     const form = await this.formRepo.findOne({
       where: { id, isActive: true },
       order: { fields: { order: 'ASC' } },
@@ -126,7 +141,28 @@ export class FormSubmissionService {
       }
     }
 
-    return { form, suggestedValues };
+    const attempt = await this.formAttemptService.getInProgressAttempt(
+      form,
+      memberId,
+    );
+    const attemptCount = await this.submissionRepo.count({
+      where: { form: { id: form.id }, member: { id: memberId } },
+    });
+
+    return {
+      form,
+      suggestedValues,
+      windowState: this.computeWindowState(form),
+      attempt,
+      attemptCount,
+    };
+  }
+
+  private computeWindowState(form: Form): 'OPEN' | 'NOT_OPEN_YET' | 'CLOSED' {
+    const now = new Date();
+    if (form.opensAt && now < form.opensAt) return 'NOT_OPEN_YET';
+    if (form.closesAt && now > form.closesAt) return 'CLOSED';
+    return 'OPEN';
   }
 
   async getForPublic(id: string): Promise<PublicFormDto> {
@@ -148,19 +184,38 @@ export class FormSubmissionService {
       FormVisibility.PUBLIC,
     ]);
     await this.assertMemberInAudienceGroup(form, memberId);
+    this.assertWithinWindow(form);
+    if (form.oneResponsePerMember) {
+      await this.assertOneResponsePerMember(form, memberId);
+    }
+    let attempt: FormAttempt | null = null;
+    if (form.purpose === FormPurpose.QUIZ && form.timeLimitMinutes != null) {
+      attempt = await this.formAttemptService.assertValidForSubmit(
+        form,
+        memberId,
+      );
+    }
+
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
     const cleaned = this.stripHiddenAnswers(form.fields, normalized);
-    const saved = await this.saveSubmission(form, cleaned, {
-      id: memberId,
-    } as Member);
+    const scoring = this.scoreQuizSubmission(form, cleaned);
+    const saved = await this.saveSubmission(
+      form,
+      cleaned,
+      {
+        id: memberId,
+      } as Member,
+      scoring,
+    );
+    if (attempt) await this.formAttemptService.consumeAttempt(attempt, saved);
     this.notifyAdmins(form, saved.id).catch((err: unknown) =>
       this.logger.error(
         `Failed to notify admins of form ${form.id} submission ${saved.id}`,
         err instanceof Error ? err.stack : err,
       ),
     );
-    return this.buildSubmitResponse(form, cleaned, saved.id);
+    return this.buildSubmitResponse(form, cleaned, saved);
   }
 
   async submitAsPublic(
@@ -170,10 +225,12 @@ export class FormSubmissionService {
     const form = await this.getVisibleFormOrThrow(formId, [
       FormVisibility.PUBLIC,
     ]);
+    this.assertWithinWindow(form);
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
     const cleaned = this.stripHiddenAnswers(form.fields, normalized);
-    const saved = await this.saveSubmission(form, cleaned, null);
+    const scoring = this.scoreQuizSubmission(form, cleaned);
+    const saved = await this.saveSubmission(form, cleaned, null, scoring);
 
     this.notifyAdmins(form, saved.id).catch((err: unknown) =>
       this.logger.error(
@@ -200,7 +257,7 @@ export class FormSubmissionService {
       }
     }
 
-    return this.buildSubmitResponse(form, cleaned, saved.id);
+    return this.buildSubmitResponse(form, cleaned, saved);
   }
 
   // No visibility restriction — an admin can record a submission against
@@ -227,13 +284,18 @@ export class FormSubmissionService {
     // unconditionally, ignoring visibilityRule entirely, so an answer
     // reaching here is always something an admin actually saw and typed,
     // never a stale leftover from a field that went hidden underneath
-    // them.
+    // them. Also deliberately no window/one-response/attempt checks — an
+    // admin backfilling or correcting a record (e.g. a paper submission)
+    // is an intentional override, same posture as this method's existing
+    // unrestricted-visibility access.
+    const scoring = this.scoreQuizSubmission(form, normalized);
     const saved = await this.saveSubmission(
       form,
       normalized,
       memberId ? ({ id: memberId } as Member) : null,
+      scoring,
     );
-    return this.buildSubmitResponse(form, normalized, saved.id);
+    return this.buildSubmitResponse(form, normalized, saved);
   }
 
   // Powers the member fill page's "you already submitted — edit it?" flow,
@@ -258,6 +320,9 @@ export class FormSubmissionService {
     submissionId: string;
     answers: Record<string, unknown>;
     editable: boolean;
+    score?: number | null;
+    maxScore?: number | null;
+    scorePendingUntil?: Date | null;
   }> {
     const form = await this.formRepo.findOne({
       where: { id: formId, isActive: true },
@@ -275,7 +340,66 @@ export class FormSubmissionService {
       submissionId: submission.id,
       answers: submission.answers,
       editable: form.editableAfterSubmit,
+      ...this.resolveScoreVisibility(form, submission),
     };
+  }
+
+  // "See scores/votes for previous events" — every QUIZ/VOTE submission
+  // this member has ever made, most recent first, regardless of whether
+  // the form itself is still active (a member should still be able to look
+  // back at last year's election vote or an old sermon quiz score). Scoped
+  // to QUIZ/VOTE only — a STANDARD form's own answers aren't a
+  // score/choice worth surfacing here the same way.
+  async getMyHistory(
+    memberId: string,
+    page = 1,
+    limit = 20,
+    purpose?: FormPurpose.QUIZ | FormPurpose.VOTE,
+  ): Promise<
+    PaginationResponseDto<{
+      formId: string;
+      formTitle: string;
+      formPurpose: FormPurpose;
+      submittedAt: Date;
+      score: number | null;
+      maxScore: number | null;
+      choice: string | null;
+    }>
+  > {
+    const qb = this.submissionRepo
+      .createQueryBuilder('submission')
+      .innerJoinAndSelect('submission.form', 'form')
+      .where('submission.member_id = :memberId', { memberId })
+      .andWhere('form.purpose IN (:...purposes)', {
+        purposes: purpose ? [purpose] : [FormPurpose.QUIZ, FormPurpose.VOTE],
+      })
+      .orderBy('submission.createdAt', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit);
+    const [submissions, total] = await qb.getManyAndCount();
+
+    const data = submissions.map((s) => {
+      // A VOTE form is always a single choice question (see
+      // FormService.assertValidPurposeConfig) — form.fields isn't eager on
+      // this query-builder path, but the submitted answer keys are stable
+      // regardless, so the first (only) answer value is the vote's choice.
+      const firstAnswer = Object.values(s.answers ?? {})[0];
+      return {
+        formId: s.form.id,
+        formTitle: s.form.title,
+        formPurpose: s.form.purpose,
+        submittedAt: s.createdAt,
+        score: s.form.purpose === FormPurpose.QUIZ ? s.score : null,
+        maxScore: s.form.purpose === FormPurpose.QUIZ ? s.maxScore : null,
+        choice:
+          s.form.purpose === FormPurpose.VOTE
+            ? Array.isArray(firstAnswer)
+              ? firstAnswer.join(', ')
+              : String(firstAnswer ?? '')
+            : null,
+      };
+    });
+    return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
   // Runs the same normalize/validate pipeline a fresh submit does (so 4a's
@@ -311,6 +435,24 @@ export class FormSubmissionService {
         'This form no longer accepts changes to your response',
       );
     }
+    // Belt-and-suspenders on top of FormService forcing
+    // editableAfterSubmit: false at save time for every QUIZ — a quiz
+    // answer is never editable after submission, full stop, so this
+    // enforces the invariant here too rather than trusting it was set
+    // correctly upstream. Letting an answer be revised after the score
+    // was already computed (and very possibly shown) would turn "test"
+    // into "look up the answer key and fix it"; oneResponsePerMember +
+    // the retake flow is the correct, timer-respecting way to try again.
+    if (form.purpose === FormPurpose.QUIZ) {
+      throw new BadRequestException(
+        'Quiz answers cannot be edited after submitting.',
+      );
+    }
+    // Editing an already-submitted vote/quiz after the window closes must
+    // be blocked too, not just a brand-new submission — otherwise
+    // editableAfterSubmit alone would let someone quietly change their
+    // vote after the poll closed.
+    this.assertWithinWindow(form);
 
     const normalized = this.normalizeAnswers(form.fields, answers);
     this.validateAnswers(form.fields, normalized);
@@ -323,6 +465,9 @@ export class FormSubmissionService {
     if (dedupValueNormalized !== submission.dedupValueNormalized) {
       submission.dedupValueNormalized = dedupValueNormalized;
     }
+    const scoring = this.scoreQuizSubmission(form, cleaned);
+    submission.score = scoring?.score ?? null;
+    submission.maxScore = scoring?.maxScore ?? null;
 
     try {
       const saved = await this.submissionRepo.save(submission);
@@ -336,7 +481,7 @@ export class FormSubmissionService {
       // narrow gap (an edited-away FILE answer leaks its old asset) rather
       // than a speculative fix for a rare case.
       await this.cleanupClaimedAttachments(form.fields, cleaned);
-      return this.buildSubmitResponse(form, cleaned, saved.id);
+      return this.buildSubmitResponse(form, cleaned, saved);
     } catch (err: unknown) {
       if ((err as { code?: string })?.code === '23505') {
         throw new BadRequestException({
@@ -534,6 +679,7 @@ export class FormSubmissionService {
     form: Form,
     answers: Record<string, unknown>,
     member: Member | null,
+    scoring: { score: number; maxScore: number } | null,
   ): Promise<FormSubmission> {
     const dedupValueNormalized = form.dedupField
       ? this.computeDedupValue(form.dedupField, answers)
@@ -545,6 +691,8 @@ export class FormSubmissionService {
           member,
           answers,
           dedupValueNormalized,
+          score: scoring?.score ?? null,
+          maxScore: scoring?.maxScore ?? null,
         }),
       );
       await this.cleanupClaimedAttachments(form.fields, answers);
@@ -601,7 +749,7 @@ export class FormSubmissionService {
   private buildSubmitResponse(
     form: Form,
     answers: Record<string, unknown>,
-    submissionId: string,
+    submission: FormSubmission,
   ): FormSubmitResponseDto {
     let selectedOption: FormSubmitResponseDto['nextSteps']['selectedOption'] =
       null;
@@ -621,9 +769,107 @@ export class FormSubmissionService {
       answers,
     );
     return {
-      submissionId,
+      submissionId: submission.id,
       nextSteps: { message, generalAction, selectedOption },
+      ...this.resolveScoreVisibility(form, submission),
     };
+  }
+
+  // Both null for a non-QUIZ form (nothing to score). For a QUIZ, the score
+  // is always computed and stored — this method decides only what's
+  // returned to the submitter: immediately when
+  // Form.revealScoreImmediately is true (the default), or withheld behind
+  // `scorePendingUntil: closesAt` until the window actually closes,
+  // guarding against an early finisher's result leaking to classmates who
+  // haven't taken it yet during a shared open window.
+  private resolveScoreVisibility(
+    form: Form,
+    submission: Pick<FormSubmission, 'score' | 'maxScore'>,
+  ): {
+    score?: number | null;
+    maxScore?: number | null;
+    scorePendingUntil?: Date | null;
+  } {
+    if (form.purpose !== FormPurpose.QUIZ || submission.score == null) {
+      return {};
+    }
+    if (
+      form.revealScoreImmediately ||
+      !form.closesAt ||
+      new Date() > form.closesAt
+    ) {
+      return { score: submission.score, maxScore: submission.maxScore };
+    }
+    return { scorePendingUntil: form.closesAt };
+  }
+
+  // Null for a non-QUIZ form, or a QUIZ with no scorable (correctOptions-
+  // carrying) fields at all. Only DROPDOWN/CHECKBOX fields with
+  // correctOptions set are scored — every other field on a quiz form (e.g.
+  // a free-text "any comments?" field) simply doesn't count toward the
+  // total. CHECKBOX is correct only when the submitted set exactly equals
+  // correctOptions (partial credit isn't offered); DROPDOWN is correct when
+  // its single submitted value is included in correctOptions (always
+  // length 1 in practice, but compared the same way for simplicity).
+  private scoreQuizSubmission(
+    form: Form,
+    answers: Record<string, unknown>,
+  ): { score: number; maxScore: number } | null {
+    if (form.purpose !== FormPurpose.QUIZ) return null;
+    const scorable = form.fields.filter((f) => f.correctOptions?.length);
+    if (!scorable.length) return null;
+
+    let score = 0;
+    let maxScore = 0;
+    for (const field of scorable) {
+      // Weighted per-question marks — a field with no explicit `points`
+      // (every field before this existed) is worth 1, unchanged.
+      const points = field.points ?? 1;
+      maxScore += points;
+      const correct = new Set(field.correctOptions);
+      const value = answers[field.id];
+      const submitted = Array.isArray(value) ? value : [value];
+      const isCorrect =
+        field.fieldType === FormFieldType.CHECKBOX
+          ? submitted.length === correct.size &&
+            submitted.every((v) => typeof v === 'string' && correct.has(v))
+          : typeof value === 'string' && correct.has(value);
+      if (isCorrect) score += points;
+    }
+    return { score, maxScore };
+  }
+
+  // Independent of the existing `isActive` kill-switch — both gates must
+  // pass. Null opensAt/closesAt (the default) means always open, today's
+  // behaviour for every existing form.
+  private assertWithinWindow(form: Form): void {
+    const now = new Date();
+    if (form.opensAt && now < form.opensAt) {
+      throw new BadRequestException("This hasn't opened yet.");
+    }
+    if (form.closesAt && now > form.closesAt) {
+      throw new BadRequestException('This has closed.');
+    }
+  }
+
+  // Identity-based — distinct from Form.dedupField, which dedupes on a
+  // submitted *value*. Only ever called when Form.oneResponsePerMember is
+  // true (VOTE forms, currently the only purpose the admin UI exposes this
+  // toggle for). Same DUPLICATE_SUBMISSION error code the dedupField path
+  // throws, so the frontend's existing handling needs no changes.
+  private async assertOneResponsePerMember(
+    form: Form,
+    memberId: string,
+  ): Promise<void> {
+    const existing = await this.submissionRepo.findOne({
+      where: { form: { id: form.id }, member: { id: memberId } },
+    });
+    if (existing) {
+      throw new BadRequestException({
+        message: "You've already voted.",
+        code: 'DUPLICATE_SUBMISSION',
+      });
+    }
   }
 
   private toPublicDto(form: Form): PublicFormDto {

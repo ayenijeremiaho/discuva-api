@@ -205,6 +205,14 @@ export const envValidationSchema = Joi.object({
   // tells a genuine hub delivery apart from a forged POST to the public URL.
   YOUTUBE_WEBSUB_SECRET: Joi.string().allow('').optional(),
 
+  // Platform-wide (not per-tenant BYOK, unlike Communication Providers
+  // above) — a read-only Drive API v3 key, used only to list files in a
+  // PUBLIC folder an admin points a Pages Gallery section at
+  // (GalleryFolderSyncService). No OAuth, no connected account: unset
+  // means folder-sync silently no-ops and a section just shows its
+  // manually-saved images, same as before this existed.
+  GOOGLE_DRIVE_API_KEY: Joi.string().allow('').optional(),
+
   // Base URL (no trailing slash, e.g. https://api.discuva.org) this API is
   // reachable at from the public internet — used to build the status-check
   // link Meta's Data Deletion Callback requires in its response

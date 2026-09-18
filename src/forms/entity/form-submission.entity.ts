@@ -47,4 +47,14 @@ export class FormSubmission extends BaseEntity {
   // can't both slip through an application-level check alone.
   @Column({ name: 'dedup_value_normalized', nullable: true })
   dedupValueNormalized: string | null;
+
+  // QUIZ forms only — both null for every other submission. Computed once
+  // at submit time (FormSubmissionService.scoreQuizSubmission) and never
+  // recalculated later, so a subsequent edit to the form's correctOptions
+  // doesn't retroactively rewrite a score already given out.
+  @Column({ type: 'smallint', nullable: true })
+  score: number | null;
+
+  @Column({ name: 'max_score', type: 'smallint', nullable: true })
+  maxScore: number | null;
 }

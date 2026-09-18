@@ -9,9 +9,11 @@ import {
   FormFieldAutoFill,
   FormFieldType,
   FormFieldVisibilityOperator,
+  FormPurpose,
   FormVisibility,
 } from '../enum/form.enum';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { DateService } from '../../utility/service/date.service';
 import { FormFieldDto } from '../dto/form.dto';
 
 const mockFormRepo = {
@@ -19,6 +21,7 @@ const mockFormRepo = {
   save: jest.fn((v) => Promise.resolve({ id: 'form-1', ...v })),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
   find: jest.fn(),
+  findAndCount: jest.fn(),
   findOne: jest.fn(),
   findOneBy: jest.fn(),
   remove: jest.fn(),
@@ -31,10 +34,39 @@ const mockFieldRepo = {
 const mockSubmissionRepo = {
   findAndCount: jest.fn(),
   find: jest.fn(),
+  createQueryBuilder: jest.fn(),
 };
+
+// Mirrors GameService.spec's own helper — a chainable query-builder stub,
+// empty-by-default so a test that doesn't care about the result still gets
+// a safe, valid response; one that does care overrides with its own
+// mockResolvedValue on getManyAndCount.
+function makeSubmissionQueryBuilderMock() {
+  const builder: {
+    leftJoinAndSelect: jest.Mock;
+    where: jest.Mock;
+    orderBy: jest.Mock;
+    addOrderBy: jest.Mock;
+    skip: jest.Mock;
+    take: jest.Mock;
+    getManyAndCount: jest.Mock;
+  } = {
+    leftJoinAndSelect: jest.fn(() => builder),
+    where: jest.fn(() => builder),
+    orderBy: jest.fn(() => builder),
+    addOrderBy: jest.fn(() => builder),
+    skip: jest.fn(() => builder),
+    take: jest.fn(() => builder),
+    getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+  };
+  return builder;
+}
 const mockCloudinaryService = {
   uploadBuffer: jest.fn(),
   deleteByPublicId: jest.fn(),
+};
+const mockDateService = {
+  toChurchInstant: jest.fn((value: string) => new Date(value)),
 };
 
 describe('FormService', () => {
@@ -52,6 +84,7 @@ describe('FormService', () => {
           useValue: mockSubmissionRepo,
         },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
+        { provide: DateService, useValue: mockDateService },
       ],
     }).compile();
     service = module.get(FormService);
@@ -235,6 +268,216 @@ describe('FormService', () => {
         expect.objectContaining({ createsFirstTimers: true }),
       );
       expect(result.title).toBe('New Here?');
+    });
+  });
+
+  describe('VOTE/QUIZ purpose config validation', () => {
+    it('rejects a VOTE form that is not MEMBERS visibility', async () => {
+      await expect(
+        service.create({
+          title: 'Board Election',
+          visibility: FormVisibility.PUBLIC,
+          purpose: FormPurpose.VOTE,
+          fields: [
+            {
+              label: 'Choice',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['A', 'B'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a VOTE field with a duplicate option value', async () => {
+      await expect(
+        service.create({
+          title: 'Board Election',
+          visibility: FormVisibility.MEMBERS,
+          purpose: FormPurpose.VOTE,
+          fields: [
+            {
+              label: 'Choice',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Candidate A', 'candidate a'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a VOTE field that is not Dropdown/Checkbox', async () => {
+      await expect(
+        service.create({
+          title: 'Board Election',
+          visibility: FormVisibility.MEMBERS,
+          purpose: FormPurpose.VOTE,
+          fields: [
+            { label: 'Your Name', fieldType: FormFieldType.TEXT },
+            {
+              label: 'Choice',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Candidate A', 'Candidate B'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a valid MEMBERS-visibility VOTE with unique options', async () => {
+      const result = await service.create({
+        title: 'Board Election',
+        visibility: FormVisibility.MEMBERS,
+        purpose: FormPurpose.VOTE,
+        oneResponsePerMember: true,
+        fields: [
+          {
+            label: 'Choice',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Candidate A', 'Candidate B'],
+          },
+        ],
+      });
+      expect(result.title).toBe('Board Election');
+    });
+
+    it('rejects a QUIZ correctOptions value that is not one of the field options', async () => {
+      await expect(
+        service.create({
+          title: 'Chapter 1 Quiz',
+          visibility: FormVisibility.MEMBERS,
+          purpose: FormPurpose.QUIZ,
+          fields: [
+            {
+              label: 'Capital of France?',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['Paris', 'London'],
+              correctOptions: ['Berlin'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects correctOptions on a non-choice field type', async () => {
+      await expect(
+        service.create({
+          title: 'Chapter 1 Quiz',
+          visibility: FormVisibility.MEMBERS,
+          purpose: FormPurpose.QUIZ,
+          fields: [
+            {
+              label: 'Your thoughts?',
+              fieldType: FormFieldType.TEXT,
+              correctOptions: ['Anything'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a timed QUIZ that is not MEMBERS visibility', async () => {
+      await expect(
+        service.create({
+          title: 'Public Trivia',
+          visibility: FormVisibility.PUBLIC,
+          purpose: FormPurpose.QUIZ,
+          timeLimitMinutes: 10,
+          fields: [
+            {
+              label: 'Q1',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['A', 'B'],
+              correctOptions: ['A'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a valid MEMBERS-visibility timed QUIZ', async () => {
+      const result = await service.create({
+        title: 'Timed Quiz',
+        visibility: FormVisibility.MEMBERS,
+        purpose: FormPurpose.QUIZ,
+        timeLimitMinutes: 10,
+        fields: [
+          {
+            label: 'Q1',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['A', 'B'],
+            correctOptions: ['A'],
+          },
+        ],
+      });
+      expect(result.title).toBe('Timed Quiz');
+    });
+
+    it('rejects a QUIZ field that is not Dropdown/Checkbox/Text/Long Text', async () => {
+      await expect(
+        service.create({
+          title: 'Chapter 1 Quiz',
+          visibility: FormVisibility.MEMBERS,
+          purpose: FormPurpose.QUIZ,
+          fields: [
+            {
+              label: 'Your Email',
+              fieldType: FormFieldType.EMAIL,
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a QUIZ mixing a graded Dropdown question with an ungraded short-answer Text field', async () => {
+      const result = await service.create({
+        title: 'Chapter 1 Quiz',
+        visibility: FormVisibility.MEMBERS,
+        purpose: FormPurpose.QUIZ,
+        fields: [
+          {
+            label: 'Capital of France?',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Paris', 'London'],
+            correctOptions: ['Paris'],
+          },
+          {
+            label: 'Explain your reasoning',
+            fieldType: FormFieldType.TEXTAREA,
+          },
+        ],
+      });
+      expect(result.title).toBe('Chapter 1 Quiz');
+    });
+
+    it('rejects closesAt on or before opensAt', async () => {
+      await expect(
+        service.create({
+          title: 'Timed Vote',
+          visibility: FormVisibility.MEMBERS,
+          purpose: FormPurpose.VOTE,
+          opensAt: '2026-03-05T17:00:00',
+          closesAt: '2026-03-05T16:00:00',
+          fields: [
+            {
+              label: 'Choice',
+              fieldType: FormFieldType.DROPDOWN,
+              options: ['A', 'B'],
+            },
+          ],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('defaults purpose to STANDARD and persists it on the entity', async () => {
+      await service.create({
+        title: 'Plain Form',
+        visibility: FormVisibility.MEMBERS,
+        fields: [{ label: 'Name', fieldType: FormFieldType.TEXT }],
+      });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: FormPurpose.STANDARD }),
+      );
     });
   });
 
@@ -447,6 +690,37 @@ describe('FormService', () => {
   });
 
   describe('getAnalytics', () => {
+    it('sorts choices by count descending, leading option first, ties keeping declared order', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        title: 'Elder Election',
+        purpose: FormPurpose.VOTE,
+        fields: [
+          {
+            id: 'f1',
+            label: 'Candidate',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Candidate A', 'Candidate B', 'Candidate C'],
+            order: 0,
+          },
+        ],
+      });
+      mockSubmissionRepo.find.mockResolvedValue([
+        { answers: { f1: 'Candidate C' } },
+        { answers: { f1: 'Candidate B' } },
+        { answers: { f1: 'Candidate C' } },
+        { answers: { f1: 'Candidate A' } },
+      ]);
+
+      const result = await service.getAnalytics('form-1');
+
+      expect(result.fields[0].choices).toEqual([
+        { option: 'Candidate C', count: 2, percentage: 50 },
+        { option: 'Candidate A', count: 1, percentage: 25 },
+        { option: 'Candidate B', count: 1, percentage: 25 },
+      ]);
+    });
+
     it('breaks down DROPDOWN/CHECKBOX fields into per-option counts and percentages', async () => {
       mockFormRepo.findOne.mockResolvedValue({
         id: 'form-1',
@@ -1677,6 +1951,61 @@ describe('FormService', () => {
         expect.objectContaining({ editableAfterSubmit: false }),
       );
     });
+
+    it('forces editableAfterSubmit to false on create for a QUIZ, even when true is requested', async () => {
+      await service.create({
+        title: 'Chapter 3 Test',
+        visibility: FormVisibility.PUBLIC,
+        purpose: FormPurpose.QUIZ,
+        editableAfterSubmit: true,
+        fields: [
+          {
+            label: 'Capital of France',
+            fieldType: FormFieldType.DROPDOWN,
+            options: ['Paris', 'Lyon'],
+            correctOptions: ['Paris'],
+          },
+        ],
+      });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ editableAfterSubmit: false }),
+      );
+    });
+
+    it('forces editableAfterSubmit to false on update for a QUIZ, even when true is requested', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        title: 'Chapter 3 Test',
+        purpose: FormPurpose.QUIZ,
+        editableAfterSubmit: false,
+        fields: [],
+      });
+      await service.update('form-1', { editableAfterSubmit: true });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ editableAfterSubmit: false }),
+      );
+    });
+
+    it('forces editableAfterSubmit to false on clone for a QUIZ, even when the source or dto allows edits', async () => {
+      mockFormRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        title: 'Chapter 3 Test',
+        visibility: FormVisibility.PUBLIC,
+        purpose: FormPurpose.QUIZ,
+        editableAfterSubmit: true,
+        fields: [{ id: 'f1', label: 'Q1', fieldType: FormFieldType.DROPDOWN }],
+      });
+      mockFieldRepo.save.mockResolvedValueOnce([
+        { id: 'cloned-0', label: 'Q1', fieldType: FormFieldType.DROPDOWN },
+      ]);
+      await service.cloneForm('form-1', {
+        title: 'Copy',
+        editableAfterSubmit: true,
+      });
+      expect(mockFormRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ editableAfterSubmit: false }),
+      );
+    });
   });
 
   describe('multi-page (pageIndex)', () => {
@@ -2157,6 +2486,167 @@ describe('FormService', () => {
           visibility: FormVisibility.MEMBERS,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('getSubmissions', () => {
+    it('sorts by createdAt DESC by default (unpaginated fields untouched)', async () => {
+      mockFormRepo.findOne.mockResolvedValue({ id: 'form-1', fields: [] });
+      mockSubmissionRepo.findAndCount.mockResolvedValue([[], 0]);
+      await service.getSubmissions('form-1');
+      expect(mockSubmissionRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ order: { createdAt: 'DESC' } }),
+      );
+      expect(mockSubmissionRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('sorts by score DESC with NULLS LAST when sortBy is score, for a QUIZ leaderboard', async () => {
+      mockFormRepo.findOne.mockResolvedValue({ id: 'form-1', fields: [] });
+      const qb = makeSubmissionQueryBuilderMock();
+      qb.getManyAndCount.mockResolvedValue([
+        [
+          { id: 'sub-1', score: 8 },
+          { id: 'sub-2', score: 3 },
+        ],
+        2,
+      ]);
+      mockSubmissionRepo.createQueryBuilder.mockReturnValue(qb);
+      const result = await service.getSubmissions('form-1', 1, 20, 'score');
+      expect(qb.orderBy).toHaveBeenCalledWith(
+        'submission.score',
+        'DESC',
+        'NULLS LAST',
+      );
+      expect(qb.addOrderBy).toHaveBeenCalledWith(
+        'submission.createdAt',
+        'DESC',
+      );
+      expect(result.data).toEqual([
+        { id: 'sub-1', score: 8 },
+        { id: 'sub-2', score: 3 },
+      ]);
+      expect(mockSubmissionRepo.findAndCount).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listForms', () => {
+    it('paginates with defaults when no filters are given', async () => {
+      mockFormRepo.findAndCount.mockResolvedValue([[{ id: 'form-1' }], 1]);
+      const result = await service.listForms();
+      expect(mockFormRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {},
+          skip: 0,
+          take: 20,
+        }),
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          data: [{ id: 'form-1' }],
+          page: 1,
+          limit: 20,
+          totalCount: 1,
+          totalPages: 1,
+        }),
+      );
+    });
+
+    it('filters by purpose, visibility, and status exactly', async () => {
+      mockFormRepo.findAndCount.mockResolvedValue([[], 0]);
+      await service.listForms(
+        1,
+        20,
+        undefined,
+        FormPurpose.QUIZ,
+        FormVisibility.MEMBERS,
+        'ACTIVE',
+      );
+      expect(mockFormRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            purpose: FormPurpose.QUIZ,
+            visibility: FormVisibility.MEMBERS,
+            isActive: true,
+          },
+        }),
+      );
+    });
+
+    it('maps an INACTIVE status filter to isActive: false', async () => {
+      mockFormRepo.findAndCount.mockResolvedValue([[], 0]);
+      await service.listForms(
+        1,
+        20,
+        undefined,
+        undefined,
+        undefined,
+        'INACTIVE',
+      );
+      expect(mockFormRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { isActive: false } }),
+      );
+    });
+
+    it('searches title OR description as an ILIKe pair, preserving other filters on each branch', async () => {
+      mockFormRepo.findAndCount.mockResolvedValue([[], 0]);
+      await service.listForms(1, 20, '  choir  ', FormPurpose.VOTE);
+      const call = mockFormRepo.findAndCount.mock.calls[0][0];
+      expect(call.where).toHaveLength(2);
+      expect(call.where[0]).toEqual(
+        expect.objectContaining({ purpose: FormPurpose.VOTE }),
+      );
+      expect(call.where[1]).toEqual(
+        expect.objectContaining({ purpose: FormPurpose.VOTE }),
+      );
+    });
+
+    it('applies page/limit to skip/take', async () => {
+      mockFormRepo.findAndCount.mockResolvedValue([[], 0]);
+      await service.listForms(3, 10);
+      expect(mockFormRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 }),
+      );
+    });
+  });
+
+  describe('getFormOptions', () => {
+    it('returns a lightweight id/title/fields projection, ordered by title', async () => {
+      mockFormRepo.find.mockResolvedValue([
+        {
+          id: 'form-2',
+          title: 'Zebra',
+          fields: [
+            { id: 'f2', pageIndex: 1 },
+            { id: 'f1', pageIndex: 0 },
+          ],
+        },
+        { id: 'form-1', title: 'Alpha', fields: [] },
+      ]);
+      const result = await service.getFormOptions();
+      expect(mockFormRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          order: { title: 'ASC', fields: { order: 'ASC' } },
+        }),
+      );
+      expect(result).toEqual([
+        {
+          id: 'form-2',
+          title: 'Zebra',
+          fields: [
+            { id: 'f2', pageIndex: 1 },
+            { id: 'f1', pageIndex: 0 },
+          ],
+        },
+        { id: 'form-1', title: 'Alpha', fields: [] },
+      ]);
+    });
+
+    it('defaults a missing pageIndex to 0', async () => {
+      mockFormRepo.find.mockResolvedValue([
+        { id: 'form-1', title: 'Old Form', fields: [{ id: 'f1' }] },
+      ]);
+      const result = await service.getFormOptions();
+      expect(result[0].fields[0]).toEqual({ id: 'f1', pageIndex: 0 });
     });
   });
 });

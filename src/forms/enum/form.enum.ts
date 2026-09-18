@@ -1,3 +1,14 @@
+// STANDARD is every form that exists today — behavior is completely
+// unchanged for it. QUIZ adds auto-graded scoring (FormField.correctOptions
+// + FormSubmission.score/maxScore) and an optional per-attempt countdown.
+// VOTE adds identity-based one-response enforcement and a duplicate-option
+// guard — see Form.oneResponsePerMember and FormService's VOTE validation.
+export enum FormPurpose {
+  STANDARD = 'STANDARD',
+  QUIZ = 'QUIZ',
+  VOTE = 'VOTE',
+}
+
 export enum FormVisibility {
   MEMBERS = 'MEMBERS',
   PUBLIC = 'PUBLIC',

@@ -15,5 +15,9 @@ import { AdminModule } from '../admin/admin.module';
   ],
   providers: [ChurchCalendarService],
   controllers: [ChurchCalendarAdminController, ChurchCalendarMemberController],
+  // Exported so PagesModule can inject ChurchCalendarService directly for
+  // the CHURCH_CALENDAR section type (reuses the real lookup rather than
+  // duplicating a repo query) — see PageService.withChurchCalendarEntries.
+  exports: [ChurchCalendarService],
 })
 export class ChurchCalendarModule {}
