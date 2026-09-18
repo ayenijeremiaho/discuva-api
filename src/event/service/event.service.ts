@@ -542,7 +542,13 @@ export class EventService {
       .from('attendances', 'a')
       .where('a.member_id = :memberId', { memberId })
       .andWhere('a.event_id IN (:...eventIds)', { eventIds })
-      .andWhere(`a.status IN ('PRESENT', 'LATE')`)
+      // Matches AttendanceService's own GENUINELY_ATTENDED_STATUSES
+      // (PRESENT/LATE/ATTENDED_ONLINE, the same set getAttendanceStreak
+      // already uses) — must stay in sync with what AttendanceService.
+      // checkin() treats as "already checked in", or this flag (which
+      // drives the member app's check-in button/icon) can disagree with
+      // the backend that actually enforces it.
+      .andWhere(`a.status IN ('PRESENT', 'LATE', 'ATTENDED_ONLINE')`)
       .getRawMany<{
         eventId: string;
         slotId: string | null;

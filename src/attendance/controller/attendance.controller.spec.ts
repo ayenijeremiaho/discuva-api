@@ -7,6 +7,7 @@ import { RolesGuard } from '../../auth/guard/roles.guard';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { PlanGuard } from '../../billing/guard/plan.guard';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
+import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 
 const mockAttendanceService = {
   getAllHistory: jest.fn(),
@@ -103,6 +104,7 @@ describe('AttendanceController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -127,6 +129,7 @@ describe('AttendanceController', () => {
         undefined,
         undefined,
         'john',
+        undefined,
       );
     });
 
@@ -145,6 +148,7 @@ describe('AttendanceController', () => {
         dateFrom: '2026-01-01',
         dateTo: '2026-06-30',
         search: 'doe',
+        role: MemberRoleEnum.WORKER,
       } as any);
 
       expect(mockAttendanceService.getAllHistory).toHaveBeenCalledWith(
@@ -156,6 +160,7 @@ describe('AttendanceController', () => {
         '2026-01-01',
         '2026-06-30',
         'doe',
+        MemberRoleEnum.WORKER,
       );
     });
 

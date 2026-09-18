@@ -114,6 +114,7 @@ export class AttendanceController {
       dateFrom,
       dateTo,
       search,
+      role,
     } = query;
     return this.attendanceService.getAllHistory(
       page,
@@ -124,6 +125,7 @@ export class AttendanceController {
       dateFrom,
       dateTo,
       search,
+      role,
     );
   }
 

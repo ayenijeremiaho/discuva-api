@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
+import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 
 export class AttendanceHistoryQueryDto {
   @IsOptional()
@@ -48,4 +49,12 @@ export class AdminAttendanceHistoryQueryDto extends AttendanceHistoryQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  // Filters on the role snapshotted at check-in time (Attendance.
+  // roleAtCheckin), not the member's current role — a worker who was
+  // later demoted still shows under "Worker" for a check-in they made
+  // while a worker, matching how the record was actually captured.
+  @IsOptional()
+  @IsEnum(MemberRoleEnum)
+  role?: MemberRoleEnum;
 }

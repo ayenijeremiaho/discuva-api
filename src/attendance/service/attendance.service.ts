@@ -50,6 +50,17 @@ import { Admin } from '../../admin/entity/admin.entity';
 
 const MAX_EXPORT_ROWS = 5000;
 
+// Matches getAttendanceStreak's own "genuinely attended" convention
+// (PRESENT/LATE/ATTENDED_ONLINE, e.g. the raw SQL at line ~917/~1442 below)
+// — ABSENT/ON_LEAVE rows (auto-marked before a member shows up, or an
+// admin correction) don't count as "already checked in" the way checkin()
+// below needs to reason about a pre-existing Attendance row.
+const GENUINELY_ATTENDED_STATUSES = new Set([
+  AttendanceStatusEnum.PRESENT,
+  AttendanceStatusEnum.LATE,
+  AttendanceStatusEnum.ATTENDED_ONLINE,
+]);
+
 export interface DepartmentAttendanceSummary {
   departmentId: string;
   departmentName: string;
@@ -154,8 +165,18 @@ export class AttendanceService {
       }
     }
 
+    // Only a genuinely-attended row blocks a fresh check-in — an ABSENT/
+    // ON_LEAVE row (auto-marked before the member showed up, or left behind
+    // by an admin's "Correct Attendance") isn't a real check-in, so
+    // rejecting here would falsely tell a member who hasn't actually
+    // attended that they already have. EventService.attachMyAttendance
+    // uses this exact same PRESENT/LATE/ATTENDED_ONLINE definition for the
+    // member app's own "am I checked in" flag — this must stay in sync
+    // with that, or the check-in button looks clickable while this throws
+    // "already checked in" (using the stale row's real checkinTime), which
+    // is exactly backwards from what the member sees.
     const existing = await this.alreadyCheckedIn(user.id, slot.event.id);
-    if (existing) {
+    if (existing && GENUINELY_ATTENDED_STATUSES.has(existing.status)) {
       const time = existing.checkinTime
         ? ` at ${this.dateService.format(existing.checkinTime, DateService.PATTERNS.EMAIL_TIME)}`
         : '';
@@ -175,17 +196,31 @@ export class AttendanceService {
     const status = this.resolveStatus(now, slot, cfg, isWorker);
 
     try {
-      await this.attendanceRepository.save(
-        this.attendanceRepository.create({
-          member,
-          event: slot.event,
-          serviceSlot: slot,
-          checkinTime: now,
-          status,
-          roleAtCheckin: member.role,
-          location: dto.location ?? null,
-        }),
-      );
+      if (existing) {
+        // A non-attended row already exists for this event (see the
+        // comment above) — update it in place. The unique (member, event)
+        // constraint wouldn't allow a second row here anyway, so this is
+        // also just the correct way to record a real check-in over a
+        // pre-existing ABSENT/ON_LEAVE placeholder.
+        existing.serviceSlot = slot;
+        existing.checkinTime = now;
+        existing.status = status;
+        existing.roleAtCheckin = member.role;
+        existing.location = dto.location ?? null;
+        await this.attendanceRepository.save(existing);
+      } else {
+        await this.attendanceRepository.save(
+          this.attendanceRepository.create({
+            member,
+            event: slot.event,
+            serviceSlot: slot,
+            checkinTime: now,
+            status,
+            roleAtCheckin: member.role,
+            location: dto.location ?? null,
+          }),
+        );
+      }
     } catch (err) {
       if (
         err instanceof QueryFailedError &&
@@ -356,6 +391,7 @@ export class AttendanceService {
     dateFrom?: string,
     dateTo?: string,
     search?: string,
+    role?: MemberRoleEnum,
   ) {
     const qb = this.attendanceRepository
       .createQueryBuilder('attendance')
@@ -364,6 +400,13 @@ export class AttendanceService {
       .leftJoinAndSelect('member.workerProfile', 'profile')
       .leftJoinAndSelect('profile.department', 'department')
       .leftJoinAndSelect('attendance.serviceSlot', 'slot')
+      // discuva-admin's AttendanceServiceSlot type expects `event` nested
+      // under `serviceSlot` (non-nullable — record.serviceSlot.event.name
+      // is read unguarded), but joining attendance.serviceSlot alone never
+      // populated the slot's OWN event relation — record.serviceSlot.event
+      // came back undefined for every record with a slot, crashing the
+      // whole Attendance page on load.
+      .leftJoinAndSelect('slot.event', 'slotEvent')
       .orderBy('attendance.createdAt', 'DESC');
 
     if (memberId) qb.andWhere('member.id = :memberId', { memberId });
@@ -382,6 +425,10 @@ export class AttendanceService {
         '(member.firstname ILIKE :search OR member.lastname ILIKE :search OR member.email ILIKE :search)',
         { search: `%${search}%` },
       );
+    // The role snapshotted at check-in time (see the DTO's own comment) —
+    // not the member's current role, which can drift after promotion/
+    // demotion.
+    if (role) qb.andWhere('attendance.roleAtCheckin = :role', { role });
 
     return qb;
   }
@@ -395,6 +442,7 @@ export class AttendanceService {
     dateFrom?: string,
     dateTo?: string,
     search?: string,
+    role?: MemberRoleEnum,
   ): Promise<PaginationResponseDto<Attendance>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
@@ -405,6 +453,7 @@ export class AttendanceService {
       dateFrom,
       dateTo,
       search,
+      role,
     )
       .skip((page - 1) * limit)
       .take(limit)
@@ -430,6 +479,7 @@ export class AttendanceService {
       dto.dateFrom,
       dto.dateTo,
       dto.search,
+      dto.role,
     )
       .take(MAX_EXPORT_ROWS)
       .getMany();

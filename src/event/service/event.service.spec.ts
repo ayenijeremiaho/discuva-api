@@ -946,6 +946,37 @@ describe('EventService', () => {
         { upcomingFrom: expect.any(Date) },
       );
     });
+
+    // Regression test: attachMyAttendance's "am I checked in" query used to
+    // only recognize PRESENT/LATE, disagreeing with AttendanceService.
+    // checkin()'s own GENUINELY_ATTENDED_STATUSES (which also includes
+    // ATTENDED_ONLINE) — a member who confirmed online attendance would
+    // still see the check-in button/icon as available.
+    it('attaches attendance status using PRESENT/LATE/ATTENDED_ONLINE, matching AttendanceService', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([
+        [{ id: 'event-1', serviceSlots: [] }],
+        1,
+      ]);
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+      const attendanceQb = {
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        from: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      };
+      mockDataSource.createQueryBuilder.mockReturnValue(attendanceQb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', {
+        memberId: 'member-1',
+      });
+
+      expect(attendanceQb.andWhere).toHaveBeenCalledWith(
+        `a.status IN ('PRESENT', 'LATE', 'ATTENDED_ONLINE')`,
+      );
+    });
   });
 
   describe('deleteFutureRecurring', () => {

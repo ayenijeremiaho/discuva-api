@@ -346,6 +346,63 @@ describe('AttendanceService', () => {
       );
     });
 
+    it('does NOT reject a check-in when the existing row is ABSENT (not genuinely attended) — updates it in place instead', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      const absentRow = {
+        id: 'att-1',
+        status: AttendanceStatusEnum.ABSENT,
+        checkinTime: null,
+      };
+      mockAttendanceRepo.findOne.mockResolvedValue(absentRow);
+
+      await expect(service.checkin(user, dto as any)).resolves.toEqual({
+        message: 'Check-in successful',
+      });
+
+      // Same row updated in place — never a second insert (the unique
+      // (member, event) constraint wouldn't allow one anyway), and
+      // create() is never called for this path.
+      expect(mockAttendanceRepo.create).not.toHaveBeenCalled();
+      expect(mockAttendanceRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'att-1',
+          status: AttendanceStatusEnum.PRESENT,
+          checkinTime: expect.any(Date),
+        }),
+      );
+    });
+
+    it('does NOT reject a check-in when the existing row is ON_LEAVE', async () => {
+      const now = new Date();
+      const slot = makeSlot(addHours(now, 1));
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceRepo.findOne.mockResolvedValue({
+        id: 'att-1',
+        status: AttendanceStatusEnum.ON_LEAVE,
+        checkinTime: null,
+      });
+
+      await expect(service.checkin(user, dto as any)).resolves.toEqual({
+        message: 'Check-in successful',
+      });
+    });
+
     it('throws BadRequestException if a member omits location while the resolved config has enforceMemberLocation on', async () => {
       const now = new Date();
       const slot = makeSlot(addHours(now, 1));
@@ -1410,6 +1467,35 @@ describe('AttendanceService', () => {
       );
     });
 
+    // Regression test: discuva-admin's AttendanceServiceSlot type reads
+    // record.serviceSlot.event.name unguarded — joining attendance.
+    // serviceSlot alone never populated the slot's OWN event relation, so
+    // this crashed the whole Attendance page on load for every record that
+    // had a service slot.
+    it('joins slot.event so record.serviceSlot.event is populated, not just attendance.event', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+      jest.spyOn(UtilityService, 'createPaginationResponse').mockReturnValue({
+        data: [],
+        page: 1,
+        limit: 10,
+        totalCount: 0,
+        totalPages: 1,
+      });
+
+      await service.getAllHistory(1, 10);
+
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
+        'attendance.serviceSlot',
+        'slot',
+      );
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
+        'slot.event',
+        'slotEvent',
+      );
+    });
+
     it('should throw BadRequestException if page < 1', async () => {
       await expect(service.getAllHistory(0)).rejects.toThrow(
         BadRequestException,
@@ -1433,6 +1519,56 @@ describe('AttendanceService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith('member.id = :memberId', {
         memberId: 'member-1',
       });
+    });
+
+    it("should apply a role filter against roleAtCheckin (the snapshot at check-in time, not the member's current role)", async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+      jest.spyOn(UtilityService, 'createPaginationResponse').mockReturnValue({
+        data: [],
+        page: 1,
+        limit: 10,
+        totalCount: 0,
+        totalPages: 1,
+      });
+
+      await service.getAllHistory(
+        1,
+        10,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        MemberRoleEnum.WORKER,
+      );
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'attendance.roleAtCheckin = :role',
+        { role: MemberRoleEnum.WORKER },
+      );
+    });
+
+    it('does not apply a role filter when omitted', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+      jest.spyOn(UtilityService, 'createPaginationResponse').mockReturnValue({
+        data: [],
+        page: 1,
+        limit: 10,
+        totalCount: 0,
+        totalPages: 1,
+      });
+
+      await service.getAllHistory(1, 10);
+
+      expect(qb.andWhere).not.toHaveBeenCalledWith(
+        'attendance.roleAtCheckin = :role',
+        expect.anything(),
+      );
     });
 
     it('should apply ILIKE search filter across firstname, lastname, and email', async () => {

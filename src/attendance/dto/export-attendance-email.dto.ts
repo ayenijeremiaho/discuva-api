@@ -7,6 +7,7 @@ import {
   IsUUID,
 } from 'class-validator';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
+import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 
 export class ExportAttendanceEmailDto {
   @IsEmail()
@@ -36,4 +37,8 @@ export class ExportAttendanceEmailDto {
   @IsString()
   @IsOptional()
   search?: string;
+
+  @IsEnum(MemberRoleEnum)
+  @IsOptional()
+  role?: MemberRoleEnum;
 }
