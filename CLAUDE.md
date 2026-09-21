@@ -23,10 +23,11 @@ NestJS church management backend. Stack: PostgreSQL · TypeORM · Redis (ioredis
 ## Migration Rules (CRITICAL)
 - **Never edit an existing migration file.** Once a migration has been committed or run, it is immutable history.
 - All schema changes (new table, new column, new index, seed data) require a **new file** with a fresh timestamp.
-- File format: `src/migrations/{13-digit-unix-ms}-{PascalCaseName}.ts`
+- **Two separate migration sets — do not mix them.** `src/migrations/` (root) is the platform/default schema, applied via `npm run migration:run`. `src/migrations/tenant/` is per-tenant, applied via `npm run migration:run:all-tenants`. Almost every feature table (members, admins, departments, department_goals, finances, attendance, etc.) is tenant-scoped — check whether the entity's module uses `TenantTypeOrmModule.forFeature([...])` (tenant) vs plain `TypeOrmModule.forFeature([...])` (root), or grep `src/migrations/tenant/` for the table's `CREATE TABLE`, before creating the file. Putting a tenant-scoped migration in the root folder runs it against the wrong schema and fails with `relation "..." does not exist` at boot. Each folder also has its **own independent timestamp sequence** — never base a new tenant migration's timestamp on the root folder's last file, or vice versa.
+- File format: `src/migrations/{13-digit-unix-ms}-{PascalCaseName}.ts` or `src/migrations/tenant/{13-digit-unix-ms}-{PascalCaseName}.ts`.
 - Class name format: `{PascalCaseName}{13-digit-unix-ms}` — timestamp at the END, matching TypeORM CLI output.
 - **Never use 14-digit date strings** (e.g. `20260614120000`) as timestamps. TypeORM extracts the timestamp via `substr(-13)`; a 14-digit suffix produces a truncated, out-of-order value that breaks migration execution order.
-- Use `/new-migration` to scaffold a new migration correctly.
+- Use `/new-migration` to scaffold a new migration correctly — it now asks which schema first.
 
 ## Redis / Cache Conventions
 - `cacheService.get()` — always `await` (need the value)

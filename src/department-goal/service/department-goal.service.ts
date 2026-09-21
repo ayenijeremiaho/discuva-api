@@ -35,6 +35,10 @@ export interface GoalView {
   churchRatingReason: string | null;
   selfRating: number | null;
   selfRatingReason: string | null;
+  // True when this goal was bulk-uploaded by an admin on the HOD's behalf
+  // (see DepartmentGoalImportService) — lets the member UI flag it for
+  // review rather than the HOD discovering it silently.
+  createdByAdmin: boolean;
 }
 
 export interface MemberDepartmentGoals {
@@ -388,6 +392,7 @@ export class DepartmentGoalService {
             cycle: { id: cycle.id },
             department: { id: r.departmentId },
           },
+          relations: ['createdByAdmin'],
           order: { createdAt: 'ASC' },
         });
         return {
@@ -633,7 +638,10 @@ export class DepartmentGoalService {
   // this method is new for is a chain-gated cycle, where the HOD keeps
   // write access at ANY stage until their department's chain completes
   // (including after a level requests changes, past the OPENING window).
-  private async assertGoalWritable(
+  // Public — also used by DepartmentGoalImportService so an admin's bulk
+  // upload on behalf of a HOD is gated by the exact same writability rule
+  // as the HOD writing directly.
+  async assertGoalWritable(
     cycle: DepartmentGoalCycle,
     departmentId: string,
   ): Promise<void> {
@@ -695,6 +703,7 @@ export class DepartmentGoalService {
       churchRatingReason: revealed ? g.churchRatingReason : null,
       selfRating: revealed ? g.selfRating : null,
       selfRatingReason: revealed ? g.selfRatingReason : null,
+      createdByAdmin: g.createdByAdmin != null,
     };
   }
 }

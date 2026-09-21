@@ -2108,6 +2108,19 @@ Both fallbacks are skipped entirely — not even attempted — whenever the Host
 subdomain, so discuva-member's own hosting (as opposed to its outgoing API calls) is completely unaffected; this
 exists purely to make a fixed, non-wildcard destination host work for the two kinds of traffic that need one.
 
+**Fixed bug: the `refresh_token` cookie's `Path` silently broke fallback #1 for discuva-admin on every route except
+the refresh endpoint itself.** The cookie used to be scoped to `path: '/v1/auth/refresh'` (`AuthController`'s
+`REFRESH_COOKIE_PATH`) — meaning the browser only ever attached it to that one route, even though
+`TenantMiddleware`'s fallback reads that same cookie on *every* route. In practice: discuva-admin's access token
+lives only in an in-memory JS variable, so once it expired (a backgrounded tab, mobile tab suspension) a normal
+request's `Authorization` header failed verification, the refresh cookie wasn't sent (wrong path) so the fallback
+found nothing, and the middleware threw a **404** "Tenant not found" — before any guard ran, so the existing
+401-triggered refresh interceptor in discuva-admin's axios client never saw it and never re-authenticated. The
+session stayed stuck until a hard reload forced a direct call to `/v1/auth/refresh`, the one path where the cookie
+was actually valid. Fixed by widening `REFRESH_COOKIE_PATH` to `/v1` (covers the whole API, still excludes
+anything outside it) so the fallback works on every route; an expired access token now correctly falls through to
+an ordinary 401 from the auth guard, which the pre-existing reactive refresh flow already handles.
+
 **Distinct error responses per tenant state, not a single generic 404:** the tenant lookup is `findOneBy({
 subdomain })`, deliberately not filtered by `isActive`, so a row that exists but isn't (yet, or anymore) usable gets
 a response that actually explains why, using `onboardingStatus` (see "Async Tenant Provisioning + Onboarding State
@@ -5609,6 +5622,38 @@ it — see `DepartmentGoalApprovalService`:
   `DEPARTMENT_GOALS_WRITE` rather than reusing the `ADMIN_READ`-gated admin-user-list endpoint, so an admin who
   can manage goal cycles isn't also required to hold admin-management access just to pick an approver.
 
+**Bulk import (`DepartmentGoalImportService`/`DepartmentGoalImportController`, `src/department-goal/`).** Lets an
+admin upload goals on behalf of a department's HOD — e.g. the admin emails the HOD a downloaded template, the HOD
+fills it offline, and the admin uploads the completed file — rather than requiring the HOD to type each goal into
+discuva-member. Mirrors `MemberImportService`'s two-phase preview → commit shape (`LimitedFileInterceptor`,
+`ExcelService.buildWorkbook`, ExcelJS parsing) rather than introducing a new pattern:
+- Scoped per cycle **and** per department (`.../cycles/:cycleId/departments/:departmentId/bulk-import/...`) — one
+  upload always targets exactly one department's goals for one cycle, so the template has no Department column,
+  only the same three fields the member-app goal form itself captures: `KPI` (`title`, required), `KPI Description`
+  (`description`), `Timeline to Achieve Target` (`timelineToAchieve`).
+- **Reuses `DepartmentGoalService.assertGoalWritable`** (now public) at both preview time and commit time — the
+  exact same writability rule a HOD's own `createGoal` call is gated by (cycle must be `OPENING`, or, for a
+  chain-configured cycle, any stage before that department's approval reaches `COMPLETE`). This is what stops an
+  admin from bulk-writing goals into a cycle that's already closed for that department, and the commit-time
+  recheck catches a cycle that closed in the gap between preview and commit.
+- Each row is validated with the existing `CreateGoalDto` (`class-validator`) — a preview response includes every
+  row (valid or not) with its `errors: string[]`, so the admin sees exactly what's wrong before committing; commit
+  only creates goals for rows with zero errors and reports the rest back as `failedRows`.
+- Persisted as two new tables, `department_goal_import_jobs`/`department_goal_import_rows` (job holds
+  cycle/department/status/counts/`createdBy`; each row holds its raw parsed `data` as `jsonb` plus `errors`,
+  decoupled from `DepartmentGoal`'s own columns so schema drift doesn't break historical import rows — same
+  reasoning as `MemberImportRow`).
+- Every goal created this way gets `DepartmentGoal.createdByAdmin` set (a new nullable FK, `SET NULL` on delete) —
+  purely an audit marker. The goal behaves identically to one the HOD entered directly: same `PENDING`-by-default
+  approval flow, and the HOD can still edit or delete it from discuva-member for as long as
+  `assertGoalWritable` says the department's goals remain open (i.e. right up to the cycle's grace deadline, or
+  later still if an approval chain is configured and not yet `COMPLETE`).
+- A job can only be committed once (`BadRequestException` on a second commit attempt) — there's no
+  update-in-place; re-uploading a corrected file starts a new job.
+- `GoalView` (the shape returned by `GET /department-goals/member/current`) now includes `createdByAdmin: boolean`
+  so discuva-member can flag admin-uploaded goals for the HOD's attention rather than presenting them identically
+  to self-written ones.
+
 | Method | Route | Auth | Notes |
 |--------|-------|------|-------|
 | POST   | `/department-goals/cycles`                              | AdminGuard (DEPARTMENT_GOALS_WRITE) | Create a cycle |
@@ -5621,6 +5666,10 @@ it — see `DepartmentGoalApprovalService`:
 | GET    | `/department-goals/cycles/:id/goals/:goalId/history`    | AdminGuard (DEPARTMENT_GOALS_READ)  | Admin-facing correction history — same audit data as the HOD-only member route, no department-lead gate |
 | GET    | `/department-goals/cycles/:id/report`                   | AdminGuard (DEPARTMENT_GOALS_READ)  | Per-department avg self/church score + the gap |
 | GET    | `/department-goals/cycles/:id/approvals`                | AdminGuard (DEPARTMENT_GOALS_READ)  | Bulk per-department approval status for the cycle |
+| GET    | `/department-goals/cycles/:cycleId/departments/:departmentId/bulk-import/template` | AdminGuard (DEPARTMENT_GOALS_WRITE) | Downloads an `.xlsx` template (`KPI`, `KPI Description`, `Timeline to Achieve Target` columns) — see Bulk Import below |
+| POST   | `/department-goals/cycles/:cycleId/departments/:departmentId/bulk-import/preview` | AdminGuard (DEPARTMENT_GOALS_WRITE) | Multipart `file` upload — parses + validates each row, returns a job + per-row errors without writing any goals yet |
+| GET    | `/department-goals/cycles/:cycleId/departments/:departmentId/bulk-import/:jobId` | AdminGuard (DEPARTMENT_GOALS_WRITE) | Re-fetch a previewed job and its rows |
+| POST   | `/department-goals/cycles/:cycleId/departments/:departmentId/bulk-import/:jobId/commit` | AdminGuard (DEPARTMENT_GOALS_WRITE) | Creates a `DepartmentGoal` for every error-free row; returns `{createdCount, failedRows}` |
 | POST   | `/department-goals/cycles/:id/departments/:departmentId/approval-decisions` | AdminGuard (DEPARTMENT_GOALS_WRITE) | `{decision: 'APPROVE'\|'REQUEST_CHANGES', comment?}` — only the department's current-level approver may call this |
 | GET    | `/department-goals/cycles/:id/departments/:departmentId/comments` | AdminGuard (DEPARTMENT_GOALS_READ)  | Full comment + decision feed for the department, real admin names |
 | POST   | `/department-goals/cycles/:id/departments/:departmentId/comments` | AdminGuard (DEPARTMENT_GOALS_WRITE) | `{content}` — general comment, always available regardless of chain config |

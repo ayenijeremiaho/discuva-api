@@ -42,7 +42,17 @@ import { plainToInstance } from 'class-transformer';
 import { MemberDto } from '../../member/dto/member.dto';
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
-const REFRESH_COOKIE_PATH = '/v1/auth/refresh';
+// Scoped to the whole API, not just /v1/auth/refresh — TenantMiddleware's
+// fallback identity chain (see resolveTenantIdFromRefreshCookie) reads this
+// same cookie on EVERY route to resolve the tenant for hosts with no
+// subdomain (e.g. discuva-admin), not only on the refresh endpoint itself.
+// Scoping it to the refresh path alone made that fallback silently dead
+// everywhere else — an expired access token combined with an unreadable
+// cookie fell through to a 404 "Tenant not found" thrown by the middleware
+// itself (before any guard runs), which the frontend's 401-only refresh
+// interceptor never sees, hanging the session until a hard reload forced a
+// fresh call to /v1/auth/refresh (the one path where the cookie was valid).
+const REFRESH_COOKIE_PATH = '/v1';
 
 @Controller('auth')
 export class AuthController {

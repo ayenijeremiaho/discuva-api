@@ -11846,6 +11846,113 @@
           "description": "Bulk per-department approval status for the cycle \u2014 { departmentId, departmentName, currentLevel, totalLevels, status, completedAt, currentApproverId, currentApproverName } per department. Empty array if the cycle has no approvalChain configured."
         },
         {
+          "name": "Download Bulk Import Template (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/bulk-import/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "bulk-import",
+                "template"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Downloads an .xlsx with columns KPI, KPI Description, Timeline to Achieve Target \u2014 no Department column, since the upload is already scoped to one department. Share this with the department's HOD to fill offline."
+        },
+        {
+          "name": "Preview Bulk Import (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/bulk-import/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "bulk-import",
+                "preview"
+              ]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            }
+          },
+          "response": [],
+          "description": "Parses and validates every row (400 if the cycle isn't currently writable for this department) but writes nothing yet. Returns the created job plus every row and its errors\u2014[] means the row is ready to commit."
+        },
+        {
+          "name": "Get Bulk Import Job (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/bulk-import/{{departmentGoalImportJobId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "bulk-import",
+                "{{departmentGoalImportJobId}}"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Re-fetches a previously previewed job and its rows."
+        },
+        {
+          "name": "Commit Bulk Import (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/department-goals/cycles/{{departmentGoalCycleId}}/departments/{{departmentId}}/bulk-import/{{departmentGoalImportJobId}}/commit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "department-goals",
+                "cycles",
+                "{{departmentGoalCycleId}}",
+                "departments",
+                "{{departmentId}}",
+                "bulk-import",
+                "{{departmentGoalImportJobId}}",
+                "commit"
+              ]
+            }
+          },
+          "response": [],
+          "description": "Creates a DepartmentGoal (tagged with createdByAdmin) for every error-free row and returns { createdCount, failedRows }. 400 if this job was already committed, or if the cycle closed for this department since preview."
+        },
+        {
           "name": "Submit Approval Decision (Admin)",
           "request": {
             "method": "POST",

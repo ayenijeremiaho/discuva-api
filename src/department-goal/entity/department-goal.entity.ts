@@ -82,4 +82,10 @@ export class DepartmentGoal extends BaseEntity {
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'self_rated_by_member_id' })
   selfRatedByMember: Member | null;
+
+  // Set when an admin bulk-uploads this goal on behalf of a HOD (see
+  // DepartmentGoalImportService); null for goals the HOD entered directly.
+  @ManyToOne(() => Admin, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'created_by_admin_id' })
+  createdByAdmin: Admin | null;
 }
