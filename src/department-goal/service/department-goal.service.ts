@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -584,17 +585,18 @@ export class DepartmentGoalService {
     return data;
   }
 
+  // Available to any member of the department (HOD, Deputy-HOD, or a plain
+  // worker), not just the HOD — exporting a copy of goals you're already
+  // shown on-screen isn't a write action, so it doesn't need the HOD-only
+  // gate createGoal/updateGoalAsHod use.
   async generatePdf(
     cycleId: string,
     departmentId: string,
     memberId: string,
   ): Promise<Buffer> {
     const cycle = await this.getCycleOrThrow(cycleId);
-    const lead = await this.departmentService.assertIsDepartmentLead(
-      memberId,
-      departmentId,
-      DepartmentLeadTypeEnum.HOD,
-    );
+    const department = await this.departmentService.getOne(departmentId);
+    await this.assertMemberInDepartment(memberId, departmentId);
     const stage = this.getEffectiveStage(cycle);
     const goals = await this.goalRepo.find({
       where: { cycle: { id: cycleId }, department: { id: departmentId } },
@@ -602,11 +604,31 @@ export class DepartmentGoalService {
     });
 
     return this.pdfService.generateDepartmentGoalReport({
-      departmentName: lead.department.name,
+      departmentName: department.name,
       cycleName: cycle.name,
       stage,
       goals: goals.map((g) => this.toGoalView(g)),
     });
+  }
+
+  private async assertMemberInDepartment(
+    memberId: string,
+    departmentId: string,
+  ): Promise<void> {
+    const leadRoles = await this.departmentService.getLeadRoles(memberId);
+    if (leadRoles.some((l) => l.departmentId === departmentId)) return;
+
+    const profile = await this.workerProfileRepo.findOne({
+      where: { member: { id: memberId } },
+      relations: ['department', 'secondaryDepartment'],
+    });
+    if (
+      profile?.department?.id === departmentId ||
+      profile?.secondaryDepartment?.id === departmentId
+    ) {
+      return;
+    }
+    throw new ForbiddenException('You are not part of this department.');
   }
 
   private async getGoalOrThrow(

@@ -35,6 +35,7 @@ const mockWorkerProfileRepo = {
 const mockDepartmentService = {
   assertIsDepartmentLead: jest.fn(),
   getLeadRoles: jest.fn().mockResolvedValue([]),
+  getOne: jest.fn(),
 };
 const mockDateService = {
   today: jest.fn().mockReturnValue('2026-06-15'),
@@ -884,6 +885,64 @@ describe('DepartmentGoalService', () => {
           action: 'DEPARTMENT_GOAL_CORRECTED',
         }),
       );
+    });
+  });
+
+  describe('generatePdf', () => {
+    beforeEach(() => {
+      mockCycleRepo.findOneBy.mockResolvedValue(makeCycle());
+      mockDepartmentService.getOne.mockResolvedValue({
+        id: 'dept-1',
+        name: 'Ushering',
+      });
+    });
+
+    it('allows a plain department member (not just the HOD) to export the PDF', async () => {
+      mockDepartmentService.getLeadRoles.mockResolvedValue([]);
+      mockWorkerProfileRepo.findOne.mockResolvedValue({
+        department: { id: 'dept-1' },
+        secondaryDepartment: null,
+      });
+
+      const pdf = await service.generatePdf('cycle-1', 'dept-1', 'member-1');
+      expect(pdf).toEqual(Buffer.from('pdf'));
+      expect(mockPdfService.generateDepartmentGoalReport).toHaveBeenCalledWith(
+        expect.objectContaining({ departmentName: 'Ushering' }),
+      );
+    });
+
+    it('allows access via a secondary department assignment', async () => {
+      mockWorkerProfileRepo.findOne.mockResolvedValue({
+        department: { id: 'other-dept' },
+        secondaryDepartment: { id: 'dept-1' },
+      });
+      await expect(
+        service.generatePdf('cycle-1', 'dept-1', 'member-1'),
+      ).resolves.toBeDefined();
+    });
+
+    it('allows access via a lead role (HOD or Deputy-HOD)', async () => {
+      mockDepartmentService.getLeadRoles.mockResolvedValue([
+        {
+          departmentId: 'dept-1',
+          departmentName: 'Ushering',
+          leadType: 'DEPUTY_HOD',
+        },
+      ]);
+      await expect(
+        service.generatePdf('cycle-1', 'dept-1', 'member-1'),
+      ).resolves.toBeDefined();
+    });
+
+    it('rejects a member with no relationship to the department', async () => {
+      mockDepartmentService.getLeadRoles.mockResolvedValue([]);
+      mockWorkerProfileRepo.findOne.mockResolvedValue({
+        department: { id: 'other-dept' },
+        secondaryDepartment: null,
+      });
+      await expect(
+        service.generatePdf('cycle-1', 'dept-1', 'member-1'),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

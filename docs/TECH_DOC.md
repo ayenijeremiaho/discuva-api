@@ -2297,6 +2297,28 @@ populate a picker with the tenant's own titles).
 `clergy: { title: {id, name}, canReviewFeedback: boolean } | null` is surfaced on `MemberDto` (`GET /auth/me`,
 `GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `clergy` relation.
 
+**Member timeline / "digital footprint":** `GET /members/:id/timeline` (`AdminGuard` + `MEMBERS_READ`) returns a
+chronologically sorted `MemberTimelineEvent[]` (`{ type, title, description, occurredAt }`) — the church-facing
+narrative of a member's life in the system: first visit → repeat visits → became a member → became a worker →
+department/clergy/status changes. `MemberTimelineService` (`src/member/service/member-timeline.service.ts`) builds
+it from two sources, not a dedicated history table:
+- The first-timer pipeline (`FollowUpService.getFirstTimerByConvertedMemberId`) — if the member ever passed through
+  `FirstTimer` (walk-in or a public form with `createsFirstTimers`), its `createdAt` becomes "First Visit", each
+  `FirstTimerVisit` becomes a "Visited Again" entry, and `convertedAt` becomes "Became a Member". A member with no
+  `FirstTimer` record (created directly by an admin, bulk import, self-signup outside the visitor pipeline) instead
+  gets a single "Joined the Church" event from `dateJoinedChurch ?? createdAt`.
+- A curated allowlist of `AuditLog` entries filtered by `targetId = memberId` (`MEMBER_ACTIVATED/DEACTIVATED`,
+  `WORKER_PROMOTED/REINSTATED/REVOKED`, `WORKER_TRAINEE_DEMOTED`, `CLERGY_ASSIGNED/TITLE_CHANGED/REMOVED`). This is
+  deliberately **not** every audit action for the member — noisy ones like `MEMBER_UPDATED`, `MEMBER_LOGIN`, or the
+  generic `WORKER_PROFILE_UPDATED` (fires on any profile field edit, carries no clean before/after) are excluded so
+  the timeline reads as milestones, not a raw change log. `WORKER_PROMOTED`/`REINSTATED`'s `metadata.departmentId`
+  is resolved to a name via one batched `Department` lookup (not per-event).
+- **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` and the evangelism `Convert` pipeline's
+  `CONVERT_LINKED_TO_MEMBER` are not yet included — those audit entries target the department/convert row (not the
+  member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
+  it doesn't have today. A worker whose promotion predates audit logging (legacy data, bulk imports) falls back to
+  `WorkerProfile.createdAt` for a "Became a Worker" event so they aren't silently missing from the timeline.
+
 **Profile photo:** `POST /members/me/photo` (multipart, field `photo`) uploads/replaces the caller's own photo via
 `CloudinaryService` (folder `profile-pictures`); `DELETE /members/me/photo` removes it. Both `JwtAuthGuard` only —
 self-service, no admin permission required. `DELETE /members/:id/photo` (`AdminGuard` + `MEMBERS_WRITE`) lets an
@@ -5681,7 +5703,7 @@ discuva-member. Mirrors `MemberImportService`'s two-phase preview → commit sha
 | GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/goals/:goalId/history` | JwtAuthGuard (dept. lead only) | Audit log, filtered to `DEPARTMENT_GOAL_CORRECTED` for this goal |
 | GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/approval`         | JwtAuthGuard (dept. lead only) | This department's approval status — `null` if no chain configured or no goal written yet |
 | GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/comments`         | JwtAuthGuard (dept. lead only) | Read-only comment + decision feed (no member-facing POST — comments stay admin-authored) |
-| GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/pdf`              | JwtAuthGuard (HOD only) | `application/pdf` download |
+| GET    | `/department-goals/member/cycles/:cycleId/departments/:departmentId/pdf`              | JwtAuthGuard (any member of the department) | `application/pdf` download — HOD, Deputy-HOD, or a plain worker/member (primary or secondary department), not HOD-only; exporting what's already shown on-screen isn't a write action |
 
 ### Social Media Module (`src/social-media/`)
 
@@ -9040,6 +9062,17 @@ Multi-Tenant Request Scoping) — every `@Cron` scheduler that touches tenant-sc
 `CURRENCY_LOCALE` has no tenant-scoped equivalent (`Tenant` has no locale column) and stays a pure global default —
 used by `PdfService` for number formatting and, unrelatedly, by `EventReminderService`/`TitheService` for date/time
 formatting (those two never touched currency, so needed no change).
+
+**Every generated PDF's header now embeds the tenant's actual logo, not just its name/tagline text.**
+`PdfService.resolveBranding()` fetches `tenant.logoUrl` (when set) and base64-encodes it into `PdfBranding.logoImage`
+once per PDF — `drawPageHeader()` (shared by every report type: session/event reports, department goals, giving
+statements, etc.) then calls jsPDF's `addImage()` with it, shifting the church name/tagline right to make room.
+Cached by URL under `pdf-logo-image:${logoUrl}` (same TTL/mechanism as the branding cache) so a broken or
+unreachable logo URL doesn't retry on every PDF request — it just caches the resulting `null` and falls back to
+the original text-only header. Only PNG/JPEG are embeddable (jsPDF's `addImage` needs a format jsPDF can decode);
+an SVG or unsupported logo format also falls back to text-only rather than failing PDF generation. The
+`addImage()` call itself is wrapped in its own `try/catch` too, so a corrupt image can't break the rest of the
+header/report either.
 
 | Variable         | Default                                         | Description                                              |
 |------------------|-------------------------------------------------|-----------------------------------------------------------|

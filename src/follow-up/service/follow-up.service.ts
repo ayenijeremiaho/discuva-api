@@ -985,4 +985,18 @@ export class FollowUpService {
 
     return UtilityService.createPaginationResponse(data, page, limit, total);
   }
+
+  // Used by MemberTimelineService to render the pre-membership leg of a
+  // member's activity timeline (first visit, repeat visits, conversion) —
+  // null for a member who joined without ever passing through the
+  // first-timer pipeline (e.g. created directly by an admin).
+  async getFirstTimerByConvertedMemberId(
+    memberId: string,
+  ): Promise<FirstTimer | null> {
+    return this.firstTimerRepo.findOne({
+      where: { convertedMember: { id: memberId } },
+      relations: ['visits', 'visitedEvent'],
+      order: { visits: { visitedAt: 'ASC' } },
+    });
+  }
 }

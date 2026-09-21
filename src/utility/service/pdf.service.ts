@@ -34,6 +34,14 @@ interface PdfBranding {
   churchTagline: string;
   currencyCode: string;
   currencyLocale: string;
+  // Pre-resolved (fetched + base64-encoded) once per PDF, not a bare URL —
+  // jsPDF's addImage draws synchronously, so the network fetch has to
+  // happen up front in resolveBranding(), not inside drawPageHeader itself.
+  // null whenever there's no logo configured, the fetch fails, or the
+  // image's format isn't one jsPDF can embed (anything but PNG/JPEG,
+  // e.g. SVG) — every report already renders correctly without a logo,
+  // so this only ever adds to the header, never blocks it.
+  logoImage: { dataUrl: string; format: 'PNG' | 'JPEG' } | null;
 }
 
 // The HOD's own department, at the visibility rules already applied by
@@ -106,6 +114,7 @@ export class PdfService {
       churchTagline: this.config.get<string>('CHURCH_TAGLINE'),
       currencyCode: this.config.get<string>('CURRENCY_CODE'),
       currencyLocale: this.config.get<string>('CURRENCY_LOCALE'),
+      logoImage: null,
     };
 
     const tenantId = this.cls.get('tenantId');
@@ -118,13 +127,50 @@ export class PdfService {
     );
     if (!tenant) return fallback;
 
+    const logoImage = tenant.logoUrl
+      ? await this.resolveLogoImage(tenant.logoUrl)
+      : null;
+
     return {
       churchName: tenant.name || fallback.churchName,
       churchAddress: tenant.address || fallback.churchAddress,
       churchTagline: tenant.tagline || fallback.churchTagline,
       currencyCode: tenant.currency || fallback.currencyCode,
       currencyLocale: fallback.currencyLocale,
+      logoImage,
     };
+  }
+
+  // Cached by URL (not tenantId) alongside the branding cache above, same
+  // TTL — a broken/unreachable logo URL caches its `null` result too, so a
+  // bad URL doesn't turn into a repeated-fetch penalty on every PDF.
+  private async resolveLogoImage(
+    logoUrl: string,
+  ): Promise<{ dataUrl: string; format: 'PNG' | 'JPEG' } | null> {
+    return this.cacheService.getOrSet(
+      `pdf-logo-image:${logoUrl}`,
+      async () => {
+        try {
+          const res = await fetch(logoUrl);
+          if (!res.ok) return null;
+          const contentType = res.headers.get('content-type') ?? '';
+          const format = contentType.includes('png')
+            ? 'PNG'
+            : contentType.includes('jpeg') || contentType.includes('jpg')
+              ? 'JPEG'
+              : null;
+          if (!format) return null;
+          const buffer = Buffer.from(await res.arrayBuffer());
+          return {
+            dataUrl: `data:${contentType};base64,${buffer.toString('base64')}`,
+            format: format as 'PNG' | 'JPEG',
+          };
+        } catch {
+          return null;
+        }
+      },
+      this.cacheTtl,
+    );
   }
 
   async generateSessionReport(report: SessionReport): Promise<Buffer> {
@@ -1347,11 +1393,32 @@ export class PdfService {
     doc.setFillColor(DARK);
     doc.rect(0, 0, PAGE_W, 22, 'F');
 
+    // Logo shifts the church name/tagline right to make room — wrapped in
+    // its own try/catch since a corrupt or unexpectedly-encoded image
+    // should degrade to the text-only header this already was, not fail
+    // the whole PDF.
+    let textStartX = MARGIN;
+    if (branding.logoImage) {
+      try {
+        doc.addImage(
+          branding.logoImage.dataUrl,
+          branding.logoImage.format,
+          MARGIN,
+          3,
+          16,
+          16,
+        );
+        textStartX = MARGIN + 20;
+      } catch {
+        textStartX = MARGIN;
+      }
+    }
+
     doc
       .setFont('helvetica', 'bold')
       .setFontSize(9)
       .setTextColor(WHITE)
-      .text(branding.churchName, MARGIN, 10);
+      .text(branding.churchName, textStartX, 10);
 
     doc
       .setFont('helvetica', 'normal')

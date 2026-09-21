@@ -10,12 +10,14 @@ import { MemberSession } from './entity/member-session.entity';
 import { MemberService } from './service/member.service';
 import { MemberSessionService } from './service/member-session.service';
 import { MemberImportService } from './service/member-import.service';
+import { MemberTimelineService } from './service/member-timeline.service';
 import { MemberController } from './controller/member.controller';
 import { MemberImportController } from './controller/member-import.controller';
 import { Department } from '../department/entity/department.entity';
 import { DepartmentLead } from '../department/entity/department-lead.entity';
 import { SundaySchoolClass } from '../sunday-school/entity/sunday-school-class.entity';
 import { UtilityModule } from '../utility/utility.module';
+import { FollowUpModule } from '../follow-up/follow-up.module';
 
 @Module({
   imports: [
@@ -32,9 +34,15 @@ import { UtilityModule } from '../utility/utility.module';
       SundaySchoolClass,
     ]),
     UtilityModule,
+    FollowUpModule,
   ],
   controllers: [MemberController, MemberImportController],
-  providers: [MemberService, MemberSessionService, MemberImportService],
+  providers: [
+    MemberService,
+    MemberSessionService,
+    MemberImportService,
+    MemberTimelineService,
+  ],
   exports: [MemberService, MemberSessionService, TenantTypeOrmModule],
 })
 export class MemberModule {}

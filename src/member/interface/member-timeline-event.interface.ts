@@ -1,0 +1,18 @@
+export enum MemberTimelineEventType {
+  FIRST_VISIT = 'FIRST_VISIT',
+  REPEAT_VISIT = 'REPEAT_VISIT',
+  BECAME_MEMBER = 'BECAME_MEMBER',
+  BECAME_WORKER = 'BECAME_WORKER',
+  WORKER_STATUS_CHANGED = 'WORKER_STATUS_CHANGED',
+  DEPARTMENT_CHANGED = 'DEPARTMENT_CHANGED',
+  CLERGY = 'CLERGY',
+  MEMBER_STATUS_CHANGED = 'MEMBER_STATUS_CHANGED',
+  MILESTONE = 'MILESTONE',
+}
+
+export interface MemberTimelineEvent {
+  type: MemberTimelineEventType;
+  title: string;
+  description: string | null;
+  occurredAt: string;
+}

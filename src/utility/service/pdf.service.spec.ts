@@ -231,4 +231,83 @@ describe('PdfService', () => {
     expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
     expect(pdfText(buffer)).toContain('Cached Church');
   });
+
+  describe('logo embedding', () => {
+    // A minimal but genuinely valid 1x1 PNG — jsPDF's addImage inspects the
+    // format signature, so an arbitrary/fake byte string would throw.
+    const TINY_PNG_BASE64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+
+    beforeEach(() => {
+      // The "resolves branding through the cache" test above overrides this
+      // shared mock with a permanent mockResolvedValue (clearAllMocks in the
+      // outer beforeEach clears calls, not implementations) — restore the
+      // normal pass-through behavior so these tests exercise the real
+      // resolveBranding/resolveLogoImage logic, not a leaked stale tenant.
+      mockCacheService.getOrSet.mockImplementation(
+        (_key: string, fn: () => Promise<unknown>) => fn(),
+      );
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('fetches and embeds the logo when the tenant has one configured', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        address: '42 Tenant Ave',
+        tagline: null,
+        currency: 'NGN',
+        logoUrl: 'https://cdn.example.com/logo.png',
+      });
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        headers: { get: () => 'image/png' },
+        arrayBuffer: async () => Buffer.from(TINY_PNG_BASE64, 'base64').buffer,
+      } as unknown as Response);
+
+      const buffer = await service.generateSessionReport(baseSessionReport);
+
+      expect(fetchSpy).toHaveBeenCalledWith('https://cdn.example.com/logo.png');
+      // Doesn't throw, and the rest of the header still renders normally.
+      expect(pdfText(buffer)).toContain('St. Example Church');
+    });
+
+    it('falls back to a text-only header when the logo fetch fails', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        address: '42 Tenant Ave',
+        tagline: null,
+        currency: 'NGN',
+        logoUrl: 'https://cdn.example.com/broken.png',
+      });
+      jest.spyOn(global, 'fetch').mockRejectedValue(new Error('network down'));
+
+      const buffer = await service.generateSessionReport(baseSessionReport);
+
+      expect(pdfText(buffer)).toContain('St. Example Church');
+    });
+
+    it('does not attempt a fetch when the tenant has no logo configured', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        address: '42 Tenant Ave',
+        tagline: null,
+        currency: 'NGN',
+        logoUrl: null,
+      });
+      const fetchSpy = jest.spyOn(global, 'fetch');
+
+      await service.generateSessionReport(baseSessionReport);
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+  });
 });

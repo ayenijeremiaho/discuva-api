@@ -1519,6 +1519,44 @@
           ]
         },
         {
+          "name": "Get Member Timeline",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/timeline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "timeline"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "The member's \"digital footprint\" — a chronologically sorted list of lifecycle milestones (first visit, repeat visits, became a member, became a worker, department/clergy/status changes), merged from the first-timer pipeline and a curated set of audit log entries. Not every audit action for the member is included — see TECH_DOC.md for exactly what's excluded and why."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"type\": \"FIRST_VISIT\",\n    \"title\": \"First Visit\",\n    \"description\": \"Sunday Service\",\n    \"occurredAt\": \"2025-11-02T09:00:00.000Z\"\n  },\n  {\n    \"type\": \"REPEAT_VISIT\",\n    \"title\": \"Visited Again\",\n    \"description\": null,\n    \"occurredAt\": \"2025-11-09T09:00:00.000Z\"\n  },\n  {\n    \"type\": \"BECAME_MEMBER\",\n    \"title\": \"Became a Member\",\n    \"description\": null,\n    \"occurredAt\": \"2025-11-16T10:00:00.000Z\"\n  },\n  {\n    \"type\": \"BECAME_WORKER\",\n    \"title\": \"Became a Worker\",\n    \"description\": \"Ushering\",\n    \"occurredAt\": \"2026-02-01T10:00:00.000Z\"\n  }\n]"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"Member not found\" }"
+            }
+          ]
+        },
+        {
           "name": "Update Member",
           "request": {
             "method": "PATCH",
@@ -12355,7 +12393,7 @@
           "description": "HOD or Deputy-HOD of this department only. Read-only \u2014 same feed as the admin view, no member-facing POST since comments stay admin-authored."
         },
         {
-          "name": "Download Goals PDF (HOD)",
+          "name": "Download Goals PDF",
           "request": {
             "method": "GET",
             "header": [],
@@ -12386,7 +12424,7 @@
             }
           },
           "response": [],
-          "description": "application/pdf \u2014 the department's current goals at whatever visibility rules already apply (goals always, ratings only once both sides have submitted)."
+          "description": "application/pdf \u2014 available to any member of the department (HOD, Deputy-HOD, or a plain worker/member, primary or secondary department), not HOD-only. The department's current goals at whatever visibility rules already apply (goals always, ratings only once both sides have submitted)."
         },
         {
           "name": "Delete a Goal (HOD)",

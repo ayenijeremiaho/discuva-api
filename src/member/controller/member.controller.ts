@@ -20,6 +20,7 @@ import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynami
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { MemberService } from '../service/member.service';
+import { MemberTimelineService } from '../service/member-timeline.service';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { MemberRoleEnum } from '../enums/member-role.enum';
@@ -44,7 +45,10 @@ import { MemberAuth } from '../../auth/interface/auth.interface';
 
 @Controller('members')
 export class MemberController {
-  constructor(private readonly memberService: MemberService) {}
+  constructor(
+    private readonly memberService: MemberService,
+    private readonly memberTimelineService: MemberTimelineService,
+  ) {}
 
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.MEMBERS_READ)
@@ -154,6 +158,18 @@ export class MemberController {
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
+  }
+
+  // "Digital footprint" — a chronological feed of this member's lifecycle
+  // milestones (first visit, became a member, became a worker, department/
+  // clergy changes, status changes), merged from the first-timer pipeline
+  // and the audit log. See MemberTimelineService for exactly what's
+  // included and why (some audit actions are deliberately left out).
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_READ)
+  @Get(':id/timeline')
+  async getTimeline(@Param('id', ParseUUIDPipe) id: string) {
+    return this.memberTimelineService.getTimeline(id);
   }
 
   @UseGuards(AdminGuard)
