@@ -21,6 +21,8 @@ import {
 import { AssignSundaySchoolMemberDto } from '../dto/assign-sunday-school-member.dto';
 import { CreateSundaySchoolSessionDto } from '../dto/create-sunday-school-session.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
+import { CheckInFirstTimerDto } from '../dto/checkin-first-timer.dto';
+import { FollowUpService } from '../../follow-up/service/follow-up.service';
 import {
   AskQuestionDto,
   AnswerQuestionDto,
@@ -41,12 +43,23 @@ export interface SessionRosterEntry {
   markedAt: Date | null;
 }
 
+// A guest checked in with no Member record — always PRESENT (checkInFirstTimer
+// only ever creates a present attendance row), so no `status` field to mirror
+// SessionRosterEntry's nullable one.
+export interface SessionRosterFirstTimerEntry {
+  attendanceId: string;
+  firstTimerId: string;
+  name: string;
+  markedAt: Date;
+}
+
 export interface SessionRoster {
   sessionId: string;
   classId: string;
   sessionDate: string;
   selfMarkOpen: boolean;
   selfMarkClosesAt: Date | null;
+  firstTimerCheckIns: SessionRosterFirstTimerEntry[];
   members: SessionRosterEntry[];
 }
 
@@ -69,6 +82,7 @@ export class SundaySchoolService {
     private readonly questionRepo: Repository<SundaySchoolQuestion>,
     private readonly departmentAccessService: DepartmentAccessService,
     private readonly notificationDispatchService: NotificationDispatchService,
+    private readonly followUpService: FollowUpService,
   ) {}
 
   async createClass(
@@ -560,6 +574,51 @@ export class SundaySchoolService {
     );
   }
 
+  // Creates a real FirstTimer (triggering the normal follow-up task/
+  // notification) and marks them present for this session in one step —
+  // for a teacher checking in someone with no Member record at all,
+  // typically a visiting child/family with no prior church contact.
+  // Deliberately NOT nested inside a manually-opened transaction the way
+  // bulkMarkAttendance is: createFirstTimerFromSundaySchoolCheckIn relies
+  // on the CLS-ambient transaction (this.txHost.tx) FollowUpService itself
+  // manages, which would conflict with a second, independently-opened
+  // `this.attendanceRepo.manager.transaction()` around it.
+  async checkInFirstTimer(
+    user: MemberAuth,
+    sessionId: string,
+    dto: CheckInFirstTimerDto,
+  ): Promise<SundaySchoolAttendance> {
+    const session = await this.sessionRepo.findOne({
+      where: { id: sessionId },
+      relations: ['sundaySchoolClass'],
+    });
+    if (!session) throw new NotFoundException('Session not found');
+    await this.requireSundaySchoolAuth(user, session.sundaySchoolClass.id);
+
+    const firstTimer =
+      await this.followUpService.createFirstTimerFromSundaySchoolCheckIn(
+        {
+          firstname: dto.firstname,
+          lastname: dto.lastname,
+          phone: dto.phone,
+          notes: dto.notes,
+        },
+        user.id,
+      );
+
+    const attendance = this.attendanceRepo.create({
+      session: { id: sessionId } as SundaySchoolSession,
+      firstTimer,
+      status: SundaySchoolAttendanceStatus.PRESENT,
+      markedByTeacher: true,
+    });
+    const saved = await this.attendanceRepo.save(attendance);
+    this.logger.log(
+      `Checked in first-timer ${firstTimer.id} for session ${sessionId}`,
+    );
+    return { ...saved, firstTimer };
+  }
+
   async getSessionRoster(
     user: MemberAuth,
     sessionId: string,
@@ -578,11 +637,19 @@ export class SundaySchoolService {
       }),
       this.attendanceRepo.find({
         where: { session: { id: sessionId } },
-        relations: ['member'],
+        relations: ['member', 'firstTimer'],
       }),
     ]);
 
-    const attendanceMap = new Map(attendances.map((a) => [a.member.id, a]));
+    // Every row has exactly one of member/firstTimer (DB-enforced) — split
+    // by which, rather than assuming `a.member` is always set as the code
+    // did before first-timer check-ins existed (that crashed on any guest
+    // row: `a.member.id` on a null member).
+    const memberAttendances = attendances.filter((a) => a.member);
+    const firstTimerAttendances = attendances.filter((a) => a.firstTimer);
+    const attendanceMap = new Map(
+      memberAttendances.map((a) => [a.member!.id, a]),
+    );
 
     return {
       sessionId,
@@ -602,6 +669,12 @@ export class SundaySchoolService {
           markedAt: att?.markedAt ?? null,
         };
       }),
+      firstTimerCheckIns: firstTimerAttendances.map((a) => ({
+        attendanceId: a.id,
+        firstTimerId: a.firstTimer!.id,
+        name: `${a.firstTimer!.firstname} ${a.firstTimer!.lastname}`,
+        markedAt: a.markedAt,
+      })),
     };
   }
 
@@ -1065,10 +1138,14 @@ export class SundaySchoolService {
       }),
       this.attendanceRepo.find({
         where: { session: { id: sessionId } },
-        relations: ['member'],
+        relations: ['member', 'firstTimer'],
       }),
     ]);
-    const attendanceMap = new Map(attendances.map((a) => [a.member.id, a]));
+    const memberAttendances = attendances.filter((a) => a.member);
+    const firstTimerAttendances = attendances.filter((a) => a.firstTimer);
+    const attendanceMap = new Map(
+      memberAttendances.map((a) => [a.member!.id, a]),
+    );
     return {
       sessionId,
       classId: session.sundaySchoolClass.id,
@@ -1087,6 +1164,12 @@ export class SundaySchoolService {
           markedAt: att?.markedAt ?? null,
         };
       }),
+      firstTimerCheckIns: firstTimerAttendances.map((a) => ({
+        attendanceId: a.id,
+        firstTimerId: a.firstTimer!.id,
+        name: `${a.firstTimer!.firstname} ${a.firstTimer!.lastname}`,
+        markedAt: a.markedAt,
+      })),
     };
   }
 

@@ -26,6 +26,7 @@ import {
   OpenSelfMarkDto,
 } from '../dto/create-sunday-school-session.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
+import { CheckInFirstTimerDto } from '../dto/checkin-first-timer.dto';
 import {
   AskQuestionDto,
   AnswerQuestionDto,
@@ -292,6 +293,21 @@ export class SundaySchoolController {
     @Body() dto: BulkMarkAttendanceDto,
   ) {
     return this.sundaySchoolService.bulkMarkAttendance(req.user, id, dto);
+  }
+
+  // For someone with no Member record at all (a visiting child/family) —
+  // creates a real FirstTimer (triggering the normal follow-up task) and
+  // marks them present in one step, rather than requiring the teacher to
+  // send them through a separate front-desk flow first.
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Post('sessions/:id/checkin-first-timer')
+  async checkInFirstTimer(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CheckInFirstTimerDto,
+  ) {
+    return this.sundaySchoolService.checkInFirstTimer(req.user, id, dto);
   }
 
   @UseGuards(RolesGuard)

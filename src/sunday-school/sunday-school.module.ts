@@ -11,6 +11,7 @@ import { SundaySchoolAdminController } from './controller/sunday-school-admin.co
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
+import { FollowUpModule } from '../follow-up/follow-up.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { DepartmentModule } from '../department/department.module';
     MemberModule,
     UtilityModule,
     DepartmentModule,
+    FollowUpModule,
   ],
   controllers: [SundaySchoolController, SundaySchoolAdminController],
   providers: [SundaySchoolService],

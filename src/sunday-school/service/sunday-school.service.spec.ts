@@ -21,6 +21,7 @@ import { DepartmentAccessService } from '../../department/service/department-acc
 import { CacheService } from '../../utility/service/cache.service';
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
+import { FollowUpService } from '../../follow-up/service/follow-up.service';
 
 const mockClassRepo = {
   create: jest.fn(),
@@ -89,6 +90,10 @@ const mockDepartmentAccessService = {
 
 const mockNotificationDispatchService = {
   notifyMember: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockFollowUpService = {
+  createFirstTimerFromSundaySchoolCheckIn: jest.fn(),
 };
 
 const adminUser = {
@@ -190,6 +195,7 @@ describe('SundaySchoolService', () => {
             key: jest.fn(),
           },
         },
+        { provide: FollowUpService, useValue: mockFollowUpService },
       ],
     }).compile();
 
@@ -997,6 +1003,133 @@ describe('SundaySchoolService', () => {
       expect(result.sessionDate).toBe('2026-06-08');
       expect(result.selfMarkOpen).toBe(true);
       expect(result.classId).toBe('class-1');
+    });
+
+    it('does not crash on a first-timer check-in row (member null) and surfaces it separately', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      const cm1 = {
+        member: { id: 'member-1', firstname: 'John', lastname: 'Doe' },
+      };
+      mockMemberAssignRepo.find.mockResolvedValue([cm1]);
+      mockAttendanceRepo.find.mockResolvedValue([
+        {
+          id: 'att-1',
+          member: { id: 'member-1' },
+          firstTimer: null,
+          status: SundaySchoolAttendanceStatus.PRESENT,
+          markedByTeacher: true,
+          markedAt: new Date(),
+        },
+        {
+          id: 'att-2',
+          member: null,
+          firstTimer: { id: 'ft-1', firstname: 'Guest', lastname: 'Visitor' },
+          status: SundaySchoolAttendanceStatus.PRESENT,
+          markedByTeacher: true,
+          markedAt: new Date('2026-06-08T10:00:00Z'),
+        },
+      ]);
+
+      const result = await service.getSessionRoster(ssWorkerUser, 'session-1');
+
+      expect(result.members).toHaveLength(1);
+      expect(result.members[0].status).toBe(
+        SundaySchoolAttendanceStatus.PRESENT,
+      );
+      expect(result.firstTimerCheckIns).toEqual([
+        {
+          attendanceId: 'att-2',
+          firstTimerId: 'ft-1',
+          name: 'Guest Visitor',
+          markedAt: new Date('2026-06-08T10:00:00Z'),
+        },
+      ]);
+    });
+  });
+
+  // ─── checkInFirstTimer ────────────────────────────────────────────────────
+
+  describe('checkInFirstTimer', () => {
+    beforeEach(() => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+    });
+
+    it('throws NotFoundException when session not found', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.checkInFirstTimer(ssWorkerUser, 'bad-id', {
+          firstname: 'Guest',
+          lastname: 'Visitor',
+          phone: '08000000000',
+        }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('creates a FirstTimer via FollowUpService and marks them present', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      const firstTimer = {
+        id: 'ft-1',
+        firstname: 'Guest',
+        lastname: 'Visitor',
+      };
+      mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn.mockResolvedValue(
+        firstTimer,
+      );
+      mockAttendanceRepo.create.mockImplementation((v) => v);
+      mockAttendanceRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'att-1', ...v }),
+      );
+
+      const result = await service.checkInFirstTimer(
+        ssWorkerUser,
+        'session-1',
+        {
+          firstname: 'Guest',
+          lastname: 'Visitor',
+          phone: '08000000000',
+        },
+      );
+
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstname: 'Guest',
+          lastname: 'Visitor',
+          phone: '08000000000',
+        }),
+        ssWorkerUser.id,
+      );
+      expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstTimer,
+          status: SundaySchoolAttendanceStatus.PRESENT,
+          markedByTeacher: true,
+        }),
+      );
+      expect(result.firstTimer).toEqual(firstTimer);
+    });
+
+    it('rejects a teacher with no authorization for this class', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.checkInFirstTimer(
+          {
+            id: 'random-member',
+            role: MemberRoleEnum.WORKER,
+            requiresPasswordChange: false,
+            surface: SessionSurface.MEMBER,
+          },
+          'session-1',
+          { firstname: 'Guest', lastname: 'Visitor', phone: '08000000000' },
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).not.toHaveBeenCalled();
     });
   });
 

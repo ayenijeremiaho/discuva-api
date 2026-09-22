@@ -120,6 +120,27 @@ export class FollowUpService {
     return created;
   }
 
+  // Called from SundaySchoolService when a teacher checks in someone with
+  // no Member record during class — deliberately bypasses
+  // assertWorkerInFollowUpDept (a Sunday School teacher has no reason to
+  // hold MANAGE_FOLLOW_UP capability); the caller is already authorized by
+  // SundaySchoolService.requireSundaySchoolAuth before this is ever
+  // reached. source is forced to SUNDAY_SCHOOL regardless of the DTO, same
+  // reasoning as createFirstTimerFromPublicForm forcing ONLINE.
+  async createFirstTimerFromSundaySchoolCheckIn(
+    dto: CreateFirstTimerDto,
+    memberId: string,
+  ): Promise<FirstTimer> {
+    const created = await this.doCreateFirstTimer(
+      { ...dto, source: FirstTimerSourceEnum.SUNDAY_SCHOOL },
+      { memberCreatorId: memberId },
+    );
+    this.logger.log(
+      `First-timer ${created.id} recorded via Sunday School check-in by ${memberId}`,
+    );
+    return created;
+  }
+
   async getFirstTimers(
     page = 1,
     limit = 20,

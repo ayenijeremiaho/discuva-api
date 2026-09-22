@@ -6313,6 +6313,34 @@ Both now throw a clean `NotFoundException('Teacher not found')` up front.
 against the DB's `(class, sessionDate)` unique constraint; a genuine race between two concurrent creates for the same
 class+date now surfaces the same friendly `ConflictException` message instead of a raw Postgres `23505` error.
 
+**First-timer check-in (`POST /sunday-school/sessions/:id/checkin-first-timer`, worker-facing only):** lets a teacher
+check in someone with no `Member` record at all — a visiting child/family whose first-ever contact with the church is
+literally the Sunday School class, not the main service. `SundaySchoolAttendance.member` is now nullable, with a new
+nullable `firstTimer` FK (`follow_up.FirstTimer`) alongside it — DB-enforced XOR (`CHK_sunday_school_attendances_
+member_xor_first_timer`): every row has exactly one of the two, never both, never neither. Two independent UNIQUE
+constraints, `(session, member)` and `(session, firstTimer)`, not one composite — Postgres treats NULL as distinct
+per row, so a nullable column already tolerates unlimited NULLs without help from the other column.
+- Calls `FollowUpService.createFirstTimerFromSundaySchoolCheckIn()` — a new method that calls the same private
+  `doCreateFirstTimer()` every other first-timer creation path uses (round-robin assignment to an active Follow-Up
+  worker, `FollowUpTask` creation, fire-and-forget assignment email) but **skips** `assertWorkerInFollowUpDept`'s
+  `MANAGE_FOLLOW_UP` capability gate — a Sunday School teacher has no reason to hold that capability, and
+  `SundaySchoolService.requireSundaySchoolAuth` already authorizes the caller before this is ever reached. `source`
+  is forced to the new `FirstTimerSourceEnum.SUNDAY_SCHOOL` value regardless of what's submitted, same
+  not-spoofable-from-input pattern `createFirstTimerFromPublicForm` already uses for `ONLINE`.
+- Deliberately **not** nested inside `bulkMarkAttendance`'s pattern of a self-opened `this.attendanceRepo.manager.
+  transaction()` — `doCreateFirstTimer` relies on `this.txHost.tx`, the CLS-ambient transaction FollowUpService
+  manages itself, and mixing that with a second independently-opened transaction risks the tenant schema's
+  `SET LOCAL search_path` not being visible to whichever transaction manager didn't set it. The FirstTimer is
+  created as its own step, then a single `SundaySchoolAttendance` row (always `PRESENT`, `markedByTeacher: true`) is
+  saved separately.
+- **Fixed the same day**: `getSessionRoster`/`adminGetSessionRoster` used to build their `Map` keyed on `a.member.id`
+  unconditionally — a first-timer attendance row (`member: null`) would have thrown a `TypeError` the moment one
+  existed. Both now split attendance rows by which of `member`/`firstTimer` is set, and `SessionRoster` gained a new
+  `firstTimerCheckIns: {attendanceId, firstTimerId, name, markedAt}[]` array so a checked-in guest is actually visible
+  in the roster response, not just recorded invisibly in the DB.
+- No admin-facing equivalent endpoint yet — this is deliberately worker/teacher-only for now (the actor is always
+  "a Sunday School teacher checking someone in during class").
+
 **Lesson material (`SundaySchoolSession.documentUrl`):** optional link to that date's lesson material (Google Drive,
 PDF link, etc.) — validated as a URL (`@IsUrl()`), settable only at session creation (`POST .../sessions`), same as
 the pre-existing `notes` field — neither has an update-after-creation route. Set via either the worker/teacher
@@ -8598,7 +8626,8 @@ outside the requested `?months=` window).
 | GET    | /sunday-school/attendance/me                               | Any authenticated member                                      | Paginated list of the member's own Sunday School attendance history                                           |
 | POST   | /sunday-school/sessions/:id/checkin                        | Any (self-mark; member must be enrolled; window must be open) | Self-mark attendance                                                                                          |
 | POST   | /sunday-school/sessions/:id/bulk-mark                      | WORKER (SS-dept or class teacher)                             | Bulk mark session attendance                                                                                  |
-| GET    | /sunday-school/sessions/:id/roster                         | WORKER (SS-dept or class teacher)                             | Get session attendance roster                                                                                 |
+| POST   | /sunday-school/sessions/:id/checkin-first-timer            | WORKER (SS-dept or class teacher)                             | Check in someone with no Member record — creates a real FirstTimer (+ follow-up task) and marks them PRESENT |
+| GET    | /sunday-school/sessions/:id/roster                         | WORKER (SS-dept or class teacher)                             | Get session attendance roster — now also returns `firstTimerCheckIns[]`                                       |
 | GET    | /sunday-school/sessions?classId=                           | Any                                                           | List sessions for a class (paginated)                                                                         |
 | GET    | /sunday-school/sessions/:id                                | Any                                                           | Get SS session by ID                                                                                          |
 | DELETE | /sunday-school/sessions/:id                                | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Delete SS session                                                                                             |

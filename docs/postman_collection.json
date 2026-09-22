@@ -13505,6 +13505,60 @@
           ]
         },
         {
+          "name": "Check In First-Timer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstname\": \"Guest\",\n  \"lastname\": \"Visitor\",\n  \"phone\": \"08012345678\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sunday-school/sessions/{{ssSessionId}}/checkin-first-timer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sunday-school",
+                "sessions",
+                "{{ssSessionId}}",
+                "checkin-first-timer"
+              ],
+              "variable": [
+                {
+                  "key": "ssSessionId",
+                  "value": "{{ssSessionId}}"
+                }
+              ]
+            },
+            "description": "SS-dept worker or class teacher only (no admin equivalent). For someone with no Member record at all — creates a real FirstTimer (source forced to SUNDAY_SCHOOL, not user-settable), triggers the normal follow-up task/notification to the Follow-Up team, and marks them PRESENT for this session in one step. 400s if no active Follow-Up department worker exists to assign the task to."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"b2e1f3a4-1234-4c5d-9e6f-7a8b9c0d1e2f\",\n  \"status\": \"PRESENT\",\n  \"markedByTeacher\": true,\n  \"markedAt\": \"2026-06-08T10:00:00.000Z\",\n  \"firstTimer\": {\n    \"id\": \"c3f2e1b4-5678-4d6e-8f7a-9b0c1d2e3f4a\",\n    \"firstname\": \"Guest\",\n    \"lastname\": \"Visitor\",\n    \"phone\": \"08012345678\",\n    \"source\": \"SUNDAY_SCHOOL\"\n  }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"Session not found\" }"
+            }
+          ]
+        },
+        {
           "name": "Get Session Roster",
           "request": {
             "method": "GET",
@@ -13526,14 +13580,14 @@
                 }
               ]
             },
-            "description": "ADMIN, SS-dept worker, or class teacher. Returns the full attendance roster for the session including members with no record yet."
+            "description": "ADMIN, SS-dept worker, or class teacher. Returns the full attendance roster for the session including members with no record yet, plus a separate firstTimerCheckIns[] array for anyone checked in via checkin-first-timer (they have no Member record, so they're never in members[])."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  { \"memberId\": \"uuid\", \"name\": \"John Doe\", \"status\": \"PRESENT\", \"markedByTeacher\": false, \"markedAt\": \"2026-06-15T09:30:00.000Z\" },\n  { \"memberId\": \"uuid2\", \"name\": \"Jane Smith\", \"status\": null, \"markedByTeacher\": null, \"markedAt\": null }\n]"
+              "body": "{\n  \"sessionId\": \"uuid\",\n  \"classId\": \"uuid\",\n  \"sessionDate\": \"2026-06-15\",\n  \"selfMarkOpen\": true,\n  \"selfMarkClosesAt\": \"2026-06-15T09:35:00.000Z\",\n  \"members\": [\n    { \"memberId\": \"uuid\", \"name\": \"John Doe\", \"status\": \"PRESENT\", \"markedByTeacher\": false, \"markedAt\": \"2026-06-15T09:30:00.000Z\" },\n    { \"memberId\": \"uuid2\", \"name\": \"Jane Smith\", \"status\": null, \"markedByTeacher\": false, \"markedAt\": null }\n  ],\n  \"firstTimerCheckIns\": [\n    { \"attendanceId\": \"uuid3\", \"firstTimerId\": \"uuid4\", \"name\": \"Guest Visitor\", \"markedAt\": \"2026-06-15T09:32:00.000Z\" }\n  ]\n}"
             }
           ]
         },
