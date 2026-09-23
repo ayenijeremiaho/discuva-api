@@ -1,7 +1,6 @@
 import {
   IsBoolean,
   IsEmail,
-  IsEnum,
   IsOptional,
   IsString,
   IsUUID,
@@ -9,37 +8,40 @@ import {
   MinLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { FirstTimerSourceEnum } from '../enums/follow-up.enum';
 
-// @IsOptional() only skips undefined/null, not "" — a picker cleared back to
-// its empty state sends "" over the wire, which would otherwise fail
-// @IsUUID().
+// Same as create-first-timer.dto.ts — @IsOptional() only skips
+// undefined/null, not "".
 const emptyToUndefined = ({ value }: { value: unknown }) =>
   value === '' ? undefined : value;
 
-export class CreateFirstTimerDto {
+// source is deliberately not editable here — it's forced server-side at
+// creation (ONLINE/SUNDAY_SCHOOL/APP_SIGNUP/WALK_IN) to stay
+// not-spoofable, and changing it after the fact would corrupt that
+// attribution. convertedAt/inviteSentAt have their own dedicated
+// endpoints.
+export class UpdateFirstTimerDto {
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  firstname: string;
+  firstname?: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(1)
   @MaxLength(100)
-  lastname: string;
+  lastname?: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(7)
   @MaxLength(20)
-  phone: string;
+  phone?: string;
 
   @IsOptional()
+  @Transform(emptyToUndefined)
   @IsEmail()
   email?: string;
-
-  @IsOptional()
-  @IsEnum(FirstTimerSourceEnum)
-  source?: FirstTimerSourceEnum;
 
   @IsOptional()
   @IsBoolean()

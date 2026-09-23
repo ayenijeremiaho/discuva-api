@@ -15,6 +15,7 @@ import { Roles } from '../../auth/decorator/roles.decorator';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { FollowUpService } from '../service/follow-up.service';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
+import { UpdateFirstTimerDto } from '../dto/update-first-timer.dto';
 import { UpdateFollowUpTaskDto } from '../dto/update-follow-up-task.dto';
 import { AddNoteDto } from '../dto/add-note.dto';
 import { FollowUpTaskStatusEnum } from '../enums/follow-up.enum';
@@ -44,6 +45,23 @@ export class FollowUpController {
     @Query('status') status?: FollowUpTaskStatusEnum,
   ) {
     return this.followUpService.getMyTasks(req.user.id, +page, +limit, status);
+  }
+
+  @Get('first-timers/:id')
+  async getFirstTimerDetail(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.followUpService.getFirstTimerDetailForWorker(id, req.user.id);
+  }
+
+  @Patch('first-timers/:id')
+  async updateFirstTimer(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFirstTimerDto,
+  ) {
+    return this.followUpService.updateFirstTimerByWorker(id, dto, req.user.id);
   }
 
   @Patch('tasks/:id')

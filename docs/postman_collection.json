@@ -1539,14 +1539,14 @@
                 }
               ]
             },
-            "description": "The member's \"digital footprint\" — a chronologically sorted list of lifecycle milestones (first visit, repeat visits, became a member, became a worker, department/clergy/status changes), merged from the first-timer pipeline and a curated set of audit log entries. Not every audit action for the member is included — see TECH_DOC.md for exactly what's excluded and why."
+            "description": "The member's \"digital footprint\": { events, visitCount, isTraineeNow }. events is a chronologically sorted list of lifecycle milestones (first visit, repeat visits, became a member, became a worker, started/completed training, department/clergy/status changes), merged from the first-timer pipeline and a curated set of audit log entries — not every audit action for the member is included, see TECH_DOC.md for exactly what's excluded and why. visitCount is a separate rollup (first visit + logged returns + Sunday School check-ins, pre- and post-conversion + regular service attendance) carried across the first-timer-to-member lifecycle rather than resetting to zero at conversion. isTraineeNow is a live status flag (not derived from events) read straight off the current worker profile."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"type\": \"FIRST_VISIT\",\n    \"title\": \"First Visit\",\n    \"description\": \"Sunday Service\",\n    \"occurredAt\": \"2025-11-02T09:00:00.000Z\"\n  },\n  {\n    \"type\": \"REPEAT_VISIT\",\n    \"title\": \"Visited Again\",\n    \"description\": null,\n    \"occurredAt\": \"2025-11-09T09:00:00.000Z\"\n  },\n  {\n    \"type\": \"BECAME_MEMBER\",\n    \"title\": \"Became a Member\",\n    \"description\": null,\n    \"occurredAt\": \"2025-11-16T10:00:00.000Z\"\n  },\n  {\n    \"type\": \"BECAME_WORKER\",\n    \"title\": \"Became a Worker\",\n    \"description\": \"Ushering\",\n    \"occurredAt\": \"2026-02-01T10:00:00.000Z\"\n  }\n]"
+              "body": "{\n  \"events\": [\n    {\n      \"type\": \"FIRST_VISIT\",\n      \"title\": \"First Visit\",\n      \"description\": \"Sunday Service\",\n      \"occurredAt\": \"2025-11-02T09:00:00.000Z\"\n    },\n    {\n      \"type\": \"REPEAT_VISIT\",\n      \"title\": \"Visited Again\",\n      \"description\": null,\n      \"occurredAt\": \"2025-11-09T09:00:00.000Z\"\n    },\n    {\n      \"type\": \"BECAME_MEMBER\",\n      \"title\": \"Became a Member\",\n      \"description\": null,\n      \"occurredAt\": \"2025-11-16T10:00:00.000Z\"\n    },\n    {\n      \"type\": \"BECAME_WORKER\",\n      \"title\": \"Became a Worker\",\n      \"description\": \"Ushering\",\n      \"occurredAt\": \"2026-02-01T10:00:00.000Z\"\n    },\n    {\n      \"type\": \"TRAINEE_STATUS_CHANGED\",\n      \"title\": \"Started Training\",\n      \"description\": \"Ushering\",\n      \"occurredAt\": \"2026-02-01T10:05:00.000Z\"\n    }\n  ],\n  \"visitCount\": 14,\n  \"isTraineeNow\": true\n}"
             },
             {
               "name": "404 Not Found",
@@ -18462,6 +18462,99 @@
       ]
     },
     {
+      "name": "Follow-Up (Public)",
+      "description": "No login required. Reached from discuva-member's own signup screen by someone who installed the app but isn't (yet, or ever) ready to create a full member account.",
+      "item": [
+        {
+          "name": "Self-Onboard as First-Timer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/public/first-timer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "public",
+                "first-timer"
+              ]
+            },
+            "description": "Public, unauthenticated, rate-limited (5/min). source is always forced server-side to APP_SIGNUP regardless of what's submitted here — not spoofable. Triggers the same round-robin FollowUpTask assignment + notification email as every other first-timer creation path. 400s if no active Follow-Up department worker exists to assign the task to."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{ \"received\": true, \"firstTimerId\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\" }"
+            },
+            {
+              "name": "429 Too Many Requests",
+              "status": "Too Many Requests",
+              "code": 429,
+              "body": "{ \"statusCode\": 429, \"message\": \"ThrottlerException: Too Many Requests\" }"
+            }
+          ]
+        },
+        {
+          "name": "Events (Today, or Search)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/public/events?search=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "public",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Optional. Name search fallback for when nothing's happening today, or a different event is meant. Omit (or leave blank) to get today's events instead."
+                }
+              ]
+            },
+            "description": "Public, unauthenticated, rate-limited (30/min). Backs the \"which event are you here for?\" picker on the member-app self-onboarding form. With no `search`, returns events happening today (eventDate <= today <= endDate), ordered by start time. With `search`, returns up to 8 name matches instead, ordered most recent first. Returns only id/name/eventDate — no attendance, slot, or venue detail."
+          },
+          "response": [
+            {
+              "name": "200 OK — today's events",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\",\n    \"name\": \"Sunday Service\",\n    \"eventDate\": \"2026-09-22\"\n  }\n]"
+            },
+            {
+              "name": "200 OK — no events today",
+              "status": "OK",
+              "code": 200,
+              "body": "[]"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Follow-Up (Worker)",
       "description": "First-timer registration and follow-up task management for workers in the Follow-Up department.\n\n**Access:** WORKER only. Caller must be assigned to the department with `key: FOLLOW_UP`.\n\n**Key concepts:**\n- Registering a first-timer auto-creates a `FollowUpTask` assigned round-robin to an active Follow-Up department member.\n- Workers see only their **own** assigned tasks.\n- Task statuses: `PENDING` | `IN_PROGRESS` | `COMPLETED` | `UNREACHABLE`\n- Task outcomes: `JOINED` | `DECLINED` | `NO_ANSWER` | `PRAYED_WITH`\n- `noteContent` in the update body optionally creates an attached note for audit.\n\n**Typical flow:**\n1. Worker registers first-timer at the door: `POST /follow-up/first-timers`\n2. Worker views their task queue: `GET /follow-up/tasks/mine`\n3. Worker calls/visits and updates: `PATCH /follow-up/tasks/:id` with status and outcome",
       "item": [
@@ -18494,7 +18587,7 @@
                 "first-timers"
               ]
             },
-            "description": "Register a first-time visitor. Caller must be a WORKER in the FOLLOW_UP department. Auto-creates a FollowUpTask assigned via round-robin."
+            "description": "Register a first-time visitor. Caller must be a WORKER in the FOLLOW_UP department. Auto-creates a FollowUpTask assigned via round-robin. If no active FOLLOW_UP worker exists to assign, this still succeeds (201) — the task is created unassigned and the response carries assignmentWarning. Reassign it later via PATCH /admin/follow-up/tasks/:id/reassign once a worker is active."
           },
           "response": [
             {
@@ -18504,10 +18597,10 @@
               "body": "{\n  \"id\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\",\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\",\n  \"source\": \"WALK_IN\",\n  \"wantsToJoinChurch\": true,\n  \"wantsToJoinWorkforce\": false,\n  \"followUpTask\": { \"id\": \"b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e\", \"assignedTo\": { \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\" } },\n  \"createdAt\": \"2026-06-17T10:00:00.000Z\"\n}"
             },
             {
-              "name": "400 No assignee",
-              "status": "Bad Request",
-              "code": 400,
-              "body": "{ \"statusCode\": 400, \"message\": \"No active Follow-Up team members available.\" }"
+              "name": "201 Created — no active worker to assign",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\",\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"email\": \"emeka@example.com\",\n  \"source\": \"WALK_IN\",\n  \"wantsToJoinChurch\": true,\n  \"wantsToJoinWorkforce\": false,\n  \"followUpTask\": { \"id\": \"b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e\", \"assignedTo\": null },\n  \"createdAt\": \"2026-06-17T10:00:00.000Z\",\n  \"assignmentWarning\": \"No active Follow-Up worker was available, so this first-timer is unassigned. Reassign it once a worker is active.\"\n}"
             },
             {
               "name": "403 Not in FOLLOW_UP dept",
@@ -18561,6 +18654,98 @@
               "status": "OK",
               "code": 200,
               "body": "{ \"data\": [...], \"total\": 5, \"page\": 1, \"limit\": 20 }"
+            }
+          ]
+        },
+        {
+          "name": "First-Timer Visit History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/first-timers/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "first-timers",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "RolesGuard (WORKER) + assertWorkerInFollowUpDept. Same { firstTimer, visitCount, timeline } shape as the admin endpoint below — for a worker reviewing a first-timer assigned to their own task before a call/visit."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"firstTimer\": { \"id\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\", \"firstname\": \"Emeka\", \"lastname\": \"Obi\" },\n  \"visitCount\": 3,\n  \"timeline\": [\n    { \"source\": \"INITIAL_VISIT\", \"label\": \"Sunday Service\", \"occurredAt\": \"2026-06-01T09:00:00.000Z\" },\n    { \"source\": \"SUNDAY_SCHOOL\", \"label\": \"Kids Class\", \"occurredAt\": \"2026-06-08\" },\n    { \"source\": \"LOGGED_VISIT\", \"label\": \"Sunday Service\", \"occurredAt\": \"2026-06-15\", \"notes\": \"Came back with a friend\" }\n  ]\n}"
+            },
+            {
+              "name": "403 Not in FOLLOW_UP dept",
+              "status": "Forbidden",
+              "code": 403,
+              "body": "{ \"statusCode\": 403, \"message\": \"Access restricted to Follow-Up department workers\" }"
+            }
+          ]
+        },
+        {
+          "name": "Update First-Timer (Worker)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"visitedEventId\": \"{{eventId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/first-timers/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "first-timers",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "RolesGuard (WORKER) + assertWorkerInFollowUpDept. Same UpdateFirstTimerDto shape as the admin endpoint above (source not editable) — lets a Follow-Up worker correct a first-timer's details from the member app, e.g. adding a missed event or filling in what a Sunday School check-in only partially captured. Not scoped to only first-timers assigned to the caller's own task."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\",\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"visitedEvent\": { \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\", \"name\": \"Sunday Service\", \"eventDate\": \"2026-09-22\" }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"First-timer not found\" }"
             }
           ]
         },
@@ -18689,7 +18874,7 @@
                 "first-timers"
               ]
             },
-            "description": "Register a first-timer from the admin portal. Requires FOLLOW_UP_WRITE permission."
+            "description": "Register a first-timer from the admin portal. Requires FOLLOW_UP_WRITE permission. Always succeeds even with no active FOLLOW_UP worker to assign — see the worker-facing Register First-Timer request above for the assignmentWarning response shape in that case."
           },
           "response": [
             {
@@ -18697,6 +18882,60 @@
               "status": "Created",
               "code": 201,
               "body": "{ \"id\": \"...\", \"firstname\": \"Tola\" }"
+            }
+          ]
+        },
+        {
+          "name": "Update First-Timer (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"visitedEventId\": \"{{eventId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/first-timers/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "first-timers",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Correct a first-timer's details after the fact — e.g. the event visited was forgotten, or a Sunday School check-in only captured partial info. Requires FOLLOW_UP_WRITE. All fields optional/independent: firstname, lastname, phone, email, wantsToJoinChurch, wantsToJoinWorkforce, enjoyedAboutChurch, notes, visitedEventId. source is not editable here (forced server-side at creation to stay non-spoofable); use the dedicated mark-converted/invite-to-membership endpoints for those fields."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\",\n  \"firstname\": \"Emeka\",\n  \"lastname\": \"Obi\",\n  \"phone\": \"08011112222\",\n  \"visitedEvent\": { \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\", \"name\": \"Sunday Service\", \"eventDate\": \"2026-09-22\" }\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"First-timer not found\" }"
             }
           ]
         },
@@ -18858,7 +19097,7 @@
                 "reassign"
               ]
             },
-            "description": "Reassign a follow-up task to a different FOLLOW_UP-dept worker. Requires FOLLOW_UP_WRITE permission."
+            "description": "Reassign a follow-up task to a different FOLLOW_UP-dept worker — use this when the assigned worker goes inactive, leaves the department, or the auto-assignment just isn't right. Requires FOLLOW_UP_WRITE permission. Target must both hold the FOLLOW_UP capability and be ACTIVE (same two checks the automatic round-robin assignment uses). See GET /admin/follow-up/workers below for the list to pick from."
           },
           "response": [
             {
@@ -18872,6 +19111,44 @@
               "status": "Bad Request",
               "code": 400,
               "body": "{ \"statusCode\": 400, \"message\": \"Target worker must be in the Follow-Up department\" }"
+            },
+            {
+              "name": "400 Target worker not active",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"Target worker is not active\" }"
+            }
+          ]
+        },
+        {
+          "name": "Active Follow-Up Workers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/workers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "workers"
+              ]
+            },
+            "description": "AdminGuard + FOLLOW_UP_READ (not DEPARTMENTS_READ — a Follow-Up-only admin doesn't need department access for this). Backs the reassign-task picker: active workers with the FOLLOW_UP capability on either their primary or secondary department, ordered by first name. Unpaginated — small team."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n    \"status\": \"ACTIVE\",\n    \"member\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\"\n    }\n  }\n]"
             }
           ]
         },
@@ -19158,6 +19435,51 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"data\": [\n    {\n      \"firstTimer\": {\n        \"id\": \"ft1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n        \"firstname\": \"Emmanuel\",\n        \"lastname\": \"Adebayo\",\n        \"phone\": \"+2348023456789\",\n        \"email\": \"emmanuel.adebayo@example.com\",\n        \"source\": \"WALK_IN\",\n        \"wantsToJoinChurch\": true,\n        \"enjoyedAboutChurch\": \"The praise and worship session\",\n        \"wantsToJoinWorkforce\": false,\n        \"notes\": \"Very receptive; came with a friend\",\n        \"visitedEvent\": null,\n        \"createdByMember\": null,\n        \"createdByAdmin\": null,\n        \"convertedMember\": null,\n        \"convertedAt\": null,\n        \"inviteSentAt\": null,\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"task\": {\n        \"id\": \"tsk1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"type\": \"FIRST_TIMER\",\n        \"status\": \"IN_PROGRESS\",\n        \"firstTimer\": {\n          \"id\": \"ft1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n          \"firstname\": \"Emmanuel\",\n          \"lastname\": \"Adebayo\",\n          \"phone\": \"+2348023456789\",\n          \"email\": \"emmanuel.adebayo@example.com\",\n          \"source\": \"WALK_IN\",\n          \"wantsToJoinChurch\": true,\n          \"enjoyedAboutChurch\": \"The praise and worship session\",\n          \"wantsToJoinWorkforce\": false,\n          \"notes\": \"Very receptive; came with a friend\",\n          \"visitedEvent\": null,\n          \"createdByMember\": null,\n          \"createdByAdmin\": null,\n          \"convertedMember\": null,\n          \"convertedAt\": null,\n          \"inviteSentAt\": null,\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"member\": null,\n        \"event\": null,\n        \"assignedTo\": {\n          \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n          \"member\": {\n            \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n            \"firstname\": \"John\",\n            \"lastname\": \"Doe\",\n            \"email\": \"john.doe@example.com\",\n            \"phoneNumber\": \"+2348012345678\",\n            \"role\": \"WORKER\",\n            \"status\": \"ACTIVE\",\n            \"gender\": \"MALE\",\n            \"birthDay\": 15,\n            \"birthMonth\": 3,\n            \"birthYear\": 1990,\n            \"maritalStatus\": \"MARRIED\",\n            \"changedPassword\": true,\n            \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n            \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n          },\n          \"department\": {\n            \"id\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n            \"name\": \"Worship Department\",\n            \"description\": \"Handles all worship activities\",\n            \"key\": \"WORSHIP\",\n            \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n            \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n          },\n          \"status\": \"ACTIVE\",\n          \"profession\": \"Software Engineer\",\n          \"yearJoinedWorkforce\": \"2022-01-01\",\n          \"completedSOD\": true,\n          \"completedBibleCollege\": false,\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"outcome\": null,\n        \"outcomeNotes\": null,\n        \"dueDate\": \"2026-07-09\",\n        \"notes\": [\n          {\n            \"id\": \"fn1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n            \"task\": {\n              \"id\": \"ft1a2b3c-d4e5-f6a7-8901-abcdef123456\"\n            },\n            \"addedBy\": {\n              \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n              \"member\": {\n                \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n                \"firstname\": \"John\",\n                \"lastname\": \"Doe\",\n                \"email\": \"john.doe@example.com\",\n                \"phoneNumber\": \"+2348012345678\",\n                \"role\": \"WORKER\",\n                \"status\": \"ACTIVE\",\n                \"gender\": \"MALE\",\n                \"birthDay\": 15,\n                \"birthMonth\": 3,\n                \"birthYear\": 1990,\n                \"maritalStatus\": \"MARRIED\",\n                \"changedPassword\": true,\n                \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n                \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n              },\n              \"department\": {\n                \"id\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n                \"name\": \"Worship Department\",\n                \"description\": \"Handles all worship activities\",\n                \"key\": \"WORSHIP\",\n                \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n                \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n              },\n              \"status\": \"ACTIVE\",\n              \"profession\": \"Software Engineer\",\n              \"yearJoinedWorkforce\": \"2022-01-01\",\n              \"completedSOD\": true,\n              \"completedBibleCollege\": false,\n              \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n              \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n            },\n            \"content\": \"Called the first-timer; they expressed interest in joining a small group.\",\n            \"contactMethod\": \"PHONE_CALL\",\n            \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n            \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n          }\n        ],\n        \"lastActivityAt\": \"2026-07-02T08:00:00.000Z\",\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"visitCount\": 2,\n      \"daysSinceCreation\": 14,\n      \"lastContactMethod\": \"PHONE_CALL\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
+            }
+          ]
+        },
+        {
+          "name": "First-Timer Visit History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/first-timers/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "first-timers",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "AdminGuard + FOLLOW_UP_READ. Backs the \"visits\" count/history panel on the admin First Timers list. visitCount rolls up the initial visit + FirstTimerVisit rows (logged returns) + SundaySchoolAttendance rows linked to this first-timer (auto-captured, no manual logging needed). timeline is the same list, dated and sorted oldest-first. Declared after admin/follow-up/first-timers/pipeline in the controller so that static path keeps matching first."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"firstTimer\": { \"id\": \"a0b1c2d3-e4f5-6a7b-8c9d-0e1f2a3b4c5d\", \"firstname\": \"Emeka\", \"lastname\": \"Obi\" },\n  \"visitCount\": 3,\n  \"timeline\": [\n    { \"source\": \"INITIAL_VISIT\", \"label\": \"Sunday Service\", \"occurredAt\": \"2026-06-01T09:00:00.000Z\" },\n    { \"source\": \"SUNDAY_SCHOOL\", \"label\": \"Kids Class\", \"occurredAt\": \"2026-06-08\" },\n    { \"source\": \"LOGGED_VISIT\", \"label\": \"Sunday Service\", \"occurredAt\": \"2026-06-15\", \"notes\": \"Came back with a friend\" }\n  ]\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{ \"statusCode\": 404, \"message\": \"First timer not found\" }"
             }
           ]
         },

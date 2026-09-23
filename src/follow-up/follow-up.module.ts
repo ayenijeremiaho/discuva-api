@@ -12,9 +12,11 @@ import { Event } from '../event/entity/event.entity';
 import { Attendance } from '../attendance/entity/attendance.entity';
 import { Admin } from '../admin/entity/admin.entity';
 import { AdminRole } from '../admin/entity/admin-role.entity';
+import { SundaySchoolAttendance } from '../sunday-school/entity/sunday-school-attendance.entity';
 import { FollowUpService } from './service/follow-up.service';
 import { FollowUpController } from './controller/follow-up.controller';
 import { FollowUpAdminController } from './controller/follow-up-admin.controller';
+import { FollowUpPublicController } from './controller/follow-up-public.controller';
 import {
   FOLLOW_UP_QUEUE,
   PostEventProcessor,
@@ -37,6 +39,8 @@ import { Tenant } from '../tenant/entity/tenant.entity';
       Attendance,
       Admin,
       AdminRole,
+      // Read-only — importing SundaySchoolModule would be circular.
+      SundaySchoolAttendance,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by FollowUpScheduler's forEachActiveTenant loops.
@@ -60,7 +64,11 @@ import { Tenant } from '../tenant/entity/tenant.entity';
     UtilityModule,
     DepartmentModule,
   ],
-  controllers: [FollowUpController, FollowUpAdminController],
+  controllers: [
+    FollowUpController,
+    FollowUpAdminController,
+    FollowUpPublicController,
+  ],
   providers: [FollowUpService, PostEventProcessor, FollowUpScheduler],
   exports: [FollowUpService],
 })

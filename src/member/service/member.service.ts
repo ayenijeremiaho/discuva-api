@@ -826,6 +826,7 @@ export class MemberService {
     if (dto.completedSOD !== undefined) profile.completedSOD = dto.completedSOD;
     if (dto.completedBibleCollege !== undefined)
       profile.completedBibleCollege = dto.completedBibleCollege;
+    const wasTrainee = profile.isTrainee;
     if (dto.isTrainee !== undefined) profile.isTrainee = dto.isTrainee;
 
     const saved = await this.workerProfileRepository.save(profile);
@@ -834,6 +835,17 @@ export class MemberService {
       targetId: memberId,
       metadata: { changes: Object.keys(dto) },
     });
+    // Logged separately so the timeline can show a clean milestone.
+    if (dto.isTrainee !== undefined && dto.isTrainee !== wasTrainee) {
+      this.auditLogService.log('WORKER_TRAINEE_STATUS_CHANGED', {
+        actorId,
+        targetId: memberId,
+        metadata: {
+          isTrainee: dto.isTrainee,
+          departmentId: profile.department?.id,
+        },
+      });
+    }
     return saved;
   }
 

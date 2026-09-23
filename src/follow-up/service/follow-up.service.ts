@@ -14,6 +14,7 @@ import { FollowUpTask } from '../entity/follow-up-task.entity';
 import { FollowUpNote } from '../entity/follow-up-note.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
+import { UpdateFirstTimerDto } from '../dto/update-first-timer.dto';
 import { UpdateFollowUpTaskDto } from '../dto/update-follow-up-task.dto';
 import { AdminUpdateFollowUpTaskDto } from '../dto/admin-update-follow-up-task.dto';
 import { BulkUpdateTasksDto } from '../dto/bulk-update-tasks.dto';
@@ -36,6 +37,27 @@ import { EmailCategory } from '../../utility/email-provider/email-category.enum'
 import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { Event } from '../../event/entity/event.entity';
+import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+
+export interface PublicEventOption {
+  id: string;
+  name: string;
+  eventDate: Date;
+}
+
+export interface FirstTimerTimelineEntry {
+  source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL';
+  label: string;
+  occurredAt: Date | string;
+  notes?: string | null;
+}
+
+export interface FirstTimerDetail {
+  firstTimer: FirstTimer;
+  visitCount: number;
+  timeline: FirstTimerTimelineEntry[];
+}
 
 const REPORT_CACHE_TTL = 300;
 
@@ -69,6 +91,10 @@ export class FollowUpService {
     private readonly workerProfileRepo: Repository<WorkerProfile>,
     @InjectRepository(FirstTimerVisit)
     private readonly visitRepo: Repository<FirstTimerVisit>,
+    @InjectRepository(Event)
+    private readonly eventRepo: Repository<Event>,
+    @InjectRepository(SundaySchoolAttendance)
+    private readonly sundaySchoolAttendanceRepo: Repository<SundaySchoolAttendance>,
     private readonly departmentAccessService: DepartmentAccessService,
   ) {
     this.followUpDueDays = this.configService.get<number>('FOLLOW_UP_DUE_DAYS');
@@ -120,6 +146,25 @@ export class FollowUpService {
     return created;
   }
 
+  // Called from the member app's own signup screen (unauthenticated,
+  // FollowUpPublicController) — a visitor who installs the app but isn't
+  // ready to create a full member account yet can still let the church
+  // know they're here. Same no-actor, forced-source shape as
+  // createFirstTimerFromPublicForm, distinct source value so this channel
+  // is analytically distinguishable from a QR/shared-link public form.
+  async createFirstTimerFromAppSignup(
+    dto: CreateFirstTimerDto,
+  ): Promise<FirstTimer> {
+    const created = await this.doCreateFirstTimer(
+      { ...dto, source: FirstTimerSourceEnum.APP_SIGNUP },
+      {},
+    );
+    this.logger.log(
+      `First-timer ${created.id} recorded via app signup self-onboarding`,
+    );
+    return created;
+  }
+
   // Called from SundaySchoolService when a teacher checks in someone with
   // no Member record during class — deliberately bypasses
   // assertWorkerInFollowUpDept (a Sunday School teacher has no reason to
@@ -160,6 +205,7 @@ export class FollowUpService {
       .leftJoinAndSelect('ft.followUpTask', 'task')
       .leftJoinAndSelect('task.assignedTo', 'wp')
       .leftJoinAndSelect('wp.member', 'wm')
+      .loadRelationCountAndMap('ft.visitCount', 'ft.visits')
       .orderBy('ft.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -184,7 +230,81 @@ export class FollowUpService {
     if (dateTo) qb.andWhere('ft.createdAt <= :dateTo', { dateTo });
 
     const [data, total] = await qb.getManyAndCount();
+
+    // Sunday School check-ins aren't covered by loadRelationCountAndMap
+    // above, so batch them separately (avoid N+1). +1 per row is the
+    // initial visit, which has no row of its own.
+    if (data.length) {
+      const ids = data.map((ft) => ft.id);
+      const ssCounts = await this.sundaySchoolAttendanceRepo
+        .createQueryBuilder('ssa')
+        .select('ssa.first_timer_id', 'firstTimerId')
+        .addSelect('COUNT(*)', 'count')
+        .where('ssa.first_timer_id IN (:...ids)', { ids })
+        .groupBy('ssa.first_timer_id')
+        .getRawMany<{ firstTimerId: string; count: string }>();
+      const ssCountByFirstTimerId = new Map(
+        ssCounts.map((r) => [r.firstTimerId, Number(r.count)]),
+      );
+      for (const ft of data) {
+        ft.visitCount =
+          1 + (ft.visitCount ?? 0) + (ssCountByFirstTimerId.get(ft.id) ?? 0);
+      }
+    }
+
     return UtilityService.createPaginationResponse(data, page, limit, total);
+  }
+
+  // Shared by the admin and worker detail endpoints.
+  private async buildFirstTimerDetail(
+    firstTimer: FirstTimer,
+  ): Promise<FirstTimerDetail> {
+    const sundaySchoolCheckIns = await this.sundaySchoolAttendanceRepo.find({
+      where: { firstTimer: { id: firstTimer.id } },
+      relations: ['session', 'session.sundaySchoolClass'],
+      order: { markedAt: 'ASC' },
+    });
+
+    const timeline: FirstTimerTimelineEntry[] = [
+      {
+        source: 'INITIAL_VISIT' as const,
+        label: firstTimer.visitedEvent?.name ?? 'Initial visit',
+        occurredAt: firstTimer.createdAt,
+      },
+      ...(firstTimer.visits ?? []).map((v) => ({
+        source: 'LOGGED_VISIT' as const,
+        label: v.event?.name ?? 'Return visit',
+        occurredAt: v.visitedAt,
+        notes: v.notes ?? null,
+      })),
+      ...sundaySchoolCheckIns.map((c) => ({
+        source: 'SUNDAY_SCHOOL' as const,
+        label: c.session.sundaySchoolClass.name,
+        occurredAt: c.session.sessionDate,
+      })),
+    ].sort(
+      (a, b) =>
+        new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
+    );
+
+    return { firstTimer, visitCount: timeline.length, timeline };
+  }
+
+  async getFirstTimerDetail(id: string): Promise<FirstTimerDetail> {
+    const firstTimer = await this.firstTimerRepo.findOne({
+      where: { id },
+      relations: ['visits', 'visits.event', 'visitedEvent', 'convertedMember'],
+    });
+    if (!firstTimer) throw new NotFoundException('First timer not found');
+    return this.buildFirstTimerDetail(firstTimer);
+  }
+
+  async getFirstTimerDetailForWorker(
+    id: string,
+    memberId: string,
+  ): Promise<FirstTimerDetail> {
+    await this.assertWorkerInFollowUpDept(memberId);
+    return this.getFirstTimerDetail(id);
   }
 
   async getMyTasks(
@@ -320,6 +440,9 @@ export class FollowUpService {
       throw new BadRequestException(
         'Target worker must be in the Follow-Up department',
       );
+    }
+    if (targetProfile.status !== WorkerStatusEnum.ACTIVE) {
+      throw new BadRequestException('Target worker is not active');
     }
 
     task.assignedTo = targetProfile;
@@ -656,6 +779,23 @@ export class FollowUpService {
     });
   }
 
+  // Backs the reassign-task picker — same active/dept-capability filter as
+  // pickRoundRobinAssignee, unpaginated (small team).
+  async getActiveFollowUpWorkers(): Promise<WorkerProfile[]> {
+    return this.workerProfileRepo
+      .createQueryBuilder('wp')
+      .leftJoinAndSelect('wp.member', 'member')
+      .leftJoinAndSelect('wp.department', 'd_primary')
+      .leftJoinAndSelect('wp.secondaryDepartment', 'd_secondary')
+      .where(
+        '(:capability = ANY(d_primary.capabilities) OR :capability = ANY(d_secondary.capabilities))',
+        { capability: DepartmentCapability.MANAGE_FOLLOW_UP },
+      )
+      .andWhere('wp.status = :status', { status: WorkerStatusEnum.ACTIVE })
+      .orderBy('member.firstname', 'ASC')
+      .getMany();
+  }
+
   async assertWorkerInFollowUpDept(memberId: string): Promise<void> {
     await this.departmentAccessService.assertHasCapability(
       memberId,
@@ -718,16 +858,16 @@ export class FollowUpService {
       [DepartmentCapability.MANAGE_FOLLOW_UP, WorkerStatusEnum.ACTIVE],
     );
 
-    if (!rows.length) {
-      throw new BadRequestException(
-        'No active Follow-Up team members available. Assign at least one worker to the Follow-Up department.',
+    if (rows.length) {
+      assignee = await manager.findOne(WorkerProfile, {
+        where: { id: rows[0].id },
+        relations: ['member'],
+      });
+    } else {
+      this.logger.warn(
+        'First-timer created with no active Follow-Up worker to assign',
       );
     }
-
-    assignee = await manager.findOne(WorkerProfile, {
-      where: { id: rows[0].id },
-      relations: ['member'],
-    });
 
     const firstTimer = manager.create(FirstTimer, {
       firstname: dto.firstname,
@@ -779,6 +919,9 @@ export class FollowUpService {
     }
 
     this.cacheService.flushNamespace('follow-up:report');
+    ft.assignmentWarning = assignee
+      ? null
+      : 'No active Follow-Up worker was available, so this first-timer is unassigned. Reassign it once a worker is active.';
     return ft;
   }
 
@@ -823,6 +966,50 @@ export class FollowUpService {
       `First-timer ${firstTimerId} marked as converted${memberId ? ` → member ${memberId}` : ''}`,
     );
     return saved;
+  }
+
+  async updateFirstTimerByWorker(
+    id: string,
+    dto: UpdateFirstTimerDto,
+    memberId: string,
+  ): Promise<FirstTimer> {
+    await this.assertWorkerInFollowUpDept(memberId);
+    return this.updateFirstTimer(id, dto);
+  }
+
+  async updateFirstTimer(
+    id: string,
+    dto: UpdateFirstTimerDto,
+  ): Promise<FirstTimer> {
+    const ft = await this.firstTimerRepo.findOne({
+      where: { id },
+      relations: ['visitedEvent'],
+    });
+    if (!ft) throw new NotFoundException('First-timer not found');
+
+    if (dto.firstname !== undefined) ft.firstname = dto.firstname;
+    if (dto.lastname !== undefined) ft.lastname = dto.lastname;
+    if (dto.phone !== undefined) ft.phone = dto.phone;
+    if (dto.email !== undefined) ft.email = dto.email;
+    if (dto.wantsToJoinChurch !== undefined)
+      ft.wantsToJoinChurch = dto.wantsToJoinChurch;
+    if (dto.wantsToJoinWorkforce !== undefined)
+      ft.wantsToJoinWorkforce = dto.wantsToJoinWorkforce;
+    if (dto.enjoyedAboutChurch !== undefined)
+      ft.enjoyedAboutChurch = dto.enjoyedAboutChurch;
+    if (dto.notes !== undefined) ft.notes = dto.notes;
+    if (dto.visitedEventId !== undefined)
+      ft.visitedEvent = { id: dto.visitedEventId } as Event;
+
+    await this.firstTimerRepo.save(ft);
+    this.cacheService.flushNamespace('follow-up:report');
+    this.logger.log(`First-timer ${id} updated`);
+    const reloaded = await this.firstTimerRepo.findOne({
+      where: { id },
+      relations: ['visitedEvent'],
+    });
+    if (!reloaded) throw new NotFoundException('First-timer not found');
+    return reloaded;
   }
 
   async adminUpdateTask(
@@ -1007,10 +1194,8 @@ export class FollowUpService {
     return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
-  // Used by MemberTimelineService to render the pre-membership leg of a
-  // member's activity timeline (first visit, repeat visits, conversion) —
-  // null for a member who joined without ever passing through the
-  // first-timer pipeline (e.g. created directly by an admin).
+  // Used by MemberTimelineService for the pre-membership leg of a member's
+  // timeline; null if they joined without ever being a FirstTimer.
   async getFirstTimerByConvertedMemberId(
     memberId: string,
   ): Promise<FirstTimer | null> {
@@ -1019,5 +1204,28 @@ export class FollowUpService {
       relations: ['visits', 'visitedEvent'],
       order: { visits: { visitedAt: 'ASC' } },
     });
+  }
+
+  // Backs the "which event?" picker — defaults to today's events, falls
+  // back to name search. Public/unauthenticated, so only id/name/eventDate.
+  async getPublicEvents(search?: string): Promise<PublicEventOption[]> {
+    const qb = this.eventRepo
+      .createQueryBuilder('event')
+      .select(['event.id', 'event.name', 'event.eventDate'])
+      .limit(8);
+
+    if (search?.trim()) {
+      qb.where('event.name ILIKE :search', {
+        search: `%${search.trim()}%`,
+      }).orderBy('event.eventDate', 'DESC');
+    } else {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      qb.where('event.eventDate <= :today', { today })
+        .andWhere('event.endDate >= :today', { today })
+        .orderBy('event.startTime', 'ASC');
+    }
+
+    return qb.getMany();
   }
 }

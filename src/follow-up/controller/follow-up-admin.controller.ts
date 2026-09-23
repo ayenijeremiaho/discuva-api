@@ -21,6 +21,7 @@ import { ReassignTaskDto } from '../dto/reassign-task.dto';
 import { BulkUpdateTasksDto } from '../dto/bulk-update-tasks.dto';
 import { AdminUpdateFollowUpTaskDto } from '../dto/admin-update-follow-up-task.dto';
 import { LogVisitDto } from '../dto/log-visit.dto';
+import { UpdateFirstTimerDto } from '../dto/update-first-timer.dto';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import {
@@ -48,6 +49,15 @@ export class FollowUpAdminController {
     @Body() dto: CreateFirstTimerDto,
   ) {
     return this.followUpService.createFirstTimerByAdmin(dto, admin.id);
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Patch('first-timers/:id')
+  async updateFirstTimer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateFirstTimerDto,
+  ) {
+    return this.followUpService.updateFirstTimer(id, dto);
   }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
@@ -111,6 +121,12 @@ export class FollowUpAdminController {
     return this.followUpService.reassignTask(id, dto, admin.id);
   }
 
+  @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
+  @Get('workers')
+  async getActiveFollowUpWorkers() {
+    return this.followUpService.getActiveFollowUpWorkers();
+  }
+
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
   @Patch('tasks/bulk')
   async bulkUpdateTasks(@Body() dto: BulkUpdateTasksDto) {
@@ -163,6 +179,13 @@ export class FollowUpAdminController {
     @Body() dto: LogVisitDto,
   ) {
     return this.followUpService.logReturnVisit(id, dto);
+  }
+
+  // Declared after first-timers/pipeline so that static path still matches.
+  @RequiresPermission(AdminPermission.FOLLOW_UP_READ)
+  @Get('first-timers/:id')
+  async getFirstTimerDetail(@Param('id', ParseUUIDPipe) id: string) {
+    return this.followUpService.getFirstTimerDetail(id);
   }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_READ)

@@ -74,4 +74,11 @@ export class FirstTimer extends BaseEntity {
 
   @OneToMany(() => FirstTimerVisit, (v) => v.firstTimer)
   visits: FirstTimerVisit[];
+
+  // Transient — populated explicitly by FollowUpService, not persisted.
+  visitCount?: number;
+
+  // Transient — set only when created with no active Follow-Up worker to
+  // assign, so the caller can surface a warning instead of blocking.
+  assignmentWarning?: string | null;
 }

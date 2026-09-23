@@ -695,6 +695,79 @@ describe('MemberService', () => {
       });
       expect((result as any).profession).toBe('Sound Engineer');
     });
+
+    it('logs WORKER_TRAINEE_STATUS_CHANGED when isTrainee actually flips', async () => {
+      const profile = {
+        id: 'wp-1',
+        department: { id: 'dept-1', name: 'Sound' },
+        secondaryDepartment: null,
+        isTrainee: false,
+      };
+      const member = { id: 'member-1', workerProfile: profile };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockWorkerProfileRepo.save.mockImplementation((p) => Promise.resolve(p));
+
+      await service.updateWorkerProfile(
+        'member-1',
+        { isTrainee: true } as any,
+        'actor-1',
+      );
+
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'WORKER_TRAINEE_STATUS_CHANGED',
+        expect.objectContaining({
+          actorId: 'actor-1',
+          targetId: 'member-1',
+          metadata: { isTrainee: true, departmentId: 'dept-1' },
+        }),
+      );
+    });
+
+    it('does not log WORKER_TRAINEE_STATUS_CHANGED when isTrainee is unchanged', async () => {
+      const profile = {
+        id: 'wp-1',
+        department: { id: 'dept-1', name: 'Sound' },
+        secondaryDepartment: null,
+        isTrainee: true,
+      };
+      const member = { id: 'member-1', workerProfile: profile };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockWorkerProfileRepo.save.mockImplementation((p) => Promise.resolve(p));
+
+      await service.updateWorkerProfile(
+        'member-1',
+        { isTrainee: true } as any,
+        'actor-1',
+      );
+
+      expect(mockAuditLogService.log).not.toHaveBeenCalledWith(
+        'WORKER_TRAINEE_STATUS_CHANGED',
+        expect.anything(),
+      );
+    });
+
+    it('does not log WORKER_TRAINEE_STATUS_CHANGED when isTrainee is not part of the update', async () => {
+      const profile = {
+        id: 'wp-1',
+        department: { id: 'dept-1', name: 'Sound' },
+        secondaryDepartment: null,
+        isTrainee: false,
+      };
+      const member = { id: 'member-1', workerProfile: profile };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockWorkerProfileRepo.save.mockImplementation((p) => Promise.resolve(p));
+
+      await service.updateWorkerProfile(
+        'member-1',
+        { profession: 'Sound Engineer' } as any,
+        'actor-1',
+      );
+
+      expect(mockAuditLogService.log).not.toHaveBeenCalledWith(
+        'WORKER_TRAINEE_STATUS_CHANGED',
+        expect.anything(),
+      );
+    });
   });
 
   describe('revokeWorker', () => {

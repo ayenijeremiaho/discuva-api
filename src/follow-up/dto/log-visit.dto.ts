@@ -5,9 +5,14 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
+
+const emptyToUndefined = ({ value }: { value: unknown }) =>
+  value === '' ? undefined : value;
 
 export class LogVisitDto {
   @IsOptional()
+  @Transform(emptyToUndefined)
   @IsUUID()
   eventId?: string;
 

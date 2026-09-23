@@ -48,9 +48,9 @@ export class FollowUpTask extends BaseEntity {
   @JoinColumn({ name: 'event_id' })
   event: Event | null;
 
-  @ManyToOne(() => WorkerProfile, { nullable: false, onDelete: 'RESTRICT' })
+  @ManyToOne(() => WorkerProfile, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'assigned_to_id' })
-  assignedTo: WorkerProfile;
+  assignedTo: WorkerProfile | null;
 
   @Column({ nullable: true })
   outcome: FollowUpOutcomeEnum | null;

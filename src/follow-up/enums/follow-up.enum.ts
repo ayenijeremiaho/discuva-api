@@ -3,6 +3,7 @@ export enum FirstTimerSourceEnum {
   ONLINE = 'ONLINE',
   REFERRAL = 'REFERRAL',
   SUNDAY_SCHOOL = 'SUNDAY_SCHOOL',
+  APP_SIGNUP = 'APP_SIGNUP',
 }
 
 export enum FollowUpTaskTypeEnum {

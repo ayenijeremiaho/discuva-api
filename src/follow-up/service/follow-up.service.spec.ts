@@ -27,6 +27,8 @@ import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { Event } from '../../event/entity/event.entity';
+import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -67,8 +69,53 @@ const mockVisitRepo = {
   create: jest.fn(),
 };
 
+const workerProfileQbMock = {
+  leftJoinAndSelect: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  orderBy: jest.fn().mockReturnThis(),
+  getMany: jest.fn(),
+};
+
 const mockWorkerProfileRepo = {
   findOne: jest.fn(),
+  createQueryBuilder: jest.fn().mockReturnValue(workerProfileQbMock),
+};
+
+const eventQbMock = {
+  select: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  orderBy: jest.fn().mockReturnThis(),
+  limit: jest.fn().mockReturnThis(),
+  getMany: jest.fn(),
+};
+
+const mockEventRepo = {
+  createQueryBuilder: jest.fn().mockReturnValue(eventQbMock),
+};
+
+const ssaQbMock = {
+  select: jest.fn().mockReturnThis(),
+  addSelect: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  groupBy: jest.fn().mockReturnThis(),
+  getRawMany: jest.fn(),
+};
+
+const firstTimersListQbMock = {
+  leftJoinAndSelect: jest.fn().mockReturnThis(),
+  loadRelationCountAndMap: jest.fn().mockReturnThis(),
+  orderBy: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  skip: jest.fn().mockReturnThis(),
+  take: jest.fn().mockReturnThis(),
+  getManyAndCount: jest.fn(),
+};
+
+const mockSundaySchoolAttendanceRepo = {
+  createQueryBuilder: jest.fn().mockReturnValue(ssaQbMock),
+  find: jest.fn(),
 };
 
 const qbMock = {
@@ -168,6 +215,14 @@ describe('FollowUpService', () => {
       wantsToJoinWorkforce: '0',
       count: '0',
     });
+    eventQbMock.getMany.mockResolvedValue([]);
+    workerProfileQbMock.getMany.mockResolvedValue([]);
+    ssaQbMock.getRawMany.mockResolvedValue([]);
+    mockSundaySchoolAttendanceRepo.find.mockResolvedValue([]);
+    firstTimersListQbMock.getManyAndCount.mockResolvedValue([[], 0]);
+    mockFirstTimerRepo.createQueryBuilder.mockReturnValue(
+      firstTimersListQbMock,
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -191,6 +246,14 @@ describe('FollowUpService', () => {
         {
           provide: getRepositoryToken(FirstTimerVisit),
           useValue: mockVisitRepo,
+        },
+        {
+          provide: getRepositoryToken(Event),
+          useValue: mockEventRepo,
+        },
+        {
+          provide: getRepositoryToken(SundaySchoolAttendance),
+          useValue: mockSundaySchoolAttendanceRepo,
         },
         {
           provide: DepartmentAccessService,
@@ -270,18 +333,38 @@ describe('FollowUpService', () => {
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws BadRequestException when no FOLLOW_UP assignee is available', async () => {
+    it('creates the first-timer unassigned (with a warning, not an error) when no FOLLOW_UP worker is available', async () => {
       mockWorkerProfileRepo.findOne.mockResolvedValue(followUpProfile);
+      const savedFirstTimer = { id: 'ft-2', firstname: 'A', lastname: 'B' };
+      const savedTask = {
+        id: 'task-2',
+        type: FollowUpTaskTypeEnum.FIRST_TIMER,
+      };
       mockManager.query
         .mockResolvedValueOnce([]) // advisory lock
         .mockResolvedValueOnce([]); // pick → no workers
+      mockManager.create.mockImplementation((entity: any) =>
+        entity === FollowUpTask ? savedTask : savedFirstTimer,
+      );
+      mockManager.save
+        .mockResolvedValueOnce(savedFirstTimer)
+        .mockResolvedValueOnce(savedTask);
 
-      await expect(
-        service.createFirstTimerByWorker(
-          { firstname: 'A', lastname: 'B', phone: '08011111111' },
-          'member-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
+      const result = await service.createFirstTimerByWorker(
+        { firstname: 'A', lastname: 'B', phone: '08011111111' },
+        'member-1',
+      );
+
+      expect(result.assignmentWarning).toEqual(
+        expect.stringContaining('unassigned'),
+      );
+      expect(mockManager.create).toHaveBeenCalledWith(
+        FollowUpTask,
+        expect.objectContaining({ assignedTo: null }),
+      );
+      expect(
+        mockEmailQueueService.queueEmailWithTemplate,
+      ).not.toHaveBeenCalled();
     });
 
     it('creates first-timer, assigns task, and sends assignment email', async () => {
@@ -314,7 +397,7 @@ describe('FollowUpService', () => {
         'member-1',
       );
 
-      expect(result).toEqual(savedFirstTimer);
+      expect(result).toMatchObject(savedFirstTimer);
       expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalledWith(
         'ada@test.com',
         expect.stringContaining('New Follow-Up Task Assigned'),
@@ -347,7 +430,7 @@ describe('FollowUpService', () => {
         'admin-1',
       );
 
-      expect(result).toEqual(savedFirstTimer);
+      expect(result).toMatchObject(savedFirstTimer);
       expect(mockEmailQueueService.queueEmailWithTemplate).toHaveBeenCalled();
     });
   });
@@ -376,10 +459,43 @@ describe('FollowUpService', () => {
         source: FirstTimerSourceEnum.WALK_IN,
       } as any);
 
-      expect(result).toEqual(savedFirstTimer);
+      expect(result).toMatchObject(savedFirstTimer);
       expect(capturedCreateArgs).toEqual(
         expect.objectContaining({
           source: FirstTimerSourceEnum.ONLINE,
+          createdByMember: null,
+          createdByAdmin: null,
+        }),
+      );
+    });
+  });
+
+  describe('createFirstTimerFromAppSignup', () => {
+    it('forces source to APP_SIGNUP regardless of the DTO and uses an empty actor', async () => {
+      const savedFirstTimer = { id: 'ft-4', firstname: 'Ada' };
+      let capturedCreateArgs: any;
+
+      mockManager.query
+        .mockResolvedValueOnce([]) // advisory lock
+        .mockResolvedValueOnce([{ id: 'wp-1' }]); // pick
+      mockManager.findOne.mockResolvedValue(followUpProfile);
+      mockManager.create.mockImplementation((entity: any, args: any) => {
+        if (entity === FirstTimer) capturedCreateArgs = args;
+        return entity === FirstTimer ? savedFirstTimer : args;
+      });
+      mockManager.save.mockResolvedValue(savedFirstTimer);
+
+      const result = await service.createFirstTimerFromAppSignup({
+        firstname: 'Ada',
+        lastname: 'Okoye',
+        phone: '+2348012345679',
+        source: FirstTimerSourceEnum.REFERRAL,
+      } as any);
+
+      expect(result).toMatchObject(savedFirstTimer);
+      expect(capturedCreateArgs).toEqual(
+        expect.objectContaining({
+          source: FirstTimerSourceEnum.APP_SIGNUP,
           createdByMember: null,
           createdByAdmin: null,
         }),
@@ -481,6 +597,24 @@ describe('FollowUpService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('throws BadRequestException when target worker is not ACTIVE', async () => {
+      const inactiveFollowUpProfile = {
+        ...followUpProfile,
+        id: 'wp-3',
+        status: WorkerStatusEnum.INACTIVE,
+      };
+      mockTaskRepo.findOne.mockResolvedValue({
+        id: 'task-1',
+        assignedTo: followUpProfile,
+      });
+      mockWorkerProfileRepo.findOne
+        .mockResolvedValueOnce(inactiveFollowUpProfile)
+        .mockResolvedValueOnce(inactiveFollowUpProfile);
+      await expect(
+        service.reassignTask('task-1', { workerProfileId: 'wp-3' }, 'admin-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('reassigns task and sends email to new assignee', async () => {
       const task = {
         id: 'task-1',
@@ -510,6 +644,20 @@ describe('FollowUpService', () => {
         undefined,
         'FOLLOW_UP',
       );
+    });
+  });
+
+  describe('getActiveFollowUpWorkers', () => {
+    it('filters to active workers with the FOLLOW_UP capability', async () => {
+      workerProfileQbMock.getMany.mockResolvedValueOnce([followUpProfile]);
+
+      const result = await service.getActiveFollowUpWorkers();
+
+      expect(workerProfileQbMock.andWhere).toHaveBeenCalledWith(
+        'wp.status = :status',
+        { status: WorkerStatusEnum.ACTIVE },
+      );
+      expect(result).toEqual([followUpProfile]);
     });
   });
 
@@ -681,6 +829,104 @@ describe('FollowUpService', () => {
       expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ convertedMember: { id: 'member-99' } }),
       );
+    });
+  });
+
+  // ── updateFirstTimer ─────────────────────────────────────────────────────
+
+  describe('updateFirstTimer', () => {
+    it('throws NotFoundException when first-timer not found', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce(null);
+      await expect(
+        service.updateFirstTimer('ft-x', { phone: '08099999999' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('applies only the provided fields and reloads with visitedEvent', async () => {
+      const ft = {
+        id: 'ft-1',
+        firstname: 'Ada',
+        lastname: 'Obi',
+        phone: '08011111111',
+        email: null,
+        wantsToJoinChurch: false,
+        wantsToJoinWorkforce: false,
+        enjoyedAboutChurch: null,
+        notes: null,
+        visitedEvent: null,
+      };
+      const reloaded = {
+        ...ft,
+        phone: '08022222222',
+        visitedEvent: { id: 'event-1', name: 'Sunday Service' },
+      };
+      mockFirstTimerRepo.findOne
+        .mockResolvedValueOnce(ft)
+        .mockResolvedValueOnce(reloaded);
+      mockFirstTimerRepo.save.mockResolvedValue(undefined);
+
+      const result = await service.updateFirstTimer('ft-1', {
+        phone: '08022222222',
+        visitedEventId: 'event-1',
+      });
+
+      expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phone: '08022222222',
+          visitedEvent: { id: 'event-1' },
+          firstname: 'Ada', // untouched fields are left as-is
+        }),
+      );
+      expect(result).toEqual(reloaded);
+    });
+
+    it('leaves a field untouched when it is not part of the update', async () => {
+      const ft = { id: 'ft-1', notes: 'Original note', phone: '08011111111' };
+      mockFirstTimerRepo.findOne
+        .mockResolvedValueOnce(ft)
+        .mockResolvedValueOnce(ft);
+      mockFirstTimerRepo.save.mockResolvedValue(undefined);
+
+      await service.updateFirstTimer('ft-1', { phone: '08022222222' });
+
+      expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ notes: 'Original note' }),
+      );
+    });
+  });
+
+  describe('updateFirstTimerByWorker', () => {
+    it('propagates ForbiddenException from the department check before loading anything', async () => {
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValueOnce(
+        new ForbiddenException(
+          'Access restricted to Follow-Up department workers',
+        ),
+      );
+
+      await expect(
+        service.updateFirstTimerByWorker(
+          'ft-1',
+          { phone: '08022222222' },
+          'member-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockFirstTimerRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('delegates to updateFirstTimer once authorized', async () => {
+      const ft = { id: 'ft-1', phone: '08011111111' };
+      mockFirstTimerRepo.findOne
+        .mockResolvedValueOnce(ft)
+        .mockResolvedValueOnce({ ...ft, phone: '08022222222' });
+      mockFirstTimerRepo.save.mockResolvedValue(undefined);
+
+      const result = await service.updateFirstTimerByWorker(
+        'ft-1',
+        { phone: '08022222222' },
+        'member-1',
+      );
+
+      expect(result.phone).toBe('08022222222');
     });
   });
 
@@ -1178,6 +1424,165 @@ describe('FollowUpService', () => {
       expect(result.data).toHaveLength(1);
       expect(result.totalCount).toBe(1);
       expect(result.data[0].id).toBe('task-1');
+    });
+  });
+
+  // ── getPublicEvents ────────────────────────────────────────────────────
+
+  describe('getPublicEvents', () => {
+    it('filters to events happening today when no search term is given', async () => {
+      eventQbMock.getMany.mockResolvedValueOnce([
+        { id: 'ev-1', name: 'Sunday Service', eventDate: new Date() },
+      ]);
+
+      const result = await service.getPublicEvents();
+
+      expect(eventQbMock.where).toHaveBeenCalledWith(
+        expect.stringContaining('eventDate <='),
+        expect.objectContaining({ today: expect.any(Date) }),
+      );
+      expect(eventQbMock.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('endDate >='),
+        expect.objectContaining({ today: expect.any(Date) }),
+      );
+      expect(result).toEqual([
+        { id: 'ev-1', name: 'Sunday Service', eventDate: expect.any(Date) },
+      ]);
+    });
+
+    it('searches by name instead of the today window when a search term is given', async () => {
+      eventQbMock.getMany.mockResolvedValueOnce([]);
+
+      await service.getPublicEvents('youth');
+
+      expect(eventQbMock.where).toHaveBeenCalledWith(
+        expect.stringContaining('name ILIKE'),
+        { search: '%youth%' },
+      );
+      expect(eventQbMock.andWhere).not.toHaveBeenCalled();
+    });
+
+    it('treats a blank search string as no search', async () => {
+      eventQbMock.getMany.mockResolvedValueOnce([]);
+
+      await service.getPublicEvents('   ');
+
+      expect(eventQbMock.where).toHaveBeenCalledWith(
+        expect.stringContaining('eventDate <='),
+        expect.anything(),
+      );
+    });
+  });
+
+  // ── getFirstTimers — visitCount aggregation ───────────────────────────
+
+  describe('getFirstTimers visitCount', () => {
+    it('rolls up the initial visit, logged visits, and Sunday School check-ins into visitCount', async () => {
+      const ftA = { id: 'ft-a', visitCount: 2 }; // 2 logged visits from loadRelationCountAndMap
+      const ftB = { id: 'ft-b', visitCount: 0 }; // no logged visits
+      firstTimersListQbMock.getManyAndCount.mockResolvedValueOnce([
+        [ftA, ftB],
+        2,
+      ]);
+      ssaQbMock.getRawMany.mockResolvedValueOnce([
+        { firstTimerId: 'ft-a', count: '3' },
+      ]);
+
+      const result = await service.getFirstTimers();
+
+      expect(
+        firstTimersListQbMock.loadRelationCountAndMap,
+      ).toHaveBeenCalledWith('ft.visitCount', 'ft.visits');
+      // ft-a: 1 (initial) + 2 (logged) + 3 (Sunday School) = 6
+      expect(result.data[0].visitCount).toBe(6);
+      // ft-b: 1 (initial) + 0 (logged) + 0 (Sunday School) = 1
+      expect(result.data[1].visitCount).toBe(1);
+    });
+
+    it('skips the Sunday School batch query when the page is empty', async () => {
+      firstTimersListQbMock.getManyAndCount.mockResolvedValueOnce([[], 0]);
+
+      await service.getFirstTimers();
+
+      expect(
+        mockSundaySchoolAttendanceRepo.createQueryBuilder,
+      ).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── getFirstTimerDetail / getFirstTimerDetailForWorker ─────────────────
+
+  describe('getFirstTimerDetail', () => {
+    it('throws NotFoundException when the first-timer does not exist', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.getFirstTimerDetail('missing')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('builds a dated timeline from the initial visit, logged visits, and Sunday School check-ins', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce({
+        id: 'ft-1',
+        createdAt: new Date('2026-01-01T09:00:00Z'),
+        visitedEvent: { name: 'Sunday Service' },
+        visits: [
+          {
+            visitedAt: '2026-01-08',
+            notes: 'Came back with a friend',
+            event: { name: 'Sunday Service' },
+          },
+        ],
+      });
+      mockSundaySchoolAttendanceRepo.find.mockResolvedValueOnce([
+        {
+          markedAt: new Date('2026-01-15T09:00:00Z'),
+          session: {
+            sessionDate: '2026-01-15',
+            sundaySchoolClass: { name: 'Kids Class' },
+          },
+        },
+      ]);
+
+      const result = await service.getFirstTimerDetail('ft-1');
+
+      expect(result.visitCount).toBe(3);
+      expect(result.timeline.map((t) => t.source)).toEqual([
+        'INITIAL_VISIT',
+        'LOGGED_VISIT',
+        'SUNDAY_SCHOOL',
+      ]);
+      expect(result.timeline[2].label).toBe('Kids Class');
+    });
+  });
+
+  describe('getFirstTimerDetailForWorker', () => {
+    it('propagates ForbiddenException from the department check before loading anything', async () => {
+      mockDepartmentAccessService.assertHasCapability.mockRejectedValueOnce(
+        new ForbiddenException(
+          'Access restricted to Follow-Up department workers',
+        ),
+      );
+
+      await expect(
+        service.getFirstTimerDetailForWorker('ft-1', 'member-1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockFirstTimerRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('delegates to getFirstTimerDetail once authorized', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce({
+        id: 'ft-1',
+        createdAt: new Date('2026-01-01T09:00:00Z'),
+        visitedEvent: null,
+        visits: [],
+      });
+
+      const result = await service.getFirstTimerDetailForWorker(
+        'ft-1',
+        'member-1',
+      );
+
+      expect(result.visitCount).toBe(1);
     });
   });
 });

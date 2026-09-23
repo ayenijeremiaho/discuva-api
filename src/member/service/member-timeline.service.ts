@@ -12,6 +12,16 @@ import {
   MemberTimelineEvent,
   MemberTimelineEventType,
 } from '../interface/member-timeline-event.interface';
+import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+import { Attendance } from '../../attendance/entity/attendance.entity';
+import { AttendanceStatusEnum } from '../../attendance/enums/check-in.enum';
+
+export interface MemberTimeline {
+  events: MemberTimelineEvent[];
+  visitCount: number;
+  // Current status, not a historical event — false for a non-worker.
+  isTraineeNow: boolean;
+}
 
 // Only audit actions that are (a) genuinely targeted at the member (not a
 // department/convert row with the memberId buried in metadata, which
@@ -26,6 +36,7 @@ const MILESTONE_ACTIONS: AuditAction[] = [
   'WORKER_REINSTATED',
   'WORKER_REVOKED',
   'WORKER_TRAINEE_DEMOTED',
+  'WORKER_TRAINEE_STATUS_CHANGED',
   'CLERGY_ASSIGNED',
   'CLERGY_TITLE_CHANGED',
   'CLERGY_REMOVED',
@@ -38,11 +49,15 @@ export class MemberTimelineService {
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(Department)
     private readonly departmentRepo: Repository<Department>,
+    @InjectRepository(SundaySchoolAttendance)
+    private readonly sundaySchoolAttendanceRepo: Repository<SundaySchoolAttendance>,
+    @InjectRepository(Attendance)
+    private readonly attendanceRepo: Repository<Attendance>,
     private readonly auditLogService: AuditLogService,
     private readonly followUpService: FollowUpService,
   ) {}
 
-  async getTimeline(memberId: string): Promise<MemberTimelineEvent[]> {
+  async getTimeline(memberId: string): Promise<MemberTimeline> {
     const member = await this.memberRepo.findOne({
       where: { id: memberId },
       relations: ['workerProfile', 'workerProfile.department'],
@@ -113,6 +128,7 @@ export class MemberTimelineService {
       const metadata = (log.metadata ?? {}) as {
         departmentId?: string;
         clergyTitleName?: string;
+        isTrainee?: boolean;
       };
       const departmentName = metadata.departmentId
         ? (departmentNameById.get(metadata.departmentId) ?? null)
@@ -129,6 +145,7 @@ export class MemberTimelineService {
         this.toTimelineEvent(log.action as AuditAction, log.createdAt, {
           departmentName,
           clergyTitleName: metadata.clergyTitleName ?? null,
+          isTrainee: metadata.isTrainee ?? null,
         }),
       );
     }
@@ -145,13 +162,57 @@ export class MemberTimelineService {
       });
     }
 
-    return events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+    // Sunday School check-ins are queried twice: first_timer_id
+    // pre-conversion, member_id after — that row is never re-linked.
+    const preConversionVisitCount = events.filter(
+      (e) =>
+        e.type === MemberTimelineEventType.FIRST_VISIT ||
+        e.type === MemberTimelineEventType.REPEAT_VISIT,
+    ).length;
+
+    const [
+      preConversionSundaySchoolCount,
+      postConversionSundaySchoolCount,
+      regularAttendanceCount,
+    ] = await Promise.all([
+      firstTimer
+        ? this.sundaySchoolAttendanceRepo.count({
+            where: { firstTimer: { id: firstTimer.id } },
+          })
+        : Promise.resolve(0),
+      this.sundaySchoolAttendanceRepo.count({
+        where: { member: { id: memberId } },
+      }),
+      this.attendanceRepo
+        .createQueryBuilder('a')
+        .where('a.member_id = :memberId', { memberId })
+        .andWhere('a.status IN (:...statuses)', {
+          statuses: [AttendanceStatusEnum.PRESENT, AttendanceStatusEnum.LATE],
+        })
+        .getCount(),
+    ]);
+
+    const visitCount =
+      preConversionVisitCount +
+      preConversionSundaySchoolCount +
+      postConversionSundaySchoolCount +
+      regularAttendanceCount;
+
+    return {
+      events: events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)),
+      visitCount,
+      isTraineeNow: member.workerProfile?.isTrainee ?? false,
+    };
   }
 
   private toTimelineEvent(
     action: AuditAction,
     occurredAt: Date,
-    context: { departmentName: string | null; clergyTitleName: string | null },
+    context: {
+      departmentName: string | null;
+      clergyTitleName: string | null;
+      isTrainee: boolean | null;
+    },
   ): MemberTimelineEvent {
     const occurredAtIso = occurredAt.toISOString();
     switch (action) {
@@ -180,6 +241,13 @@ export class MemberTimelineService {
         return {
           type: MemberTimelineEventType.WORKER_STATUS_CHANGED,
           title: 'Moved Back to Trainee',
+          description: context.departmentName,
+          occurredAt: occurredAtIso,
+        };
+      case 'WORKER_TRAINEE_STATUS_CHANGED':
+        return {
+          type: MemberTimelineEventType.TRAINEE_STATUS_CHANGED,
+          title: context.isTrainee ? 'Started Training' : 'Completed Training',
           description: context.departmentName,
           occurredAt: occurredAtIso,
         };

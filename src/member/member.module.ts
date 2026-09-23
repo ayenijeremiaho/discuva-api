@@ -16,6 +16,8 @@ import { MemberImportController } from './controller/member-import.controller';
 import { Department } from '../department/entity/department.entity';
 import { DepartmentLead } from '../department/entity/department-lead.entity';
 import { SundaySchoolClass } from '../sunday-school/entity/sunday-school-class.entity';
+import { SundaySchoolAttendance } from '../sunday-school/entity/sunday-school-attendance.entity';
+import { Attendance } from '../attendance/entity/attendance.entity';
 import { UtilityModule } from '../utility/utility.module';
 import { FollowUpModule } from '../follow-up/follow-up.module';
 
@@ -32,6 +34,10 @@ import { FollowUpModule } from '../follow-up/follow-up.module';
       Department,
       DepartmentLead,
       SundaySchoolClass,
+      // Read-only — importing AttendanceModule/SundaySchoolModule directly
+      // would risk circularity.
+      SundaySchoolAttendance,
+      Attendance,
     ]),
     UtilityModule,
     FollowUpModule,

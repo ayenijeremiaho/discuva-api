@@ -123,7 +123,7 @@ Created when a member is promoted to WORKER. **Never deleted by any revocation p
 | yearJoinedWorkforce   | Date               | Optional                                                                                         |
 | completedSOD          | boolean            | School of Disciples                                                                              |
 | completedBibleCollege | boolean            |                                                                                                  |
-| isTrainee             | boolean            | Default `false`. Marks a worker as still in training/probation — has full worker access (role stays `WORKER`, `RolesGuard` only checks `role`) but is flagged in the UI (mobile "Training" badge, admin "Trainee" badge). Toggled via `PATCH members/:id/worker-profile`. |
+| isTrainee             | boolean            | Default `false`, indexed (`IDX_worker_profiles_is_trainee`). Marks a worker as still in training/probation — has full worker access (role stays `WORKER`, `RolesGuard` only checks `role`) but is flagged in the UI (mobile "Training" badge, admin "Trainee" badge). Toggled via `PATCH members/:id/worker-profile`; a real flip (not just the field being present with its existing value) is separately audit-logged as `WORKER_TRAINEE_STATUS_CHANGED` (`metadata: { isTrainee, departmentId }`) alongside the always-fired, non-milestone `WORKER_PROFILE_UPDATED` — this is what lets the digital-footprint timeline show a clean "Started Training"/"Completed Training" entry instead of the generic (and deliberately timeline-excluded) profile-update action. |
 
 **Deactivation (`revokeWorker` / `demoteTraineeToMember`) — shared, non-destructive:** both go through a private `deactivateWorkerAccess()` helper that removes `DepartmentLead` rows and any Sunday School teacher assignment (no cascade on those FKs), sets `workerProfile.status = INACTIVE`, and resets `member.role = MEMBER`. Access is fully revoked immediately — `RolesGuard` does an exact match on `role` alone, so a `MEMBER`-role account can't reach worker routes regardless of what its (inactive) `WorkerProfile` looks like. The two differ only in guard + what they touch on `isTrainee`:
 - `revokeWorker` — any active worker, `POST members/:id/revoke-worker`. Leaves `isTrainee` untouched (so reinstatement resumes exactly as they left off, trainee or not).
@@ -2297,27 +2297,46 @@ populate a picker with the tenant's own titles).
 `clergy: { title: {id, name}, canReviewFeedback: boolean } | null` is surfaced on `MemberDto` (`GET /auth/me`,
 `GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `clergy` relation.
 
-**Member timeline / "digital footprint":** `GET /members/:id/timeline` (`AdminGuard` + `MEMBERS_READ`) returns a
-chronologically sorted `MemberTimelineEvent[]` (`{ type, title, description, occurredAt }`) — the church-facing
-narrative of a member's life in the system: first visit → repeat visits → became a member → became a worker →
-department/clergy/status changes. `MemberTimelineService` (`src/member/service/member-timeline.service.ts`) builds
-it from two sources, not a dedicated history table:
+**Member timeline / "digital footprint":** `GET /members/:id/timeline` (`AdminGuard` + `MEMBERS_READ`) returns
+`{ events: MemberTimelineEvent[], visitCount: number, isTraineeNow: boolean }`. `events` is a chronologically sorted
+`{ type, title, description, occurredAt }[]` — the church-facing narrative of a member's life in the system: first
+visit → repeat visits → became a member → became a worker → started/completed training → department/clergy/status
+changes. `MemberTimelineService` (`src/member/service/member-timeline.service.ts`) builds `events` from two sources,
+not a dedicated history table:
 - The first-timer pipeline (`FollowUpService.getFirstTimerByConvertedMemberId`) — if the member ever passed through
   `FirstTimer` (walk-in or a public form with `createsFirstTimers`), its `createdAt` becomes "First Visit", each
   `FirstTimerVisit` becomes a "Visited Again" entry, and `convertedAt` becomes "Became a Member". A member with no
   `FirstTimer` record (created directly by an admin, bulk import, self-signup outside the visitor pipeline) instead
   gets a single "Joined the Church" event from `dateJoinedChurch ?? createdAt`.
 - A curated allowlist of `AuditLog` entries filtered by `targetId = memberId` (`MEMBER_ACTIVATED/DEACTIVATED`,
-  `WORKER_PROMOTED/REINSTATED/REVOKED`, `WORKER_TRAINEE_DEMOTED`, `CLERGY_ASSIGNED/TITLE_CHANGED/REMOVED`). This is
-  deliberately **not** every audit action for the member — noisy ones like `MEMBER_UPDATED`, `MEMBER_LOGIN`, or the
-  generic `WORKER_PROFILE_UPDATED` (fires on any profile field edit, carries no clean before/after) are excluded so
-  the timeline reads as milestones, not a raw change log. `WORKER_PROMOTED`/`REINSTATED`'s `metadata.departmentId`
-  is resolved to a name via one batched `Department` lookup (not per-event).
+  `WORKER_PROMOTED/REINSTATED/REVOKED`, `WORKER_TRAINEE_DEMOTED`, `WORKER_TRAINEE_STATUS_CHANGED`,
+  `CLERGY_ASSIGNED/TITLE_CHANGED/REMOVED`). This is deliberately **not** every audit action for the member — noisy
+  ones like `MEMBER_UPDATED`, `MEMBER_LOGIN`, or the generic `WORKER_PROFILE_UPDATED` (fires on any profile field
+  edit, carries no clean before/after) are excluded so the timeline reads as milestones, not a raw change log.
+  `WORKER_PROMOTED`/`REINSTATED`/`WORKER_TRAINEE_STATUS_CHANGED`'s `metadata.departmentId` is resolved to a name via
+  one batched `Department` lookup (not per-event). `WORKER_TRAINEE_STATUS_CHANGED`'s `metadata.isTrainee` picks the
+  title: `true` → "Started Training", `false` → "Completed Training" (a trainee promoted to a full worker — distinct
+  from `WORKER_TRAINEE_DEMOTED`, which is a trainee losing worker status entirely and reverting to plain `MEMBER`).
+
+`isTraineeNow` is a live status read straight off `member.workerProfile?.isTrainee` (not derived from `events`) — a
+current-state badge for "is this person in training right now," separate from the dated `TRAINEE_STATUS_CHANGED`
+history entries. `false` for a non-worker.
 - **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` and the evangelism `Convert` pipeline's
   `CONVERT_LINKED_TO_MEMBER` are not yet included — those audit entries target the department/convert row (not the
   member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
   it doesn't have today. A worker whose promotion predates audit logging (legacy data, bulk imports) falls back to
   `WorkerProfile.createdAt` for a "Became a Worker" event so they aren't silently missing from the timeline.
+
+`visitCount` is a separate rollup, computed alongside `events` rather than derived from them, of "how many times has
+the church actually seen this person" — the same figure `FollowUpService.getPublicEvents`'s sibling feature,
+`FollowUpService.getFirstTimerDetail`, computes for a still-unconverted first-timer (see below), carried across the
+first-timer → member lifecycle instead of resetting to zero on conversion. It sums: the `FIRST_VISIT`/`REPEAT_VISIT`
+event count already in `events`; `SundaySchoolAttendance` rows linked via `first_timer_id` (pre-conversion, queried
+only if a `FirstTimer` record exists) *and* via `member_id` (post-conversion) — queried separately because a
+Sunday School attendance row is never re-linked from one FK to the other when a first-timer converts; and regular
+`Attendance` rows with `status IN ('PRESENT', 'LATE')`, matching the status-filter convention used everywhere else
+attendance is counted (`AttendanceService`). `ON_LEAVE`/`ABSENT` don't count as a visit; `ATTENDED_ONLINE` isn't
+included either, consistent with this being a physical-attendance figure.
 
 **Profile photo:** `POST /members/me/photo` (multipart, field `photo`) uploads/replaces the caller's own photo via
 `CloudinaryService` (folder `profile-pictures`); `DELETE /members/me/photo` removes it. Both `JwtAuthGuard` only —
@@ -6901,6 +6920,16 @@ Handles first-timer registration, follow-up task management, and post-event enga
 
 **First-timer registration** is available on both the worker mobile app (workers in the FOLLOW_UP department) and the admin portal (admins with `FOLLOW_UP_WRITE`). On creation, a `FollowUpTask` of type `FIRST_TIMER` is automatically created and assigned via round-robin to the FOLLOW_UP-department worker with the fewest open tasks. The pick and task creation run inside a single transaction protected by a PostgreSQL advisory lock (`pg_advisory_xact_lock(hashtext('follow-up:round-robin'))`), serializing concurrent registrations so the open-task count is always accurate.
 
+When no active FOLLOW_UP worker exists to assign, this is **not** an error — `doCreateFirstTimer()` still creates the `FirstTimer` and its `FollowUpTask` with `assignedTo: null` (nullable since migration `MakeFollowUpTaskAssignedToNullable`; was `NOT NULL` originally, which would have hard-blocked creation). The returned `FirstTimer` carries a transient `assignmentWarning: string | null` (not persisted — same pattern as `visitCount`) so callers can surface a warning instead of silently losing the registration. The admin UI shows it as a dismissible banner instead of auto-closing the "Add First Timer" panel. An unassigned task shows up in `GET /admin/follow-up/tasks` like any other (with `assignedTo: null`, "—" for worker name) and can be handed to someone once a worker becomes active via `PATCH /admin/follow-up/tasks/:id/reassign`.
+
+**Self-onboarding from the member app's signup screen (`POST /follow-up/public/first-timer`, `FollowUpPublicController`):** `@Public()`, no login required — reached from `discuva-member`'s own signup page by someone who just installed the app and isn't (yet, or ever) ready to create a full member account, so they can still let the church know they're here. Mirrors `FormPublicController`'s shape (module gate via `ModuleEnabledGuard`, rate-limited `@Throttle({limit: 5, ttl: 60_000})` since it's an open unauthenticated write). Calls `FollowUpService.createFirstTimerFromAppSignup()`, which — like `createFirstTimerFromPublicForm` forcing `ONLINE` — forces `source` to a new `FirstTimerSourceEnum.APP_SIGNUP` value regardless of what the caller submits, and passes an empty actor (no `createdByMember`/`createdByAdmin`). Goes through the exact same `doCreateFirstTimer` path as every other first-timer creation route: round-robin `FollowUpTask` assignment, due date, fire-and-forget assignment email. Returns only `{ received: true, firstTimerId }` — never the assignee or other internal details, to an unauthenticated caller.
+
+**"Which event is this for?" picker (`GET /follow-up/public/events`, `FollowUpPublicController.events`; and the existing authenticated `GET /events?from=&to=` for admin/worker callers):** Backs the event-visited field on both the unauthenticated member-app self-onboarding form above and the admin's manual "Add First Timer"/"Log Visit" forms. `FollowUpService.getPublicEvents(search?)` defaults to events happening today (`event.eventDate <= today AND event.endDate >= today`, ordered by `startTime` ASC — both `event_date` and `end_date` are indexed, migration `AddEventEndDateIndex`, since `event_date <= today` alone isn't selective as event history grows) so a visitor or admin can tap rather than search — a name search (`?search=`) is the fallback when nothing's on today or a different event is meant. Public variant is `@Public()` + `ModuleEnabledGuard` (module `follow_up`) + `@Throttle({limit: 30, ttl: 60_000})` (read-only, higher limit than the write endpoint above since it's typeahead-driven), and selects only `id`/`name`/`eventDate` — no attendance, slot, or venue detail, since the caller isn't authenticated. The admin UI instead reuses the existing authenticated `GET /events` route with `from`/`to` set to today for the same "today" default, since an admin session already has full read access to that endpoint.
+
+**Editing a first-timer's own details (`PATCH /admin/follow-up/first-timers/:id`, admin; `PATCH /follow-up/first-timers/:id`, worker; both `UpdateFirstTimerDto`):** for correcting a record after the fact — e.g. an admin forgot to set the event visited, or a Sunday School check-in only captured partial info. All fields optional/independent (`firstname`, `lastname`, `phone`, `email`, `wantsToJoinChurch`, `wantsToJoinWorkforce`, `enjoyedAboutChurch`, `notes`, `visitedEventId`); `source` is deliberately **not** editable here — it's forced server-side at creation to stay non-spoofable, and changing it after the fact would corrupt source attribution in reports. `convertedAt`/`inviteSentAt` have their own dedicated endpoints. `FollowUpService.updateFirstTimer()` reloads the record with its `visitedEvent` relation before returning, so the response reflects the current event name, not just the id that was set. The worker variant (`updateFirstTimerByWorker`) is a thin wrapper adding `assertWorkerInFollowUpDept` first — same shape as `getFirstTimerDetailForWorker` — and isn't scoped to only first-timers on the caller's own tasks, matching `createFirstTimerByWorker`'s existing department-wide (not just own-task) access. Backs an inline "Edit Details" toggle on the member app's task detail screen, using the same public today-first event picker (`GET /follow-up/public/events`) as the self-onboarding form, since it's `@Public()` and works fine from an authenticated session too.
+
+**First-timer visit history (`GET /admin/follow-up/first-timers/:id`, admin; `GET /follow-up/first-timers/:id`, worker):** Returns `{ firstTimer, visitCount, timeline }` — `FollowUpService.getFirstTimerDetail()` (worker variant wraps it with `assertWorkerInFollowUpDept` first). `timeline` merges three sources into one dated list, each entry `{ source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL', label, occurredAt, notes? }`: the first-timer's own `createdAt` as `INITIAL_VISIT`; each `FirstTimerVisit` row as `LOGGED_VISIT`; and each `SundaySchoolAttendance` row linked via `first_timer_id` as `SUNDAY_SCHOOL` (queried directly — `SundaySchoolAttendance` is registered read-only in `FollowUpModule` rather than importing `SundaySchoolModule`, which would be circular since it already imports `FollowUpModule`). `visitCount` is simply `timeline.length`. The admin route is declared *after* `first-timers/pipeline` in `FollowUpAdminController` so that static path keeps matching first. `getFirstTimers` (the list endpoint) carries a lighter version of the same idea: `loadRelationCountAndMap('ft.visitCount', 'ft.visits')` for the logged-visit count, then one batched `SundaySchoolAttendance` count query (`first_timer_id IN (:...ids)`, grouped) across the whole page — never per-row — plus `+1` per row for the initial visit.
+
 **Post-event jobs (Bull queue `follow-up`):**
 
 1. After `markAbsentees()` completes for an event, a `post-event` Bull job is dispatched.
@@ -6941,10 +6970,12 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Stale task list:** `GET /admin/follow-up/tasks/stale?daysInactive=7&page=1&limit=20` (requires `FOLLOW_UP_READ`) returns open tasks with no activity for ≥ N days, ordered oldest-activity-first.
 
+**Reassigning a task (`PATCH /admin/follow-up/tasks/:id/reassign`, `{ workerProfileId }`):** for when the currently-assigned worker leaves, goes inactive, or the round-robin pick just isn't right — moves a task to a different worker. `FollowUpService.reassignTask()` requires the target to both have the `MANAGE_FOLLOW_UP` capability (primary or secondary department) *and* be `ACTIVE` — the same two conditions `pickRoundRobinAssignee` enforces for automatic assignment, so a manual reassign can't put a task on someone the round-robin logic itself would never pick. `GET /admin/follow-up/workers` (also `FOLLOW_UP_READ`, not `DEPARTMENTS_READ`, so a Follow-Up-only admin doesn't need department access to use it) backs the picker for this — returns the same active/capability-filtered worker list, unpaginated (small team).
+
 **Routes (worker mobile):** `/follow-up/first-timers`, `/follow-up/tasks/mine`, `/follow-up/tasks/:id`, `/follow-up/tasks/:id/notes`
 **First-timer list filtering:** `GET /admin/follow-up/first-timers` accepts optional `dateFrom` and `dateTo` (YYYY-MM-DD) to restrict results to first-timers registered within that date range. Both are optional; omitting either removes the respective bound.
 
-**Routes (admin portal):** `/admin/follow-up/first-timers`, `/admin/follow-up/first-timers/pipeline`, `/admin/follow-up/first-timers/:id/invite-to-membership`, `/admin/follow-up/first-timers/:id/mark-converted`, `/admin/follow-up/first-timers/:id/visits`, `/admin/follow-up/tasks`, `/admin/follow-up/tasks/:id`, `/admin/follow-up/tasks/stale`, `/admin/follow-up/tasks/:id/reassign`, `/admin/follow-up/tasks/bulk`, `/admin/follow-up/report`
+**Routes (admin portal):** `/admin/follow-up/first-timers`, `/admin/follow-up/first-timers/pipeline`, `/admin/follow-up/first-timers/:id/invite-to-membership`, `/admin/follow-up/first-timers/:id/mark-converted`, `/admin/follow-up/first-timers/:id/visits`, `/admin/follow-up/tasks`, `/admin/follow-up/tasks/:id`, `/admin/follow-up/tasks/stale`, `/admin/follow-up/tasks/:id/reassign`, `/admin/follow-up/tasks/bulk`, `/admin/follow-up/report`, `/admin/follow-up/workers`
 
 ### Evangelism Module
 

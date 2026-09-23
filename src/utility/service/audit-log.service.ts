@@ -84,6 +84,7 @@ export type AuditAction =
   // Worker profiles
   | 'WORKER_PROFILE_UPDATED'
   | 'WORKER_TRAINEE_DEMOTED'
+  | 'WORKER_TRAINEE_STATUS_CHANGED'
   // Classes
   | 'CLASS_TYPE_CREATED'
   | 'CLASS_TYPE_UPDATED'
