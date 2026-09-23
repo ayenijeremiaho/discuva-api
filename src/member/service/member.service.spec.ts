@@ -1420,4 +1420,122 @@ describe('MemberService', () => {
       expect(mockPushService.unsubscribe).toHaveBeenCalledWith('member-1');
     });
   });
+
+  describe('linkSpouse', () => {
+    it('rejects linking a member to themselves', async () => {
+      await expect(
+        service.linkSpouse('member-1', 'member-1', 'actor-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockMemberRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('rejects when the member already has a spouse', async () => {
+      mockMemberRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstname: 'Ada',
+          lastname: 'Obi',
+          spouse: { id: 'member-3' },
+        })
+        .mockResolvedValueOnce({ id: 'member-2', spouse: null });
+
+      await expect(
+        service.linkSpouse('member-1', 'member-2', 'actor-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects when the target spouse already has a spouse', async () => {
+      mockMemberRepo.findOne
+        .mockResolvedValueOnce({ id: 'member-1', spouse: null })
+        .mockResolvedValueOnce({
+          id: 'member-2',
+          firstname: 'Bola',
+          lastname: 'Ade',
+          spouse: { id: 'member-4' },
+        });
+
+      await expect(
+        service.linkSpouse('member-1', 'member-2', 'actor-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('links both members to each other in one transaction', async () => {
+      const mockTxManager = { update: jest.fn().mockResolvedValue({}) };
+      mockMemberRepo.findOne
+        .mockResolvedValueOnce({ id: 'member-1', spouse: null })
+        .mockResolvedValueOnce({ id: 'member-2', spouse: null })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          spouse: { id: 'member-2' },
+        });
+      mockMemberRepo.manager.transaction.mockImplementation(
+        async (cb: (em: typeof mockTxManager) => Promise<void>) =>
+          cb(mockTxManager),
+      );
+
+      const result = await service.linkSpouse(
+        'member-1',
+        'member-2',
+        'actor-1',
+      );
+
+      expect(mockTxManager.update).toHaveBeenCalledWith(Member, 'member-1', {
+        spouse: { id: 'member-2' },
+      });
+      expect(mockTxManager.update).toHaveBeenCalledWith(Member, 'member-2', {
+        spouse: { id: 'member-1' },
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_SPOUSE_LINKED',
+        expect.objectContaining({
+          actorId: 'actor-1',
+          targetId: 'member-1',
+          metadata: { spouseId: 'member-2' },
+        }),
+      );
+      expect(result.spouse).toEqual({ id: 'member-2' });
+    });
+  });
+
+  describe('unlinkSpouse', () => {
+    it('rejects when the member has no linked spouse', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'member-1',
+        spouse: null,
+      });
+
+      await expect(service.unlinkSpouse('member-1', 'actor-1')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('clears the spouse link on both sides in one transaction', async () => {
+      const mockTxManager = { update: jest.fn().mockResolvedValue({}) };
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'member-1',
+        spouse: { id: 'member-2' },
+      });
+      mockMemberRepo.manager.transaction.mockImplementation(
+        async (cb: (em: typeof mockTxManager) => Promise<void>) =>
+          cb(mockTxManager),
+      );
+
+      await service.unlinkSpouse('member-1', 'actor-1');
+
+      expect(mockTxManager.update).toHaveBeenCalledWith(Member, 'member-1', {
+        spouse: null,
+      });
+      expect(mockTxManager.update).toHaveBeenCalledWith(Member, 'member-2', {
+        spouse: null,
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_SPOUSE_UNLINKED',
+        expect.objectContaining({
+          actorId: 'actor-1',
+          targetId: 'member-1',
+          metadata: { spouseId: 'member-2' },
+        }),
+      );
+    });
+  });
 });

@@ -145,6 +145,24 @@ describe('AdminService', () => {
     });
   });
 
+  describe('getMyProfile', () => {
+    it('should throw NotFoundException if admin not found', async () => {
+      mockAdminRepo.findOne.mockResolvedValue(null);
+      await expect(service.getMyProfile('nonexistent')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should load member.spouse alongside member and adminRole', async () => {
+      mockAdminRepo.findOne.mockResolvedValue(mockAdmin);
+      await service.getMyProfile('admin-1');
+      expect(mockAdminRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'admin-1' },
+        relations: ['member', 'member.spouse', 'adminRole'],
+      });
+    });
+  });
+
   describe('countActive', () => {
     it('should return count of active admins', async () => {
       mockAdminRepo.countBy.mockResolvedValue(3);

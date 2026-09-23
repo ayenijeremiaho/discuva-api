@@ -13,14 +13,27 @@ import {
   MemberTimelineEventType,
 } from '../interface/member-timeline-event.interface';
 import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+import { SundaySchoolAttendanceStatus } from '../../sunday-school/enums/sunday-school-attendance-status.enum';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { AttendanceStatusEnum } from '../../attendance/enums/check-in.enum';
+import { ChildGuardian } from '../../children-church/entity/child-guardian.entity';
+import { ChildCheckIn } from '../../children-church/entity/child-check-in.entity';
 
 export interface MemberTimeline {
   events: MemberTimelineEvent[];
-  visitCount: number;
+  // Regular-service attendance: first-timer FIRST_VISIT/REPEAT_VISIT entries
+  // plus post-conversion Attendance rows with status PRESENT/LATE.
+  serviceVisitCount: number;
+  // Sunday School attendance only (status PRESENT), pre- and
+  // post-conversion — kept separate from serviceVisitCount since the two
+  // are different programs, not the same headcount.
+  sundaySchoolVisitCount: number;
   // Current status, not a historical event — false for a non-worker.
   isTraineeNow: boolean;
+  // Times this member dropped off or picked up a child at Children's Church
+  // (as a ChildGuardian) — tracks the guardian's own engagement, not the
+  // child's; a child has no Member/FirstTimer record of their own.
+  childrenChurchDropOffs: number;
 }
 
 // Only audit actions that are (a) genuinely targeted at the member (not a
@@ -53,6 +66,10 @@ export class MemberTimelineService {
     private readonly sundaySchoolAttendanceRepo: Repository<SundaySchoolAttendance>,
     @InjectRepository(Attendance)
     private readonly attendanceRepo: Repository<Attendance>,
+    @InjectRepository(ChildGuardian)
+    private readonly childGuardianRepo: Repository<ChildGuardian>,
+    @InjectRepository(ChildCheckIn)
+    private readonly childCheckInRepo: Repository<ChildCheckIn>,
     private readonly auditLogService: AuditLogService,
     private readonly followUpService: FollowUpService,
   ) {}
@@ -171,17 +188,25 @@ export class MemberTimelineService {
     ).length;
 
     const [
-      preConversionSundaySchoolCount,
-      postConversionSundaySchoolCount,
+      preConversionSundaySchoolRows,
+      postConversionSundaySchoolRows,
       regularAttendanceCount,
     ] = await Promise.all([
       firstTimer
-        ? this.sundaySchoolAttendanceRepo.count({
-            where: { firstTimer: { id: firstTimer.id } },
+        ? this.sundaySchoolAttendanceRepo.find({
+            where: {
+              firstTimer: { id: firstTimer.id },
+              status: SundaySchoolAttendanceStatus.PRESENT,
+            },
+            relations: ['session', 'session.sundaySchoolClass'],
           })
-        : Promise.resolve(0),
-      this.sundaySchoolAttendanceRepo.count({
-        where: { member: { id: memberId } },
+        : Promise.resolve([]),
+      this.sundaySchoolAttendanceRepo.find({
+        where: {
+          member: { id: memberId },
+          status: SundaySchoolAttendanceStatus.PRESENT,
+        },
+        relations: ['session', 'session.sundaySchoolClass'],
       }),
       this.attendanceRepo
         .createQueryBuilder('a')
@@ -192,16 +217,46 @@ export class MemberTimelineService {
         .getCount(),
     ]);
 
-    const visitCount =
-      preConversionVisitCount +
-      preConversionSundaySchoolCount +
-      postConversionSundaySchoolCount +
-      regularAttendanceCount;
+    for (const row of [
+      ...preConversionSundaySchoolRows,
+      ...postConversionSundaySchoolRows,
+    ]) {
+      events.push({
+        type: MemberTimelineEventType.SUNDAY_SCHOOL_VISIT,
+        title: 'Attended Sunday School',
+        description: row.session?.sundaySchoolClass?.name ?? null,
+        occurredAt: new Date(
+          row.session?.sessionDate ?? row.markedAt,
+        ).toISOString(),
+      });
+    }
+
+    const serviceVisitCount = preConversionVisitCount + regularAttendanceCount;
+    const sundaySchoolVisitCount =
+      preConversionSundaySchoolRows.length +
+      postConversionSundaySchoolRows.length;
+
+    const guardianRows = await this.childGuardianRepo.find({
+      where: { member: { id: memberId } },
+    });
+    const childrenChurchDropOffs = guardianRows.length
+      ? await this.childCheckInRepo
+          .createQueryBuilder('cci')
+          .where('cci.dropped_off_by_id IN (:...ids)', {
+            ids: guardianRows.map((g) => g.id),
+          })
+          .orWhere('cci.picked_up_by_id IN (:...ids)', {
+            ids: guardianRows.map((g) => g.id),
+          })
+          .getCount()
+      : 0;
 
     return {
       events: events.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)),
-      visitCount,
+      serviceVisitCount,
+      sundaySchoolVisitCount,
       isTraineeNow: member.workerProfile?.isTrainee ?? false,
+      childrenChurchDropOffs,
     };
   }
 

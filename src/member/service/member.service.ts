@@ -1004,6 +1004,70 @@ export class MemberService {
     this.auditLogService.log('DEVICE_PURGED', { actorId, targetId: memberId });
   }
 
+  // Symmetric — both rows are updated in one transaction so a spouse link
+  // is never one-sided. Rejects rather than silently overwriting an
+  // existing link on either side; the caller must unlinkSpouse() first.
+  async linkSpouse(
+    memberId: string,
+    spouseId: string,
+    actorId: string,
+  ): Promise<Member> {
+    if (memberId === spouseId) {
+      throw new BadRequestException('A member cannot be linked to themselves.');
+    }
+    const [member, spouse] = await Promise.all([
+      this.getById(memberId, ['spouse']),
+      this.getById(spouseId, ['spouse']),
+    ]);
+    if (member.spouse) {
+      throw new BadRequestException(
+        `${member.firstname} ${member.lastname} is already linked to a spouse — unlink first.`,
+      );
+    }
+    if (spouse.spouse) {
+      throw new BadRequestException(
+        `${spouse.firstname} ${spouse.lastname} is already linked to a spouse — unlink first.`,
+      );
+    }
+
+    await this.memberRepository.manager.transaction(async (manager) => {
+      await manager.update(Member, memberId, { spouse: { id: spouseId } });
+      await manager.update(Member, spouseId, { spouse: { id: memberId } });
+    });
+
+    this.logger.log(
+      `Member ${memberId} linked to spouse ${spouseId} by actor ${actorId}`,
+    );
+    this.auditLogService.log('MEMBER_SPOUSE_LINKED', {
+      actorId,
+      targetId: memberId,
+      metadata: { spouseId },
+    });
+    return this.getById(memberId, ['spouse']);
+  }
+
+  async unlinkSpouse(memberId: string, actorId: string): Promise<void> {
+    const member = await this.getById(memberId, ['spouse']);
+    if (!member.spouse) {
+      throw new BadRequestException('This member has no linked spouse.');
+    }
+    const spouseId = member.spouse.id;
+
+    await this.memberRepository.manager.transaction(async (manager) => {
+      await manager.update(Member, memberId, { spouse: null });
+      await manager.update(Member, spouseId, { spouse: null });
+    });
+
+    this.logger.log(
+      `Member ${memberId} unlinked from spouse ${spouseId} by actor ${actorId}`,
+    );
+    this.auditLogService.log('MEMBER_SPOUSE_UNLINKED', {
+      actorId,
+      targetId: memberId,
+      metadata: { spouseId },
+    });
+  }
+
   async getById(id: string, relations: string[] = []): Promise<Member> {
     const member = await this.memberRepository.findOne({
       where: { id },

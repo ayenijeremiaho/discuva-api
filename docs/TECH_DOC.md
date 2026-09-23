@@ -2297,8 +2297,39 @@ populate a picker with the tenant's own titles).
 `clergy: { title: {id, name}, canReviewFeedback: boolean } | null` is surfaced on `MemberDto` (`GET /auth/me`,
 `GET /members/:id`, `GET /members`, `GET /members/workers`), computed from the `clergy` relation.
 
-**Member timeline / "digital footprint":** `GET /members/:id/timeline` (`AdminGuard` + `MEMBERS_READ`) returns
-`{ events: MemberTimelineEvent[], visitCount: number, isTraineeNow: boolean }`. `events` is a chronologically sorted
+**Spouse link (`POST /members/:id/spouse` `{ spouseId }`, `DELETE /members/:id/spouse`, both `AdminGuard` +
+`MEMBERS_WRITE`):** a symmetric "married to" link between two `Member` rows — the only family-relationship concept in
+the system today (a `ChildProfile` is not a `Member`/`FirstTimer` and has its own `ChildGuardian` links instead, see
+§Children Church Module). Modeled as a plain self-referencing FK (`members.spouse_id`, nullable, `ON DELETE SET
+NULL`, migration `AddMemberSpouse`) rather than a TypeORM self-referential `OneToOne` (the inverse side has no
+distinct property to map to) or a join table (unnecessary for a 1:1 pair with no extra fields yet). Both rows are
+always written in one transaction (`MemberService.linkSpouse()`/`unlinkSpouse()`) so the link can never end up
+one-sided — `member.spouse` and `spouse.spouse` are always mirror images of each other. `linkSpouse` rejects (not
+silently overwrites) if *either* side already has a spouse — the caller must `unlinkSpouse()` first — and rejects
+linking a member to themselves. Audit-logged as `MEMBER_SPOUSE_LINKED`/`MEMBER_SPOUSE_UNLINKED`. `spouse: { id,
+firstname, lastname, photoUrl } | null` is surfaced on `MemberDto` (`GET /auth/me`, `GET /members/:id`) via a new
+`SpouseRefDto`, same shallow-ref pattern as `clergy`. Not loaded on the paginated `GET /members`/`GET
+/members/workers` list routes — an extra join on every row of a frequently-paginated endpoint for a field those
+views don't render.
+
+Admin UI lives on the Members list's member-detail panel (`app/members/page.tsx`), as its own "Spouse" card next to
+the "Clergy" card — link/search/unlink actions, same place clergy assignment already lives. Deliberately **not** on
+the Member Journey / timeline page (`app/members/[id]/timeline/page.tsx`): that page is a history feed (first
+visit, became a worker, training milestones, visit counts), and a spouse link is a static profile fact, not an
+event — it was there in an earlier pass and got moved once that mismatch was pointed out.
+
+Deliberately **not** self-service: only `AdminGuard` routes can set/clear the link, there is no member-facing
+`POST/DELETE` equivalent. A member can see their own linked spouse (`discuva-member`'s account page reads `spouse`
+off `GET /auth/me`) but cannot set or change it themselves — the same trust model the rest of the member-identity
+surface already uses (department assignment, clergy designation, worker promotion are all admin-verified, not
+self-declared). Letting a member link themselves to anyone with no confirmation from the other side would let one
+member falsely claim to be married to another and see fields depending on that in the future; a mutual-consent
+request flow was considered and deferred rather than built as a first pass.
+
+**Member timeline / "Member Journey"** (admin UI label; renamed from "Digital Footprint" — church-facing language,
+not tech jargon): `GET /members/:id/timeline` (`AdminGuard` + `MEMBERS_READ`) returns
+`{ events: MemberTimelineEvent[], serviceVisitCount: number, sundaySchoolVisitCount: number, isTraineeNow: boolean, childrenChurchDropOffs: number }`.
+`events` is a chronologically sorted
 `{ type, title, description, occurredAt }[]` — the church-facing narrative of a member's life in the system: first
 visit → repeat visits → became a member → became a worker → started/completed training → department/clergy/status
 changes. `MemberTimelineService` (`src/member/service/member-timeline.service.ts`) builds `events` from two sources,
@@ -2317,26 +2348,40 @@ not a dedicated history table:
   one batched `Department` lookup (not per-event). `WORKER_TRAINEE_STATUS_CHANGED`'s `metadata.isTrainee` picks the
   title: `true` → "Started Training", `false` → "Completed Training" (a trainee promoted to a full worker — distinct
   from `WORKER_TRAINEE_DEMOTED`, which is a trainee losing worker status entirely and reverting to plain `MEMBER`).
+- Each `SundaySchoolAttendance` row counted toward `sundaySchoolVisitCount` (`status = 'PRESENT'`, pre-conversion via
+  `first_timer_id` and post-conversion via `member_id`) also becomes its own `SUNDAY_SCHOOL_VISIT` event, title
+  "Attended Sunday School", `description` the class name, `occurredAt` the session's `sessionDate` — so the count is
+  never a bare number with no dated entries backing it; every visit it includes is individually visible in `events`.
 
 `isTraineeNow` is a live status read straight off `member.workerProfile?.isTrainee` (not derived from `events`) — a
 current-state badge for "is this person in training right now," separate from the dated `TRAINEE_STATUS_CHANGED`
 history entries. `false` for a non-worker.
+
+`childrenChurchDropOffs` is a separate rollup, not part of `serviceVisitCount`/`sundaySchoolVisitCount` — see
+§Children Church Module for what it counts and why it's kept apart from the member's own visit counts.
 - **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` and the evangelism `Convert` pipeline's
   `CONVERT_LINKED_TO_MEMBER` are not yet included — those audit entries target the department/convert row (not the
   member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
   it doesn't have today. A worker whose promotion predates audit logging (legacy data, bulk imports) falls back to
   `WorkerProfile.createdAt` for a "Became a Worker" event so they aren't silently missing from the timeline.
 
-`visitCount` is a separate rollup, computed alongside `events` rather than derived from them, of "how many times has
-the church actually seen this person" — the same figure `FollowUpService.getPublicEvents`'s sibling feature,
-`FollowUpService.getFirstTimerDetail`, computes for a still-unconverted first-timer (see below), carried across the
-first-timer → member lifecycle instead of resetting to zero on conversion. It sums: the `FIRST_VISIT`/`REPEAT_VISIT`
-event count already in `events`; `SundaySchoolAttendance` rows linked via `first_timer_id` (pre-conversion, queried
-only if a `FirstTimer` record exists) *and* via `member_id` (post-conversion) — queried separately because a
-Sunday School attendance row is never re-linked from one FK to the other when a first-timer converts; and regular
+`serviceVisitCount` and `sundaySchoolVisitCount` are two independent rollups, computed alongside `events` rather
+than derived from them, of "how many times has the church actually seen this person" — split because regular
+service attendance and Sunday School are different programs, not one combined headcount (previously a single
+`visitCount` field silently summed both, which read as one inflated, unexplained number — e.g. a member with 1
+service visit and 2 Sunday School sessions showed "3 visits" with no way to tell what made it up).
+`serviceVisitCount` sums: the `FIRST_VISIT`/`REPEAT_VISIT` event count already in `events` (from the first-timer
+pipeline, carried across the first-timer → member lifecycle instead of resetting to zero on conversion — the same
+figure `FollowUpService.getFirstTimerDetail` computes for a still-unconverted first-timer, see below); and regular
 `Attendance` rows with `status IN ('PRESENT', 'LATE')`, matching the status-filter convention used everywhere else
-attendance is counted (`AttendanceService`). `ON_LEAVE`/`ABSENT` don't count as a visit; `ATTENDED_ONLINE` isn't
-included either, consistent with this being a physical-attendance figure.
+attendance is counted (`AttendanceService`). `sundaySchoolVisitCount` sums `SundaySchoolAttendance` rows linked via
+`first_timer_id` (pre-conversion, queried only if a `FirstTimer` record exists) *and* via `member_id`
+(post-conversion), both filtered to `status = 'PRESENT'` — queried separately because a Sunday School attendance
+row is never re-linked from one FK to the other when a first-timer converts. `ABSENT`/`EXCUSED` Sunday School rows
+and `ON_LEAVE`/`ABSENT` regular-attendance rows don't count as a visit; `ATTENDED_ONLINE` isn't included either,
+consistent with these being physical-attendance figures. (Fixed 2026-09-23 — the two Sunday School counts
+originally had no status filter at all, so `ABSENT`/`EXCUSED` rows inflated the combined `visitCount`; then split
+into `serviceVisitCount`/`sundaySchoolVisitCount` the same day so the breakdown is visible, not just the total.)
 
 **Profile photo:** `POST /members/me/photo` (multipart, field `photo`) uploads/replaces the caller's own photo via
 `CloudinaryService` (folder `profile-pictures`); `DELETE /members/me/photo` removes it. Both `JwtAuthGuard` only —
@@ -2404,7 +2449,10 @@ Manages the admin RBAC system used by the admin web portal. This module is `@Glo
 **Admin user routes** (`/admin/users`):
 
 - `GET /admin/users` — `ADMIN_READ` — list all admin users
-- `GET /admin/users/me` — any admin — own admin profile
+- `GET /admin/users/me` — any admin — own admin profile. Uses a dedicated `AdminService.getMyProfile()` rather than
+  `findById()`/the `AdminGuard`-preloaded admin — it's the only place `member.spouse` is loaded, so an admin's own
+  profile page can show their spouse. Kept off `AdminGuard`'s preload (which runs on every guarded request) and off
+  `findById()` (used for viewing *other* admins) so that extra join only happens on this one self-service call.
 - `GET /admin/users/:id` — `ADMIN_READ` — get admin by ID
 - `POST /admin/users` — `ADMIN_WRITE` — grant admin access to a member
 - `PATCH /admin/users/:id` — `ADMIN_WRITE` — change admin role or active status; **an admin cannot modify their own record** (403)
@@ -7307,6 +7355,8 @@ Provides a security-grade check-in/check-out system for children. Key features:
 - Any check-in can be flagged with `PATCH /children-church/checkin/:id/flag` (e.g. unknown pickup attempt).
 - Multiple guardians can be registered per child; `isAuthorizedPickup` controls who may collect.
 - Admins (not workers) can view live active check-ins across all classes via `GET /children-church/admin/checkin/active` and paginated history via `GET /children-church/admin/checkin/history`.
+- `GET /children-church/children/:id` carries a transient `visitCount` (total `ChildCheckIn` rows for that child, not persisted — same pattern as `FirstTimer.visitCount`) so a child's own attendance history reads as a single number, not just a paginated `checkin-history` list.
+- A `ChildProfile` is **not** a `Member` or `FirstTimer` — a child has no digital-footprint timeline of their own. Instead, `MemberTimelineService.getTimeline()` carries a `childrenChurchDropOffs` count: every `ChildCheckIn` where the member is the `droppedOffBy`/`pickedUpBy` `ChildGuardian` (found via `ChildGuardian.member`), across every child they guard. This tracks the *guardian's* engagement, not the child's, and is deliberately kept separate from `visitCount` (which is the member's own visits) rather than folded into it — conflating "I visited" with "my kid was dropped off" would be misleading. `ChildGuardian`/`ChildCheckIn` are registered read-only in `MemberModule` (not by importing `ChildrenChurchModule`, which already imports `MemberModule` — that would be circular), same pattern as `SundaySchoolAttendance`/`Attendance`.
 
 **Routes prefix:** `/children-church`
 
@@ -8410,6 +8460,8 @@ outside the requested `?months=` window).
 | POST   | /members/:id/clergy                                        | AdminGuard (MEMBERS_WRITE)                                    | Assign clergy designation, body `{ clergyTitleId }`; `409` if already clergy, `404` if the title is unknown |
 | PATCH  | /members/:id/clergy                                        | AdminGuard (MEMBERS_WRITE)                                    | Change clergy title, body `{ clergyTitleId }`; `404` if not clergy, or if the title is unknown              |
 | DELETE | /members/:id/clergy                                        | AdminGuard (MEMBERS_WRITE)                                    | Remove clergy designation; `404` if not clergy; returns `204`                                             |
+| POST   | /members/:id/spouse                                        | AdminGuard (MEMBERS_WRITE)                                    | Link two members as spouses (symmetric), body `{ spouseId }`; `400` if either side already has a spouse or spouseId is the member's own id |
+| DELETE | /members/:id/spouse                                        | AdminGuard (MEMBERS_WRITE)                                    | Unlink spouse on both sides; `400` if no spouse is linked; returns `204`                                   |
 | PATCH  | /members/:id/clergy/review-access                          | AdminGuard (MEMBERS_WRITE)                                    | Grant/revoke Pastor Feedback review access, body `{ canReviewFeedback }`, independent of title; `404` if not clergy |
 | GET    | /clergy-titles                                             | Public                                                         | Tenant's clergy-title catalog, see ClergyTitle above                                                          |
 | GET    | /clergy-titles/:id                                         | Public                                                         | Single clergy title                                                                                            |

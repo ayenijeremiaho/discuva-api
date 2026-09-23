@@ -59,6 +59,7 @@ const mockCheckInRepo = {
   findOne: jest.fn(),
   find: jest.fn(),
   existsBy: jest.fn(),
+  count: jest.fn().mockResolvedValue(0),
 };
 
 const mockMemberRepo = {};
@@ -165,6 +166,7 @@ describe('ChildrenChurchService', () => {
     mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
       undefined,
     );
+    mockCheckInRepo.count.mockResolvedValue(0);
   });
 
   // ─── Authorization ────────────────────────────────────────────────────────
@@ -430,6 +432,18 @@ describe('ChildrenChurchService', () => {
       mockChildProfileRepo.findOne.mockResolvedValue(mockChild);
       const result = await service.getChild(adminUser, 'child-1');
       expect(result).toEqual(mockChild);
+    });
+
+    it('attaches the total check-in count as visitCount', async () => {
+      mockChildProfileRepo.findOne.mockResolvedValue({ ...mockChild });
+      mockCheckInRepo.count.mockResolvedValueOnce(7);
+
+      const result = await service.getChild(adminUser, 'child-1');
+
+      expect(mockCheckInRepo.count).toHaveBeenCalledWith({
+        where: { child: { id: 'child-1' } },
+      });
+      expect(result.visitCount).toBe(7);
     });
   });
 

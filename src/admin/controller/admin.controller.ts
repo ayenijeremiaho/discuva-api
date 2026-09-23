@@ -33,7 +33,7 @@ export class AdminController {
 
   @Get('me')
   getMe(@CurrentAdmin() admin: Admin) {
-    return admin;
+    return this.adminService.getMyProfile(admin.id);
   }
 
   @RequiresPermission(AdminPermission.ADMIN_READ)

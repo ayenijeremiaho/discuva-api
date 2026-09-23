@@ -172,6 +172,23 @@ export class AdminService {
     return admin;
   }
 
+  // Separate from findById — AdminGuard already preloads 'member' on every
+  // guarded request, so adding 'member.spouse' there would join on every
+  // admin API call just for a field only the "my profile" page needs. This
+  // one-off refetch keeps that cost isolated to GET /admin/users/me.
+  async getMyProfile(id: string): Promise<Admin> {
+    const admin = await this.adminRepository.findOne({
+      where: { id },
+      relations: ['member', 'member.spouse', 'adminRole'],
+    });
+    if (!admin) throw new NotFoundException('Admin user not found.');
+    if (admin.member) {
+      delete (admin.member as any).password;
+      delete (admin.member as any).deviceId;
+    }
+    return admin;
+  }
+
   async countActive(): Promise<number> {
     return this.adminRepository.countBy({ isActive: true });
   }

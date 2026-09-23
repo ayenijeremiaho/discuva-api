@@ -8,7 +8,10 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { FollowUpService } from '../../follow-up/service/follow-up.service';
 import { MemberTimelineEventType } from '../interface/member-timeline-event.interface';
 import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+import { SundaySchoolAttendanceStatus } from '../../sunday-school/enums/sunday-school-attendance-status.enum';
 import { Attendance } from '../../attendance/entity/attendance.entity';
+import { ChildGuardian } from '../../children-church/entity/child-guardian.entity';
+import { ChildCheckIn } from '../../children-church/entity/child-check-in.entity';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
@@ -23,7 +26,7 @@ const mockFollowUpService = {
   getFirstTimerByConvertedMemberId: jest.fn().mockResolvedValue(null),
 };
 const mockSundaySchoolAttendanceRepo = {
-  count: jest.fn().mockResolvedValue(0),
+  find: jest.fn().mockResolvedValue([]),
 };
 const attendanceQbMock = {
   where: jest.fn().mockReturnThis(),
@@ -32,6 +35,17 @@ const attendanceQbMock = {
 };
 const mockAttendanceRepo = {
   createQueryBuilder: jest.fn().mockReturnValue(attendanceQbMock),
+};
+const mockChildGuardianRepo = {
+  find: jest.fn().mockResolvedValue([]),
+};
+const childCheckInQbMock = {
+  where: jest.fn().mockReturnThis(),
+  orWhere: jest.fn().mockReturnThis(),
+  getCount: jest.fn().mockResolvedValue(0),
+};
+const mockChildCheckInRepo = {
+  createQueryBuilder: jest.fn().mockReturnValue(childCheckInQbMock),
 };
 
 const baseMember = {
@@ -51,8 +65,10 @@ describe('MemberTimelineService', () => {
     );
     mockAuditLogService.findAll.mockResolvedValue({ data: [] });
     mockDepartmentRepo.find.mockResolvedValue([]);
-    mockSundaySchoolAttendanceRepo.count.mockResolvedValue(0);
+    mockSundaySchoolAttendanceRepo.find.mockResolvedValue([]);
     attendanceQbMock.getCount.mockResolvedValue(0);
+    mockChildGuardianRepo.find.mockResolvedValue([]);
+    childCheckInQbMock.getCount.mockResolvedValue(0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -69,6 +85,14 @@ describe('MemberTimelineService', () => {
         {
           provide: getRepositoryToken(Attendance),
           useValue: mockAttendanceRepo,
+        },
+        {
+          provide: getRepositoryToken(ChildGuardian),
+          useValue: mockChildGuardianRepo,
+        },
+        {
+          provide: getRepositoryToken(ChildCheckIn),
+          useValue: mockChildCheckInRepo,
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: FollowUpService, useValue: mockFollowUpService },
@@ -87,7 +111,8 @@ describe('MemberTimelineService', () => {
 
   it('falls back to "Joined the Church" when there is no first-timer record', async () => {
     mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
-    const { events, visitCount } = await service.getTimeline('member-1');
+    const { events, serviceVisitCount, sundaySchoolVisitCount } =
+      await service.getTimeline('member-1');
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: MemberTimelineEventType.BECAME_MEMBER,
@@ -95,7 +120,8 @@ describe('MemberTimelineService', () => {
     });
     // "Joined the Church" isn't itself a visit, and there's no first-timer
     // or attendance history in this scenario.
-    expect(visitCount).toBe(0);
+    expect(serviceVisitCount).toBe(0);
+    expect(sundaySchoolVisitCount).toBe(0);
   });
 
   it('builds the pre-membership timeline from a first-timer record with visits', async () => {
@@ -108,7 +134,8 @@ describe('MemberTimelineService', () => {
       visits: [{ visitedAt: '2024-01-08', event: null }],
     });
 
-    const { events, visitCount } = await service.getTimeline('member-1');
+    const { events, serviceVisitCount, sundaySchoolVisitCount } =
+      await service.getTimeline('member-1');
 
     expect(events.map((e) => e.type)).toEqual([
       MemberTimelineEventType.FIRST_VISIT,
@@ -119,10 +146,11 @@ describe('MemberTimelineService', () => {
     expect(events[0].occurredAt < events[1].occurredAt).toBe(true);
     expect(events[1].occurredAt < events[2].occurredAt).toBe(true);
     // FIRST_VISIT + REPEAT_VISIT, no Sunday School or regular attendance mocked.
-    expect(visitCount).toBe(2);
+    expect(serviceVisitCount).toBe(2);
+    expect(sundaySchoolVisitCount).toBe(0);
   });
 
-  it('rolls up Sunday School and regular attendance into visitCount', async () => {
+  it('keeps serviceVisitCount and sundaySchoolVisitCount as independent totals', async () => {
     mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
     mockFollowUpService.getFirstTimerByConvertedMemberId.mockResolvedValueOnce({
       id: 'ft-1',
@@ -131,22 +159,70 @@ describe('MemberTimelineService', () => {
       visitedEvent: null,
       visits: [],
     });
-    // First call is the pre-conversion (firstTimer-linked) count, second is
-    // the post-conversion (member-linked) count — same repo, two FK columns.
-    mockSundaySchoolAttendanceRepo.count
-      .mockResolvedValueOnce(2)
-      .mockResolvedValueOnce(3);
+    // First call is the pre-conversion (firstTimer-linked) rows, second is
+    // the post-conversion (member-linked) rows — same repo, two FK columns.
+    mockSundaySchoolAttendanceRepo.find
+      .mockResolvedValueOnce([
+        {
+          session: {
+            sessionDate: '2024-01-07',
+            sundaySchoolClass: { name: 'Adults' },
+          },
+        },
+        {
+          session: {
+            sessionDate: '2024-01-14',
+            sundaySchoolClass: { name: 'Adults' },
+          },
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          session: {
+            sessionDate: '2024-02-04',
+            sundaySchoolClass: { name: 'Adults' },
+          },
+        },
+        {
+          session: {
+            sessionDate: '2024-02-11',
+            sundaySchoolClass: { name: 'Adults' },
+          },
+        },
+        {
+          session: {
+            sessionDate: '2024-02-18',
+            sundaySchoolClass: { name: 'Adults' },
+          },
+        },
+      ]);
     attendanceQbMock.getCount.mockResolvedValueOnce(5);
 
-    const { visitCount } = await service.getTimeline('member-1');
+    const { serviceVisitCount, sundaySchoolVisitCount, events } =
+      await service.getTimeline('member-1');
 
-    // 1 (FIRST_VISIT) + 2 (pre-conversion SS) + 3 (post-conversion SS) + 5 (regular attendance)
-    expect(visitCount).toBe(11);
-    expect(mockSundaySchoolAttendanceRepo.count).toHaveBeenCalledWith({
-      where: { firstTimer: { id: 'ft-1' } },
+    // serviceVisitCount: 1 (FIRST_VISIT) + 5 (regular attendance)
+    expect(serviceVisitCount).toBe(6);
+    // sundaySchoolVisitCount: 2 (pre-conversion SS) + 3 (post-conversion SS)
+    expect(sundaySchoolVisitCount).toBe(5);
+    expect(
+      events.filter(
+        (e) => e.type === MemberTimelineEventType.SUNDAY_SCHOOL_VISIT,
+      ),
+    ).toHaveLength(5);
+    expect(mockSundaySchoolAttendanceRepo.find).toHaveBeenCalledWith({
+      where: {
+        firstTimer: { id: 'ft-1' },
+        status: SundaySchoolAttendanceStatus.PRESENT,
+      },
+      relations: ['session', 'session.sundaySchoolClass'],
     });
-    expect(mockSundaySchoolAttendanceRepo.count).toHaveBeenCalledWith({
-      where: { member: { id: 'member-1' } },
+    expect(mockSundaySchoolAttendanceRepo.find).toHaveBeenCalledWith({
+      where: {
+        member: { id: 'member-1' },
+        status: SundaySchoolAttendanceStatus.PRESENT,
+      },
+      relations: ['session', 'session.sundaySchoolClass'],
     });
     expect(attendanceQbMock.andWhere).toHaveBeenCalledWith(
       'a.status IN (:...statuses)',
@@ -256,5 +332,41 @@ describe('MemberTimelineService', () => {
       'Completed Training',
     ]);
     expect(traineeEvents[0].description).toBe('Ushering');
+  });
+
+  describe('childrenChurchDropOffs', () => {
+    it('is 0 when the member is not a guardian for any child', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
+      mockChildGuardianRepo.find.mockResolvedValueOnce([]);
+
+      const { childrenChurchDropOffs } = await service.getTimeline('member-1');
+
+      expect(childrenChurchDropOffs).toBe(0);
+      expect(mockChildCheckInRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('counts check-ins across all children the member guards', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
+      mockChildGuardianRepo.find.mockResolvedValueOnce([
+        { id: 'guardian-1' },
+        { id: 'guardian-2' },
+      ]);
+      childCheckInQbMock.getCount.mockResolvedValueOnce(5);
+
+      const { childrenChurchDropOffs } = await service.getTimeline('member-1');
+
+      expect(mockChildGuardianRepo.find).toHaveBeenCalledWith({
+        where: { member: { id: 'member-1' } },
+      });
+      expect(childCheckInQbMock.where).toHaveBeenCalledWith(
+        'cci.dropped_off_by_id IN (:...ids)',
+        { ids: ['guardian-1', 'guardian-2'] },
+      );
+      expect(childCheckInQbMock.orWhere).toHaveBeenCalledWith(
+        'cci.picked_up_by_id IN (:...ids)',
+        { ids: ['guardian-1', 'guardian-2'] },
+      );
+      expect(childrenChurchDropOffs).toBe(5);
+    });
   });
 });

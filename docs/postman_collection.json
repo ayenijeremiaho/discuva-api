@@ -1539,14 +1539,14 @@
                 }
               ]
             },
-            "description": "The member's \"digital footprint\": { events, visitCount, isTraineeNow }. events is a chronologically sorted list of lifecycle milestones (first visit, repeat visits, became a member, became a worker, started/completed training, department/clergy/status changes), merged from the first-timer pipeline and a curated set of audit log entries — not every audit action for the member is included, see TECH_DOC.md for exactly what's excluded and why. visitCount is a separate rollup (first visit + logged returns + Sunday School check-ins, pre- and post-conversion + regular service attendance) carried across the first-timer-to-member lifecycle rather than resetting to zero at conversion. isTraineeNow is a live status flag (not derived from events) read straight off the current worker profile."
+            "description": "The member's \"Member Journey\" (admin UI label; formerly \"Digital Footprint\"): { events, serviceVisitCount, sundaySchoolVisitCount, isTraineeNow, childrenChurchDropOffs }. events is a chronologically sorted list of lifecycle milestones (first visit, repeat visits, became a member, became a worker, started/completed training, department/clergy/status changes, individual Sunday School visits), merged from the first-timer pipeline, Sunday School attendance, and a curated set of audit log entries — not every audit action for the member is included, see TECH_DOC.md for exactly what's excluded and why. serviceVisitCount and sundaySchoolVisitCount are two independent rollups (regular service attendance vs. Sunday School attendance are different programs, not one combined headcount) carried across the first-timer-to-member lifecycle rather than resetting to zero at conversion. isTraineeNow is a live status flag (not derived from events) read straight off the current worker profile. childrenChurchDropOffs counts Children's Church check-ins where this member is the guardian who dropped off or picked up a child — the guardian's own engagement, not folded into either visit count since a child has no Member/FirstTimer record of its own."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"events\": [\n    {\n      \"type\": \"FIRST_VISIT\",\n      \"title\": \"First Visit\",\n      \"description\": \"Sunday Service\",\n      \"occurredAt\": \"2025-11-02T09:00:00.000Z\"\n    },\n    {\n      \"type\": \"REPEAT_VISIT\",\n      \"title\": \"Visited Again\",\n      \"description\": null,\n      \"occurredAt\": \"2025-11-09T09:00:00.000Z\"\n    },\n    {\n      \"type\": \"BECAME_MEMBER\",\n      \"title\": \"Became a Member\",\n      \"description\": null,\n      \"occurredAt\": \"2025-11-16T10:00:00.000Z\"\n    },\n    {\n      \"type\": \"BECAME_WORKER\",\n      \"title\": \"Became a Worker\",\n      \"description\": \"Ushering\",\n      \"occurredAt\": \"2026-02-01T10:00:00.000Z\"\n    },\n    {\n      \"type\": \"TRAINEE_STATUS_CHANGED\",\n      \"title\": \"Started Training\",\n      \"description\": \"Ushering\",\n      \"occurredAt\": \"2026-02-01T10:05:00.000Z\"\n    }\n  ],\n  \"visitCount\": 14,\n  \"isTraineeNow\": true\n}"
+              "body": "{\n  \"events\": [\n    {\n      \"type\": \"FIRST_VISIT\",\n      \"title\": \"First Visit\",\n      \"description\": \"Sunday Service\",\n      \"occurredAt\": \"2025-11-02T09:00:00.000Z\"\n    },\n    {\n      \"type\": \"REPEAT_VISIT\",\n      \"title\": \"Visited Again\",\n      \"description\": null,\n      \"occurredAt\": \"2025-11-09T09:00:00.000Z\"\n    },\n    {\n      \"type\": \"BECAME_MEMBER\",\n      \"title\": \"Became a Member\",\n      \"description\": null,\n      \"occurredAt\": \"2025-11-16T10:00:00.000Z\"\n    },\n    {\n      \"type\": \"BECAME_WORKER\",\n      \"title\": \"Became a Worker\",\n      \"description\": \"Ushering\",\n      \"occurredAt\": \"2026-02-01T10:00:00.000Z\"\n    },\n    {\n      \"type\": \"TRAINEE_STATUS_CHANGED\",\n      \"title\": \"Started Training\",\n      \"description\": \"Ushering\",\n      \"occurredAt\": \"2026-02-01T10:05:00.000Z\"\n    }\n  ],\n  \"visitCount\": 14,\n  \"isTraineeNow\": true,\n  \"childrenChurchDropOffs\": 3\n}"
             },
             {
               "name": "404 Not Found",
@@ -1605,6 +1605,98 @@
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Member not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Link Spouse",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"spouseId\": \"{{spouseMemberId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/spouse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "spouse"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "Symmetric link — both members' spouse field is set in one transaction. Rejects (400) if either member already has a spouse (unlink first) or if spouseId equals the member's own id."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"spouse\": {\n    \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n    \"firstname\": \"Jane\",\n    \"lastname\": \"Doe\",\n    \"photoUrl\": null\n  }\n}"
+            },
+            {
+              "name": "400 Already linked",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"John Doe is already linked to a spouse — unlink first.\" }"
+            }
+          ]
+        },
+        {
+          "name": "Unlink Spouse",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/spouse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "spouse"
+              ],
+              "variable": [
+                {
+                  "key": "memberId",
+                  "value": "{{memberId}}"
+                }
+              ]
+            },
+            "description": "Clears the spouse link on both sides in one transaction. 400 if the member has no linked spouse."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": null
+            },
+            {
+              "name": "400 No spouse linked",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{ \"statusCode\": 400, \"message\": \"This member has no linked spouse.\" }"
             }
           ]
         },
@@ -2572,7 +2664,8 @@
                     "users",
                     "me"
                   ]
-                }
+                },
+                "description": "Any admin. Own admin + member profile, including member.spouse (the only admin-users route that loads it — see TECH_DOC.md)."
               },
               "response": [
                 {

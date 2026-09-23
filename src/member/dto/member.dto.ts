@@ -23,6 +23,20 @@ export class MemberClergyDto {
   canReviewFeedback: boolean;
 }
 
+export class SpouseRefDto {
+  @Expose()
+  id: string;
+
+  @Expose()
+  firstname: string;
+
+  @Expose()
+  lastname: string;
+
+  @Expose()
+  photoUrl: string | null;
+}
+
 export class MemberDto {
   @Expose()
   id: string;
@@ -93,6 +107,10 @@ export class MemberDto {
       : null,
   )
   clergy: MemberClergyDto | null;
+
+  @Expose()
+  @Type(() => SpouseRefDto)
+  spouse: SpouseRefDto | null;
 
   @Expose()
   @Transform(({ obj }) => {

@@ -3,6 +3,8 @@ import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
@@ -115,4 +117,13 @@ export class Member extends BaseEntity {
     eager: false,
   })
   clergy: Clergy;
+
+  // Symmetric — both rows point at each other, kept in sync only by
+  // MemberService.linkSpouse()/unlinkSpouse() (never via the generic
+  // update-member path), so a one-sided edit can't desync the pair. Not a
+  // TypeORM OneToOne self-reference (the inverse side has no distinct
+  // property to map to); modeled as a plain self-referencing FK instead.
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'spouse_id' })
+  spouse: Member | null;
 }

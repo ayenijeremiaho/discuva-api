@@ -987,6 +987,7 @@ describe('AuthService', () => {
         'workerProfile.secondaryDepartment',
         'clergy',
         'clergy.title',
+        'spouse',
       ]);
     });
   });

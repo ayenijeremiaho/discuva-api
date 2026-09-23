@@ -28,6 +28,7 @@ import { UpdateMemberDto } from '../dto/update-member.dto';
 import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
+import { LinkSpouseDto } from '../dto/link-spouse.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
 import { AssignClergyDto } from '../dto/assign-clergy.dto';
 import { SetClergyReviewAccessDto } from '../dto/set-clergy-review-access.dto';
@@ -154,6 +155,7 @@ export class MemberController {
       'workerProfile.secondaryDepartment',
       'clergy',
       'clergy.title',
+      'spouse',
     ]);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
@@ -277,6 +279,35 @@ export class MemberController {
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Post(':id/spouse')
+  async linkSpouse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LinkSpouseDto,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<MemberDto> {
+    const member = await this.memberService.linkSpouse(
+      id,
+      dto.spouseId,
+      user.id,
+    );
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Delete(':id/spouse')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async unlinkSpouse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<void> {
+    await this.memberService.unlinkSpouse(id, user.id);
   }
 
   @UseGuards(AdminGuard)

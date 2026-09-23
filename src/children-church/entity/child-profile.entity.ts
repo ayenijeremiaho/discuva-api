@@ -51,4 +51,8 @@ export class ChildProfile extends BaseEntity {
 
   @OneToMany(() => ChildGuardian, (guardian) => guardian.child)
   guardians: ChildGuardian[];
+
+  // Transient — populated explicitly by ChildrenChurchService.getChild(),
+  // not persisted. Total Children's Church check-ins for this child.
+  visitCount?: number;
 }

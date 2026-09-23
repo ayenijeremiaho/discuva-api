@@ -248,6 +248,9 @@ export class ChildrenChurchService {
       relations: ['ageGroup', 'classGroup', 'guardians', 'registeredBy'],
     });
     if (!entity) throw new NotFoundException('Child not found');
+    entity.visitCount = await this.checkInRepo.count({
+      where: { child: { id } },
+    });
     return entity;
   }
 
