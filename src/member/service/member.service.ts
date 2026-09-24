@@ -833,6 +833,8 @@ export class MemberService {
     this.auditLogService.log('WORKER_PROFILE_UPDATED', {
       actorId,
       targetId: memberId,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
       metadata: { changes: Object.keys(dto) },
     });
     // Logged separately so the timeline can show a clean milestone.
@@ -840,6 +842,8 @@ export class MemberService {
       this.auditLogService.log('WORKER_TRAINEE_STATUS_CHANGED', {
         actorId,
         targetId: memberId,
+        targetName: `${member.firstname} ${member.lastname}`,
+        targetEmail: member.email,
         metadata: {
           isTrainee: dto.isTrainee,
           departmentId: profile.department?.id,
@@ -992,6 +996,7 @@ export class MemberService {
   }
 
   async purgeDevice(memberId: string, actorId: string): Promise<void> {
+    const member = await this.getById(memberId);
     await this.memberRepository.update(memberId, { deviceId: null });
     await Promise.all([
       this.sessionService.updateLogout(memberId, SessionSurface.MEMBER),
@@ -1001,7 +1006,12 @@ export class MemberService {
     this.logger.log(
       `Device lock purged for member ${memberId} by actor ${actorId}`,
     );
-    this.auditLogService.log('DEVICE_PURGED', { actorId, targetId: memberId });
+    this.auditLogService.log('DEVICE_PURGED', {
+      actorId,
+      targetId: memberId,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
+    });
   }
 
   // Symmetric — both rows are updated in one transaction so a spouse link
@@ -1041,7 +1051,12 @@ export class MemberService {
     this.auditLogService.log('MEMBER_SPOUSE_LINKED', {
       actorId,
       targetId: memberId,
-      metadata: { spouseId },
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
+      metadata: {
+        spouseId,
+        spouseName: `${spouse.firstname} ${spouse.lastname}`,
+      },
     });
     return this.getById(memberId, ['spouse']);
   }
@@ -1064,6 +1079,8 @@ export class MemberService {
     this.auditLogService.log('MEMBER_SPOUSE_UNLINKED', {
       actorId,
       targetId: memberId,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
       metadata: { spouseId },
     });
   }

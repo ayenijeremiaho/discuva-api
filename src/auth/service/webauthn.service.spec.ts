@@ -327,15 +327,21 @@ describe('WebauthnService', () => {
 
   describe('removeCredential', () => {
     it('throws NotFoundException when the row does not belong to this member', async () => {
-      mockCredentialRepo.delete.mockResolvedValue({ affected: 0 });
+      mockCredentialRepo.findOne.mockResolvedValue(null);
 
       await expect(
         service.removeCredential('member-1', 'row-1'),
       ).rejects.toThrow(NotFoundException);
+      expect(mockCredentialRepo.delete).not.toHaveBeenCalled();
       expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
 
     it('deletes scoped to memberId and audit-logs on success', async () => {
+      mockCredentialRepo.findOne.mockResolvedValue({
+        id: 'row-1',
+        memberId: 'member-1',
+        deviceName: "Jane's iPhone",
+      });
       mockCredentialRepo.delete.mockResolvedValue({ affected: 1 });
 
       await service.removeCredential('member-1', 'row-1');
@@ -346,7 +352,10 @@ describe('WebauthnService', () => {
       });
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'MEMBER_WEBAUTHN_CREDENTIAL_REMOVED',
-        expect.objectContaining({ targetId: 'member-1' }),
+        expect.objectContaining({
+          targetId: 'member-1',
+          targetName: "Jane's iPhone",
+        }),
       );
     });
   });
@@ -354,6 +363,12 @@ describe('WebauthnService', () => {
   describe('revokeAllCredentials', () => {
     it('deletes every credential for the member and audit-logs the count', async () => {
       mockCredentialRepo.delete.mockResolvedValue({ affected: 3 });
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Jane',
+        lastname: 'Doe',
+        email: 'jane@test.com',
+      });
 
       await service.revokeAllCredentials('member-1');
 
@@ -364,6 +379,8 @@ describe('WebauthnService', () => {
         'MEMBER_WEBAUTHN_CREDENTIALS_REVOKED',
         expect.objectContaining({
           targetId: 'member-1',
+          targetName: 'Jane Doe',
+          targetEmail: 'jane@test.com',
           metadata: { count: 3 },
         }),
       );

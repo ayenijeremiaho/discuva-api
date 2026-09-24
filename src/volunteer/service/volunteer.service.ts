@@ -56,6 +56,7 @@ export class VolunteerService {
     this.auditLogService.log('VOLUNTEER_OPPORTUNITY_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.title,
       metadata: { title: saved.title },
     });
     return saved;
@@ -83,6 +84,7 @@ export class VolunteerService {
     this.auditLogService.log('VOLUNTEER_OPPORTUNITY_UPDATED', {
       actorId: admin.id,
       targetId: id,
+      targetName: saved.title,
       metadata: { changes: Object.keys(dto) },
     });
     return saved;
@@ -98,6 +100,7 @@ export class VolunteerService {
     this.auditLogService.log('VOLUNTEER_OPPORTUNITY_CANCELLED', {
       actorId: admin.id,
       targetId: id,
+      targetName: saved.title,
     });
     return saved;
   }
@@ -247,6 +250,7 @@ export class VolunteerService {
     this.auditLogService.log('VOLUNTEER_SIGNUP_CREATED', {
       actorId: memberId,
       targetId: opportunityId,
+      targetName: opportunity.title,
     });
 
     return signup;

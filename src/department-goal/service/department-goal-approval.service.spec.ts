@@ -34,6 +34,7 @@ const mockAdminService = {
 const mockDepartmentService = {
   getDepartmentLeads: jest.fn(),
   assertIsDepartmentLead: jest.fn(),
+  getOne: jest.fn().mockResolvedValue({ id: 'dept-1', name: 'Ushering' }),
 };
 const mockAuditLogService = {
   log: jest.fn(),

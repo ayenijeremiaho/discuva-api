@@ -140,6 +140,7 @@ export class GameService {
     this.auditLogService.log('GAME_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.title,
       metadata: { title: saved.title },
     });
     return saved;
@@ -167,6 +168,7 @@ export class GameService {
     this.auditLogService.log('GAME_UPDATED', {
       actorId: admin.id,
       targetId: id,
+      targetName: saved.title,
       metadata: { title: saved.title, changes: Object.keys(dto) },
     });
     return saved;
@@ -179,6 +181,7 @@ export class GameService {
     this.auditLogService.log('GAME_DELETED', {
       actorId: admin.id,
       targetId: id,
+      targetName: title,
       metadata: { title },
     });
   }
@@ -327,6 +330,7 @@ export class GameService {
     this.auditLogService.log('GAME_QUESTION_ADDED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: game.title,
       metadata: { gameId },
     });
     return saved;
@@ -356,6 +360,7 @@ export class GameService {
     this.auditLogService.log('GAME_QUESTION_UPDATED', {
       actorId: admin.id,
       targetId: questionId,
+      targetName: question.game.title,
       metadata: { changes: Object.keys(dto) },
     });
     return saved;
@@ -367,6 +372,7 @@ export class GameService {
     this.auditLogService.log('GAME_QUESTION_DELETED', {
       actorId: admin.id,
       targetId: questionId,
+      targetName: question.game.title,
     });
   }
 
@@ -382,6 +388,7 @@ export class GameService {
     dto: ReorderQuestionsDto,
     admin: Admin,
   ): Promise<GameQuestion[]> {
+    const game = await this.getGameOrThrow(gameId);
     const questions = await this.listQuestions(gameId);
     const byId = new Map(questions.map((q) => [q.id, q]));
     if (
@@ -401,6 +408,7 @@ export class GameService {
     this.auditLogService.log('GAME_QUESTIONS_REORDERED', {
       actorId: admin.id,
       targetId: gameId,
+      targetName: game.title,
     });
     return this.listQuestions(gameId);
   }
@@ -451,6 +459,7 @@ export class GameService {
     this.auditLogService.log('GAME_SESSION_STARTED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: game.title,
       metadata: { gameId, sessionCode: saved.sessionCode },
     });
     return saved;
@@ -521,6 +530,7 @@ export class GameService {
       this.auditLogService.log('GAME_SESSION_ENDED', {
         actorId: admin.id,
         targetId: session.id,
+        targetName: session.game.title,
         metadata: { sessionCode },
       });
     }

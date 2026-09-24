@@ -1462,8 +1462,19 @@ describe('MemberService', () => {
     it('links both members to each other in one transaction', async () => {
       const mockTxManager = { update: jest.fn().mockResolvedValue({}) };
       mockMemberRepo.findOne
-        .mockResolvedValueOnce({ id: 'member-1', spouse: null })
-        .mockResolvedValueOnce({ id: 'member-2', spouse: null })
+        .mockResolvedValueOnce({
+          id: 'member-1',
+          firstname: 'Ada',
+          lastname: 'Okoye',
+          email: 'ada@test.com',
+          spouse: null,
+        })
+        .mockResolvedValueOnce({
+          id: 'member-2',
+          firstname: 'Bola',
+          lastname: 'Ade',
+          spouse: null,
+        })
         .mockResolvedValueOnce({
           id: 'member-1',
           spouse: { id: 'member-2' },
@@ -1490,7 +1501,9 @@ describe('MemberService', () => {
         expect.objectContaining({
           actorId: 'actor-1',
           targetId: 'member-1',
-          metadata: { spouseId: 'member-2' },
+          targetName: 'Ada Okoye',
+          targetEmail: 'ada@test.com',
+          metadata: { spouseId: 'member-2', spouseName: 'Bola Ade' },
         }),
       );
       expect(result.spouse).toEqual({ id: 'member-2' });

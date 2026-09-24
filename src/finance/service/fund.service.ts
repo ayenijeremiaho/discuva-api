@@ -32,6 +32,7 @@ export class FundService {
     this.auditLogService.log('FUND_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { name: saved.name, type: saved.type },
     });
     return saved;
@@ -58,6 +59,7 @@ export class FundService {
     this.auditLogService.log('FUND_UPDATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: dto as unknown as Record<string, unknown>,
     });
     return saved;

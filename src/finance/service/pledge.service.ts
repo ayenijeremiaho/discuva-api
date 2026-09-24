@@ -59,6 +59,7 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CAMPAIGN_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { name: saved.name },
     });
     return saved;
@@ -188,6 +189,7 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CAMPAIGN_ACTIVE_UPDATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { isActive: dto.isActive },
     });
     return saved;
@@ -212,6 +214,7 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: dto.guestName,
       metadata: {
         memberId: dto.memberId,
         guestName: dto.guestName,
@@ -266,7 +269,10 @@ export class PledgeService {
     dto: UpdatePledgeStatusDto,
     admin: Admin,
   ): Promise<Pledge> {
-    const pledge = await this.pledgeRepo.findOne({ where: { id } });
+    const pledge = await this.pledgeRepo.findOne({
+      where: { id },
+      relations: ['member'],
+    });
     if (!pledge) throw new NotFoundException('Pledge not found.');
     if (
       pledge.status === PledgeStatus.COMPLETED ||
@@ -281,6 +287,9 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_STATUS_UPDATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: pledge.member
+        ? `${pledge.member.firstname} ${pledge.member.lastname}`
+        : pledge.guestName,
       metadata: { status: dto.status },
     });
     return saved;
@@ -375,6 +384,9 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CONTRIBUTION_SUBMITTED', {
       actorId: memberId,
       targetId: saved.id,
+      targetName: pledge.member
+        ? `${pledge.member.firstname} ${pledge.member.lastname}`
+        : pledge.guestName,
       metadata: { pledgeId, amount: dto.amount },
     });
     return saved;
@@ -395,7 +407,10 @@ export class PledgeService {
     amount: number,
     reference: string,
   ): Promise<PledgeContribution> {
-    const pledge = await this.pledgeRepo.findOne({ where: { id: pledgeId } });
+    const pledge = await this.pledgeRepo.findOne({
+      where: { id: pledgeId },
+      relations: ['member'],
+    });
     if (!pledge) throw new NotFoundException('Pledge not found.');
 
     const contribution = this.contributionRepo.create({
@@ -413,6 +428,9 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CONTRIBUTION_CONFIRMED', {
       actorId: memberId,
       targetId: saved.id,
+      targetName: pledge.member
+        ? `${pledge.member.firstname} ${pledge.member.lastname}`
+        : pledge.guestName,
       metadata: { pledgeId, amount, source: 'giving-checkout' },
     });
 
@@ -483,6 +501,9 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CONTRIBUTION_CONFIRMED', {
       actorId: admin.id,
       targetId: id,
+      targetName: contribution.pledge.member
+        ? `${contribution.pledge.member.firstname} ${contribution.pledge.member.lastname}`
+        : contribution.pledge.guestName,
       metadata: { pledgeId: contribution.pledge.id },
     });
 
@@ -526,6 +547,9 @@ export class PledgeService {
     this.auditLogService.log('PLEDGE_CONTRIBUTION_DECLINED', {
       actorId: admin.id,
       targetId: id,
+      targetName: contribution.pledge.member
+        ? `${contribution.pledge.member.firstname} ${contribution.pledge.member.lastname}`
+        : contribution.pledge.guestName,
       metadata: { pledgeId: contribution.pledge.id, note: dto.financeNote },
     });
 
@@ -550,7 +574,10 @@ export class PledgeService {
   }
 
   private async maybeAutoCompletePledge(pledgeId: string): Promise<void> {
-    const pledge = await this.pledgeRepo.findOne({ where: { id: pledgeId } });
+    const pledge = await this.pledgeRepo.findOne({
+      where: { id: pledgeId },
+      relations: ['member'],
+    });
     if (pledge?.status !== PledgeStatus.ACTIVE) return;
 
     const { sum } = await this.contributionRepo
@@ -565,6 +592,9 @@ export class PledgeService {
       await this.pledgeRepo.save(pledge);
       this.auditLogService.log('PLEDGE_AUTO_COMPLETED', {
         targetId: pledgeId,
+        targetName: pledge.member
+          ? `${pledge.member.firstname} ${pledge.member.lastname}`
+          : pledge.guestName,
         metadata: { confirmedTotal: Number(sum) },
       });
     }

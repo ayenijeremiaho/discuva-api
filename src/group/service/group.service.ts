@@ -57,6 +57,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_CREATED', {
       actorId,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { name: saved.name },
     });
     return saved;
@@ -84,6 +85,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_UPDATED', {
       actorId,
       targetId: id,
+      targetName: saved.name,
       metadata: { name: saved.name, changes: Object.keys(dto) },
     });
     return saved;
@@ -96,6 +98,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_DELETED', {
       actorId,
       targetId: id,
+      targetName: name,
       metadata: { name },
     });
   }
@@ -153,7 +156,7 @@ export class GroupService {
     dto: AddGroupMemberDto,
     actorId: string,
   ): Promise<GroupMember> {
-    await this.getOrThrow(groupId);
+    const group = await this.getOrThrow(groupId);
 
     const existing = await this.groupMemberRepo.findOne({
       where: { group: { id: groupId }, member: { id: dto.memberId } },
@@ -171,6 +174,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_MEMBERS_ADDED', {
       actorId,
       targetId: groupId,
+      targetName: group.name,
       metadata: { memberIds: [dto.memberId] },
     });
     return saved;
@@ -181,7 +185,7 @@ export class GroupService {
     dto: BulkAddGroupMembersDto,
     actorId: string,
   ): Promise<{ added: number; skipped: number }> {
-    await this.getOrThrow(groupId);
+    const group = await this.getOrThrow(groupId);
 
     // Batched instead of looping addMember() per id (which cost 2 round
     // trips per member) — one existence check + one bulk insert regardless
@@ -211,6 +215,7 @@ export class GroupService {
       this.auditLogService.log('GROUP_MEMBERS_ADDED', {
         actorId,
         targetId: groupId,
+        targetName: group.name,
         metadata: { memberIds: toAdd },
       });
     }
@@ -226,6 +231,7 @@ export class GroupService {
     memberId: string,
     actorId: string,
   ): Promise<void> {
+    const group = await this.getOrThrow(groupId);
     const groupMember = await this.groupMemberRepo.findOne({
       where: { group: { id: groupId }, member: { id: memberId } },
     });
@@ -236,6 +242,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_MEMBERS_REMOVED', {
       actorId,
       targetId: groupId,
+      targetName: group.name,
       metadata: { memberIds: [memberId] },
     });
   }
@@ -245,7 +252,7 @@ export class GroupService {
     dto: BulkRemoveGroupMembersDto,
     actorId: string,
   ): Promise<{ removed: number }> {
-    await this.getOrThrow(groupId);
+    const group = await this.getOrThrow(groupId);
 
     const result = await this.groupMemberRepo.delete({
       group: { id: groupId },
@@ -255,6 +262,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_MEMBERS_REMOVED', {
       actorId,
       targetId: groupId,
+      targetName: group.name,
       metadata: { memberIds: dto.memberIds },
     });
     this.logger.log(`Bulk remove from group ${groupId}: ${removed} removed`);
@@ -283,7 +291,7 @@ export class GroupService {
     dto: AddPhoneGroupMembersDto,
     actorId: string,
   ): Promise<{ added: number; skipped: number }> {
-    await this.getOrThrow(groupId);
+    const group = await this.getOrThrow(groupId);
 
     // Batched instead of looping a findOne+save per entry — one existence
     // check + one bulk insert regardless of how many entries are submitted
@@ -322,6 +330,7 @@ export class GroupService {
       this.auditLogService.log('GROUP_MEMBERS_ADDED', {
         actorId,
         targetId: groupId,
+        targetName: group.name,
         metadata: { added: toAdd.length, skipped, source: 'manual-phone' },
       });
     }
@@ -337,7 +346,7 @@ export class GroupService {
     dto: AddFirstTimersToGroupDto,
     actorId: string,
   ): Promise<{ added: number; skipped: number }> {
-    await this.getOrThrow(groupId);
+    const group = await this.getOrThrow(groupId);
 
     const firstTimers = await this.firstTimerRepo
       .createQueryBuilder('ft')
@@ -360,6 +369,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_MEMBERS_ADDED', {
       actorId,
       targetId: groupId,
+      targetName: group.name,
       metadata: {
         added: result.added,
         skipped: result.skipped,
@@ -376,6 +386,7 @@ export class GroupService {
     entryId: string,
     actorId: string,
   ): Promise<void> {
+    const group = await this.getOrThrow(groupId);
     const groupMember = await this.groupMemberRepo.findOne({
       where: { id: entryId, group: { id: groupId } },
     });
@@ -386,6 +397,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_MEMBERS_REMOVED', {
       actorId,
       targetId: groupId,
+      targetName: group.name,
       metadata: { entryIds: [entryId] },
     });
   }
@@ -395,7 +407,7 @@ export class GroupService {
     dto: BulkRemoveGroupEntriesDto,
     actorId: string,
   ): Promise<{ removed: number }> {
-    await this.getOrThrow(groupId);
+    const group = await this.getOrThrow(groupId);
 
     const result = await this.groupMemberRepo.delete({
       group: { id: groupId },
@@ -405,6 +417,7 @@ export class GroupService {
     this.auditLogService.log('GROUP_MEMBERS_REMOVED', {
       actorId,
       targetId: groupId,
+      targetName: group.name,
       metadata: { entryIds: dto.entryIds },
     });
     this.logger.log(`Bulk remove from group ${groupId}: ${removed} removed`);

@@ -63,6 +63,8 @@ export class PrayerRequestService {
     this.auditLogService.log('PRAYER_REQUEST_SUBMITTED', {
       actorId: currentUser.id,
       targetId: saved.id,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
     });
 
     return saved;
@@ -104,6 +106,8 @@ export class PrayerRequestService {
     this.auditLogService.log('TESTIMONY_SUBMITTED', {
       actorId: currentUser.id,
       targetId: saved.id,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
       metadata: {
         isPublic: saved.isPublic,
         prayerRequestId: dto.prayerRequestId ?? null,
@@ -199,6 +203,7 @@ export class PrayerRequestService {
     this.auditLogService.log('PRAYER_REQUEST_STATUS_UPDATED', {
       actorId,
       targetId: saved.id,
+      targetName: saved.submittedByName,
       metadata: { status: dto.status },
     });
 
@@ -225,6 +230,7 @@ export class PrayerRequestService {
     this.auditLogService.log('PREGNANCY_CASE_CREATED', {
       actorId: currentUser.id,
       targetId: saved.id,
+      targetName: saved.name,
     });
 
     return saved;
@@ -256,6 +262,7 @@ export class PrayerRequestService {
     this.auditLogService.log('PREGNANCY_VISIT_LOGGED', {
       actorId: currentUser.id,
       targetId: saved.id,
+      targetName: pregnancyCase.name,
       metadata: { caseId },
     });
 
@@ -312,6 +319,7 @@ export class PrayerRequestService {
     this.auditLogService.log('PREGNANCY_CASE_STATUS_UPDATED', {
       actorId,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { status: dto.status },
     });
 

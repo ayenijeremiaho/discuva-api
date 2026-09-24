@@ -54,6 +54,7 @@ export class PettyCashService {
     this.auditLogService.log('PETTY_CASH_REQUESTED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.notes ?? undefined,
       metadata: { amount: saved.amount },
     });
     return saved;
@@ -117,6 +118,7 @@ export class PettyCashService {
     this.auditLogService.log('PETTY_CASH_REJECTED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.notes ?? undefined,
     });
     return saved;
   }
@@ -191,6 +193,7 @@ export class PettyCashService {
     this.auditLogService.log('PETTY_CASH_APPROVED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.notes ?? undefined,
     });
     return saved;
   }

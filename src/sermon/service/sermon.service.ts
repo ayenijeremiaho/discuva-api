@@ -56,6 +56,7 @@ export class SermonService {
     this.auditLogService.log('SERMON_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.title,
       metadata: { title: saved.title },
     });
     return saved;
@@ -86,6 +87,7 @@ export class SermonService {
     this.auditLogService.log('SERMON_UPDATED', {
       actorId: admin.id,
       targetId: id,
+      targetName: saved.title,
       metadata: { title: saved.title, changes: Object.keys(dto) },
     });
     return saved;
@@ -98,6 +100,7 @@ export class SermonService {
     this.auditLogService.log('SERMON_DELETED', {
       actorId: admin.id,
       targetId: id,
+      targetName: title,
       metadata: { title },
     });
   }

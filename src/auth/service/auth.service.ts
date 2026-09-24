@@ -343,7 +343,16 @@ export class AuthService {
   ): Promise<void> {
     await this.sessionService.updateLogout(memberId, surface);
     await this.cacheService.blacklistJti(jti, remainingTtl);
-    this.auditLogService.log('MEMBER_LOGOUT', { targetId: memberId });
+    const member = await this.memberService.getById(memberId);
+    this.auditLogService.log(
+      surface === SessionSurface.ADMIN ? 'ADMIN_LOGOUT' : 'MEMBER_LOGOUT',
+      {
+        actorId: memberId,
+        targetId: memberId,
+        targetEmail: member.email,
+        targetName: `${member.firstname} ${member.lastname}`,
+      },
+    );
   }
 
   async validateRefreshToken(

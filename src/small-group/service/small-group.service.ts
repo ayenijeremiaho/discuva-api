@@ -53,6 +53,7 @@ export class SmallGroupService {
     this.auditLogService.log('SMALL_GROUP_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { name: saved.name },
     });
     return saved;
@@ -84,6 +85,7 @@ export class SmallGroupService {
     this.auditLogService.log('SMALL_GROUP_UPDATED', {
       actorId: admin.id,
       targetId: id,
+      targetName: saved.name,
       metadata: { changes: Object.keys(dto) },
     });
     return saved;
@@ -95,6 +97,7 @@ export class SmallGroupService {
     this.auditLogService.log('SMALL_GROUP_DELETED', {
       actorId: admin.id,
       targetId: id,
+      targetName: group.name,
       metadata: { name: group.name },
     });
   }
@@ -162,6 +165,7 @@ export class SmallGroupService {
     memberId: string,
     admin: Admin,
   ): Promise<void> {
+    const group = await this.getOrThrow(groupId);
     const membership = await this.memberRepo.findOne({
       where: { group: { id: groupId }, member: { id: memberId } },
     });
@@ -171,6 +175,7 @@ export class SmallGroupService {
     this.auditLogService.log('SMALL_GROUP_MEMBER_REMOVED', {
       actorId: admin.id,
       targetId: groupId,
+      targetName: group.name,
       metadata: { memberId },
     });
   }

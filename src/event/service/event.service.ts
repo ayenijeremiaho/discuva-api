@@ -53,6 +53,7 @@ export class EventService {
       const result = await this.createRecurring(dto);
       this.auditLogService.log('EVENT_CREATED', {
         actorId,
+        targetName: dto.name,
         metadata: { name: dto.name, isRecurring: true, count: result.length },
       });
       return result;
@@ -62,6 +63,7 @@ export class EventService {
     this.auditLogService.log('EVENT_CREATED', {
       actorId,
       targetId: result.id,
+      targetName: result.name,
       metadata: { name: result.name, eventDate: result.eventDate },
     });
     return result;
@@ -108,6 +110,7 @@ export class EventService {
     this.auditLogService.log('EVENT_UPDATED', {
       actorId,
       targetId: id,
+      targetName: saved.name,
       metadata: { name: saved.name, changes: Object.keys(dto) },
     });
     return saved;
@@ -197,6 +200,7 @@ export class EventService {
     this.auditLogService.log('EVENT_DELETED', {
       actorId,
       targetId: eventId,
+      targetName: name,
       metadata: { name },
     });
   }
@@ -225,6 +229,8 @@ export class EventService {
     await this.eventRepository.remove(events);
     this.auditLogService.log('EVENT_DELETED', {
       actorId,
+      targetId: recurringEventId,
+      targetName: name,
       metadata: {
         name,
         recurringEventId,

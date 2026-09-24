@@ -34,6 +34,7 @@ export class BudgetService {
     this.auditLogService.log('BUDGET_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { name: saved.name },
     });
     return saved;
@@ -89,6 +90,7 @@ export class BudgetService {
     this.auditLogService.log('BUDGET_DEACTIVATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
     });
     return saved;
   }
@@ -100,6 +102,7 @@ export class BudgetService {
     this.auditLogService.log('BUDGET_REACTIVATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
     });
     return saved;
   }

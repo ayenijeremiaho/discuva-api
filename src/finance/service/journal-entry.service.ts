@@ -138,6 +138,7 @@ export class JournalEntryService {
       this.auditLogService.log('JOURNAL_ENTRY_CREATED', {
         actorId: admin.id,
         targetId: savedEntry.id,
+        targetName: savedEntry.description,
         metadata: { idempotencyKey: dto.idempotencyKey },
       });
       return savedEntry;
@@ -209,6 +210,7 @@ export class JournalEntryService {
     this.auditLogService.log('JOURNAL_ENTRY_APPROVED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.description,
     });
     return saved;
   }
@@ -299,6 +301,7 @@ export class JournalEntryService {
     this.auditLogService.log('JOURNAL_ENTRY_VOIDED', {
       actorId: admin.id,
       targetId: entry.id,
+      targetName: entry.description,
       metadata: { reversalId: savedReversal.id },
     });
     return savedReversal;

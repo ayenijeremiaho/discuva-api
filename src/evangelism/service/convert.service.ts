@@ -65,6 +65,7 @@ export class ConvertService {
     this.auditLogService.log('CONVERT_CREATED', {
       actorId: currentUser.id,
       targetId: saved.id,
+      targetName: saved.name,
     });
 
     return saved;
@@ -96,6 +97,7 @@ export class ConvertService {
     this.auditLogService.log('CONVERT_FOLLOW_UP_LOGGED', {
       actorId: currentUser.id,
       targetId: saved.id,
+      targetName: convert.name,
       metadata: { convertId },
     });
 
@@ -190,6 +192,7 @@ export class ConvertService {
     this.auditLogService.log('CONVERT_STATUS_UPDATED', {
       actorId,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { status: dto.status },
     });
 
@@ -230,6 +233,7 @@ export class ConvertService {
     this.auditLogService.log('CONVERT_REASSIGNED', {
       actorId: actorAdminId,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { workerProfileId: dto.workerProfileId },
     });
 
@@ -253,6 +257,7 @@ export class ConvertService {
     this.auditLogService.log('CONVERT_LINKED_TO_MEMBER', {
       actorId: actorAdminId,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { memberId: dto.memberId },
     });
 

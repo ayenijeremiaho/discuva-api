@@ -744,6 +744,30 @@ describe('AuthService', () => {
         ),
       ).resolves.toBeUndefined();
     });
+
+    it('should audit-log MEMBER_LOGOUT with actor and target set to the logging-out member', async () => {
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+
+      await service.logout('member-1', SessionSurface.MEMBER, 'test-jti', 3600);
+
+      expect(mockAuditLogService.log).toHaveBeenCalledWith('MEMBER_LOGOUT', {
+        actorId: 'member-1',
+        targetId: 'member-1',
+        targetEmail: 'test@test.com',
+        targetName: 'Test undefined',
+      });
+    });
+
+    it('should audit-log ADMIN_LOGOUT when the surface is ADMIN', async () => {
+      mockSessionService.updateLogout.mockResolvedValue(undefined);
+
+      await service.logout('member-1', SessionSurface.ADMIN, 'test-jti', 3600);
+
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'ADMIN_LOGOUT',
+        expect.objectContaining({ actorId: 'member-1', targetId: 'member-1' }),
+      );
+    });
   });
 
   describe('validateRefreshToken', () => {

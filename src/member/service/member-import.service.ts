@@ -264,6 +264,7 @@ export class MemberImportService {
     this.auditLogService.log('MEMBER_IMPORT_PREVIEWED', {
       actorId: admin.id,
       targetId: job.id,
+      targetName: job.originalFilename,
       metadata: {
         filename: file.originalname,
         totalRows: job.totalRows,
@@ -480,6 +481,7 @@ export class MemberImportService {
     this.auditLogService.log('MEMBER_IMPORT_COMMITTED', {
       actorId: admin.id,
       targetId: jobId,
+      targetName: job.originalFilename,
       metadata: { createdCount, failedCount: failedRows.length },
     });
 

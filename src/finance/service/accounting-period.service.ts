@@ -36,6 +36,7 @@ export class AccountingPeriodService {
     this.auditLogService.log('ACCOUNTING_PERIOD_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: `${dto.year}-${String(dto.month).padStart(2, '0')}`,
       metadata: { year: dto.year, month: dto.month },
     });
     return saved;
@@ -65,6 +66,7 @@ export class AccountingPeriodService {
     this.auditLogService.log('ACCOUNTING_PERIOD_CLOSED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: `${saved.year}-${String(saved.month).padStart(2, '0')}`,
       metadata: { year: saved.year, month: saved.month },
     });
     return saved;
@@ -81,6 +83,7 @@ export class AccountingPeriodService {
     this.auditLogService.log('ACCOUNTING_PERIOD_REOPENED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: `${saved.year}-${String(saved.month).padStart(2, '0')}`,
       metadata: { year: saved.year, month: saved.month },
     });
     return saved;

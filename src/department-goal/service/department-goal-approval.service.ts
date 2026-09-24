@@ -244,9 +244,11 @@ export class DepartmentGoalApprovalService {
     }
 
     const saved = await this.approvalRepo.save(approval);
+    const department = await this.departmentService.getOne(departmentId);
     this.auditLogService.log('DEPARTMENT_GOAL_APPROVAL_LEVEL_OVERRIDE_SET', {
       actorId: actorAdmin.member?.id,
       targetId: saved.id,
+      targetName: department.name,
       metadata: {
         cycleId,
         departmentId,
@@ -283,9 +285,11 @@ export class DepartmentGoalApprovalService {
     }
     approval.status = DepartmentGoalApprovalStatus.PENDING;
     await this.approvalRepo.save(approval);
+    const department = await this.departmentService.getOne(departmentId);
     this.auditLogService.log('DEPARTMENT_GOAL_APPROVAL_RESUBMITTED', {
       actorId: memberId,
       targetId: approval.id,
+      targetName: department.name,
       metadata: {
         cycleId: cycle.id,
         departmentId,
@@ -364,6 +368,7 @@ export class DepartmentGoalApprovalService {
       this.auditLogService.log('DEPARTMENT_GOAL_APPROVAL_CHANGES_REQUESTED', {
         actorId: actorAdmin.member?.id,
         targetId: saved.id,
+        targetName: leads.name,
         metadata: { cycleId, departmentId, level: approval.currentLevel },
       });
       this.notifyLeads(leads, {
@@ -402,6 +407,7 @@ export class DepartmentGoalApprovalService {
     this.auditLogService.log('DEPARTMENT_GOAL_APPROVAL_APPROVED', {
       actorId: actorAdmin.member?.id,
       targetId: saved.id,
+      targetName: leads.name,
       metadata: { cycleId, departmentId, level: approvedLevel },
     });
     this.notifyLeads(leads, { title, body: comment.content, comment });
@@ -427,12 +433,13 @@ export class DepartmentGoalApprovalService {
         decision: null,
       }),
     );
+    const leads = await this.departmentService.getDepartmentLeads(departmentId);
     this.auditLogService.log('DEPARTMENT_GOAL_COMMENT_ADDED', {
       actorId: actorAdmin.member?.id,
       targetId: comment.id,
+      targetName: leads.name,
       metadata: { cycleId, departmentId },
     });
-    const leads = await this.departmentService.getDepartmentLeads(departmentId);
     this.notifyLeads(leads, {
       title: "New comment on your department's goals",
       body: content,

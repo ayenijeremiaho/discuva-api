@@ -35,6 +35,7 @@ export class RecurringEntryService {
     this.auditLogService.log('RECURRING_ENTRY_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.description,
       metadata: { description: saved.description },
     });
     return saved;
@@ -72,6 +73,7 @@ export class RecurringEntryService {
     this.auditLogService.log('RECURRING_ENTRY_UPDATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.description,
       metadata: dto as unknown as Record<string, unknown>,
     });
     return saved;

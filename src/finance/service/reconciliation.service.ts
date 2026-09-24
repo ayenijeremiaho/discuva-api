@@ -112,6 +112,7 @@ export class ReconciliationService {
     this.auditLogService.log('RECONCILIATION_CSV_UPLOADED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.originalFilename,
       metadata: { filename: file.originalname, profileId: profile.id },
     });
     return saved;
@@ -193,7 +194,7 @@ export class ReconciliationService {
     dto: BulkConfirmReconciliationDto,
     admin: Admin,
   ): Promise<{ confirmed: number }> {
-    await this.findJob(jobId);
+    const job = await this.findJob(jobId);
 
     const rowIds = dto.rows.map((r) => r.rowId);
     const rows = await this.rowRepo.findBy({
@@ -219,6 +220,7 @@ export class ReconciliationService {
     this.auditLogService.log('RECONCILIATION_BULK_CONFIRMED', {
       actorId: admin.id,
       targetId: jobId,
+      targetName: job.originalFilename,
       metadata: { confirmed },
     });
     return { confirmed };
@@ -350,6 +352,7 @@ export class ReconciliationService {
     this.auditLogService.log('RECONCILIATION_ROWS_POSTED', {
       actorId: admin.id,
       targetId: jobId,
+      targetName: job.originalFilename,
       metadata: { created },
     });
     return { created };

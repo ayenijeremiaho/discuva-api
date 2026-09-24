@@ -58,6 +58,7 @@ export class AccountService {
     this.auditLogService.log('ACCOUNT_CREATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: { name: saved.name, type: saved.type, subtype: saved.subtype },
     });
     return saved;
@@ -127,6 +128,7 @@ export class AccountService {
     this.auditLogService.log('ACCOUNT_UPDATED', {
       actorId: admin.id,
       targetId: saved.id,
+      targetName: saved.name,
       metadata: dto as unknown as Record<string, unknown>,
     });
     return saved;

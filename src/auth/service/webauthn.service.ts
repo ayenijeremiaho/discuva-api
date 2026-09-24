@@ -178,6 +178,7 @@ export class WebauthnService {
     );
     this.auditLogService.log('MEMBER_WEBAUTHN_CREDENTIAL_REGISTERED', {
       targetId: memberId,
+      targetName: deviceName,
       metadata: { deviceName },
     });
   }
@@ -279,12 +280,16 @@ export class WebauthnService {
   }
 
   async removeCredential(memberId: string, id: string): Promise<void> {
-    const result = await this.credentialRepo.delete({ id, memberId });
-    if (result.affected === 0) {
+    const credential = await this.credentialRepo.findOne({
+      where: { id, memberId },
+    });
+    if (!credential) {
       throw new NotFoundException('Device not found.');
     }
+    await this.credentialRepo.delete({ id, memberId });
     this.auditLogService.log('MEMBER_WEBAUTHN_CREDENTIAL_REMOVED', {
       targetId: memberId,
+      targetName: credential.deviceName,
       metadata: { credentialRowId: id },
     });
   }
@@ -300,8 +305,11 @@ export class WebauthnService {
   async revokeAllCredentials(memberId: string): Promise<void> {
     const result = await this.credentialRepo.delete({ memberId });
     if (!result.affected) return;
+    const member = await this.memberService.getById(memberId);
     this.auditLogService.log('MEMBER_WEBAUTHN_CREDENTIALS_REVOKED', {
       targetId: memberId,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
       metadata: { count: result.affected },
     });
   }

@@ -113,6 +113,7 @@ export class AnnouncementService {
     this.auditLogService.log('ANNOUNCEMENT_CREATED', {
       actorId: authorId,
       targetId: saved.id,
+      targetName: saved.title,
       metadata: { title: saved.title, audience: saved.audience },
     });
 
@@ -227,6 +228,7 @@ export class AnnouncementService {
     this.auditLogService.log('ANNOUNCEMENT_CREATED', {
       actorId,
       targetId: saved.id,
+      targetName: saved.title,
       metadata: { title: saved.title, audience: saved.audience, system: true },
     });
 
@@ -269,6 +271,7 @@ export class AnnouncementService {
     this.auditLogService.log('ANNOUNCEMENT_UPDATED', {
       actorId,
       targetId: id,
+      targetName: saved.title,
       metadata: {
         title: saved.title,
         audience: saved.audience,
@@ -465,6 +468,7 @@ export class AnnouncementService {
     this.auditLogService.log('ANNOUNCEMENT_DELETED', {
       actorId,
       targetId: id,
+      targetName: title,
       metadata: { title, audience },
     });
   }

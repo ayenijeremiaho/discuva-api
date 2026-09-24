@@ -65,6 +65,7 @@ export class AssetService {
       this.auditLogService.log('ASSET_CREATED', {
         actorId: admin.member?.id,
         targetId: saved.id,
+        targetName: saved.name,
         metadata: {
           tagNumber: saved.tagNumber,
           name: saved.name,
@@ -151,6 +152,7 @@ export class AssetService {
     this.auditLogService.log('ASSET_UPDATED', {
       actorId: admin.member?.id,
       targetId: id,
+      targetName: saved.name,
       metadata: {
         changes: Object.keys(dto).filter((k) => (dto as any)[k] !== undefined),
       },
@@ -184,6 +186,7 @@ export class AssetService {
     this.auditLogService.log('ASSET_MAINTENANCE_SCHEDULED', {
       actorId: admin.member?.id,
       targetId: id,
+      targetName: asset.name,
       metadata: {
         frequencyUnit: dto.frequencyUnit,
         frequencyValue: dto.frequencyValue,
@@ -233,6 +236,7 @@ export class AssetService {
     this.auditLogService.log('ASSET_MAINTENANCE_LOGGED', {
       actorId: admin.member?.id,
       targetId: id,
+      targetName: asset.name,
       metadata: {
         recordId: saved.id,
         type: dto.type,
@@ -259,6 +263,7 @@ export class AssetService {
     this.auditLogService.log('ASSET_INVENTORY_UPDATED', {
       actorId: admin.member?.id,
       targetId: id,
+      targetName: saved.name,
       metadata: {
         inStorage: dto.inStorage,
         inUse: dto.inUse,
