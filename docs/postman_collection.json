@@ -17933,7 +17933,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Equipment & Tools\",\n  \"description\": \"Updated description\"\n}"
+              "raw": "{\n  \"name\": \"Equipment & Tools\",\n  \"description\": \"Updated description\",\n  \"isActive\": false\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/admin/finance/categories/:id",
@@ -17953,7 +17953,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_WRITE). Updates an existing category."
+            "description": "AdminGuard (FINANCE_WRITE). Updates an existing category; set isActive: false to hide it from the finance-worker picker without deleting it."
           },
           "response": [
             {
@@ -17961,6 +17961,57 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"id\": \"e7f8a9b0-1c2d-3e4f-5a6b-7c8d9e0f1a2b\",\n  \"name\": \"Welfare\",\n  \"isActive\": true\n}"
+            },
+            {
+              "name": "404 Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Finance category not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Finance Category",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/finance/categories/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "finance",
+                "categories",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "AdminGuard (FINANCE_WRITE). Deletes a category; fails with 400 if the category is referenced by any FinanceRequest (disable it instead via PATCH isActive: false)."
+          },
+          "response": [
+            {
+              "name": "204 No Content",
+              "status": "No Content",
+              "code": 204,
+              "body": ""
+            },
+            {
+              "name": "400 Bad Request (in use)",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"\\\"Welfare\\\" is already used by one or more finance requests and can't be deleted \\u2014 disable it instead so it stops showing as an option.\"\n}"
             },
             {
               "name": "404 Not Found",
@@ -18360,7 +18411,7 @@
                 "categories"
               ]
             },
-            "description": "RolesGuard (WORKER). Returns all finance categories for use in the request creation form."
+            "description": "RolesGuard (WORKER). Returns only active (isActive: true) finance categories for use in the request creation form."
           },
           "response": [
             {

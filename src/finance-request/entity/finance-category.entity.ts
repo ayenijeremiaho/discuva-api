@@ -11,4 +11,10 @@ export class FinanceCategory extends BaseEntity {
 
   @Column({ type: 'character varying', nullable: true })
   description: string;
+
+  // Categories already used by a FinanceRequest can't be hard-deleted (see
+  // FK RESTRICT on FinanceRequest.category) — this lets an admin retire one
+  // from the picker without breaking existing requests that reference it.
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
 }

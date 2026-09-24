@@ -38,6 +38,7 @@ const mockCategoryRepo = {
   findOne: jest.fn(),
   create: jest.fn(),
   save: jest.fn(),
+  remove: jest.fn(),
 };
 
 const makeQb = () => ({
@@ -58,6 +59,7 @@ const mockRequestRepo = {
   findAndCount: jest.fn(),
   create: jest.fn(),
   save: jest.fn(),
+  exists: jest.fn(),
   createQueryBuilder: jest.fn(),
 };
 
@@ -229,6 +231,19 @@ describe('FinanceRequestService', () => {
 
       expect(result).toEqual([mockCategory]);
       expect(mockCategoryRepo.find).toHaveBeenCalledWith({
+        where: {},
+        order: { name: 'ASC' },
+      });
+    });
+
+    it('should filter to active categories only when activeOnly is true', async () => {
+      mockCategoryRepo.find.mockResolvedValue([mockCategory]);
+
+      const result = await service.getCategories(true);
+
+      expect(result).toEqual([mockCategory]);
+      expect(mockCategoryRepo.find).toHaveBeenCalledWith({
+        where: { isActive: true },
         order: { name: 'ASC' },
       });
     });
@@ -318,6 +333,44 @@ describe('FinanceRequestService', () => {
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'FINANCE_CATEGORY_UPDATED',
         expect.objectContaining({ actorId: 'member-admin-1' }),
+      );
+    });
+  });
+
+  describe('deleteCategory', () => {
+    it('should throw NotFoundException when category does not exist', async () => {
+      mockCategoryRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.deleteCategory('nonexistent', mockAdmin),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should throw BadRequestException when category is used by a finance request', async () => {
+      mockCategoryRepo.findOne.mockResolvedValue(mockCategory);
+      mockRequestRepo.exists.mockResolvedValue(true);
+
+      await expect(service.deleteCategory('cat-1', mockAdmin)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      expect(mockCategoryRepo.remove).not.toHaveBeenCalled();
+    });
+
+    it('should remove category and audit-log when not in use', async () => {
+      mockCategoryRepo.findOne.mockResolvedValue(mockCategory);
+      mockRequestRepo.exists.mockResolvedValue(false);
+
+      await service.deleteCategory('cat-1', mockAdmin);
+
+      expect(mockCategoryRepo.remove).toHaveBeenCalledWith(mockCategory);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'FINANCE_CATEGORY_DELETED',
+        expect.objectContaining({
+          actorId: 'member-admin-1',
+          targetId: 'cat-1',
+          targetName: mockCategory.name,
+        }),
       );
     });
   });
@@ -547,6 +600,24 @@ describe('FinanceRequestService', () => {
         'FINANCE_REQUEST_REJECTED',
         expect.objectContaining({
           metadata: expect.objectContaining({ reason: 'No budget' }),
+        }),
+      );
+    });
+  });
+
+  describe('getMyDepartmentRequests', () => {
+    it('should load department and requestedBy relations alongside category', async () => {
+      mockRequestRepo.findAndCount.mockResolvedValue([[pendingRequest], 1]);
+
+      await service.getMyDepartmentRequests('dept-1', 1, 20);
+
+      expect(mockRequestRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          relations: expect.arrayContaining([
+            'department',
+            'requestedBy',
+            'category',
+          ]),
         }),
       );
     });

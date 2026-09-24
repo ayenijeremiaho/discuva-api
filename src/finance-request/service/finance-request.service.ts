@@ -83,8 +83,16 @@ export class FinanceRequestService {
 
   // ── Categories ────────────────────────────────────────────────────────────
 
-  async getCategories(): Promise<FinanceCategory[]> {
-    return this.categoryRepo.find({ order: { name: 'ASC' } });
+  // activeOnly=true is what the finance-worker picker (member app "New
+  // Finance Request" category dropdown) uses — a disabled category should
+  // disappear from there, but admins still need to see it (to re-enable it,
+  // or just to understand old requests that reference it), so the admin
+  // list always gets every category regardless of isActive.
+  async getCategories(activeOnly = false): Promise<FinanceCategory[]> {
+    return this.categoryRepo.find({
+      where: activeOnly ? { isActive: true } : {},
+      order: { name: 'ASC' },
+    });
   }
 
   async createCategory(
@@ -102,6 +110,8 @@ export class FinanceRequestService {
     );
     this.auditLogService.log('FINANCE_CATEGORY_CREATED', {
       actorId: actorAdmin.member?.id,
+      targetId: category.id,
+      targetName: category.name,
       metadata: { name: dto.name },
     });
     return category;
@@ -127,9 +137,36 @@ export class FinanceRequestService {
     const updated = await this.categoryRepo.save(category);
     this.auditLogService.log('FINANCE_CATEGORY_UPDATED', {
       actorId: actorAdmin.member?.id,
-      metadata: { id },
+      targetId: id,
+      targetName: updated.name,
+      metadata: { id, ...dto },
     });
     return updated;
+  }
+
+  // Categories referenced by any FinanceRequest can't be hard-deleted — the
+  // FK is RESTRICT, so the DB would reject it with an unhelpful constraint
+  // error. Checked up front instead, with a message pointing at the real
+  // alternative (disable via updateCategory's isActive, above).
+  async deleteCategory(id: string, actorAdmin: Admin): Promise<void> {
+    const category = await this.categoryRepo.findOne({ where: { id } });
+    if (!category) throw new NotFoundException('Category not found');
+
+    const inUse = await this.requestRepo.exists({
+      where: { category: { id } },
+    });
+    if (inUse) {
+      throw new BadRequestException(
+        `"${category.name}" is already used by one or more finance requests and can't be deleted — disable it instead so it stops showing as an option.`,
+      );
+    }
+
+    await this.categoryRepo.remove(category);
+    this.auditLogService.log('FINANCE_CATEGORY_DELETED', {
+      actorId: actorAdmin.member?.id,
+      targetId: id,
+      targetName: category.name,
+    });
   }
 
   // ── Requests (HOD) ────────────────────────────────────────────────────────
@@ -193,7 +230,13 @@ export class FinanceRequestService {
   ): Promise<PaginationResponseDto<FinanceRequest>> {
     const [data, total] = await this.requestRepo.findAndCount({
       where: { department: { id: departmentId } },
-      relations: ['category', 'reviewedBy', 'reviewedBy.member'],
+      relations: [
+        'department',
+        'requestedBy',
+        'category',
+        'reviewedBy',
+        'reviewedBy.member',
+      ],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,

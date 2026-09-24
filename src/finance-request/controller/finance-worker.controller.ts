@@ -37,7 +37,7 @@ export class FinanceWorkerController {
 
   @Get('categories')
   getCategories() {
-    return this.financeRequestService.getCategories();
+    return this.financeRequestService.getCategories(true);
   }
 
   @Post('requests')

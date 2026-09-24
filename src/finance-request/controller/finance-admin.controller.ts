@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -59,6 +62,16 @@ export class FinanceAdminController {
     @CurrentAdmin() admin: Admin,
   ) {
     return this.financeRequestService.updateCategory(id, dto, admin);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_WRITE)
+  @Delete('categories/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteCategory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.financeRequestService.deleteCategory(id, admin);
   }
 
   // ── Requests ──────────────────────────────────────────────────────────────

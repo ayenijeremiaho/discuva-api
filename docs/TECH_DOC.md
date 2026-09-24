@@ -673,6 +673,7 @@ Immutable record of every admin write action.
 | action      | AuditAction    | String enum — see Audit Actions below                                                        |
 | actor       | Member \| null | ManyToOne FK to `members.id`, SET NULL on member delete — the admin who performed the action |
 | targetId    | UUID \| null   | The ID of the affected resource (member, event, department, etc.)                            |
+| targetName  | string \| null | Human-readable label for the target (a group's name, an event's title, a member's full name — whatever the target actually is) |
 | targetEmail | string \| null | Email snapshot for identity tracing when targetId alone is insufficient                      |
 | metadata    | jsonb \| null  | Action-specific details (role changed, count of records affected, etc.)                      |
 | createdAt   | timestamptz    | Auto-set on insert                                                                           |
@@ -684,6 +685,16 @@ Immutable record of every admin write action.
 **Actor traceability:** The `actor` relation is a real FK to the `members` table. When building an audit log API, load
 the relation (`relations: ['actor']`) to access actor name and email. If the member account is deleted, `actor` is set
 to `null` but the log record and all other fields are preserved.
+
+**`targetName` convention:** the admin audit-log list view only ever renders `targetName ?? targetEmail ?? "—"` for
+its Target column — it never falls back to displaying the raw `targetId`, since a bare UUID isn't meaningful to an
+admin reading the trail. Every `auditLogService.log(...)` call site that sets a `targetId` should also set
+`targetName` using whatever human-readable field is already in scope on the entity being acted on (a `.name`/`.title`
+field from an entity already loaded via `findOne`/`getOrThrow` just above the call, or a `${firstname}
+${lastname}` for a person) — this is nearly always free, not a new query. A handful of genuinely nameless entities
+(a journal entry, a petty cash request with no notes) fall back to the closest available proxy (a `description`
+field, a formatted date range, free-text `notes`) rather than a fabricated label; where nothing reasonable exists,
+`targetName` is left unset and the column honestly shows "—".
 
 ### EmailLog
 
@@ -717,7 +728,7 @@ that was actually attempted through a tenant's own BYOK provider — fixed by th
 **Indexes:** `recipient`, `status`, `createdAt`.
 
 **Audit Actions:**
-`ADMIN_CREATED` · `MEMBER_SIGNED_UP` · `MEMBER_LOGIN` · `MEMBER_LOGOUT` · `ADMIN_LOGIN` · `PASSWORD_CHANGED` ·
+`ADMIN_CREATED` · `MEMBER_SIGNED_UP` · `MEMBER_LOGIN` · `MEMBER_LOGOUT` · `ADMIN_LOGIN` · `ADMIN_LOGOUT` · `PASSWORD_CHANGED` ·
 `PASSWORD_RESET_REQUESTED` · `PASSWORD_RESET_COMPLETED` · `ADMIN_PASSWORD_RESET` · `WORKER_PROMOTED` ·
 `WORKER_REVOKED` · `MEMBER_ACTIVATED` · `MEMBER_DEACTIVATED` · `MEMBER_UPDATED` · `MEMBER_CREATED_BY_ADMIN` · `MEMBER_PHOTO_UPDATED` ·
 `MEMBER_PHOTO_REMOVED` · `ATTENDANCE_ADMIN_MARKED` ·
@@ -729,7 +740,7 @@ that was actually attempted through a tenant's own BYOK provider — fixed by th
 `DEPARTMENT_LEAD_REMOVED` · `WORKER_PROFILE_UPDATED` · `ADMIN_ROLE_CREATED` · `ADMIN_ROLE_UPDATED` ·
 `ADMIN_ROLE_DELETED` · `ADMIN_USER_CREATED` · `ADMIN_USER_UPDATED` · `ADMIN_USER_DEACTIVATED`
 `TITHE_BATCH_QUEUED` · `TITHE_UNMATCHED_RESOLVED` · `TITHE_UNMATCHED_DISMISSED` · `TITHE_DISPUTE_APPROVED` · `TITHE_DISPUTE_REJECTED` · `TITHE_ACCOUNT_CREATED` · `TITHE_ACCOUNT_UPDATED` ·
-`FINANCE_CATEGORY_CREATED` · `FINANCE_CATEGORY_UPDATED` · `FINANCE_REQUEST_CREATED` · `FINANCE_REQUEST_APPROVED` · `FINANCE_REQUEST_REJECTED` · `FINANCE_PROOF_ATTACHED` ·
+`FINANCE_CATEGORY_CREATED` · `FINANCE_CATEGORY_UPDATED` · `FINANCE_CATEGORY_DELETED` · `FINANCE_REQUEST_CREATED` · `FINANCE_REQUEST_APPROVED` · `FINANCE_REQUEST_REJECTED` · `FINANCE_PROOF_ATTACHED` ·
 `TITHE_PROOF_SUBMITTED` · `TITHE_PROOF_CONFIRMED` · `TITHE_PROOF_DECLINED` · `TITHE_PROOF_EXPIRED_PURGED` ·
 `CHURCH_SETTING_UPDATED` · `INCIDENT_REPORT_CREATED` · `INCIDENT_REPORT_STATUS_UPDATED` ·
 `ASSET_CREATED` · `ASSET_UPDATED` · `ASSET_MAINTENANCE_SCHEDULED` · `ASSET_MAINTENANCE_LOGGED` · `ASSET_INVENTORY_UPDATED` ·
@@ -1042,6 +1053,7 @@ Admin-managed list of expense categories used on finance requests.
 | id          | UUID   | PK     |
 | name        | string | Unique |
 | description | string \| null |   |
+| isActive    | boolean | Default `true`. Disabling hides the category from the finance-worker picker (`GET /finance/categories`) without deleting it — categories already referenced by a `FinanceRequest` can't be hard-deleted (FK `RESTRICT`), so disabling is the retirement path for those. |
 
 ### FinanceRequest
 
@@ -8785,16 +8797,17 @@ outside the requested `?months=` window).
 | POST   | /admin/tithes/proofs/:id/decline                           | AdminGuard (FINANCE_WRITE)                                    | Decline a tithe payment proof (body: financeNote); notifies member by email                                   |
 | GET    | /admin/finance/categories                                  | AdminGuard (FINANCE_READ)                                     | List finance categories                                                                                       |
 | POST   | /admin/finance/categories                                  | AdminGuard (FINANCE_WRITE)                                    | Create finance category                                                                                       |
-| PATCH  | /admin/finance/categories/:id                              | AdminGuard (FINANCE_WRITE)                                    | Update finance category                                                                                       |
+| PATCH  | /admin/finance/categories/:id                              | AdminGuard (FINANCE_WRITE)                                    | Update finance category (name, description, or `isActive`)                                                    |
+| DELETE | /admin/finance/categories/:id                              | AdminGuard (FINANCE_WRITE)                                    | Delete a finance category; 400 if the category is referenced by any `FinanceRequest` (disable it via PATCH `isActive: false` instead) |
 | GET    | /admin/finance/requests                                    | AdminGuard (FINANCE_READ)                                     | List finance requests (paginated); filters: `status`, `categoryId`, `memberId`, `departmentId`, `search`      |
 | GET    | /admin/finance/requests/download                           | AdminGuard (FINANCE_READ)                                     | Download filtered finance requests as `.xlsx`; same query params as list endpoint, no pagination              |
 | GET    | /admin/finance/requests/:id                                | AdminGuard (FINANCE_READ)                                     | Get finance request by ID                                                                                     |
 | PATCH  | /admin/finance/requests/:id/approve                        | AdminGuard (FINANCE_WRITE)                                    | Approve a pending finance request — 403 if the approver is the same member who raised the request            |
 | PATCH  | /admin/finance/requests/:id/reject                         | AdminGuard (FINANCE_WRITE)                                    | Reject a pending finance request (body: rejectionReason)                                                      |
 | PATCH  | /admin/finance/requests/:id/proof                          | AdminGuard (FINANCE_WRITE)                                    | Attach payment proof to an approved request (multipart, field: file)                                          |
-| GET    | /finance/categories                                        | WORKER (RolesGuard)                                           | List finance categories (visible to HOD for request creation)                                                 |
+| GET    | /finance/categories                                        | WORKER (RolesGuard)                                           | List finance categories (visible to HOD for request creation); only `isActive: true` categories are returned |
 | POST   | /finance/requests                                          | WORKER — HOD only                                             | Raise a finance request for own department (multipart optional: attachment)                                   |
-| GET    | /finance/requests                                          | WORKER — HOD only                                             | List own department's finance requests (paginated)                                                            |
+| GET    | /finance/requests                                          | WORKER — HOD only                                             | List own department's finance requests (paginated); each row includes `department` and `requestedBy` relations |
 | GET    | /finance/requests/:id                                      | WORKER — HOD only                                             | Get a single request from own department (includes proofUrl once attached)                                    |
 | POST   | /service-programme                                         | AdminGuard + SERVICE_PROGRAMME_WRITE                          | Create a programme for one or more service slots in one call — body is `{ programmes: [{ serviceSlotId, slots? }], saveAsTemplate? }` (`programmes` min 1). One `ServiceProgramme` per slot still (1:1 with `ServiceSlot`), but a multi-service Sunday (First/Second Service under one Event) can be programmed in a single request instead of one round trip per slot. Each entry's `slots` (order-of-service items) is independent — sibling slots are not required to have matching items, or any items at all. 404 if any `serviceSlotId` doesn't exist; 409 (naming the affected slots) if any already has a programme — the whole call is rejected, none are created. Each `slots` item is created the same way `POST /service-programme/:id/slots` would (member/backup resolution, assignment email, conflict-warning check), in array order starting at position 0. `saveAsTemplate` applies to every programme created in the call. Response is a single fully-loaded programme (same shape as `GET /service-programme/:id`) when `programmes` has one entry, or an array of them when it has multiple. Omitting an entry's `slots` still creates that programme as an empty DRAFT, added to later. |
 | GET    | /service-programme                                         | AdminGuard + SERVICE_PROGRAMME_READ                           | List all programmes paginated (query: page, limit). Each result includes structured `event: { id, name, eventDate }` and `serviceSlotDetail: { id, name, startTime, endTime }` (in addition to the flattened `serviceSlotName` string) so the admin UI can group programmes by their parent event instead of rendering every slot as an unrelated row. |

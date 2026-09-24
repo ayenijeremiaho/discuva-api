@@ -33,6 +33,13 @@ export class UpdateFinanceCategoryDto {
   @IsOptional()
   @MaxLength(255)
   description?: string;
+
+  // Lets an admin retire a category from the picker (e.g. finance-worker's
+  // GET /finance/categories) without deleting it — categories already used
+  // by a FinanceRequest can't be hard-deleted anyway (FK RESTRICT).
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }
 
 export class CreateFinanceRequestDto {
