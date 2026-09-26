@@ -1,7 +1,6 @@
 import {
   IsBoolean,
   IsDateString,
-  IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -12,18 +11,26 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { OfferingType } from '../enum/finance.enum';
 
 export class CreateOfferingDto {
   @IsOptional()
   @IsUUID()
   serviceEventId?: string;
 
+  // Optional — falls back to the selected GivingOption's own fund when
+  // omitted; required only when that option has none configured.
+  @IsOptional()
   @IsUUID()
-  fundId: string;
+  fundId?: string;
 
-  @IsEnum(OfferingType)
-  type: OfferingType;
+  @IsUUID()
+  givingOptionId: string;
+
+  // Who physically brought this giving, if known — omit for
+  // anonymous/basket collections.
+  @IsOptional()
+  @IsUUID()
+  memberId?: string;
 
   @IsOptional()
   @Type(() => Number)
@@ -60,8 +67,8 @@ export class OfferingQueryDto {
   fundId?: string;
 
   @IsOptional()
-  @IsEnum(OfferingType)
-  type?: OfferingType;
+  @IsUUID()
+  givingOptionId?: string;
 
   @IsOptional()
   @IsDateString()

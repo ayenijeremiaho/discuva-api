@@ -10,6 +10,8 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { OfferingType } from '../enum/finance.enum';
 import { Fund } from './fund.entity';
 import { Admin } from '../../admin/entity/admin.entity';
+import { GivingOption } from './giving-option.entity';
+import { Member } from '../../member/entity/member.entity';
 
 @Entity('finance_offerings')
 export class Offering extends BaseEntity {
@@ -19,13 +21,30 @@ export class Offering extends BaseEntity {
   @Column({ type: 'uuid', nullable: true, name: 'service_event_id' })
   serviceEventId: string | null;
 
+  // Nullable now that a fund can be derived from `givingOption.fund` — see
+  // OfferingService.create, which still requires one or the other resolve.
   @Index('IDX_offerings_fund_id')
-  @ManyToOne(() => Fund, { nullable: false, onDelete: 'RESTRICT' })
+  @ManyToOne(() => Fund, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'fund_id' })
-  fund: Fund;
+  fund: Fund | null;
 
-  @Column({ type: 'varchar' })
-  type: OfferingType;
+  // Legacy fixed-enum purpose, kept read-only for historical rows created
+  // before GivingOption unification — never written to by new entries.
+  @Column({ type: 'varchar', nullable: true })
+  type: OfferingType | null;
+
+  @Index('IDX_offerings_giving_option_id')
+  @ManyToOne(() => GivingOption, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'giving_option_id' })
+  givingOption: GivingOption | null;
+
+  // Who physically brought this giving (e.g. cash tithe handed in at
+  // church) — null for anonymous/basket collections, which are a
+  // legitimate, common case, not a data-entry gap.
+  @Index('IDX_offerings_member_id')
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'member_id' })
+  member: Member | null;
 
   @Column({
     type: 'numeric',

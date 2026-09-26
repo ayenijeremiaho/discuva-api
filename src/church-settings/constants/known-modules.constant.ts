@@ -22,13 +22,12 @@ export const KNOWN_MODULES = [
   // @RequiresModule('tithe') across the tithe/finance/giving-checkout
   // modules and by the TITHE_READ/TITHE_WRITE permission names) — never
   // rename this without a data migration touching every tenant's stored
-  // enabled-modules list. Kept as "Tithe & Giving" to stay consistent with
-  // those permission labels ("View Tithe & Giving Records" etc.) rather
-  // than drifting to a different display word than the permission picker
-  // uses for the same capability. A church that doesn't use "tithe"
+  // enabled-modules list. Display label is "Giving" — this module covers all
+  // online/manual giving, not just tithes — matching the reworded permission
+  // labels ("View Giving Records" etc.). A church that wants different
   // terminology can already override this via church_module_settings.displayName
   // (discuva-admin's Module Settings page supports a per-tenant rename).
-  { key: 'tithe', moduleName: 'Tithe & Giving', required: false },
+  { key: 'tithe', moduleName: 'Giving', required: false },
   { key: 'classes', moduleName: 'Training Classes', required: false },
   { key: 'announcements', moduleName: 'Announcements', required: false },
   { key: 'sermons', moduleName: 'Sermon Archive', required: false },

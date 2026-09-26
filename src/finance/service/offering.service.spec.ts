@@ -8,6 +8,8 @@ import { JournalEntry } from '../entity/journal-entry.entity';
 import { JournalEntryLine } from '../entity/journal-entry-line.entity';
 import { Account } from '../entity/account.entity';
 import { AccountingPeriod } from '../entity/accounting-period.entity';
+import { GivingOption } from '../entity/giving-option.entity';
+import { Fund } from '../entity/fund.entity';
 import {
   AccountingPeriodStatus,
   JournalEntryStatus,
@@ -40,6 +42,8 @@ const mockAuditLogService = { log: jest.fn() };
 
 const mockAccountRepo = { findOne: jest.fn(), save: jest.fn() };
 const mockPeriodRepo = { findOne: jest.fn() };
+const mockGivingOptionRepo = { findOne: jest.fn() };
+const mockFundRepo = { findOne: jest.fn() };
 
 const mockManager = {
   findOne: jest.fn(),
@@ -81,6 +85,11 @@ describe('OfferingService', () => {
           provide: getRepositoryToken(AccountingPeriod),
           useValue: mockPeriodRepo,
         },
+        {
+          provide: getRepositoryToken(GivingOption),
+          useValue: mockGivingOptionRepo,
+        },
+        { provide: getRepositoryToken(Fund), useValue: mockFundRepo },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -89,24 +98,94 @@ describe('OfferingService', () => {
   });
 
   describe('create', () => {
-    it('records a new offering', async () => {
-      const offering = {
-        id: 'o-1',
-        type: OfferingType.GENERAL,
-        cashAmount: 5000,
-      };
+    it('throws NotFoundException when the giving option does not exist', async () => {
+      mockGivingOptionRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.create(
+          { givingOptionId: 'missing', cashAmount: 5000 },
+          mockAdmin,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('uses the given fundId when provided, even if the giving option has its own fund', async () => {
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'go-1',
+        name: 'Tithe',
+        fund: { id: 'go-fund' },
+      });
+      mockFundRepo.findOne.mockResolvedValue({ id: 'f-explicit' });
+      const offering = { id: 'o-1', cashAmount: 5000 };
       mockOfferingRepo.create.mockReturnValue(offering);
       mockOfferingRepo.save.mockResolvedValue(offering);
 
       const result = await service.create(
-        { fundId: 'f-1', type: OfferingType.GENERAL, cashAmount: 5000 },
+        { givingOptionId: 'go-1', fundId: 'f-explicit', cashAmount: 5000 },
         mockAdmin,
       );
+
       expect(result.id).toBe('o-1');
+      expect(mockFundRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'f-explicit' },
+      });
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'OFFERING_RECORDED',
-        expect.any(Object),
+        expect.objectContaining({
+          targetName: 'Tithe',
+          metadata: { givingOptionId: 'go-1', fundId: 'f-explicit' },
+        }),
       );
+    });
+
+    it("falls back to the giving option's own fund when fundId is omitted", async () => {
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'go-1',
+        name: 'Building Fund',
+        fund: { id: 'go-fund' },
+      });
+      mockFundRepo.findOne.mockResolvedValue({ id: 'go-fund' });
+      const offering = { id: 'o-2' };
+      mockOfferingRepo.create.mockReturnValue(offering);
+      mockOfferingRepo.save.mockResolvedValue(offering);
+
+      await service.create({ givingOptionId: 'go-1' }, mockAdmin);
+
+      expect(mockFundRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'go-fund' },
+      });
+    });
+
+    it('throws BadRequestException when neither fundId nor the giving option has a fund', async () => {
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'go-1',
+        name: 'General',
+        fund: null,
+      });
+
+      await expect(
+        service.create({ givingOptionId: 'go-1' }, mockAdmin),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('attributes the entry to a member when memberId is provided', async () => {
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'go-1',
+        name: 'Tithe',
+        fund: { id: 'go-fund' },
+      });
+      mockFundRepo.findOne.mockResolvedValue({ id: 'go-fund' });
+      mockOfferingRepo.create.mockImplementation((v) => v);
+      mockOfferingRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'o-3', ...v }),
+      );
+
+      const result = await service.create(
+        { givingOptionId: 'go-1', memberId: 'member-1' },
+        mockAdmin,
+      );
+
+      expect(result.member).toEqual({ id: 'member-1' });
     });
   });
 
@@ -159,6 +238,7 @@ describe('OfferingService', () => {
       const makeOffering = () => ({
         id: 'o-1',
         type: OfferingType.GENERAL,
+        givingOption: { id: 'go-1', name: 'General' },
         cashAmount: 3000,
         expectedTransferAmount: 2000,
         createdAt: new Date('2026-01-05'),

@@ -16,6 +16,7 @@ import { TitheRecord } from '../entity/tithe-record.entity';
 import { TitheUnmatchedRecord } from '../entity/tithe-unmatched-record.entity';
 import { TitheDisputeRecord } from '../entity/tithe-dispute-record.entity';
 import { Member } from '../../member/entity/member.entity';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
 import { TitheBatchStatus } from '../enum/tithe.enum';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
@@ -35,6 +36,7 @@ export interface TitheRow {
   paymentDate: string;
   reference?: string;
   bankName?: string;
+  givingOption?: string;
 }
 
 @Processor(TITHE_QUEUE)
@@ -78,6 +80,15 @@ export class TitheProcessor implements OnApplicationBootstrap {
         matched = 0;
         unmatched = 0;
         disputed = 0;
+
+        // Built once per batch, not per row — the CSV's `givingOption`
+        // column is an admin-typed name, matched case-insensitively; no
+        // match (or a blank cell) just leaves the record's purpose unset
+        // rather than guessing, same convention as the rest of this batch.
+        const givingOptions = await manager.find(GivingOption);
+        const givingOptionByName = new Map(
+          givingOptions.map((g) => [g.name.trim().toLowerCase(), g.id]),
+        );
 
         for (const row of rows) {
           const member = await manager.findOne(Member, {
@@ -123,6 +134,10 @@ export class TitheProcessor implements OnApplicationBootstrap {
             continue;
           }
 
+          const givingOptionId = row.givingOption
+            ? givingOptionByName.get(row.givingOption.trim().toLowerCase())
+            : undefined;
+
           await manager.save(
             manager.create(TitheRecord, {
               member: { id: member.id },
@@ -131,6 +146,7 @@ export class TitheProcessor implements OnApplicationBootstrap {
               paymentDate: row.paymentDate,
               reference: row.reference ?? null,
               bankName: row.bankName ?? null,
+              givingOption: givingOptionId ? { id: givingOptionId } : null,
             }),
           );
           matched++;

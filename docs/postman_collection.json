@@ -16731,7 +16731,7 @@
                 "template"
               ]
             },
-            "description": "AdminGuard (FINANCE_READ). Downloads a 3-sheet Excel workbook: Tithe Template (headers), Instructions, Sample row."
+            "description": "AdminGuard (FINANCE_READ). Downloads a 3-sheet Excel workbook: Tithe Template (headers: email, amount, paymentDate, reference, bankName, givingOption), Instructions, Sample row."
           },
           "response": [
             {
@@ -16765,7 +16765,7 @@
                   "key": "file",
                   "type": "file",
                   "src": "",
-                  "description": "Excel .xlsx file with columns: Email, Amount, Payment Date (YYYY-MM-DD), Reference (optional), Bank Name (optional \u2014 sender's bank, not destination)"
+                  "description": "Excel .xlsx file with columns: Email, Amount, Payment Date (YYYY-MM-DD), Reference (optional), Bank Name (optional \u2014 sender's bank, not destination), Giving Option (optional \u2014 must match an existing Giving Option name exactly, case-insensitive; blank or unmatched falls back to General Giving)"
                 },
                 {
                   "key": "titheAccountId",
@@ -27433,10 +27433,10 @@
                 "offerings"
               ]
             },
-            "description": "FINANCE_WRITE. type: GENERAL|TITHE_SUNDAY|PLEDGE|SEED.",
+            "description": "FINANCE_WRITE. givingOptionId is required; fundId is optional — falls back to the selected GivingOption's own fund, and is only required when that option has none. memberId is optional (who physically brought this giving; omit for anonymous/basket collections).",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"fundId\": \"{{fundId}}\",\n  \"type\": \"GENERAL\",\n  \"cashAmount\": 45000,\n  \"expectedTransferAmount\": 12000,\n  \"serviceEventId\": \"{{serviceEventId}}\",\n  \"notes\": \"Sunday 1st June morning service\"\n}",
+              "raw": "{\n  \"givingOptionId\": \"{{givingOptionId}}\",\n  \"fundId\": \"{{fundId}}\",\n  \"memberId\": \"{{memberId}}\",\n  \"cashAmount\": 45000,\n  \"expectedTransferAmount\": 12000,\n  \"serviceEventId\": \"{{serviceEventId}}\",\n  \"notes\": \"Sunday 1st June morning service\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -27449,7 +27449,7 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"off1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"serviceEventId\": \"evt1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"fund\": {\n    \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n    \"name\": \"General Fund\",\n    \"type\": \"UNRESTRICTED\",\n    \"description\": \"Main operating fund for church activities\",\n    \"isActive\": true,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"type\": \"GENERAL\",\n  \"cashAmount\": 125000.0,\n  \"expectedTransferAmount\": 50000.0,\n  \"isReconciled\": false,\n  \"reconciledAt\": null,\n  \"notes\": \"Main Sunday offering\",\n  \"recordedBy\": {\n    \"id\": \"adm1\",\n    \"email\": \"admin@church.org\"\n  },\n  \"reconciledBy\": null,\n  \"createdAt\": \"2026-07-06T12:00:00.000Z\",\n  \"updatedAt\": \"2026-07-06T12:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"off1a2b3-c4d5-e6f7-8901-abcdef123456\",\n  \"serviceEventId\": \"evt1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"fund\": {\n    \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n    \"name\": \"General Fund\",\n    \"type\": \"UNRESTRICTED\",\n    \"description\": \"Main operating fund for church activities\",\n    \"isActive\": true,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"type\": null,\n  \"givingOption\": {\n    \"id\": \"go1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n    \"name\": \"Tithe\"\n  },\n  \"member\": null,\n  \"cashAmount\": 125000.0,\n  \"expectedTransferAmount\": 50000.0,\n  \"isReconciled\": false,\n  \"reconciledAt\": null,\n  \"notes\": \"Main Sunday offering\",\n  \"recordedBy\": {\n    \"id\": \"adm1\",\n    \"email\": \"admin@church.org\"\n  },\n  \"reconciledBy\": null,\n  \"createdAt\": \"2026-07-06T12:00:00.000Z\",\n  \"updatedAt\": \"2026-07-06T12:00:00.000Z\"\n}"
             }
           ]
         },
@@ -27475,7 +27475,7 @@
                 "offerings"
               ]
             },
-            "description": "FINANCE_READ. Query: fundId, type, fromDate, toDate, page, limit."
+            "description": "FINANCE_READ. Query: fundId, givingOptionId, fromDate, toDate, page, limit."
           },
           "response": [
             {

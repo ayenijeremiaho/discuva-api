@@ -264,6 +264,7 @@ export class TitheService {
       { header: 'paymentDate', key: 'paymentDate', width: 18 },
       { header: 'reference', key: 'reference', width: 30 },
       { header: 'bankName', key: 'bankName', width: 20 },
+      { header: 'givingOption', key: 'givingOption', width: 25 },
     ];
     sheet.getRow(1).font = { bold: true };
 
@@ -282,6 +283,10 @@ export class TitheService {
         'bankName',
         'Optional. Name of the bank the tithe was paid from (sender bank).',
       ],
+      [
+        'givingOption',
+        'Optional. Must match an existing Giving Option name exactly (case-insensitive). Left blank or unmatched falls back to General Giving.',
+      ],
     ];
     instructions.forEach(([col, desc], i) => {
       guide.getCell(`A${i + 2}`).value = col;
@@ -299,6 +304,7 @@ export class TitheService {
       paymentDate: '2026-05-01',
       reference: 'TRF/2026/001',
       bankName: 'GTBank',
+      givingOption: 'Tithe',
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
@@ -355,6 +361,9 @@ export class TitheService {
           : undefined,
         bankName: values[colIndex('bankName')]
           ? String(values[colIndex('bankName')]).trim()
+          : undefined,
+        givingOption: values[colIndex('givingOption')]
+          ? String(values[colIndex('givingOption')]).trim()
           : undefined,
       });
     });

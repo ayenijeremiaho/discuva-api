@@ -12,6 +12,8 @@ import { JournalEntry } from '../entity/journal-entry.entity';
 import { JournalEntryLine } from '../entity/journal-entry-line.entity';
 import { Account } from '../entity/account.entity';
 import { AccountingPeriod } from '../entity/accounting-period.entity';
+import { GivingOption } from '../entity/giving-option.entity';
+import { Fund } from '../entity/fund.entity';
 import {
   CreateOfferingDto,
   OfferingQueryDto,
@@ -41,15 +43,34 @@ export class OfferingService {
     private readonly accountRepo: Repository<Account>,
     @InjectRepository(AccountingPeriod)
     private readonly periodRepo: Repository<AccountingPeriod>,
+    @InjectRepository(GivingOption)
+    private readonly givingOptionRepo: Repository<GivingOption>,
+    @InjectRepository(Fund)
+    private readonly fundRepo: Repository<Fund>,
     private readonly auditLogService: AuditLogService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   async create(dto: CreateOfferingDto, admin: Admin): Promise<Offering> {
+    const givingOption = await this.givingOptionRepo.findOne({
+      where: { id: dto.givingOptionId },
+      relations: ['fund'],
+    });
+    if (!givingOption) throw new NotFoundException('Giving option not found.');
+
+    const fundId = dto.fundId ?? givingOption.fund?.id;
+    if (!fundId)
+      throw new BadRequestException(
+        'This giving option has no fund configured — select one.',
+      );
+    const fund = await this.fundRepo.findOne({ where: { id: fundId } });
+    if (!fund) throw new NotFoundException('Fund not found.');
+
     const offering = this.offeringRepo.create({
       serviceEventId: dto.serviceEventId ?? null,
-      fund: { id: dto.fundId } as any,
-      type: dto.type,
+      fund,
+      givingOption,
+      member: dto.memberId ? ({ id: dto.memberId } as any) : null,
       cashAmount: dto.cashAmount ?? 0,
       expectedTransferAmount: dto.expectedTransferAmount ?? 0,
       notes: dto.notes ?? null,
@@ -59,7 +80,8 @@ export class OfferingService {
     this.auditLogService.log('OFFERING_RECORDED', {
       actorId: admin.id,
       targetId: saved.id,
-      metadata: { type: saved.type, fundId: dto.fundId },
+      targetName: givingOption.name,
+      metadata: { givingOptionId: givingOption.id, fundId },
     });
     return saved;
   }
@@ -67,10 +89,19 @@ export class OfferingService {
   async findAll(
     query: OfferingQueryDto,
   ): Promise<PaginationResponseDto<Offering>> {
-    const { page = 1, limit = 20, fundId, type, fromDate, toDate } = query;
+    const {
+      page = 1,
+      limit = 20,
+      fundId,
+      givingOptionId,
+      fromDate,
+      toDate,
+    } = query;
     const qb = this.offeringRepo
       .createQueryBuilder('o')
       .leftJoinAndSelect('o.fund', 'fund')
+      .leftJoinAndSelect('o.givingOption', 'givingOption')
+      .leftJoinAndSelect('o.member', 'member')
       .leftJoinAndSelect('o.recordedBy', 'recordedBy')
       .leftJoinAndSelect('recordedBy.member', 'recordedByMember')
       .leftJoinAndSelect('o.reconciledBy', 'reconciledBy')
@@ -80,7 +111,8 @@ export class OfferingService {
       .take(limit);
 
     if (fundId) qb.andWhere('fund.id = :fundId', { fundId });
-    if (type) qb.andWhere('o.type = :type', { type });
+    if (givingOptionId)
+      qb.andWhere('givingOption.id = :givingOptionId', { givingOptionId });
     if (fromDate) qb.andWhere('o.createdAt >= :fromDate', { fromDate });
     if (toDate) qb.andWhere('o.createdAt <= :toDate', { toDate });
 
@@ -98,6 +130,8 @@ export class OfferingService {
     const offering = await this.offeringRepo
       .createQueryBuilder('o')
       .leftJoinAndSelect('o.fund', 'fund')
+      .leftJoinAndSelect('o.givingOption', 'givingOption')
+      .leftJoinAndSelect('o.member', 'member')
       .leftJoinAndSelect('o.recordedBy', 'recordedBy')
       .leftJoinAndSelect('recordedBy.member', 'recordedByMember')
       .leftJoinAndSelect('o.reconciledBy', 'reconciledBy')
@@ -177,7 +211,7 @@ export class OfferingService {
 
     const entry = manager.create(JournalEntry, {
       date: new Date().toISOString().slice(0, 10),
-      description: `Offering reconciliation — ${offering.type} (${offering.createdAt.toISOString().slice(0, 10)})`,
+      description: `Offering reconciliation — ${offering.givingOption?.name ?? offering.type ?? 'Giving'} (${offering.createdAt.toISOString().slice(0, 10)})`,
       source: JournalEntrySource.MANUAL,
       entryType: JournalEntryType.STANDARD,
       status: JournalEntryStatus.PENDING_APPROVAL,
