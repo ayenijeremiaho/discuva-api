@@ -145,25 +145,35 @@ export class EmailProcessor {
     job: Job<EmailJobData>,
     result: SendResult | undefined,
   ): Promise<void> {
-    return runInTenantContext(this.cls, this.txHost, job.data, async () => {
-      const { to, subject } = job.data;
-      const recipient = Array.isArray(to) ? to.join(', ') : to;
-      await this.emailLogRepository.save(
-        this.emailLogRepository.create({
-          recipient,
-          subject,
-          status: 'sent',
-          jobId: String(job.id),
-          provider:
-            result?.providerName ??
-            job.data.resolvedProviderName ??
-            this.defaultEmailProvider.providerName,
-          source:
-            result?.source ?? job.data.resolvedSource ?? 'platform_default',
-          attemptsMade: job.attemptsMade,
-        }),
+    // Bull event handlers run outside any request context — an unhandled
+    // rejection here (e.g. a DB/schema issue writing the log row) would
+    // otherwise crash the whole process over what is just an audit trail
+    // for an email that already sent successfully.
+    try {
+      await runInTenantContext(this.cls, this.txHost, job.data, async () => {
+        const { to, subject } = job.data;
+        const recipient = Array.isArray(to) ? to.join(', ') : to;
+        await this.emailLogRepository.save(
+          this.emailLogRepository.create({
+            recipient,
+            subject,
+            status: 'sent',
+            jobId: String(job.id),
+            provider:
+              result?.providerName ??
+              job.data.resolvedProviderName ??
+              this.defaultEmailProvider.providerName,
+            source:
+              result?.source ?? job.data.resolvedSource ?? 'platform_default',
+            attemptsMade: job.attemptsMade,
+          }),
+        );
+      });
+    } catch (err: any) {
+      this.logger.error(
+        `Failed to write email_logs row for completed job ${job.id}: ${err?.message ?? err}`,
       );
-    });
+    }
   }
 
   @OnQueueFailed()
@@ -171,33 +181,42 @@ export class EmailProcessor {
     const maxAttempts = job.opts.attempts ?? 1;
     if (job.attemptsMade < maxAttempts) return; // transient failure — Bull will retry
 
-    return runInTenantContext(this.cls, this.txHost, job.data, async () => {
-      const { to, subject } = job.data;
-      const recipient = Array.isArray(to) ? to.join(', ') : to;
+    this.logger.error(
+      `Email permanently failed after ${job.attemptsMade} attempts: "${job.data.subject}" to ${Array.isArray(job.data.to) ? job.data.to.join(', ') : job.data.to} — ${error.message}`,
+    );
+
+    // Same reasoning as onCompleted — never let the act of logging a
+    // failure become a second, unrelated failure that crashes the process.
+    try {
+      await runInTenantContext(this.cls, this.txHost, job.data, async () => {
+        const { to, subject } = job.data;
+        const recipient = Array.isArray(to) ? to.join(', ') : to;
+        // Was previously hardcoded to the platform default's name — wrong
+        // whenever the failure happened on the tenant's own BYOK provider.
+        // job.data.resolvedProviderName/resolvedSource (set by handleSend via
+        // job.update() before it ever attempted the send) is the actual
+        // provider that failed; only fall back to the platform default label
+        // for the near-never-happens case where resolution itself threw
+        // before handleSend reached that update call.
+        await this.emailLogRepository.save(
+          this.emailLogRepository.create({
+            recipient,
+            subject,
+            status: 'failed',
+            jobId: String(job.id),
+            provider:
+              job.data.resolvedProviderName ??
+              this.defaultEmailProvider.providerName,
+            source: job.data.resolvedSource ?? 'platform_default',
+            errorMessage: error.message,
+            attemptsMade: job.attemptsMade,
+          }),
+        );
+      });
+    } catch (err: any) {
       this.logger.error(
-        `Email permanently failed after ${job.attemptsMade} attempts: "${subject}" to ${recipient} — ${error.message}`,
+        `Failed to write email_logs row for failed job ${job.id}: ${err?.message ?? err}`,
       );
-      // Was previously hardcoded to the platform default's name — wrong
-      // whenever the failure happened on the tenant's own BYOK provider.
-      // job.data.resolvedProviderName/resolvedSource (set by handleSend via
-      // job.update() before it ever attempted the send) is the actual
-      // provider that failed; only fall back to the platform default label
-      // for the near-never-happens case where resolution itself threw
-      // before handleSend reached that update call.
-      await this.emailLogRepository.save(
-        this.emailLogRepository.create({
-          recipient,
-          subject,
-          status: 'failed',
-          jobId: String(job.id),
-          provider:
-            job.data.resolvedProviderName ??
-            this.defaultEmailProvider.providerName,
-          source: job.data.resolvedSource ?? 'platform_default',
-          errorMessage: error.message,
-          attemptsMade: job.attemptsMade,
-        }),
-      );
-    });
+    }
   }
 }

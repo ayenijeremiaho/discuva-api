@@ -285,9 +285,34 @@ describe('EmailProcessor', () => {
         }),
       );
     });
+
+    it('does not throw when writing the log row itself fails', async () => {
+      mockEmailLogRepo.save.mockRejectedValueOnce(
+        new Error('column "source" of relation "email_logs" does not exist'),
+      );
+      const job = buildJob({ to: 'member@example.com', subject: 'Hi' });
+
+      await expect(
+        processor.onCompleted(job, {
+          providerName: 'resend',
+          source: 'tenant',
+        }),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe('onFailed', () => {
+    it('does not throw when writing the log row itself fails', async () => {
+      mockEmailLogRepo.save.mockRejectedValueOnce(
+        new Error('column "source" of relation "email_logs" does not exist'),
+      );
+      const job = buildJob({ to: 'member@example.com', subject: 'Hi' }, 3);
+
+      await expect(
+        processor.onFailed(job, new Error('resend rejected')),
+      ).resolves.toBeUndefined();
+    });
+
     it('logs a failure only once max attempts are exhausted', async () => {
       const job = buildJob(
         { to: 'member@example.com', subject: 'Hi' },
