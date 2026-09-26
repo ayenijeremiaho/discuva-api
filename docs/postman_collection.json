@@ -16693,7 +16693,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_READ). Downloads all matching tithe records as tithe-records.xlsx. Columns: Member Name, Email, Account, Currency, Amount, Payment Date, Sender Bank, Source, Payment Gateway, Reference (reference for manual/bank rows, falling back to externalReference \u2014 the gateway's own transaction reference \u2014 for PAYMENT_GATEWAY rows). Supports same filters as the list endpoint (including accountId); no pagination."
+            "description": "AdminGuard (FINANCE_READ). Downloads all matching tithe records as tithe-records.xlsx. Columns: Member Name, Email, Account, Currency, Amount, Payment Date, Purpose (the record's givingOption name, or \"General Giving\"), Sender Bank, Source, Payment Gateway, Reference (reference for manual/bank rows, falling back to externalReference \u2014 the gateway's own transaction reference \u2014 for PAYMENT_GATEWAY rows). Supports same filters as the list endpoint (including accountId); no pagination."
           },
           "response": [
             {

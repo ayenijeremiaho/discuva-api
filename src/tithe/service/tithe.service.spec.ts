@@ -1158,6 +1158,7 @@ describe('TitheService', () => {
           reference: 'REF1',
           source: 'PAYMENT_GATEWAY',
           paymentChannel: 'paystack',
+          givingOption: { id: 'go-1', name: 'Building Fund' },
           member: {
             firstname: 'Jane',
             lastname: 'Smith',
@@ -1183,6 +1184,7 @@ describe('TitheService', () => {
           expect.objectContaining({ key: 'amount' }),
           expect.objectContaining({ key: 'source' }),
           expect.objectContaining({ key: 'paymentChannel' }),
+          expect.objectContaining({ key: 'purpose' }),
         ]),
         expect.arrayContaining([
           expect.objectContaining({
@@ -1191,6 +1193,7 @@ describe('TitheService', () => {
             amount: 5000,
             source: 'PAYMENT_GATEWAY',
             paymentChannel: 'paystack',
+            purpose: 'Building Fund',
           }),
         ]),
       );
