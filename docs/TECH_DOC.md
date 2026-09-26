@@ -1035,6 +1035,7 @@ A member-submitted proof of tithe payment awaiting finance-team review. Files ar
 | amount       | decimal (12,2)   |                                                       |
 | paymentDate  | date             | Indexed.                                              |
 | reference    | string \| null   |                                                       |
+| givingOption | GivingOption \| null | ManyToOne (nullable, SET NULL). Indexed. What the member designated this payment for; null means General Giving. Carried onto the `TitheRecord` created on confirm. |
 | proofUrl     | string           | Cloudinary secure URL                                 |
 | publicId     | string           | Cloudinary public ID (used for deletion)              |
 | resourceType | string           | Cloudinary resource type returned at upload           |
@@ -8790,7 +8791,7 @@ outside the requested `?months=` window).
 | PATCH  | /admin/tithes/disputes/:id/reject                          | AdminGuard (FINANCE_WRITE)                                    | Reject a tithe dispute                                                                                        |
 | GET    | /tithes/me                                                 | Any (JwtAuthGuard)                                            | Member's own tithe records (paginated)                                                                        |
 | POST   | /tithes/me/statement/send                                  | Any (JwtAuthGuard)                                            | Email a PDF Giving Statement (TitheRecord + CONFIRMED PledgeContribution, merged and per-line typed — see "Giving Statement" above) to the caller's registered email. Optional query: `fromMonth` (YYYY-MM), `toMonth` (YYYY-MM) — filters records to the date range and prints the period on the PDF |
-| POST   | /tithes/proof                                              | Any (JwtAuthGuard)                                            | Submit tithe payment proof (multipart, field: file, max 2 MB); body: amount, paymentDate, bankName?, reference? |
+| POST   | /tithes/proof                                              | Any (JwtAuthGuard)                                            | Submit tithe payment proof (multipart, field: file, max 2 MB); body: titheAccountId, amount, paymentDate, reference?, givingOptionId? (what this payment was for; omit for General Giving) |
 | GET    | /tithes/proof                                              | Any (JwtAuthGuard)                                            | List caller's own tithe payment proofs (paginated)                                                            |
 | GET    | /admin/tithes/proofs?status=&search=&page=&limit=          | AdminGuard (FINANCE_READ)                                     | List all tithe payment proofs; optional `status` filter (PENDING/CONFIRMED/DECLINED); `search` filters by member firstname, lastname, or email |
 | POST   | /admin/tithes/proofs/:id/confirm                           | AdminGuard (FINANCE_WRITE)                                    | Confirm a tithe payment proof; creates a TitheRecord (source MANUAL_PROOF) so it appears in the member's giving history/statement, and notifies member by email |

@@ -11,6 +11,7 @@ import { Member } from '../../member/entity/member.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { TitheAccount } from './tithe-account.entity';
 import { TitheProofStatus } from '../enum/tithe.enum';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
 
 @Entity({ name: 'tithe_payment_proofs' })
 export class TithePaymentProof extends BaseEntity {
@@ -33,6 +34,14 @@ export class TithePaymentProof extends BaseEntity {
   @Index()
   @Column({ type: 'date' })
   paymentDate: string;
+
+  // What this payment was for, member-designated — optional since not every
+  // church configures multiple purposes; null carries through to the
+  // TitheRecord created on confirm and displays as "General Giving".
+  @Index()
+  @ManyToOne(() => GivingOption, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'giving_option_id' })
+  givingOption: GivingOption | null;
 
   @Column({ type: 'character varying', nullable: true })
   reference: string;

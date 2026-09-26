@@ -17346,7 +17346,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_WRITE). Sets proof status to CONFIRMED, creates a TitheRecord (source MANUAL_PROOF) so it appears in the member's giving history/statement, and emails the member. Returns 204."
+            "description": "AdminGuard (FINANCE_WRITE). Sets proof status to CONFIRMED, creates a TitheRecord (source MANUAL_PROOF, givingOption carried over from the proof) so it appears in the member's giving history/statement, and emails the member. Returns 204."
           },
           "response": [
             {
@@ -17605,6 +17605,12 @@
                   "key": "reference",
                   "value": "TXN123456",
                   "type": "text"
+                },
+                {
+                  "key": "givingOptionId",
+                  "value": "",
+                  "type": "text",
+                  "description": "Optional. UUID of a GivingOption (fetch from GET /finance/giving-options) — what this payment was for. Omit for General Giving."
                 }
               ]
             },
@@ -17618,7 +17624,7 @@
                 "proof"
               ]
             },
-            "description": "JwtAuthGuard. Upload a tithe payment proof (multipart, field: file, max 2 MB). Required body fields: titheAccountId (UUID of the account paid into), amount, paymentDate (YYYY-MM-DD). Optional: reference. Creates a TithePaymentProof with status PENDING. Finance team is notified by email."
+            "description": "JwtAuthGuard. Upload a tithe payment proof (multipart, field: file, max 2 MB). Required body fields: titheAccountId (UUID of the account paid into), amount, paymentDate (YYYY-MM-DD). Optional: reference, givingOptionId (what this payment was for; omit for General Giving). Creates a TithePaymentProof with status PENDING. Finance team is notified by email. Confirming the proof later creates a TitheRecord carrying this same givingOption."
           },
           "response": [
             {

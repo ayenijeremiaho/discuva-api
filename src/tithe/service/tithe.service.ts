@@ -22,6 +22,7 @@ import { TitheUnmatchedRecord } from '../entity/tithe-unmatched-record.entity';
 import { TitheDisputeRecord } from '../entity/tithe-dispute-record.entity';
 import { TithePaymentProof } from '../entity/tithe-payment-proof.entity';
 import { PledgeContribution } from '../../finance/entity/pledge-contribution.entity';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
 import {
   TitheBatchStatus,
   TitheDisputeStatus,
@@ -116,6 +117,8 @@ export class TitheService {
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(PledgeContribution)
     private readonly contributionRepo: Repository<PledgeContribution>,
+    @InjectRepository(GivingOption)
+    private readonly givingOptionRepo: Repository<GivingOption>,
     @InjectQueue(TITHE_QUEUE)
     private readonly titheQueue: Queue,
     private readonly utilityService: UtilityService,
@@ -765,6 +768,14 @@ export class TitheService {
     if (!titheAccount)
       throw new NotFoundException('Tithe account not found or inactive');
 
+    let givingOption: GivingOption | null = null;
+    if (dto.givingOptionId) {
+      givingOption = await this.givingOptionRepo.findOne({
+        where: { id: dto.givingOptionId },
+      });
+      if (!givingOption) throw new NotFoundException('Giving option not found');
+    }
+
     const uploaded = await this.cloudinaryService.uploadBuffer(
       file.buffer,
       'tithe-proofs',
@@ -782,6 +793,7 @@ export class TitheService {
         amount: dto.amount,
         paymentDate: dto.paymentDate,
         reference: dto.reference ?? null,
+        givingOption,
         proofUrl: uploaded.secureUrl,
         publicId: uploaded.publicId,
         resourceType: uploaded.resourceType,
@@ -814,7 +826,7 @@ export class TitheService {
   ): Promise<PaginationResponseDto<TithePaymentProof>> {
     const [data, total] = await this.proofRepo.findAndCount({
       where: { member: { id: user.id } },
-      relations: ['titheAccount'],
+      relations: ['titheAccount', 'givingOption'],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -832,6 +844,7 @@ export class TitheService {
       .createQueryBuilder('p')
       .leftJoinAndSelect('p.member', 'member')
       .leftJoinAndSelect('p.titheAccount', 'titheAccount')
+      .leftJoinAndSelect('p.givingOption', 'givingOption')
       .leftJoinAndSelect('p.reviewedBy', 'reviewedBy')
       .leftJoinAndSelect('reviewedBy.member', 'reviewedByMember')
       .orderBy('p.createdAt', 'DESC')
@@ -855,7 +868,7 @@ export class TitheService {
   async confirmProof(id: string, actorAdmin: Admin): Promise<void> {
     const proof = await this.proofRepo.findOne({
       where: { id, status: TitheProofStatus.PENDING },
-      relations: ['member', 'titheAccount'],
+      relations: ['member', 'titheAccount', 'givingOption'],
     });
     if (!proof) throw new NotFoundException('Pending proof not found');
 
@@ -867,7 +880,9 @@ export class TitheService {
     // Confirming a proof is how this money enters the books — without this,
     // the proof shows as CONFIRMED in the admin's proof queue but never
     // appears in the member's own giving history/statement, since those all
-    // read from TitheRecord, not TithePaymentProof.
+    // read from TitheRecord, not TithePaymentProof. givingOption carries
+    // over whatever purpose the member designated at submission (null means
+    // General Giving, same as checkout).
     await this.recordRepo.save(
       this.recordRepo.create({
         member: { id: proof.member.id },
@@ -875,6 +890,7 @@ export class TitheService {
         paymentDate: proof.paymentDate,
         reference: proof.reference ?? null,
         source: TitheSource.MANUAL_PROOF,
+        givingOption: proof.givingOption,
       }),
     );
 

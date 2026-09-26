@@ -88,6 +88,12 @@ export class SubmitTitheProofDto {
   @IsString()
   @IsOptional()
   reference?: string;
+
+  // Optional — what this payment was for. Omit for General Giving, same
+  // convention as checkout's InitiateGivingCheckoutDto.
+  @IsUUID()
+  @IsOptional()
+  givingOptionId?: string;
 }
 
 export class DeclineTitheProofDto {

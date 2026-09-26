@@ -33,6 +33,7 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { PledgeContribution } from '../../finance/entity/pledge-contribution.entity';
+import { GivingOption } from '../../finance/entity/giving-option.entity';
 import { PledgeContributionStatus } from '../../finance/enum/finance.enum';
 
 const mockClsService = {
@@ -92,6 +93,10 @@ const mockDisputeRepo = {
 
 const mockContributionRepo = {
   find: jest.fn().mockResolvedValue([]),
+};
+
+const mockGivingOptionRepo = {
+  findOne: jest.fn(),
 };
 
 const mockMemberRepo = {
@@ -256,6 +261,10 @@ describe('TitheService', () => {
         {
           provide: getRepositoryToken(PledgeContribution),
           useValue: mockContributionRepo,
+        },
+        {
+          provide: getRepositoryToken(GivingOption),
+          useValue: mockGivingOptionRepo,
         },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -760,6 +769,50 @@ describe('TitheService', () => {
       );
     });
 
+    it('should throw NotFoundException when givingOptionId does not match an option', async () => {
+      mockAccountRepo.findOne.mockResolvedValue(mockAccount);
+      mockGivingOptionRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.submitProof(
+          mockUser,
+          { ...dto, givingOptionId: 'missing' },
+          file,
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should resolve and attach the giving option when givingOptionId is provided', async () => {
+      mockAccountRepo.findOne.mockResolvedValue(mockAccount);
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'go-1',
+        name: 'Building Fund',
+      });
+      mockCloudinaryService.uploadBuffer.mockResolvedValue(uploadResult);
+      mockProofRepo.create.mockImplementation((v) => v);
+      mockProofRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'proof-1', ...v }),
+      );
+      const adminQb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      mockAdminRepo.createQueryBuilder.mockReturnValue(adminQb);
+
+      await service.submitProof(
+        mockUser,
+        { ...dto, givingOptionId: 'go-1' },
+        file,
+      );
+
+      expect(mockProofRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          givingOption: { id: 'go-1', name: 'Building Fund' },
+        }),
+      );
+    });
+
     it('should upload proof, save record, and notify finance team', async () => {
       mockAccountRepo.findOne.mockResolvedValue(mockAccount);
       mockCloudinaryService.uploadBuffer.mockResolvedValue(uploadResult);
@@ -851,6 +904,31 @@ describe('TitheService', () => {
         expect.any(Object),
         undefined,
         'GIVING_RECEIPT',
+      );
+    });
+
+    it('carries the giving option from the proof onto the created TitheRecord', async () => {
+      const proof = {
+        id: 'proof-1',
+        status: TitheProofStatus.PENDING,
+        member: mockMember,
+        titheAccount: { currency: 'NGN' },
+        amount: 5000,
+        paymentDate: '2026-01-01',
+        givingOption: { id: 'go-1', name: 'Building Fund' },
+      };
+      mockProofRepo.findOne.mockResolvedValue(proof);
+      mockProofRepo.save.mockResolvedValue({
+        ...proof,
+        status: TitheProofStatus.CONFIRMED,
+      });
+
+      await service.confirmProof('proof-1', mockAdmin);
+
+      expect(mockRecordRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          givingOption: { id: 'go-1', name: 'Building Fund' },
+        }),
       );
     });
   });
