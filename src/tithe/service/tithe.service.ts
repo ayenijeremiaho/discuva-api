@@ -864,6 +864,20 @@ export class TitheService {
     proof.reviewedAt = new Date();
     await this.proofRepo.save(proof);
 
+    // Confirming a proof is how this money enters the books — without this,
+    // the proof shows as CONFIRMED in the admin's proof queue but never
+    // appears in the member's own giving history/statement, since those all
+    // read from TitheRecord, not TithePaymentProof.
+    await this.recordRepo.save(
+      this.recordRepo.create({
+        member: { id: proof.member.id },
+        amount: proof.amount,
+        paymentDate: proof.paymentDate,
+        reference: proof.reference ?? null,
+        source: TitheSource.MANUAL_PROOF,
+      }),
+    );
+
     this.auditLogService.log('TITHE_PROOF_CONFIRMED', {
       actorId: actorAdmin.member?.id,
       metadata: { proofId: id },

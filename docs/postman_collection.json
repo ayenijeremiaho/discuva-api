@@ -17346,7 +17346,7 @@
                 }
               ]
             },
-            "description": "AdminGuard (FINANCE_WRITE). Sets proof status to CONFIRMED and emails the member. Returns 204."
+            "description": "AdminGuard (FINANCE_WRITE). Sets proof status to CONFIRMED, creates a TitheRecord (source MANUAL_PROOF) so it appears in the member's giving history/statement, and emails the member. Returns 204."
           },
           "response": [
             {

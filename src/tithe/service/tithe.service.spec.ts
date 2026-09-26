@@ -14,6 +14,7 @@ import {
   TitheProofStatus,
   TitheUnmatchedStatus,
 } from '../enum/tithe.enum';
+import { TitheSource } from '../../finance/enum/finance.enum';
 import { TITHE_QUEUE } from '../processor/tithe.processor';
 import { TithePaymentProof } from '../entity/tithe-payment-proof.entity';
 import { TitheAccount } from '../entity/tithe-account.entity';
@@ -830,6 +831,15 @@ describe('TitheService', () => {
           reviewedBy: mockAdmin,
         }),
       );
+      expect(mockRecordRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          member: { id: mockMember.id },
+          amount: 5000,
+          paymentDate: '2026-01-01',
+          source: TitheSource.MANUAL_PROOF,
+        }),
+      );
+      expect(mockRecordRepo.save).toHaveBeenCalled();
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'TITHE_PROOF_CONFIRMED',
         expect.any(Object),
