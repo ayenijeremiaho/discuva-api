@@ -27433,7 +27433,7 @@
                 "offerings"
               ]
             },
-            "description": "FINANCE_WRITE. givingOptionId is required; fundId is optional — falls back to the selected GivingOption's own fund, and is only required when that option has none. memberId is optional (who physically brought this giving; omit for anonymous/basket collections).",
+            "description": "FINANCE_WRITE. givingOptionId is optional — omit it for General Giving (no seeded row needed). fundId is optional too, falling back to the selected GivingOption's own fund; it's required whenever that has nothing to fall back to (no option picked, or the picked option has no fund). memberId is optional (who physically brought this giving; omit for anonymous/basket collections).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"givingOptionId\": \"{{givingOptionId}}\",\n  \"fundId\": \"{{fundId}}\",\n  \"memberId\": \"{{memberId}}\",\n  \"cashAmount\": 45000,\n  \"expectedTransferAmount\": 12000,\n  \"serviceEventId\": \"{{serviceEventId}}\",\n  \"notes\": \"Sunday 1st June morning service\"\n}",

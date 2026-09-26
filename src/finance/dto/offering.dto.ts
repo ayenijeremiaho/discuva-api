@@ -23,8 +23,13 @@ export class CreateOfferingDto {
   @IsUUID()
   fundId?: string;
 
+  // Optional — omitting it means "General Giving", same as checkout's
+  // InitiateGivingCheckoutDto: there's no seeded "General Giving" row, null
+  // just displays as that. fundId becomes required in that case since there's
+  // no GivingOption to derive one from.
+  @IsOptional()
   @IsUUID()
-  givingOptionId: string;
+  givingOptionId?: string;
 
   // Who physically brought this giving, if known — omit for
   // anonymous/basket collections.

@@ -52,16 +52,22 @@ export class OfferingService {
   ) {}
 
   async create(dto: CreateOfferingDto, admin: Admin): Promise<Offering> {
-    const givingOption = await this.givingOptionRepo.findOne({
-      where: { id: dto.givingOptionId },
-      relations: ['fund'],
-    });
-    if (!givingOption) throw new NotFoundException('Giving option not found.');
+    let givingOption: GivingOption | null = null;
+    if (dto.givingOptionId) {
+      givingOption = await this.givingOptionRepo.findOne({
+        where: { id: dto.givingOptionId },
+        relations: ['fund'],
+      });
+      if (!givingOption)
+        throw new NotFoundException('Giving option not found.');
+    }
 
-    const fundId = dto.fundId ?? givingOption.fund?.id;
+    const fundId = dto.fundId ?? givingOption?.fund?.id;
     if (!fundId)
       throw new BadRequestException(
-        'This giving option has no fund configured — select one.',
+        givingOption
+          ? 'This giving option has no fund configured — select one.'
+          : 'Select a fund, or a giving option with one configured.',
       );
     const fund = await this.fundRepo.findOne({ where: { id: fundId } });
     if (!fund) throw new NotFoundException('Fund not found.');
@@ -80,8 +86,8 @@ export class OfferingService {
     this.auditLogService.log('OFFERING_RECORDED', {
       actorId: admin.id,
       targetId: saved.id,
-      targetName: givingOption.name,
-      metadata: { givingOptionId: givingOption.id, fundId },
+      targetName: givingOption?.name ?? 'General Giving',
+      metadata: { givingOptionId: givingOption?.id ?? null, fundId },
     });
     return saved;
   }

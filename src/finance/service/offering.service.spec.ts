@@ -168,6 +168,32 @@ describe('OfferingService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
+    it('records as General Giving when givingOptionId is omitted, given an explicit fundId', async () => {
+      mockFundRepo.findOne.mockResolvedValue({ id: 'f-1' });
+      mockOfferingRepo.create.mockImplementation((v) => v);
+      mockOfferingRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'o-4', ...v }),
+      );
+
+      const result = await service.create({ fundId: 'f-1' }, mockAdmin);
+
+      expect(result.givingOption).toBeNull();
+      expect(mockGivingOptionRepo.findOne).not.toHaveBeenCalled();
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'OFFERING_RECORDED',
+        expect.objectContaining({
+          targetName: 'General Giving',
+          metadata: { givingOptionId: null, fundId: 'f-1' },
+        }),
+      );
+    });
+
+    it('throws BadRequestException when both givingOptionId and fundId are omitted', async () => {
+      await expect(service.create({}, mockAdmin)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
     it('attributes the entry to a member when memberId is provided', async () => {
       mockGivingOptionRepo.findOne.mockResolvedValue({
         id: 'go-1',
