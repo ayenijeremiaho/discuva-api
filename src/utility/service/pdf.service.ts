@@ -199,6 +199,7 @@ export class PdfService {
     member: Member,
     lines: GivingStatementLine[],
     period?: { from?: string; to?: string },
+    title = 'Giving Statement',
   ): Promise<Buffer> {
     const branding = await this.resolveBranding();
     const doc = new jsPDF({
@@ -206,7 +207,7 @@ export class PdfService {
       unit: 'mm',
       format: 'a4',
     });
-    this.drawGivingStatement(doc, member, lines, branding, period);
+    this.drawGivingStatement(doc, member, lines, branding, period, title);
     return Buffer.from(doc.output('arraybuffer'));
   }
 
@@ -422,8 +423,9 @@ export class PdfService {
     lines: GivingStatementLine[],
     branding: PdfBranding,
     period?: { from?: string; to?: string },
+    title = 'Giving Statement',
   ): void {
-    let y = this.drawPageHeader(doc, 'Giving Statement', branding);
+    let y = this.drawPageHeader(doc, title, branding);
 
     const total = lines.reduce((sum, r) => sum + Number(r.amount), 0);
 

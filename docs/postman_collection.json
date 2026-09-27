@@ -17546,10 +17546,16 @@
                   "value": "2026-06",
                   "description": "End month (YYYY-MM, optional). Records up to and including this month.",
                   "disabled": true
+                },
+                {
+                  "key": "givingOptionId",
+                  "value": "",
+                  "description": "Giving Option UUID (optional). When supplied, includes matching giving records only and excludes pledge contributions.",
+                  "disabled": true
                 }
               ]
             },
-            "description": "JwtAuthGuard. Generates a PDF Giving Statement \u2014 merges TitheRecord (Tithe/Offering/General Giving/a GivingOption) with CONFIRMED PledgeContribution (pledge-designated gifts) for the date range, each line typed via the same rule used on the member history list \u2014 and emails it to the caller's registered email address."
+            "description": "JwtAuthGuard. Generates and emails a PDF Giving Statement. Optional fromMonth/toMonth filter the date range; givingOptionId filters to matching TitheRecords and excludes pledge contributions, which are included only when no option is selected."
           },
           "response": [
             {
@@ -17557,6 +17563,46 @@
               "status": "OK",
               "code": 200,
               "body": "{\n  \"message\": \"Your giving statement has been emailed to john.doe@example.com.\",\n  \"recordCount\": 6\n}"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Email Pledge Contribution Statement PDF",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/tithes/me/pledge-statement/send",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tithes",
+                "me",
+                "pledge-statement",
+                "send"
+              ]
+            },
+            "description": "JwtAuthGuard. Emails a PDF containing only all-time CONFIRMED pledge contributions for the caller. Does not send an email when there are no confirmed contributions."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"message\": \"Your pledge contribution statement has been emailed to john.doe@example.com.\",\n  \"recordCount\": 3\n}"
             },
             {
               "name": "401 Unauthorized",

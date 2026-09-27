@@ -666,9 +666,16 @@ export class TitheService {
     user: MemberAuth,
     fromMonth?: string,
     toMonth?: string,
+    givingOptionId?: string,
   ): Promise<{ message: string; recordCount: number }> {
     const member = await this.memberRepo.findOne({ where: { id: user.id } });
     if (!member) throw new NotFoundException('Member not found');
+
+    const givingOption = givingOptionId
+      ? await this.givingOptionRepo.findOne({ where: { id: givingOptionId } })
+      : null;
+    if (givingOptionId && !givingOption)
+      throw new NotFoundException('Giving option not found');
 
     const fromDate = fromMonth ? `${fromMonth}-01` : undefined;
     const toDate = toMonth ? this.lastDayOfMonth(toMonth) : undefined;
@@ -682,19 +689,25 @@ export class TitheService {
 
     const [records, contributions] = await Promise.all([
       this.recordRepo.find({
-        where: { member: { id: user.id }, ...dateWhere },
+        where: {
+          member: { id: user.id },
+          ...dateWhere,
+          ...(givingOptionId ? { givingOption: { id: givingOptionId } } : {}),
+        },
         relations: ['batch', 'batch.titheAccount', 'givingOption'],
         order: { paymentDate: 'DESC' },
       }),
-      this.contributionRepo.find({
-        where: {
-          pledge: { member: { id: user.id } },
-          status: PledgeContributionStatus.CONFIRMED,
-          ...dateWhere,
-        },
-        relations: ['pledge', 'pledge.campaign'],
-        order: { paymentDate: 'DESC' },
-      }),
+      givingOptionId
+        ? Promise.resolve([])
+        : this.contributionRepo.find({
+            where: {
+              pledge: { member: { id: user.id } },
+              status: PledgeContributionStatus.CONFIRMED,
+              ...dateWhere,
+            },
+            relations: ['pledge', 'pledge.campaign'],
+            order: { paymentDate: 'DESC' },
+          }),
     ]);
 
     const recordLines: GivingStatementLine[] = records.map((r) => ({
@@ -730,7 +743,11 @@ export class TitheService {
       {
         name: UtilityService.capitalizeFirstLetter(member.firstname),
         count: lines.length,
-        period: this.formatStatementPeriod(fromMonth, toMonth),
+        period: this.formatStatementPeriod(
+          fromMonth,
+          toMonth,
+          givingOption?.name,
+        ),
       },
       [{ filename: 'giving-statement.pdf', content: pdfBuffer }],
       EmailCategory.GIVING_RECEIPT,
@@ -742,6 +759,65 @@ export class TitheService {
 
     return {
       message: `Your giving statement has been emailed to ${member.email}.`,
+      recordCount: lines.length,
+    };
+  }
+
+  async emailPledgeContributionStatement(
+    user: MemberAuth,
+  ): Promise<{ message: string; recordCount: number }> {
+    const member = await this.memberRepo.findOne({ where: { id: user.id } });
+    if (!member) throw new NotFoundException('Member not found');
+
+    const contributions = await this.contributionRepo.find({
+      where: {
+        pledge: { member: { id: user.id } },
+        status: PledgeContributionStatus.CONFIRMED,
+      },
+      relations: ['pledge', 'pledge.campaign'],
+      order: { paymentDate: 'DESC' },
+    });
+
+    if (contributions.length === 0) {
+      return {
+        message: 'You have no confirmed pledge contributions to export.',
+        recordCount: 0,
+      };
+    }
+
+    const lines: GivingStatementLine[] = contributions.map((contribution) => ({
+      paymentDate: contribution.paymentDate,
+      amount: Number(contribution.amount),
+      type: `Pledge: ${contribution.pledge.campaign.name}`,
+      bankName: null,
+      reference: contribution.reference,
+    }));
+    const pdfBuffer = await this.pdfService.generateGivingStatement(
+      member,
+      lines,
+      undefined,
+      'Pledge Contribution Statement',
+    );
+
+    this.utilityService.sendEmailWithAttachment(
+      member.email,
+      'Your Pledge Contribution Statement',
+      'tithe-statement',
+      {
+        name: UtilityService.capitalizeFirstLetter(member.firstname),
+        count: lines.length,
+        pledgeOnly: true,
+      },
+      [{ filename: 'pledge-contribution-statement.pdf', content: pdfBuffer }],
+      EmailCategory.GIVING_RECEIPT,
+    );
+
+    this.logger.log(
+      `Pledge contribution statement emailed to ${member.email} — ${lines.length} records`,
+    );
+
+    return {
+      message: `Your pledge contribution statement has been emailed to ${member.email}.`,
       recordCount: lines.length,
     };
   }
@@ -1087,8 +1163,12 @@ export class TitheService {
   private formatStatementPeriod(
     fromMonth?: string,
     toMonth?: string,
+    givingOptionName?: string,
   ): string | undefined {
-    if (!fromMonth && !toMonth) return undefined;
+    if (!fromMonth && !toMonth)
+      return givingOptionName
+        ? `all available dates for ${givingOptionName}`
+        : undefined;
     const fmt = (ym: string) => {
       const [year, month] = ym.split('-').map(Number);
       return new Date(year, month - 1, 1).toLocaleDateString('en-GB', {
@@ -1096,9 +1176,11 @@ export class TitheService {
         year: 'numeric',
       });
     };
-    if (fromMonth && toMonth) return `${fmt(fromMonth)} – ${fmt(toMonth)}`;
-    if (fromMonth) return `${fmt(fromMonth)} onwards`;
-    return `Up to ${fmt(toMonth as string)}`;
+    let period: string;
+    if (fromMonth && toMonth) period = `${fmt(fromMonth)} – ${fmt(toMonth)}`;
+    else if (fromMonth) period = `${fmt(fromMonth)} onwards`;
+    else period = `Up to ${fmt(toMonth as string)}`;
+    return givingOptionName ? `${period} for ${givingOptionName}` : period;
   }
 
   // Same rule everywhere a TitheRecord's purpose needs a human label

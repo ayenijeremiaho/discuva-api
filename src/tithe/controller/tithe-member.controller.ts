@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   ParseIntPipe,
+  ParseUUIDPipe,
   Post,
   Query,
   Request,
@@ -44,8 +45,20 @@ export class TitheMemberController {
     @Request() req: any,
     @Query('fromMonth') fromMonth?: string,
     @Query('toMonth') toMonth?: string,
+    @Query('givingOptionId', new ParseUUIDPipe({ optional: true }))
+    givingOptionId?: string,
   ) {
-    return this.titheService.emailGivingStatement(req.user, fromMonth, toMonth);
+    return this.titheService.emailGivingStatement(
+      req.user,
+      fromMonth,
+      toMonth,
+      givingOptionId,
+    );
+  }
+
+  @Post('me/pledge-statement/send')
+  emailPledgeStatement(@Request() req: any) {
+    return this.titheService.emailPledgeContributionStatement(req.user);
   }
 
   @Post('proof')

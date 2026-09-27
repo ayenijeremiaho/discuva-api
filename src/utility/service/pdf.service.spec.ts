@@ -209,6 +209,26 @@ describe('PdfService', () => {
       expect(text).toContain('Pledge:');
       expect(text).toContain('Roof');
     });
+
+    it('supports a pledge-specific statement title', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        address: '42 Tenant Ave',
+        tagline: null,
+        currency: 'NGN',
+      });
+
+      const buffer = await service.generateGivingStatement(
+        member,
+        lines,
+        undefined,
+        'Pledge Contribution Statement',
+      );
+
+      expect(pdfText(buffer)).toContain('Pledge Contribution Statement');
+    });
   });
 
   it('resolves branding through the cache, not a fresh DB lookup per call', async () => {

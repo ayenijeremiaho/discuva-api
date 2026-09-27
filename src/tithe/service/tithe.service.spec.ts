@@ -1296,6 +1296,117 @@ describe('TitheService', () => {
       );
     });
 
+    it('should limit a statement to one giving option and omit unrelated pledge contributions', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'go-1',
+        name: 'Building Fund',
+      });
+      mockRecordRepo.find.mockResolvedValue([
+        {
+          paymentDate: '2026-01-01',
+          amount: 5000,
+          bankName: null,
+          reference: null,
+          externalReference: null,
+          source: 'PAYMENT_GATEWAY',
+          batch: null,
+          givingOption: { id: 'go-1', name: 'Building Fund' },
+        },
+      ]);
+
+      await service.emailGivingStatement(
+        mockUser,
+        '2026-01',
+        '2026-06',
+        'go-1',
+      );
+
+      expect(mockRecordRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ givingOption: { id: 'go-1' } }),
+        }),
+      );
+      expect(mockContributionRepo.find).not.toHaveBeenCalled();
+      expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
+        'john@test.com',
+        'Your Giving Statement',
+        'tithe-statement',
+        expect.objectContaining({
+          period: 'January 2026 – June 2026 for Building Fund',
+          count: 1,
+        }),
+        expect.any(Array),
+        'GIVING_RECEIPT',
+      );
+    });
+
+    it('should email a PDF containing only confirmed pledge contributions', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockContributionRepo.find.mockResolvedValue([
+        {
+          amount: '12500',
+          paymentDate: '2026-08-12',
+          reference: 'PLEDGE-REF-1',
+          pledge: { campaign: { name: 'Building Fund' } },
+        },
+      ]);
+
+      const result = await service.emailPledgeContributionStatement(mockUser);
+
+      expect(mockContributionRepo.find).toHaveBeenCalledWith({
+        where: {
+          pledge: { member: { id: mockUser.id } },
+          status: PledgeContributionStatus.CONFIRMED,
+        },
+        relations: ['pledge', 'pledge.campaign'],
+        order: { paymentDate: 'DESC' },
+      });
+      expect(mockRecordRepo.find).not.toHaveBeenCalled();
+      expect(mockPdfService.generateGivingStatement).toHaveBeenCalledWith(
+        mockMember,
+        [
+          {
+            paymentDate: '2026-08-12',
+            amount: 12500,
+            type: 'Pledge: Building Fund',
+            bankName: null,
+            reference: 'PLEDGE-REF-1',
+          },
+        ],
+        undefined,
+        'Pledge Contribution Statement',
+      );
+      expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
+        'john@test.com',
+        'Your Pledge Contribution Statement',
+        'tithe-statement',
+        expect.objectContaining({ name: 'John', count: 1, pledgeOnly: true }),
+        [
+          {
+            filename: 'pledge-contribution-statement.pdf',
+            content: Buffer.from('pdf'),
+          },
+        ],
+        'GIVING_RECEIPT',
+      );
+      expect(result.recordCount).toBe(1);
+    });
+
+    it('does not email a pledge statement when there are no confirmed contributions', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockContributionRepo.find.mockResolvedValue([]);
+
+      const result = await service.emailPledgeContributionStatement(mockUser);
+
+      expect(result.recordCount).toBe(0);
+      expect(result.message).toBe(
+        'You have no confirmed pledge contributions to export.',
+      );
+      expect(mockPdfService.generateGivingStatement).not.toHaveBeenCalled();
+      expect(mockUtilityService.sendEmailWithAttachment).not.toHaveBeenCalled();
+    });
+
     it('should format an open-ended "from" period', async () => {
       mockMemberRepo.findOne.mockResolvedValue(mockMember);
       mockRecordRepo.find.mockResolvedValue([]);
