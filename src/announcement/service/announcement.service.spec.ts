@@ -706,7 +706,7 @@ describe('AnnouncementService', () => {
       expect(mockSmsService.send).not.toHaveBeenCalled();
     });
 
-    it('swallows an SMS dispatch failure instead of failing announcement creation', async () => {
+    it('returns the SMS failure while preserving the created announcement', async () => {
       const announcement = {
         id: 'ann-1',
         title: 'T',
@@ -731,7 +731,10 @@ describe('AnnouncementService', () => {
           'author-1',
           smsAdmin,
         ),
-      ).resolves.toMatchObject({ id: 'ann-1' });
+      ).resolves.toMatchObject({
+        id: 'ann-1',
+        smsDispatch: { status: 'failed', message: 'provider down' },
+      });
     });
   });
 
@@ -809,6 +812,24 @@ describe('AnnouncementService', () => {
 
       expect(mockSmsService.send).not.toHaveBeenCalled();
       expect(result).toEqual({ sentCount: 0 });
+    });
+
+    it('propagates SMS provider errors instead of reporting a successful broadcast', async () => {
+      mockMemberQb.getMany.mockResolvedValue([{ phoneNumber: '+1' }]);
+      mockSmsService.send.mockRejectedValueOnce(
+        new Error('SMS provider request failed: sender id rejected.'),
+      );
+
+      await expect(
+        service.sendSmsBroadcast(
+          { audience: AnnouncementAudienceEnum.ALL, message: 'Hi' } as any,
+          'admin-1',
+        ),
+      ).rejects.toThrow('sender id rejected');
+      expect(mockAuditLogService.log).not.toHaveBeenCalledWith(
+        'SMS_BROADCAST_SENT',
+        expect.anything(),
+      );
     });
 
     it('unions member-derived phones with phone-only group entries and dedupes', async () => {

@@ -43,6 +43,10 @@ describe('SmsService', () => {
     service = module.get<SmsService>(SmsService);
   });
 
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   describe('calculateSegments', () => {
     it('treats a 159-character plain message as 1 segment', () => {
       const result = service.calculateSegments('a'.repeat(159));
@@ -84,6 +88,7 @@ describe('SmsService', () => {
 
   describe('send', () => {
     it('throws ForbiddenException with SMS_PROVIDER_NOT_CONFIGURED when no active provider is configured', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockCredentialResolver.resolveConfig.mockResolvedValue(undefined);
 
       await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
@@ -93,6 +98,7 @@ describe('SmsService', () => {
     });
 
     it('dispatches to the provider resolved from the registry by providerId', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
       const to = Array.from({ length: 5 }, (_, i) => `+23480000000${i}`);
 
@@ -108,6 +114,7 @@ describe('SmsService', () => {
     });
 
     it('routes to the tenant-selected vendor, not a hardcoded one', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockCredentialResolver.resolveConfig.mockResolvedValue({
         providerId: 'twilio',
         credentials: {
@@ -124,6 +131,7 @@ describe('SmsService', () => {
     });
 
     it('splits recipients into multiple batches using the resolved provider max', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockProvider.maxRecipientsPerRequest = 100;
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
       const to = Array.from(
@@ -140,7 +148,8 @@ describe('SmsService', () => {
       expect(mockProvider.send.mock.calls[1][0]).toHaveLength(10);
     });
 
-    it('does not let one failed batch stop the others', async () => {
+    it('continues remaining batches but rejects when a provider batch fails', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockProvider.maxRecipientsPerRequest = 100;
       mockProvider.send
         .mockRejectedValueOnce(new Error('boom'))
@@ -150,9 +159,40 @@ describe('SmsService', () => {
         (_, i) => `+234800000${i}`,
       );
 
-      const results = await service.send(to, 'Hello');
+      await expect(service.send(to, 'Hello')).rejects.toThrow('boom');
 
-      expect(results).toHaveLength(1);
+      expect(mockProvider.send).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects sends before 8:00am in the configured timezone without calling a provider', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T06:59:00.000Z'));
+
+      await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
+        '8:00am to 7:50pm',
+      );
+
+      expect(mockCredentialResolver.resolveConfig).not.toHaveBeenCalled();
+      expect(mockProvider.send).not.toHaveBeenCalled();
+    });
+
+    it('rejects sends after 7:50pm in the configured timezone without calling a provider', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T18:51:00.000Z'));
+
+      await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
+        '8:00am to 7:50pm',
+      );
+
+      expect(mockCredentialResolver.resolveConfig).not.toHaveBeenCalled();
+      expect(mockProvider.send).not.toHaveBeenCalled();
+    });
+
+    it('allows sends through 7:50pm in the configured timezone', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T18:50:00.000Z'));
+      mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
+
+      await service.send(['+1'], 'Hello');
+
+      expect(mockProvider.send).toHaveBeenCalledTimes(1);
     });
   });
 

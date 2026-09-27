@@ -31,6 +31,12 @@ import { GroupService } from '../../group/service/group.service';
 import { ClassesService } from '../../classes/service/classes.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { SmsService } from '../../sms/service/sms.service';
+
+export interface AnnouncementSmsDispatchResult {
+  status: 'accepted' | 'failed' | 'skipped';
+  recipientCount?: number;
+  message?: string;
+}
 import { Admin } from '../../admin/entity/admin.entity';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 
@@ -87,7 +93,7 @@ export class AnnouncementService {
     dto: CreateAnnouncementDto,
     authorId: string,
     admin: Admin,
-  ): Promise<Announcement> {
+  ): Promise<Announcement & { smsDispatch?: AnnouncementSmsDispatchResult }> {
     this.assertAudienceTargetProvided(dto);
     await this.assertCanSendViaSms(dto.sendViaSms, admin);
 
@@ -119,15 +125,11 @@ export class AnnouncementService {
 
     this.dispatchPushNotification(saved);
 
-    if (saved.sendViaSms) {
-      // Awaited deliberately, unlike the fire-and-forget push notification
-      // above — this is a paid external API call, so a failure must be
-      // caught and logged synchronously rather than silently dropped.
-      // dispatchSms swallows its own errors, so this never fails create().
-      await this.dispatchSms(saved);
-    }
+    const smsDispatch = saved.sendViaSms
+      ? await this.dispatchSms(saved)
+      : undefined;
 
-    return saved;
+    return smsDispatch ? { ...saved, smsDispatch } : saved;
   }
 
   // Resolves and pushes to every audience type, not just GROUP — previously
@@ -242,7 +244,7 @@ export class AnnouncementService {
     dto: UpdateAnnouncementDto,
     actorId: string,
     admin: Admin,
-  ): Promise<Announcement> {
+  ): Promise<Announcement & { smsDispatch?: AnnouncementSmsDispatchResult }> {
     const announcement = await this.getOrThrow(id);
     await this.assertCanSendViaSms(dto.sendViaSms, admin);
 
@@ -282,11 +284,11 @@ export class AnnouncementService {
     // Only dispatch on the transition into sendViaSms=true — re-saving an
     // already-SMS'd announcement (e.g. editing its title afterward) must not
     // re-text everyone.
-    if (sendingSmsNow) {
-      await this.dispatchSms(saved);
-    }
+    const smsDispatch = sendingSmsNow
+      ? await this.dispatchSms(saved)
+      : undefined;
 
-    return saved;
+    return smsDispatch ? { ...saved, smsDispatch } : saved;
   }
 
   // Checked before anything is persisted — an announcement created with
@@ -339,9 +341,13 @@ export class AnnouncementService {
     return { sentCount: phoneNumbers.length };
   }
 
-  private async dispatchSms(announcement: Announcement): Promise<void> {
+  private async dispatchSms(
+    announcement: Announcement,
+  ): Promise<AnnouncementSmsDispatchResult> {
     try {
-      if (!announcement.smsBody) return;
+      if (!announcement.smsBody) {
+        return { status: 'skipped', message: 'No SMS message was provided.' };
+      }
       const phoneNumbers = await this.resolvePhoneNumbers({
         audience: announcement.audience,
         departmentId: announcement.department?.id,
@@ -349,12 +355,20 @@ export class AnnouncementService {
         groupId: announcement.group?.id,
         classId: announcement.churchClass?.id,
       });
-      if (phoneNumbers.length === 0) return;
+      if (phoneNumbers.length === 0) {
+        return {
+          status: 'skipped',
+          message: 'No recipients with a phone number were found.',
+        };
+      }
       await this.smsService.send(phoneNumbers, announcement.smsBody);
+      return { status: 'accepted', recipientCount: phoneNumbers.length };
     } catch (err: any) {
+      const message = err?.message ?? String(err);
       this.logger.error(
-        `Failed to dispatch SMS for announcement ${announcement.id}: ${err?.message ?? err}`,
+        `Failed to dispatch SMS for announcement ${announcement.id}: ${message}`,
       );
+      return { status: 'failed', message };
     }
   }
 

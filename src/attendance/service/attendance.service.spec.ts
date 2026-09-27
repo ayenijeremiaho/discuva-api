@@ -875,12 +875,8 @@ describe('AttendanceService', () => {
       );
     });
 
-    // Regression test: event.eventDate is a `date` column hydrated as a JS
-    // Date at local-timezone midnight. Passing that Date object directly as
-    // a query parameter risks the driver re-serializing it (e.g. via UTC
-    // toISOString()), which can shift the calendar date by a day depending
-    // on server timezone. Must be passed as a plain 'YYYY-MM-DD' string so
-    // Postgres parses it as a DATE literal with no reinterpretation.
+    // Regression test: both Date and PostgreSQL's YYYY-MM-DD string form must
+    // become a date-only query parameter without timezone reinterpretation.
     it('compares leave dates against eventDate as a plain YYYY-MM-DD string, not a Date object', async () => {
       const eventDate = new Date(2026, 5, 1); // June 1 2026, local midnight
       const event = { id: 'event-1', name: 'Sunday Service', eventDate };
@@ -903,6 +899,35 @@ describe('AttendanceService', () => {
         {
           eventDate: '2026-06-01',
         },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith('leave.date_to >= :eventDate', {
+        eventDate: '2026-06-01',
+      });
+    });
+
+    it('accepts eventDate hydrated from PostgreSQL as a YYYY-MM-DD string', async () => {
+      const event = {
+        id: 'event-1',
+        name: 'Sunday Service',
+        eventDate: '2026-06-01',
+      };
+      mockEventService.findEventsReadyForAbsenceMarking.mockResolvedValue([
+        event,
+      ]);
+      mockMemberService.getMembersNotCheckedInForEvent.mockResolvedValue([]);
+      mockMemberService.getWorkersNotCheckedInForEvent.mockResolvedValue([
+        { id: 'worker-2' },
+      ]);
+      mockTxManager.save.mockResolvedValue(undefined);
+      mockTxManager.update.mockResolvedValue(undefined);
+      const qb = { ...makeQb(), getRawMany: jest.fn().mockResolvedValue([]) };
+      mockDataSource.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      await service.markAbsentees();
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'leave.date_from <= :eventDate',
+        { eventDate: '2026-06-01' },
       );
       expect(qb.andWhere).toHaveBeenCalledWith('leave.date_to >= :eventDate', {
         eventDate: '2026-06-01',

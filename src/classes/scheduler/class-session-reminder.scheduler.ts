@@ -182,10 +182,16 @@ export class ClassSessionReminderScheduler {
     );
 
     if (smsEnabled && phone) {
-      this.smsService.send(
-        [phone],
-        `Reminder: ${churchClass.name} ${status}.${churchClass.meetingLink ? ` Join: ${churchClass.meetingLink}` : ''}`,
-      );
+      void this.smsService
+        .send(
+          [phone],
+          `Reminder: ${churchClass.name} ${status}.${churchClass.meetingLink ? ` Join: ${churchClass.meetingLink}` : ''}`,
+        )
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to send class session reminder SMS: ${err instanceof Error ? err.message : err}`,
+          );
+        });
     }
 
     this.cacheService.set(cacheKey, '1', 3_600 * 2);

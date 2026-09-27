@@ -8673,7 +8673,7 @@
                 "announcements"
               ]
             },
-            "description": "audience: ALL | WORKERS_ONLY | DEPARTMENT | INDIVIDUAL. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. publishedAt defaults to now if omitted. sendViaSms (optional, requires the caller's admin role to hold SMS_SEND \u2014 403 otherwise) triggers an SMS to every resolved recipient's phone number; smsBody is required whenever sendViaSms=true and is deliberately separate from body since SMS is billed per segment (see SMS Module)."
+            "description": "audience: ALL | WORKERS_ONLY | DEPARTMENT | INDIVIDUAL. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. publishedAt defaults to now if omitted. sendViaSms (optional, requires the caller's admin role to hold SMS_SEND - 403 otherwise) triggers an SMS to every resolved recipient's phone number; smsBody is required whenever sendViaSms=true and is deliberately separate from body since SMS is billed per segment (see SMS Module). SMS sends are allowed 08:00-19:50 in CHURCH_TIMEZONE. The announcement remains created if sending fails; its response includes a transient smsDispatch outcome and provider message."
           },
           "event": [
             {
@@ -8692,7 +8692,7 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"id\": \"d4e5f6a7-8b9c-0d1e-2f3a-4b5c6d7e8f9a\",\n  \"title\": \"Sunday Service Update\",\n  \"body\": \"Service starts at 8am this Sunday.\",\n  \"audience\": \"ALL\",\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
+              "body": "{\n  \"id\": \"d4e5f6a7-8b9c-0d1e-2f3a-4b5c6d7e8f9a\",\n  \"title\": \"Sunday Service Update\",\n  \"body\": \"Service starts at 8am this Sunday.\",\n  \"audience\": \"ALL\",\n  \"sendViaSms\": true,\n  \"smsDispatch\": {\n    \"status\": \"accepted\",\n    \"recipientCount\": 42\n  },\n  \"createdAt\": \"2026-06-15T08:00:00.000Z\"\n}"
             },
             {
               "name": "400 Bad Request",
@@ -8731,7 +8731,7 @@
                 "sms-broadcast"
               ]
             },
-            "description": "Sends an SMS to the resolved audience without creating an announcement \u2014 no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. If audience=GROUP, groupId (UUID) is required. Returns { sentCount } \u2014 sentCount: 0 (not an error) if the resolved audience has no members with a phone number on file."
+            "description": "Sends an SMS to the resolved audience without creating an announcement - no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. If audience=GROUP, groupId (UUID) is required. Returns { sentCount } only when every provider request succeeds; sentCount: 0 if there are no recipients with phone numbers. Provider failures and sends outside 08:00-19:50 CHURCH_TIMEZONE return an error instead of a false success. A provider failure may be partial; check provider history before retrying."
           },
           "response": [
             {
@@ -8745,6 +8745,18 @@
               "status": "Forbidden",
               "code": 403,
               "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Missing required permission: sms:send\"\n}"
+            },
+            {
+              "name": "400 SMS sending window closed",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"SMS sending is available from 8:00am to 7:50pm (Africa/Lagos).\",\n  \"code\": \"SMS_SEND_WINDOW_CLOSED\"\n}"
+            },
+            {
+              "name": "500 SMS provider failure",
+              "status": "Internal Server Error",
+              "code": 500,
+              "body": "{\n  \"statusCode\": 500,\n  \"message\": \"SMS provider request failed: sender id rejected.\",\n  \"code\": \"SMS_SEND_FAILED\"\n}"
             }
           ]
         },

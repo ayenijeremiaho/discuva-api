@@ -1419,13 +1419,9 @@ export class AttendanceService {
       )
       .where('profile.member_id IN (:...memberIds)', { memberIds })
       .andWhere('leave.status = :status', { status: 'APPROVED' })
-      // event.eventDate is a `date` column, hydrated by pg's driver as a JS
-      // Date via local-timezone midnight — passed as a plain Date parameter,
-      // the driver would re-serialize it (e.g. via toISOString(), UTC),
-      // which can shift the calendar date by a day off the server's local
-      // timezone. Passing a plain 'YYYY-MM-DD' string instead sidesteps
-      // that round-trip entirely: Postgres parses it as a DATE literal with
-      // no timezone reinterpretation, regardless of server TZ.
+      // PostgreSQL DATE values may be hydrated as YYYY-MM-DD strings. Preserve
+      // those directly; Date values are formatted locally to avoid a UTC
+      // serialization shifting the calendar day.
       .andWhere('leave.date_from <= :eventDate', {
         eventDate: this.toDateOnlyString(event.eventDate),
       })
@@ -1436,7 +1432,9 @@ export class AttendanceService {
     return new Set(rows.map((r) => r.memberId));
   }
 
-  private toDateOnlyString(d: Date): string {
+  private toDateOnlyString(d: Date | string): string {
+    if (typeof d === 'string') return d;
+
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');

@@ -3171,10 +3171,14 @@ targets `IN_PROGRESS` + `COMPLETED` enrollees only (excludes `CANCELLED`).
 the `SMS_SEND` permission (checked in `AnnouncementService`, not the DTO — a DTO can't inspect the caller's
 permission set — throws `403 Forbidden` otherwise) and requires `smsBody` to be non-empty. `smsBody` is deliberately
 separate from `body`: the announcement body is often long-form and meant for in-app reading, whereas SMS is billed
-per segment, so admins compose a distinct, short message for it. On `create`, an SMS is sent (awaited, not
-fire-and-forget, since it's a paid external call whose failure must be caught and logged synchronously) whenever
-`sendViaSms` is set. On `update`, the SMS is sent only on the **transition** into `sendViaSms=true` — re-saving an
-already-SMS'd announcement (e.g. editing its title afterward) does not re-text everyone.
+separate from `body`: the announcement body is often long-form and meant for in-app reading, whereas SMS is billed
+per segment, so admins compose a distinct, short message for it. SMS sends are allowed from 08:00 through 19:50 in
+`CHURCH_TIMEZONE` (default `Africa/Lagos`) for every provider. On `create`, an SMS is sent (awaited) whenever
+`sendViaSms` is set; the announcement is still saved if sending fails, and the response includes a transient
+`smsDispatch` result (`accepted`, `failed`, or `skipped`) and any provider error message. On `update`, the SMS is sent
+only on the **transition** into `sendViaSms=true` — re-saving an already-SMS'd announcement (e.g. editing its title
+afterward) does not re-text everyone. `accepted` means the provider accepted the request, not that the carrier
+delivered every message; use the provider's live message history for delivery status.
 
 **SMS phone number resolution (`resolvePhoneNumbers`)** — independent of the push-notification audience logic above.
 Always restricted to `ACTIVE` members with a non-null `phoneNumber`, further filtered by audience:
@@ -3197,7 +3201,10 @@ an admin with SMS access but no announcement-authoring access can use this). Bod
 audiences + `message` (required). Reuses the same `resolvePhoneNumbers` targeting as `sendViaSms` on a regular
 announcement. No `Announcement` row is created, no push notification is sent, and no title/body is required — this
 is purely an SMS send. Returns `{ sentCount }`; `sentCount: 0` (not an error) when the resolved audience has no
-members with a phone number on file. Logs `SMS_BROADCAST_SENT` to the audit log (`metadata: { audience, count }`).
+members with a phone number on file. `sentCount` is returned only if every provider request succeeds; failures are
+returned to the caller and are not audit-logged as sent. A failure may follow partial provider acceptance, so check
+provider history before retrying. Successful requests log `SMS_BROADCAST_SENT` (`metadata: { audience, count }`);
+`sentCount` records provider acceptance, not carrier delivery.
 
 **Emoji reactions:** any authenticated member/worker can react to an announcement with one of a fixed emoji set
 (`ReactionEmojiEnum`: 👍 ❤️ 🙏 🎉 👏) via `POST announcements/:id/react` — reacting again just updates the existing
@@ -3304,11 +3311,15 @@ class, a line in the registry, and a `communication_providers` catalog row — n
   documents as forcing UCS-2/unicode encoding even though they're otherwise ordinary ASCII punctuation:
   `; ^ { } \ [ ~ ] | € ' "` — in which case it's encoded `unicode` (70 chars/segment). Returns
   `{ segments, encoding, characterCount }`.
-- `send(to, message)` — resolves the caller's active SMS config once
+- `send(to, message)` — first enforces the 08:00–19:50 send window in
+  `CHURCH_TIMEZONE` (default `Africa/Lagos`), before resolving the caller's active SMS config. Outside the window it
+  throws `400 SMS_SEND_WINDOW_CLOSED` without contacting a provider. Otherwise it resolves config once
   (`SmsCredentialResolverService.resolveConfig()`); if the tenant has none configured, throws
   `403 SMS_PROVIDER_NOT_CONFIGURED` immediately, before attempting anything. Otherwise looks up the matching
   `ISmsProvider` from the registry and batches `to` into groups of that provider's own
-  `maxRecipientsPerRequest`. A failed batch is logged and skipped; it does not abort the remaining batches.
+  `maxRecipientsPerRequest`. All batches are attempted; if any fail, it throws `500 SMS_SEND_FAILED` including the
+  provider error, and warns that earlier requests may already have been accepted. Fire-and-forget reminder callers
+  log the rejection; interactive broadcast callers surface it to the admin.
 - `getLogs()`/`getBalance()` — same resolve-or-403 pattern, then pure passthrough to the resolved provider (a
   tenant sees their own vendor's balance/history, never the platform's — there isn't one). `getLogs()` tags every
   returned entry with `provider: config.providerId` (`termii` \| `twilio`) — individual `ISmsProvider` classes don't
@@ -3322,6 +3333,11 @@ provider-agnostic `SmsLogEntry` shape (`recipient`, `message`, `status`, `type`,
 A non-array response body is treated as empty rather than thrown. `TwilioSmsProvider` has no native bulk-send
 endpoint, so it issues one `POST` per recipient (`Promise.all`, capped by `maxRecipientsPerRequest`) and joins the
 returned `sid`s with a comma for `messageId`.
+
+`TermiiSmsProvider` currently sends through the DND route. Termii requires that route to be enabled on the account;
+the admin's Communication Providers page calls this out. Termii's documentation says its 20:00–08:00 restriction
+applies to generic-route SMS to MTN and that DND messages are exempt. Discuva's stricter 08:00–19:50 policy applies
+to all providers and routes regardless of Termii's exemption.
 
 **Routes prefix:** `/admin/sms` (`AdminGuard`)
 
@@ -9024,6 +9040,7 @@ A cron job runs every 5 minutes (`EVERY_5_MINUTES`).
     - Gets all **members** (ACTIVE, role=MEMBER) who have no `PRESENT` or `LATE` attendance record for the event → creates one `ABSENT` record per member referencing the event (`serviceSlot = null`).
     - Gets all **workers** (ACTIVE, role=WORKER) who have no `PRESENT` or `LATE` record for the event:
         - Checks `request_leave` table: if the worker has an APPROVED leave whose `date_from ≤ event.eventDate ≤ date_to` → creates `ON_LEAVE` record.
+          - PostgreSQL `DATE` values may be hydrated as `YYYY-MM-DD` strings; leave-date comparisons preserve that form (and normalize `Date` values) to avoid timezone shifts.
         - Otherwise → creates `ABSENT` record.
 3. All absence records for the event are saved in a single DB transaction.
 4. Sets `event.attendanceMarked = true` so the job skips it next run.

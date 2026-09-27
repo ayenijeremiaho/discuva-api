@@ -173,10 +173,16 @@ export class AssignmentReminderScheduler {
     );
 
     if (smsEnabled && phone) {
-      this.smsService.send(
-        [phone],
-        `Reminder: your assignment for ${assignment.churchClass.name} is ${status}. Check your email for the link.`,
-      );
+      void this.smsService
+        .send(
+          [phone],
+          `Reminder: your assignment for ${assignment.churchClass.name} is ${status}. Check your email for the link.`,
+        )
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `Failed to send assignment reminder SMS: ${err instanceof Error ? err.message : err}`,
+          );
+        });
     }
 
     this.cacheService.set(cacheKey, '1', 86_400 * 2);
