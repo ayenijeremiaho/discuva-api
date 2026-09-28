@@ -18,6 +18,12 @@ export interface SmsLogEntry {
   type: string;
   sentAt: string;
   sender?: string;
+  dispatchStatus?: string;
+  errorMessage?: string;
+  sourceType?: string;
+  sourceId?: string;
+  sourceLabel?: string;
+  trackingId?: string;
   // Set by SmsService.getLogs() from the resolved config's providerId, not
   // by individual ISmsProvider implementations — a provider class has no
   // reason to know its own registry key. Always populated by the time an

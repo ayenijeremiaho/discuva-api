@@ -35,6 +35,7 @@ import { SmsService } from '../../sms/service/sms.service';
 export interface AnnouncementSmsDispatchResult {
   status: 'accepted' | 'failed' | 'skipped';
   recipientCount?: number;
+  failedCount?: number;
   message?: string;
 }
 import { Admin } from '../../admin/entity/admin.entity';
@@ -313,7 +314,7 @@ export class AnnouncementService {
   async sendSmsBroadcast(
     dto: SendSmsBroadcastDto,
     actorId: string,
-  ): Promise<{ sentCount: number }> {
+  ): Promise<{ sentCount: number; failedCount?: number; failures?: string[] }> {
     this.assertAudienceTargetProvided(dto);
 
     const phoneNumbers = await this.resolvePhoneNumbers({
@@ -328,17 +329,37 @@ export class AnnouncementService {
       return { sentCount: 0 };
     }
 
-    await this.smsService.send(phoneNumbers, dto.message);
+    const outcome = await this.smsService.send(phoneNumbers, dto.message, {
+      sourceType: 'sms_broadcast',
+      sourceLabel: dto.audience,
+    });
+
+    if (outcome.failedCount > 0) {
+      this.auditLogService.log('SMS_BROADCAST_FAILED', {
+        actorId,
+        metadata: {
+          audience: dto.audience,
+          acceptedCount: outcome.acceptedCount,
+          failedCount: outcome.failedCount,
+          failures: outcome.failures,
+        },
+      });
+      return {
+        sentCount: outcome.acceptedCount,
+        failedCount: outcome.failedCount,
+        failures: outcome.failures,
+      };
+    }
 
     this.logger.log(
-      `SMS-only broadcast sent to ${phoneNumbers.length} recipient(s) for ${dto.audience} audience by actor ${actorId}`,
+      `SMS-only broadcast accepted by provider for ${outcome.acceptedCount} recipient(s) for ${dto.audience} audience by actor ${actorId}`,
     );
     this.auditLogService.log('SMS_BROADCAST_SENT', {
       actorId,
-      metadata: { audience: dto.audience, count: phoneNumbers.length },
+      metadata: { audience: dto.audience, count: outcome.acceptedCount },
     });
 
-    return { sentCount: phoneNumbers.length };
+    return { sentCount: outcome.acceptedCount };
   }
 
   private async dispatchSms(
@@ -361,8 +382,24 @@ export class AnnouncementService {
           message: 'No recipients with a phone number were found.',
         };
       }
-      await this.smsService.send(phoneNumbers, announcement.smsBody);
-      return { status: 'accepted', recipientCount: phoneNumbers.length };
+      const outcome = await this.smsService.send(
+        phoneNumbers,
+        announcement.smsBody,
+        {
+          sourceType: 'announcement',
+          sourceId: announcement.id,
+          sourceLabel: announcement.title,
+        },
+      );
+      if (outcome.failedCount > 0) {
+        return {
+          status: 'failed',
+          recipientCount: phoneNumbers.length,
+          failedCount: outcome.failedCount,
+          message: outcome.failures.join('; '),
+        };
+      }
+      return { status: 'accepted', recipientCount: outcome.acceptedCount };
     } catch (err: any) {
       const message = err?.message ?? String(err);
       this.logger.error(

@@ -19,6 +19,13 @@ const mockConfigRepo = {
   findOneBy: jest.fn(),
   find: jest.fn(),
   create: jest.fn((v) => v),
+  createQueryBuilder: jest.fn(),
+};
+
+const mockConfigReadQb = {
+  addSelect: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  getMany: jest.fn(),
 };
 
 const mockQueryBuilder = {
@@ -42,6 +49,8 @@ describe('TenantCommunicationProviderService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCls.get.mockReturnValue('tenant-1');
+    mockConfigRepo.createQueryBuilder.mockReturnValue(mockConfigReadQb);
+    mockConfigReadQb.getMany.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TenantCommunicationProviderService,
@@ -68,7 +77,7 @@ describe('TenantCommunicationProviderService', () => {
         { id: 'termii', channel: 'sms', name: 'Termii', isActive: true },
         { id: 'twilio', channel: 'sms', name: 'Twilio', isActive: false },
       ]);
-      mockConfigRepo.find.mockResolvedValue([]);
+      mockConfigReadQb.getMany.mockResolvedValue([]);
 
       const result = await service.listProviders('sms');
 
@@ -80,12 +89,13 @@ describe('TenantCommunicationProviderService', () => {
         { id: 'termii', channel: 'sms', name: 'Termii', isActive: true },
         { id: 'twilio', channel: 'sms', name: 'Twilio', isActive: false },
       ]);
-      mockConfigRepo.find.mockResolvedValue([
+      mockConfigReadQb.getMany.mockResolvedValue([
         {
           providerId: 'twilio',
           senderIdentity: null,
           isActive: true,
           tenantId: 'tenant-1',
+          credentialsEncrypted: { accountSid: 'secret' },
         },
       ]);
 
@@ -104,6 +114,35 @@ describe('TenantCommunicationProviderService', () => {
           isActive: true,
         },
       ]);
+    });
+
+    it('returns the Termii route without returning secret credentials', async () => {
+      mockProviderRepo.find.mockResolvedValue([
+        { id: 'termii', channel: 'sms', name: 'Termii', isActive: true },
+      ]);
+      mockConfigReadQb.getMany.mockResolvedValue([
+        {
+          providerId: 'termii',
+          senderIdentity: null,
+          isActive: true,
+          tenantId: 'tenant-1',
+          credentialsEncrypted: { apiKey: 'secret-key', route: 'dnd' },
+        },
+      ]);
+
+      const result = await service.listProviders('sms');
+
+      expect(result.ownConfigs).toEqual([
+        {
+          providerId: 'termii',
+          providerName: 'Termii',
+          channel: 'sms',
+          senderIdentity: null,
+          smsRoute: 'dnd',
+          isActive: true,
+        },
+      ]);
+      expect(JSON.stringify(result)).not.toContain('secret-key');
     });
   });
 

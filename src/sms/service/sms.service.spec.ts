@@ -1,8 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
+import { getRepositoryToken } from '@nestjs/typeorm';
 import { SmsService } from './sms.service';
 import { SmsProviderRegistryService } from './sms-provider-registry.service';
 import { SmsCredentialResolverService } from '../../communication-provider/service/sms-credential-resolver.service';
+import { SmsDeliveryLog } from '../entity/sms-delivery-log.entity';
 
 describe('SmsService', () => {
   let service: SmsService;
@@ -22,6 +24,15 @@ describe('SmsService', () => {
       credentials: { apiKey: 'tenant-key', senderId: 'TenantChurch' },
     }),
   };
+  const mockDeliveryLogRepo = {
+    create: jest.fn((values) => ({
+      ...values,
+      id: 'log-1',
+      createdAt: new Date(),
+    })),
+    save: jest.fn((logs) => Promise.resolve(logs)),
+    find: jest.fn().mockResolvedValue([]),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -30,6 +41,15 @@ describe('SmsService', () => {
       providerId: 'termii',
       credentials: { apiKey: 'tenant-key', senderId: 'TenantChurch' },
     });
+    mockDeliveryLogRepo.create.mockImplementation((values) => ({
+      ...values,
+      id: 'log-1',
+      createdAt: new Date(),
+    }));
+    mockDeliveryLogRepo.save.mockImplementation((logs) =>
+      Promise.resolve(logs),
+    );
+    mockDeliveryLogRepo.find.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SmsService,
@@ -37,6 +57,10 @@ describe('SmsService', () => {
         {
           provide: SmsCredentialResolverService,
           useValue: mockCredentialResolver,
+        },
+        {
+          provide: getRepositoryToken(SmsDeliveryLog),
+          useValue: mockDeliveryLogRepo,
         },
       ],
     }).compile();
@@ -110,7 +134,12 @@ describe('SmsService', () => {
         apiKey: 'tenant-key',
         senderId: 'TenantChurch',
       });
-      expect(results).toHaveLength(1);
+      expect(results).toEqual({
+        acceptedCount: 5,
+        failedCount: 0,
+        failures: [],
+      });
+      expect(mockDeliveryLogRepo.save).toHaveBeenCalledTimes(2);
     });
 
     it('routes to the tenant-selected vendor, not a hardcoded one', async () => {
@@ -159,31 +188,47 @@ describe('SmsService', () => {
         (_, i) => `+234800000${i}`,
       );
 
-      await expect(service.send(to, 'Hello')).rejects.toThrow('boom');
+      const outcome = await service.send(to, 'Hello');
 
       expect(mockProvider.send).toHaveBeenCalledTimes(2);
+      expect(outcome).toEqual({
+        acceptedCount: 1,
+        failedCount: 100,
+        failures: ['boom'],
+      });
+      expect(mockDeliveryLogRepo.save).toHaveBeenCalledTimes(4);
+      expect(mockDeliveryLogRepo.save.mock.calls[1][0][0]).toMatchObject({
+        status: 'FAILED',
+        errorMessage: 'boom',
+      });
     });
 
-    it('rejects sends before 8:00am in the configured timezone without calling a provider', async () => {
+    it('records sends attempted before 8:00am without calling a provider', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T06:59:00.000Z'));
 
-      await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
-        '8:00am to 7:50pm',
-      );
+      const outcome = await service.send(['+1'], 'Hello');
 
-      expect(mockCredentialResolver.resolveConfig).not.toHaveBeenCalled();
+      expect(outcome).toEqual({
+        acceptedCount: 0,
+        failedCount: 1,
+        failures: [
+          'SMS sending is available from 8:00am to 7:50pm (Africa/Lagos).',
+        ],
+      });
+      expect(mockCredentialResolver.resolveConfig).toHaveBeenCalled();
       expect(mockProvider.send).not.toHaveBeenCalled();
+      expect(mockDeliveryLogRepo.save).toHaveBeenCalledTimes(2);
     });
 
-    it('rejects sends after 7:50pm in the configured timezone without calling a provider', async () => {
+    it('records sends after 7:50pm without calling a provider', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T18:51:00.000Z'));
 
-      await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
-        '8:00am to 7:50pm',
-      );
+      const outcome = await service.send(['+1'], 'Hello');
 
-      expect(mockCredentialResolver.resolveConfig).not.toHaveBeenCalled();
+      expect(outcome.failedCount).toBe(1);
+      expect(outcome.failures[0]).toContain('8:00am to 7:50pm');
       expect(mockProvider.send).not.toHaveBeenCalled();
+      expect(mockDeliveryLogRepo.save).toHaveBeenCalledTimes(2);
     });
 
     it('allows sends through 7:50pm in the configured timezone', async () => {
@@ -218,7 +263,7 @@ describe('SmsService', () => {
       await expect(service.getLogs()).rejects.toThrow(ForbiddenException);
     });
 
-    it('delegates to the resolved provider, no local persistence', async () => {
+    it('merges provider history with matching local dispatch metadata', async () => {
       const logs = [
         {
           messageId: 'msg-1',
@@ -230,11 +275,85 @@ describe('SmsService', () => {
         },
       ];
       mockProvider.getMessageHistory.mockResolvedValue(logs);
+      mockDeliveryLogRepo.find.mockResolvedValue([
+        {
+          id: 'dispatch-1',
+          provider: 'termii',
+          providerMessageId: 'msg-1',
+          recipient: '+1',
+          message: 'Hi',
+          status: 'ACCEPTED',
+          providerStatus: 'Successfully Sent',
+          errorMessage: null,
+          sourceType: 'announcement',
+          sourceId: 'announcement-1',
+          sourceLabel: 'Service reminder',
+          createdAt: new Date('2026-07-18T10:00:00Z'),
+        },
+      ]);
 
       const result = await service.getLogs();
 
       expect(mockProvider.getMessageHistory).toHaveBeenCalled();
-      expect(result).toEqual([{ ...logs[0], provider: 'termii' }]);
+      expect(mockDeliveryLogRepo.find).toHaveBeenCalledWith({
+        where: { provider: 'termii' },
+        order: { createdAt: 'DESC' },
+        take: 500,
+      });
+      expect(result).toEqual([
+        {
+          ...logs[0],
+          provider: 'termii',
+          dispatchStatus: 'ACCEPTED',
+          errorMessage: undefined,
+          sourceType: 'announcement',
+          sourceId: 'announcement-1',
+          sourceLabel: 'Service reminder',
+          trackingId: 'dispatch-1',
+        },
+      ]);
+    });
+
+    it('returns locally tracked failures when no provider message ID exists', async () => {
+      mockProvider.getMessageHistory.mockRejectedValue(
+        new Error('history temporarily unavailable'),
+      );
+      mockDeliveryLogRepo.find.mockResolvedValue([
+        {
+          id: 'dispatch-failed',
+          provider: 'termii',
+          providerMessageId: null,
+          recipient: '+2348012345678',
+          message: 'Announcement message',
+          status: 'FAILED',
+          providerStatus: null,
+          errorMessage: 'Termii DND route is not enabled',
+          sourceType: 'announcement',
+          sourceId: 'announcement-1',
+          sourceLabel: 'Sunday Service',
+          createdAt: new Date('2026-09-28T15:16:19.700Z'),
+        },
+      ]);
+
+      const result = await service.getLogs();
+
+      expect(result).toEqual([
+        {
+          messageId: 'dispatch-failed',
+          recipient: '+2348012345678',
+          message: 'Announcement message',
+          status: 'FAILED',
+          type: 'sms',
+          sentAt: '2026-09-28T15:16:19.700Z',
+          provider: 'termii',
+          dispatchStatus: 'FAILED',
+          errorMessage: 'Termii DND route is not enabled',
+          sourceType: 'announcement',
+          sourceId: 'announcement-1',
+          sourceLabel: 'Sunday Service',
+          trackingId: 'dispatch-failed',
+        },
+      ]);
     });
 
     it('tags each log entry with the tenant-selected vendor, not a hardcoded one', async () => {

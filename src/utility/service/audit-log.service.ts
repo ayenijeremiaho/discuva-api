@@ -153,6 +153,7 @@ export type AuditAction =
   | 'FIRST_TIMER_SMS_SENT'
   // SMS
   | 'SMS_BROADCAST_SENT'
+  | 'SMS_BROADCAST_FAILED'
   // Church settings
   | 'CHURCH_SETTING_UPDATED'
   | 'REMINDER_SETTING_UPDATED'

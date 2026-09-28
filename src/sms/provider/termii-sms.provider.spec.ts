@@ -48,7 +48,8 @@ describe('TermiiSmsProvider', () => {
       const [url, options] = fetchSpy.mock.calls[0];
       expect(url).toBe('https://api.ng.termii.com/api/sms/send');
       const body = JSON.parse((options as any).body);
-      expect(body.to).toBe('+2348012345678');
+      expect(body.to).toBe('2348012345678');
+      expect(body.channel).toBe('generic');
       expect(result).toEqual({ messageId: 'abc', status: 'Sent' });
     });
 
@@ -63,7 +64,7 @@ describe('TermiiSmsProvider', () => {
       const [url, options] = fetchSpy.mock.calls[0];
       expect(url).toBe('https://api.ng.termii.com/api/sms/send/bulk');
       const body = JSON.parse((options as any).body);
-      expect(body.to).toEqual(['+1', '+2']);
+      expect(body.to).toEqual(['1', '2']);
     });
 
     it('throws when Termii responds with a non-ok code', async () => {
@@ -76,6 +77,24 @@ describe('TermiiSmsProvider', () => {
       await expect(
         provider.send(['+1'], 'Hi', 'plain', credentials),
       ).rejects.toThrow(InternalServerErrorException);
+    });
+
+    it('explains when the Termii workspace has no DND route configured', async () => {
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: () =>
+          Promise.resolve({
+            message: 'Route not configured for workspace country channel route',
+          }),
+      } as any);
+
+      await expect(
+        provider.send(['+1'], 'Hi', 'plain', credentials),
+      ).rejects.toThrow('Termii GENERIC SMS route is not enabled');
+      await expect(
+        provider.send(['+1'], 'Hi', 'plain', credentials),
+      ).rejects.toThrow('Termii HTTP 422');
     });
 
     it('rejects a batch larger than the per-request recipient limit', async () => {
@@ -100,6 +119,22 @@ describe('TermiiSmsProvider', () => {
       const body = JSON.parse((options as any).body);
       expect(body.api_key).toBe('tenant-own-key');
       expect(body.from).toBe('TenantChurch');
+      expect(body.channel).toBe('generic');
+    });
+
+    it('uses the configured DND route when the account supports it', async () => {
+      const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ code: 'ok', message_id: 'abc' }),
+      } as any);
+
+      await provider.send(['+1'], 'Transactional', 'plain', {
+        ...credentials,
+        route: 'dnd',
+      });
+
+      const body = JSON.parse((fetchSpy.mock.calls[0][1] as any).body);
+      expect(body.channel).toBe('dnd');
     });
   });
 

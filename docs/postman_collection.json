@@ -8731,7 +8731,7 @@
                 "sms-broadcast"
               ]
             },
-            "description": "Sends an SMS to the resolved audience without creating an announcement - no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. If audience=DEPARTMENT, departmentId is required. If audience=INDIVIDUAL, targetMemberId (UUID) is required. If audience=GROUP, groupId (UUID) is required. Returns { sentCount } only when every provider request succeeds; sentCount: 0 if there are no recipients with phone numbers. Provider failures and sends outside 08:00-19:50 CHURCH_TIMEZONE return an error instead of a false success. A provider failure may be partial; check provider history before retrying."
+            "description": "Sends an SMS to the resolved audience without creating an announcement - no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. Returns { sentCount, failedCount?, failures? }; failed sends return in the response so local diagnostic records commit. SMS is restricted to 08:00-19:50 CHURCH_TIMEZONE. A provider failure may be partial; check SMS Logs before retrying."
           },
           "response": [
             {
@@ -8747,16 +8747,10 @@
               "body": "{\n  \"statusCode\": 403,\n  \"message\": \"Missing required permission: sms:send\"\n}"
             },
             {
-              "name": "400 SMS sending window closed",
-              "status": "Bad Request",
-              "code": 400,
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"SMS sending is available from 8:00am to 7:50pm (Africa/Lagos).\",\n  \"code\": \"SMS_SEND_WINDOW_CLOSED\"\n}"
-            },
-            {
-              "name": "500 SMS provider failure",
-              "status": "Internal Server Error",
-              "code": 500,
-              "body": "{\n  \"statusCode\": 500,\n  \"message\": \"SMS provider request failed: sender id rejected.\",\n  \"code\": \"SMS_SEND_FAILED\"\n}"
+              "name": "201 SMS send failures",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"sentCount\": 0,\n  \"failedCount\": 42,\n  \"failures\": [\"Termii GENERIC SMS route is not enabled for this workspace.\"]\n}"
             }
           ]
         },
@@ -9357,14 +9351,14 @@
                 "logs"
               ]
             },
-            "description": "Live passthrough to the tenant's active SMS provider's message history \u2014 not stored locally, not paginated/filtered server-side. Returns an array of { messageId, recipient, message, status, type, sentAt, sender?, provider }, where provider (\"termii\" | \"twilio\") is the tenant's currently-configured vendor, tagged onto each entry by the backend, not the provider API itself."
+            "description": "Merges the tenant's active provider history with up to 500 local per-recipient dispatch records. Entries include provider, dispatchStatus, errorMessage, sourceType, sourceId, sourceLabel, and trackingId where available. Provider history is matched to local sends by message ID and recipient; unmatched local failures remain visible. Results are not paginated/filtered server-side."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"messageId\": \"abc123\",\n    \"recipient\": \"+2348012345678\",\n    \"message\": \"Reminder: service starts at 9am\",\n    \"status\": \"Delivered\",\n    \"type\": \"generic\",\n    \"sentAt\": \"2026-07-18 10:00:00\",\n    \"sender\": \"YourChurch\",\n    \"provider\": \"termii\"\n  }\n]"
+              "body": "[\n  {\n    \"messageId\": \"abc123\",\n    \"recipient\": \"+2348012345678\",\n    \"message\": \"Reminder: service starts at 9am\",\n    \"status\": \"Delivered\",\n    \"type\": \"generic\",\n    \"sentAt\": \"2026-07-18 10:00:00\",\n    \"sender\": \"YourChurch\",\n    \"provider\": \"termii\",\n    \"dispatchStatus\": \"ACCEPTED\",\n    \"sourceType\": \"announcement\",\n    \"sourceId\": \"announcement-uuid\",\n    \"sourceLabel\": \"Sunday Service Update\",\n    \"trackingId\": \"dispatch-uuid\"\n  },\n  {\n    \"messageId\": \"dispatch-uuid\",\n    \"recipient\": \"+2348012345678\",\n    \"message\": \"Reminder: service starts at 9am\",\n    \"status\": \"FAILED\",\n    \"type\": \"sms\",\n    \"sentAt\": \"2026-09-28T15:16:19.700Z\",\n    \"provider\": \"termii\",\n    \"dispatchStatus\": \"FAILED\",\n    \"errorMessage\": \"Termii GENERIC SMS route is not enabled for this workspace.\",\n    \"sourceType\": \"announcement\",\n    \"sourceId\": \"announcement-uuid\",\n    \"sourceLabel\": \"Sunday Service Update\",\n    \"trackingId\": \"dispatch-uuid\"\n  }\n]"
             }
           ]
         }

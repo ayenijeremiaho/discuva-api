@@ -297,6 +297,7 @@ describe('ClassSessionReminderScheduler', () => {
     expect(mockSmsService.send).toHaveBeenCalledWith(
       ['+1234567890'],
       expect.stringContaining('https://meet.example.com/abc'),
+      expect.objectContaining({ sourceType: 'class_session_reminder' }),
     );
   });
 

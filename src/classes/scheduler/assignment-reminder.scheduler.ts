@@ -177,6 +177,11 @@ export class AssignmentReminderScheduler {
         .send(
           [phone],
           `Reminder: your assignment for ${assignment.churchClass.name} is ${status}. Check your email for the link.`,
+          {
+            sourceType: 'assignment_reminder',
+            sourceId: assignment.id,
+            sourceLabel: assignment.title,
+          },
         )
         .catch((err: unknown) => {
           this.logger.warn(

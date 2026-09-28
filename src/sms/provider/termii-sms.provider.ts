@@ -42,15 +42,17 @@ export class TermiiSmsProvider implements ISmsProvider {
     }
 
     const { apiKey, senderId } = credentials;
-    const isBulk = to.length > 1;
+    const channel = credentials.route === 'dnd' ? 'dnd' : 'generic';
+    const recipients = to.map((recipient) => recipient.replace(/^\+/, ''));
+    const isBulk = recipients.length > 1;
     const url = `${this.baseUrl}/api/sms/send${isBulk ? '/bulk' : ''}`;
     const body = {
       api_key: apiKey,
-      to: isBulk ? to : to[0],
+      to: isBulk ? recipients : recipients[0],
       from: senderId,
       sms: message,
       type: encoding === 'unicode' ? 'unicode' : 'plain',
-      channel: 'dnd',
+      channel,
     };
 
     const response = await fetch(url, {
@@ -62,8 +64,18 @@ export class TermiiSmsProvider implements ISmsProvider {
 
     if (!response.ok || json.code !== 'ok') {
       this.logger.error(`Termii send failed: ${JSON.stringify(json)}`);
+      const providerDetails = `Termii HTTP ${response.status}: ${JSON.stringify(json)}`;
+      if (
+        response.status === 422 &&
+        typeof json.message === 'string' &&
+        json.message.includes('Route not configured')
+      ) {
+        throw new InternalServerErrorException(
+          `Termii ${channel.toUpperCase()} SMS route is not enabled for this workspace. Ask Termii support to enable ${channel.toUpperCase()}, or select ${channel === 'dnd' ? 'Generic' : 'DND'} in Communication Providers if that route matches your message type. ${providerDetails}`,
+        );
+      }
       throw new InternalServerErrorException(
-        json.message || 'Failed to send SMS via Termii.',
+        `${json.message || 'Failed to send SMS via Termii.'} ${providerDetails}`,
       );
     }
 

@@ -3171,14 +3171,14 @@ targets `IN_PROGRESS` + `COMPLETED` enrollees only (excludes `CANCELLED`).
 the `SMS_SEND` permission (checked in `AnnouncementService`, not the DTO — a DTO can't inspect the caller's
 permission set — throws `403 Forbidden` otherwise) and requires `smsBody` to be non-empty. `smsBody` is deliberately
 separate from `body`: the announcement body is often long-form and meant for in-app reading, whereas SMS is billed
-separate from `body`: the announcement body is often long-form and meant for in-app reading, whereas SMS is billed
 per segment, so admins compose a distinct, short message for it. SMS sends are allowed from 08:00 through 19:50 in
 `CHURCH_TIMEZONE` (default `Africa/Lagos`) for every provider. On `create`, an SMS is sent (awaited) whenever
 `sendViaSms` is set; the announcement is still saved if sending fails, and the response includes a transient
 `smsDispatch` result (`accepted`, `failed`, or `skipped`) and any provider error message. On `update`, the SMS is sent
 only on the **transition** into `sendViaSms=true` — re-saving an already-SMS'd announcement (e.g. editing its title
 afterward) does not re-text everyone. `accepted` means the provider accepted the request, not that the carrier
-delivered every message; use the provider's live message history for delivery status.
+delivered every message; use the SMS Logs page for current provider delivery status and its matching local send
+record, including the announcement ID and any provider error.
 
 **SMS phone number resolution (`resolvePhoneNumbers`)** — independent of the push-notification audience logic above.
 Always restricted to `ACTIVE` members with a non-null `phoneNumber`, further filtered by audience:
@@ -3201,10 +3201,11 @@ an admin with SMS access but no announcement-authoring access can use this). Bod
 audiences + `message` (required). Reuses the same `resolvePhoneNumbers` targeting as `sendViaSms` on a regular
 announcement. No `Announcement` row is created, no push notification is sent, and no title/body is required — this
 is purely an SMS send. Returns `{ sentCount }`; `sentCount: 0` (not an error) when the resolved audience has no
-members with a phone number on file. `sentCount` is returned only if every provider request succeeds; failures are
-returned to the caller and are not audit-logged as sent. A failure may follow partial provider acceptance, so check
-provider history before retrying. Successful requests log `SMS_BROADCAST_SENT` (`metadata: { audience, count }`);
-`sentCount` records provider acceptance, not carrier delivery.
+members with a phone number on file. Returns `{ sentCount, failedCount?, failures? }`; failed recipients are returned
+as a normal response so the tenant transaction can commit their local failure records. Failures are audited as
+`SMS_BROADCAST_FAILED`, not as sent. A failure may follow partial provider acceptance, so check SMS Logs before
+retrying. Successful requests log `SMS_BROADCAST_SENT` (`metadata: { audience, count }`); `sentCount` records
+provider acceptance, not carrier delivery.
 
 **Emoji reactions:** any authenticated member/worker can react to an announcement with one of a fixed emoji set
 (`ReactionEmojiEnum`: 👍 ❤️ 🙏 🎉 👏) via `POST announcements/:id/react` — reacting again just updates the existing
@@ -3311,33 +3312,39 @@ class, a line in the registry, and a `communication_providers` catalog row — n
   documents as forcing UCS-2/unicode encoding even though they're otherwise ordinary ASCII punctuation:
   `; ^ { } \ [ ~ ] | € ' "` — in which case it's encoded `unicode` (70 chars/segment). Returns
   `{ segments, encoding, characterCount }`.
-- `send(to, message)` — first enforces the 08:00–19:50 send window in
-  `CHURCH_TIMEZONE` (default `Africa/Lagos`), before resolving the caller's active SMS config. Outside the window it
-  throws `400 SMS_SEND_WINDOW_CLOSED` without contacting a provider. Otherwise it resolves config once
-  (`SmsCredentialResolverService.resolveConfig()`); if the tenant has none configured, throws
-  `403 SMS_PROVIDER_NOT_CONFIGURED` immediately, before attempting anything. Otherwise looks up the matching
-  `ISmsProvider` from the registry and batches `to` into groups of that provider's own
-  `maxRecipientsPerRequest`. All batches are attempted; if any fail, it throws `500 SMS_SEND_FAILED` including the
-  provider error, and warns that earlier requests may already have been accepted. Fire-and-forget reminder callers
-  log the rejection; interactive broadcast callers surface it to the admin.
-- `getLogs()`/`getBalance()` — same resolve-or-403 pattern, then pure passthrough to the resolved provider (a
-  tenant sees their own vendor's balance/history, never the platform's — there isn't one). `getLogs()` tags every
-  returned entry with `provider: config.providerId` (`termii` \| `twilio`) — individual `ISmsProvider` classes don't
-  set this themselves, since a provider class has no reason to know its own registry key.
+- `send(to, message, context?)` — resolves config once (`SmsCredentialResolverService.resolveConfig()`); if the
+  tenant has none configured, throws `403 SMS_PROVIDER_NOT_CONFIGURED` before attempting anything. It then saves one
+  `PENDING` `SmsDeliveryLog` per recipient with provider and source metadata and enforces the 08:00–19:50 send window
+  in `CHURCH_TIMEZONE` (default `Africa/Lagos`) before contacting the provider. An out-of-window attempt is marked
+  `FAILED` in the local log and included in the returned outcome. It batches `to` into groups of that provider's own
+  `maxRecipientsPerRequest`. Each batch updates its recipient rows to `ACCEPTED` or `FAILED`; provider request errors
+  are returned as `{ acceptedCount, failedCount, failures }` rather than thrown, allowing the outer tenant
+  transaction to commit diagnostics. Callers surface or log those failures. `context` links announcement, broadcast,
+  and reminder sends to their source.
+- `getLogs()`/`getBalance()` — same resolve-or-403 pattern. `getBalance()` delegates to the tenant's provider;
+  `getLogs()` merges active provider history with local dispatch records and retains local rows if provider history
+  is unavailable. A tenant sees their own vendor's data, never the platform's.
 
 **Message history (`TermiiSmsProvider.getMessageHistory`):** calls Termii's `GET /api/sms/inbox?api_key=...`
-(undocumented pagination or date-filter params — it's a flat array of every message on the account) and maps its
+(Termii's documented outbound message-history endpoint; without `message_id` it returns all account reports) and maps its
 raw field names (`receiver`, `message`, `status`, `sms_type`, `message_id`, `created_at`, `sender?`) to the
 provider-agnostic `SmsLogEntry` shape (`recipient`, `message`, `status`, `type`, `messageId`, `sentAt`, `sender?`,
 `provider?` — the last set by `SmsService.getLogs()`, not by the provider class itself).
-A non-array response body is treated as empty rather than thrown. `TwilioSmsProvider` has no native bulk-send
+A non-array response body is treated as empty rather than thrown. `SmsService.getLogs()` joins provider history to up
+to 500 recent local recipient records by `(providerMessageId, recipient)` and appends unmatched local rows so rejected
+requests with no provider message ID remain visible. Log entries expose `dispatchStatus`, `errorMessage`, `sourceType`,
+`sourceId`, `sourceLabel`, and `trackingId`; announcement rows can therefore be traced back to their announcement.
+`TwilioSmsProvider` has no native bulk-send
 endpoint, so it issues one `POST` per recipient (`Promise.all`, capped by `maxRecipientsPerRequest`) and joins the
 returned `sid`s with a comma for `messageId`.
 
-`TermiiSmsProvider` currently sends through the DND route. Termii requires that route to be enabled on the account;
-the admin's Communication Providers page calls this out. Termii's documentation says its 20:00–08:00 restriction
-applies to generic-route SMS to MTN and that DND messages are exempt. Discuva's stricter 08:00–19:50 policy applies
-to all providers and routes regardless of Termii's exemption.
+`TermiiSmsProvider` uses the configured `route` credential (`generic` or `dnd`), defaulting to `generic` for existing
+and new configurations. Generic is Termii's promotional route; DND is for transactional/critical messages and must
+be enabled by Termii for the workspace. The communication-provider summary returns only the non-secret `smsRoute`
+field so the admin can preserve it while editing credentials. A `422 Route not configured` response is explained in
+the admin error. Termii recipients are sent as digits-only international numbers (no leading `+`) per its API format.
+Termii documents a 20:00–08:00 restriction for generic-route SMS to MTN; Discuva's stricter 08:00–19:50 window
+applies to all providers and routes.
 
 **Routes prefix:** `/admin/sms` (`AdminGuard`)
 
@@ -3345,7 +3352,11 @@ to all providers and routes regardless of Termii's exemption.
 |--------|----------------------------|------------|--------------------------------------------------------------------------|
 | GET    | `/admin/sms/balance`       | SMS_READ   | Returns `{ balance, currency }` from the tenant's active provider — `403 SMS_PROVIDER_NOT_CONFIGURED` if none is active |
 | POST   | `/admin/sms/segment-count` | SMS_READ   | Body `{ message }` — returns `{ segments, encoding, characterCount }` without sending anything |
-| GET    | `/admin/sms/logs`          | SMS_READ   | Live passthrough to the provider's message history — `SmsLogEntry[]` (each entry tagged with `provider`), not paginated or filtered server-side; the frontend paginates/filters the returned array client-side |
+| GET    | `/admin/sms/logs`          | SMS_READ   | Merged provider history and up to 500 local dispatch rows with send origin, provider IDs, dispatch status, and failure details; frontend filters/paginates the response client-side |
+
+**Local tracking table:** tenant migration `CreateSmsDeliveryLogs` creates `sms_delivery_logs`. It stores each recipient,
+message, active provider, provider message ID/status, local dispatch state, provider error, source type/ID/label, and
+creation time. Provider failures and out-of-window attempts are retained even if Termii returns no message ID.
 
 **Env vars:** `TERMII_BASE_URL` (default `https://api.ng.termii.com`) — Termii's API host is infrastructure, not a
 secret, so it stays env-driven even under pure BYOK; every tenant's Termii account (BYOK) talks to the same host.
@@ -8705,7 +8716,7 @@ outside the requested `?months=` window).
 | GET    | /classes/types                                             | Any                                                           | List all class types (unpaginated, cached) — member-readable so the mobile app can show current types         |
 | GET    | /classes/types/:id                                         | Any                                                           | Get class type                                                                                                |
 | POST   | /announcements                                             | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Create announcement; optional `sendViaSms` (requires `SMS_SEND`) + `smsBody` (required if `sendViaSms=true`)  |
-| POST   | /announcements/sms-broadcast                               | AdminGuard (SMS_SEND)                                         | Send an SMS to an audience without creating an announcement; body `{ audience, departmentId?/targetMemberId?/groupId?, message }` — returns `{ sentCount }` |
+| POST   | /announcements/sms-broadcast                               | AdminGuard (SMS_SEND)                                         | Send an SMS to an audience without creating an announcement; body `{ audience, departmentId?/targetMemberId?/groupId?, message }` — returns `{ sentCount, failedCount?, failures? }` |
 | PATCH  | /announcements/:id                                         | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Update announcement; same `sendViaSms`/`smsBody` rules as create — SMS only (re-)sent on the transition into `sendViaSms=true` |
 | DELETE | /announcements/:id                                         | AdminGuard (ANNOUNCEMENTS_WRITE)                              | Delete announcement                                                                                           |
 | GET    | /announcements/all?search=&audience=&page=&limit=          | AdminGuard (ANNOUNCEMENTS_READ)                               | All announcements (paginated); optional `search` filters by title (case-insensitive); optional `audience` filters by value (ALL/WORKERS_ONLY/MEMBERS_ONLY/DEPARTMENT/INDIVIDUAL) |

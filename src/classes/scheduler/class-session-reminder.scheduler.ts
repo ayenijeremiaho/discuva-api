@@ -186,6 +186,11 @@ export class ClassSessionReminderScheduler {
         .send(
           [phone],
           `Reminder: ${churchClass.name} ${status}.${churchClass.meetingLink ? ` Join: ${churchClass.meetingLink}` : ''}`,
+          {
+            sourceType: 'class_session_reminder',
+            sourceId: churchClass.id,
+            sourceLabel: churchClass.name,
+          },
         )
         .catch((err: unknown) => {
           this.logger.warn(

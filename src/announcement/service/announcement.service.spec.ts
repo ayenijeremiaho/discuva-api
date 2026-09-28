@@ -98,7 +98,7 @@ const mockMemberRepo = {
 };
 
 const mockSmsService = {
-  send: jest.fn().mockResolvedValue([]),
+  send: jest.fn(),
   assertConfigured: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -107,6 +107,13 @@ describe('AnnouncementService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockSmsService.send.mockImplementation((recipients: string[]) =>
+      Promise.resolve({
+        acceptedCount: recipients.length,
+        failedCount: 0,
+        failures: [],
+      }),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -683,6 +690,11 @@ describe('AnnouncementService', () => {
       expect(mockSmsService.send).toHaveBeenCalledWith(
         ['+1', '+2'],
         'Short SMS text',
+        {
+          sourceType: 'announcement',
+          sourceId: 'ann-1',
+          sourceLabel: 'T',
+        },
       );
     });
 
@@ -790,6 +802,7 @@ describe('AnnouncementService', () => {
       expect(mockSmsService.send).toHaveBeenCalledWith(
         ['+1', '+2'],
         'Reminder: service starts at 9am',
+        { sourceType: 'sms_broadcast', sourceLabel: 'ALL' },
       );
       expect(mockAnnouncementRepo.save).not.toHaveBeenCalled();
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
@@ -814,18 +827,28 @@ describe('AnnouncementService', () => {
       expect(result).toEqual({ sentCount: 0 });
     });
 
-    it('propagates SMS provider errors instead of reporting a successful broadcast', async () => {
+    it('reports failed SMS recipients instead of reporting a successful broadcast', async () => {
       mockMemberQb.getMany.mockResolvedValue([{ phoneNumber: '+1' }]);
-      mockSmsService.send.mockRejectedValueOnce(
-        new Error('SMS provider request failed: sender id rejected.'),
+      mockSmsService.send.mockResolvedValueOnce({
+        acceptedCount: 0,
+        failedCount: 1,
+        failures: ['Termii DND route is not configured.'],
+      });
+
+      const result = await service.sendSmsBroadcast(
+        { audience: AnnouncementAudienceEnum.ALL, message: 'Hi' } as any,
+        'admin-1',
       );
 
-      await expect(
-        service.sendSmsBroadcast(
-          { audience: AnnouncementAudienceEnum.ALL, message: 'Hi' } as any,
-          'admin-1',
-        ),
-      ).rejects.toThrow('sender id rejected');
+      expect(result).toEqual({
+        sentCount: 0,
+        failedCount: 1,
+        failures: ['Termii DND route is not configured.'],
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'SMS_BROADCAST_FAILED',
+        expect.objectContaining({ actorId: 'admin-1' }),
+      );
       expect(mockAuditLogService.log).not.toHaveBeenCalledWith(
         'SMS_BROADCAST_SENT',
         expect.anything(),
@@ -858,6 +881,7 @@ describe('AnnouncementService', () => {
       expect(mockSmsService.send).toHaveBeenCalledWith(
         expect.arrayContaining(['+1', '+2', '+3']),
         'Welcome back!',
+        { sourceType: 'sms_broadcast', sourceLabel: 'GROUP' },
       );
       expect(mockSmsService.send.mock.calls[0][0]).toHaveLength(3);
       expect(result).toEqual({ sentCount: 3 });
@@ -880,6 +904,7 @@ describe('AnnouncementService', () => {
       expect(mockSmsService.send).toHaveBeenCalledWith(
         ['+9'],
         'Hi first-timer',
+        { sourceType: 'sms_broadcast', sourceLabel: 'GROUP' },
       );
       expect(result).toEqual({ sentCount: 1 });
     });
@@ -916,6 +941,7 @@ describe('AnnouncementService', () => {
       expect(mockSmsService.send).toHaveBeenCalledWith(
         expect.arrayContaining(['+1', '+2', '+3']),
         'Class starts soon',
+        { sourceType: 'sms_broadcast', sourceLabel: 'CLASS' },
       );
       expect(mockSmsService.send.mock.calls[0][0]).toHaveLength(3);
       expect(result).toEqual({ sentCount: 3 });
@@ -935,7 +961,10 @@ describe('AnnouncementService', () => {
       );
 
       expect(mockMemberRepo.find).not.toHaveBeenCalled();
-      expect(mockSmsService.send).toHaveBeenCalledWith(['+9'], 'Hi guest');
+      expect(mockSmsService.send).toHaveBeenCalledWith(['+9'], 'Hi guest', {
+        sourceType: 'sms_broadcast',
+        sourceLabel: 'CLASS',
+      });
       expect(result).toEqual({ sentCount: 1 });
     });
   });

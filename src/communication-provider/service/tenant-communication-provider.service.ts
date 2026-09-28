@@ -19,6 +19,7 @@ export interface TenantProviderConfigSummary {
   providerName: string;
   channel: string;
   senderIdentity: string | null;
+  smsRoute?: string;
   isActive: boolean;
 }
 
@@ -54,9 +55,8 @@ export class TenantCommunicationProviderService {
   }
 
   // Catalog (every provider registered for the given channel, or all
-  // channels) plus this tenant's own config summary for each — never the
-  // credentials themselves, `credentialsEncrypted` has `select: false` and
-  // this method never selects it back in regardless.
+  // channels) plus this tenant's own config summary for each. Only the
+  // non-secret Termii route is extracted from encrypted credentials.
   //
   // `catalog` excludes providers the platform has deactivated (see
   // PlatformCommunicationProviderService.setActive) UNLESS this tenant is
@@ -76,7 +76,11 @@ export class TenantCommunicationProviderService {
       order: { channel: 'ASC', name: 'ASC' },
     });
 
-    const configs = await this.configRepo.find({ where: { tenantId } });
+    const configs = await this.configRepo
+      .createQueryBuilder('config')
+      .addSelect('config.credentialsEncrypted')
+      .where('config.tenantId = :tenantId', { tenantId })
+      .getMany();
     const providerById = new Map(allProviders.map((p) => [p.id, p]));
     const configuredProviderIds = new Set(configs.map((c) => c.providerId));
 
@@ -84,13 +88,23 @@ export class TenantCommunicationProviderService {
       .filter(
         (c) => !channel || providerById.get(c.providerId)?.channel === channel,
       )
-      .map((c) => ({
-        providerId: c.providerId,
-        providerName: providerById.get(c.providerId)?.name ?? c.providerId,
-        channel: providerById.get(c.providerId)?.channel ?? 'unknown',
-        senderIdentity: c.senderIdentity,
-        isActive: c.isActive,
-      }));
+      .map((c) => {
+        const provider = providerById.get(c.providerId);
+        const summary: TenantProviderConfigSummary = {
+          providerId: c.providerId,
+          providerName: provider?.name ?? c.providerId,
+          channel: provider?.channel ?? 'unknown',
+          senderIdentity: c.senderIdentity,
+          isActive: c.isActive,
+        };
+        if (provider?.id === 'termii') {
+          const credentials = this.encryptionService.decryptFields(
+            c.credentialsEncrypted as Record<string, string>,
+          );
+          summary.smsRoute = credentials.route ?? 'generic';
+        }
+        return summary;
+      });
 
     const catalog = allProviders.filter(
       (p) => p.isActive || configuredProviderIds.has(p.id),
@@ -174,6 +188,9 @@ export class TenantCommunicationProviderService {
       providerName: provider.name,
       channel: provider.channel,
       senderIdentity: config.senderIdentity,
+      ...(provider.id === 'termii'
+        ? { smsRoute: dto.credentials.route ?? 'generic' }
+        : {}),
       isActive: config.isActive,
     };
   }

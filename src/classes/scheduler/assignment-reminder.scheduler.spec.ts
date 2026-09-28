@@ -257,6 +257,7 @@ describe('AssignmentReminderScheduler', () => {
     expect(mockSmsService.send).toHaveBeenCalledWith(
       ['+1234567890'],
       expect.any(String),
+      expect.objectContaining({ sourceType: 'assignment_reminder' }),
     );
   });
 

@@ -6,9 +6,15 @@ import { TermiiSmsProvider } from './provider/termii-sms.provider';
 import { TwilioSmsProvider } from './provider/twilio-sms.provider';
 import { SmsProviderRegistryService } from './service/sms-provider-registry.service';
 import { CommunicationProviderModule } from '../communication-provider/communication-provider.module';
+import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
+import { SmsDeliveryLog } from './entity/sms-delivery-log.entity';
 
 @Module({
-  imports: [ConfigModule, CommunicationProviderModule],
+  imports: [
+    ConfigModule,
+    CommunicationProviderModule,
+    TenantTypeOrmModule.forFeature([SmsDeliveryLog]),
+  ],
   controllers: [SmsController],
   providers: [
     SmsService,
