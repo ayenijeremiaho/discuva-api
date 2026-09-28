@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { SmsService } from './sms.service';
 import { SmsProviderRegistryService } from './sms-provider-registry.service';
@@ -33,6 +34,7 @@ describe('SmsService', () => {
     save: jest.fn((logs) => Promise.resolve(logs)),
     find: jest.fn().mockResolvedValue([]),
   };
+  const mockConfigService = { get: jest.fn().mockReturnValue('en-NG') };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -62,6 +64,7 @@ describe('SmsService', () => {
           provide: getRepositoryToken(SmsDeliveryLog),
           useValue: mockDeliveryLogRepo,
         },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
     service = module.get<SmsService>(SmsService);
@@ -115,7 +118,7 @@ describe('SmsService', () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockCredentialResolver.resolveConfig.mockResolvedValue(undefined);
 
-      await expect(service.send(['+1'], 'Hello')).rejects.toThrow(
+      await expect(service.send(['+2348012345678'], 'Hello')).rejects.toThrow(
         ForbiddenException,
       );
       expect(mockProvider.send).not.toHaveBeenCalled();
@@ -124,7 +127,10 @@ describe('SmsService', () => {
     it('dispatches to the provider resolved from the registry by providerId', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
-      const to = Array.from({ length: 5 }, (_, i) => `+23480000000${i}`);
+      const to = Array.from(
+        { length: 5 },
+        (_, i) => `+234801234${String(i).padStart(4, '0')}`,
+      );
 
       const results = await service.send(to, 'Hello');
 
@@ -142,6 +148,40 @@ describe('SmsService', () => {
       expect(mockDeliveryLogRepo.save).toHaveBeenCalledTimes(2);
     });
 
+    it('normalizes national-format numbers to E.164 before provider dispatch', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
+      mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
+
+      await service.send(['08012345678'], 'Hello');
+
+      expect(mockProvider.send).toHaveBeenCalledWith(
+        ['+2348012345678'],
+        'Hello',
+        'plain',
+        { apiKey: 'tenant-key', senderId: 'TenantChurch' },
+      );
+      expect(mockDeliveryLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ recipient: '+2348012345678' }),
+      );
+    });
+
+    it('records invalid recipient numbers as failures without contacting the provider', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
+
+      const result = await service.send(['07012'], 'Hello');
+
+      expect(result.acceptedCount).toBe(0);
+      expect(result.failedCount).toBe(1);
+      expect(mockProvider.send).not.toHaveBeenCalled();
+      expect(mockDeliveryLogRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          recipient: '07012',
+          status: 'FAILED',
+          errorMessage: expect.stringContaining('invalid'),
+        }),
+      );
+    });
+
     it('routes to the tenant-selected vendor, not a hardcoded one', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
       mockCredentialResolver.resolveConfig.mockResolvedValue({
@@ -149,12 +189,12 @@ describe('SmsService', () => {
         credentials: {
           accountSid: 'AC1',
           authToken: 'secret',
-          fromNumber: '+1000',
+          fromNumber: '+10000000000',
         },
       });
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
 
-      await service.send(['+1'], 'Hello');
+      await service.send(['+2348012345678'], 'Hello');
 
       expect(mockRegistry.get).toHaveBeenCalledWith('twilio');
     });
@@ -165,7 +205,7 @@ describe('SmsService', () => {
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
       const to = Array.from(
         { length: mockProvider.maxRecipientsPerRequest + 10 },
-        (_, i) => `+234800000${i}`,
+        (_, i) => `+234801234${String(i).padStart(4, '0')}`,
       );
 
       await service.send(to, 'Hello');
@@ -185,7 +225,7 @@ describe('SmsService', () => {
         .mockResolvedValueOnce({ messageId: '2', status: 'ok' });
       const to = Array.from(
         { length: mockProvider.maxRecipientsPerRequest + 1 },
-        (_, i) => `+234800000${i}`,
+        (_, i) => `+234801234${String(i).padStart(4, '0')}`,
       );
 
       const outcome = await service.send(to, 'Hello');
@@ -206,7 +246,7 @@ describe('SmsService', () => {
     it('records sends attempted before 8:00am without calling a provider', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T06:59:00.000Z'));
 
-      const outcome = await service.send(['+1'], 'Hello');
+      const outcome = await service.send(['+2348012345678'], 'Hello');
 
       expect(outcome).toEqual({
         acceptedCount: 0,
@@ -223,7 +263,7 @@ describe('SmsService', () => {
     it('records sends after 7:50pm without calling a provider', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T18:51:00.000Z'));
 
-      const outcome = await service.send(['+1'], 'Hello');
+      const outcome = await service.send(['+2348012345678'], 'Hello');
 
       expect(outcome.failedCount).toBe(1);
       expect(outcome.failures[0]).toContain('8:00am to 7:50pm');
@@ -235,7 +275,7 @@ describe('SmsService', () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T18:50:00.000Z'));
       mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
 
-      await service.send(['+1'], 'Hello');
+      await service.send(['+2348012345678'], 'Hello');
 
       expect(mockProvider.send).toHaveBeenCalledTimes(1);
     });
@@ -267,7 +307,7 @@ describe('SmsService', () => {
       const logs = [
         {
           messageId: 'msg-1',
-          recipient: '+1',
+          recipient: '+2348012345678',
           message: 'Hi',
           status: 'Delivered',
           type: 'generic',
@@ -280,7 +320,7 @@ describe('SmsService', () => {
           id: 'dispatch-1',
           provider: 'termii',
           providerMessageId: 'msg-1',
-          recipient: '+1',
+          recipient: '+2348012345678',
           message: 'Hi',
           status: 'ACCEPTED',
           providerStatus: 'Successfully Sent',
@@ -362,13 +402,13 @@ describe('SmsService', () => {
         credentials: {
           accountSid: 'AC1',
           authToken: 'secret',
-          fromNumber: '+1000',
+          fromNumber: '+10000000000',
         },
       });
       mockProvider.getMessageHistory.mockResolvedValue([
         {
           messageId: 'msg-2',
-          recipient: '+1',
+          recipient: '+2348012345678',
           message: 'Hi',
           status: 'delivered',
           type: 'generic',

@@ -8731,7 +8731,7 @@
                 "sms-broadcast"
               ]
             },
-            "description": "Sends an SMS to the resolved audience without creating an announcement - no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. Returns { sentCount, failedCount?, failures? }; failed sends return in the response so local diagnostic records commit. SMS is restricted to 08:00-19:50 CHURCH_TIMEZONE. A provider failure may be partial; check SMS Logs before retrying."
+            "description": "Sends an SMS to the resolved audience without creating an announcement - no in-app feed entry, no push notification, no title/body required. Guarded solely by SMS_SEND (not ANNOUNCEMENTS_WRITE). audience: ALL | WORKERS_ONLY | MEMBERS_ONLY | DEPARTMENT | INDIVIDUAL | GROUP. Phone numbers normalize to E.164 using CURRENCY_LOCALE; invalid numbers are recorded as failures and not sent. Returns { sentCount, failedCount?, failures? }; failed sends return in the response so local diagnostic records commit. SMS is restricted to 08:00-19:50 CHURCH_TIMEZONE. A provider failure may be partial; check SMS Logs before retrying."
           },
           "response": [
             {
@@ -9764,7 +9764,7 @@
                 }
               ]
             },
-            "description": "Adds phone-only entries to a group \u2014 for people with no Member account (e.g. first-timers), label is optional. Returns { added, skipped }; duplicate phone numbers within the group are skipped, not errored."
+            "description": "Adds phone-only entries to a group - for people with no Member account (e.g. first-timers), label is optional. Numbers normalize to E.164 using CURRENCY_LOCALE; invalid numbers are rejected. Returns { added, skipped }; duplicate normalized phone numbers within the group are skipped, not errored."
           },
           "response": [
             {

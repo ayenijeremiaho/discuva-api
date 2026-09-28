@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
   SmsBalance,
   SmsEncoding,
@@ -19,6 +20,11 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SmsDeliveryLog } from '../entity/sms-delivery-log.entity';
+import type { CountryCode } from 'libphonenumber-js';
+import {
+  normalizePhoneNumber,
+  phoneRegionFromLocale,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 // Characters Termii documents as forcing UCS-2/unicode encoding (70 chars per
 // segment instead of 160) even though some of these are otherwise ordinary
@@ -56,20 +62,22 @@ function chunk<T>(items: T[], size: number): T[][] {
   return batches;
 }
 
-function normalizePhoneNumber(phone: string): string {
-  return phone.replace(/\D/g, '');
-}
-
 @Injectable()
 export class SmsService {
   private readonly logger = new Logger(SmsService.name);
+  private readonly defaultPhoneRegion: CountryCode;
 
   constructor(
     private readonly smsProviderRegistry: SmsProviderRegistryService,
     private readonly credentialResolver: SmsCredentialResolverService,
     @InjectRepository(SmsDeliveryLog)
     private readonly deliveryLogRepo: Repository<SmsDeliveryLog>,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.defaultPhoneRegion = phoneRegionFromLocale(
+      configService.get<string>('CURRENCY_LOCALE', 'en-NG'),
+    );
+  }
 
   calculateSegments(message: string): SegmentCalculation {
     const characterCount = message.length;
@@ -112,11 +120,46 @@ export class SmsService {
 
     const provider = this.smsProviderRegistry.get(config.providerId);
     const { encoding } = this.calculateSegments(message);
-    const batches = chunk(to, provider.maxRecipientsPerRequest);
-    const failures: string[] = [];
+    const normalizedRecipients = to.map((recipient) => ({
+      original: recipient,
+      normalized: normalizePhoneNumber(recipient, this.defaultPhoneRegion),
+    }));
+    const invalidRecipients = normalizedRecipients.filter(
+      (recipient) => !recipient.normalized,
+    );
+    const validRecipients = normalizedRecipients
+      .map((recipient) => recipient.normalized)
+      .filter((recipient): recipient is string => recipient !== null);
+    const failures: string[] = invalidRecipients.length
+      ? [
+          `${invalidRecipients.length} recipient phone number(s) are invalid. Use a valid national number for ${this.defaultPhoneRegion} or include the international country code.`,
+        ]
+      : [];
     let acceptedCount = 0;
 
-    for (const batch of batches) {
+    if (invalidRecipients.length > 0) {
+      await this.deliveryLogRepo.save(
+        invalidRecipients.map(({ original }) =>
+          this.deliveryLogRepo.create({
+            provider: config.providerId,
+            recipient: original,
+            message,
+            status: 'FAILED',
+            providerMessageId: null,
+            providerStatus: null,
+            errorMessage: failures[0],
+            sourceType: context.sourceType ?? 'direct',
+            sourceId: context.sourceId ?? null,
+            sourceLabel: context.sourceLabel ?? null,
+          }),
+        ),
+      );
+    }
+
+    for (const batch of chunk(
+      validRecipients,
+      provider.maxRecipientsPerRequest,
+    )) {
       const logs = batch.map((recipient) =>
         this.deliveryLogRepo.create({
           provider: config.providerId,
@@ -215,13 +258,22 @@ export class SmsService {
     ]);
     const matchedIds = new Set<string>();
     const providerLogs = history.map((entry) => {
-      const local = localLogs.find(
-        (log) =>
+      const local = localLogs.find((log) => {
+        const localRecipient = normalizePhoneNumber(
+          log.recipient,
+          this.defaultPhoneRegion,
+        );
+        const providerRecipient = normalizePhoneNumber(
+          entry.recipient,
+          this.defaultPhoneRegion,
+        );
+        return (
           !matchedIds.has(log.id) &&
           log.providerMessageId === entry.messageId &&
-          normalizePhoneNumber(log.recipient) ===
-            normalizePhoneNumber(entry.recipient),
-      );
+          !!localRecipient &&
+          localRecipient === providerRecipient
+        );
+      });
       if (local) matchedIds.add(local.id);
       return {
         ...entry,

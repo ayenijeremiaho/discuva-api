@@ -1,4 +1,19 @@
-import { normalizePhoneNumber } from './normalize-phone.decorator';
+import {
+  normalizePhoneNumber,
+  phoneRegionFromLocale,
+} from './normalize-phone.decorator';
+
+describe('phoneRegionFromLocale', () => {
+  it('extracts a country region from a locale', () => {
+    expect(phoneRegionFromLocale('en-NG')).toBe('NG');
+    expect(phoneRegionFromLocale('en_US')).toBe('US');
+  });
+
+  it('falls back to Nigeria for an absent or regionless locale', () => {
+    expect(phoneRegionFromLocale(undefined)).toBe('NG');
+    expect(phoneRegionFromLocale('en')).toBe('NG');
+  });
+});
 
 describe('normalizePhoneNumber', () => {
   it('converts a leading-zero Nigerian number to E.164, defaulting to NG', () => {

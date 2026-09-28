@@ -197,6 +197,68 @@ describe('MemberImportService', () => {
       expect(savedRows[0].data.email).toBe('jane@test.com');
     });
 
+    it('normalizes a national-format phone number to E.164 in the import preview', async () => {
+      mockConfigService.get.mockImplementation((key: string) =>
+        key === 'CURRENCY_LOCALE' ? 'en-NG' : undefined,
+      );
+      const buffer = await buildXlsxBuffer([
+        [
+          'Jane',
+          'Doe',
+          'jane-phone@test.com',
+          '08012345678',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+        ],
+      ]);
+
+      await service.previewImport(makeFile(buffer), admin);
+
+      const savedRows = mockRowRepository.save.mock.calls[0][0];
+      expect(savedRows[0].errors).toEqual([]);
+      expect(savedRows[0].data.phoneNumber).toBe('+2348012345678');
+    });
+
+    it('flags an invalid phone number during import preview', async () => {
+      const buffer = await buildXlsxBuffer([
+        [
+          'Jane',
+          'Doe',
+          'jane-invalid-phone@test.com',
+          '07012',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+        ],
+      ]);
+
+      await service.previewImport(makeFile(buffer), admin);
+
+      const savedRows = mockRowRepository.save.mock.calls[0][0];
+      expect(savedRows[0].errors).toContain(
+        'Phone Number is invalid for NG; include the country code for international numbers.',
+      );
+    });
+
     it('flags a row whose email already exists in the DB', async () => {
       mockMemberRepository.find.mockResolvedValueOnce([
         { email: 'jane@test.com' },

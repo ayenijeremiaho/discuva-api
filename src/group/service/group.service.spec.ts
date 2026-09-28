@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { GroupService } from './group.service';
@@ -9,6 +10,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 
 const mockAuditLogService = { log: jest.fn() };
+const mockConfigService = { get: jest.fn().mockReturnValue('en-NG') };
 
 const makeQb = () => ({
   leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -69,6 +71,7 @@ describe('GroupService', () => {
           useValue: mockFirstTimerRepo,
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
 
@@ -326,18 +329,26 @@ describe('GroupService', () => {
     it('should tally added and skipped counts using one batched existence check', async () => {
       mockGroupRepo.findOne.mockResolvedValue({ id: 'g-1' });
       const qb = makeQb();
-      qb.getRawMany.mockResolvedValue([{ phoneNumber: '+2' }]);
+      qb.getRawMany.mockResolvedValue([{ phoneNumber: '+2348098765432' }]);
       mockGroupMemberRepo.createQueryBuilder.mockReturnValue(qb);
       mockGroupMemberRepo.create.mockImplementation((x) => x);
       mockGroupMemberRepo.save.mockResolvedValue([]);
 
       const result = await service.addPhoneEntries(
         'g-1',
-        { entries: [{ phoneNumber: '+1' }, { phoneNumber: '+2' }] },
+        {
+          entries: [
+            { phoneNumber: '08012345678' },
+            { phoneNumber: '+2348098765432' },
+          ],
+        },
         'admin-1',
       );
 
       expect(result).toEqual({ added: 1, skipped: 1 });
+      expect(mockGroupMemberRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ phoneNumber: '+2348012345678' }),
+      ]);
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'GROUP_MEMBERS_ADDED',
         expect.objectContaining({
@@ -357,11 +368,30 @@ describe('GroupService', () => {
 
       const result = await service.addPhoneEntries(
         'g-1',
-        { entries: [{ phoneNumber: '+1' }, { phoneNumber: '+1' }] },
+        {
+          entries: [
+            { phoneNumber: '08012345678' },
+            { phoneNumber: '+2348012345678' },
+          ],
+        },
         'admin-1',
       );
 
       expect(result).toEqual({ added: 1, skipped: 1 });
+    });
+
+    it('rejects invalid phone numbers during contact upload', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'g-1' });
+
+      await expect(
+        service.addPhoneEntries(
+          'g-1',
+          { entries: [{ phoneNumber: '07012' }] },
+          'admin-1',
+        ),
+      ).rejects.toThrow('Invalid phone number');
+
+      expect(mockGroupMemberRepo.save).not.toHaveBeenCalled();
     });
   });
 
@@ -370,7 +400,7 @@ describe('GroupService', () => {
       mockGroupRepo.findOne.mockResolvedValue({ id: 'g-1' });
       const ftQb = makeQb();
       ftQb.getMany.mockResolvedValue([
-        { firstname: 'Jane', lastname: 'Doe', phone: '+1' },
+        { firstname: 'Jane', lastname: 'Doe', phone: '08012345678' },
         { firstname: 'John', lastname: 'Smith', phone: null },
       ]);
       mockFirstTimerRepo.createQueryBuilder.mockReturnValue(ftQb);
@@ -388,7 +418,10 @@ describe('GroupService', () => {
 
       expect(result).toEqual({ added: 1, skipped: 0 });
       expect(mockGroupMemberRepo.save).toHaveBeenCalledWith([
-        expect.objectContaining({ phoneNumber: '+1', label: 'Jane Doe' }),
+        expect.objectContaining({
+          phoneNumber: '+2348012345678',
+          label: 'Jane Doe',
+        }),
       ]);
     });
 

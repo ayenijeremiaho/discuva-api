@@ -15,6 +15,13 @@ import {
 // default ("en-NG") without hardcoding phone handling to Nigeria only.
 const FALLBACK_REGION: CountryCode = 'NG';
 
+export function phoneRegionFromLocale(locale?: string): CountryCode {
+  const region = locale?.split(/[-_]/)[1]?.toUpperCase();
+  return (
+    region && region.length === 2 ? region : FALLBACK_REGION
+  ) as CountryCode;
+}
+
 // Parses/normalizes a phone number to E.164 (e.g. "+2348012345678"),
 // using `defaultRegion` only to interpret a number with no explicit
 // country code — pass the tenant's own region when known (see

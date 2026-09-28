@@ -2435,6 +2435,8 @@ Worker), Profession, Year Joined Workforce.
 **Validation (at preview time, one pass over every row):**
 
 - Each row is validated against `SignupDto`'s rules (required fields, formats).
+- A phone number is normalized to E.164 using the region from `CURRENCY_LOCALE` (default `en-NG`); invalid numbers
+  are flagged on preview rather than saved in local/national format.
 - Duplicate email **within the file** is flagged, pointing at the earlier row number.
 - Email already existing in the DB is flagged.
 - A filled `department` column is looked up case-insensitively; an unknown department name is flagged as an error
@@ -3264,7 +3266,7 @@ fixed group of people without re-selecting individuals each time. A group's memb
 | GET | `/groups/:id/members` | Paginated roster (`page`, `limit`; can grow large, mirrors the Workers-by-Department policy) — `leftJoin`s the member relation so phone-only rows are included, not just real members |
 | POST | `/groups/:id/members` | Add a single real member (`memberId`) |
 | POST | `/groups/:id/members/bulk-add` | Add multiple real members at once (`memberIds: string[]`); returns `{added, skipped}` — duplicates are skipped, not errored |
-| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; returns `{added, skipped}` — duplicate phone numbers within the group are skipped |
+| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; numbers normalize to E.164 using `CURRENCY_LOCALE`; invalid entries are rejected. Returns `{added, skipped}` — duplicate normalized phone numbers within the group are skipped |
 | POST | `/groups/:id/members/first-timers` | Bulk-import every `FirstTimer` captured within a date range as phone-only entries (label = their name). Body: `{ dateFrom, dateTo }` (ISO 8601); returns `{added, skipped}` |
 | DELETE | `/groups/:id/members/:memberId` | Remove a single real member by member id (kept for backward compatibility — cannot address phone-only rows, which have no member id) |
 | POST | `/groups/:id/members/bulk-remove` | Remove multiple real members at once by member id (`memberIds: string[]`); returns `{removed}` |
@@ -3312,7 +3314,9 @@ class, a line in the registry, and a `communication_providers` catalog row — n
   documents as forcing UCS-2/unicode encoding even though they're otherwise ordinary ASCII punctuation:
   `; ^ { } \ [ ~ ] | € ' "` — in which case it's encoded `unicode` (70 chars/segment). Returns
   `{ segments, encoding, characterCount }`.
-- `send(to, message, context?)` — resolves config once (`SmsCredentialResolverService.resolveConfig()`); if the
+- `send(to, message, context?)` — normalizes recipients to E.164 using the region from `CURRENCY_LOCALE` (default
+  `en-NG`); invalid recipients are recorded as failed and are never sent. It resolves config once
+  (`SmsCredentialResolverService.resolveConfig()`); if the
   tenant has none configured, throws `403 SMS_PROVIDER_NOT_CONFIGURED` before attempting anything. It then saves one
   `PENDING` `SmsDeliveryLog` per recipient with provider and source metadata and enforces the 08:00–19:50 send window
   in `CHURCH_TIMEZONE` (default `Africa/Lagos`) before contacting the provider. An out-of-window attempt is marked
@@ -3342,7 +3346,9 @@ returned `sid`s with a comma for `messageId`.
 and new configurations. Generic is Termii's promotional route; DND is for transactional/critical messages and must
 be enabled by Termii for the workspace. The communication-provider summary returns only the non-secret `smsRoute`
 field so the admin can preserve it while editing credentials. A `422 Route not configured` response is explained in
-the admin error. Termii recipients are sent as digits-only international numbers (no leading `+`) per its API format.
+the admin error. Recipients are normalized to E.164 before dispatch, then Termii receives its documented digits-only
+international form (no leading `+`). `Successfully Sent` means Termii accepted the request; only a later `Delivered`
+provider status confirms delivery to the handset.
 Termii documents a 20:00–08:00 restriction for generic-route SMS to MTN; Discuva's stricter 08:00–19:50 window
 applies to all providers and routes.
 

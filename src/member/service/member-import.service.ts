@@ -26,6 +26,11 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { ConfigService } from '@nestjs/config';
 import { Admin } from '../../admin/entity/admin.entity';
+import {
+  normalizePhoneNumber,
+  phoneRegionFromLocale,
+} from '../../utility/decorators/normalize-phone.decorator';
+import type { CountryCode } from 'libphonenumber-js';
 
 interface TemplateColumn {
   header: string;
@@ -62,6 +67,7 @@ export class MemberImportService {
   private readonly logger = new Logger(MemberImportService.name);
   private readonly churchName: string;
   private readonly churchAddress: string;
+  private readonly defaultPhoneRegion: CountryCode;
 
   constructor(
     @InjectRepository(MemberImportJob)
@@ -81,6 +87,9 @@ export class MemberImportService {
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
+    this.defaultPhoneRegion = phoneRegionFromLocale(
+      this.configService.get<string>('CURRENCY_LOCALE', 'en-NG'),
+    );
   }
 
   async generateTemplate(): Promise<Buffer> {
@@ -192,6 +201,20 @@ export class MemberImportService {
 
     for (const { rowNumber, data } of parsedRows) {
       const errors: string[] = [];
+
+      if (data.phoneNumber) {
+        const normalizedPhone = normalizePhoneNumber(
+          data.phoneNumber,
+          this.defaultPhoneRegion,
+        );
+        if (normalizedPhone) {
+          data.phoneNumber = normalizedPhone;
+        } else {
+          errors.push(
+            `Phone Number is invalid for ${this.defaultPhoneRegion}; include the country code for international numbers.`,
+          );
+        }
+      }
 
       const dtoInstance = plainToInstance(SignupDto, {
         firstname: data.firstname,

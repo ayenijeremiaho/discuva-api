@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -22,9 +23,17 @@ import {
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { ConfigService } from '@nestjs/config';
+import type { CountryCode } from 'libphonenumber-js';
+import {
+  normalizePhoneNumber,
+  phoneRegionFromLocale,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 @Injectable()
 export class GroupService {
+  private readonly defaultPhoneRegion: CountryCode;
+
   constructor(
     @InjectRepository(Group)
     private readonly groupRepo: Repository<Group>,
@@ -33,7 +42,12 @@ export class GroupService {
     @InjectRepository(FirstTimer)
     private readonly firstTimerRepo: Repository<FirstTimer>,
     private readonly auditLogService: AuditLogService,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.defaultPhoneRegion = phoneRegionFromLocale(
+      configService.get<string>('CURRENCY_LOCALE', 'en-NG'),
+    );
+  }
 
   private readonly logger = new Logger(GroupService.name);
 
@@ -292,12 +306,24 @@ export class GroupService {
     actorId: string,
   ): Promise<{ added: number; skipped: number }> {
     const group = await this.getOrThrow(groupId);
+    const normalizedEntries = dto.entries.map((entry) => {
+      const phoneNumber = normalizePhoneNumber(
+        entry.phoneNumber,
+        this.defaultPhoneRegion,
+      );
+      if (!phoneNumber) {
+        throw new BadRequestException(
+          `Invalid phone number "${entry.phoneNumber}" for ${this.defaultPhoneRegion}. Use a valid local number or include its country code.`,
+        );
+      }
+      return { ...entry, phoneNumber };
+    });
 
     // Batched instead of looping a findOne+save per entry — one existence
     // check + one bulk insert regardless of how many entries are submitted
     // (matters most for the first-timers bulk import below, which can hand
     // this dozens of entries at once).
-    const phoneNumbers = dto.entries.map((e) => e.phoneNumber);
+    const phoneNumbers = normalizedEntries.map((e) => e.phoneNumber);
     const existingRows = await this.groupMemberRepo
       .createQueryBuilder('gm')
       .select('gm.phone_number', 'phoneNumber')
@@ -307,14 +333,14 @@ export class GroupService {
     const existingSet = new Set(existingRows.map((r) => r.phoneNumber));
 
     const seen = new Set<string>();
-    const toAdd = dto.entries.filter((entry) => {
+    const toAdd = normalizedEntries.filter((entry) => {
       if (existingSet.has(entry.phoneNumber) || seen.has(entry.phoneNumber)) {
         return false;
       }
       seen.add(entry.phoneNumber);
       return true;
     });
-    const skipped = dto.entries.length - toAdd.length;
+    const skipped = normalizedEntries.length - toAdd.length;
 
     if (toAdd.length > 0) {
       await this.groupMemberRepo.save(
