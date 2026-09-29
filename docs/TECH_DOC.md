@@ -3887,9 +3887,11 @@ without touching their plan or anyone else's" — exactly the shape of control n
 override — falls through to the plan check exactly as before this existed. `ModuleEnabledGuard` checks it between
 the tenant's own on/off toggle and the plan-features check: tenant toggle off still always wins (a church's own
 choice is never overridden), then override `false` blocks outright, override `true` grants outright, and only an
-absent override falls through to `features.includes(moduleKey)`. `PlanGuard` (the 4 orphan `PlanFeature`-only
-gates with no `KNOWN_MODULES` counterpart) doesn't consult this — no per-tenant override need has come up for
-those yet, easy to extend the same way later if one does.
+absent override falls through to `features.includes(moduleKey)`. `PlanGuard` applies the same override precedence
+(since 2026-09-29), so a module whose routes also carry `@RequiresPlan` — Sermons, Service Ratings, Volunteering, Forms,
+etc. — honours the override on every route. `setModuleOverride()` still only accepts `KNOWN_MODULES` keys, so the
+plan-only features (`finance`, `sms`, `audit`, `bulk_export`, `notification_customization`) can't be overridden per
+church from the Tenant edit UI.
 
 `PlanFeatureResolverService.resolve()` — already shared by both guards, already caching per-tenant under
 `plan-features:${tenantId}` — now also fetches the `Tenant` row and returns `overrides` alongside `features`/
