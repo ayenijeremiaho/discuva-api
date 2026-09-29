@@ -371,7 +371,7 @@
                 "signup"
               ]
             },
-            "description": "Register a new member account. Do NOT include a password \u2014 the server generates a secure temporary password and emails it to the provided address. The account will have changedPassword=false, requiring a password change on first login. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
+            "description": "Register a new member account. The member app sends only firstname, lastname, email and optionally phoneNumber, gender and birthday; the church journey is added later via PATCH /members/me. joinWorkforce: true records a serve request (serveInterestAt). Do NOT include a password \u2014 the server generates a secure temporary password and emails it to the provided address. The account will have changedPassword=false, requiring a password change on first login. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -1186,7 +1186,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/members?page=1&limit=10&role=MEMBER&search=",
+              "raw": "{{baseUrl}}/members?page=1&limit=10&role=MEMBER&search=&wantsToServe=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1210,6 +1210,12 @@
                   "key": "search",
                   "value": "",
                   "description": "Case-insensitive match on firstname, lastname, email or phone"
+                },
+                {
+                  "key": "wantsToServe",
+                  "value": "",
+                  "description": "true returns only active members with a pending in-app serve request",
+                  "disabled": true
                 }
               ]
             }
@@ -1346,7 +1352,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"gender\": \"MALE\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"maritalStatus\": \"MARRIED\"\n}",
+              "raw": "{\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"gender\": \"MALE\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"maritalStatus\": \"MARRIED\",\n  \"dateJoinedChurch\": \"2020-05-17\",\n  \"yearBornAgain\": \"2008\",\n  \"yearBaptized\": null,\n  \"baptizedWithHolyGhost\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1363,7 +1369,7 @@
                 "me"
               ]
             },
-            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional. Deliberately excludes email (use /auth/email-change/*) and the admin-only church-record fields (dateJoinedChurch, yearBornAgain, yearBaptized, baptizedWithHolyGhost). Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged."
+            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional; excludes email (use /auth/email-change/*). Church journey: dateJoinedChurch (YYYY-MM-DD), yearBornAgain / yearBaptized (YYYY, null clears), baptizedWithHolyGhost. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged."
           },
           "response": [
             {
@@ -1376,7 +1382,91 @@
               "name": "400 Validation Error",
               "status": "Bad Request",
               "code": 400,
-              "body": "{ \"statusCode\": 400, \"message\": [\"phoneNumber must be 7\u201320 digits, optionally prefixed with +\"] }"
+              "body": "{ \"statusCode\": 400, \"message\": [\"Please enter a valid phone number (e.g. 0802 123 4567), or include the country code (e.g. +44\u2026) for numbers outside Nigeria.\"] }"
+            }
+          ]
+        },
+        {
+          "name": "Request to Serve",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/serve-interest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "serve-interest"
+              ]
+            },
+            "description": "Records an in-app request to join the workforce (sets serveInterestAt). Idempotent. Workers get 400 'You are already serving as a worker.' Admins see these via GET /members?wantsToServe=true; promoting the member clears it."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"role\": \"MEMBER\", \"serveInterestAt\": \"2026-09-29T10:00:00.000Z\" } }"
+            }
+          ]
+        },
+        {
+          "name": "Withdraw Serve Request",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/serve-interest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "serve-interest"
+              ]
+            },
+            "description": "Clears the member's serve request (serveInterestAt = null). Idempotent."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"role\": \"MEMBER\", \"serveInterestAt\": null } }"
+            }
+          ]
+        },
+        {
+          "name": "Dismiss Serve Request (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/serve-interest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "serve-interest"
+              ]
+            },
+            "description": "MEMBERS_WRITE. Declines a member's request to serve (serveInterestAt = null). Idempotent; audited as MEMBER_SERVE_INTEREST_DISMISSED. The member can ask again from the app. Promotion and deactivation also clear the request automatically."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"role\": \"MEMBER\", \"serveInterestAt\": null } }"
             }
           ]
         },

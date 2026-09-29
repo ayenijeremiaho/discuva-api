@@ -99,6 +99,7 @@ The universal identity for every person in the system.
 | yearBaptized          | Date              | Optional                                                                                                  |
 | baptizedWithHolyGhost | boolean           | Optional                                                                                                  |
 | dateJoinedChurch      | Date (date only)  | Optional; full YYYY-MM-DD date, stored in `date_joined_church` column                                     |
+| serveInterestAt       | Date \| null      | When the member asked to serve in the workforce (`POST /members/me/serve-interest`, or `joinWorkforce: true` at signup); cleared on withdraw, admin dismissal, promotion to worker, or deactivation. Tenant migration `AddMemberServeInterest` |
 | photoUrl              | string \| null    | Cloudinary `secure_url` of the member's self-uploaded profile picture. `null` until first upload.         |
 | photoPublicId         | string \| null    | Internal — Cloudinary public_id, used to delete the old asset on replace/remove. Not exposed on `MemberDto`. |
 | workerProfile         | WorkerProfile     | OneToOne, null for plain members                                                                          |
@@ -1718,6 +1719,10 @@ All new accounts — whether created via signup or admin-elevated — receive a 
 
 **Signup:** `POST /auth/signup` no longer accepts a `password` field. The server generates a secure random password,
 hashes it, sets `changedPassword = false`, and emails the plaintext temporary password to the new member.
+The member app's signup is a single screen — first/last name, email, optional phone, gender and birthday. Marital
+status and the church journey (`dateJoinedChurch`, `yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost`) are
+added afterwards from Edit Profile, prompted by a "Next Steps" card on Home. `SignupDto` still accepts every field
+(older clients, admin create); `joinWorkforce: true` now records `serveInterestAt` instead of being discarded.
 
 ### Device Lock (Mobile App)
 
@@ -2287,10 +2292,18 @@ only difference is the audit action — `MEMBER_CREATED_BY_ADMIN` (with the admi
 `POST /members/:id/promote`.
 
 **Self-service profile edit:** `PATCH /members/me` (`JwtAuthGuard` only, no admin) lets a member/worker update their
-own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus`
-(`UpdateMyProfileDto`, all fields optional). Deliberately excludes `email` (handled by the OTP-gated email-change
-flow — see Self-Service Email Change Flow), and the admin-only church-record fields `dateJoinedChurch`,
-`yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost`.
+own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` and
+church journey — `dateJoinedChurch` (YYYY-MM-DD), `yearBornAgain`, `yearBaptized` (YYYY; `null` clears),
+`baptizedWithHolyGhost` (`UpdateMyProfileDto`, all fields optional). Excludes `email` (handled by the OTP-gated
+email-change flow — see Self-Service Email Change Flow). Admins can still edit the same fields via `PATCH /members/:id`.
+
+**Serve interest:** `POST /members/me/serve-interest` / `DELETE /members/me/serve-interest` (`JwtAuthGuard`) set or
+clear `serveInterestAt` — the in-app "I'd like to serve" request that replaced signup's workforce step. Idempotent;
+a `WORKER` asking returns `400`. Audited as `MEMBER_SERVE_INTEREST_ADDED` / `MEMBER_SERVE_INTEREST_WITHDRAWN`.
+Admins find these members with `GET /members?wantsToServe=true` (active members only). Cleared by: the member
+withdrawing, an admin dismissing it (`DELETE /members/:id/serve-interest`, `MEMBERS_WRITE`, audited as
+`MEMBER_SERVE_INTEREST_DISMISSED` — the member can ask again), promotion (`promoteToWorker` / `bulkPromoteToWorker`, in
+the same transaction as the role change), or deactivation (`PATCH /members/:id/status` → `INACTIVE`).
 
 **Clergy designation:** four `AdminGuard` + `MEMBERS_WRITE` routes manage the optional `Clergy` relation on a member
 (same permission as promote-to-worker — no separate permission was introduced):
@@ -8524,11 +8537,14 @@ outside the requested `?months=` window).
 | POST   | /auth/webauthn/register/verify                              | Any (JwtAuthGuard)                                            | Enroll a new device, step 2 — body is the browser's `RegistrationResponseJSON`; stores the new credential, `204` on success |
 | GET    | /auth/webauthn/credentials                                  | Any (JwtAuthGuard)                                            | List the caller's own registered devices — `{ id, deviceName, createdAt, lastUsedAt }[]`, never the credential id/public key |
 | DELETE | /auth/webauthn/credentials/:id                              | Any (JwtAuthGuard)                                            | Remove one of the caller's own devices; `404` if it doesn't belong to them; `204` on success                  |
-| PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` (excludes email and admin-only church-record fields) |
+| PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus`, `dateJoinedChurch`, `yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost` (excludes email) |
+| POST   | /members/me/serve-interest                                 | Any (JwtAuthGuard)                                            | Record "I'd like to serve" (`serveInterestAt`); `400` for workers                                              |
+| DELETE | /members/me/serve-interest                                 | Any (JwtAuthGuard)                                            | Withdraw the serve request                                                                                     |
+| DELETE | /members/:id/serve-interest                                | AdminGuard (MEMBERS_WRITE)                                    | Dismiss a member's serve request (declined); idempotent, audited. The member can request again                 |
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
 | DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
-| GET    | /members?page=&limit=&role=&search=                        | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive)   |
+| GET    | /members?page=&limit=&role=&search=&wantsToServe=          | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
 | POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |
 | GET    | /members/workers                                           | AdminGuard (MEMBERS_READ)                                     | List workers (filterable by status)                                                                           |
 | GET    | /members/:id                                               | AdminGuard (MEMBERS_READ)                                     | Get member by ID                                                                                              |

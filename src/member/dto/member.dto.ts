@@ -88,6 +88,8 @@ export class MemberDto {
 
   @Expose()
   dateJoinedChurch: Date;
+  @Expose()
+  serveInterestAt: Date | null;
 
   @Expose()
   photoUrl: string | null;
