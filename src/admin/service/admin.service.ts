@@ -189,6 +189,15 @@ export class AdminService {
     return admin;
   }
 
+  async updateFavouritePages(
+    id: string,
+    pages: string[],
+  ): Promise<{ favouritePages: string[] }> {
+    const favouritePages = [...new Set(pages)];
+    await this.adminRepository.update(id, { favouritePages });
+    return { favouritePages };
+  }
+
   async countActive(): Promise<number> {
     return this.adminRepository.countBy({ isActive: true });
   }

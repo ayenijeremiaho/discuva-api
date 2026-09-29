@@ -2735,6 +2735,49 @@
               ]
             },
             {
+              "name": "Update My Favourite Pages",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"pages\": [\"/members\", \"/finances\", \"/announcements\"]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users/me/favourite-pages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "users",
+                    "me",
+                    "favourite-pages"
+                  ]
+                },
+                "description": "Any admin. Replaces the pages pinned to the dashboard's Quick Access \u2014 up to 12 admin-portal paths, order kept, duplicates dropped. Send [] to clear."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "_postman_previewlanguage": "json",
+                  "body": "{ \"data\": { \"favouritePages\": [\"/members\", \"/finances\", \"/announcements\"] } }"
+                }
+              ]
+            },
+            {
               "name": "Get My Admin Profile",
               "request": {
                 "method": "GET",

@@ -653,6 +653,7 @@ role (MEMBER/WORKER).
 | member    | Member    | OneToOne, CASCADE on delete — the admin must be a church member               |
 | adminRole | AdminRole | ManyToOne, RESTRICT on delete — deleting a role with active admins is blocked |
 | isActive  | boolean   | Soft-disable without revoking the role                                        |
+| favouritePages | string[] (jsonb) | Admin-portal routes the admin pinned to the dashboard's Quick Access, in their order; max 12. Default `[]`. Tenant migration `AddAdminFavouritePages` |
 
 **Relationship:** A church worker can also be an admin. Having `role=WORKER` on the Member entity and an `Admin` record
 are independent. Mobile app routes check `role=WORKER`; admin portal routes check the `admins` table.
@@ -2481,6 +2482,7 @@ Manages the admin RBAC system used by the admin web portal. This module is `@Glo
   `findById()`/the `AdminGuard`-preloaded admin — it's the only place `member.spouse` is loaded, so an admin's own
   profile page can show their spouse. Kept off `AdminGuard`'s preload (which runs on every guarded request) and off
   `findById()` (used for viewing *other* admins) so that extra join only happens on this one self-service call.
+- `PUT /admin/users/me/favourite-pages` — any admin — saves the pages they pinned to the dashboard's Quick Access (`Admin.favouritePages`), so pins follow them across devices. The "most used" pages that fill the remaining Quick Access slots are counted per browser (localStorage) and never sent to the API. The portal filters both by the admin's permissions and enabled modules before showing them.
 - `GET /admin/users/:id` — `ADMIN_READ` — get admin by ID
 - `POST /admin/users` — `ADMIN_WRITE` — grant admin access to a member
 - `PATCH /admin/users/:id` — `ADMIN_WRITE` — change admin role or active status; **an admin cannot modify their own record** (403)
@@ -8580,7 +8582,8 @@ outside the requested `?months=` window).
 | PATCH  | /admin/roles/:id                                           | AdminGuard (ADMIN_WRITE)                                      | Update admin role                                                                                             |
 | DELETE | /admin/roles/:id                                           | AdminGuard (ADMIN_WRITE)                                      | Delete admin role                                                                                             |
 | GET    | /admin/users                                               | AdminGuard (ADMIN_READ)                                       | List admin users                                                                                              |
-| GET    | /admin/users/me                                            | AdminGuard                                                    | Own admin profile                                                                                             |
+| GET    | /admin/users/me                                            | AdminGuard                                                    | Own admin profile (includes `favouritePages`)                                                                 |
+| PUT    | /admin/users/me/favourite-pages                            | AdminGuard (any admin)                                        | Replace own pinned pages. Body `{ pages: string[] }` — up to 12 admin-portal paths (`/members`, `/finances/external-payees`), order kept, duplicates dropped. Returns `{ favouritePages }` |
 | GET    | /admin/users/:id                                           | AdminGuard (ADMIN_READ)                                       | Get admin user by ID                                                                                          |
 | POST   | /admin/users                                               | AdminGuard (ADMIN_WRITE)                                      | Grant admin access to a member                                                                                |
 | PATCH  | /admin/users/:id                                           | AdminGuard (ADMIN_WRITE)                                      | Update admin user role/status                                                                                 |
