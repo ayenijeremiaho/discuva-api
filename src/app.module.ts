@@ -47,6 +47,7 @@ import { ServiceHeadcountModule } from './service-headcount/service-headcount.mo
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
 import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
 import { EmailCategorySettingsModule } from './email-category-settings/email-category-settings.module';
+import { NotificationCatalogueModule } from './notification-catalogue/notification-catalogue.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
 import { YoutubeModule } from './integrations/youtube/youtube.module';
@@ -261,6 +262,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     ChurchSettingsModule,
     ReminderSettingsModule,
     EmailCategorySettingsModule,
+    NotificationCatalogueModule,
     IncidentReportModule,
     SermonModule,
     YoutubeModule,

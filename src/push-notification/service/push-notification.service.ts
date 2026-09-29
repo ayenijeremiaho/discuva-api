@@ -14,10 +14,8 @@ import {
   PushPayload,
   SubscribePushDto,
 } from '../dto/push-notification.dto';
-import {
-  PUSH_CATALOGUE,
-  renderPush,
-} from '../../notification-catalogue/push-catalogue';
+import { renderPush } from '../../notification-catalogue/push-catalogue';
+import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
@@ -34,12 +32,13 @@ export class PushNotificationService implements OnModuleInit {
     private readonly config: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly categorySettings: EmailCategorySettingsService,
+    private readonly templates: NotificationTemplateService,
   ) {}
 
   // Null when the church has switched this category's push off.
   private async resolve(push: DispatchPush): Promise<PushPayload | null> {
     if (!('key' in push)) return push;
-    const template = PUSH_CATALOGUE[push.key];
+    const template = await this.templates.resolvePushTemplate(push.key);
     if (!(await this.categorySettings.isPushEnabled(template.category))) {
       return null;
     }
@@ -72,6 +71,10 @@ export class PushNotificationService implements OnModuleInit {
         auth: dto.auth,
       }),
     );
+  }
+
+  async hasSubscription(memberId: string): Promise<boolean> {
+    return this.subRepo.exists({ where: { memberId } });
   }
 
   async unsubscribe(memberId: string): Promise<void> {

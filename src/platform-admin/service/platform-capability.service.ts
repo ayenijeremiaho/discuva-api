@@ -7,13 +7,13 @@ export interface PlatformCapability {
   label: string;
 }
 
-// The 4 PlanFeature values with no KNOWN_MODULES counterpart — hand-labeled
-// since they have no moduleName to borrow.
+// PlanFeature values with no KNOWN_MODULES counterpart — hand-labeled since they have no moduleName to borrow.
 const ORPHAN_PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
   [PlanFeature.FINANCE]: 'Finance',
   [PlanFeature.SMS]: 'SMS',
   [PlanFeature.AUDIT]: 'Audit Log',
   [PlanFeature.BULK_EXPORT]: 'Bulk Export',
+  [PlanFeature.NOTIFICATION_CUSTOMIZATION]: 'Notification Customization',
 };
 
 @Injectable()

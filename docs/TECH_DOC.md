@@ -2745,8 +2745,31 @@ default wording, keyed by `PushNotificationKey` — category, admin-facing label
 fills placeholders with plain token replacement (never a template engine, so future church-edited wording can't run
 code) and clips to 60/150 characters. Announcements are the one exception: an admin writes them, so they pass
 `{ title, body, url, idempotencyKey }` and aren't gated by a category switch. Before this, prayer, pastor-feedback and
-announcement pushes ignored the category switches entirely. Phase 1 of per-church notification customization will
-look up a church's override of a catalogue entry at this same point.
+announcement pushes ignored the category switches entirely.
+
+**Custom push wording (notification customization, Phase 1):** churches on a plan with
+`PlanFeature.NOTIFICATION_CUSTOMIZATION` (`notification_customization`, added to every Pro variant by root migration
+`AddNotificationCustomizationToProPlans`) can replace a catalogue push's title and/or message.
+- **Storage:** tenant table `notification_template_overrides` (`NotificationTemplateOverride`, tenant migration
+  `CreateNotificationTemplateOverrides`) — `channel` (`PUSH`; `EMAIL` reserved for Phase 2), `template_key`, nullable
+  `title`/`body` (null = use the default for that field), `updated_by_id` (members, `SET NULL`); unique
+  `(channel, template_key)`.
+- **Sending:** `PushNotificationService` asks `NotificationTemplateService.resolvePushTemplate(key)` for the wording.
+  It returns the church's override only while the church's plan includes the feature, so a downgraded church falls
+  back to the defaults without losing its saved text. Overrides are cached per church under
+  `notification-overrides:push` (5 min), cleared on every save or reset.
+- **Validation on save:** text is made plain (HTML tags and line breaks removed), can't be empty, is limited to 60
+  (title) / 150 (message) characters, and may only use that notification's own placeholders — anything else is
+  rejected with the list of valid ones. Saving wording identical to the default stores nothing. Audited as
+  `NOTIFICATION_TEMPLATE_UPDATED` / `NOTIFICATION_TEMPLATE_RESET`.
+- **Endpoints** (`admin/notification-templates`, `AdminGuard`; there is no separate church-settings permission, so the
+  same `admin:read`/`admin:write` pair as Notification Settings): `GET push` (every plan — returns
+  `{ customizationAvailable, items }` so the portal can show defaults with an upgrade prompt), and on plans with the
+  feature: `PUT push/:key` `{ title, body }`, `DELETE push/:key` (reset to default), `POST push/:key/test`
+  (`{ title?, body? }` draft; sends it filled with sample values to the calling admin's own device, or returns
+  `{ sent: false, reason: 'NO_DEVICE' }` if they haven't turned on notifications).
+- `NOTIFICATION_CUSTOMIZATION` is labelled "Notification Customization" in `PlatformCapabilityService` so the platform
+  Plans page lists it.
 
 ### Event Module
 
@@ -9053,6 +9076,10 @@ outside the requested `?months=` window).
 | GET    | /facility-rental/bookings/:id                              | JwtAuthGuard                                                  | Get own booking detail (returns 404 if belongs to another member)                                             |
 | PATCH  | /facility-rental/bookings/:id/cancel                       | JwtAuthGuard                                                  | Cancel own booking (only PENDING or CONFIRMED)                                                                |
 
+| GET    | /admin/notification-templates/push                         | AdminGuard (`admin:read`), any plan                           | Every push type with default and current wording, placeholders and `customized`, plus `customizationAvailable` for the church's plan |
+| PUT    | /admin/notification-templates/push/:key                    | AdminGuard (`admin:write`) + plan `notification_customization` | Save the church's title/message for one push type. Body `{ title, body }` |
+| DELETE | /admin/notification-templates/push/:key                    | AdminGuard (`admin:write`) + plan `notification_customization` | Reset one push type to the default wording |
+| POST   | /admin/notification-templates/push/:key/test               | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) wording with sample values to the admin's own device; `{ sent }` or `{ sent: false, reason: 'NO_DEVICE' }` |
 | GET    | /notifications/vapid-public-key                            | JwtAuthGuard                                                  | `{ publicKey }` — the server's VAPID public key; clients must use it as `applicationServerKey` when subscribing |
 | POST   | /notifications/subscribe                                   | JwtAuthGuard                                                  | Register a Web Push subscription. Called **once** after first device registration (`deviceId` transitions from `null`). Also called after re-registering on a new device following an admin purge or OTP device reset. Body: `endpoint`, `p256dh`, `auth`. Returns 204. |
 | DELETE | /notifications/subscribe                                   | JwtAuthGuard                                                  | Explicit opt-out: removes the Web Push subscription. **Not called on normal logout** — subscription persists so the service worker can deliver notifications while the member is logged out. Returns 204. |

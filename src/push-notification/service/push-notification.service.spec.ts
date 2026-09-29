@@ -8,7 +8,11 @@ import { PushNotificationService } from './push-notification.service';
 import { PushSubscription } from '../entity/push-subscription.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
-import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import {
+  PUSH_CATALOGUE,
+  PushNotificationKey,
+} from '../../notification-catalogue/push-catalogue';
+import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 
 jest.mock('web-push', () => ({
@@ -49,6 +53,12 @@ describe('PushNotificationService', () => {
     getId: jest.fn(),
   };
 
+  const mockTemplates = {
+    resolvePushTemplate: jest.fn((key: PushNotificationKey) =>
+      Promise.resolve(PUSH_CATALOGUE[key]),
+    ),
+  };
+
   const mockCategorySettings = {
     isPushEnabled: jest.fn().mockResolvedValue(true),
   };
@@ -75,6 +85,7 @@ describe('PushNotificationService', () => {
           provide: EmailCategorySettingsService,
           useValue: mockCategorySettings,
         },
+        { provide: NotificationTemplateService, useValue: mockTemplates },
       ],
     }).compile();
 
@@ -268,5 +279,33 @@ describe('PushNotificationService', () => {
       expect(mockCategorySettings.isPushEnabled).not.toHaveBeenCalled();
       expect(mockQueue.addBulk).toHaveBeenCalled();
     });
+  });
+
+  it("sends the church's own wording when it has customized a push", async () => {
+    mockSubRepo.find.mockResolvedValue([
+      { memberId: 'm1', endpoint: 'https://ep', p256dh: 'p', auth: 'a' },
+    ]);
+    mockTemplates.resolvePushTemplate.mockResolvedValueOnce({
+      ...PUSH_CATALOGUE[PushNotificationKey.PRAYER_ASSIGNED],
+      title: 'Prayer duty',
+      body: 'We pray together on {{meeting_date}}.',
+    });
+
+    await service.dispatchToMemberIds(['m1'], {
+      key: PushNotificationKey.PRAYER_ASSIGNED,
+      vars: { meeting_date: '2026-10-04' },
+      idempotencyKey: 'k2',
+    });
+
+    expect(mockQueue.addBulk).toHaveBeenCalledWith([
+      expect.objectContaining({
+        data: expect.objectContaining({
+          payload: expect.objectContaining({
+            title: 'Prayer duty',
+            body: 'We pray together on 2026-10-04.',
+          }),
+        }),
+      }),
+    ]);
   });
 });

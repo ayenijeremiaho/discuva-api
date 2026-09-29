@@ -31200,6 +31200,140 @@
       ]
     },
     {
+      "name": "Notification Templates (Admin)",
+      "description": "Per-church push wording (notification customization). Reading is open to every plan; saving, resetting and test-sending need the notification_customization plan feature (403 PLAN_UPGRADE_REQUIRED otherwise). Placeholders are limited to each notification's own list.",
+      "item": [
+        {
+          "name": "List Push Templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/push",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "push"
+              ]
+            },
+            "description": "admin:read. Every push type with its default and current wording, placeholders and whether the church customized it, plus customizationAvailable for the church's plan."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"customizationAvailable\": true, \"items\": [ { \"key\": \"PRAYER_ASSIGNED\", \"category\": \"PRAYER_REMINDER\", \"categoryLabel\": \"Prayer Reminders\", \"label\": \"Prayer meeting assigned\", \"placeholders\": { \"meeting_date\": \"2026-10-04\" }, \"defaultTitle\": \"Prayer Assignment\", \"defaultBody\": \"You have been assigned to a prayer meeting on {{meeting_date}}.\", \"title\": \"Prayer duty\", \"body\": \"You have been assigned to a prayer meeting on {{meeting_date}}.\", \"customized\": true, \"updatedAt\": \"2026-09-29T20:00:00.000Z\" } ] } }"
+            }
+          ]
+        },
+        {
+          "name": "Save Push Template",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/push/PRAYER_ASSIGNED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "push",
+                "PRAYER_ASSIGNED"
+              ]
+            },
+            "description": "admin:write + plan feature. Title up to 60, message up to 150 characters; plain text; only this notification's placeholders.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Prayer duty\",\n  \"body\": \"You're praying with us on {{meeting_date}}. Thank you!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Push Template",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/push/PRAYER_ASSIGNED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "push",
+                "PRAYER_ASSIGNED"
+              ]
+            },
+            "description": "admin:write + plan feature. Back to the default wording."
+          },
+          "response": []
+        },
+        {
+          "name": "Send Test Push",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/push/PRAYER_ASSIGNED/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "push",
+                "PRAYER_ASSIGNED",
+                "test"
+              ]
+            },
+            "description": "admin:write + plan feature. Sends the draft (or saved) wording with sample values to your own device. Returns { sent: true } or { sent: false, reason: 'NO_DEVICE' }.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Prayer duty\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"sent\": true } }"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Push Notifications",
       "item": [
         {
