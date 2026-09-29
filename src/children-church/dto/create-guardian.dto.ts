@@ -8,14 +8,19 @@ import {
   IsUUID,
 } from 'class-validator';
 import { GuardianRelationshipEnum } from '../enums/guardian-relationship.enum';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 export class CreateGuardianDto {
   @IsString()
   @IsNotEmpty()
   fullName: string;
 
-  @IsString()
   @IsOptional()
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phoneNumber?: string;
 
   @IsEmail()

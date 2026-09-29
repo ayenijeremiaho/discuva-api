@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -11,10 +12,12 @@ import {
 } from 'class-validator';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
-// Deliberately excludes email (handled via the OTP-gated email-change flow)
-// and church-record fields (dateJoinedChurch, yearBornAgain, yearBaptized,
-// baptizedWithHolyGhost) — those stay admin-managed.
+// Excludes email — changed via the OTP-gated email-change flow. Church-journey fields accept null to clear.
 export class UpdateMyProfileDto {
   @IsOptional()
   @IsString()
@@ -29,12 +32,9 @@ export class UpdateMyProfileDto {
   lastname?: string;
 
   @IsOptional()
-  @IsString()
-  @Matches(/^\+?\d{7,20}$/, {
-    message: 'phoneNumber must be 7–20 digits, optionally prefixed with +',
-  })
-  @MaxLength(20)
-  phoneNumber?: string;
+  @NormalizePhone({ clearable: true })
+  @IsNormalizedPhone()
+  phoneNumber?: string | null;
 
   @IsOptional()
   @IsEnum(GenderEnum)
@@ -61,4 +61,22 @@ export class UpdateMyProfileDto {
   @IsOptional()
   @IsEnum(MaritalStatusEnum)
   maritalStatus?: MaritalStatusEnum;
+
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'dateJoinedChurch must be YYYY-MM-DD',
+  })
+  dateJoinedChurch?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{4}$/, { message: 'yearBornAgain must be a 4-digit year' })
+  yearBornAgain?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{4}$/, { message: 'yearBaptized must be a 4-digit year' })
+  yearBaptized?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
+  baptizedWithHolyGhost?: boolean;
 }

@@ -99,6 +99,7 @@ The universal identity for every person in the system.
 | yearBaptized          | Date              | Optional                                                                                                  |
 | baptizedWithHolyGhost | boolean           | Optional                                                                                                  |
 | dateJoinedChurch      | Date (date only)  | Optional; full YYYY-MM-DD date, stored in `date_joined_church` column                                     |
+| serveInterestAt       | Date \| null      | When the member asked to serve in the workforce (`POST /members/me/serve-interest`, or `joinWorkforce: true` at signup); cleared on withdraw, admin dismissal, promotion to worker, or deactivation. Tenant migration `AddMemberServeInterest` |
 | photoUrl              | string \| null    | Cloudinary `secure_url` of the member's self-uploaded profile picture. `null` until first upload.         |
 | photoPublicId         | string \| null    | Internal — Cloudinary public_id, used to delete the old asset on replace/remove. Not exposed on `MemberDto`. |
 | workerProfile         | WorkerProfile     | OneToOne, null for plain members                                                                          |
@@ -1095,7 +1096,7 @@ A visitor recorded by a follow-up team worker or admin during or after a service
 | phone                | string                  |                                                                            |
 | email                | string \| null          | Optional                                                                   |
 | source               | FirstTimerSourceEnum    | WALK_IN \| ONLINE \| REFERRAL                                              |
-| wantsToJoinChurch    | boolean                 | Default `false`                                                            |
+| wantsToJoinChurch    | boolean                 | Default `false`. Self-onboard form asks "Just visiting" / "I'd like to stay" on the main screen (unanswered stays `false`); admins and Follow-Up workers can edit it later |
 | enjoyedAboutChurch   | text \| null            | What the visitor enjoyed                                                   |
 | wantsToJoinWorkforce | boolean                 | Default `false`                                                            |
 | notes                | text \| null            | Additional follow-up notes                                                 |
@@ -1718,6 +1719,10 @@ All new accounts — whether created via signup or admin-elevated — receive a 
 
 **Signup:** `POST /auth/signup` no longer accepts a `password` field. The server generates a secure random password,
 hashes it, sets `changedPassword = false`, and emails the plaintext temporary password to the new member.
+The member app's signup is a single screen — first/last name, email, optional phone, gender and birthday. Marital
+status and the church journey (`dateJoinedChurch`, `yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost`) are
+added afterwards from Edit Profile, prompted by a "Next Steps" card on Home. `SignupDto` still accepts every field
+(older clients, admin create); `joinWorkforce: true` now records `serveInterestAt` instead of being discarded.
 
 ### Device Lock (Mobile App)
 
@@ -2287,10 +2292,18 @@ only difference is the audit action — `MEMBER_CREATED_BY_ADMIN` (with the admi
 `POST /members/:id/promote`.
 
 **Self-service profile edit:** `PATCH /members/me` (`JwtAuthGuard` only, no admin) lets a member/worker update their
-own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus`
-(`UpdateMyProfileDto`, all fields optional). Deliberately excludes `email` (handled by the OTP-gated email-change
-flow — see Self-Service Email Change Flow), and the admin-only church-record fields `dateJoinedChurch`,
-`yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost`.
+own `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` and
+church journey — `dateJoinedChurch` (YYYY-MM-DD), `yearBornAgain`, `yearBaptized` (YYYY; `null` clears),
+`baptizedWithHolyGhost` (`UpdateMyProfileDto`, all fields optional). Excludes `email` (handled by the OTP-gated
+email-change flow — see Self-Service Email Change Flow). Admins can still edit the same fields via `PATCH /members/:id`.
+
+**Serve interest:** `POST /members/me/serve-interest` / `DELETE /members/me/serve-interest` (`JwtAuthGuard`) set or
+clear `serveInterestAt` — the in-app "I'd like to serve" request that replaced signup's workforce step. Idempotent;
+a `WORKER` asking returns `400`. Audited as `MEMBER_SERVE_INTEREST_ADDED` / `MEMBER_SERVE_INTEREST_WITHDRAWN`.
+Admins find these members with `GET /members?wantsToServe=true` (active members only). Cleared by: the member
+withdrawing, an admin dismissing it (`DELETE /members/:id/serve-interest`, `MEMBERS_WRITE`, audited as
+`MEMBER_SERVE_INTEREST_DISMISSED` — the member can ask again), promotion (`promoteToWorker` / `bulkPromoteToWorker`, in
+the same transaction as the role change), or deactivation (`PATCH /members/:id/status` → `INACTIVE`).
 
 **Clergy designation:** four `AdminGuard` + `MEMBERS_WRITE` routes manage the optional `Clergy` relation on a member
 (same permission as promote-to-worker — no separate permission was introduced):
@@ -3266,12 +3279,13 @@ fixed group of people without re-selecting individuals each time. A group's memb
 | GET | `/groups/:id/members` | Paginated roster (`page`, `limit`; can grow large, mirrors the Workers-by-Department policy) — `leftJoin`s the member relation so phone-only rows are included, not just real members |
 | POST | `/groups/:id/members` | Add a single real member (`memberId`) |
 | POST | `/groups/:id/members/bulk-add` | Add multiple real members at once (`memberIds: string[]`); returns `{added, skipped}` — duplicates are skipped, not errored |
-| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; numbers normalize to E.164 using `CURRENCY_LOCALE`; invalid entries are rejected. Returns `{added, skipped}` — duplicate normalized phone numbers within the group are skipped |
-| POST | `/groups/:id/members/first-timers` | Bulk-import every `FirstTimer` captured within a date range as phone-only entries (label = their name). Body: `{ dateFrom, dateTo }` (ISO 8601); returns `{added, skipped}` |
+| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; numbers normalize to E.164 using `CURRENCY_LOCALE`; any invalid entry rejects the batch with `400` naming the number (`"<number>" is not valid. <invalidPhoneMessage>`). Returns `{added, skipped}` — duplicate normalized phone numbers within the group are skipped |
+| POST | `/groups/:id/members/first-timers` | Bulk-import every `FirstTimer` captured within a date range as phone-only entries (label = their name). Body: `{ dateFrom, dateTo }` (ISO 8601); returns `{added, skipped, invalid}` — first-timers whose stored phone doesn't normalize are counted in `invalid` and skipped, never failing the import |
 | DELETE | `/groups/:id/members/:memberId` | Remove a single real member by member id (kept for backward compatibility — cannot address phone-only rows, which have no member id) |
 | POST | `/groups/:id/members/bulk-remove` | Remove multiple real members at once by member id (`memberIds: string[]`); returns `{removed}` |
 | DELETE | `/groups/:id/entries/:entryId` | Remove a single roster entry by its own `GroupMember` row id — works for both real members and phone-only entries |
 | POST | `/groups/:id/entries/bulk-remove` | Remove multiple roster entries at once by row id (`entryIds: string[]`); returns `{removed}` |
+| DELETE | `/groups/:id/entries` | Remove every entry (members and phone-only) from the contact list, keeping the group; returns `{removed}`. Backs the admin roster's "Select all N in this list" |
 
 **Resolving a group's phone numbers for SMS** (`AnnouncementService.resolveGroupPhoneNumbers`, used by both regular
 announcement `sendViaSms` and the dedicated SMS-only broadcast): unions two sources — active Members in the group
@@ -3527,6 +3541,9 @@ here. This backend only ever knows what's been explicitly overridden.
 - `GET /tenant/info`'s response gained an `assets: Record<assetKey, imageUrl>` field — only overridden keys appear
   in it, never the full catalog and never a default. Bundled into the same call the member app already makes on
   startup rather than a second round trip.
+- `GET /tenant/info`'s response includes `phoneRegion` (ISO 3166 alpha-2, e.g. `NG`) — the region the API uses to
+  parse local-format phone numbers (from `CURRENCY_LOCALE`), so client phone pickers default to the same country the
+  server validates against.
 - `GET /tenant/info`'s response also gained a plain `subdomain: string` field — not sensitive (already visible in
   every discuva-member URL, and the admin types it in at login), added specifically so discuva-admin has a
   client-side "which tenant am I" signal for its Games presentation-screen fix (see Games Module): that route is
@@ -4262,9 +4279,41 @@ derived once per `FormSubmissionService` instance from the `CURRENCY_LOCALE` env
 `PdfService`, `EventReminderService`), not a Nigeria-specific hardcode. Anything that doesn't parse as valid for
 its (explicit or assumed) country returns `null` (a *required* PHONE field that fails to normalize is rejected
 with a 400 — never silently mangled or dropped). The normalized value is what's actually stored in `answers`, so
-exports, analytics, and dedup all ever see one canonical shape for the same real number. This is the first
-phone-normalization logic anywhere in the codebase — `Member.phoneNumber` still stores whatever raw string was
-typed, unaffected by this.
+exports, analytics, and dedup all ever see one canonical shape for the same real number. The same rule applies to
+every phone field on the API — see **Phone Number Storage (E.164)** below.
+
+**Phone Number Storage (E.164):** every phone number written through the API is stored in E.164 (`+` + country code
++ national number, e.g. `+2348012345678`). Clients may send local format (`08012345678`), a bare country code
+(`2348012345678`) or spaced/dashed input — the DTO decorators `@NormalizePhone() @IsNormalizedPhone()` convert it,
+using the `CURRENCY_LOCALE` region (default `NG`) for numbers without a country code. Anything that doesn't parse as a
+valid number for its country is rejected with `400` and a region-aware message built from `CURRENCY_LOCALE`, e.g.
+`Please enter a valid phone number (e.g. 0802 123 4567), or include the country code (e.g. +44…) for numbers outside
+Nigeria.` (`invalidPhoneMessage()`; clients should show it as-is). A blank or whitespace-only phone is treated as
+not provided — accepted on optional fields, rejected with the same message on required ones (first-timer phone).
+Exception: on `PATCH /members/me` and `PATCH /members/:id`, `phoneNumber: ""` or `null` **clears** the stored number
+(`@NormalizePhone({ clearable: true })`); omitting the field leaves it unchanged. Length/prefix rules come from `libphonenumber-js` per country — never hardcode digit
+counts.
+
+| DTO | Field | Endpoint(s) |
+|---|---|---|
+| `SignupDto` | `phoneNumber` | `POST /auth/signup`, `POST /members` (admin create) |
+| `UpdateMemberDto` | `phoneNumber` | `PATCH /members/:id` |
+| `UpdateMyProfileDto` | `phoneNumber` | `PATCH /members/me` |
+| `CreateGuardianDto` | `phoneNumber` | `POST /children-church/children/:id/guardians` |
+| `EnrollGuestDto` / `BulkGuestEntryDto` | `phone` | `POST /classes/enroll/guest`, `POST /classes/enroll/guests/bulk` |
+| `CreateFirstTimerDto` / `UpdateFirstTimerDto` | `phone` | `POST /follow-up/public/first-timer`, `POST`/`PATCH` `/follow-up/first-timers[/:id]`, `POST`/`PATCH` `/admin/follow-up/first-timers[/:id]` |
+| `CheckInFirstTimerDto` | `phone` | `POST /sunday-school/sessions/:id/checkin-first-timer` |
+| `CreateConvertDto` | `phone` | `POST /evangelism/converts` |
+
+Also normalized in-service: member bulk import, group phone-only entries, `PHONE` form fields, and SMS recipients at
+send time (recipients are deduped after normalization, so `0801…` and `+234801…` send once). Not normalized: `ExternalPayee.contactPhone` (finance contact, never messaged).
+
+**Backfilling existing data:** `npm run phones:normalize:all-tenants` (prod: `phones:normalize:all-tenants:prod`) walks
+every active tenant and rewrites `members.phone_number`, `group_members.phone_number`, `child_guardians.phone_number`,
+`first_timers.phone`, `converts.phone` and `guests.phone` to E.164. Dry run by default — prints per-tenant counts and
+every row needing manual review; pass `-- --apply` to write. Unparseable numbers are left untouched and reported;
+a `group_members` row whose normalized number already exists in the same group is skipped and reported (never merged
+or deleted). Idempotent — safe to re-run.
 
 **Form branding — cover image and logo:** `Form.coverImageUrl`/`coverImagePublicId` and `Form.logoUrl`/
 `logoPublicId` (mirrors `Tenant.logoUrl`/`logoPublicId`'s shape) are set via dedicated upload endpoints (see table
@@ -7020,7 +7069,7 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 
 **Self-onboarding from the member app's signup screen (`POST /follow-up/public/first-timer`, `FollowUpPublicController`):** `@Public()`, no login required — reached from `discuva-member`'s own signup page by someone who just installed the app and isn't (yet, or ever) ready to create a full member account, so they can still let the church know they're here. Mirrors `FormPublicController`'s shape (module gate via `ModuleEnabledGuard`, rate-limited `@Throttle({limit: 5, ttl: 60_000})` since it's an open unauthenticated write). Calls `FollowUpService.createFirstTimerFromAppSignup()`, which — like `createFirstTimerFromPublicForm` forcing `ONLINE` — forces `source` to a new `FirstTimerSourceEnum.APP_SIGNUP` value regardless of what the caller submits, and passes an empty actor (no `createdByMember`/`createdByAdmin`). Goes through the exact same `doCreateFirstTimer` path as every other first-timer creation route: round-robin `FollowUpTask` assignment, due date, fire-and-forget assignment email. Returns only `{ received: true, firstTimerId }` — never the assignee or other internal details, to an unauthenticated caller.
 
-**"Which event is this for?" picker (`GET /follow-up/public/events`, `FollowUpPublicController.events`; and the existing authenticated `GET /events?from=&to=` for admin/worker callers):** Backs the event-visited field on both the unauthenticated member-app self-onboarding form above and the admin's manual "Add First Timer"/"Log Visit" forms. `FollowUpService.getPublicEvents(search?)` defaults to events happening today (`event.eventDate <= today AND event.endDate >= today`, ordered by `startTime` ASC — both `event_date` and `end_date` are indexed, migration `AddEventEndDateIndex`, since `event_date <= today` alone isn't selective as event history grows) so a visitor or admin can tap rather than search — a name search (`?search=`) is the fallback when nothing's on today or a different event is meant. Public variant is `@Public()` + `ModuleEnabledGuard` (module `follow_up`) + `@Throttle({limit: 30, ttl: 60_000})` (read-only, higher limit than the write endpoint above since it's typeahead-driven), and selects only `id`/`name`/`eventDate` — no attendance, slot, or venue detail, since the caller isn't authenticated. The admin UI instead reuses the existing authenticated `GET /events` route with `from`/`to` set to today for the same "today" default, since an admin session already has full read access to that endpoint.
+**"Which event is this for?" picker (`GET /follow-up/public/events`, `FollowUpPublicController.events`; and the existing authenticated `GET /events?from=&to=` for admin/worker callers):** Backs the event-visited field on both the unauthenticated member-app self-onboarding form above and the admin's manual "Add First Timer"/"Log Visit" forms. `FollowUpService.getPublicEvents(search?)` defaults to today's events plus the last 14 days (`event.eventDate <= today AND event.endDate >= today − 14d`, never future events, newest first, max 10; "today" is computed in `CHURCH_TIMEZONE` — both `event_date` and `end_date` are indexed, migration `AddEventEndDateIndex`) so a visitor can tap the service they attended instead of typing — a name search (`?search=`, also past/today only) is the fallback for older services. Each option returns `{ id, name, eventDate, endDate, isToday }` (dates as `YYYY-MM-DD`); the member app shows "Today" or the weekday + date (a range for multi-day events) beside each name. Public variant is `@Public()` + `ModuleEnabledGuard` (module `follow_up`) + `@Throttle({limit: 30, ttl: 60_000})` (read-only, higher limit than the write endpoint above since it's typeahead-driven), and selects only `id`/`name`/`eventDate`/`endDate` — no attendance, slot, or venue detail, since the caller isn't authenticated. The admin UI instead reuses the existing authenticated `GET /events` route with `from`/`to` set to today for the same "today" default, since an admin session already has full read access to that endpoint.
 
 **Editing a first-timer's own details (`PATCH /admin/follow-up/first-timers/:id`, admin; `PATCH /follow-up/first-timers/:id`, worker; both `UpdateFirstTimerDto`):** for correcting a record after the fact — e.g. an admin forgot to set the event visited, or a Sunday School check-in only captured partial info. All fields optional/independent (`firstname`, `lastname`, `phone`, `email`, `wantsToJoinChurch`, `wantsToJoinWorkforce`, `enjoyedAboutChurch`, `notes`, `visitedEventId`); `source` is deliberately **not** editable here — it's forced server-side at creation to stay non-spoofable, and changing it after the fact would corrupt source attribution in reports. `convertedAt`/`inviteSentAt` have their own dedicated endpoints. `FollowUpService.updateFirstTimer()` reloads the record with its `visitedEvent` relation before returning, so the response reflects the current event name, not just the id that was set. The worker variant (`updateFirstTimerByWorker`) is a thin wrapper adding `assertWorkerInFollowUpDept` first — same shape as `getFirstTimerDetailForWorker` — and isn't scoped to only first-timers on the caller's own tasks, matching `createFirstTimerByWorker`'s existing department-wide (not just own-task) access. Backs an inline "Edit Details" toggle on the member app's task detail screen, using the same public today-first event picker (`GET /follow-up/public/events`) as the self-onboarding form, since it's `@Public()` and works fine from an authenticated session too.
 
@@ -8488,11 +8537,14 @@ outside the requested `?months=` window).
 | POST   | /auth/webauthn/register/verify                              | Any (JwtAuthGuard)                                            | Enroll a new device, step 2 — body is the browser's `RegistrationResponseJSON`; stores the new credential, `204` on success |
 | GET    | /auth/webauthn/credentials                                  | Any (JwtAuthGuard)                                            | List the caller's own registered devices — `{ id, deviceName, createdAt, lastUsedAt }[]`, never the credential id/public key |
 | DELETE | /auth/webauthn/credentials/:id                              | Any (JwtAuthGuard)                                            | Remove one of the caller's own devices; `404` if it doesn't belong to them; `204` on success                  |
-| PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus` (excludes email and admin-only church-record fields) |
+| PATCH  | /members/me                                                | Any (JwtAuthGuard)                                            | Self-service profile edit: `firstname`, `lastname`, `phoneNumber`, `gender`, `birthDay`, `birthMonth`, `birthYear`, `maritalStatus`, `dateJoinedChurch`, `yearBornAgain`, `yearBaptized`, `baptizedWithHolyGhost` (excludes email) |
+| POST   | /members/me/serve-interest                                 | Any (JwtAuthGuard)                                            | Record "I'd like to serve" (`serveInterestAt`); `400` for workers                                              |
+| DELETE | /members/me/serve-interest                                 | Any (JwtAuthGuard)                                            | Withdraw the serve request                                                                                     |
+| DELETE | /members/:id/serve-interest                                | AdminGuard (MEMBERS_WRITE)                                    | Dismiss a member's serve request (declined); idempotent, audited. The member can request again                 |
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
 | DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
-| GET    | /members?page=&limit=&role=&search=                        | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive)   |
+| GET    | /members?page=&limit=&role=&search=&wantsToServe=          | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
 | POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |
 | GET    | /members/workers                                           | AdminGuard (MEMBERS_READ)                                     | List workers (filterable by status)                                                                           |
 | GET    | /members/:id                                               | AdminGuard (MEMBERS_READ)                                     | Get member by ID                                                                                              |

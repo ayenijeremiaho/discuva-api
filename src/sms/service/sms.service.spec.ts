@@ -165,6 +165,24 @@ describe('SmsService', () => {
       );
     });
 
+    it('sends once when the same number appears in local and E.164 form', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
+      mockProvider.send.mockResolvedValue({ messageId: '1', status: 'ok' });
+
+      const result = await service.send(
+        ['08012345678', '+2348012345678'],
+        'Hello',
+      );
+
+      expect(mockProvider.send).toHaveBeenCalledWith(
+        ['+2348012345678'],
+        'Hello',
+        'plain',
+        { apiKey: 'tenant-key', senderId: 'TenantChurch' },
+      );
+      expect(result.acceptedCount).toBe(1);
+    });
+
     it('records invalid recipient numbers as failures without contacting the provider', async () => {
       jest.useFakeTimers().setSystemTime(new Date('2026-09-27T07:00:00.000Z'));
 

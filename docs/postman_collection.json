@@ -371,7 +371,7 @@
                 "signup"
               ]
             },
-            "description": "Register a new member account. Do NOT include a password \u2014 the server generates a secure temporary password and emails it to the provided address. The account will have changedPassword=false, requiring a password change on first login."
+            "description": "Register a new member account. The member app sends only firstname, lastname, email and optionally phoneNumber, gender and birthday; the church journey is added later via PATCH /members/me. joinWorkforce: true records a serve request (serveInterestAt). Do NOT include a password \u2014 the server generates a secure temporary password and emails it to the provided address. The account will have changedPassword=false, requiring a password change on first login. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -1186,7 +1186,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/members?page=1&limit=10&role=MEMBER&search=",
+              "raw": "{{baseUrl}}/members?page=1&limit=10&role=MEMBER&search=&wantsToServe=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1210,6 +1210,12 @@
                   "key": "search",
                   "value": "",
                   "description": "Case-insensitive match on firstname, lastname, email or phone"
+                },
+                {
+                  "key": "wantsToServe",
+                  "value": "",
+                  "description": "true returns only active members with a pending in-app serve request",
+                  "disabled": true
                 }
               ]
             }
@@ -1251,7 +1257,7 @@
                 "members"
               ]
             },
-            "description": "Admin-created member account (MEMBERS_WRITE). Body is the same SignupDto as public self-signup \u2014 only firstname/lastname/email are required. Do NOT include a password: the server generates a temporary one and emails it to the member, with changedPassword=false forcing a password change on first login. Use this for members without a phone/email habit, or who can't self-register. Promoting the new member to a worker afterwards is a separate call \u2014 POST members/:id/promote."
+            "description": "Admin-created member account (MEMBERS_WRITE). Body is the same SignupDto as public self-signup \u2014 only firstname/lastname/email are required. Do NOT include a password: the server generates a temporary one and emails it to the member, with changedPassword=false forcing a password change on first login. Use this for members without a phone/email habit, or who can't self-register. Promoting the new member to a worker afterwards is a separate call \u2014 POST members/:id/promote. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -1346,7 +1352,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"gender\": \"MALE\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"maritalStatus\": \"MARRIED\"\n}",
+              "raw": "{\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"gender\": \"MALE\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"maritalStatus\": \"MARRIED\",\n  \"dateJoinedChurch\": \"2020-05-17\",\n  \"yearBornAgain\": \"2008\",\n  \"yearBaptized\": null,\n  \"baptizedWithHolyGhost\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1363,7 +1369,7 @@
                 "me"
               ]
             },
-            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional. Deliberately excludes email (use /auth/email-change/*) and the admin-only church-record fields (dateJoinedChurch, yearBornAgain, yearBaptized, baptizedWithHolyGhost)."
+            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional; excludes email (use /auth/email-change/*). Church journey: dateJoinedChurch (YYYY-MM-DD), yearBornAgain / yearBaptized (YYYY, null clears), baptizedWithHolyGhost. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged."
           },
           "response": [
             {
@@ -1376,7 +1382,91 @@
               "name": "400 Validation Error",
               "status": "Bad Request",
               "code": 400,
-              "body": "{ \"statusCode\": 400, \"message\": [\"phoneNumber must be 7\u201320 digits, optionally prefixed with +\"] }"
+              "body": "{ \"statusCode\": 400, \"message\": [\"Please enter a valid phone number (e.g. 0802 123 4567), or include the country code (e.g. +44\u2026) for numbers outside Nigeria.\"] }"
+            }
+          ]
+        },
+        {
+          "name": "Request to Serve",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/serve-interest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "serve-interest"
+              ]
+            },
+            "description": "Records an in-app request to join the workforce (sets serveInterestAt). Idempotent. Workers get 400 'You are already serving as a worker.' Admins see these via GET /members?wantsToServe=true; promoting the member clears it."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"role\": \"MEMBER\", \"serveInterestAt\": \"2026-09-29T10:00:00.000Z\" } }"
+            }
+          ]
+        },
+        {
+          "name": "Withdraw Serve Request",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/me/serve-interest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "me",
+                "serve-interest"
+              ]
+            },
+            "description": "Clears the member's serve request (serveInterestAt = null). Idempotent."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"role\": \"MEMBER\", \"serveInterestAt\": null } }"
+            }
+          ]
+        },
+        {
+          "name": "Dismiss Serve Request (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/members/{{memberId}}/serve-interest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "{{memberId}}",
+                "serve-interest"
+              ]
+            },
+            "description": "MEMBERS_WRITE. Declines a member's request to serve (serveInterestAt = null). Idempotent; audited as MEMBER_SERVE_INTEREST_DISMISSED. The member can ask again from the app. Promotion and deactivation also clear the request automatically."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"role\": \"MEMBER\", \"serveInterestAt\": null } }"
             }
           ]
         },
@@ -1591,7 +1681,7 @@
                 }
               ]
             },
-            "description": "All fields are optional. Only provided fields are updated."
+            "description": "All fields are optional. Only provided fields are updated. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged."
           },
           "response": [
             {
@@ -8382,6 +8472,7 @@
           "name": "Enroll Guest in Class (Admin)",
           "request": {
             "method": "POST",
+            "description": "Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400.",
             "header": [
               {
                 "key": "Content-Type",
@@ -8435,6 +8526,7 @@
           "name": "Bulk Enroll Guests (Admin)",
           "request": {
             "method": "POST",
+            "description": "Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400.",
             "header": [
               {
                 "key": "Content-Type",
@@ -9813,7 +9905,7 @@
                 }
               ]
             },
-            "description": "Bulk-imports every FirstTimer captured within the given date range (filtered by createdAt) as phone-only group entries (label = their name). Only first-timers with a phone number on file are imported. Returns { added, skipped }."
+            "description": "Bulk-imports every FirstTimer captured within the given date range (filtered by createdAt) as phone-only group entries (label = their name). Only first-timers with a valid phone number on file are imported. Returns { added, skipped, invalid } \u2014 invalid counts first-timers skipped because their stored phone doesn't normalize."
           },
           "response": [
             {
@@ -9911,6 +10003,41 @@
               "status": "OK",
               "code": 200,
               "body": "{\"data\": {\"removed\": 2}}"
+            }
+          ]
+        },
+        {
+          "name": "Remove All Group Entries (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/groups/:id/entries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "groups",
+                ":id",
+                "entries"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "GROUPS_WRITE. Empties the contact list \u2014 removes every entry (real members and phone-only) in one call; the group itself is kept. Returns { removed }. Audited once as GROUP_MEMBERS_REMOVED with metadata { all: true, removed }."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"removed\": 42 } }"
             }
           ]
         },
@@ -13640,7 +13767,7 @@
                 }
               ]
             },
-            "description": "SS-dept worker or class teacher only (no admin equivalent). For someone with no Member record at all — creates a real FirstTimer (source forced to SUNDAY_SCHOOL, not user-settable), triggers the normal follow-up task/notification to the Follow-Up team, and marks them PRESENT for this session in one step. 400s if no active Follow-Up department worker exists to assign the task to."
+            "description": "SS-dept worker or class teacher only (no admin equivalent). For someone with no Member record at all — creates a real FirstTimer (source forced to SUNDAY_SCHOOL, not user-settable), triggers the normal follow-up task/notification to the Follow-Up team, and marks them PRESENT for this session in one step. 400s if no active Follow-Up department worker exists to assign the task to. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -15499,7 +15626,7 @@
                 }
               ]
             },
-            "description": "ADMIN or CC-dept worker. relationship: MOTHER | FATHER | GRANDPARENT | SIBLING | UNCLE | AUNT | FAMILY_FRIEND | OTHER. email and memberId are optional. Pickup notification emails are sent to guardian.email ?? guardian.member.email."
+            "description": "ADMIN or CC-dept worker. relationship: MOTHER | FATHER | GRANDPARENT | SIBLING | UNCLE | AUNT | FAMILY_FRIEND | OTHER. email and memberId are optional. Pickup notification emails are sent to guardian.email ?? guardian.member.email. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "event": [
             {
@@ -18697,7 +18824,7 @@
                 "first-timer"
               ]
             },
-            "description": "Public, unauthenticated, rate-limited (5/min). source is always forced server-side to APP_SIGNUP regardless of what's submitted here — not spoofable. Triggers the same round-robin FollowUpTask assignment + notification email as every other first-timer creation path. 400s if no active Follow-Up department worker exists to assign the task to."
+            "description": "Public, unauthenticated, rate-limited (5/min). source is always forced server-side to APP_SIGNUP regardless of what's submitted here — not spoofable. Triggers the same round-robin FollowUpTask assignment + notification email as every other first-timer creation path. 400s if no active Follow-Up department worker exists to assign the task to. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -18715,7 +18842,7 @@
           ]
         },
         {
-          "name": "Events (Today, or Search)",
+          "name": "Events (Today & Recent, or Search)",
           "request": {
             "method": "GET",
             "header": [],
@@ -18737,14 +18864,14 @@
                 }
               ]
             },
-            "description": "Public, unauthenticated, rate-limited (30/min). Backs the \"which event are you here for?\" picker on the member-app self-onboarding form. With no `search`, returns events happening today (eventDate <= today <= endDate), ordered by start time. With `search`, returns up to 8 name matches instead, ordered most recent first. Returns only id/name/eventDate — no attendance, slot, or venue detail."
+            "description": "Public, unauthenticated, rate-limited (30/min). Backs the \"which service did you attend?\" picker on the member-app self-onboarding form. With no `search`, returns today's events plus the last 14 days (never future events), newest first, max 10, with \"today\" computed in the church timezone. With `search`, matches past/today events by name. Each item: { id, name, eventDate, endDate (YYYY-MM-DD), isToday }."
           },
           "response": [
             {
               "name": "200 OK — today's events",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\",\n    \"name\": \"Sunday Service\",\n    \"eventDate\": \"2026-09-22\"\n  }\n]"
+              "body": "[\n  {\n    \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\",\n    \"name\": \"Sunday Service\",\n    \"eventDate\": \"2026-09-27\",\n    \"endDate\": \"2026-09-27\",\n    \"isToday\": true\n  },\n  {\n    \"id\": \"c2d3e4f5-6a7b-8c9d-0e1f-2a3b4c5d6e7f\",\n    \"name\": \"Midweek Service\",\n    \"eventDate\": \"2026-09-23\",\n    \"endDate\": \"2026-09-23\",\n    \"isToday\": false\n  }\n]"
             },
             {
               "name": "200 OK — no events today",
@@ -18789,7 +18916,7 @@
                 "first-timers"
               ]
             },
-            "description": "Register a first-time visitor. Caller must be a WORKER in the FOLLOW_UP department. Auto-creates a FollowUpTask assigned via round-robin. If no active FOLLOW_UP worker exists to assign, this still succeeds (201) — the task is created unassigned and the response carries assignmentWarning. Reassign it later via PATCH /admin/follow-up/tasks/:id/reassign once a worker is active."
+            "description": "Register a first-time visitor. Caller must be a WORKER in the FOLLOW_UP department. Auto-creates a FollowUpTask assigned via round-robin. If no active FOLLOW_UP worker exists to assign, this still succeeds (201) — the task is created unassigned and the response carries assignmentWarning. Reassign it later via PATCH /admin/follow-up/tasks/:id/reassign once a worker is active. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -19076,7 +19203,7 @@
                 "first-timers"
               ]
             },
-            "description": "Register a first-timer from the admin portal. Requires FOLLOW_UP_WRITE permission. Always succeeds even with no active FOLLOW_UP worker to assign — see the worker-facing Register First-Timer request above for the assignmentWarning response shape in that case."
+            "description": "Register a first-timer from the admin portal. Requires FOLLOW_UP_WRITE permission. Always succeeds even with no active FOLLOW_UP worker to assign — see the worker-facing Register First-Timer request above for the assignmentWarning response shape in that case. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": [
             {
@@ -19760,7 +19887,7 @@
                 "converts"
               ]
             },
-            "description": "Any authenticated worker. Only `name` is required \u2014 kept as simple as possible. status defaults to UNSAVED."
+            "description": "Any authenticated worker. Only `name` is required \u2014 kept as simple as possible. status defaults to UNSAVED. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
           },
           "response": []
         },
@@ -22967,6 +23094,33 @@
     {
       "name": "Church Settings",
       "item": [
+        {
+          "name": "Get Tenant Info (Public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/tenant/info",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tenant",
+                "info"
+              ]
+            },
+            "description": "Public branding/config for the current tenant subdomain. phoneRegion is the ISO country the API uses for local-format phone numbers (from CURRENCY_LOCALE) \u2014 clients default their phone country picker to it."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"name\": \"Your Church\", \"subdomain\": \"your-church\", \"logoUrl\": null, \"tagline\": null, \"address\": null, \"supportEmail\": null, \"pwaShortName\": null, \"currency\": \"NGN\", \"timezone\": \"Africa/Lagos\", \"phoneRegion\": \"NG\", \"assets\": {} } }"
+            }
+          ]
+        },
         {
           "name": "List all module settings",
           "request": {

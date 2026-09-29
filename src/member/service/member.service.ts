@@ -118,6 +118,7 @@ export class MemberService {
       role: MemberRoleEnum.MEMBER,
       status: MemberStatusEnum.ACTIVE,
       changedPassword: false,
+      serveInterestAt: dto.joinWorkforce ? new Date() : null,
     });
 
     const saved = await this.memberRepository.save(member);
@@ -207,6 +208,7 @@ export class MemberService {
         await transactionalEntityManager.save(profile);
         await transactionalEntityManager.update(Member, memberId, {
           role: MemberRoleEnum.WORKER,
+          serveInterestAt: null,
         });
       },
     );
@@ -324,7 +326,7 @@ export class MemberService {
           await transactionalEntityManager.update(
             Member,
             eligible.map((m) => m.id),
-            { role: MemberRoleEnum.WORKER },
+            { role: MemberRoleEnum.WORKER, serveInterestAt: null },
           );
         },
       );
@@ -624,7 +626,7 @@ export class MemberService {
 
     if (dto.firstname) member.firstname = dto.firstname;
     if (dto.lastname) member.lastname = dto.lastname;
-    if (dto.phoneNumber) member.phoneNumber = dto.phoneNumber;
+    if (dto.phoneNumber !== undefined) member.phoneNumber = dto.phoneNumber;
     if (dto.gender) member.gender = dto.gender;
     if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
     if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;
@@ -649,6 +651,44 @@ export class MemberService {
     return saved;
   }
 
+  async setServeInterest(
+    memberId: string,
+    interested: boolean,
+  ): Promise<Member> {
+    const member = await this.getById(memberId);
+    if (interested && member.role === MemberRoleEnum.WORKER) {
+      throw new BadRequestException('You are already serving as a worker.');
+    }
+    if (interested === !!member.serveInterestAt) return member;
+
+    member.serveInterestAt = interested ? new Date() : null;
+    const saved = await this.memberRepository.save(member);
+    this.auditLogService.log(
+      interested
+        ? 'MEMBER_SERVE_INTEREST_ADDED'
+        : 'MEMBER_SERVE_INTEREST_WITHDRAWN',
+      { actorId: memberId, targetId: memberId, targetEmail: saved.email },
+    );
+    return saved;
+  }
+
+  async dismissServeInterest(
+    memberId: string,
+    actorId: string,
+  ): Promise<Member> {
+    const member = await this.getById(memberId);
+    if (!member.serveInterestAt) return member;
+
+    member.serveInterestAt = null;
+    const saved = await this.memberRepository.save(member);
+    this.auditLogService.log('MEMBER_SERVE_INTEREST_DISMISSED', {
+      actorId,
+      targetId: memberId,
+      targetEmail: saved.email,
+    });
+    return saved;
+  }
+
   async updateMyProfile(
     memberId: string,
     dto: UpdateMyProfileDto,
@@ -662,12 +702,26 @@ export class MemberService {
 
     if (dto.firstname) member.firstname = dto.firstname;
     if (dto.lastname) member.lastname = dto.lastname;
-    if (dto.phoneNumber) member.phoneNumber = dto.phoneNumber;
+    if (dto.phoneNumber !== undefined) member.phoneNumber = dto.phoneNumber;
     if (dto.gender) member.gender = dto.gender;
     if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
     if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;
     if (dto.birthYear !== undefined) member.birthYear = dto.birthYear ?? null;
     if (dto.maritalStatus) member.maritalStatus = dto.maritalStatus;
+    if (dto.dateJoinedChurch !== undefined)
+      member.dateJoinedChurch = dto.dateJoinedChurch
+        ? new Date(dto.dateJoinedChurch)
+        : null;
+    if (dto.yearBornAgain !== undefined)
+      member.yearBornAgain = dto.yearBornAgain
+        ? new Date(`${dto.yearBornAgain}-01-01`)
+        : null;
+    if (dto.yearBaptized !== undefined)
+      member.yearBaptized = dto.yearBaptized
+        ? new Date(`${dto.yearBaptized}-01-01`)
+        : null;
+    if (dto.baptizedWithHolyGhost !== undefined)
+      member.baptizedWithHolyGhost = dto.baptizedWithHolyGhost;
 
     const saved = await this.memberRepository.save(member);
     this.auditLogService.log('MEMBER_UPDATED', {
@@ -865,6 +919,7 @@ export class MemberService {
       );
     }
     member.status = status;
+    if (status === MemberStatusEnum.INACTIVE) member.serveInterestAt = null;
     await this.memberRepository.save(member);
     this.logger.log(
       `Member ${memberId} status changed to ${status} by actor ${actorId}`,
@@ -1121,6 +1176,7 @@ export class MemberService {
     limit = 10,
     role?: MemberRoleEnum,
     search?: string,
+    wantsToServe?: boolean,
   ): Promise<PaginationResponseDto<Member>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
@@ -1139,6 +1195,12 @@ export class MemberService {
       .take(limit);
 
     if (role) qb.andWhere('member.role = :role', { role });
+    if (wantsToServe) {
+      qb.andWhere('member.serveInterestAt IS NOT NULL').andWhere(
+        'member.status = :activeStatus',
+        { activeStatus: MemberStatusEnum.ACTIVE },
+      );
+    }
     if (search) {
       qb.andWhere(
         '(LOWER(member.firstname) LIKE LOWER(:s) OR LOWER(member.lastname) LIKE LOWER(:s) OR LOWER(member.email) LIKE LOWER(:s) OR member.phoneNumber LIKE :s)',

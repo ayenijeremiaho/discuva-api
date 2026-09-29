@@ -59,8 +59,15 @@ export class MemberController {
     @Query('limit') limit = 10,
     @Query('role') role?: MemberRoleEnum,
     @Query('search') search?: string,
+    @Query('wantsToServe') wantsToServe?: string,
   ) {
-    const result = await this.memberService.getAll(+page, +limit, role, search);
+    const result = await this.memberService.getAll(
+      +page,
+      +limit,
+      role,
+      search,
+      wantsToServe === 'true',
+    );
     return UtilityService.getPaginationResponseDto(result, MemberDto);
   }
 
@@ -100,6 +107,26 @@ export class MemberController {
     @Body() dto: UpdateMyProfileDto,
   ): Promise<MemberDto> {
     const member = await this.memberService.updateMyProfile(user.id, dto);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('me/serve-interest')
+  async addServeInterest(@CurrentUser() user: MemberAuth): Promise<MemberDto> {
+    const member = await this.memberService.setServeInterest(user.id, true);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me/serve-interest')
+  async withdrawServeInterest(
+    @CurrentUser() user: MemberAuth,
+  ): Promise<MemberDto> {
+    const member = await this.memberService.setServeInterest(user.id, false);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
@@ -347,6 +374,19 @@ export class MemberController {
     @CurrentUser() user: MemberAuth,
   ): Promise<MemberDto> {
     const member = await this.memberService.removeMemberPhoto(id, user.id);
+    return plainToInstance(MemberDto, member, {
+      excludeExtraneousValues: true,
+    });
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Delete(':id/serve-interest')
+  async dismissServeInterest(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ): Promise<MemberDto> {
+    const member = await this.memberService.dismissServeInterest(id, user.id);
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });

@@ -148,6 +148,26 @@ describe('MemberService', () => {
       ).rejects.toThrow(ConflictException);
     });
 
+    it('records serve interest when joinWorkforce is sent at signup', async () => {
+      mockMemberRepo.exists.mockResolvedValue(false);
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed_pass');
+      mockMemberRepo.create.mockImplementation((m) => m);
+      mockMemberRepo.save.mockImplementation((m) =>
+        Promise.resolve({ id: 'uuid-1', ...m }),
+      );
+
+      await service.signup({
+        email: 'new@test.com',
+        firstname: 'john',
+        lastname: 'doe',
+        joinWorkforce: true,
+      } as any);
+
+      expect(mockMemberRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ serveInterestAt: expect.any(Date) }),
+      );
+    });
+
     it('should save member with MEMBER role and ACTIVE status on success', async () => {
       mockMemberRepo.exists.mockResolvedValue(false);
       jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed_pass');
@@ -378,6 +398,7 @@ describe('MemberService', () => {
       expect(mockTxManager.save).toHaveBeenCalledWith(workerProfile);
       expect(mockTxManager.update).toHaveBeenCalledWith(Member, 'member-1', {
         role: MemberRoleEnum.WORKER,
+        serveInterestAt: null,
       });
       expect(result.role).toBe(MemberRoleEnum.WORKER);
       // The subject must name the tenant's own church (resolved per-request
@@ -577,6 +598,7 @@ describe('MemberService', () => {
       ]);
       expect(mockTxManager.update).toHaveBeenCalledWith(Member, ['m1'], {
         role: MemberRoleEnum.WORKER,
+        serveInterestAt: null,
       });
     });
 
@@ -1096,6 +1118,25 @@ describe('MemberService', () => {
       );
     });
 
+    it('clears a pending serve request when deactivating', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        status: MemberStatusEnum.ACTIVE,
+        serveInterestAt: new Date(),
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      await service.changeStatus(
+        'member-1',
+        MemberStatusEnum.INACTIVE,
+        'actor-1',
+      );
+
+      expect(mockMemberRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ serveInterestAt: null }),
+      );
+    });
+
     it('should throw NotFoundException when member not found for status change', async () => {
       mockMemberRepo.findOne.mockResolvedValue(null);
 
@@ -1190,6 +1231,182 @@ describe('MemberService', () => {
       expect(result.firstname).toBe('New');
       expect(result.lastname).toBe('Name');
       expect(mockMemberRepo.save).toHaveBeenCalled();
+    });
+
+    it('clears the phone number when null is sent', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        phoneNumber: '+2348012345678',
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.updateMyProfile('member-1', {
+        phoneNumber: null,
+      });
+
+      expect(result.phoneNumber).toBeNull();
+    });
+
+    it('keeps the phone number when the field is omitted', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        phoneNumber: '+2348012345678',
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.updateMyProfile('member-1', {
+        firstname: 'New',
+      });
+
+      expect(result.phoneNumber).toBe('+2348012345678');
+    });
+  });
+
+  describe('updateMyProfile church journey', () => {
+    it('sets and clears church-journey fields', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        yearBaptized: new Date('2010-01-01'),
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.updateMyProfile('member-1', {
+        dateJoinedChurch: '2020-05-17',
+        yearBornAgain: '2008',
+        yearBaptized: null,
+        baptizedWithHolyGhost: true,
+      });
+
+      expect(result.dateJoinedChurch).toEqual(new Date('2020-05-17'));
+      expect(result.yearBornAgain).toEqual(new Date('2008-01-01'));
+      expect(result.yearBaptized).toBeNull();
+      expect(result.baptizedWithHolyGhost).toBe(true);
+    });
+  });
+
+  describe('setServeInterest', () => {
+    it('records interest for a member', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        serveInterestAt: null,
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.setServeInterest('member-1', true);
+
+      expect(result.serveInterestAt).toBeInstanceOf(Date);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_SERVE_INTEREST_ADDED',
+        expect.objectContaining({ targetId: 'member-1' }),
+      );
+    });
+
+    it('withdraws interest', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        serveInterestAt: new Date(),
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.setServeInterest('member-1', false);
+
+      expect(result.serveInterestAt).toBeNull();
+    });
+
+    it('is a no-op when already in the requested state', async () => {
+      const at = new Date('2026-01-01');
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        serveInterestAt: at,
+      });
+
+      const result = await service.setServeInterest('member-1', true);
+
+      expect(result.serveInterestAt).toBe(at);
+      expect(mockMemberRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a worker asking to serve', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.WORKER,
+        serveInterestAt: null,
+      });
+
+      await expect(service.setServeInterest('member-1', true)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('getAll wantsToServe filter', () => {
+    function listQb() {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it('returns only active members with a pending request', async () => {
+      const qb = listQb();
+
+      await service.getAll(1, 10, undefined, undefined, true);
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'member.serveInterestAt IS NOT NULL',
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'member.status = :activeStatus',
+        { activeStatus: MemberStatusEnum.ACTIVE },
+      );
+    });
+
+    it('adds no serve filter by default', async () => {
+      const qb = listQb();
+
+      await service.getAll(1, 10);
+
+      expect(qb.andWhere).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dismissServeInterest', () => {
+    it('clears the request and audits the admin', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        email: 'm@test.com',
+        serveInterestAt: new Date(),
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.dismissServeInterest('member-1', 'admin-1');
+
+      expect(result.serveInterestAt).toBeNull();
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_SERVE_INTEREST_DISMISSED',
+        expect.objectContaining({ actorId: 'admin-1', targetId: 'member-1' }),
+      );
+    });
+
+    it('does nothing when there is no request', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        serveInterestAt: null,
+      });
+
+      await service.dismissServeInterest('member-1', 'admin-1');
+
+      expect(mockMemberRepo.save).not.toHaveBeenCalled();
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
   });
 

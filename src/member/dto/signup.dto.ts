@@ -14,6 +14,10 @@ import {
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
 import { NormalizeEmail } from '../../utility/decorators/normalize-email.decorator';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 export class SignupDto {
   @IsString()
@@ -31,11 +35,8 @@ export class SignupDto {
   email: string;
 
   @IsOptional()
-  @IsString()
-  @Matches(/^\+?\d{7,20}$/, {
-    message: 'phoneNumber must be 7–20 digits, optionally prefixed with +',
-  })
-  @MaxLength(20)
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phoneNumber?: string;
 
   @IsOptional()

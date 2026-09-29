@@ -33,8 +33,8 @@ export class Member extends BaseEntity {
   @Column({ unique: true })
   email: string;
 
-  @Column({ nullable: true })
-  phoneNumber: string;
+  @Column({ type: 'varchar', nullable: true })
+  phoneNumber: string | null;
 
   @Exclude()
   @Column({ select: false })
@@ -81,6 +81,10 @@ export class Member extends BaseEntity {
 
   @Column({ nullable: true, type: 'date' })
   dateJoinedChurch: Date;
+
+  // Set when a member asks to serve in the workforce; cleared on promotion.
+  @Column({ type: 'timestamptz', nullable: true })
+  serveInterestAt: Date | null;
 
   @Column({ nullable: true, type: 'smallint', name: 'birthday_greeted_year' })
   birthdayGreetedYear: number | null;
