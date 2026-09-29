@@ -66,8 +66,10 @@ describe('TenantInfoController', () => {
     mockCls.get.mockReturnValue('tenant-1');
     mockTenantRepo.save.mockImplementation((t) => Promise.resolve(t));
     mockTenantAssetService.getOverrides.mockResolvedValue({});
-    mockConfigService.get.mockReturnValue(
-      'https://cdn.example.com/platform-default-logo.png',
+    mockConfigService.get.mockImplementation((key: string) =>
+      key === 'CURRENCY_LOCALE'
+        ? 'en-GB'
+        : 'https://cdn.example.com/platform-default-logo.png',
     );
 
     const module: TestingModule = await Test.createTestingModule({
@@ -106,6 +108,7 @@ describe('TenantInfoController', () => {
         pwaShortName: null,
         currency: 'NGN',
         timezone: 'UTC',
+        phoneRegion: 'GB',
         assets: { 'login-backdrop': 'https://cdn.example.com/login.jpg' },
       });
       expect(mockTenantAssetService.getOverrides).toHaveBeenCalledWith(

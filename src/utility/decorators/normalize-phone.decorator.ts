@@ -1,18 +1,13 @@
 import { Transform } from 'class-transformer';
+import { registerDecorator, type ValidationOptions } from 'class-validator';
 import {
+  getExampleNumber,
   parsePhoneNumberFromString,
   type CountryCode,
 } from 'libphonenumber-js';
+import examples from 'libphonenumber-js/mobile/examples';
 
-// This is a multi-tenant platform — CURRENCY_LOCALE/Tenant.currency are
-// both configurable per deployment (see TenantCurrencyService), so a
-// tenant is never assumed to be Nigerian. Nigeria is only the *fallback*
-// region used to interpret a LOCAL-format number with no country code
-// (e.g. "0801234567") when the caller doesn't supply a better one — any
-// number already carrying its own country code (typed with a leading
-// "+", or as a bare international dialing code) is parsed correctly
-// regardless of this default. Matches CURRENCY_LOCALE's own convenience
-// default ("en-NG") without hardcoding phone handling to Nigeria only.
+// Only used for local-format numbers; an explicit country code always wins.
 const FALLBACK_REGION: CountryCode = 'NG';
 
 export function phoneRegionFromLocale(locale?: string): CountryCode {
@@ -22,13 +17,7 @@ export function phoneRegionFromLocale(locale?: string): CountryCode {
   ) as CountryCode;
 }
 
-// Parses/normalizes a phone number to E.164 (e.g. "+2348012345678"),
-// using `defaultRegion` only to interpret a number with no explicit
-// country code — pass the tenant's own region when known (see
-// resolvePhoneRegion in form-submission.service.ts) rather than relying
-// on the Nigeria fallback for every tenant. Returns null for anything
-// that doesn't parse as a valid number for its (explicit or assumed)
-// country — never silently mangled into something else.
+// Returns E.164 (e.g. "+2348012345678"), or null if not a valid number.
 export function normalizePhoneNumber(
   raw: string,
   defaultRegion: CountryCode = FALLBACK_REGION,
@@ -40,16 +29,49 @@ export function normalizePhoneNumber(
   return parsed?.isValid() ? parsed.number : null;
 }
 
-/**
- * class-transformer decorator counterpart to normalizePhoneNumber, for use
- * on a fixed DTO property (e.g. @IsString() @NormalizePhone() phoneNumber).
- * Leaves the raw value untouched if it doesn't normalize — validation
- * decorators on the property are what should reject it, not this.
- */
-export function NormalizePhone(defaultRegion?: CountryCode) {
-  return Transform(({ value }) =>
-    typeof value === 'string'
-      ? (normalizePhoneNumber(value, defaultRegion) ?? value)
-      : value,
-  );
+// Read per request, not at import, so env is loaded by then.
+function deploymentPhoneRegion(): CountryCode {
+  return phoneRegionFromLocale(process.env.CURRENCY_LOCALE);
+}
+
+// Blank → undefined (skipped by @IsOptional()), or null with clearable to erase a stored number.
+export function NormalizePhone(
+  options: { defaultRegion?: CountryCode; clearable?: boolean } = {},
+) {
+  return Transform(({ value }) => {
+    if (typeof value !== 'string') return value;
+    if (!value.trim()) return options.clearable ? null : undefined;
+    return (
+      normalizePhoneNumber(
+        value,
+        options.defaultRegion ?? deploymentPhoneRegion(),
+      ) ?? value
+    );
+  });
+}
+
+export function invalidPhoneMessage(
+  region: CountryCode = deploymentPhoneRegion(),
+): string {
+  const example = getExampleNumber(region, examples)?.formatNational();
+  const country = new Intl.DisplayNames(['en'], { type: 'region' }).of(region);
+  return `Please enter a valid phone number${example ? ` (e.g. ${example})` : ''}, or include the country code (e.g. ${region === 'GB' ? '+1' : '+44'}…) for numbers outside ${country ?? region}.`;
+}
+
+export function IsNormalizedPhone(validationOptions?: ValidationOptions) {
+  return (object: object, propertyName: string) => {
+    registerDecorator({
+      name: 'isNormalizedPhone',
+      target: object.constructor,
+      propertyName,
+      options: {
+        message: () => invalidPhoneMessage(),
+        ...validationOptions,
+      },
+      validator: {
+        validate: (value: unknown) =>
+          typeof value === 'string' && normalizePhoneNumber(value) === value,
+      },
+    });
+  };
 }

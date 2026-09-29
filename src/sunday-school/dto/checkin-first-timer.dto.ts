@@ -1,4 +1,8 @@
 import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 // Deliberately slimmer than CreateFirstTimerDto — a teacher checking someone
 // in mid-class has name and phone, not the fuller front-desk intake fields
@@ -16,9 +20,8 @@ export class CheckInFirstTimerDto {
   @MaxLength(100)
   lastname: string;
 
-  @IsString()
-  @MinLength(7)
-  @MaxLength(20)
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phone: string;
 
   @IsOptional()

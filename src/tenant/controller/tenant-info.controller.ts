@@ -30,6 +30,7 @@ import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
+import { phoneRegionFromLocale } from '../../utility/decorators/normalize-phone.decorator';
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -199,6 +200,10 @@ export class TenantInfoController {
       pwaShortName: tenant.pwaShortName,
       currency: tenant.currency,
       timezone: tenant.timezone,
+      // Same region the API uses to parse local-format phone numbers.
+      phoneRegion: phoneRegionFromLocale(
+        this.config.get<string>('CURRENCY_LOCALE', 'en-NG'),
+      ),
       assets: await this.tenantAssetService.getOverrides(tenant.id),
     };
   }

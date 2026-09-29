@@ -10,6 +10,10 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { FirstTimerSourceEnum } from '../enums/follow-up.enum';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 // @IsOptional() only skips undefined/null, not "" — a picker cleared back to
 // its empty state sends "" over the wire, which would otherwise fail
@@ -28,9 +32,8 @@ export class CreateFirstTimerDto {
   @MaxLength(100)
   lastname: string;
 
-  @IsString()
-  @MinLength(7)
-  @MaxLength(20)
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phone: string;
 
   @IsOptional()

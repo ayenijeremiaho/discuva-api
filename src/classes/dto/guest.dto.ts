@@ -4,12 +4,15 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Matches,
   MaxLength,
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 // Either enrolls an existing guest (guestId set — the "Existing guest"
 // search path in the admin UI) or creates a new one from the profile
@@ -38,10 +41,8 @@ export class EnrollGuestDto {
   email?: string;
 
   @IsOptional()
-  @IsString()
-  @Matches(/^\+?\d{7,20}$/, {
-    message: 'phone must be 7–20 digits, optionally prefixed with +',
-  })
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phone?: string;
 
   @IsOptional()
@@ -80,10 +81,8 @@ export class BulkGuestEntryDto {
   email: string;
 
   @IsOptional()
-  @IsString()
-  @Matches(/^\+?\d{7,20}$/, {
-    message: 'phone must be 7–20 digits, optionally prefixed with +',
-  })
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phone?: string;
 }
 

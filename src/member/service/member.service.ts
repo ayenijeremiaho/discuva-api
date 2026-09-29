@@ -624,7 +624,7 @@ export class MemberService {
 
     if (dto.firstname) member.firstname = dto.firstname;
     if (dto.lastname) member.lastname = dto.lastname;
-    if (dto.phoneNumber) member.phoneNumber = dto.phoneNumber;
+    if (dto.phoneNumber !== undefined) member.phoneNumber = dto.phoneNumber;
     if (dto.gender) member.gender = dto.gender;
     if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
     if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;
@@ -662,7 +662,7 @@ export class MemberService {
 
     if (dto.firstname) member.firstname = dto.firstname;
     if (dto.lastname) member.lastname = dto.lastname;
-    if (dto.phoneNumber) member.phoneNumber = dto.phoneNumber;
+    if (dto.phoneNumber !== undefined) member.phoneNumber = dto.phoneNumber;
     if (dto.gender) member.gender = dto.gender;
     if (dto.birthDay !== undefined) member.birthDay = dto.birthDay;
     if (dto.birthMonth !== undefined) member.birthMonth = dto.birthMonth;

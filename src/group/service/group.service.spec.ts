@@ -389,7 +389,9 @@ describe('GroupService', () => {
           { entries: [{ phoneNumber: '07012' }] },
           'admin-1',
         ),
-      ).rejects.toThrow('Invalid phone number');
+      ).rejects.toThrow(
+        '"07012" is not valid. Please enter a valid phone number',
+      );
 
       expect(mockGroupMemberRepo.save).not.toHaveBeenCalled();
     });
@@ -416,13 +418,20 @@ describe('GroupService', () => {
         'admin-1',
       );
 
-      expect(result).toEqual({ added: 1, skipped: 0 });
+      expect(result).toEqual({ added: 1, skipped: 0, invalid: 0 });
       expect(mockGroupMemberRepo.save).toHaveBeenCalledWith([
         expect.objectContaining({
           phoneNumber: '+2348012345678',
           label: 'Jane Doe',
         }),
       ]);
+      expect(mockAuditLogService.log).toHaveBeenCalledTimes(1);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'GROUP_MEMBERS_ADDED',
+        expect.objectContaining({
+          metadata: expect.objectContaining({ source: 'first-timers' }),
+        }),
+      );
     });
 
     it('should return zero counts without touching group_members when nothing has a phone', async () => {
@@ -437,8 +446,82 @@ describe('GroupService', () => {
         'admin-1',
       );
 
-      expect(result).toEqual({ added: 0, skipped: 0 });
+      expect(result).toEqual({ added: 0, skipped: 0, invalid: 0 });
       expect(mockGroupMemberRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('skips first-timers with invalid legacy phones instead of failing the import', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'g-1' });
+      const ftQb = makeQb();
+      ftQb.getMany.mockResolvedValue([
+        { firstname: 'Jane', lastname: 'Doe', phone: '08012345678' },
+        { firstname: 'Bad', lastname: 'Number', phone: '0801234567' },
+      ]);
+      mockFirstTimerRepo.createQueryBuilder.mockReturnValue(ftQb);
+      const gmQb = makeQb();
+      gmQb.getRawMany.mockResolvedValue([]);
+      mockGroupMemberRepo.createQueryBuilder.mockReturnValue(gmQb);
+      mockGroupMemberRepo.create.mockImplementation((x) => x);
+      mockGroupMemberRepo.save.mockResolvedValue([]);
+
+      const result = await service.addFirstTimersToGroup(
+        'g-1',
+        { dateFrom: '2026-01-01', dateTo: '2026-01-31' },
+        'admin-1',
+      );
+
+      expect(result).toEqual({ added: 1, skipped: 0, invalid: 1 });
+      expect(mockGroupMemberRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({ phoneNumber: '+2348012345678' }),
+      ]);
+    });
+
+    it('returns the invalid count when every first-timer phone is invalid', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'g-1' });
+      const ftQb = makeQb();
+      ftQb.getMany.mockResolvedValue([
+        { firstname: 'Bad', lastname: 'Number', phone: '12345' },
+      ]);
+      mockFirstTimerRepo.createQueryBuilder.mockReturnValue(ftQb);
+
+      const result = await service.addFirstTimersToGroup(
+        'g-1',
+        { dateFrom: '2026-01-01', dateTo: '2026-01-31' },
+        'admin-1',
+      );
+
+      expect(result).toEqual({ added: 0, skipped: 0, invalid: 1 });
+      expect(mockGroupMemberRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('clearEntries', () => {
+    it('removes every entry in the group and audits it once', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({ id: 'g-1', name: 'Callers' });
+      mockGroupMemberRepo.delete.mockResolvedValue({ affected: 42 });
+
+      const result = await service.clearEntries('g-1', 'admin-1');
+
+      expect(result).toEqual({ removed: 42 });
+      expect(mockGroupMemberRepo.delete).toHaveBeenCalledWith({
+        group: { id: 'g-1' },
+      });
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'GROUP_MEMBERS_REMOVED',
+        expect.objectContaining({
+          targetId: 'g-1',
+          metadata: { all: true, removed: 42 },
+        }),
+      );
+    });
+
+    it('throws NotFoundException for an unknown group', async () => {
+      mockGroupRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.clearEntries('g-x', 'admin-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockGroupMemberRepo.delete).not.toHaveBeenCalled();
     });
   });
 

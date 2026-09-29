@@ -1191,6 +1191,34 @@ describe('MemberService', () => {
       expect(result.lastname).toBe('Name');
       expect(mockMemberRepo.save).toHaveBeenCalled();
     });
+
+    it('clears the phone number when null is sent', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        phoneNumber: '+2348012345678',
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.updateMyProfile('member-1', {
+        phoneNumber: null,
+      });
+
+      expect(result.phoneNumber).toBeNull();
+    });
+
+    it('keeps the phone number when the field is omitted', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        phoneNumber: '+2348012345678',
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.updateMyProfile('member-1', {
+        firstname: 'New',
+      });
+
+      expect(result.phoneNumber).toBe('+2348012345678');
+    });
   });
 
   describe('updateMyPhoto', () => {

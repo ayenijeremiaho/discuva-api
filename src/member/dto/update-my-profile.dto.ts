@@ -4,13 +4,16 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  Matches,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 // Deliberately excludes email (handled via the OTP-gated email-change flow)
 // and church-record fields (dateJoinedChurch, yearBornAgain, yearBaptized,
@@ -29,12 +32,9 @@ export class UpdateMyProfileDto {
   lastname?: string;
 
   @IsOptional()
-  @IsString()
-  @Matches(/^\+?\d{7,20}$/, {
-    message: 'phoneNumber must be 7–20 digits, optionally prefixed with +',
-  })
-  @MaxLength(20)
-  phoneNumber?: string;
+  @NormalizePhone({ clearable: true })
+  @IsNormalizedPhone()
+  phoneNumber?: string | null;
 
   @IsOptional()
   @IsEnum(GenderEnum)

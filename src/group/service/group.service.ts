@@ -26,6 +26,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { ConfigService } from '@nestjs/config';
 import type { CountryCode } from 'libphonenumber-js';
 import {
+  invalidPhoneMessage,
   normalizePhoneNumber,
   phoneRegionFromLocale,
 } from '../../utility/decorators/normalize-phone.decorator';
@@ -304,6 +305,8 @@ export class GroupService {
     groupId: string,
     dto: AddPhoneGroupMembersDto,
     actorId: string,
+    // Off for the first-timer import, which logs its own entry.
+    audit = true,
   ): Promise<{ added: number; skipped: number }> {
     const group = await this.getOrThrow(groupId);
     const normalizedEntries = dto.entries.map((entry) => {
@@ -313,7 +316,7 @@ export class GroupService {
       );
       if (!phoneNumber) {
         throw new BadRequestException(
-          `Invalid phone number "${entry.phoneNumber}" for ${this.defaultPhoneRegion}. Use a valid local number or include its country code.`,
+          `"${entry.phoneNumber}" is not valid. ${invalidPhoneMessage(this.defaultPhoneRegion)}`,
         );
       }
       return { ...entry, phoneNumber };
@@ -353,12 +356,13 @@ export class GroupService {
           }),
         ),
       );
-      this.auditLogService.log('GROUP_MEMBERS_ADDED', {
-        actorId,
-        targetId: groupId,
-        targetName: group.name,
-        metadata: { added: toAdd.length, skipped, source: 'manual-phone' },
-      });
+      if (audit)
+        this.auditLogService.log('GROUP_MEMBERS_ADDED', {
+          actorId,
+          targetId: groupId,
+          targetName: group.name,
+          metadata: { added: toAdd.length, skipped, source: 'manual-phone' },
+        });
     }
 
     this.logger.log(
@@ -371,7 +375,7 @@ export class GroupService {
     groupId: string,
     dto: AddFirstTimersToGroupDto,
     actorId: string,
-  ): Promise<{ added: number; skipped: number }> {
+  ): Promise<{ added: number; skipped: number; invalid: number }> {
     const group = await this.getOrThrow(groupId);
 
     const firstTimers = await this.firstTimerRepo
@@ -380,18 +384,27 @@ export class GroupService {
       .andWhere('ft.createdAt <= :dateTo', { dateTo: dto.dateTo })
       .getMany();
 
-    const entries = firstTimers
-      .filter((ft) => !!ft.phone)
-      .map((ft) => ({
-        phoneNumber: ft.phone,
-        label: `${ft.firstname} ${ft.lastname}`.trim(),
-      }));
+    const withPhone = firstTimers.filter((ft) => !!ft.phone);
+    // Legacy rows may predate phone validation; skip them rather than fail the whole import.
+    const entries = withPhone.flatMap((ft) => {
+      const phoneNumber = normalizePhoneNumber(
+        ft.phone,
+        this.defaultPhoneRegion,
+      );
+      return phoneNumber
+        ? [{ phoneNumber, label: `${ft.firstname} ${ft.lastname}`.trim() }]
+        : [];
+    });
+    const invalid = withPhone.length - entries.length;
 
     if (entries.length === 0) {
-      return { added: 0, skipped: 0 };
+      return { added: 0, skipped: 0, invalid };
     }
 
-    const result = await this.addPhoneEntries(groupId, { entries }, actorId);
+    const result = {
+      ...(await this.addPhoneEntries(groupId, { entries }, actorId, false)),
+      invalid,
+    };
     this.auditLogService.log('GROUP_MEMBERS_ADDED', {
       actorId,
       targetId: groupId,
@@ -399,6 +412,7 @@ export class GroupService {
       metadata: {
         added: result.added,
         skipped: result.skipped,
+        invalid,
         source: 'first-timers',
         dateFrom: dto.dateFrom,
         dateTo: dto.dateTo,
@@ -447,6 +461,26 @@ export class GroupService {
       metadata: { entryIds: dto.entryIds },
     });
     this.logger.log(`Bulk remove from group ${groupId}: ${removed} removed`);
+    return { removed };
+  }
+
+  async clearEntries(
+    groupId: string,
+    actorId: string,
+  ): Promise<{ removed: number }> {
+    const group = await this.getOrThrow(groupId);
+
+    const result = await this.groupMemberRepo.delete({
+      group: { id: groupId },
+    });
+    const removed = result.affected ?? 0;
+    this.auditLogService.log('GROUP_MEMBERS_REMOVED', {
+      actorId,
+      targetId: groupId,
+      targetName: group.name,
+      metadata: { all: true, removed },
+    });
+    this.logger.log(`Cleared group ${groupId}: ${removed} removed`);
     return { removed };
   }
 

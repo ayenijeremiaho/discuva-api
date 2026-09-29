@@ -8,6 +8,10 @@ import {
   MinLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 // Same as create-first-timer.dto.ts — @IsOptional() only skips
 // undefined/null, not "".
@@ -33,9 +37,8 @@ export class UpdateFirstTimerDto {
   lastname?: string;
 
   @IsOptional()
-  @IsString()
-  @MinLength(7)
-  @MaxLength(20)
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phone?: string;
 
   @IsOptional()

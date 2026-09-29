@@ -127,9 +127,14 @@ export class SmsService {
     const invalidRecipients = normalizedRecipients.filter(
       (recipient) => !recipient.normalized,
     );
-    const validRecipients = normalizedRecipients
-      .map((recipient) => recipient.normalized)
-      .filter((recipient): recipient is string => recipient !== null);
+    // Deduped after normalization so "0801…" and "+234801…" aren't both sent.
+    const validRecipients = [
+      ...new Set(
+        normalizedRecipients
+          .map((recipient) => recipient.normalized)
+          .filter((recipient): recipient is string => recipient !== null),
+      ),
+    ];
     const failures: string[] = invalidRecipients.length
       ? [
           `${invalidRecipients.length} recipient phone number(s) are invalid. Use a valid national number for ${this.defaultPhoneRegion} or include the international country code.`,

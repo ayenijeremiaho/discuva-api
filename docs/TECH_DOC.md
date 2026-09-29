@@ -3266,12 +3266,13 @@ fixed group of people without re-selecting individuals each time. A group's memb
 | GET | `/groups/:id/members` | Paginated roster (`page`, `limit`; can grow large, mirrors the Workers-by-Department policy) — `leftJoin`s the member relation so phone-only rows are included, not just real members |
 | POST | `/groups/:id/members` | Add a single real member (`memberId`) |
 | POST | `/groups/:id/members/bulk-add` | Add multiple real members at once (`memberIds: string[]`); returns `{added, skipped}` — duplicates are skipped, not errored |
-| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; numbers normalize to E.164 using `CURRENCY_LOCALE`; invalid entries are rejected. Returns `{added, skipped}` — duplicate normalized phone numbers within the group are skipped |
-| POST | `/groups/:id/members/first-timers` | Bulk-import every `FirstTimer` captured within a date range as phone-only entries (label = their name). Body: `{ dateFrom, dateTo }` (ISO 8601); returns `{added, skipped}` |
+| POST | `/groups/:id/members/phone` | Add phone-only entries directly. Body: `{ entries: { phoneNumber, label? }[] }`; numbers normalize to E.164 using `CURRENCY_LOCALE`; any invalid entry rejects the batch with `400` naming the number (`"<number>" is not valid. <invalidPhoneMessage>`). Returns `{added, skipped}` — duplicate normalized phone numbers within the group are skipped |
+| POST | `/groups/:id/members/first-timers` | Bulk-import every `FirstTimer` captured within a date range as phone-only entries (label = their name). Body: `{ dateFrom, dateTo }` (ISO 8601); returns `{added, skipped, invalid}` — first-timers whose stored phone doesn't normalize are counted in `invalid` and skipped, never failing the import |
 | DELETE | `/groups/:id/members/:memberId` | Remove a single real member by member id (kept for backward compatibility — cannot address phone-only rows, which have no member id) |
 | POST | `/groups/:id/members/bulk-remove` | Remove multiple real members at once by member id (`memberIds: string[]`); returns `{removed}` |
 | DELETE | `/groups/:id/entries/:entryId` | Remove a single roster entry by its own `GroupMember` row id — works for both real members and phone-only entries |
 | POST | `/groups/:id/entries/bulk-remove` | Remove multiple roster entries at once by row id (`entryIds: string[]`); returns `{removed}` |
+| DELETE | `/groups/:id/entries` | Remove every entry (members and phone-only) from the contact list, keeping the group; returns `{removed}`. Backs the admin roster's "Select all N in this list" |
 
 **Resolving a group's phone numbers for SMS** (`AnnouncementService.resolveGroupPhoneNumbers`, used by both regular
 announcement `sendViaSms` and the dedicated SMS-only broadcast): unions two sources — active Members in the group
@@ -3527,6 +3528,9 @@ here. This backend only ever knows what's been explicitly overridden.
 - `GET /tenant/info`'s response gained an `assets: Record<assetKey, imageUrl>` field — only overridden keys appear
   in it, never the full catalog and never a default. Bundled into the same call the member app already makes on
   startup rather than a second round trip.
+- `GET /tenant/info`'s response includes `phoneRegion` (ISO 3166 alpha-2, e.g. `NG`) — the region the API uses to
+  parse local-format phone numbers (from `CURRENCY_LOCALE`), so client phone pickers default to the same country the
+  server validates against.
 - `GET /tenant/info`'s response also gained a plain `subdomain: string` field — not sensitive (already visible in
   every discuva-member URL, and the admin types it in at login), added specifically so discuva-admin has a
   client-side "which tenant am I" signal for its Games presentation-screen fix (see Games Module): that route is
@@ -4262,9 +4266,41 @@ derived once per `FormSubmissionService` instance from the `CURRENCY_LOCALE` env
 `PdfService`, `EventReminderService`), not a Nigeria-specific hardcode. Anything that doesn't parse as valid for
 its (explicit or assumed) country returns `null` (a *required* PHONE field that fails to normalize is rejected
 with a 400 — never silently mangled or dropped). The normalized value is what's actually stored in `answers`, so
-exports, analytics, and dedup all ever see one canonical shape for the same real number. This is the first
-phone-normalization logic anywhere in the codebase — `Member.phoneNumber` still stores whatever raw string was
-typed, unaffected by this.
+exports, analytics, and dedup all ever see one canonical shape for the same real number. The same rule applies to
+every phone field on the API — see **Phone Number Storage (E.164)** below.
+
+**Phone Number Storage (E.164):** every phone number written through the API is stored in E.164 (`+` + country code
++ national number, e.g. `+2348012345678`). Clients may send local format (`08012345678`), a bare country code
+(`2348012345678`) or spaced/dashed input — the DTO decorators `@NormalizePhone() @IsNormalizedPhone()` convert it,
+using the `CURRENCY_LOCALE` region (default `NG`) for numbers without a country code. Anything that doesn't parse as a
+valid number for its country is rejected with `400` and a region-aware message built from `CURRENCY_LOCALE`, e.g.
+`Please enter a valid phone number (e.g. 0802 123 4567), or include the country code (e.g. +44…) for numbers outside
+Nigeria.` (`invalidPhoneMessage()`; clients should show it as-is). A blank or whitespace-only phone is treated as
+not provided — accepted on optional fields, rejected with the same message on required ones (first-timer phone).
+Exception: on `PATCH /members/me` and `PATCH /members/:id`, `phoneNumber: ""` or `null` **clears** the stored number
+(`@NormalizePhone({ clearable: true })`); omitting the field leaves it unchanged. Length/prefix rules come from `libphonenumber-js` per country — never hardcode digit
+counts.
+
+| DTO | Field | Endpoint(s) |
+|---|---|---|
+| `SignupDto` | `phoneNumber` | `POST /auth/signup`, `POST /members` (admin create) |
+| `UpdateMemberDto` | `phoneNumber` | `PATCH /members/:id` |
+| `UpdateMyProfileDto` | `phoneNumber` | `PATCH /members/me` |
+| `CreateGuardianDto` | `phoneNumber` | `POST /children-church/children/:id/guardians` |
+| `EnrollGuestDto` / `BulkGuestEntryDto` | `phone` | `POST /classes/enroll/guest`, `POST /classes/enroll/guests/bulk` |
+| `CreateFirstTimerDto` / `UpdateFirstTimerDto` | `phone` | `POST /follow-up/public/first-timer`, `POST`/`PATCH` `/follow-up/first-timers[/:id]`, `POST`/`PATCH` `/admin/follow-up/first-timers[/:id]` |
+| `CheckInFirstTimerDto` | `phone` | `POST /sunday-school/sessions/:id/checkin-first-timer` |
+| `CreateConvertDto` | `phone` | `POST /evangelism/converts` |
+
+Also normalized in-service: member bulk import, group phone-only entries, `PHONE` form fields, and SMS recipients at
+send time (recipients are deduped after normalization, so `0801…` and `+234801…` send once). Not normalized: `ExternalPayee.contactPhone` (finance contact, never messaged).
+
+**Backfilling existing data:** `npm run phones:normalize:all-tenants` (prod: `phones:normalize:all-tenants:prod`) walks
+every active tenant and rewrites `members.phone_number`, `group_members.phone_number`, `child_guardians.phone_number`,
+`first_timers.phone`, `converts.phone` and `guests.phone` to E.164. Dry run by default — prints per-tenant counts and
+every row needing manual review; pass `-- --apply` to write. Unparseable numbers are left untouched and reported;
+a `group_members` row whose normalized number already exists in the same group is skipped and reported (never merged
+or deleted). Idempotent — safe to re-run.
 
 **Form branding — cover image and logo:** `Form.coverImageUrl`/`coverImagePublicId` and `Form.logoUrl`/
 `logoPublicId` (mirrors `Tenant.logoUrl`/`logoPublicId`'s shape) are set via dedicated upload endpoints (see table

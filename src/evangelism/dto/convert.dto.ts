@@ -6,6 +6,10 @@ import {
   IsUUID,
 } from 'class-validator';
 import { ConvertStatusEnum } from '../enum/convert-status.enum';
+import {
+  IsNormalizedPhone,
+  NormalizePhone,
+} from '../../utility/decorators/normalize-phone.decorator';
 
 export class CreateConvertDto {
   @IsNotEmpty()
@@ -13,7 +17,8 @@ export class CreateConvertDto {
   name: string;
 
   @IsOptional()
-  @IsString()
+  @NormalizePhone()
+  @IsNormalizedPhone()
   phone?: string;
 
   @IsOptional()

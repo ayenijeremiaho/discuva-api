@@ -154,6 +154,15 @@ export class GroupController {
   }
 
   @RequiresPermission(AdminPermission.GROUPS_WRITE)
+  @Delete(':id/entries')
+  clearEntries(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.groupService.clearEntries(id, user.id);
+  }
+
+  @RequiresPermission(AdminPermission.GROUPS_WRITE)
   @Delete(':id/entries/:entryId')
   removeEntry(
     @Param('id', ParseUUIDPipe) id: string,
