@@ -13,6 +13,13 @@ import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 
+// Subscription was created with a different VAPID key, so it can never be delivered with the current one.
+function isKeyMismatch(status: number | undefined, body: string): boolean {
+  return (
+    status === 403 && /VapidPkHashMismatch|do(?:es)? not correspond/i.test(body)
+  );
+}
+
 @Injectable()
 @Processor('push-notifications')
 export class PushNotificationProcessor {
@@ -51,14 +58,18 @@ export class PushNotificationProcessor {
       );
       this.cacheService.set(idempotencyKey, '1', 86_400);
     } catch (err: any) {
-      if (err?.statusCode === 410 || err?.statusCode === 404) {
+      const status: number | undefined = err?.statusCode;
+      const body = String(err?.body ?? '').slice(0, 300);
+      if (status === 410 || status === 404 || isKeyMismatch(status, body)) {
         await this.subRepo.delete({ memberId });
         this.logger.warn(
-          `Removed stale push subscription for member ${memberId}`,
+          `Removed unusable push subscription for member ${memberId} (${status}${body ? `: ${body}` : ''})`,
         );
         return;
       }
-      throw err;
+      throw new Error(
+        `Push service responded ${status ?? 'with an error'}${body ? `: ${body}` : ''}`,
+      );
     }
   }
 

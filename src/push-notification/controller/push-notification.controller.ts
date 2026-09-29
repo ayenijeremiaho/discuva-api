@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
@@ -16,6 +17,12 @@ import { SubscribePushDto } from '../dto/push-notification.dto';
 @Controller('notifications')
 export class PushNotificationController {
   constructor(private readonly pushService: PushNotificationService) {}
+
+  // Clients subscribe with this key; a copy baked into the client drifted from the server's pair once.
+  @Get('vapid-public-key')
+  vapidPublicKey(): { publicKey: string } {
+    return { publicKey: this.pushService.getPublicKey() };
+  }
 
   @Post('subscribe')
   @HttpCode(HttpStatus.NO_CONTENT)

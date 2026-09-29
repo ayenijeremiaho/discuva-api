@@ -31160,6 +31160,33 @@
       "name": "Push Notifications",
       "item": [
         {
+          "name": "Get VAPID Public Key",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/notifications/vapid-public-key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notifications",
+                "vapid-public-key"
+              ]
+            },
+            "description": "JwtAuthGuard. The server's VAPID public key \u2014 pass it (base64url-decoded) as applicationServerKey to pushManager.subscribe(). Using any other key makes Apple/FCM reject every send."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"publicKey\": \"BHij...\" } }"
+            }
+          ]
+        },
+        {
           "name": "Subscribe",
           "request": {
             "method": "POST",

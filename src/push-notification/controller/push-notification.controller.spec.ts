@@ -9,6 +9,7 @@ describe('PushNotificationController', () => {
   const mockPushService = {
     subscribe: jest.fn().mockResolvedValue(undefined),
     unsubscribe: jest.fn().mockResolvedValue(undefined),
+    getPublicKey: jest.fn().mockReturnValue('server-public-key'),
   };
 
   beforeEach(async () => {
@@ -31,6 +32,12 @@ describe('PushNotificationController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  it("returns the server's VAPID public key", () => {
+    expect(controller.vapidPublicKey()).toEqual({
+      publicKey: 'server-public-key',
+    });
   });
 
   describe('subscribe', () => {

@@ -37,6 +37,10 @@ export class PushNotificationService implements OnModuleInit {
     );
   }
 
+  getPublicKey(): string {
+    return this.config.get<string>('VAPID_PUBLIC_KEY');
+  }
+
   async subscribe(memberId: string, dto: SubscribePushDto): Promise<void> {
     await this.subRepo.delete({ memberId });
     await this.subRepo.save(
