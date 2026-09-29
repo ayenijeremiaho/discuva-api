@@ -11,6 +11,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 
 const mockAdminRepo = {
+  update: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn(),
   create: jest.fn(),
@@ -142,6 +143,23 @@ describe('AdminService', () => {
       mockAdminRepo.findOne.mockResolvedValue(mockAdmin);
       const result = await service.findById('admin-1');
       expect(result).toEqual(mockAdmin);
+    });
+  });
+
+  describe('updateFavouritePages', () => {
+    it('saves the pages in order without duplicates', async () => {
+      mockAdminRepo.update.mockResolvedValue({ affected: 1 });
+
+      const result = await service.updateFavouritePages('admin-1', [
+        '/members',
+        '/finances',
+        '/members',
+      ]);
+
+      expect(mockAdminRepo.update).toHaveBeenCalledWith('admin-1', {
+        favouritePages: ['/members', '/finances'],
+      });
+      expect(result).toEqual({ favouritePages: ['/members', '/finances'] });
     });
   });
 

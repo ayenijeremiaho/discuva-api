@@ -8,10 +8,15 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { AdminService } from '../service/admin.service';
-import { GrantAdminDto, UpdateAdminUserDto } from '../dto/admin-user.dto';
+import {
+  GrantAdminDto,
+  UpdateAdminUserDto,
+  UpdateFavouritePagesDto,
+} from '../dto/admin-user.dto';
 import { AdminGuard } from '../guard/admin.guard';
 import { RequiresPermission } from '../decorator/requires-permission.decorator';
 import { AdminPermission } from '../enum/admin-permission.enum';
@@ -34,6 +39,14 @@ export class AdminController {
   @Get('me')
   getMe(@CurrentAdmin() admin: Admin) {
     return this.adminService.getMyProfile(admin.id);
+  }
+
+  @Put('me/favourite-pages')
+  updateFavouritePages(
+    @CurrentAdmin() admin: Admin,
+    @Body() dto: UpdateFavouritePagesDto,
+  ) {
+    return this.adminService.updateFavouritePages(admin.id, dto.pages);
   }
 
   @RequiresPermission(AdminPermission.ADMIN_READ)

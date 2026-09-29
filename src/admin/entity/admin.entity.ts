@@ -31,4 +31,8 @@ export class Admin extends BaseEntity {
 
   @Column({ default: true })
   isActive: boolean;
+
+  // Admin-portal routes pinned to the dashboard's Quick Access, in the admin's own order.
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  favouritePages: string[];
 }
