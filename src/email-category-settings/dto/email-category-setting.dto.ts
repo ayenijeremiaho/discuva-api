@@ -1,9 +1,14 @@
-import { IsBoolean, IsNotEmpty } from 'class-validator';
+import { IsBoolean, IsOptional, ValidateIf } from 'class-validator';
 
 export class UpdateEmailCategorySettingDto {
+  // At least one switch must be sent.
+  @ValidateIf((o: UpdateEmailCategorySettingDto) => o.pushEnabled === undefined)
   @IsBoolean()
-  @IsNotEmpty()
-  enabled: boolean;
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  pushEnabled?: boolean;
 }
 
 export class EmailCategorySettingResponseDto {
@@ -11,4 +16,7 @@ export class EmailCategorySettingResponseDto {
   label: string;
   description: string;
   enabled: boolean;
+  // Whether any push notification belongs to this category.
+  hasPush: boolean;
+  pushEnabled: boolean;
 }

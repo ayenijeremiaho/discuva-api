@@ -43,6 +43,7 @@ import {
   withMemberNamesList,
   ServiceProgrammeSlotWithNames,
 } from '../util/slot-display';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 export type ServiceProgrammeWithSummary = ServiceProgramme & {
   serviceSlotId?: string;
@@ -98,6 +99,30 @@ export interface UpcomingProgrammeView {
   // whoever has their own slot in it, same as MyAssignment.sessionCode.
   sessionCode: string | null;
   slots: UpcomingProgrammeSlotView[];
+}
+
+function slotAssignmentPush(
+  line: {
+    serviceSlotName: string;
+    slotType: string;
+    serviceDate?: string | null;
+    serviceTime?: string | null;
+  },
+  isBackup: boolean,
+) {
+  let when = '';
+  if (line.serviceDate) when += ` on ${line.serviceDate}`;
+  if (line.serviceDate && line.serviceTime) when += ` at ${line.serviceTime}`;
+  return {
+    key: isBackup
+      ? PushNotificationKey.SERVICE_SLOT_BACKUP
+      : PushNotificationKey.SERVICE_SLOT_ASSIGNED,
+    vars: {
+      service_name: line.serviceSlotName,
+      slot_type: line.slotType,
+      when,
+    },
+  };
 }
 
 @Injectable()
@@ -796,18 +821,12 @@ export class ServiceProgrammeService {
       }
     }
 
-    let pushBody = `${slotType} — ${serviceSlotName}`;
-    if (serviceDate) pushBody += ` on ${serviceDate}`;
-    if (serviceDate && serviceTime) pushBody += ` at ${serviceTime}`;
-
     this.notificationDispatchService.notifyMember({
       category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
       email,
       push: {
         memberIds: [member.id],
-        title: subject,
-        body: pushBody,
-        url: '/events',
+        ...slotAssignmentPush(line, isBackup),
         idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
       },
     });
@@ -840,21 +859,11 @@ export class ServiceProgrammeService {
     for (const { member, items: memberItems } of byMember.values()) {
       for (const { programme, slot, isBackup } of memberItems) {
         const line = this.buildAssignmentLine(programme, slot, isBackup);
-        const subject = isBackup
-          ? `You're the Backup for: ${line.serviceSlotName}`
-          : `You've Been Added to the Programme: ${line.serviceSlotName}`;
-        let pushBody = `${line.slotType} — ${line.serviceSlotName}`;
-        if (line.serviceDate) pushBody += ` on ${line.serviceDate}`;
-        if (line.serviceDate && line.serviceTime)
-          pushBody += ` at ${line.serviceTime}`;
-
         this.notificationDispatchService.notifyMember({
           category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
           push: {
             memberIds: [member.id],
-            title: subject,
-            body: pushBody,
-            url: '/events',
+            ...slotAssignmentPush(line, isBackup),
             idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
           },
         });

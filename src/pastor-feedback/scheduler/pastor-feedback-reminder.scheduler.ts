@@ -16,6 +16,7 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 @Injectable()
 export class PastorFeedbackReminderScheduler {
@@ -96,9 +97,8 @@ export class PastorFeedbackReminderScheduler {
     );
     this.pushService.dispatchToMemberIds([member.id], {
       idempotencyKey: `pastor-feedback-reminder:${department.id}:${weekOf}`,
-      title: 'Weekly Feedback Reminder',
-      body: `Don't forget to submit ${department.name}'s feedback for the week of ${weekOf}.`,
-      url: '/pastor-feedback',
+      key: PushNotificationKey.PASTOR_FEEDBACK_REMINDER,
+      vars: { department_name: department.name, week_of: weekOf },
     });
   }
 

@@ -23,6 +23,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { MemberAuth } from '../../auth/interface/auth.interface';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 @Injectable()
 export class PastorFeedbackService {
@@ -185,9 +186,11 @@ export class PastorFeedbackService {
       );
       this.pushService.dispatchToMemberIds([submitterMember.id], {
         idempotencyKey: `pastor-feedback-response:${feedback.id}`,
-        title: 'Pastor Response',
-        body: `A pastor responded to your ${feedback.department.name} feedback for the week of ${feedback.weekOf}.`,
-        url: '/pastor-feedback',
+        key: PushNotificationKey.PASTOR_FEEDBACK_RESPONSE,
+        vars: {
+          department_name: feedback.department.name,
+          week_of: feedback.weekOf,
+        },
       });
     }
 

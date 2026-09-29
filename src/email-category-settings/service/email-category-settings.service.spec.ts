@@ -120,7 +120,7 @@ describe('EmailCategorySettingsService', () => {
       expect(mockSettingRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           key: 'email_category:INCIDENT_REPORT',
-          value: { enabled: false },
+          value: { enabled: false, pushEnabled: true },
         }),
       );
       expect(result.enabled).toBe(false);
@@ -137,7 +137,7 @@ describe('EmailCategorySettingsService', () => {
       await service.upsert(EmailCategory.INCIDENT_REPORT, { enabled: false });
 
       expect(mockSettingRepo.create).not.toHaveBeenCalled();
-      expect(existing.value).toEqual({ enabled: false });
+      expect(existing.value).toEqual({ enabled: false, pushEnabled: true });
     });
 
     it('invalidates the cache after upsert', async () => {
@@ -171,6 +171,65 @@ describe('EmailCategorySettingsService', () => {
           enabled: true,
         }),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('push switch', () => {
+    it('reports which categories have push notifications', async () => {
+      mockSettingRepo.find.mockResolvedValue([]);
+      const all = await service.findAll();
+      const prayer = all.find(
+        (s) => s.category === EmailCategory.PRAYER_REMINDER,
+      );
+      const incident = all.find(
+        (s) => s.category === EmailCategory.INCIDENT_REPORT,
+      );
+
+      expect(prayer).toMatchObject({ hasPush: true, pushEnabled: true });
+      expect(incident).toMatchObject({ hasPush: false, pushEnabled: false });
+    });
+
+    it('turns push off without touching email', async () => {
+      const existing = {
+        key: 'email_category:PRAYER_REMINDER',
+        value: { enabled: true },
+      };
+      mockSettingRepo.findOne.mockResolvedValue(existing);
+      mockSettingRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.upsert(EmailCategory.PRAYER_REMINDER, {
+        pushEnabled: false,
+      });
+
+      expect(existing.value).toEqual({ enabled: true, pushEnabled: false });
+      expect(result).toMatchObject({ enabled: true, pushEnabled: false });
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'push-category-settings:PRAYER_REMINDER',
+      );
+    });
+
+    it('keeps push off for churches that switched the whole category off before push had its own switch', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({
+        key: 'email_category:PRAYER_REMINDER',
+        value: { enabled: false },
+      });
+
+      await expect(
+        service.isPushEnabled(EmailCategory.PRAYER_REMINDER),
+      ).resolves.toBe(false);
+    });
+
+    it('defaults push on and caches it', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.isPushEnabled(EmailCategory.PRAYER_REMINDER),
+      ).resolves.toBe(true);
+      expect(mockCacheService.set).toHaveBeenCalledWith(
+        'push-category-settings:PRAYER_REMINDER',
+        true,
+        300,
+      );
     });
   });
 

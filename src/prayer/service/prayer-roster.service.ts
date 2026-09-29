@@ -24,6 +24,7 @@ import { ManualAssignDto, ReschedulePrayerEntryDto } from '../dto/prayer.dto';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { DepartmentLeadTypeEnum } from '../../department/enums/department-lead-type.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 interface AssignContext {
   meetings: PrayerMeeting[];
@@ -216,9 +217,7 @@ export class PrayerRosterService {
       ];
       this.pushService.dispatchToWorkerProfileIds(assignedWorkerIds, {
         idempotencyKey: `prayer-auto-assign:${programId}:${month}:${year}`,
-        title: 'Prayer Schedule Updated',
-        body: 'Your prayer schedule for the month has been set.',
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_SCHEDULE_SET,
       });
     }
 
@@ -310,16 +309,14 @@ export class PrayerRosterService {
     if (workerProfile) {
       this.pushService.dispatchToWorkerProfileIds([workerProfile.id], {
         idempotencyKey: `prayer-manual-assign:${entry.id}`,
-        title: 'Prayer Assignment',
-        body: `You have been assigned to a prayer meeting on ${meeting.date}.`,
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: meeting.date },
       });
     } else if (member) {
       this.pushService.dispatchToMemberIds([member.id], {
         idempotencyKey: `prayer-manual-assign:${entry.id}`,
-        title: 'Prayer Assignment',
-        body: `You have been assigned to a prayer meeting on ${meeting.date}.`,
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: meeting.date },
       });
     }
 
@@ -354,16 +351,12 @@ export class PrayerRosterService {
     if (entry.workerProfile) {
       this.pushService.dispatchToWorkerProfileIds([entry.workerProfile.id], {
         idempotencyKey: `prayer-removed:${entryId}`,
-        title: 'Prayer Assignment Removed',
-        body: 'Your prayer assignment has been removed.',
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_ASSIGNMENT_REMOVED,
       });
     } else if (entry.member) {
       this.pushService.dispatchToMemberIds([entry.member.id], {
         idempotencyKey: `prayer-removed:${entryId}`,
-        title: 'Prayer Assignment Removed',
-        body: 'Your prayer assignment has been removed.',
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_ASSIGNMENT_REMOVED,
       });
     }
   }
@@ -458,16 +451,14 @@ export class PrayerRosterService {
     if (entry.workerProfile) {
       this.pushService.dispatchToWorkerProfileIds([entry.workerProfile.id], {
         idempotencyKey: `prayer-reschedule:${saved.id}`,
-        title: 'Prayer Rescheduled',
-        body: `Your prayer meeting has been rescheduled to ${newMeeting.date}.`,
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_RESCHEDULED,
+        vars: { meeting_date: newMeeting.date },
       });
     } else if (entry.member) {
       this.pushService.dispatchToMemberIds([entry.member.id], {
         idempotencyKey: `prayer-reschedule:${saved.id}`,
-        title: 'Prayer Rescheduled',
-        body: `Your prayer meeting has been rescheduled to ${newMeeting.date}.`,
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_RESCHEDULED,
+        vars: { meeting_date: newMeeting.date },
       });
     }
 

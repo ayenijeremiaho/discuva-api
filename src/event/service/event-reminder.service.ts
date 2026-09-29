@@ -35,6 +35,7 @@ import {
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 @Injectable()
 export class EventReminderService {
@@ -248,9 +249,8 @@ export class EventReminderService {
       recipientIds.length > 0
         ? {
             memberIds: recipientIds,
-            title,
-            body: `${slot.name} begins in ${label}. Please make your way and check in on time.`,
-            url: '/events',
+            key: PushNotificationKey.SERVICE_REMINDER,
+            vars: { service_name: slot.name, time_until: label },
             idempotencyKey: `event-reminder:${reminder.id}`,
           }
         : undefined;

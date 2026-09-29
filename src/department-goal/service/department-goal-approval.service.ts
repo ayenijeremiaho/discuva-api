@@ -24,6 +24,10 @@ import { NotificationDispatchService } from '../../utility/service/notification-
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { Admin } from '../../admin/entity/admin.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
+import {
+  PushNotificationKey,
+  PushVars,
+} from '../../notification-catalogue/push-catalogue';
 
 export interface DepartmentGoalApprovalView {
   currentLevel: number;
@@ -372,8 +376,8 @@ export class DepartmentGoalApprovalService {
         metadata: { cycleId, departmentId, level: approval.currentLevel },
       });
       this.notifyLeads(leads, {
-        title: `Level ${approval.currentLevel} requested changes`,
-        body: comment.content,
+        key: PushNotificationKey.GOAL_CHANGES_REQUESTED,
+        vars: { level: approval.currentLevel },
         comment,
       });
       return saved;
@@ -393,15 +397,15 @@ export class DepartmentGoalApprovalService {
       }),
     );
 
-    let title: string;
+    let key: PushNotificationKey;
     if (approvedLevel === maxLevel) {
       approval.status = DepartmentGoalApprovalStatus.COMPLETE;
       approval.completedAt = new Date();
-      title = 'Your department goals have been fully approved';
+      key = PushNotificationKey.GOAL_FULLY_APPROVED;
     } else {
       approval.currentLevel = approvedLevel + 1;
       approval.status = DepartmentGoalApprovalStatus.PENDING;
-      title = `Level ${approvedLevel} approved — awaiting Level ${approval.currentLevel}`;
+      key = PushNotificationKey.GOAL_LEVEL_APPROVED;
     }
     const saved = await this.approvalRepo.save(approval);
     this.auditLogService.log('DEPARTMENT_GOAL_APPROVAL_APPROVED', {
@@ -410,7 +414,11 @@ export class DepartmentGoalApprovalService {
       targetName: leads.name,
       metadata: { cycleId, departmentId, level: approvedLevel },
     });
-    this.notifyLeads(leads, { title, body: comment.content, comment });
+    this.notifyLeads(leads, {
+      key,
+      vars: { level: approvedLevel, next_level: approval.currentLevel },
+      comment,
+    });
     return saved;
   }
 
@@ -441,8 +449,7 @@ export class DepartmentGoalApprovalService {
       metadata: { cycleId, departmentId },
     });
     this.notifyLeads(leads, {
-      title: "New comment on your department's goals",
-      body: content,
+      key: PushNotificationKey.GOAL_NEW_COMMENT,
       comment,
     });
     return comment;
@@ -612,7 +619,11 @@ export class DepartmentGoalApprovalService {
 
   private notifyLeads(
     leads: { head: WorkerProfile | null; assistant: WorkerProfile | null },
-    opts: { title: string; body: string; comment: DepartmentGoalComment },
+    opts: {
+      key: PushNotificationKey;
+      vars?: PushVars;
+      comment: DepartmentGoalComment;
+    },
   ): void {
     const memberIds = [
       leads.head?.member?.id,
@@ -623,10 +634,8 @@ export class DepartmentGoalApprovalService {
       category: EmailCategory.DEPARTMENT_GOAL_ACTIVITY,
       push: {
         memberIds,
-        title: opts.title,
-        body:
-          opts.body.length > 120 ? `${opts.body.slice(0, 117)}...` : opts.body,
-        url: '/department-goals',
+        key: opts.key,
+        vars: { ...opts.vars, comment: opts.comment.content },
         idempotencyKey: `department-goal-comment:${opts.comment.id}`,
       },
     });

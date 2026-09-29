@@ -23551,14 +23551,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enabled\": false\n}",
+              "raw": "{\n  \"enabled\": true,\n  \"pushEnabled\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Turn an email category on or off for this tenant only. Two independent gates suppress a send: the platform-wide EMAIL_<CATEGORY>_ENABLED env var (checked first) and this per-tenant setting - either being off suppresses it. Requires admin:write."
+            "description": "Turn a category's email and/or push on or off for this tenant only. Send enabled (email) and/or pushEnabled (push) \u2014 at least one; the response includes hasPush (whether this category sends any push) and pushEnabled. Email has two independent gates: the platform-wide EMAIL_<CATEGORY>_ENABLED env var (checked first) and this per-tenant setting - either being off suppresses it. Requires admin:write."
           },
           "response": [
             {

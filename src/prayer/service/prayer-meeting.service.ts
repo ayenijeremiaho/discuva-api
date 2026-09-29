@@ -31,6 +31,7 @@ import {
 } from '../dto/prayer.dto';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 @Injectable()
 export class PrayerMeetingService {
@@ -144,9 +145,7 @@ export class PrayerMeetingService {
       workers.map((w) => w.id),
       {
         idempotencyKey: `prayer-window-open:${programId}:${dto.month}:${dto.year}`,
-        title: 'Prayer Selection Open',
-        body: 'You can now select your prayer slots for the upcoming month.',
-        url: '/prayer',
+        key: PushNotificationKey.PRAYER_SELECTION_OPEN,
       },
     );
   }

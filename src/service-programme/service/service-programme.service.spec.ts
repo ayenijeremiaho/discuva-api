@@ -1170,7 +1170,10 @@ describe('ServiceProgrammeService', () => {
             }),
           }),
           push: expect.objectContaining({
-            body: expect.stringContaining('2026'),
+            key: 'SERVICE_SLOT_ASSIGNED',
+            vars: expect.objectContaining({
+              when: expect.stringContaining('2026'),
+            }),
           }),
         }),
       );

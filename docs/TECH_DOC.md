@@ -2728,9 +2728,25 @@ actually be set without Joi's `forbidNonWhitelisted` rejecting it. Now registere
 **Routes:** `GET/PATCH /admin/email-category-settings`, `GET/PATCH /admin/email-category-settings/:category` — same
 `AdminGuard` + `AdminPermission.ADMIN_WRITE`-on-write pattern as `/admin/reminder-settings`.
 
-**Frontend:** a new "Email Categories" section on discuva-admin's existing `/notification-settings` page, below the
-reminder-settings section — one row per category, a plain enabled/disabled toggle (no thresholds, unlike reminder
-settings).
+**Separate Email and Push switches:** the stored value is `{ enabled, pushEnabled }` — `enabled` gates email,
+`pushEnabled` gates push. `PATCH` accepts either or both (at least one). Responses add `hasPush` (whether any push in
+`PUSH_CATALOGUE` belongs to the category) and `pushEnabled` (`false` when `hasPush` is false). Rows saved before the
+split have no `pushEnabled`; it falls back to `enabled`, so a church that had switched a whole category off keeps its
+push off. `isPushEnabled(category)` is cached under `push-category-settings:{category}` and cleared on update.
+
+**Frontend:** the "Email Categories" section on discuva-admin's `/notification-settings` page has one row per category
+with an Email switch and, where `hasPush`, a Push switch.
+
+**Push catalogue** (`src/notification-catalogue/push-catalogue.ts`): `PUSH_CATALOGUE` holds every push notification's
+default wording, keyed by `PushNotificationKey` — category, admin-facing label/description, `title`/`body` with
+`{{placeholders}}`, default `url` and a sample value per placeholder. Senders pass
+`{ key, vars, idempotencyKey, url? }` to `PushNotificationService.dispatchToMemberIds`/`dispatchToWorkerProfileIds` or
+`NotificationDispatchService.notifyMember({ push })`. `PushNotificationService` checks the category's Push switch,
+fills placeholders with plain token replacement (never a template engine, so future church-edited wording can't run
+code) and clips to 60/150 characters. Announcements are the one exception: an admin writes them, so they pass
+`{ title, body, url, idempotencyKey }` and aren't gated by a category switch. Before this, prayer, pastor-feedback and
+announcement pushes ignored the category switches entirely. Phase 1 of per-church notification customization will
+look up a church's override of a catalogue entry at this same point.
 
 ### Event Module
 
@@ -7395,7 +7411,7 @@ Delivers Web Push notifications to members and workers via the standard Web Push
 - `PushNotificationService.dispatchToMemberIds(memberIds, payload)` finds subscriptions and enqueues all subscribers' jobs in a single `queue.addBulk()` call (each still keeps its own stable `jobId`, `push:{memberId}:{idempotencyKey}`, for deduplication) rather than one `queue.add()` round trip per subscriber — matters most for large-fanout sends (e.g. an `ALL` audience announcement to thousands of members).
 - `PushNotificationService.dispatchToWorkerProfileIds(workerProfileIds, payload)` resolves worker profile IDs to member IDs via a single SQL query, then delegates to `dispatchToMemberIds`.
 - `PushNotificationProcessor` processes each job: checks a Redis idempotency key (`notif:sent:{memberId}:{idempotencyKey}`, 24 h TTL) before sending. On `410 Gone`, `404` or a `403` key mismatch from the push service, the subscription is deleted — no retry. Any other error is re-thrown as `Push service responded <status>: <body>` for Bull to retry (3 attempts, exponential backoff), so the failed job records the push service's actual reason.
-- **`NotificationDispatchService`** (`src/utility/service/notification-dispatch.service.ts`, exported from the `@Global()` `UtilityModule`) — `notifyMember({ category, email?, push? })` fires the email and push legs of one notification *together*, gated by the same `EmailCategorySettingsService.isEnabled(category)` check on both. Introduced because several call sites (`ServiceProgrammeService.notifySlotAssignment`, `EventReminderService.fireReminder`) queued email through that gate but dispatched `PushNotificationService.dispatchToMemberIds()` completely unconditionally — an admin disabling a category's emails silently left push still firing for the same event. Either `email`/`push` option is independently optional (send email-only, push-only, or both — e.g. `fireReminder` only sets `push` when `recipientIds` is non-empty), but the category gate always applies to both uniformly; there's no per-channel opt-out below the category level. New notification-worthy events should be wired through this rather than calling `EmailQueueService`/`PushNotificationService` directly, to get the same-gate guarantee for free.
+- **`NotificationDispatchService`** (`src/utility/service/notification-dispatch.service.ts`, exported from the `@Global()` `UtilityModule`) — `notifyMember({ category, email?, push? })` fires the email and push legs of one notification together. Since the Email/Push switch split, each leg has its own per-church switch: email checks `EmailCategorySettingsService.isEnabled(category)` here, and the push leg (a catalogue key + vars) is gated by `isPushEnabled` inside `PushNotificationService`. Originally both legs shared one check. Introduced because several call sites (`ServiceProgrammeService.notifySlotAssignment`, `EventReminderService.fireReminder`) queued email through that gate but dispatched `PushNotificationService.dispatchToMemberIds()` completely unconditionally — an admin disabling a category's emails silently left push still firing for the same event. Either `email`/`push` option is independently optional (send email-only, push-only, or both — e.g. `fireReminder` only sets `push` when `recipientIds` is non-empty), but the category gate always applies to both uniformly; there's no per-channel opt-out below the category level. New notification-worthy events should be wired through this rather than calling `EmailQueueService`/`PushNotificationService` directly, to get the same-gate guarantee for free.
 
 **Trigger points:**
 

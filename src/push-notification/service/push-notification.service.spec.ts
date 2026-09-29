@@ -7,6 +7,9 @@ import * as webPush from 'web-push';
 import { PushNotificationService } from './push-notification.service';
 import { PushSubscription } from '../entity/push-subscription.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
+import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 
 jest.mock('web-push', () => ({
   setVapidDetails: jest.fn(),
@@ -46,8 +49,13 @@ describe('PushNotificationService', () => {
     getId: jest.fn(),
   };
 
+  const mockCategorySettings = {
+    isPushEnabled: jest.fn().mockResolvedValue(true),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockCategorySettings.isPushEnabled.mockResolvedValue(true);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -63,6 +71,10 @@ describe('PushNotificationService', () => {
         { provide: getQueueToken('push-notifications'), useValue: mockQueue },
         { provide: ConfigService, useValue: mockConfig },
         { provide: ClsService, useValue: mockClsService },
+        {
+          provide: EmailCategorySettingsService,
+          useValue: mockCategorySettings,
+        },
       ],
     }).compile();
 
@@ -198,6 +210,63 @@ describe('PushNotificationService', () => {
         url: '/prayer',
       });
       expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('catalogue pushes', () => {
+    beforeEach(() => {
+      mockSubRepo.find.mockResolvedValue([
+        { memberId: 'm1', endpoint: 'https://ep', p256dh: 'p', auth: 'a' },
+      ]);
+    });
+
+    it('fills the catalogue wording and default link', async () => {
+      await service.dispatchToMemberIds(['m1'], {
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: '2026-10-04' },
+        idempotencyKey: 'k1',
+      });
+
+      expect(mockCategorySettings.isPushEnabled).toHaveBeenCalledWith(
+        EmailCategory.PRAYER_REMINDER,
+      );
+      expect(mockQueue.addBulk).toHaveBeenCalledWith([
+        expect.objectContaining({
+          data: expect.objectContaining({
+            payload: {
+              title: 'Prayer Assignment',
+              body: 'You have been assigned to a prayer meeting on 2026-10-04.',
+              url: '/prayer',
+              idempotencyKey: 'k1',
+            },
+          }),
+        }),
+      ]);
+    });
+
+    it("sends nothing when the church switched that category's push off", async () => {
+      mockCategorySettings.isPushEnabled.mockResolvedValue(false);
+
+      await service.dispatchToMemberIds(['m1'], {
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: '2026-10-04' },
+        idempotencyKey: 'k1',
+      });
+
+      expect(mockSubRepo.find).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+    });
+
+    it('sends admin-written pushes (announcements) as-is, without a category switch', async () => {
+      await service.dispatchToMemberIds(['m1'], {
+        title: 'Harvest Sunday',
+        body: 'Join us this Sunday.',
+        url: '/announcements',
+        idempotencyKey: 'a1',
+      });
+
+      expect(mockCategorySettings.isPushEnabled).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).toHaveBeenCalled();
     });
   });
 });

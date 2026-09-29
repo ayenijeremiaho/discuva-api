@@ -9,9 +9,19 @@ import {
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { KNOWN_EMAIL_CATEGORIES } from '../constant/known-email-categories.constant';
 import { CacheService } from '../../utility/service/cache.service';
+import { PUSH_CATALOGUE } from '../../notification-catalogue/push-catalogue';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 
-type EmailCategorySettingValue = { enabled: boolean };
+// pushEnabled absent on rows saved before Push had its own switch — those followed `enabled`.
+type EmailCategorySettingValue = { enabled: boolean; pushEnabled?: boolean };
+
+function pushEnabledOf(value?: EmailCategorySettingValue): boolean {
+  return value?.pushEnabled ?? value?.enabled ?? true;
+}
+
+const PUSH_CATEGORIES = new Set(
+  Object.values(PUSH_CATALOGUE).map((t) => t.category),
+);
 
 // Per-tenant on/off switch per EmailCategory — same ChurchSetting-backed
 // pattern as ReminderSettingsService (own key namespace, 'email_category:'),
@@ -38,6 +48,26 @@ export class EmailCategorySettingsService {
     return `email-category-settings:${category}`;
   }
 
+  private pushCacheKey(category: EmailCategory): string {
+    return `push-category-settings:${category}`;
+  }
+
+  private toDto(
+    category: EmailCategory,
+    value?: EmailCategorySettingValue,
+  ): EmailCategorySettingResponseDto {
+    const known = KNOWN_EMAIL_CATEGORIES[category];
+    const hasPush = PUSH_CATEGORIES.has(category);
+    return {
+      category,
+      label: known.label,
+      description: known.description,
+      enabled: value?.enabled ?? true,
+      hasPush,
+      pushEnabled: hasPush ? pushEnabledOf(value) : false,
+    };
+  }
+
   async findAll(): Promise<EmailCategorySettingResponseDto[]> {
     const rows = await this.settingRepo.find({
       where: {
@@ -47,33 +77,22 @@ export class EmailCategorySettingsService {
     const overrides = new Map(
       rows.map((r) => [r.key, r.value as EmailCategorySettingValue]),
     );
-    return Object.values(EmailCategory).map((category) => {
-      const known = KNOWN_EMAIL_CATEGORIES[category];
-      const override = overrides.get(this.storageKey(category));
-      return {
-        category,
-        label: known.label,
-        description: known.description,
-        enabled: override?.enabled ?? true,
-      };
-    });
+    return Object.values(EmailCategory).map((category) =>
+      this.toDto(category, overrides.get(this.storageKey(category))),
+    );
   }
 
   async findOne(
     category: EmailCategory,
   ): Promise<EmailCategorySettingResponseDto> {
     this.assertKnownCategory(category);
-    const known = KNOWN_EMAIL_CATEGORIES[category];
     const row = await this.settingRepo.findOne({
       where: { key: this.storageKey(category) },
     });
-    const value = row?.value as EmailCategorySettingValue | undefined;
-    return {
+    return this.toDto(
       category,
-      label: known.label,
-      description: known.description,
-      enabled: value?.enabled ?? true,
-    };
+      row?.value as EmailCategorySettingValue | undefined,
+    );
   }
 
   async upsert(
@@ -86,7 +105,11 @@ export class EmailCategorySettingsService {
     const storageKey = this.storageKey(category);
 
     let row = await this.settingRepo.findOne({ where: { key: storageKey } });
-    const value: EmailCategorySettingValue = { enabled: dto.enabled };
+    const current = row?.value as EmailCategorySettingValue | undefined;
+    const value: EmailCategorySettingValue = {
+      enabled: dto.enabled ?? current?.enabled ?? true,
+      pushEnabled: dto.pushEnabled ?? pushEnabledOf(current),
+    };
 
     if (!row) {
       row = this.settingRepo.create({
@@ -99,19 +122,15 @@ export class EmailCategorySettingsService {
     }
     await this.settingRepo.save(row);
     this.cacheService.del(this.cacheKey(category));
+    this.cacheService.del(this.pushCacheKey(category));
 
     this.auditLogService.log('EMAIL_CATEGORY_SETTING_UPDATED', {
       actorId: actorMemberId,
       targetId: category,
-      metadata: { enabled: dto.enabled },
+      metadata: { enabled: value.enabled, pushEnabled: value.pushEnabled },
     });
 
-    return {
-      category,
-      label: known.label,
-      description: known.description,
-      enabled: dto.enabled,
-    };
+    return this.toDto(category, value);
   }
 
   // Called by EmailQueueService before every category-tagged send — cached
@@ -126,6 +145,22 @@ export class EmailCategorySettingsService {
     });
     const value = row?.value as EmailCategorySettingValue | undefined;
     const enabled = value?.enabled ?? true;
+    this.cacheService.set(cacheKey, enabled, this.CACHE_TTL);
+    return enabled;
+  }
+
+  // Checked before every catalogue push — cached like isEnabled.
+  async isPushEnabled(category: EmailCategory): Promise<boolean> {
+    const cacheKey = this.pushCacheKey(category);
+    const cached = await this.cacheService.get<boolean>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const row = await this.settingRepo.findOne({
+      where: { key: this.storageKey(category) },
+    });
+    const enabled = pushEnabledOf(
+      row?.value as EmailCategorySettingValue | undefined,
+    );
     this.cacheService.set(cacheKey, enabled, this.CACHE_TTL);
     return enabled;
   }

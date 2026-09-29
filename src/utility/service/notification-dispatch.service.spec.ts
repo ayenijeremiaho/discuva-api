@@ -4,6 +4,7 @@ import { EmailQueueService } from './email-queue.service';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EmailCategory } from '../email-provider/email-category.enum';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 const mockEmailQueueService = {
   queueEmailWithTemplate: jest.fn(),
@@ -54,9 +55,8 @@ describe('NotificationDispatchService', () => {
       },
       push: {
         memberIds: ['member-1'],
-        title: 'Subject',
-        body: 'Body',
-        url: '/events',
+        key: PushNotificationKey.SERVICE_SLOT_ASSIGNED,
+        vars: { service_name: 'Sunday Service' },
         idempotencyKey: 'key-1',
       },
     });
@@ -75,14 +75,13 @@ describe('NotificationDispatchService', () => {
     expect(
       mockPushNotificationService.dispatchToMemberIds,
     ).toHaveBeenCalledWith(['member-1'], {
+      key: PushNotificationKey.SERVICE_SLOT_ASSIGNED,
+      vars: { service_name: 'Sunday Service' },
       idempotencyKey: 'key-1',
-      title: 'Subject',
-      body: 'Body',
-      url: '/events',
     });
   });
 
-  it('suppresses BOTH email and push when the category is disabled — the actual bug this fixes', async () => {
+  it('email switch off stops the email only — push goes on to its own switch in PushNotificationService', async () => {
     mockEmailCategorySettingsService.isEnabled.mockResolvedValue(false);
 
     await service.notifyMember({
@@ -95,9 +94,8 @@ describe('NotificationDispatchService', () => {
       },
       push: {
         memberIds: ['member-1'],
-        title: 'Subject',
-        body: 'Body',
-        url: '/events',
+        key: PushNotificationKey.SERVICE_SLOT_ASSIGNED,
+        vars: { service_name: 'Sunday Service' },
         idempotencyKey: 'key-1',
       },
     });
@@ -105,7 +103,10 @@ describe('NotificationDispatchService', () => {
     expect(mockEmailQueueService.queueEmailWithTemplate).not.toHaveBeenCalled();
     expect(
       mockPushNotificationService.dispatchToMemberIds,
-    ).not.toHaveBeenCalled();
+    ).toHaveBeenCalledWith(
+      ['member-1'],
+      expect.objectContaining({ idempotencyKey: 'key-1' }),
+    );
   });
 
   it('uses the attachments variant when attachments are given', async () => {
@@ -138,14 +139,26 @@ describe('NotificationDispatchService', () => {
     expect(mockEmailQueueService.queueEmailWithTemplate).not.toHaveBeenCalled();
   });
 
+  it('does not check the email switch for a push-only notification', async () => {
+    await service.notifyMember({
+      category: EmailCategory.EVENT_REMINDER,
+      push: {
+        memberIds: ['member-1'],
+        key: PushNotificationKey.SERVICE_REMINDER,
+        idempotencyKey: 'event-reminder:2',
+      },
+    });
+
+    expect(mockEmailCategorySettingsService.isEnabled).not.toHaveBeenCalled();
+  });
+
   it('sends push only when no email option is given', async () => {
     await service.notifyMember({
       category: EmailCategory.EVENT_REMINDER,
       push: {
         memberIds: ['member-1', 'member-2'],
-        title: 'Reminder',
-        body: 'Starting soon',
-        url: '/events',
+        key: PushNotificationKey.SERVICE_REMINDER,
+        vars: { service_name: 'Sunday Service', time_until: '1 hour' },
         idempotencyKey: 'event-reminder:1',
       },
     });

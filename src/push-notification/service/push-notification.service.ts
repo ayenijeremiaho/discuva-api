@@ -9,10 +9,16 @@ import * as webPush from 'web-push';
 import { PushSubscription } from '../entity/push-subscription.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import {
+  DispatchPush,
   PushJobData,
   PushPayload,
   SubscribePushDto,
 } from '../dto/push-notification.dto';
+import {
+  PUSH_CATALOGUE,
+  renderPush,
+} from '../../notification-catalogue/push-catalogue';
+import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 
@@ -27,7 +33,22 @@ export class PushNotificationService implements OnModuleInit {
     private readonly queue: Queue<PushJobData>,
     private readonly config: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly categorySettings: EmailCategorySettingsService,
   ) {}
+
+  // Null when the church has switched this category's push off.
+  private async resolve(push: DispatchPush): Promise<PushPayload | null> {
+    if (!('key' in push)) return push;
+    const template = PUSH_CATALOGUE[push.key];
+    if (!(await this.categorySettings.isPushEnabled(template.category))) {
+      return null;
+    }
+    return {
+      ...renderPush(template, push.vars),
+      url: push.url ?? template.url,
+      idempotencyKey: push.idempotencyKey,
+    };
+  }
 
   onModuleInit(): void {
     webPush.setVapidDetails(
@@ -59,7 +80,7 @@ export class PushNotificationService implements OnModuleInit {
 
   async dispatchToWorkerProfileIds(
     workerProfileIds: string[],
-    payload: PushPayload,
+    push: DispatchPush,
   ): Promise<void> {
     if (!workerProfileIds.length) return;
     const rows = await this.workerRepo
@@ -69,15 +90,17 @@ export class PushNotificationService implements OnModuleInit {
       .getRawMany<{ memberId: string }>();
     await this.dispatchToMemberIds(
       rows.map((r) => r.memberId),
-      payload,
+      push,
     );
   }
 
   async dispatchToMemberIds(
     memberIds: string[],
-    payload: PushPayload,
+    push: DispatchPush,
   ): Promise<void> {
     if (!memberIds.length) return;
+    const payload = await this.resolve(push);
+    if (!payload) return;
     const subscriptions = await this.subRepo.find({
       where: { memberId: In(memberIds) },
     });

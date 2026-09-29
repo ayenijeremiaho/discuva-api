@@ -14,6 +14,7 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 @Injectable()
 export class PrayerReminderScheduler {
@@ -153,9 +154,14 @@ export class PrayerReminderScheduler {
 
     this.pushService.dispatchToMemberIds([member.id], {
       idempotencyKey: `prayer-reminder-${type}:${entry.id}`,
-      title: subject,
-      body: `Your prayer meeting is on ${entry.meeting.date} at ${dayConfig.startTime}.`,
-      url: '/prayer',
+      key:
+        type === 'two-day'
+          ? PushNotificationKey.PRAYER_REMINDER_TWO_DAYS
+          : PushNotificationKey.PRAYER_REMINDER_TODAY,
+      vars: {
+        meeting_date: entry.meeting.date,
+        start_time: dayConfig.startTime,
+      },
     });
   }
 

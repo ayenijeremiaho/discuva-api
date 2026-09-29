@@ -34,6 +34,7 @@ import { DepartmentAccessService } from '../../department/service/department-acc
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 export interface SessionRosterEntry {
   memberId: string;
@@ -746,9 +747,8 @@ export class SundaySchoolService {
         },
         push: {
           memberIds: [teacher.id],
-          title: 'New Sunday School Question',
-          body: `${askerName} asked a question in ${cls.name}.`,
-          url: '/sunday-school',
+          key: PushNotificationKey.SUNDAY_SCHOOL_QUESTION_ASKED,
+          vars: { asker_name: askerName, class_name: cls.name },
           idempotencyKey: `sunday-school-question-asked:${cls.id}:${Date.now()}`,
         },
       });
@@ -764,9 +764,8 @@ export class SundaySchoolService {
       category: EmailCategory.SUNDAY_SCHOOL_QA,
       push: {
         memberIds: staffIds,
-        title: 'New Sunday School Question',
-        body: `${askerName} asked a question in ${cls.name} (no teacher assigned).`,
-        url: '/sunday-school',
+        key: PushNotificationKey.SUNDAY_SCHOOL_QUESTION_UNASSIGNED,
+        vars: { asker_name: askerName, class_name: cls.name },
         idempotencyKey: `sunday-school-question-asked:${cls.id}:${Date.now()}`,
       },
     });
@@ -903,9 +902,8 @@ export class SundaySchoolService {
       },
       push: {
         memberIds: [question.askedBy.id],
-        title: 'Your Question Was Answered',
-        body: `Your question in ${question.sundaySchoolClass.name} has been answered.`,
-        url: '/sunday-school',
+        key: PushNotificationKey.SUNDAY_SCHOOL_QUESTION_ANSWERED,
+        vars: { class_name: question.sundaySchoolClass.name },
         idempotencyKey: `sunday-school-question-answered:${saved.id}`,
       },
     });

@@ -3,6 +3,7 @@ import { EmailQueueService } from './email-queue.service';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { EmailCategory } from '../email-provider/email-category.enum';
+import { CataloguePush } from '../../push-notification/dto/push-notification.dto';
 
 export interface NotifyMemberEmail {
   to: string | string[];
@@ -12,33 +13,12 @@ export interface NotifyMemberEmail {
   attachments?: Array<{ filename: string; content: Buffer }>;
 }
 
-export interface NotifyMemberPush {
+export interface NotifyMemberPush extends CataloguePush {
   memberIds: string[];
-  title: string;
-  body: string;
-  url: string;
-  // Passed straight through to PushNotificationService.dispatchToMemberIds,
-  // which builds the per-subscription queue jobId from it — same
-  // idempotency contract, just documented here so callers don't have to
-  // read that service to know it needs to be unique per notification
-  // *event*, not per member (memberId is already folded in downstream).
-  idempotencyKey: string;
 }
 
-// Fires the email and push legs of one notification together, gated by the
-// SAME per-tenant EmailCategory preference (EmailCategorySettingsService) —
-// before this existed, several call sites (service-programme assignment,
-// event reminders) queued email through that gate but dispatched push
-// completely unconditionally, so an admin disabling a category's emails
-// left push still firing for the exact same event. Named
-// EmailCategorySettingsService for historical reasons (it predates push),
-// but it already models "is this category of notification on for this
-// church" independent of channel — reused as-is rather than introducing a
-// second, parallel preference store.
-//
-// Either leg is optional so a caller can send email-only, push-only, or
-// both — but the category gate applies to both uniformly; there's no
-// per-channel opt-out below the category level.
+// Sends the email and push for one event. Each leg has its own per-church switch for the category:
+// email checks EmailCategorySettingsService.isEnabled here, push is gated inside PushNotificationService.
 @Injectable()
 export class NotificationDispatchService {
   constructor(
@@ -52,11 +32,10 @@ export class NotificationDispatchService {
     email?: NotifyMemberEmail;
     push?: NotifyMemberPush;
   }): Promise<void> {
-    if (!(await this.emailCategorySettingsService.isEnabled(opts.category))) {
-      return;
-    }
-
-    if (opts.email) {
+    if (
+      opts.email &&
+      (await this.emailCategorySettingsService.isEnabled(opts.category))
+    ) {
       const { to, subject, template, data, attachments } = opts.email;
       if (attachments) {
         this.emailQueueService.queueEmailWithTemplateAndAttachments(
@@ -81,13 +60,8 @@ export class NotificationDispatchService {
     }
 
     if (opts.push) {
-      const { memberIds, title, body, url, idempotencyKey } = opts.push;
-      this.pushNotificationService.dispatchToMemberIds(memberIds, {
-        idempotencyKey,
-        title,
-        body,
-        url,
-      });
+      const { memberIds, ...push } = opts.push;
+      this.pushNotificationService.dispatchToMemberIds(memberIds, push);
     }
   }
 }
