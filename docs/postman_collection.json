@@ -18842,7 +18842,7 @@
           ]
         },
         {
-          "name": "Events (Today, or Search)",
+          "name": "Events (Today & Recent, or Search)",
           "request": {
             "method": "GET",
             "header": [],
@@ -18864,14 +18864,14 @@
                 }
               ]
             },
-            "description": "Public, unauthenticated, rate-limited (30/min). Backs the \"which event are you here for?\" picker on the member-app self-onboarding form. With no `search`, returns events happening today (eventDate <= today <= endDate), ordered by start time. With `search`, returns up to 8 name matches instead, ordered most recent first. Returns only id/name/eventDate — no attendance, slot, or venue detail."
+            "description": "Public, unauthenticated, rate-limited (30/min). Backs the \"which service did you attend?\" picker on the member-app self-onboarding form. With no `search`, returns today's events plus the last 14 days (never future events), newest first, max 10, with \"today\" computed in the church timezone. With `search`, matches past/today events by name. Each item: { id, name, eventDate, endDate (YYYY-MM-DD), isToday }."
           },
           "response": [
             {
               "name": "200 OK — today's events",
               "status": "OK",
               "code": 200,
-              "body": "[\n  {\n    \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\",\n    \"name\": \"Sunday Service\",\n    \"eventDate\": \"2026-09-22\"\n  }\n]"
+              "body": "[\n  {\n    \"id\": \"b1c2d3e4-5f6a-7b8c-9d0e-1f2a3b4c5d6e\",\n    \"name\": \"Sunday Service\",\n    \"eventDate\": \"2026-09-27\",\n    \"endDate\": \"2026-09-27\",\n    \"isToday\": true\n  },\n  {\n    \"id\": \"c2d3e4f5-6a7b-8c9d-0e1f-2a3b4c5d6e7f\",\n    \"name\": \"Midweek Service\",\n    \"eventDate\": \"2026-09-23\",\n    \"endDate\": \"2026-09-23\",\n    \"isToday\": false\n  }\n]"
             },
             {
               "name": "200 OK — no events today",

@@ -38,12 +38,31 @@ import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Event } from '../../event/entity/event.entity';
+import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
 
 export interface PublicEventOption {
   id: string;
   name: string;
-  eventDate: Date;
+  eventDate: string;
+  endDate: string;
+  isToday: boolean;
+}
+
+const RECENT_EVENT_DAYS = 14;
+const PUBLIC_EVENT_LIMIT = 10;
+
+function churchDate(offsetDays = 0): string {
+  const d = new Date(Date.now() + offsetDays * 86_400_000);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: CHURCH_TIMEZONE }).format(
+    d,
+  );
+}
+
+function dateOnly(value: Date | string): string {
+  return typeof value === 'string'
+    ? value.slice(0, 10)
+    : value.toISOString().slice(0, 10);
 }
 
 export interface FirstTimerTimelineEntry {
@@ -1208,24 +1227,38 @@ export class FollowUpService {
 
   // Backs the "which event?" picker — defaults to today's events, falls
   // back to name search. Public/unauthenticated, so only id/name/eventDate.
+  // Today's events plus the last two weeks (never future ones), newest first; ?search= looks further back.
   async getPublicEvents(search?: string): Promise<PublicEventOption[]> {
+    const today = churchDate();
     const qb = this.eventRepo
       .createQueryBuilder('event')
-      .select(['event.id', 'event.name', 'event.eventDate'])
-      .limit(8);
+      .select(['event.id', 'event.name', 'event.eventDate', 'event.endDate'])
+      .where('event.eventDate <= :today', { today })
+      .orderBy('event.eventDate', 'DESC')
+      .addOrderBy('event.startTime', 'DESC')
+      .limit(PUBLIC_EVENT_LIMIT);
 
     if (search?.trim()) {
-      qb.where('event.name ILIKE :search', {
+      qb.andWhere('event.name ILIKE :search', {
         search: `%${search.trim()}%`,
-      }).orderBy('event.eventDate', 'DESC');
+      });
     } else {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      qb.where('event.eventDate <= :today', { today })
-        .andWhere('event.endDate >= :today', { today })
-        .orderBy('event.startTime', 'ASC');
+      qb.andWhere('event.endDate >= :from', {
+        from: churchDate(-RECENT_EVENT_DAYS),
+      });
     }
 
-    return qb.getMany();
+    const events = await qb.getMany();
+    return events.map((event) => {
+      const eventDate = dateOnly(event.eventDate);
+      const endDate = dateOnly(event.endDate ?? event.eventDate);
+      return {
+        id: event.id,
+        name: event.name,
+        eventDate,
+        endDate,
+        isToday: eventDate <= today && endDate >= today,
+      };
+    });
   }
 }

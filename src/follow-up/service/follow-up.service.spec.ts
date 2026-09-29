@@ -87,6 +87,7 @@ const eventQbMock = {
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
   orderBy: jest.fn().mockReturnThis(),
+  addOrderBy: jest.fn().mockReturnThis(),
   limit: jest.fn().mockReturnThis(),
   getMany: jest.fn(),
 };
@@ -1430,36 +1431,98 @@ describe('FollowUpService', () => {
   // ── getPublicEvents ────────────────────────────────────────────────────
 
   describe('getPublicEvents', () => {
-    it('filters to events happening today when no search term is given', async () => {
+    beforeEach(() => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-09-27T10:00:00Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('lists today and the last two weeks, never future events, newest first', async () => {
+      eventQbMock.getMany.mockResolvedValueOnce([]);
+
+      await service.getPublicEvents();
+
+      expect(eventQbMock.where).toHaveBeenCalledWith(
+        'event.eventDate <= :today',
+        { today: '2026-09-27' },
+      );
+      expect(eventQbMock.andWhere).toHaveBeenCalledWith(
+        'event.endDate >= :from',
+        { from: '2026-09-13' },
+      );
+      expect(eventQbMock.orderBy).toHaveBeenCalledWith(
+        'event.eventDate',
+        'DESC',
+      );
+    });
+
+    it('returns dates and flags events happening today', async () => {
       eventQbMock.getMany.mockResolvedValueOnce([
-        { id: 'ev-1', name: 'Sunday Service', eventDate: new Date() },
+        {
+          id: 'ev-1',
+          name: 'Sunday Service',
+          eventDate: '2026-09-27',
+          endDate: '2026-09-27',
+        },
+        {
+          id: 'ev-2',
+          name: 'Midweek Service',
+          eventDate: '2026-09-23',
+          endDate: '2026-09-23',
+        },
       ]);
 
       const result = await service.getPublicEvents();
 
-      expect(eventQbMock.where).toHaveBeenCalledWith(
-        expect.stringContaining('eventDate <='),
-        expect.objectContaining({ today: expect.any(Date) }),
-      );
-      expect(eventQbMock.andWhere).toHaveBeenCalledWith(
-        expect.stringContaining('endDate >='),
-        expect.objectContaining({ today: expect.any(Date) }),
-      );
       expect(result).toEqual([
-        { id: 'ev-1', name: 'Sunday Service', eventDate: expect.any(Date) },
+        {
+          id: 'ev-1',
+          name: 'Sunday Service',
+          eventDate: '2026-09-27',
+          endDate: '2026-09-27',
+          isToday: true,
+        },
+        {
+          id: 'ev-2',
+          name: 'Midweek Service',
+          eventDate: '2026-09-23',
+          endDate: '2026-09-23',
+          isToday: false,
+        },
       ]);
     });
 
-    it('searches by name instead of the today window when a search term is given', async () => {
+    it('marks a multi-day event still running today', async () => {
+      eventQbMock.getMany.mockResolvedValueOnce([
+        {
+          id: 'ev-3',
+          name: 'Conference',
+          eventDate: '2026-09-25',
+          endDate: '2026-09-28',
+        },
+      ]);
+
+      const [event] = await service.getPublicEvents();
+
+      expect(event.isToday).toBe(true);
+    });
+
+    it('searches past events by name without the two-week window', async () => {
       eventQbMock.getMany.mockResolvedValueOnce([]);
 
       await service.getPublicEvents('youth');
 
-      expect(eventQbMock.where).toHaveBeenCalledWith(
-        expect.stringContaining('name ILIKE'),
+      expect(eventQbMock.andWhere).toHaveBeenCalledWith(
+        'event.name ILIKE :search',
         { search: '%youth%' },
       );
-      expect(eventQbMock.andWhere).not.toHaveBeenCalled();
+      expect(eventQbMock.andWhere).not.toHaveBeenCalledWith(
+        'event.endDate >= :from',
+        expect.anything(),
+      );
+      expect(eventQbMock.where).toHaveBeenCalledWith(
+        'event.eventDate <= :today',
+        expect.anything(),
+      );
     });
 
     it('treats a blank search string as no search', async () => {
@@ -1467,8 +1530,8 @@ describe('FollowUpService', () => {
 
       await service.getPublicEvents('   ');
 
-      expect(eventQbMock.where).toHaveBeenCalledWith(
-        expect.stringContaining('eventDate <='),
+      expect(eventQbMock.andWhere).toHaveBeenCalledWith(
+        'event.endDate >= :from',
         expect.anything(),
       );
     });
