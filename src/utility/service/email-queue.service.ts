@@ -16,6 +16,11 @@ import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { CacheService } from './cache.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { buildAdminUrl, buildTenantUrl } from '../../tenant/utility/tenant-url';
+import {
+  isCatalogueEmail,
+  renderCatalogueEmail,
+} from '../../notification-catalogue/email-catalogue';
+import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
 
 @Injectable()
 export class EmailQueueService {
@@ -30,6 +35,7 @@ export class EmailQueueService {
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
     private readonly emailCategorySettingsService: EmailCategorySettingsService,
+    private readonly notificationTemplates: NotificationTemplateService,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
@@ -72,16 +78,20 @@ export class EmailQueueService {
     cc?: string | string[],
     category?: EmailCategory,
   ): Promise<string> {
-    const templatePath = path.resolve(
-      __dirname,
-      '..',
-      'templates',
-      `${templateName}.html`,
-    );
     try {
-      const template = fs.readFileSync(templatePath, 'utf-8');
-      const html = await this.compileTemplate(template, templateData);
-      return this.queueEmail(to, subject, html, cc, undefined, category);
+      const rendered = await this.renderTemplate(
+        templateName,
+        subject,
+        templateData,
+      );
+      return this.queueEmail(
+        to,
+        rendered.subject,
+        rendered.html,
+        cc,
+        undefined,
+        category,
+      );
     } catch (error) {
       this.logger.error(`Failed to read template ${templateName}: ${error}`);
       throw error;
@@ -97,21 +107,25 @@ export class EmailQueueService {
     cc?: string | string[],
     category?: EmailCategory,
   ): Promise<string> {
-    const templatePath = path.resolve(
-      __dirname,
-      '..',
-      'templates',
-      `${templateName}.html`,
-    );
     try {
-      const template = fs.readFileSync(templatePath, 'utf-8');
-      const html = await this.compileTemplate(template, templateData);
+      const rendered = await this.renderTemplate(
+        templateName,
+        subject,
+        templateData,
+      );
       const emailAttachments: EmailAttachment[] = attachments.map((a) => ({
         filename: a.filename,
         content: a.content.toString('base64'),
         encoding: 'base64',
       }));
-      return this.queueEmail(to, subject, html, cc, emailAttachments, category);
+      return this.queueEmail(
+        to,
+        rendered.subject,
+        rendered.html,
+        cc,
+        emailAttachments,
+        category,
+      );
     } catch (error) {
       this.logger.error(`Failed to read template ${templateName}: ${error}`);
       throw error;
@@ -166,6 +180,42 @@ export class EmailQueueService {
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);
+  }
+
+  // Catalogue emails use the shared layout and the church's own wording (subject included); others load their file.
+  private async renderTemplate(
+    templateName: string,
+    subject: string,
+    templateData: Record<string, any>,
+  ): Promise<{ subject: string; html: string }> {
+    if (isCatalogueEmail(templateName)) {
+      const [wording, branding] = await Promise.all([
+        this.notificationTemplates.resolveEmailWording(templateName),
+        this.resolveBrandingData(),
+      ]);
+      return renderCatalogueEmail(
+        templateName,
+        wording,
+        templateData,
+        branding,
+      );
+    }
+    const templatePath = path.resolve(
+      __dirname,
+      '..',
+      'templates',
+      `${templateName}.html`,
+    );
+    const template = fs.readFileSync(templatePath, 'utf-8');
+    return {
+      subject,
+      html: await this.compileTemplate(template, templateData),
+    };
+  }
+
+  // Branding values shared by previews and test sends of catalogue emails.
+  async getBrandingData(): Promise<Record<string, string>> {
+    return this.resolveBrandingData();
   }
 
   private async compileTemplate(

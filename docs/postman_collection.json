@@ -31330,6 +31330,170 @@
               "body": "{ \"data\": { \"sent\": true } }"
             }
           ]
+        },
+        {
+          "name": "List Email Templates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email"
+              ]
+            },
+            "description": "admin:read. Every customizable email with its defaults, current wording, placeholders (always including church_name), lockedNote and customized, plus customizationAvailable."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"customizationAvailable\": true, \"items\": [ { \"key\": \"happy-birthday\", \"category\": \"BIRTHDAY\", \"categoryLabel\": \"Birthday Wishes\", \"label\": \"Birthday greeting\", \"lockedNote\": \"Nothing is locked \\u2014 the whole message is yours.\", \"placeholders\": { \"church_name\": \"Your church\", \"first_name\": \"Ada\", \"full_name\": \"Ada Obi\" }, \"defaults\": { \"subject\": \"Happy Birthday, {{first_name}}!\" }, \"wording\": { \"subject\": \"Happy Birthday, {{first_name}}!\" }, \"customized\": false, \"updatedAt\": null } ] } }"
+            }
+          ]
+        },
+        {
+          "name": "Preview Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email/happy-birthday/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email",
+                "happy-birthday",
+                "preview"
+              ]
+            },
+            "description": "admin:read, any plan. Returns { subject, html } rendered with sample details and your church branding. Send any fields to preview an unsaved draft; omit the body to preview the current wording.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"heading\": \"Cheers, {{first_name}}!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Save Email Template",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email/happy-birthday",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email",
+                "happy-birthday"
+              ]
+            },
+            "description": "admin:write + plan feature. All six fields required; message/closing are rich text (sanitized), the rest plain text. Only this email's placeholders plus {{church_name}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Happy Birthday, {{first_name}}!\",\n  \"heading\": \"Happy Birthday, {{first_name}}!\",\n  \"message\": \"<p>The whole {{church_name}} family is celebrating you today!</p>\",\n  \"closing\": \"\",\n  \"signoff\": \"With love,\",\n  \"signature\": \"{{church_name}} Family\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Email Template",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email/happy-birthday",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email",
+                "happy-birthday"
+              ]
+            },
+            "description": "admin:write + plan feature. Back to the default wording."
+          },
+          "response": []
+        },
+        {
+          "name": "Send Test Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email/happy-birthday/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email",
+                "happy-birthday",
+                "test"
+              ]
+            },
+            "description": "admin:write + plan feature. Sends the draft (or saved) email with sample details to your own address, subject prefixed [Test].",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"sent\": true, \"to\": \"admin@example.com\" } }"
+            }
+          ]
         }
       ]
     },

@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { NotificationTemplateService } from './notification-template.service';
 import { PUSH_CATALOGUE, PushNotificationKey } from '../push-catalogue';
+import { EmailTemplateKey, defaultWording } from '../email-catalogue';
 
 describe('NotificationTemplateService', () => {
   const repo = {
@@ -163,6 +164,125 @@ describe('NotificationTemplateService', () => {
       categoryLabel: 'Prayer Reminders',
       defaultTitle: 'Prayer Assignment',
       customized: false,
+    });
+  });
+
+  describe('emails', () => {
+    const EKEY = EmailTemplateKey.HAPPY_BIRTHDAY;
+    const clean = (html: string) =>
+      html.replace(/<script[\s\S]*?<\/script>/g, '');
+
+    it("resolves the church's changed fields over the defaults", async () => {
+      repo.find.mockResolvedValue([
+        {
+          templateKey: EKEY,
+          content: { heading: 'Cheers, {{first_name}}!' },
+          updatedAt: new Date(),
+        },
+      ]);
+
+      const w = await service.resolveEmailWording(EKEY);
+
+      expect(w.heading).toBe('Cheers, {{first_name}}!');
+      expect(w.subject).toBe(defaultWording(EKEY).subject);
+    });
+
+    it('ignores saved wording on plans without customization', async () => {
+      onPlan(false);
+      repo.find.mockResolvedValue([
+        { templateKey: EKEY, content: { heading: 'x' }, updatedAt: new Date() },
+      ]);
+
+      expect((await service.resolveEmailWording(EKEY)).heading).toBe(
+        defaultWording(EKEY).heading,
+      );
+    });
+
+    it('saves only the fields that differ from the default, cleaned', async () => {
+      await service.saveEmail(
+        EKEY,
+        {
+          ...defaultWording(EKEY),
+          subject: '<b>Happy day</b>, {{first_name}}',
+          message: '<p>Hi {{first_name}}</p><script>alert(1)</script>',
+        },
+        clean,
+        'member-1',
+      );
+
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'EMAIL',
+          templateKey: EKEY,
+          content: {
+            subject: 'Happy day, {{first_name}}',
+            message: '<p>Hi {{first_name}}</p>',
+          },
+        }),
+      );
+      expect(cache.del).toHaveBeenCalledWith('notification-overrides:email');
+    });
+
+    it('allows {{church_name}} everywhere but rejects placeholders the email lacks', async () => {
+      await expect(
+        service.saveEmail(
+          EKEY,
+          { ...defaultWording(EKEY), signature: '{{church_name}} Youth' },
+          clean,
+        ),
+      ).resolves.toBeDefined();
+
+      await expect(
+        service.saveEmail(
+          EKEY,
+          { ...defaultWording(EKEY), message: '<p>{{amount}}</p>' },
+          clean,
+        ),
+      ).rejects.toThrow(
+        "Message uses {{amount}}, which this email doesn't have.",
+      );
+    });
+
+    it('requires a subject and a message', async () => {
+      await expect(
+        service.saveEmail(
+          EKEY,
+          { ...defaultWording(EKEY), subject: ' ' },
+          clean,
+        ),
+      ).rejects.toThrow("Subject can't be empty.");
+      await expect(
+        service.saveEmail(
+          EKEY,
+          { ...defaultWording(EKEY), message: '<p> </p>' },
+          clean,
+        ),
+      ).rejects.toThrow("Message can't be empty.");
+    });
+
+    it('lists every catalogue email with its group, lock note and placeholders', async () => {
+      const { items } = await service.listEmail();
+      const welcome = items.find(
+        (i) => i.key === EmailTemplateKey.WELCOME_MEMBER,
+      );
+
+      expect(items).toHaveLength(Object.values(EmailTemplateKey).length);
+      expect(welcome).toMatchObject({
+        categoryLabel: 'Account emails',
+        placeholders: { church_name: 'Your church', first_name: 'Ada' },
+        customized: false,
+      });
+      expect(welcome?.lockedNote).toMatch(/password/);
+    });
+
+    it('resetEmail removes the church wording', async () => {
+      await service.resetEmail(EKEY, 'member-1');
+
+      expect(repo.delete).toHaveBeenCalledWith({
+        channel: 'EMAIL',
+        templateKey: EKEY,
+      });
+      expect(cache.del).toHaveBeenCalledWith('notification-overrides:email');
     });
   });
 });

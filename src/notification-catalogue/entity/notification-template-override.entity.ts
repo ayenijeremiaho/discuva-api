@@ -39,6 +39,10 @@ export class NotificationTemplateOverride extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   body: string | null;
 
+  // Email wording fields the church changed (EmailWording subset); absent fields use the default.
+  @Column({ type: 'jsonb', nullable: true })
+  content: Record<string, string> | null;
+
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'updated_by_id' })
   updatedBy: Member | null;

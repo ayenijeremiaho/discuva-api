@@ -16,9 +16,20 @@ import {
   PushTemplate,
 } from '../push-catalogue';
 import {
+  EmailTemplateView,
+  EmailWordingDto,
   PushTemplateView,
   UpdatePushTemplateDto,
 } from '../dto/push-template.dto';
+import {
+  EMAIL_CATALOGUE,
+  EmailTemplate,
+  EmailTemplateKey,
+  EmailWording,
+  RICH_EMAIL_FIELDS,
+  defaultWording,
+  isCatalogueEmail,
+} from '../email-catalogue';
 import { KNOWN_EMAIL_CATEGORIES } from '../../email-category-settings/constant/known-email-categories.constant';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -32,6 +43,28 @@ type PushOverrides = Record<
 >;
 
 const PUSH_CACHE_KEY = 'notification-overrides:push';
+const EMAIL_CACHE_KEY = 'notification-overrides:email';
+const EMAIL_FIELDS: (keyof EmailWording)[] = [
+  'subject',
+  'heading',
+  'message',
+  'closing',
+  'signoff',
+  'signature',
+];
+const EMAIL_FIELD_LABELS: Record<keyof EmailWording, string> = {
+  subject: 'Subject',
+  heading: 'Heading',
+  message: 'Message',
+  closing: 'Closing message',
+  signoff: 'Sign-off',
+  signature: 'Signature',
+};
+
+type EmailOverrides = Record<
+  string,
+  { content: Partial<EmailWording>; updatedAt: string }
+>;
 const CACHE_TTL = 300;
 const PLACEHOLDER = /{{\s*(\w+)\s*}}/g;
 
@@ -165,6 +198,181 @@ export class NotificationTemplateService {
       metadata: { channel: NotificationChannel.PUSH },
     });
     return this.toView(key as PushNotificationKey, undefined);
+  }
+
+  private async emailOverrides(): Promise<EmailOverrides> {
+    const cached = await this.cacheService.get<EmailOverrides>(EMAIL_CACHE_KEY);
+    if (cached) return cached;
+    const rows = await this.overrideRepo.find({
+      where: { channel: NotificationChannel.EMAIL },
+    });
+    const map: EmailOverrides = {};
+    for (const row of rows) {
+      map[row.templateKey] = {
+        content: (row.content ?? {}) as Partial<EmailWording>,
+        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+      };
+    }
+    this.cacheService.set(EMAIL_CACHE_KEY, map, CACHE_TTL);
+    return map;
+  }
+
+  // Wording to send: church edits (while the plan includes customization) over the defaults, field by field.
+  async resolveEmailWording(key: EmailTemplateKey): Promise<EmailWording> {
+    const defaults = defaultWording(key);
+    const override = (await this.emailOverrides())[key];
+    if (!override || !(await this.isCustomizationAvailable())) return defaults;
+    return { ...defaults, ...override.content };
+  }
+
+  async listEmail(): Promise<{
+    customizationAvailable: boolean;
+    items: EmailTemplateView[];
+  }> {
+    const [overrides, customizationAvailable] = await Promise.all([
+      this.emailOverrides(),
+      this.isCustomizationAvailable(),
+    ]);
+    const items = Object.values(EmailTemplateKey).map((key) =>
+      this.toEmailView(key, overrides[key]),
+    );
+    return { customizationAvailable, items };
+  }
+
+  async saveEmail(
+    key: string,
+    dto: EmailWordingDto,
+    sanitizeHtml: (html: string) => string,
+    actorMemberId?: string,
+  ): Promise<EmailTemplateView> {
+    const template = this.assertEmailKey(key);
+    const wording = this.validateEmailWording(dto, template, sanitizeHtml);
+    const defaults = defaultWording(key as EmailTemplateKey);
+    const changed: Partial<EmailWording> = {};
+    for (const field of EMAIL_FIELDS) {
+      if (wording[field] !== defaults[field]) changed[field] = wording[field];
+    }
+
+    const existing = await this.overrideRepo.findOne({
+      where: { channel: NotificationChannel.EMAIL, templateKey: key },
+    });
+    if (!Object.keys(changed).length) {
+      if (existing) await this.overrideRepo.delete({ id: existing.id });
+    } else {
+      const row =
+        existing ??
+        this.overrideRepo.create({
+          channel: NotificationChannel.EMAIL,
+          templateKey: key,
+        });
+      row.content = changed as Record<string, string>;
+      row.updatedBy = actorMemberId ? ({ id: actorMemberId } as never) : null;
+      await this.overrideRepo.save(row);
+    }
+    this.cacheService.del(EMAIL_CACHE_KEY);
+    this.auditLogService.log('NOTIFICATION_TEMPLATE_UPDATED', {
+      actorId: actorMemberId,
+      targetId: key,
+      metadata: {
+        channel: NotificationChannel.EMAIL,
+        fields: Object.keys(changed),
+      },
+    });
+    return this.toEmailView(
+      key as EmailTemplateKey,
+      Object.keys(changed).length
+        ? { content: changed, updatedAt: new Date().toISOString() }
+        : undefined,
+    );
+  }
+
+  async resetEmail(
+    key: string,
+    actorMemberId?: string,
+  ): Promise<EmailTemplateView> {
+    this.assertEmailKey(key);
+    await this.overrideRepo.delete({
+      channel: NotificationChannel.EMAIL,
+      templateKey: key,
+    });
+    this.cacheService.del(EMAIL_CACHE_KEY);
+    this.auditLogService.log('NOTIFICATION_TEMPLATE_RESET', {
+      actorId: actorMemberId,
+      targetId: key,
+      metadata: { channel: NotificationChannel.EMAIL },
+    });
+    return this.toEmailView(key as EmailTemplateKey, undefined);
+  }
+
+  // Cleans and checks a draft; the HTML sanitizer is passed in so this service (loaded by EmailQueueService) stays free of jsdom.
+  validateEmailWording(
+    dto: EmailWordingDto,
+    template: EmailTemplate,
+    sanitizeHtml: (html: string) => string,
+  ): EmailWording {
+    const allowed = { church_name: '', ...template.placeholders };
+    const wording = {} as EmailWording;
+    for (const field of EMAIL_FIELDS) {
+      const raw = dto[field] ?? '';
+      const value = RICH_EMAIL_FIELDS.includes(field)
+        ? sanitizeHtml(raw).trim()
+        : toPlainText(raw);
+      this.assertPlaceholders(value, allowed, EMAIL_FIELD_LABELS[field]);
+      wording[field] = value;
+    }
+    if (!wording.subject) {
+      throw new BadRequestException("Subject can't be empty.");
+    }
+    if (!toPlainText(wording.message)) {
+      throw new BadRequestException("Message can't be empty.");
+    }
+    return wording;
+  }
+
+  assertEmailKey(key: string): EmailTemplate {
+    if (!isCatalogueEmail(key)) {
+      throw new NotFoundException(`Unknown email: ${key}`);
+    }
+    return EMAIL_CATALOGUE[key];
+  }
+
+  private assertPlaceholders(
+    text: string,
+    allowed: Record<string, string>,
+    field: string,
+  ): void {
+    const unknown = [...text.matchAll(PLACEHOLDER)]
+      .map((m) => m[1])
+      .filter((name) => !(name in allowed));
+    if (!unknown.length) return;
+    const names = Object.keys(allowed);
+    throw new BadRequestException(
+      `${field} uses ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(', ')}, which this email doesn't have.` +
+        ` Available: ${names.map((n) => `{{${n}}}`).join(', ')}.`,
+    );
+  }
+
+  private toEmailView(
+    key: EmailTemplateKey,
+    override?: { content: Partial<EmailWording>; updatedAt: string },
+  ): EmailTemplateView {
+    const template = EMAIL_CATALOGUE[key];
+    const defaults = defaultWording(key);
+    return {
+      key,
+      category: template.category,
+      categoryLabel: template.category
+        ? KNOWN_EMAIL_CATEGORIES[template.category].label
+        : 'Account emails',
+      label: template.label,
+      description: template.description,
+      lockedNote: template.lockedNote,
+      placeholders: { church_name: 'Your church', ...template.placeholders },
+      defaults: { ...defaults },
+      wording: { ...defaults, ...(override?.content ?? {}) },
+      customized: !!override && Object.keys(override.content).length > 0,
+      updatedAt: override ? new Date(override.updatedAt) : null,
+    };
   }
 
   assertPushKey(key: string): PushTemplate {

@@ -166,6 +166,7 @@ export class AssignmentReminderScheduler {
         assignmentTitle: assignment.title,
         dueDate: assignment.dueDate!.toISOString().slice(0, 10),
         status,
+        statusTitle: AssignmentReminderScheduler.subjectLabel(diffDays),
         portalUrl,
       },
       undefined,

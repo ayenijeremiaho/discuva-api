@@ -2771,6 +2771,32 @@ announcement pushes ignored the category switches entirely.
 - `NOTIFICATION_CUSTOMIZATION` is labelled "Notification Customization" in `PlatformCapabilityService` so the platform
   Plans page lists it.
 
+**Custom email wording (notification customization, Phase 2):** same plan feature and permissions as push. Eight
+emails are customizable so far — `welcome-member`, `happy-birthday`, `service-reminder`,
+`first-timer-membership-invite`, `tithe-proof-confirmed`, `pledge-contribution-confirmed`, `class-session-reminder`,
+`assignment-due-reminder`.
+- **Catalogue:** `EMAIL_CATALOGUE` (`src/notification-catalogue/email-catalogue.ts`), keyed by the existing template
+  name, holds each email's default wording (reproducing the old files word for word, except the service reminder now
+  says "Open the app" rather than naming the product), placeholders with sample values, a `toVars(data)` mapping from
+  the sender's template data to friendly placeholder names, a `lockedNote` for admins, and `sampleData` for previews.
+  `category` is `null` for the welcome email (it always sends).
+- **Layout:** these emails no longer have standalone HTML files. They render as `templates/layouts/base.html` (shared
+  head, styles, logo header, sign-off and footer) wrapping `templates/content/<key>.html`, which holds only the
+  optional heading, the editable `message`, the locked block (credentials, buttons, amounts, dates, links) and the
+  editable `closing`.
+- **Editable fields:** `subject`, `heading`, `message` (rich), `closing` (rich), `signoff`, `signature`. Plain fields
+  are stripped to text; rich fields are cleaned with `SanitizationService.sanitizeForEmail` (passed in from the
+  controller so the template service, loaded by `EmailQueueService`, doesn't pull in jsdom). Every field may only use
+  the email's own placeholders plus `{{church_name}}`; subject and message are required. Only fields that differ from
+  the default are stored, in `notification_template_overrides.content` (jsonb, tenant migration
+  `AddEmailContentToNotificationTemplateOverrides`), cached per church under `notification-overrides:email`.
+- **Sending:** `EmailQueueService.queueEmailWithTemplate*` detects catalogue template names and renders them with
+  `NotificationTemplateService.resolveEmailWording()` (church edits while the plan allows, else defaults) — including
+  the subject, which replaces the caller's. Placeholders are filled by plain token replacement with HTML-escaped
+  values; church wording is inserted as data and never compiled by Handlebars. Every other email still loads its own
+  file unchanged.
+- **Class reminders** now also pass `statusTitle` (e.g. "Starts in 1 Hour") so the default subjects stay identical.
+
 ### Event Module
 
 Manages events and service slots. Events can be single or recurring (daily/weekly/monthly). At least one `serviceSlot`
@@ -9091,6 +9117,11 @@ outside the requested `?months=` window).
 | PUT    | /admin/notification-templates/push/:key                    | AdminGuard (`admin:write`) + plan `notification_customization` | Save the church's title/message for one push type. Body `{ title, body }` |
 | DELETE | /admin/notification-templates/push/:key                    | AdminGuard (`admin:write`) + plan `notification_customization` | Reset one push type to the default wording |
 | POST   | /admin/notification-templates/push/:key/test               | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) wording with sample values to the admin's own device; `{ sent }` or `{ sent: false, reason: 'NO_DEVICE' }` |
+| GET    | /admin/notification-templates/email                        | AdminGuard (`admin:read`), any plan                           | Every customizable email with defaults, current wording, placeholders, `lockedNote`, `customized`, plus `customizationAvailable` |
+| POST   | /admin/notification-templates/email/:key/preview           | AdminGuard (`admin:read`), any plan                           | `{ subject, html }` of the email with sample details and the church's branding; body is an optional unsaved draft |
+| PUT    | /admin/notification-templates/email/:key                   | AdminGuard (`admin:write`) + plan `notification_customization` | Save wording `{ subject, heading, message, closing, signoff, signature }` |
+| DELETE | /admin/notification-templates/email/:key                   | AdminGuard (`admin:write`) + plan `notification_customization` | Reset one email to the default wording |
+| POST   | /admin/notification-templates/email/:key/test              | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) email with sample details to the admin's own address, subject prefixed `[Test]` |
 | GET    | /notifications/vapid-public-key                            | JwtAuthGuard                                                  | `{ publicKey }` — the server's VAPID public key; clients must use it as `applicationServerKey` when subscribing |
 | POST   | /notifications/subscribe                                   | JwtAuthGuard                                                  | Register a Web Push subscription. Called **once** after first device registration (`deviceId` transitions from `null`). Also called after re-registering on a new device following an admin purge or OTP device reset. Body: `endpoint`, `p256dh`, `auth`. Returns 204. |
 | DELETE | /notifications/subscribe                                   | JwtAuthGuard                                                  | Explicit opt-out: removes the Web Push subscription. **Not called on normal logout** — subscription persists so the service worker can deliver notifications while the member is logged out. Returns 204. |

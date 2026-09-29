@@ -10,6 +10,12 @@ import { CacheService } from './cache.service';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { EmailCategory } from '../email-provider/email-category.enum';
 
+import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
+import {
+  EmailTemplateKey,
+  defaultWording,
+} from '../../notification-catalogue/email-catalogue';
+
 jest.mock('node:fs');
 
 const TEMPLATE =
@@ -50,6 +56,12 @@ const mockEmailCategorySettingsService = {
   isEnabled: jest.fn().mockResolvedValue(true),
 };
 
+const mockTemplates = {
+  resolveEmailWording: jest.fn((key: EmailTemplateKey) =>
+    Promise.resolve(defaultWording(key)),
+  ),
+};
+
 describe('EmailQueueService', () => {
   let service: EmailQueueService;
 
@@ -81,6 +93,7 @@ describe('EmailQueueService', () => {
           provide: EmailCategorySettingsService,
           useValue: mockEmailCategorySettingsService,
         },
+        { provide: NotificationTemplateService, useValue: mockTemplates },
       ],
     }).compile();
     service = module.get(EmailQueueService);
@@ -380,6 +393,58 @@ describe('EmailQueueService', () => {
       await expect(service.resolveChurchName()).resolves.toBe(
         ENV_DEFAULTS.CHURCH_NAME,
       );
+    });
+  });
+
+  describe('catalogue emails', () => {
+    beforeEach(() => {
+      const realFs = jest.requireActual<typeof fs>('node:fs');
+      (fs.readFileSync as jest.Mock).mockImplementation(
+        (file: string, enc: BufferEncoding) => realFs.readFileSync(file, enc),
+      );
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        subdomain: 'example',
+      });
+    });
+
+    it("uses the church's wording, including its subject, around the locked details", async () => {
+      mockTemplates.resolveEmailWording.mockResolvedValueOnce({
+        ...defaultWording(EmailTemplateKey.TITHE_CONFIRMED),
+        subject: 'Thank you, {{first_name}}!',
+        message: '<p>We received your tithe, {{first_name}}.</p>',
+      });
+
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        'Caller subject',
+        'tithe-proof-confirmed',
+        { name: 'Ada', amount: 'NGN 5,000', paymentDate: '2026-09-27' },
+      );
+
+      const job = mockQueue.add.mock.calls[0][1];
+      expect(job.subject).toBe('Thank you, Ada!');
+      expect(job.html).toContain('We received your tithe, Ada.');
+      expect(job.html).toContain('NGN 5,000');
+      expect(job.html).toContain('St. Example Church');
+    });
+
+    it('escapes member-supplied values placed into church wording', async () => {
+      mockTemplates.resolveEmailWording.mockResolvedValueOnce({
+        ...defaultWording(EmailTemplateKey.HAPPY_BIRTHDAY),
+        message: '<p>Happy birthday {{full_name}}</p>',
+      });
+
+      await service.queueEmailWithTemplate('a@b.com', 's', 'happy-birthday', {
+        name: 'Ada',
+        full_name: '<script>x</script>',
+      });
+
+      const html = mockQueue.add.mock.calls[0][1].html;
+      expect(html).toContain('&lt;script&gt;x&lt;/script&gt;');
+      expect(html).not.toContain('<script>x</script>');
     });
   });
 });

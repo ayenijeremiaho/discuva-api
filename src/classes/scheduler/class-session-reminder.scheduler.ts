@@ -174,6 +174,7 @@ export class ClassSessionReminderScheduler {
         name: firstName,
         className: churchClass.name,
         status,
+        statusTitle: ClassSessionReminderScheduler.subjectLabel(diffHours),
         sessionTime: churchClass.nextSessionAt!.toISOString(),
         meetingLink: churchClass.meetingLink,
       },

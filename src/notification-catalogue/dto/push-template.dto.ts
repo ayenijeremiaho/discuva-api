@@ -38,3 +38,76 @@ export interface PushTemplateView {
   customized: boolean;
   updatedAt: Date | null;
 }
+
+export class EmailWordingDto {
+  @IsString()
+  @MaxLength(150)
+  subject: string;
+
+  @IsString()
+  @MaxLength(120)
+  heading: string;
+
+  @IsString()
+  @MaxLength(5000)
+  message: string;
+
+  @IsString()
+  @MaxLength(3000)
+  closing: string;
+
+  @IsString()
+  @MaxLength(60)
+  signoff: string;
+
+  @IsString()
+  @MaxLength(80)
+  signature: string;
+}
+
+export interface EmailTemplateView {
+  key: string;
+  category: string | null;
+  categoryLabel: string;
+  label: string;
+  description: string;
+  lockedNote: string;
+  placeholders: Record<string, string>;
+  defaults: Record<string, string>;
+  wording: Record<string, string>;
+  customized: boolean;
+  updatedAt: Date | null;
+}
+
+// Unsaved draft for previews and test sends; omitted fields use the saved or default wording.
+export class DraftEmailWordingDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(150)
+  subject?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  heading?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  message?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3000)
+  closing?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  signoff?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  signature?: string;
+}
