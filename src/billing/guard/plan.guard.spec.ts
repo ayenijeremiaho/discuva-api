@@ -16,9 +16,7 @@ import { CacheService } from '../../utility/service/cache.service';
 
 const mockSubscriptionRepo = { findOne: jest.fn() };
 const mockPlanRepo = { findOne: jest.fn() };
-// PlanGuard itself never consults overrides (only ModuleEnabledGuard
-// does), but PlanFeatureResolverService fetches the tenant row regardless
-// — defaults to null (no tenant found) unless a test overrides it.
+// Tenant row supplies moduleOverrides; null (no overrides) unless a test sets one.
 const mockTenantRepo = { findOne: jest.fn().mockResolvedValue(null) };
 const mockFeatureUsageService = { tryConsume: jest.fn(), getUsage: jest.fn() };
 const mockCacheService = {
@@ -97,6 +95,47 @@ describe('PlanGuard', () => {
       ForbiddenException,
     );
     expect(mockFeatureUsageService.getUsage).not.toHaveBeenCalled();
+  });
+
+  it("grants access through a platform admin's per-church override even without the plan", async () => {
+    mockReflectorReturns(reflector, {
+      [REQUIRES_PLAN_KEY]: PlanFeature.SERMON,
+    });
+    mockCls.get.mockReturnValue('tenant-1');
+    mockTenantRepo.findOne.mockResolvedValueOnce({
+      moduleOverrides: { sermons: true },
+    });
+    mockSubscriptionRepo.findOne.mockResolvedValue({ planId: 'free' });
+    mockPlanRepo.findOne.mockResolvedValue({ features: [], featureLimits: {} });
+
+    await expect(guard.canActivate(mockContext())).resolves.toBe(true);
+  });
+
+  it('blocks access through a per-church override even when the plan includes it', async () => {
+    mockReflectorReturns(reflector, {
+      [REQUIRES_PLAN_KEY]: PlanFeature.VOLUNTEER,
+    });
+    mockCls.get.mockReturnValue('tenant-1');
+    mockTenantRepo.findOne.mockResolvedValueOnce({
+      moduleOverrides: { volunteering: false },
+    });
+    mockSubscriptionRepo.findOne.mockResolvedValue({ planId: 'pro' });
+    mockPlanRepo.findOne.mockResolvedValue({
+      features: ['volunteering'],
+      featureLimits: {},
+    });
+
+    await expect(guard.canActivate(mockContext())).rejects.toThrow(
+      'This feature has been disabled for your account.',
+    );
+  });
+
+  it('uses the module keys for sermons, service ratings and volunteering', () => {
+    expect([
+      PlanFeature.SERMON,
+      PlanFeature.SERVICE_RATING,
+      PlanFeature.VOLUNTEER,
+    ]).toEqual(['sermons', 'service_ratings', 'volunteering']);
   });
 
   it('allows the request through when the feature is included and has no configured limit', async () => {

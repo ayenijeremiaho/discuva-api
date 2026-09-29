@@ -3852,6 +3852,15 @@ counterpart and stay purely plan-gated, no toggle) unioned with every `KNOWN_MOD
 to be a hardcoded 12-entry array in `plan-form-panel.tsx` (which — notably — never included `forms`, fixed as a
 side effect).
 
+**One key per module (fixed 2026-09-29):** `PlanFeature.SERMON`, `SERVICE_RATING` and `VOLUNTEER` used to be `sermon`,
+`service_rating` and `volunteer` while their modules used `sermons`, `service_ratings` and `volunteering`. Access
+needed both keys, but the Plans page only listed the module keys, so platform admins couldn't grant these to a plan,
+and removing one from Pro only blocked the member side (the admin controllers check `@RequiresPlan` alone). The enum
+now uses the module keys, and root migration `UnifySermonRatingVolunteerPlanKeys` renames the old keys in
+`plans.features`, `plans.feature_limits` and `tenants.module_overrides`. `PlanGuard` also honours
+`Tenant.moduleOverrides` now (`false` blocks, `true` grants, checked before plan membership) — the same precedence as
+`ModuleEnabledGuard` — so a per-church override works on every route.
+
 A one-time backfill migration (`BackfillModuleCapabilityKeys`) added the 11 previously-free module keys to *both*
 `free` and `pro` plans' `features` (preserving today's access for every tenant — a platform admin removes a key
 from `free` afterward to make it Pro-only) and 3 module-key spellings that don't match their pre-existing

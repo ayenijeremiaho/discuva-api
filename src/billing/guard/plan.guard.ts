@@ -41,8 +41,17 @@ export class PlanGuard implements CanActivate {
     // same key (`plan-features:${tenantId}`) — PlatformTenantService.changeTenantPlan
     // (manual platform-admin override) already does this; self-serve upgrade
     // checkout is still deferred (§9 Phase 3) and will need the same call.
-    const { features, featureLimits } =
+    const { features, featureLimits, overrides } =
       await this.planFeatureResolver.resolve(tenantId);
+
+    // Platform-admin per-church override, same precedence as ModuleEnabledGuard.
+    const override = overrides[required];
+    if (override === false) {
+      throw new ForbiddenException(
+        'This feature has been disabled for your account.',
+      );
+    }
+    if (override === true) return true;
 
     if (!features.includes(required)) {
       throw new ForbiddenException({

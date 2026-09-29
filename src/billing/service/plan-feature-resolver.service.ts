@@ -9,11 +9,8 @@ import { CacheService } from '../../utility/service/cache.service';
 export interface ResolvedPlan {
   features: string[];
   featureLimits: Record<string, number>;
-  // Platform-admin manual overrides, keyed by module/feature key — see
-  // Tenant.moduleOverrides' own comment. Checked by ModuleEnabledGuard
-  // ahead of `features` membership; PlanGuard doesn't consult this (no
-  // per-tenant override need has come up for the orphan PlanFeature-only
-  // gates yet).
+  // Platform-admin manual overrides keyed by module/feature key (Tenant.moduleOverrides); both
+  // ModuleEnabledGuard and PlanGuard check them ahead of `features` membership.
   overrides: Record<string, boolean>;
 }
 
