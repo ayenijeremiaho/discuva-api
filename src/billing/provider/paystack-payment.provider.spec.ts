@@ -259,6 +259,34 @@ describe('PaystackPaymentProvider', () => {
     });
   });
 
+  describe('createOneOffCheckout', () => {
+    it('sends the cancel link as Paystack metadata.cancel_action', async () => {
+      mockFetchOnce(200, {
+        status: true,
+        data: { authorization_url: 'https://checkout.paystack.com/x' },
+      });
+
+      await provider.createOneOffCheckout({
+        tenantId: 'tenant-1',
+        providerCustomerId: 'CUS_1',
+        email: 'admin@church.org',
+        amountCents: 50000,
+        description: 'Top-up',
+        successUrl: 'https://admin/billing?checkout=success',
+        cancelUrl: 'https://admin/billing?checkout=cancelled',
+      });
+
+      const body = JSON.parse(
+        (global.fetch as jest.Mock).mock.calls[0][1].body,
+      );
+      expect(body.callback_url).toBe('https://admin/billing?checkout=success');
+      expect(body.metadata).toMatchObject({
+        tenantId: 'tenant-1',
+        cancel_action: 'https://admin/billing?checkout=cancelled',
+      });
+    });
+  });
+
   describe('refund', () => {
     it('posts to /refund with the transaction reference and amount', async () => {
       mockFetchOnce(200, { status: true, data: {} });

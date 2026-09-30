@@ -127,26 +127,54 @@ describe('StripeGivingProvider', () => {
       ).toThrow(InternalServerErrorException);
     });
 
-    it('maps an unpaid session to charge.failed', () => {
-      const payload = JSON.stringify({
-        type: 'checkout.session.completed',
-        data: {
-          object: {
-            payment_status: 'unpaid',
-            client_reference_id: 'giving_abc123',
-          },
-        },
-      });
+    function parse(type: string, object: Record<string, unknown>) {
+      const payload = JSON.stringify({ type, data: { object } });
       const timestamp = '1700000000';
-      const signature = sign(timestamp, payload);
-
-      const result = provider.verifyAndParseWebhook(
+      return provider.verifyAndParseWebhook(
         Buffer.from(payload),
-        `t=${timestamp},v1=${signature}`,
+        `t=${timestamp},v1=${sign(timestamp, payload)}`,
         credentials,
       );
+    }
 
+    it('leaves a delayed (unpaid) payment pending instead of failing it', () => {
+      const result = parse('checkout.session.completed', {
+        payment_status: 'unpaid',
+        client_reference_id: 'giving_abc123',
+      });
       expect(result.type).toBe('charge.failed');
+      expect(result.providerReference).toBeUndefined();
+    });
+
+    it('completes a delayed payment once Stripe says it succeeded', () => {
+      expect(
+        parse('checkout.session.async_payment_succeeded', {
+          payment_status: 'paid',
+          client_reference_id: 'giving_abc123',
+        }),
+      ).toMatchObject({
+        type: 'charge.succeeded',
+        providerReference: 'giving_abc123',
+      });
+    });
+
+    it.each([
+      'checkout.session.async_payment_failed',
+      'checkout.session.expired',
+    ])('fails the checkout on %s', (type) => {
+      expect(
+        parse(type, { client_reference_id: 'giving_abc123' }),
+      ).toMatchObject({
+        type: 'charge.failed',
+        providerReference: 'giving_abc123',
+      });
+    });
+
+    it('ignores unrelated events', () => {
+      const result = parse('payment_intent.created', {
+        client_reference_id: 'giving_abc123',
+      });
+      expect(result.providerReference).toBeUndefined();
     });
   });
 });

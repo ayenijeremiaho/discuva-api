@@ -103,16 +103,33 @@ export class StripeGivingProvider implements IGivingProvider {
     const payload = JSON.parse(rawBody.toString('utf-8'));
     const object = payload.data?.object ?? {};
 
-    if (payload.type === 'checkout.session.completed') {
-      return {
-        type:
-          object.payment_status === 'paid'
-            ? 'charge.succeeded'
-            : 'charge.failed',
-        providerReference: object.client_reference_id,
-        raw: payload,
-      };
+    const reference = object.client_reference_id;
+    switch (payload.type) {
+      // Delayed methods (e.g. bank debits) complete the session as `unpaid`; they stay pending until
+      // async_payment_succeeded/failed arrives, rather than being failed straight away.
+      case 'checkout.session.completed':
+        return object.payment_status === 'paid'
+          ? {
+              type: 'charge.succeeded',
+              providerReference: reference,
+              raw: payload,
+            }
+          : { type: 'charge.failed', raw: payload };
+      case 'checkout.session.async_payment_succeeded':
+        return {
+          type: 'charge.succeeded',
+          providerReference: reference,
+          raw: payload,
+        };
+      case 'checkout.session.async_payment_failed':
+      case 'checkout.session.expired':
+        return {
+          type: 'charge.failed',
+          providerReference: reference,
+          raw: payload,
+        };
+      default:
+        return { type: 'charge.failed', raw: payload };
     }
-    return { type: 'charge.failed', raw: payload };
   }
 }

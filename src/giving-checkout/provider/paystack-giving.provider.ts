@@ -42,7 +42,11 @@ export class PaystackGivingProvider implements IGivingProvider {
         currency: params.currency,
         reference: params.reference,
         callback_url: params.successUrl,
-        metadata: { cancel_url: params.cancelUrl, payerName: params.payerName },
+        // cancel_action is the metadata key Paystack uses to send a payer who cancels back to us.
+        metadata: {
+          cancel_action: params.cancelUrl,
+          payerName: params.payerName,
+        },
       }),
     });
     const json: any = await response.json().catch(() => ({}));

@@ -142,7 +142,8 @@ export class PaystackPaymentProvider implements IPaymentProvider {
       plan: planCode,
       reference,
       callback_url: params.successUrl,
-      metadata: { tenantId: params.tenantId, cancel_url: params.cancelUrl },
+      // cancel_action is the metadata key Paystack uses to send a payer who cancels back to us.
+      metadata: { tenantId: params.tenantId, cancel_action: params.cancelUrl },
     });
 
     return {
@@ -170,7 +171,7 @@ export class PaystackPaymentProvider implements IPaymentProvider {
       metadata: {
         tenantId: params.tenantId,
         description: params.description,
-        cancel_url: params.cancelUrl,
+        cancel_action: params.cancelUrl,
       },
     });
 

@@ -46,6 +46,8 @@ describe('PaystackGivingProvider', () => {
       const body = JSON.parse((options as any).body);
       expect(body.amount).toBe(500000);
       expect(body.reference).toBe('giving_abc123');
+      expect(body.callback_url).toBe('https://example.com/success');
+      expect(body.metadata.cancel_action).toBe('https://example.com/cancel');
       expect(result.checkoutUrl).toBe('https://checkout.paystack.com/abc');
     });
 

@@ -49,13 +49,14 @@ const mockConfigRepo = {
   createQueryBuilder: jest.fn(),
 };
 const mockCheckoutRepo = {
+  findOne: jest.fn(),
   create: jest.fn((v) => v),
   save: jest.fn(),
   update: jest.fn(),
 };
 const mockTenantRepo = { findOneByOrFail: jest.fn() };
 const mockMemberRepo = { findOneByOrFail: jest.fn() };
-const mockGivingOptionRepo = { exists: jest.fn() };
+const mockGivingOptionRepo = { exists: jest.fn(), findOne: jest.fn() };
 const mockPledgeRepo = { findOne: jest.fn() };
 const mockPledgeService = { recordConfirmedContribution: jest.fn() };
 
@@ -200,6 +201,7 @@ describe('GivingCheckoutService', () => {
       });
 
       expect(mockRegistry.get).toHaveBeenCalledWith('paystack');
+      expect(result.reference).toMatch(/^giving_/);
       expect(mockGivingProvider.createCheckoutSession).toHaveBeenCalledWith(
         expect.objectContaining({
           amountCents: 500000,
@@ -331,6 +333,77 @@ describe('GivingCheckoutService', () => {
       expect(mockCheckoutRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ givingOptionId: 'go-1', pledgeId: null }),
       );
+    });
+  });
+
+  describe('getCheckoutStatus', () => {
+    const session = (extra: Record<string, unknown> = {}) => ({
+      id: 'giving_abc',
+      status: GivingCheckoutStatus.COMPLETED,
+      amountCents: 50000,
+      currency: 'NGN',
+      givingOptionId: null,
+      pledgeId: null,
+      ...extra,
+    });
+
+    it("returns the member's own checkout with the giving option's name", async () => {
+      mockCheckoutRepo.findOne.mockResolvedValue(
+        session({ givingOptionId: 'opt-1' }),
+      );
+      mockGivingOptionRepo.findOne.mockResolvedValue({
+        id: 'opt-1',
+        name: 'Tithe',
+      });
+
+      await expect(
+        service.getCheckoutStatus('member-1', 'giving_abc'),
+      ).resolves.toEqual({
+        status: GivingCheckoutStatus.COMPLETED,
+        amountCents: 50000,
+        currency: 'NGN',
+        purpose: 'Tithe',
+        isPledge: false,
+      });
+      expect(mockCheckoutRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'giving_abc',
+            memberId: 'member-1',
+            tenantId: 'tenant-1',
+          },
+        }),
+      );
+    });
+
+    it('names the pledge campaign, or General Giving when nothing was chosen', async () => {
+      mockCheckoutRepo.findOne.mockResolvedValueOnce(
+        session({ pledgeId: 'pl-1' }),
+      );
+      mockPledgeRepo.findOne.mockResolvedValue({
+        campaign: { name: 'Building Fund' },
+      });
+      await expect(
+        service.getCheckoutStatus('member-1', 'giving_abc'),
+      ).resolves.toMatchObject({
+        purpose: 'Building Fund',
+        isPledge: true,
+      });
+
+      mockCheckoutRepo.findOne.mockResolvedValueOnce(session());
+      await expect(
+        service.getCheckoutStatus('member-1', 'giving_abc'),
+      ).resolves.toMatchObject({
+        purpose: 'General Giving',
+        isPledge: false,
+      });
+    });
+
+    it("404s for someone else's or an unknown checkout", async () => {
+      mockCheckoutRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.getCheckoutStatus('member-2', 'giving_abc'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 

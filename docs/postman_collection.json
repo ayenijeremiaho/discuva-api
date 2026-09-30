@@ -30023,6 +30023,40 @@
           ]
         },
         {
+          "name": "Giving Checkout Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/finance/giving/checkout/giving_00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finance",
+                "giving",
+                "checkout",
+                "giving_00000000-0000-0000-0000-000000000000"
+              ]
+            },
+            "description": "JwtAuthGuard. Status of the caller's own giving checkout (the `reference` returned by POST /finance/giving/checkout): pending, completed, failed or needs_review, plus the amount and what it was for (giving option, pledge campaign, or General Giving). 404 for another member's or an unknown reference."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"status\": \"completed\",\n    \"amountCents\": 50000,\n    \"currency\": \"NGN\",\n    \"purpose\": \"Tithe\",\n    \"isPledge\": false\n  }\n}"
+            }
+          ]
+        },
+        {
           "name": "Initiate Giving Checkout",
           "request": {
             "method": "POST",
@@ -30063,7 +30097,7 @@
               "name": "201 Created",
               "status": "Created",
               "code": 201,
-              "body": "{\n  \"checkoutUrl\": \"https://checkout.paystack.com/abcxyz123\"\n}"
+              "body": "{\n  \"checkoutUrl\": \"https://checkout.paystack.com/abcxyz123\",\n  \"reference\": \"giving_00000000-0000-0000-0000-000000000000\"\n}"
             }
           ]
         }

@@ -181,10 +181,57 @@ export class GivingCheckoutService {
     };
   }
 
+  // Lets a member who's just back from the provider see whether their own gift went through, and what it was for.
+  async getCheckoutStatus(
+    memberId: string,
+    reference: string,
+  ): Promise<{
+    status: GivingCheckoutStatus;
+    amountCents: number;
+    currency: string;
+    purpose: string;
+    isPledge: boolean;
+  }> {
+    const session = await this.checkoutRepo.findOne({
+      where: { id: reference, memberId, tenantId: this.currentTenantId() },
+      select: {
+        id: true,
+        status: true,
+        amountCents: true,
+        currency: true,
+        givingOptionId: true,
+        pledgeId: true,
+      },
+    });
+    if (!session) throw new NotFoundException('Checkout not found.');
+
+    let purpose = 'General Giving';
+    if (session.pledgeId) {
+      const pledge = await this.pledgeRepo.findOne({
+        where: { id: session.pledgeId },
+        relations: { campaign: true },
+      });
+      purpose = pledge?.campaign?.name ?? 'your pledge';
+    } else if (session.givingOptionId) {
+      const option = await this.givingOptionRepo.findOne({
+        where: { id: session.givingOptionId },
+        select: { id: true, name: true },
+      });
+      purpose = option?.name ?? purpose;
+    }
+    return {
+      status: session.status,
+      amountCents: Number(session.amountCents),
+      currency: session.currency,
+      purpose,
+      isPledge: !!session.pledgeId,
+    };
+  }
+
   async initiateCheckout(
     memberId: string,
     dto: InitiateGivingCheckoutDto,
-  ): Promise<{ checkoutUrl: string }> {
+  ): Promise<{ checkoutUrl: string; reference: string }> {
     const tenantId = this.currentTenantId();
     const config = await this.resolveActiveConfig(tenantId);
     if (!config) {
@@ -254,7 +301,7 @@ export class GivingCheckoutService {
       }),
     );
 
-    return { checkoutUrl: session.checkoutUrl };
+    return { checkoutUrl: session.checkoutUrl, reference };
   }
 
   // Entry point for GivingWebhookController. No CLS/tenant context exists

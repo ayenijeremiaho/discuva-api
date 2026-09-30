@@ -6985,7 +6985,29 @@ in the same request.
 | PUT    | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ credentials }` — upserts and activates, deactivating any other active provider |
 | PATCH  | `/finance/giving-providers/:providerId`     | `AdminGuard`, tenant-scoped | `TITHE_WRITE`     | Body `{ isActive }` — enable/disable without touching stored credentials |
 | GET    | `/finance/giving/checkout/provider`         | Member JWT                | —                  | `{ providerId, providerName } \| null` — whether to show "Give via Checkout" at all |
-| POST   | `/finance/giving/checkout`                  | Member JWT                | —                  | Body `{ amountCents, givingOptionId?, pledgeId?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` |
+| POST   | `/finance/giving/checkout`                  | Member JWT                | —                  | Body `{ amountCents, givingOptionId?, pledgeId?, successUrl, cancelUrl }` — returns `{ checkoutUrl, reference }` |
+| GET    | `/finance/giving/checkout/:reference`       | Member JWT                | —                  | `{ status, amountCents, currency, purpose, isPledge }` for the caller's own checkout in this church (`status`: `pending`/`completed`/`failed`/`needs_review`; `purpose`: the giving option's name, the pledge campaign's name, or "General Giving"); 404 for anyone else's. Polled by the Give page after the provider redirects back |
+
+**Returning from checkout (member app):** before redirecting, the app keeps the returned `reference` in
+`sessionStorage`. On return it reads the query tolerantly — Monnify appends `?paymentReference=…` to a redirect URL that
+already has `?checkout=success`, and Paystack/Flutterwave echo `reference`/`trxref`/`tx_ref` — then polls the status
+endpoint (every 2s, up to 10 times) and names what was given, e.g. "We've received your ₦500.00 for Tithe" or
+"…toward your Building Fund pledge": completed → thanks the member and refreshes; failed → "no gift was recorded";
+`needs_review` → "being checked by the finance team"; still pending → says confirmation hasn't arrived yet without
+assuming they paid (Monnify also redirects when the payer closes the page).
+
+| Provider | Webhook → checkout status | Back to the app | Cancel |
+|---|---|---|---|
+| Paystack | `charge.success` → completed | `callback_url` + `reference`/`trxref` | `metadata.cancel_action` → `?checkout=cancelled` (was wrongly sent as `cancel_url`, which Paystack ignores; billing fixed too) |
+| Flutterwave | `charge.completed` with `status: successful` → completed, else failed | `redirect_url` + `tx_ref` | returns to the same link with `status=cancelled`, which the app treats as cancelled |
+| Korapay | `charge.success` → completed | `redirect_url` + `reference` | — (falls back to the unconfirmed message) |
+| Stripe | `checkout.session.completed` with `payment_status: paid`, or `checkout.session.async_payment_succeeded` → completed; `async_payment_failed` / `expired` → failed; an `unpaid` completed session (delayed method such as a bank debit) stays pending | `success_url`, no reference (the app uses the one it saved) | `cancel_url` → `?checkout=cancelled` |
+| Monnify | `SUCCESSFUL_TRANSACTION` PAID → completed; part/over-paid → `needs_review` | `redirectUrl` + `?paymentReference=` (appended as a second `?`) | — (falls back to the unconfirmed message) |
+
+Stripe setup: the church's Stripe webhook endpoint must subscribe to `checkout.session.completed`,
+`checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired`
+(listed on the admin's Giving Providers page). Without the async events a delayed payment stays pending rather than
+being recorded.
 | POST   | `/webhooks/giving/:tenantId/:provider`      | None (per-vendor signature) | —                | Provider webhook — creates a `TitheRecord` on a verified successful charge |
 
 Both `finance/giving-providers` and `finance/giving/checkout` are gated behind `@RequiresModule('tithe')` —

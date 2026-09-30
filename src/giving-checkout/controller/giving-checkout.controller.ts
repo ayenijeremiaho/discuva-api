@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
@@ -18,6 +18,15 @@ export class GivingCheckoutController {
   @Get('provider')
   getActiveProvider() {
     return this.checkoutService.getActiveProvider();
+  }
+
+  // Polled by the Give page after the provider redirects back.
+  @Get(':reference')
+  getStatus(
+    @CurrentUser() user: MemberAuth,
+    @Param('reference') reference: string,
+  ) {
+    return this.checkoutService.getCheckoutStatus(user.id, reference);
   }
 
   @Post()
