@@ -1,0 +1,7 @@
+blockquote.question {
+          margin: 1em 0;
+          padding: 12px 16px;
+          background-color: #F4F1EA;
+          border-left: 3px solid #121212;
+          font-style: italic;
+      }

@@ -1,0 +1,57 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{#if multiple}}
+                    <h1>You're on the Programme, {{ memberName }}!</h1>
+                    <p>You've been added to <strong>{{ count }} parts</strong> of the order of service.</p>
+                    {{else}}
+                    <h1>You're on the Programme, {{ memberName }}!</h1>
+                    <p>You've been added to the order of service.</p>
+                    {{/if}}
+{{#each assignments}}
+                    <p class="part-heading">{{#if this.isBackup}}Backup for{{else}}Part {{ this.partNumber }}{{/if}}: {{ this.serviceSlotName }}</p>
+                    <table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td class="attributes_content">
+                          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            {{#if this.isBackup}}
+                            <tr>
+                              <td class="attributes_item">You're the <strong>backup</strong> — please be ready to step in if the primary assignee is unavailable.</td>
+                            </tr>
+                            {{/if}}
+                            {{#if this.serviceDate}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Date:</strong> {{ this.serviceDate }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            {{#if this.serviceTime}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Time:</strong> {{ this.serviceTime }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Type:</strong> {{ this.slotType }}
+                              </td>
+                            </tr>
+                            {{#if this.topic}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Topic:</strong> {{ this.topic }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Allocated Time:</strong> {{ this.allocatedMinutes }} min
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    {{/each}}
+{{{ message_html }}}
+{{{ closing_html }}}

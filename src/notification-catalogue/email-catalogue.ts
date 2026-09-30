@@ -2,6 +2,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as Handlebars from 'handlebars';
 import { EmailCategory } from '../utility/email-provider/email-category.enum';
+import { EXTRA_EMAIL_CATALOGUE } from './email-catalogue.extra';
+import { withRecipient } from './recipient';
 
 export enum EmailTemplateKey {
   WELCOME_MEMBER = 'welcome-member',
@@ -40,6 +42,8 @@ type TemplateData = Record<string, unknown>;
 export interface EmailTemplate extends EmailWording {
   // null for emails that always send (no on/off switch), e.g. account emails.
   category: EmailCategory | null;
+  // Admin list heading for emails without a category; defaults to "Account emails".
+  group?: string;
   label: string;
   description: string;
   preheader: string;
@@ -55,7 +59,7 @@ export interface EmailTemplate extends EmailWording {
 const s = (v: unknown): string => (v == null ? '' : String(v));
 
 // Defaults reproduce the pre-catalogue emails word for word.
-export const EMAIL_CATALOGUE: Record<EmailTemplateKey, EmailTemplate> = {
+const CORE_EMAIL_CATALOGUE: Record<EmailTemplateKey, EmailTemplate> = {
   [EmailTemplateKey.WELCOME_MEMBER]: {
     category: null,
     label: 'Welcome to a new member',
@@ -290,11 +294,16 @@ export const EMAIL_CATALOGUE: Record<EmailTemplateKey, EmailTemplate> = {
   },
 };
 
-export function isCatalogueEmail(name: string): name is EmailTemplateKey {
-  return name in EMAIL_CATALOGUE;
+export const EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
+  ...CORE_EMAIL_CATALOGUE,
+  ...EXTRA_EMAIL_CATALOGUE,
+};
+
+export function isCatalogueEmail(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(EMAIL_CATALOGUE, name);
 }
 
-export function defaultWording(key: EmailTemplateKey): EmailWording {
+export function defaultWording(key: string): EmailWording {
   const { subject, heading, message, closing, signoff, signature } =
     EMAIL_CATALOGUE[key];
   return { subject, heading, message, closing, signoff, signature };
@@ -322,6 +331,17 @@ function fillHtml(html: string, vars: Record<string, string>): string {
 
 const TEMPLATE_DIR = path.resolve(__dirname, '..', 'utility', 'templates');
 const compiled = new Map<string, Handlebars.TemplateDelegate>();
+const styles = new Map<string, string>();
+
+function extraStyles(key: string): string {
+  let css = styles.get(key);
+  if (css === undefined) {
+    const file = path.join(TEMPLATE_DIR, 'content', `${key}.css`);
+    css = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+    styles.set(key, css);
+  }
+  return css;
+}
 
 function compileFile(relative: string): Handlebars.TemplateDelegate {
   let template = compiled.get(relative);
@@ -334,18 +354,27 @@ function compileFile(relative: string): Handlebars.TemplateDelegate {
   return template;
 }
 
+// defaultSubject is the sender's own subject, available to wording as {{default_subject}}.
 export function renderCatalogueEmail(
-  key: EmailTemplateKey,
+  key: string,
   wording: EmailWording,
   data: TemplateData,
   branding: Record<string, string>,
+  defaultSubject?: string,
+  recipient: Record<string, string> = {},
+  // Test sends: the admin's own details replace the sample ones.
+  recipientWins = false,
 ): { subject: string; html: string } {
   const template = EMAIL_CATALOGUE[key];
-  const vars = {
+  const own = {
     church_name: branding.church_name ?? '',
+    default_subject: defaultSubject || template.label,
     ...template.toVars(data),
   };
-  const subject = fillText(wording.subject, vars);
+  const vars = recipientWins
+    ? { ...own, ...recipient }
+    : withRecipient(own, recipient);
+  const subject = fillText(wording.subject, vars) || vars.default_subject;
   const base = { ...branding, ...data };
   const content = compileFile(`content/${key}.html`)({
     ...base,
@@ -353,12 +382,16 @@ export function renderCatalogueEmail(
     message_html: fillHtml(wording.message, vars),
     closing_html: fillHtml(wording.closing, vars),
   });
+  const signoff = fillText(wording.signoff, vars);
+  const signature = fillText(wording.signature, vars);
   const html = compileFile('layouts/base.html')({
     ...base,
     subject,
     preheader: fillText(template.preheader, vars),
-    signoff: fillText(wording.signoff, vars),
-    signature: fillText(wording.signature, vars),
+    signoff,
+    signature,
+    show_signoff: !!(signoff || signature),
+    extra_styles: extraStyles(key),
     content,
   });
   return { subject, html };

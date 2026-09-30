@@ -83,4 +83,43 @@ describe('email catalogue', () => {
     );
     expect(html).not.toContain('<h1>');
   });
+
+  it("uses the sender's subject through {{default_subject}}", () => {
+    const key = 'password-changed';
+    const data = EMAIL_CATALOGUE[key].sampleData;
+    const custom = { ...defaultWording(key), subject: '{{default_subject}} ✓' };
+
+    expect(
+      renderCatalogueEmail(key, defaultWording(key), data, branding, 'Sent')
+        .subject,
+    ).toBe('Sent');
+    expect(
+      renderCatalogueEmail(key, custom, data, branding, 'Sent').subject,
+    ).toBe('Sent ✓');
+    expect(
+      renderCatalogueEmail(key, defaultWording(key), data, branding).subject,
+    ).toBe(EMAIL_CATALOGUE[key].label);
+  });
+
+  it('hides the sign-off when both lines are cleared', () => {
+    const key = 'password-changed';
+    const { html } = renderCatalogueEmail(
+      key,
+      { ...defaultWording(key), signoff: '', signature: '' },
+      EMAIL_CATALOGUE[key].sampleData,
+      branding,
+    );
+    expect(html).not.toContain('margin-top: 35px');
+  });
+
+  it("adds an email's own styles to the layout", () => {
+    const key = 'device-reset-otp';
+    const { html } = renderCatalogueEmail(
+      key,
+      defaultWording(key),
+      EMAIL_CATALOGUE[key].sampleData,
+      branding,
+    );
+    expect(html).toMatch(/<style[^>]*>[\s\S]*\.otp-code[\s\S]*<\/style>/);
+  });
 });

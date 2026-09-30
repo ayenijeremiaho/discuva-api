@@ -234,6 +234,7 @@
           letter-spacing: 0.05em;
           padding-right: 0;
       }
+{{{ extra_styles }}}
   </style>
 </head>
 
@@ -258,8 +259,10 @@
                 <td class="content-cell">
                   <div>
 {{{ content }}}
+                    {{#if show_signoff}}
                     <p style="margin-top: 35px; color: #8A817C;">{{ signoff }}<br><span
                       style="color: #121212; font-weight: 500;">{{ signature }}</span></p>
+                    {{/if}}
                   </div>
                 </td>
               </tr>

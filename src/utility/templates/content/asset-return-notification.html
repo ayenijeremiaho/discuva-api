@@ -1,0 +1,36 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<div class="return-banner">
+                      The asset below has been successfully returned. Thank you for taking care of it.
+                    </div>
+<table class="detail-table" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td><strong>Asset</strong></td>
+                        <td>{{ assetName }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Tag Number</strong></td>
+                        <td>{{ tagNumber }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Category</strong></td>
+                        <td>{{ category }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Location</strong></td>
+                        <td>{{ location }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Checked Out On</strong></td>
+                        <td>{{ checkedOutAt }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Returned On</strong></td>
+                        <td>{{ returnedAt }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Processed By</strong></td>
+                        <td>{{ returnedBy }}</td>
+                      </tr>
+                    </table>
+{{{ closing_html }}}

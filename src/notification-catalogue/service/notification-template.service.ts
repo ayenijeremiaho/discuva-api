@@ -11,6 +11,10 @@ import {
   NotificationTemplateOverride,
 } from '../entity/notification-template-override.entity';
 import {
+  NotificationTemplateAction,
+  NotificationTemplateVersion,
+} from '../entity/notification-template-version.entity';
+import {
   PUSH_CATALOGUE,
   PushNotificationKey,
   PushTemplate,
@@ -18,18 +22,19 @@ import {
 import {
   EmailTemplateView,
   EmailWordingDto,
+  NotificationTemplateVersionView,
   PushTemplateView,
   UpdatePushTemplateDto,
 } from '../dto/push-template.dto';
 import {
   EMAIL_CATALOGUE,
   EmailTemplate,
-  EmailTemplateKey,
   EmailWording,
   RICH_EMAIL_FIELDS,
   defaultWording,
   isCatalogueEmail,
 } from '../email-catalogue';
+import { RECIPIENT_PLACEHOLDERS } from '../recipient';
 import { KNOWN_EMAIL_CATEGORIES } from '../../email-category-settings/constant/known-email-categories.constant';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -66,6 +71,7 @@ type EmailOverrides = Record<
   { content: Partial<EmailWording>; updatedAt: string }
 >;
 const CACHE_TTL = 300;
+const HISTORY_LIMIT = 20;
 const PLACEHOLDER = /{{\s*(\w+)\s*}}/g;
 
 // Push is plain text: drop markup and line breaks, collapse spacing.
@@ -82,6 +88,8 @@ export class NotificationTemplateService {
   constructor(
     @InjectRepository(NotificationTemplateOverride)
     private readonly overrideRepo: Repository<NotificationTemplateOverride>,
+    @InjectRepository(NotificationTemplateVersion)
+    private readonly versionRepo: Repository<NotificationTemplateVersion>,
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
     private readonly planFeatureResolver: PlanFeatureResolverService,
@@ -143,6 +151,7 @@ export class NotificationTemplateService {
     key: string,
     dto: UpdatePushTemplateDto,
     actorMemberId?: string,
+    action = NotificationTemplateAction.SAVED,
   ): Promise<PushTemplateView> {
     const template = this.assertPushKey(key);
     const title = this.validate(dto.title, template, 'Title');
@@ -165,10 +174,17 @@ export class NotificationTemplateService {
       row = await this.overrideRepo.save(row);
     }
     this.cacheService.del(PUSH_CACHE_KEY);
+    await this.recordVersion(
+      NotificationChannel.PUSH,
+      key,
+      action,
+      { title, body },
+      actorMemberId,
+    );
     this.auditLogService.log('NOTIFICATION_TEMPLATE_UPDATED', {
       actorId: actorMemberId,
       targetId: key,
-      metadata: { channel: NotificationChannel.PUSH, title, body },
+      metadata: { channel: NotificationChannel.PUSH, action, title, body },
     });
 
     const saved =
@@ -186,12 +202,19 @@ export class NotificationTemplateService {
     key: string,
     actorMemberId?: string,
   ): Promise<PushTemplateView> {
-    this.assertPushKey(key);
+    const template = this.assertPushKey(key);
     await this.overrideRepo.delete({
       channel: NotificationChannel.PUSH,
       templateKey: key,
     });
     this.cacheService.del(PUSH_CACHE_KEY);
+    await this.recordVersion(
+      NotificationChannel.PUSH,
+      key,
+      NotificationTemplateAction.RESET,
+      { title: template.title, body: template.body },
+      actorMemberId,
+    );
     this.auditLogService.log('NOTIFICATION_TEMPLATE_RESET', {
       actorId: actorMemberId,
       targetId: key,
@@ -218,7 +241,7 @@ export class NotificationTemplateService {
   }
 
   // Wording to send: church edits (while the plan includes customization) over the defaults, field by field.
-  async resolveEmailWording(key: EmailTemplateKey): Promise<EmailWording> {
+  async resolveEmailWording(key: string): Promise<EmailWording> {
     const defaults = defaultWording(key);
     const override = (await this.emailOverrides())[key];
     if (!override || !(await this.isCustomizationAvailable())) return defaults;
@@ -233,7 +256,7 @@ export class NotificationTemplateService {
       this.emailOverrides(),
       this.isCustomizationAvailable(),
     ]);
-    const items = Object.values(EmailTemplateKey).map((key) =>
+    const items = Object.keys(EMAIL_CATALOGUE).map((key) =>
       this.toEmailView(key, overrides[key]),
     );
     return { customizationAvailable, items };
@@ -244,10 +267,11 @@ export class NotificationTemplateService {
     dto: EmailWordingDto,
     sanitizeHtml: (html: string) => string,
     actorMemberId?: string,
+    action = NotificationTemplateAction.SAVED,
   ): Promise<EmailTemplateView> {
     const template = this.assertEmailKey(key);
     const wording = this.validateEmailWording(dto, template, sanitizeHtml);
-    const defaults = defaultWording(key as EmailTemplateKey);
+    const defaults = defaultWording(key);
     const changed: Partial<EmailWording> = {};
     for (const field of EMAIL_FIELDS) {
       if (wording[field] !== defaults[field]) changed[field] = wording[field];
@@ -270,16 +294,24 @@ export class NotificationTemplateService {
       await this.overrideRepo.save(row);
     }
     this.cacheService.del(EMAIL_CACHE_KEY);
+    await this.recordVersion(
+      NotificationChannel.EMAIL,
+      key,
+      action,
+      { ...wording },
+      actorMemberId,
+    );
     this.auditLogService.log('NOTIFICATION_TEMPLATE_UPDATED', {
       actorId: actorMemberId,
       targetId: key,
       metadata: {
         channel: NotificationChannel.EMAIL,
+        action,
         fields: Object.keys(changed),
       },
     });
     return this.toEmailView(
-      key as EmailTemplateKey,
+      key,
       Object.keys(changed).length
         ? { content: changed, updatedAt: new Date().toISOString() }
         : undefined,
@@ -296,12 +328,19 @@ export class NotificationTemplateService {
       templateKey: key,
     });
     this.cacheService.del(EMAIL_CACHE_KEY);
+    await this.recordVersion(
+      NotificationChannel.EMAIL,
+      key,
+      NotificationTemplateAction.RESET,
+      { ...defaultWording(key) },
+      actorMemberId,
+    );
     this.auditLogService.log('NOTIFICATION_TEMPLATE_RESET', {
       actorId: actorMemberId,
       targetId: key,
       metadata: { channel: NotificationChannel.EMAIL },
     });
-    return this.toEmailView(key as EmailTemplateKey, undefined);
+    return this.toEmailView(key, undefined);
   }
 
   // Cleans and checks a draft; the HTML sanitizer is passed in so this service (loaded by EmailQueueService) stays free of jsdom.
@@ -310,7 +349,11 @@ export class NotificationTemplateService {
     template: EmailTemplate,
     sanitizeHtml: (html: string) => string,
   ): EmailWording {
-    const allowed = { church_name: '', ...template.placeholders };
+    const allowed = {
+      church_name: '',
+      ...RECIPIENT_PLACEHOLDERS,
+      ...template.placeholders,
+    };
     const wording = {} as EmailWording;
     for (const field of EMAIL_FIELDS) {
       const raw = dto[field] ?? '';
@@ -323,10 +366,118 @@ export class NotificationTemplateService {
     if (!wording.subject) {
       throw new BadRequestException("Subject can't be empty.");
     }
-    if (!toPlainText(wording.message)) {
+    if (toPlainText(template.message) && !toPlainText(wording.message)) {
       throw new BadRequestException("Message can't be empty.");
     }
     return wording;
+  }
+
+  async history(
+    channel: NotificationChannel,
+    key: string,
+  ): Promise<NotificationTemplateVersionView[]> {
+    if (channel === NotificationChannel.PUSH) this.assertPushKey(key);
+    else this.assertEmailKey(key);
+    const rows = await this.versionRepo.find({
+      where: { channel, templateKey: key },
+      relations: { createdBy: true },
+      select: {
+        id: true,
+        action: true,
+        content: true,
+        createdAt: true,
+        createdBy: { id: true, firstname: true, lastname: true },
+      },
+      order: { createdAt: 'DESC' },
+      take: HISTORY_LIMIT,
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      action: row.action,
+      content: row.content,
+      changedBy: row.createdBy
+        ? `${row.createdBy.firstname ?? ''} ${row.createdBy.lastname ?? ''}`.trim()
+        : null,
+      createdAt: row.createdAt,
+    }));
+  }
+
+  async restorePush(
+    key: string,
+    versionId: string,
+    actorMemberId?: string,
+  ): Promise<PushTemplateView> {
+    this.assertPushKey(key);
+    const { content } = await this.findVersion(
+      NotificationChannel.PUSH,
+      key,
+      versionId,
+    );
+    return this.savePush(
+      key,
+      { title: content.title ?? '', body: content.body ?? '' },
+      actorMemberId,
+      NotificationTemplateAction.RESTORED,
+    );
+  }
+
+  // Re-validated on restore, so a version that no longer fits the catalogue is refused, not sent.
+  async restoreEmail(
+    key: string,
+    versionId: string,
+    sanitizeHtml: (html: string) => string,
+    actorMemberId?: string,
+  ): Promise<EmailTemplateView> {
+    this.assertEmailKey(key);
+    const { content } = await this.findVersion(
+      NotificationChannel.EMAIL,
+      key,
+      versionId,
+    );
+    return this.saveEmail(
+      key,
+      { ...defaultWording(key), ...content } as EmailWordingDto,
+      sanitizeHtml,
+      actorMemberId,
+      NotificationTemplateAction.RESTORED,
+    );
+  }
+
+  private async findVersion(
+    channel: NotificationChannel,
+    key: string,
+    id: string,
+  ): Promise<NotificationTemplateVersion> {
+    const version = await this.versionRepo.findOne({
+      where: { id, channel, templateKey: key },
+    });
+    if (!version) throw new NotFoundException('That version no longer exists.');
+    return version;
+  }
+
+  private async recordVersion(
+    channel: NotificationChannel,
+    key: string,
+    action: NotificationTemplateAction,
+    content: Record<string, string>,
+    actorMemberId?: string,
+  ): Promise<void> {
+    await this.versionRepo.save(
+      this.versionRepo.create({
+        channel,
+        templateKey: key,
+        action,
+        content,
+        createdBy: actorMemberId ? ({ id: actorMemberId } as never) : null,
+      }),
+    );
+    const stale = await this.versionRepo.find({
+      where: { channel, templateKey: key },
+      select: { id: true },
+      order: { createdAt: 'DESC' },
+      skip: HISTORY_LIMIT,
+    });
+    if (stale.length) await this.versionRepo.delete(stale.map((v) => v.id));
   }
 
   assertEmailKey(key: string): EmailTemplate {
@@ -353,7 +504,7 @@ export class NotificationTemplateService {
   }
 
   private toEmailView(
-    key: EmailTemplateKey,
+    key: string,
     override?: { content: Partial<EmailWording>; updatedAt: string },
   ): EmailTemplateView {
     const template = EMAIL_CATALOGUE[key];
@@ -363,11 +514,15 @@ export class NotificationTemplateService {
       category: template.category,
       categoryLabel: template.category
         ? KNOWN_EMAIL_CATEGORIES[template.category].label
-        : 'Account emails',
+        : (template.group ?? 'Account emails'),
       label: template.label,
       description: template.description,
       lockedNote: template.lockedNote,
-      placeholders: { church_name: 'Your church', ...template.placeholders },
+      placeholders: {
+        church_name: 'Your church',
+        ...RECIPIENT_PLACEHOLDERS,
+        ...template.placeholders,
+      },
       defaults: { ...defaults },
       wording: { ...defaults, ...(override?.content ?? {}) },
       customized: !!override && Object.keys(override.content).length > 0,
@@ -384,11 +539,12 @@ export class NotificationTemplateService {
   private validate(raw: string, template: PushTemplate, field: string): string {
     const text = toPlainText(raw);
     if (!text) throw new BadRequestException(`${field} can't be empty.`);
+    const available = { ...RECIPIENT_PLACEHOLDERS, ...template.placeholders };
     const unknown = [...text.matchAll(PLACEHOLDER)]
       .map((m) => m[1])
-      .filter((name) => !(name in template.placeholders));
+      .filter((name) => !(name in available));
     if (unknown.length) {
-      const allowed = Object.keys(template.placeholders);
+      const allowed = Object.keys(available);
       throw new BadRequestException(
         `${field} uses ${[...new Set(unknown)].map((n) => `{{${n}}}`).join(', ')}, which this notification doesn't have.` +
           (allowed.length
@@ -410,7 +566,7 @@ export class NotificationTemplateService {
       categoryLabel: KNOWN_EMAIL_CATEGORIES[template.category].label,
       label: template.label,
       description: template.description,
-      placeholders: template.placeholders,
+      placeholders: { ...RECIPIENT_PLACEHOLDERS, ...template.placeholders },
       defaultTitle: template.title,
       defaultBody: template.body,
       title: override?.title || template.title,

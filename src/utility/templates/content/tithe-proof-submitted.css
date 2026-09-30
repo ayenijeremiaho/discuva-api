@@ -1,0 +1,13 @@
+.header {
+          background-color: #121212;
+          color: #ffffff;
+          padding: 32px 40px;
+          text-align: left;
+      }
+.header h1 {
+          margin: 0;
+          font-size: 24px;
+          font-weight: 300;
+          letter-spacing: -0.025em;
+          color: #ffffff;
+      }

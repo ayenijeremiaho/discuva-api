@@ -11,6 +11,7 @@ import { EmailCategorySettingsService } from '../../email-category-settings/serv
 import { EmailCategory } from '../email-provider/email-category.enum';
 
 import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
+import { NotificationRecipientService } from '../../notification-catalogue/service/notification-recipient.service';
 import {
   EmailTemplateKey,
   defaultWording,
@@ -62,6 +63,8 @@ const mockTemplates = {
   ),
 };
 
+const mockRecipients = { byEmail: jest.fn() };
+
 describe('EmailQueueService', () => {
   let service: EmailQueueService;
 
@@ -94,6 +97,7 @@ describe('EmailQueueService', () => {
           useValue: mockEmailCategorySettingsService,
         },
         { provide: NotificationTemplateService, useValue: mockTemplates },
+        { provide: NotificationRecipientService, useValue: mockRecipients },
       ],
     }).compile();
     service = module.get(EmailQueueService);
@@ -429,6 +433,74 @@ describe('EmailQueueService', () => {
       expect(job.html).toContain('We received your tithe, Ada.');
       expect(job.html).toContain('NGN 5,000');
       expect(job.html).toContain('St. Example Church');
+    });
+
+    it('fills recipient details the sender did not pass, looked up by address', async () => {
+      mockTemplates.resolveEmailWording.mockResolvedValueOnce({
+        ...defaultWording(EmailTemplateKey.TITHE_CONFIRMED),
+        message: '<p>Dear {{title}} {{first_name}} {{last_name}}</p>',
+      });
+      mockRecipients.byEmail.mockResolvedValue({
+        first_name: 'Someone else',
+        last_name: 'Obi',
+        title: 'Mrs',
+      });
+
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        's',
+        'tithe-proof-confirmed',
+        {
+          name: 'Ada',
+        },
+      );
+
+      expect(mockRecipients.byEmail).toHaveBeenCalledWith('a@b.com');
+      expect(mockQueue.add.mock.calls[0][1].html).toContain('Dear Mrs Ada Obi');
+    });
+
+    it('skips the lookup when unneeded or sent to several people', async () => {
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        's',
+        'tithe-proof-confirmed',
+        {
+          name: 'Ada',
+        },
+      );
+      mockTemplates.resolveEmailWording.mockResolvedValueOnce({
+        ...defaultWording(EmailTemplateKey.TITHE_CONFIRMED),
+        message: '<p>{{last_name}}</p>',
+      });
+      await service.queueEmailWithTemplate(
+        ['a@b.com', 'c@d.com'],
+        's',
+        'tithe-proof-confirmed',
+        {
+          name: 'Ada',
+        },
+      );
+
+      expect(mockRecipients.byEmail).not.toHaveBeenCalled();
+    });
+
+    it('still sends when the recipient lookup fails', async () => {
+      mockTemplates.resolveEmailWording.mockResolvedValueOnce({
+        ...defaultWording(EmailTemplateKey.TITHE_CONFIRMED),
+        message: '<p>Hi {{last_name}}.</p>',
+      });
+      mockRecipients.byEmail.mockRejectedValueOnce(new Error('db down'));
+
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        's',
+        'tithe-proof-confirmed',
+        {
+          name: 'Ada',
+        },
+      );
+
+      expect(mockQueue.add.mock.calls[0][1].html).toContain('Hi .');
     });
 
     it('escapes member-supplied values placed into church wording', async () => {

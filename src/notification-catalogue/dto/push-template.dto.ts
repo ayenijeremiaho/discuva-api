@@ -79,6 +79,15 @@ export interface EmailTemplateView {
   updatedAt: Date | null;
 }
 
+export interface NotificationTemplateVersionView {
+  id: string;
+  action: string;
+  // Push: title/body. Email: the full wording.
+  content: Record<string, string>;
+  changedBy: string | null;
+  createdAt: Date;
+}
+
 // Unsaved draft for previews and test sends; omitted fields use the saved or default wording.
 export class DraftEmailWordingDto {
   @IsOptional()

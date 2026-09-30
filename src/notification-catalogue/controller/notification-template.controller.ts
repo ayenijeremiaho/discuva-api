@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Post,
   Put,
   UseGuards,
@@ -27,13 +28,20 @@ import {
   UpdatePushTemplateDto,
 } from '../dto/push-template.dto';
 import { PushNotificationKey, renderPush } from '../push-catalogue';
-import {
-  EmailTemplateKey,
-  EmailWording,
-  renderCatalogueEmail,
-} from '../email-catalogue';
+import { EmailWording, renderCatalogueEmail } from '../email-catalogue';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { SanitizationService } from '../../utility/service/sanitization.service';
+import { NotificationChannel } from '../entity/notification-template-override.entity';
+import { RECIPIENT_PLACEHOLDERS } from '../recipient';
+import { NotificationRecipientService } from '../service/notification-recipient.service';
+
+// Sample-data keys that name the recipient in an email's locked parts.
+const SAMPLE_NAME_KEYS: Record<string, string> = {
+  name: 'first_name',
+  firstname: 'first_name',
+  lastname: 'last_name',
+  full_name: 'full_name',
+};
 
 @UseGuards(AdminGuard, PlanGuard)
 @Controller('admin/notification-templates')
@@ -43,6 +51,7 @@ export class NotificationTemplateController {
     private readonly pushService: PushNotificationService,
     private readonly emailQueue: EmailQueueService,
     private readonly sanitization: SanitizationService,
+    private readonly recipients: NotificationRecipientService,
   ) {}
 
   private readonly sanitizeHtml = (html: string) =>
@@ -73,6 +82,24 @@ export class NotificationTemplateController {
     return this.templates.resetPush(key, admin.member?.id);
   }
 
+  @RequiresPermission(AdminPermission.ADMIN_READ)
+  @Get('push/:key/history')
+  pushHistory(@Param('key') key: string) {
+    return this.templates.history(NotificationChannel.PUSH, key);
+  }
+
+  @RequiresPermission(AdminPermission.ADMIN_WRITE)
+  @RequiresPlan(PlanFeature.NOTIFICATION_CUSTOMIZATION)
+  @HttpCode(HttpStatus.OK)
+  @Post('push/:key/history/:versionId/restore')
+  restorePush(
+    @Param('key') key: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.templates.restorePush(key, versionId, admin.member?.id);
+  }
+
   // Sends the draft (or saved) wording, filled with sample values, to the admin's own device.
   @RequiresPermission(AdminPermission.ADMIN_WRITE)
   @RequiresPlan(PlanFeature.NOTIFICATION_CUSTOMIZATION)
@@ -93,7 +120,7 @@ export class NotificationTemplateController {
     );
     const rendered = renderPush(
       { title: dto.title || current.title, body: dto.body || current.body },
-      template.placeholders,
+      { ...template.placeholders, ...(await this.ownDetails(memberId)) },
     );
     await this.pushService.dispatchToMemberIds([memberId], {
       ...rendered,
@@ -132,6 +159,29 @@ export class NotificationTemplateController {
     return this.templates.resetEmail(key, admin.member?.id);
   }
 
+  @RequiresPermission(AdminPermission.ADMIN_READ)
+  @Get('email/:key/history')
+  emailHistory(@Param('key') key: string) {
+    return this.templates.history(NotificationChannel.EMAIL, key);
+  }
+
+  @RequiresPermission(AdminPermission.ADMIN_WRITE)
+  @RequiresPlan(PlanFeature.NOTIFICATION_CUSTOMIZATION)
+  @HttpCode(HttpStatus.OK)
+  @Post('email/:key/history/:versionId/restore')
+  restoreEmail(
+    @Param('key') key: string,
+    @Param('versionId', ParseUUIDPipe) versionId: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.templates.restoreEmail(
+      key,
+      versionId,
+      this.sanitizeHtml,
+      admin.member?.id,
+    );
+  }
+
   // Whole email as members would get it, with sample details; body is an optional unsaved draft.
   @RequiresPermission(AdminPermission.ADMIN_READ)
   @HttpCode(HttpStatus.OK)
@@ -150,16 +200,31 @@ export class NotificationTemplateController {
     @CurrentAdmin() admin: Admin,
   ): Promise<{ sent: boolean; to: string }> {
     const to = admin.member?.email;
-    const { subject, html } = await this.renderSample(key, dto);
+    const { subject, html } = await this.renderSample(
+      key,
+      dto,
+      await this.ownDetails(admin.member?.id),
+    );
     await this.emailQueue.queueEmail(to, `[Test] ${subject}`, html);
     return { sent: true, to };
   }
 
-  private async renderSample(key: string, draft: DraftEmailWordingDto) {
+  // The admin's own recipient details (blank where unknown, as a real send would be); samples if not found.
+  private async ownDetails(memberId?: string): Promise<Record<string, string>> {
+    const mine = memberId
+      ? (await this.recipients.byMemberIds([memberId])).get(memberId)
+      : undefined;
+    return mine ?? RECIPIENT_PLACEHOLDERS;
+  }
+
+  // Previews use sample details; test sends pass the admin's own.
+  private async renderSample(
+    key: string,
+    draft: DraftEmailWordingDto,
+    recipient?: Record<string, string>,
+  ) {
     const template = this.templates.assertEmailKey(key);
-    const saved = await this.templates.resolveEmailWording(
-      key as EmailTemplateKey,
-    );
+    const saved = await this.templates.resolveEmailWording(key);
     const hasDraft = Object.values(draft ?? {}).some((v) => v !== undefined);
     const wording: EmailWording = hasDraft
       ? this.templates.validateEmailWording(
@@ -169,11 +234,21 @@ export class NotificationTemplateController {
         )
       : saved;
     const branding = await this.emailQueue.getBrandingData();
+    const data = { ...template.sampleData };
+    if (recipient) {
+      for (const [dataKey, detail] of Object.entries(SAMPLE_NAME_KEYS)) {
+        if (dataKey in data && recipient[detail])
+          data[dataKey] = recipient[detail];
+      }
+    }
     return renderCatalogueEmail(
-      key as EmailTemplateKey,
+      key,
       wording,
-      template.sampleData,
+      data,
       branding,
+      undefined,
+      recipient ?? RECIPIENT_PLACEHOLDERS,
+      !!recipient,
     );
   }
 }

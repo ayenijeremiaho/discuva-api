@@ -1,7 +1,11 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { NotificationTemplateService } from './notification-template.service';
 import { PUSH_CATALOGUE, PushNotificationKey } from '../push-catalogue';
-import { EmailTemplateKey, defaultWording } from '../email-catalogue';
+import {
+  EMAIL_CATALOGUE,
+  EmailTemplateKey,
+  defaultWording,
+} from '../email-catalogue';
 
 describe('NotificationTemplateService', () => {
   const repo = {
@@ -9,6 +13,13 @@ describe('NotificationTemplateService', () => {
     findOne: jest.fn(),
     create: jest.fn((v) => ({ ...v })),
     save: jest.fn((v) => Promise.resolve({ ...v, id: 'row-1' })),
+    delete: jest.fn().mockResolvedValue({ affected: 1 }),
+  };
+  const versions = {
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn(),
+    create: jest.fn((v) => ({ ...v })),
+    save: jest.fn((v) => Promise.resolve({ ...v, id: 'v-new' })),
     delete: jest.fn().mockResolvedValue({ affected: 1 }),
   };
   const cache = {
@@ -21,6 +32,7 @@ describe('NotificationTemplateService', () => {
   const cls = { get: jest.fn().mockReturnValue('tenant-1') };
   const service = new NotificationTemplateService(
     repo as any,
+    versions as any,
     cache as any,
     audit as any,
     plans as any,
@@ -39,6 +51,7 @@ describe('NotificationTemplateService', () => {
     cache.get.mockResolvedValue(undefined);
     repo.find.mockResolvedValue([]);
     repo.findOne.mockResolvedValue(null);
+    versions.find.mockResolvedValue([]);
     onPlan(true);
   });
 
@@ -110,10 +123,22 @@ describe('NotificationTemplateService', () => {
 
     it('rejects placeholders the notification does not have, listing the valid ones', async () => {
       await expect(
-        service.savePush(KEY, { title: 'Hi {{first_name}}', body: 'x' }),
+        service.savePush(KEY, { title: 'Hi {{amount}}', body: 'x' }),
       ).rejects.toThrow(
-        "Title uses {{first_name}}, which this notification doesn't have. Available: {{meeting_date}}.",
+        /Title uses {{amount}}, which this notification doesn't have\. Available: .*{{last_name}}.*{{meeting_date}}\./,
       );
+    });
+
+    it('accepts recipient details in any push', async () => {
+      const view = await service.savePush(KEY, {
+        title: 'Hi {{church_title}} {{last_name}}',
+        body: 'You are on prayer duty on {{meeting_date}}.',
+      });
+      expect(view.title).toBe('Hi {{church_title}} {{last_name}}');
+      expect(view.placeholders).toMatchObject({
+        last_name: 'Obi',
+        meeting_date: expect.any(String),
+      });
     });
 
     it('rejects empty wording', async () => {
@@ -260,13 +285,26 @@ describe('NotificationTemplateService', () => {
       ).rejects.toThrow("Message can't be empty.");
     });
 
+    it('allows an empty message when the default has none', async () => {
+      const view = await service.saveEmail(
+        'tithe-statement',
+        { ...defaultWording('tithe-statement'), signature: 'Finance' },
+        clean,
+      );
+      expect(view.wording.message).toBe('');
+      expect(view.customized).toBe(true);
+    });
+
     it('lists every catalogue email with its group, lock note and placeholders', async () => {
       const { items } = await service.listEmail();
       const welcome = items.find(
         (i) => i.key === EmailTemplateKey.WELCOME_MEMBER,
       );
 
-      expect(items).toHaveLength(Object.values(EmailTemplateKey).length);
+      expect(items).toHaveLength(Object.keys(EMAIL_CATALOGUE).length);
+      expect(items.find((i) => i.key === 'leave-submitted')).toMatchObject({
+        categoryLabel: 'Workforce',
+      });
       expect(welcome).toMatchObject({
         categoryLabel: 'Account emails',
         placeholders: { church_name: 'Your church', first_name: 'Ada' },
@@ -283,6 +321,117 @@ describe('NotificationTemplateService', () => {
         templateKey: EKEY,
       });
       expect(cache.del).toHaveBeenCalledWith('notification-overrides:email');
+    });
+  });
+
+  describe('history', () => {
+    const EKEY = EmailTemplateKey.HAPPY_BIRTHDAY;
+
+    it('snapshots the full wording on every save and reset', async () => {
+      const wording = { ...defaultWording(EKEY), signature: 'The Youth' };
+      await service.saveEmail(EKEY, wording, (h) => h, 'member-1');
+      await service.resetPush(KEY, 'member-1');
+
+      expect(versions.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'EMAIL',
+          templateKey: EKEY,
+          action: 'SAVED',
+          content: wording,
+          createdBy: { id: 'member-1' },
+        }),
+      );
+      expect(versions.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'PUSH',
+          action: 'RESET',
+          content: {
+            title: PUSH_CATALOGUE[KEY].title,
+            body: PUSH_CATALOGUE[KEY].body,
+          },
+        }),
+      );
+    });
+
+    it('keeps only the newest 20 versions', async () => {
+      versions.find.mockResolvedValueOnce([{ id: 'old-1' }, { id: 'old-2' }]);
+      await service.resetEmail(EKEY);
+
+      expect(versions.find).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20 }),
+      );
+      expect(versions.delete).toHaveBeenCalledWith(['old-1', 'old-2']);
+    });
+
+    it('lists versions newest first with who made them', async () => {
+      const createdAt = new Date();
+      versions.find.mockResolvedValueOnce([
+        {
+          id: 'v1',
+          action: 'SAVED',
+          content: { title: 'T', body: 'B' },
+          createdAt,
+          createdBy: { id: 'm1', firstname: 'Ada', lastname: 'Obi' },
+        },
+        { id: 'v0', action: 'RESET', content: {}, createdAt, createdBy: null },
+      ]);
+
+      const rows = await service.history('PUSH' as any, KEY);
+
+      expect(versions.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { channel: 'PUSH', templateKey: KEY },
+          order: { createdAt: 'DESC' },
+          take: 20,
+        }),
+      );
+      expect(rows[0]).toEqual({
+        id: 'v1',
+        action: 'SAVED',
+        content: { title: 'T', body: 'B' },
+        changedBy: 'Ada Obi',
+        createdAt,
+      });
+      expect(rows[1].changedBy).toBeNull();
+    });
+
+    it('rejects an unknown key', async () => {
+      await expect(service.history('EMAIL' as any, 'nope')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('restores a push version as a new change', async () => {
+      versions.findOne.mockResolvedValue({
+        content: { title: 'Old title', body: 'Old body' },
+      });
+
+      const view = await service.restorePush(KEY, 'v1', 'member-1');
+
+      expect(versions.findOne).toHaveBeenCalledWith({
+        where: { id: 'v1', channel: 'PUSH', templateKey: KEY },
+      });
+      expect(view.title).toBe('Old title');
+      expect(versions.save).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'RESTORED' }),
+      );
+    });
+
+    it('re-validates an email version before restoring it', async () => {
+      versions.findOne.mockResolvedValue({
+        content: { ...defaultWording(EKEY), message: '<p>{{gone}}</p>' },
+      });
+
+      await expect(
+        service.restoreEmail(EKEY, 'v1', (h) => h, 'member-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('404s a version from another template', async () => {
+      versions.findOne.mockResolvedValue(null);
+      await expect(service.restoreEmail(EKEY, 'v1', (h) => h)).rejects.toThrow(
+        'That version no longer exists.',
+      );
     });
   });
 });

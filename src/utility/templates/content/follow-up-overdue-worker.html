@@ -1,0 +1,35 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<p
+                      style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">
+                      Overdue tasks</p>
+<table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td class="attributes_content">
+                          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            <tr>
+                              <td
+                                style="font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; padding: 0 16px 8px 0;">
+                                Name
+                              </td>
+                              <td
+                                style="font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; padding: 0 16px 8px 0;">
+                                Phone
+                              </td>
+                              <td
+                                style="font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; padding: 0 0 8px 0;">
+                                Due Date
+                              </td>
+                            </tr>
+                            {{#each tasks}}
+                            <tr style="border-top: 1px solid rgba(18, 18, 18, 0.1);">
+                              <td class="attributes_item" style="padding: 6px 16px 6px 0;">{{ this.name }}</td>
+                              <td class="attributes_item" style="padding: 6px 16px 6px 0;">{{ this.phone }}</td>
+                              <td class="attributes_item" style="padding: 6px 0;">{{ this.dueDate }}</td>
+                            </tr>
+                            {{/each}}
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+{{{ closing_html }}}

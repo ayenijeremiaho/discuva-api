@@ -1,0 +1,17 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<h1>{{#if pledgeOnly}}Your Pledge Contribution Statement{{else}}Your Giving Statement{{/if}}, {{ name }}</h1>
+<p>Please find your {{#if pledgeOnly}}pledge contribution statement{{else}}giving statement{{/if}} attached to this email as a PDF.</p>
+{{#if period}}
+                    <p>The statement covers <strong>{{ period }}</strong> and includes {{ count }} {{#if pledgeOnly}}confirmed pledge contribution(s){{else}}giving record(s) on file for your account{{/if}}. If you notice any
+                      discrepancies, please contact the finance team.</p>
+                    {{else}}
+                    {{#if pledgeOnly}}
+                    <p>The statement includes all {{ count }} confirmed pledge contribution(s) on file for your account. If you notice any
+                      discrepancies, please contact the finance team.</p>
+                    {{else}}
+                    <p>The statement includes all {{ count }} giving record(s) we have on file for your account. If you notice any
+                      discrepancies, please contact the finance team.</p>
+                    {{/if}}
+                    {{/if}}
+{{{ closing_html }}}

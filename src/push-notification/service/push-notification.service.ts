@@ -16,6 +16,11 @@ import {
 } from '../dto/push-notification.dto';
 import { renderPush } from '../../notification-catalogue/push-catalogue';
 import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
+import { NotificationRecipientService } from '../../notification-catalogue/service/notification-recipient.service';
+import {
+  needsRecipient,
+  withRecipient,
+} from '../../notification-catalogue/recipient';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
@@ -33,19 +38,35 @@ export class PushNotificationService implements OnModuleInit {
     private readonly cls: ClsService<AppClsStore>,
     private readonly categorySettings: EmailCategorySettingsService,
     private readonly templates: NotificationTemplateService,
+    private readonly recipients: NotificationRecipientService,
   ) {}
 
-  // Null when the church has switched this category's push off.
-  private async resolve(push: DispatchPush): Promise<PushPayload | null> {
-    if (!('key' in push)) return push;
+  // Null when the church has switched this category's push off. personal = wording uses recipient details.
+  private async resolve(push: DispatchPush): Promise<{
+    personal: boolean;
+    build: (recipient?: Record<string, string>) => PushPayload;
+  } | null> {
+    if (!('key' in push)) return { personal: false, build: () => push };
     const template = await this.templates.resolvePushTemplate(push.key);
     if (!(await this.categorySettings.isPushEnabled(template.category))) {
       return null;
     }
+    const vars = Object.fromEntries(
+      Object.entries(push.vars ?? {}).map(([k, v]) => [
+        k,
+        v == null ? '' : String(v),
+      ]),
+    );
     return {
-      ...renderPush(template, push.vars),
-      url: push.url ?? template.url,
-      idempotencyKey: push.idempotencyKey,
+      personal: needsRecipient([template.title, template.body], vars),
+      build: (recipient) => ({
+        ...renderPush(
+          template,
+          recipient ? withRecipient(vars, recipient) : vars,
+        ),
+        url: push.url ?? template.url,
+        idempotencyKey: push.idempotencyKey,
+      }),
     };
   }
 
@@ -102,32 +123,42 @@ export class PushNotificationService implements OnModuleInit {
     push: DispatchPush,
   ): Promise<void> {
     if (!memberIds.length) return;
-    const payload = await this.resolve(push);
-    if (!payload) return;
+    const resolved = await this.resolve(push);
+    if (!resolved) return;
     const subscriptions = await this.subRepo.find({
       where: { memberId: In(memberIds) },
     });
     if (!subscriptions.length) return;
+    const details = resolved.personal
+      ? await this.recipients.byMemberIds([
+          ...new Set(subscriptions.map((s) => s.memberId)),
+        ])
+      : null;
+    const shared = details ? null : resolved.build();
     const envelope = buildJobEnvelope(this.cls);
     await this.queue.addBulk(
-      subscriptions.map((sub) => ({
-        name: 'send',
-        data: {
-          memberId: sub.memberId,
-          endpoint: sub.endpoint,
-          p256dh: sub.p256dh,
-          auth: sub.auth,
-          payload,
-          ...envelope,
-        },
-        opts: {
-          jobId: `push:${sub.memberId}:${payload.idempotencyKey}`,
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5_000 },
-          removeOnComplete: true,
-          removeOnFail: false,
-        },
-      })),
+      subscriptions.map((sub) => {
+        const payload =
+          shared ?? resolved.build(details?.get(sub.memberId) ?? {});
+        return {
+          name: 'send',
+          data: {
+            memberId: sub.memberId,
+            endpoint: sub.endpoint,
+            p256dh: sub.p256dh,
+            auth: sub.auth,
+            payload,
+            ...envelope,
+          },
+          opts: {
+            jobId: `push:${sub.memberId}:${payload.idempotencyKey}`,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5_000 },
+            removeOnComplete: true,
+            removeOnFail: false,
+          },
+        };
+      }),
     );
   }
 }

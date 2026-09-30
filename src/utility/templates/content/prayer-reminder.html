@@ -1,0 +1,12 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+<div class="mode-chip">{{ mode }}</div>
+<div class="reminder-badge">
+                      <p>{{ meeting_date }} &mdash; {{ start_time }} to {{ end_time }}</p>
+                    </div>
+{{{ message_html }}}
+{{#if is_two_day}}
+                    <p>This is a reminder that you are scheduled for a prayer meeting in <strong>2 days</strong>. Please plan ahead and ensure you are available.</p>
+                    {{else}}
+                    <p>This is a reminder that you have a prayer meeting <strong>today</strong>. Please make arrangements to be available at the scheduled time.</p>
+                    {{/if}}
+{{{ closing_html }}}

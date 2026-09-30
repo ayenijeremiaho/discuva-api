@@ -1,0 +1,43 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<div class="overdue-banner">
+                      This is a reminder that the asset below was due to be returned <strong>{{ daysOverdue }} day(s)
+                      ago</strong> and has not yet been returned. Please arrange for its return as soon as possible.
+                    </div>
+<table class="detail-table" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td><strong>Asset</strong></td>
+                        <td>{{ assetName }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Tag Number</strong></td>
+                        <td>{{ tagNumber }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Category</strong></td>
+                        <td>{{ category }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Location</strong></td>
+                        <td>{{ location }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Checked Out On</strong></td>
+                        <td>{{ checkedOutAt }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Expected Return</strong></td>
+                        <td>{{ expectedReturnAt }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Days Overdue</strong></td>
+                        <td>{{ daysOverdue }}</td>
+                      </tr>
+                      {{#if purpose}}
+                      <tr>
+                        <td><strong>Original Purpose</strong></td>
+                        <td>{{ purpose }}</td>
+                      </tr>
+                      {{/if}}
+                    </table>
+{{{ closing_html }}}

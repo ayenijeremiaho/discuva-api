@@ -1,0 +1,13 @@
+.alert {
+          background: #fdfaf2;
+          border: 1px dashed rgba(18, 18, 18, 0.15);
+          padding: 16px 20px;
+          margin: 24px 0;
+          font-size: 14px;
+          color: #121212;
+          font-weight: 300;
+      }
+.alert strong {
+          color: #121212;
+          font-weight: 600;
+      }

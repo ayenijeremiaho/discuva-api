@@ -1,0 +1,36 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<p
+                      style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">
+                      Visitor details</p>
+<table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td class="attributes_content">
+                          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Name:</strong> {{ firstTimerName }}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Phone:</strong> {{ phone }}
+                              </td>
+                            </tr>
+                            {{#if email}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Email:</strong> {{ email }}
+                              </td>
+                            </tr>
+                            {{/if}}
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Due Date:</strong> {{ dueDate }}
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+{{{ closing_html }}}

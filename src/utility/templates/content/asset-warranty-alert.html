@@ -1,0 +1,40 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+<div class="warranty-banner">&#9888; The warranty for <strong>{{ assetName }}</strong> expires in
+                      <strong>{{ timing }}</strong> ({{ warrantyExpiry }}).
+                    </div>
+{{{ message_html }}}
+<table class="detail-table" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td><strong>Asset</strong></td>
+                        <td>{{ assetName }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Tag Number</strong></td>
+                        <td>{{ tagNumber }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Category</strong></td>
+                        <td>{{ category }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Location</strong></td>
+                        <td>{{ location }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Warranty Expires</strong></td>
+                        <td>{{ warrantyExpiry }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Vendor</strong></td>
+                        <td>{{ vendorName }}</td>
+                      </tr>
+                      <tr>
+                        <td><strong>Vendor Contact</strong></td>
+                        <td>{{ vendorContact }}</td>
+                      </tr>
+                    </table>
+<p>Log in to the admin portal to review this asset or arrange a renewal.</p>
+<a href="{{admin_login_url}}" class="button" target="_blank">View in Admin Portal</a>
+<p class="sub" style="margin-top: 20px;">Or copy this link: <a
+                      href="{{admin_login_url}}">{{ admin_login_url }}</a></p>
+{{{ closing_html }}}

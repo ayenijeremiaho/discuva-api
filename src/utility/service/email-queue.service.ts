@@ -17,10 +17,14 @@ import { CacheService } from './cache.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { buildAdminUrl, buildTenantUrl } from '../../tenant/utility/tenant-url';
 import {
+  EMAIL_CATALOGUE,
+  EmailWording,
   isCatalogueEmail,
   renderCatalogueEmail,
 } from '../../notification-catalogue/email-catalogue';
 import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
+import { NotificationRecipientService } from '../../notification-catalogue/service/notification-recipient.service';
+import { needsRecipient } from '../../notification-catalogue/recipient';
 
 @Injectable()
 export class EmailQueueService {
@@ -36,6 +40,7 @@ export class EmailQueueService {
     private readonly tenantRepository: Repository<Tenant>,
     private readonly emailCategorySettingsService: EmailCategorySettingsService,
     private readonly notificationTemplates: NotificationTemplateService,
+    private readonly recipients: NotificationRecipientService,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
@@ -83,6 +88,7 @@ export class EmailQueueService {
         templateName,
         subject,
         templateData,
+        to,
       );
       return this.queueEmail(
         to,
@@ -112,6 +118,7 @@ export class EmailQueueService {
         templateName,
         subject,
         templateData,
+        to,
       );
       const emailAttachments: EmailAttachment[] = attachments.map((a) => ({
         filename: a.filename,
@@ -187,6 +194,7 @@ export class EmailQueueService {
     templateName: string,
     subject: string,
     templateData: Record<string, any>,
+    to: string | string[],
   ): Promise<{ subject: string; html: string }> {
     if (isCatalogueEmail(templateName)) {
       const [wording, branding] = await Promise.all([
@@ -198,6 +206,8 @@ export class EmailQueueService {
         wording,
         templateData,
         branding,
+        subject,
+        await this.recipientFor(templateName, wording, templateData, to),
       );
     }
     const templatePath = path.resolve(
@@ -211,6 +221,25 @@ export class EmailQueueService {
       subject,
       html: await this.compileTemplate(template, templateData),
     };
+  }
+
+  // Only a single-recipient email can be personalised; a failed lookup leaves the details blank.
+  private async recipientFor(
+    templateName: string,
+    wording: EmailWording,
+    data: Record<string, any>,
+    to: string | string[],
+  ): Promise<Record<string, string>> {
+    const addresses = [to].flat();
+    if (addresses.length !== 1) return {};
+    const provided = EMAIL_CATALOGUE[templateName].toVars(data);
+    if (!needsRecipient(Object.values(wording), provided)) return {};
+    try {
+      return await this.recipients.byEmail(addresses[0]);
+    } catch (error) {
+      this.logger.warn(`Recipient lookup failed for ${templateName}: ${error}`);
+      return {};
+    }
   }
 
   // Branding values shared by previews and test sends of catalogue emails.

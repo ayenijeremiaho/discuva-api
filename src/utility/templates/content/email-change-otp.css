@@ -1,0 +1,35 @@
+.otp-table {
+          width: 100%;
+          background: #EADCC9;
+          margin: 24px 0;
+          border-collapse: collapse;
+      }
+.otp-table td {
+          padding: 24px;
+          text-align: center;
+      }
+.otp-code {
+          font-size: 32px;
+          font-weight: 700;
+          letter-spacing: 8px;
+          color: #121212;
+          margin: 0;
+      }
+.alert-table {
+          width: 100%;
+          background: #fdfaf2;
+          border: 1px dashed rgba(18, 18, 18, 0.15);
+          margin: 24px 0;
+          border-collapse: collapse;
+      }
+.alert-table td {
+          padding: 16px 20px;
+          font-size: 14px;
+          line-height: 1.5;
+          color: #121212;
+          font-weight: 300;
+      }
+.alert-table td strong {
+          color: #121212;
+          font-weight: 600;
+      }

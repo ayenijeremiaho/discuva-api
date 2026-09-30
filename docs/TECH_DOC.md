@@ -2797,6 +2797,53 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   file unchanged.
 - **Class reminders** now also pass `statusTitle` (e.g. "Starts in 1 Hour") so the default subjects stay identical.
 
+**All emails customizable, plus change history (notification customization, Phase 3):**
+- **Every member/worker email is now in the catalogue** (63 in total). The 55 added in this phase live in
+  `EXTRA_EMAIL_CATALOGUE` (`src/notification-catalogue/email-catalogue.extra.ts`), merged into `EMAIL_CATALOGUE`, which
+  is now keyed by plain template name (`EmailTemplateKey` still names the original eight). Their old standalone files
+  were split into `templates/content/<key>.html` plus, where the email had its own styles (OTP boxes, asset tables,
+  banners), `templates/content/<key>.css`, which the layout injects into `<head>` via `{{{ extra_styles }}}`. The
+  visible body text of every converted email matches the old file; the differences are the standard footer (the
+  "Need help?" line now appears wherever a support email is set), three simplified hidden preview lines (asset
+  maintenance, programme assignments, slot assigned), the child-pickup email now using the standard layout, and the
+  product name dropped from three defaults ("your account" / "the app" in device-reset confirmation, login security
+  alert and online attendance request).
+- **Still fixed (not in the catalogue):** platform emails (`founder-welcome`, `platform-admin-welcome`,
+  `tenant-approval-needed`, `tenant-welcome`) and three admin-only reports with bespoke layouts
+  (`finance-budget-alert`, `report-export`, `service-session-report`).
+- **Subjects:** the added emails default to `{{default_subject}}`, which is filled with the subject the sending code
+  passes (so dynamic subjects keep working); churches may keep it, surround it with their own words, or replace it.
+  If a subject renders empty, the sender's subject (or the email's label, in previews) is used.
+- **Optional parts:** the sign-off paragraph is hidden when both `signoff` and `signature` are empty. `message` is
+  required only when the default has one — some emails' default message is empty because all of their text is in
+  the locked block.
+- **List grouping:** emails without a category show under their catalogue `group` (`Classes`, `Finance requests`,
+  `Giving`, `Workforce`) or "Account emails".
+- **Recipient details in every message:** besides each message's own placeholders (and `{{church_name}}`), every
+  email and push accepts `{{first_name}}`, `{{last_name}}`, `{{full_name}}`, `{{email}}`, `{{phone}}`, `{{title}}`
+  (Mr; Mrs if married/widowed; Miss if single; Ms otherwise; blank without a gender), `{{church_title}}`
+  (Brother/Sister) and `{{department}}` (a worker's primary department) — `RECIPIENT_PLACEHOLDERS` in
+  `src/notification-catalogue/recipient.ts`. Values the sender passes win; recipient details only fill gaps.
+  `NotificationRecipientService` looks the member up (by the single `to` address for email, case-insensitive; by
+  member id for push, one query per dispatch) **only when the wording uses a recipient token the sender didn't
+  supply**, so default wording costs no extra query. A multi-address email, a non-member address or a failed lookup
+  leaves those tokens blank rather than failing the send. Pushes whose wording uses them are rendered per member.
+  Previews use sample values. Test sends (`POST push|email/:key/test`) use the calling admin's own linked-member
+  details for these placeholders — blank where unknown, as a real send would be, falling back to samples only if the
+  member can't be found — and, in emails, for the name shown in locked parts; message-specific values (amounts,
+  dates, class names) stay samples. The follow-up task email's first-timer contact placeholders are
+  `{{first_timer_email}}` / `{{first_timer_phone}}` so `{{email}}`/`{{phone}}` always mean the recipient.
+- **Change history:** tenant table `notification_template_versions` (`NotificationTemplateVersion`, tenant migration
+  `CreateNotificationTemplateVersions`) — `channel`, `template_key`, `action` (`SAVED` / `RESET` / `RESTORED`),
+  `content` (jsonb snapshot of the full wording in effect after the change: `{ title, body }` for push, all six email
+  fields for email), `created_by_id` (members, `SET NULL`); indexed on `(channel, template_key, created_at)`. A row is
+  written on every save, reset and restore; only the newest 20 per message are kept. Restoring re-saves the snapshot
+  through the normal save path, so it is re-validated (a version using a placeholder that no longer exists is
+  refused) and is itself recorded as `RESTORED`.
+- **Endpoints:** `GET push/:key/history` and `GET email/:key/history` (`admin:read`, any plan) return
+  `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
+  `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
+
 ### Event Module
 
 Manages events and service slots. Events can be single or recurring (daily/weekly/monthly). At least one `serviceSlot`
@@ -9116,12 +9163,16 @@ outside the requested `?months=` window).
 | GET    | /admin/notification-templates/push                         | AdminGuard (`admin:read`), any plan                           | Every push type with default and current wording, placeholders and `customized`, plus `customizationAvailable` for the church's plan |
 | PUT    | /admin/notification-templates/push/:key                    | AdminGuard (`admin:write`) + plan `notification_customization` | Save the church's title/message for one push type. Body `{ title, body }` |
 | DELETE | /admin/notification-templates/push/:key                    | AdminGuard (`admin:write`) + plan `notification_customization` | Reset one push type to the default wording |
-| POST   | /admin/notification-templates/push/:key/test               | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) wording with sample values to the admin's own device; `{ sent }` or `{ sent: false, reason: 'NO_DEVICE' }` |
-| GET    | /admin/notification-templates/email                        | AdminGuard (`admin:read`), any plan                           | Every customizable email with defaults, current wording, placeholders, `lockedNote`, `customized`, plus `customizationAvailable` |
+| POST   | /admin/notification-templates/push/:key/test               | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) wording to the admin's own device, filled with the admin's own recipient details and sample values for the rest; `{ sent }` or `{ sent: false, reason: 'NO_DEVICE' }` |
+| GET    | /admin/notification-templates/email                        | AdminGuard (`admin:read`), any plan                           | Every customizable email (all member/worker emails) with defaults, current wording, placeholders, `lockedNote`, `customized`, plus `customizationAvailable` |
 | POST   | /admin/notification-templates/email/:key/preview           | AdminGuard (`admin:read`), any plan                           | `{ subject, html }` of the email with sample details and the church's branding; body is an optional unsaved draft |
 | PUT    | /admin/notification-templates/email/:key                   | AdminGuard (`admin:write`) + plan `notification_customization` | Save wording `{ subject, heading, message, closing, signoff, signature }` |
 | DELETE | /admin/notification-templates/email/:key                   | AdminGuard (`admin:write`) + plan `notification_customization` | Reset one email to the default wording |
-| POST   | /admin/notification-templates/email/:key/test              | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) email with sample details to the admin's own address, subject prefixed `[Test]` |
+| POST   | /admin/notification-templates/email/:key/test              | AdminGuard (`admin:write`) + plan `notification_customization` | Send the draft (or saved) email to the admin's own address, filled with the admin's own recipient details and sample values for the rest, subject prefixed `[Test]` |
+| GET    | /admin/notification-templates/push/:key/history            | AdminGuard (`admin:read`), any plan                           | Newest-first change history (up to 20) for one push type: `[{ id, action, content: { title, body }, changedBy, createdAt }]` |
+| POST   | /admin/notification-templates/push/:key/history/:versionId/restore | AdminGuard (`admin:write`) + plan `notification_customization` | Re-save an earlier version's wording (re-validated, recorded as `RESTORED`) |
+| GET    | /admin/notification-templates/email/:key/history           | AdminGuard (`admin:read`), any plan                           | Newest-first change history (up to 20) for one email, `content` holding all six wording fields |
+| POST   | /admin/notification-templates/email/:key/history/:versionId/restore | AdminGuard (`admin:write`) + plan `notification_customization` | Re-save an earlier version's email wording (re-validated, recorded as `RESTORED`) |
 | GET    | /notifications/vapid-public-key                            | JwtAuthGuard                                                  | `{ publicKey }` — the server's VAPID public key; clients must use it as `applicationServerKey` when subscribing |
 | POST   | /notifications/subscribe                                   | JwtAuthGuard                                                  | Register a Web Push subscription. Called **once** after first device registration (`deviceId` transitions from `null`). Also called after re-registering on a new device following an admin purge or OTP device reset. Body: `endpoint`, `p256dh`, `auth`. Returns 204. |
 | DELETE | /notifications/subscribe                                   | JwtAuthGuard                                                  | Explicit opt-out: removes the Web Push subscription. **Not called on normal logout** — subscription persists so the service worker can deliver notifications while the member is logged out. Returns 204. |

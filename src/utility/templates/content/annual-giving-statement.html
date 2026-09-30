@@ -1,0 +1,24 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<div class="giving-banner">
+                    <strong>Total Giving for {{ year }}: {{ currency }} {{ total }}</strong>
+                  </div>
+<table class="detail-table" role="presentation">
+                    <tr>
+                      <td><strong>Member Name</strong></td>
+                      <td>{{ memberName }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Year</strong></td>
+                      <td>{{ year }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Total Contributions</strong></td>
+                      <td>{{ currency }} {{ total }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Number of Records</strong></td>
+                      <td>{{ lineCount }}</td>
+                    </tr>
+                  </table>
+{{{ closing_html }}}

@@ -1,0 +1,14 @@
+.alert-table {
+          width: 100%;
+          background: #fdfaf2;
+          border: 1px dashed rgba(18, 18, 18, 0.15);
+          margin: 24px 0;
+          border-collapse: collapse;
+      }
+.alert-table td {
+          padding: 16px 20px;
+          font-size: 14px;
+          line-height: 1.5;
+          color: #121212;
+          font-weight: 300;
+      }

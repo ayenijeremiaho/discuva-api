@@ -1,0 +1,47 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<p
+                      style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">
+                      Your login credentials</p>
+<table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td class="attributes_content">
+                          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Email:</strong> {{ email }}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Password:</strong> {{ password }}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td class="attributes_item">
+                                <strong>Login URL:</strong> <a href="{{admin_login_url}}" target="_blank">Visit Admin
+                                Portal</a>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+<table class="body-action" align="center" width="100%" cellpadding="0" cellspacing="0"
+                           role="presentation">
+                      <tr>
+                        <td align="center">
+                          <a href="{{admin_login_url}}" class="button" target="_blank">Go to Admin Portal</a>
+                        </td>
+                      </tr>
+                    </table>
+<p style="margin-top: 16px; font-size: 13px; color: #8A817C; text-align: center;">Can't click the
+                      button? Copy and paste this link into your browser:</p>
+<p
+                      style="word-break: break-all; font-size: 12px; text-align: center; background-color: #f5f5f5; padding: 10px 16px; border-radius: 4px; margin: 0 0 24px;">
+                      <a href="{{admin_login_url}}" style="color: #4F46E5; text-decoration: none;">{{ admin_login_url }}</a></p>
+<div class="alert">
+                      <strong>Important:</strong> Please log in and change your password immediately. Do not share
+                      these credentials with anyone.
+                    </div>
+{{{ closing_html }}}

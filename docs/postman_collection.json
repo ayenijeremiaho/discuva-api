@@ -322,6 +322,11 @@
     {
       "key": "departmentGoalId",
       "value": ""
+    },
+    {
+      "key": "versionId",
+      "value": "",
+      "description": "Notification template version UUID (from a template history request)"
     }
   ],
   "auth": {
@@ -31310,7 +31315,7 @@
                 "test"
               ]
             },
-            "description": "admin:write + plan feature. Sends the draft (or saved) wording with sample values to your own device. Returns { sent: true } or { sent: false, reason: 'NO_DEVICE' }.",
+            "description": "admin:write + plan feature. Sends the draft (or saved) wording to your own device, using your own name/title/department and sample values for the rest. Returns { sent: true } or { sent: false, reason: 'NO_DEVICE' }.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"title\": \"Prayer duty\"\n}",
@@ -31328,6 +31333,68 @@
               "code": 200,
               "_postman_previewlanguage": "json",
               "body": "{ \"data\": { \"sent\": true } }"
+            }
+          ]
+        },
+        {
+          "name": "Push Template History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/push/PRAYER_ASSIGNED/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "push",
+                "PRAYER_ASSIGNED",
+                "history"
+              ]
+            },
+            "description": "admin:read, any plan. Newest-first change history (latest 20) for one push type."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": [ { \"id\": \"{{versionId}}\", \"action\": \"SAVED\", \"content\": { \"title\": \"Prayer duty\", \"body\": \"You are on prayer duty on {{meeting_date}}.\" }, \"changedBy\": \"Ada Obi\", \"createdAt\": \"2026-09-30T08:00:00.000Z\" } ] }"
+            }
+          ]
+        },
+        {
+          "name": "Restore Push Template Version",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/push/PRAYER_ASSIGNED/history/{{versionId}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "push",
+                "PRAYER_ASSIGNED",
+                "history",
+                "{{versionId}}",
+                "restore"
+              ]
+            },
+            "description": "admin:write + plan feature. Re-saves an earlier version's wording (re-validated; recorded as RESTORED). Returns the updated push template."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"key\": \"PRAYER_ASSIGNED\", \"title\": \"Prayer duty\", \"customized\": true } }"
             }
           ]
         },
@@ -31474,7 +31541,7 @@
                 "test"
               ]
             },
-            "description": "admin:write + plan feature. Sends the draft (or saved) email with sample details to your own address, subject prefixed [Test].",
+            "description": "admin:write + plan feature. Sends the draft (or saved) email to your own address, using your own name/title/department and sample values for the rest; subject prefixed [Test].",
             "body": {
               "mode": "raw",
               "raw": "{}",
@@ -31492,6 +31559,68 @@
               "code": 200,
               "_postman_previewlanguage": "json",
               "body": "{ \"data\": { \"sent\": true, \"to\": \"admin@example.com\" } }"
+            }
+          ]
+        },
+        {
+          "name": "Email Template History",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email/happy-birthday/history",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email",
+                "happy-birthday",
+                "history"
+              ]
+            },
+            "description": "admin:read, any plan. Newest-first change history (latest 20) for one email; content holds all six wording fields."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": [ { \"id\": \"{{versionId}}\", \"action\": \"RESET\", \"content\": { \"subject\": \"Happy Birthday, {{first_name}}!\", \"heading\": \"Happy Birthday, {{first_name}}!\", \"message\": \"<p>...</p>\", \"closing\": \"\", \"signoff\": \"With love and prayers,\", \"signature\": \"{{church_name}} Family\" }, \"changedBy\": null, \"createdAt\": \"2026-09-30T08:00:00.000Z\" } ] }"
+            }
+          ]
+        },
+        {
+          "name": "Restore Email Template Version",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notification-templates/email/happy-birthday/history/{{versionId}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notification-templates",
+                "email",
+                "happy-birthday",
+                "history",
+                "{{versionId}}",
+                "restore"
+              ]
+            },
+            "description": "admin:write + plan feature. Re-saves an earlier version's email wording (re-validated; recorded as RESTORED). Returns the updated email template."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{ \"data\": { \"key\": \"happy-birthday\", \"customized\": true } }"
             }
           ]
         }

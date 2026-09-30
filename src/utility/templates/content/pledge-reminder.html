@@ -1,0 +1,29 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+<div class="pledge-banner {{status}}">
+                    &#128197; Dear {{ name }}, your pledge payment for <strong>{{ campaignName }}</strong> is
+                    <strong>{{ status }}</strong> ({{ dueDate }}).
+                  </div>
+{{{ message_html }}}
+<table class="detail-table" cellpadding="0" cellspacing="0" role="presentation">
+                    <tr>
+                      <td><strong>Campaign</strong></td>
+                      <td>{{ campaignName }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Total Pledged</strong></td>
+                      <td>{{ totalAmount }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Frequency</strong></td>
+                      <td>{{ frequency }}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Due Date</strong></td>
+                      <td>{{ dueDate }}</td>
+                    </tr>
+                  </table>
+<p>You can make your pledge payment via the member portal or any of our available giving channels.</p>
+<a href="{{login_url}}" class="button" target="_blank">Go to Member Portal</a>
+<p class="sub" style="margin-top: 20px;">Or copy this link: <a
+                    href="{{login_url}}">{{ login_url }}</a></p>
+{{{ closing_html }}}

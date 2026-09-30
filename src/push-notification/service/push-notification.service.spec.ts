@@ -13,6 +13,7 @@ import {
   PushNotificationKey,
 } from '../../notification-catalogue/push-catalogue';
 import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
+import { NotificationRecipientService } from '../../notification-catalogue/service/notification-recipient.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 
 jest.mock('web-push', () => ({
@@ -63,6 +64,8 @@ describe('PushNotificationService', () => {
     isPushEnabled: jest.fn().mockResolvedValue(true),
   };
 
+  const mockRecipients = { byMemberIds: jest.fn() };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCategorySettings.isPushEnabled.mockResolvedValue(true);
@@ -86,6 +89,7 @@ describe('PushNotificationService', () => {
           useValue: mockCategorySettings,
         },
         { provide: NotificationTemplateService, useValue: mockTemplates },
+        { provide: NotificationRecipientService, useValue: mockRecipients },
       ],
     }).compile();
 
@@ -253,6 +257,45 @@ describe('PushNotificationService', () => {
           }),
         }),
       ]);
+    });
+
+    it("doesn't look up recipients when the wording doesn't use them", async () => {
+      await service.dispatchToMemberIds(['m1'], {
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: '2026-10-04' },
+        idempotencyKey: 'k1',
+      });
+      expect(mockRecipients.byMemberIds).not.toHaveBeenCalled();
+    });
+
+    it('personalises each member when the wording uses recipient details', async () => {
+      mockTemplates.resolvePushTemplate.mockResolvedValueOnce({
+        ...PUSH_CATALOGUE[PushNotificationKey.PRAYER_ASSIGNED],
+        title: 'Hi {{church_title}} {{last_name}}',
+      });
+      mockSubRepo.find.mockResolvedValue([
+        { memberId: 'm1', endpoint: 'e1', p256dh: 'p', auth: 'a' },
+        { memberId: 'm2', endpoint: 'e2', p256dh: 'p', auth: 'a' },
+      ]);
+      mockRecipients.byMemberIds.mockResolvedValue(
+        new Map([
+          ['m1', { church_title: 'Sister', last_name: 'Obi' }],
+          ['m2', { church_title: 'Brother', last_name: 'Bello' }],
+        ]),
+      );
+
+      await service.dispatchToMemberIds(['m1', 'm2'], {
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: '2026-10-04' },
+        idempotencyKey: 'k1',
+      });
+
+      expect(mockRecipients.byMemberIds).toHaveBeenCalledWith(['m1', 'm2']);
+      const titles = mockQueue.addBulk.mock.calls[0][0].map(
+        (job: { data: { payload: { title: string } } }) =>
+          job.data.payload.title,
+      );
+      expect(titles).toEqual(['Hi Sister Obi', 'Hi Brother Bello']);
     });
 
     it("sends nothing when the church switched that category's push off", async () => {
