@@ -19,5 +19,12 @@
 			"path": "../discuva-deploy"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"/^ls -1 src/migrations/tenant \\| sort \\| tail -12 && node -p 'Date\\.now\\(\\)'$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
+		}
+	}
 }
