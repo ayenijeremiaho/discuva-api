@@ -2,7 +2,6 @@ import { Global, Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { BullModule } from '@nestjs/bull';
 import { PushSubscription } from './entity/push-subscription.entity';
-import { WorkerProfile } from '../member/entity/worker-profile.entity';
 import { PushNotificationService } from './service/push-notification.service';
 import { PushNotificationProcessor } from './processor/push-notification.processor';
 import { PushNotificationController } from './controller/push-notification.controller';
@@ -11,7 +10,7 @@ import { UtilityModule } from '../utility/utility.module';
 @Global()
 @Module({
   imports: [
-    TenantTypeOrmModule.forFeature([PushSubscription, WorkerProfile]),
+    TenantTypeOrmModule.forFeature([PushSubscription]),
     BullModule.registerQueue({ name: 'push-notifications' }),
     UtilityModule,
   ],

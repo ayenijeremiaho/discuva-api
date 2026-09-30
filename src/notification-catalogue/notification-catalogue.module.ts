@@ -4,7 +4,6 @@ import { NotificationTemplateOverride } from './entity/notification-template-ove
 import { NotificationTemplateVersion } from './entity/notification-template-version.entity';
 import { NotificationTemplateService } from './service/notification-template.service';
 import { NotificationRecipientService } from './service/notification-recipient.service';
-import { Member } from '../member/entity/member.entity';
 import { NotificationTemplateController } from './controller/notification-template.controller';
 
 // Global so PushNotificationService can resolve church wording without an import cycle.
@@ -14,7 +13,6 @@ import { NotificationTemplateController } from './controller/notification-templa
     TenantTypeOrmModule.forFeature([
       NotificationTemplateOverride,
       NotificationTemplateVersion,
-      Member,
     ]),
   ],
   providers: [NotificationTemplateService, NotificationRecipientService],

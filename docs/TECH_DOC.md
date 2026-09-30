@@ -2833,6 +2833,14 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   member can't be found — and, in emails, for the name shown in locked parts; message-specific values (amounts,
   dates, class names) stay samples. The follow-up task email's first-timer contact placeholders are
   `{{first_timer_email}}` / `{{first_timer_phone}}` so `{{email}}`/`{{phone}}` always mean the recipient.
+- **Reads on the send path are schema-qualified:** most senders queue emails/pushes fire-and-forget, so the work
+  often runs after the request's (or scheduler's) tenant transaction has closed, when a tenant repository silently
+  falls back to the `public` schema. Wording overrides, recipient details, the per-category Email/Push switches
+  (`church_settings`) and push subscriptions/worker lookups are therefore read with
+  `queryTenant()` (`src/tenant/utility/query-tenant.ts`), which prefixes the CLS `schemaName` (validated) and returns
+  no rows when there is no church context. Wording lookups also fall back to the defaults on any error, so a
+  customization problem can never stop an email or push from sending. (First seen in production as
+  `relation "notification_template_overrides" does not exist` on `POST /tithes/me/statement/send`.)
 - **Change history:** tenant table `notification_template_versions` (`NotificationTemplateVersion`, tenant migration
   `CreateNotificationTemplateVersions`) — `channel`, `template_key`, `action` (`SAVED` / `RESET` / `RESTORED`),
   `content` (jsonb snapshot of the full wording in effect after the change: `{ title, body }` for push, all six email

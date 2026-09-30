@@ -1,6 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, In, Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { queryTenant } from '../../tenant/utility/query-tenant';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
 import {
   EmailCategorySettingResponseDto,
@@ -38,7 +41,22 @@ export class EmailCategorySettingsService {
     private readonly settingRepo: Repository<ChurchSetting>,
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
+
+  // Read on the send path, which often runs after the caller's tenant transaction has closed.
+  private async storedValue(
+    category: EmailCategory,
+  ): Promise<EmailCategorySettingValue | undefined> {
+    const [row] = await queryTenant<{ value: EmailCategorySettingValue }>(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (schema) => `SELECT value FROM ${schema}.church_settings WHERE key = $1`,
+      [this.storageKey(category)],
+    );
+    return row?.value;
+  }
 
   private storageKey(category: EmailCategory): string {
     return `email_category:${category}`;
@@ -140,10 +158,7 @@ export class EmailCategorySettingsService {
     const cached = await this.cacheService.get<boolean>(cacheKey);
     if (cached !== undefined) return cached;
 
-    const row = await this.settingRepo.findOne({
-      where: { key: this.storageKey(category) },
-    });
-    const value = row?.value as EmailCategorySettingValue | undefined;
+    const value = await this.storedValue(category);
     const enabled = value?.enabled ?? true;
     this.cacheService.set(cacheKey, enabled, this.CACHE_TTL);
     return enabled;
@@ -155,12 +170,7 @@ export class EmailCategorySettingsService {
     const cached = await this.cacheService.get<boolean>(cacheKey);
     if (cached !== undefined) return cached;
 
-    const row = await this.settingRepo.findOne({
-      where: { key: this.storageKey(category) },
-    });
-    const enabled = pushEnabledOf(
-      row?.value as EmailCategorySettingValue | undefined,
-    );
+    const enabled = pushEnabledOf(await this.storedValue(category));
     this.cacheService.set(cacheKey, enabled, this.CACHE_TTL);
     return enabled;
   }

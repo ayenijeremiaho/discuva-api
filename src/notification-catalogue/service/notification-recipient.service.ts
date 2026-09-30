@@ -1,8 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Member } from '../../member/entity/member.entity';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { RecipientDetails, recipientVars } from '../recipient';
+import { queryTenant } from '../../tenant/utility/query-tenant';
 
 type Row = RecipientDetails & { id: string };
 
@@ -10,15 +12,14 @@ type Row = RecipientDetails & { id: string };
 @Injectable()
 export class NotificationRecipientService {
   constructor(
-    @InjectRepository(Member)
-    private readonly members: Repository<Member>,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
 
   async byEmail(email: string): Promise<Record<string, string>> {
-    const [row] = await this.query()
-      .where('LOWER(m.email) = LOWER(:email)', { email })
-      .limit(1)
-      .getRawMany<Row>();
+    const [row] = await this.query('LOWER(m.email) = LOWER($1) LIMIT 1', [
+      email,
+    ]);
     return recipientVars(row);
   }
 
@@ -26,26 +27,22 @@ export class NotificationRecipientService {
     ids: string[],
   ): Promise<Map<string, Record<string, string>>> {
     if (!ids.length) return new Map();
-    const rows = await this.query()
-      .where('m.id IN (:...ids)', { ids })
-      .getRawMany<Row>();
+    const rows = await this.query('m.id = ANY($1::uuid[])', [ids]);
     return new Map(rows.map((row) => [row.id, recipientVars(row)]));
   }
 
-  private query() {
-    return this.members
-      .createQueryBuilder('m')
-      .leftJoin('m.workerProfile', 'wp')
-      .leftJoin('wp.department', 'd')
-      .select([
-        'm.id AS id',
-        'm.firstname AS firstname',
-        'm.lastname AS lastname',
-        'm.email AS email',
-        'm.phone_number AS "phoneNumber"',
-        'm.gender AS gender',
-        'm.marital_status AS "maritalStatus"',
-        'd.name AS department',
-      ]);
+  private query(where: string, params: unknown[]): Promise<Row[]> {
+    return queryTenant<Row>(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (s) => `SELECT m.id, m.firstname, m.lastname, m.email,
+          m.phone_number AS "phoneNumber", m.gender,
+          m.marital_status AS "maritalStatus", d.name AS department
+        FROM ${s}.members m
+        LEFT JOIN ${s}.worker_profiles wp ON wp.member_id = m.id
+        LEFT JOIN ${s}.departments d ON d.id = wp.department_id
+        WHERE ${where}`,
+      params,
+    );
   }
 }

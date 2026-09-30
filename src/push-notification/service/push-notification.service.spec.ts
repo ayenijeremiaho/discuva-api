@@ -1,12 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import * as webPush from 'web-push';
 import { PushNotificationService } from './push-notification.service';
 import { PushSubscription } from '../entity/push-subscription.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import {
   PUSH_CATALOGUE,
@@ -48,8 +47,19 @@ describe('PushNotificationService', () => {
     get: jest.fn().mockReturnValue('test-value'),
   };
 
+  // Subscriptions and worker lookups are schema-qualified raw reads; route them to the repo-style mocks.
+  const mockDataSource = {
+    query: jest.fn((sql: string, params: unknown[]) =>
+      sql.includes('push_subscriptions')
+        ? mockSubRepo.find(params)
+        : mockWorkerRepo.createQueryBuilder().getRawMany(),
+    ),
+  };
+
   const mockClsService = {
-    get: jest.fn(),
+    get: jest.fn((key: string) =>
+      key === 'schemaName' ? 'church_demo' : undefined,
+    ),
     isActive: jest.fn().mockReturnValue(false),
     getId: jest.fn(),
   };
@@ -77,10 +87,7 @@ describe('PushNotificationService', () => {
           provide: getRepositoryToken(PushSubscription),
           useValue: mockSubRepo,
         },
-        {
-          provide: getRepositoryToken(WorkerProfile),
-          useValue: mockWorkerRepo,
-        },
+        { provide: getDataSourceToken(), useValue: mockDataSource },
         { provide: getQueueToken('push-notifications'), useValue: mockQueue },
         { provide: ConfigService, useValue: mockConfig },
         { provide: ClsService, useValue: mockClsService },
@@ -225,6 +232,39 @@ describe('PushNotificationService', () => {
         url: '/prayer',
       });
       expect(mockQueue.addBulk).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('tenant reads', () => {
+    it("reads subscriptions from the church's own schema, so fire-and-forget sends still work", async () => {
+      await service.dispatchToMemberIds(['m1'], {
+        title: 'T',
+        body: 'B',
+        url: '/',
+        idempotencyKey: 'k',
+      });
+
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('FROM "church_demo".push_subscriptions'),
+        [['m1']],
+      );
+    });
+
+    it('sends nothing without a church context', async () => {
+      mockClsService.get.mockImplementation(() => undefined);
+
+      await service.dispatchToMemberIds(['m1'], {
+        title: 'T',
+        body: 'B',
+        url: '/',
+        idempotencyKey: 'k',
+      });
+
+      expect(mockDataSource.query).not.toHaveBeenCalled();
+      expect(mockQueue.addBulk).not.toHaveBeenCalled();
+      mockClsService.get.mockImplementation((key: string) =>
+        key === 'schemaName' ? 'church_demo' : undefined,
+      );
     });
   });
 

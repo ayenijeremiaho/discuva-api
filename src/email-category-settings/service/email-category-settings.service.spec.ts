@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { ClsService } from 'nestjs-cls';
 import { NotFoundException } from '@nestjs/common';
 import { EmailCategorySettingsService } from './email-category-settings.service';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
@@ -25,12 +26,17 @@ const mockAuditLogService = {
   log: jest.fn(),
 };
 
+const mockDataSource = { query: jest.fn().mockResolvedValue([]) };
+const mockCls = { get: jest.fn().mockReturnValue('church_demo') };
+
 describe('EmailCategorySettingsService', () => {
   let service: EmailCategorySettingsService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
     mockCacheService.get.mockResolvedValue(undefined);
+    mockDataSource.query.mockResolvedValue([]);
+    mockCls.get.mockReturnValue('church_demo');
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -41,6 +47,8 @@ describe('EmailCategorySettingsService', () => {
         },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: getDataSourceToken(), useValue: mockDataSource },
+        { provide: ClsService, useValue: mockCls },
       ],
     }).compile();
 
@@ -209,10 +217,7 @@ describe('EmailCategorySettingsService', () => {
     });
 
     it('keeps push off for churches that switched the whole category off before push had its own switch', async () => {
-      mockSettingRepo.findOne.mockResolvedValue({
-        key: 'email_category:PRAYER_REMINDER',
-        value: { enabled: false },
-      });
+      mockDataSource.query.mockResolvedValue([{ value: { enabled: false } }]);
 
       await expect(
         service.isPushEnabled(EmailCategory.PRAYER_REMINDER),
@@ -220,8 +225,6 @@ describe('EmailCategorySettingsService', () => {
     });
 
     it('defaults push on and caches it', async () => {
-      mockSettingRepo.findOne.mockResolvedValue(null);
-
       await expect(
         service.isPushEnabled(EmailCategory.PRAYER_REMINDER),
       ).resolves.toBe(true);
@@ -240,31 +243,39 @@ describe('EmailCategorySettingsService', () => {
       const result = await service.isEnabled(EmailCategory.LOGIN_ALERT);
 
       expect(result).toBe(false);
-      expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
+      expect(mockDataSource.query).not.toHaveBeenCalled();
     });
 
     it('defaults to enabled when there is no cache or DB row', async () => {
-      mockSettingRepo.findOne.mockResolvedValue(null);
-
       const result = await service.isEnabled(EmailCategory.LOGIN_ALERT);
 
       expect(result).toBe(true);
     });
 
-    it('reads the DB value and caches it on a miss', async () => {
-      mockSettingRepo.findOne.mockResolvedValue({
-        key: 'email_category:LOGIN_ALERT',
-        value: { enabled: false },
-      });
+    it("reads the DB value from the church's own schema and caches it on a miss", async () => {
+      mockDataSource.query.mockResolvedValue([{ value: { enabled: false } }]);
 
       const result = await service.isEnabled(EmailCategory.LOGIN_ALERT);
 
       expect(result).toBe(false);
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        'SELECT value FROM "church_demo".church_settings WHERE key = $1',
+        ['email_category:LOGIN_ALERT'],
+      );
       expect(mockCacheService.set).toHaveBeenCalledWith(
         'email-category-settings:LOGIN_ALERT',
         false,
         300,
       );
+    });
+
+    it('treats a call with no church context as enabled, without querying', async () => {
+      mockCls.get.mockReturnValue(undefined);
+
+      await expect(service.isEnabled(EmailCategory.LOGIN_ALERT)).resolves.toBe(
+        true,
+      );
+      expect(mockDataSource.query).not.toHaveBeenCalled();
     });
   });
 });

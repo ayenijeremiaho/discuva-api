@@ -1,13 +1,12 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import * as webPush from 'web-push';
 import { PushSubscription } from '../entity/push-subscription.entity';
-import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import {
   DispatchPush,
   PushJobData,
@@ -24,14 +23,13 @@ import {
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
+import { queryTenant } from '../../tenant/utility/query-tenant';
 
 @Injectable()
 export class PushNotificationService implements OnModuleInit {
   constructor(
     @InjectRepository(PushSubscription)
     private readonly subRepo: Repository<PushSubscription>,
-    @InjectRepository(WorkerProfile)
-    private readonly workerRepo: Repository<WorkerProfile>,
     @InjectQueue('push-notifications')
     private readonly queue: Queue<PushJobData>,
     private readonly config: ConfigService,
@@ -39,6 +37,7 @@ export class PushNotificationService implements OnModuleInit {
     private readonly categorySettings: EmailCategorySettingsService,
     private readonly templates: NotificationTemplateService,
     private readonly recipients: NotificationRecipientService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   // Null when the church has switched this category's push off. personal = wording uses recipient details.
@@ -107,11 +106,13 @@ export class PushNotificationService implements OnModuleInit {
     push: DispatchPush,
   ): Promise<void> {
     if (!workerProfileIds.length) return;
-    const rows = await this.workerRepo
-      .createQueryBuilder('wp')
-      .select('wp.member_id', 'memberId')
-      .where('wp.id IN (:...ids)', { ids: workerProfileIds })
-      .getRawMany<{ memberId: string }>();
+    const rows = await queryTenant<{ memberId: string }>(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (schema) =>
+        `SELECT member_id AS "memberId" FROM ${schema}.worker_profiles WHERE id = ANY($1::uuid[])`,
+      [workerProfileIds],
+    );
     await this.dispatchToMemberIds(
       rows.map((r) => r.memberId),
       push,
@@ -125,9 +126,16 @@ export class PushNotificationService implements OnModuleInit {
     if (!memberIds.length) return;
     const resolved = await this.resolve(push);
     if (!resolved) return;
-    const subscriptions = await this.subRepo.find({
-      where: { memberId: In(memberIds) },
-    });
+    // Schema-qualified: most dispatches are fire-and-forget and outlive the caller's tenant transaction.
+    const subscriptions = await queryTenant<
+      Pick<PushSubscription, 'memberId' | 'endpoint' | 'p256dh' | 'auth'>
+    >(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (schema) =>
+        `SELECT member_id AS "memberId", endpoint, p256dh, auth FROM ${schema}.push_subscriptions WHERE member_id = ANY($1::uuid[])`,
+      [memberIds],
+    );
     if (!subscriptions.length) return;
     const details = resolved.personal
       ? await this.recipients.byMemberIds([

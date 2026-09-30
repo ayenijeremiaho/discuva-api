@@ -29,8 +29,25 @@ describe('NotificationTemplateService', () => {
   };
   const audit = { log: jest.fn() };
   const plans = { resolve: jest.fn() };
-  const cls = { get: jest.fn().mockReturnValue('tenant-1') };
+  const cls = {
+    get: jest.fn((key: string) =>
+      key === 'schemaName' ? 'church_demo' : 'tenant-1',
+    ),
+  };
+  // Overrides are read with raw schema-qualified SQL; serve repo.find's rows in that shape.
+  const dataSource = {
+    query: jest.fn(async () =>
+      ((await repo.find()) ?? []).map((r: any) => ({
+        template_key: r.templateKey,
+        title: r.title ?? null,
+        body: r.body ?? null,
+        content: r.content ?? null,
+        updated_at: r.updatedAt,
+      })),
+    ),
+  };
   const service = new NotificationTemplateService(
+    dataSource as any,
     repo as any,
     versions as any,
     cache as any,
@@ -431,6 +448,46 @@ describe('NotificationTemplateService', () => {
       versions.findOne.mockResolvedValue(null);
       await expect(service.restoreEmail(EKEY, 'v1', (h) => h)).rejects.toThrow(
         'That version no longer exists.',
+      );
+    });
+  });
+
+  describe('sending outside a request', () => {
+    it("reads overrides from the church's own schema", async () => {
+      await service.resolveEmailWording(EmailTemplateKey.HAPPY_BIRTHDAY);
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'FROM "church_demo".notification_template_overrides',
+        ),
+        ['EMAIL'],
+      );
+    });
+
+    it('uses the defaults, without querying, when there is no church context', async () => {
+      cls.get.mockImplementation(() => undefined);
+
+      await expect(
+        service.resolveEmailWording(EmailTemplateKey.HAPPY_BIRTHDAY),
+      ).resolves.toEqual(defaultWording(EmailTemplateKey.HAPPY_BIRTHDAY));
+      expect(dataSource.query).not.toHaveBeenCalled();
+
+      cls.get.mockImplementation((key: string) =>
+        key === 'schemaName' ? 'church_demo' : 'tenant-1',
+      );
+    });
+
+    it('falls back to the defaults instead of failing the send', async () => {
+      dataSource.query.mockRejectedValueOnce(
+        new Error('relation "notification_template_overrides" does not exist'),
+      );
+      await expect(
+        service.resolveEmailWording(EmailTemplateKey.HAPPY_BIRTHDAY),
+      ).resolves.toEqual(defaultWording(EmailTemplateKey.HAPPY_BIRTHDAY));
+
+      dataSource.query.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.resolvePushTemplate(KEY)).resolves.toEqual(
+        PUSH_CATALOGUE[KEY],
       );
     });
   });

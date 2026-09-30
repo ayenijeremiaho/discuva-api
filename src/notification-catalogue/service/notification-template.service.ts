@@ -1,10 +1,11 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import {
   NotificationChannel,
@@ -35,6 +36,7 @@ import {
   isCatalogueEmail,
 } from '../email-catalogue';
 import { RECIPIENT_PLACEHOLDERS } from '../recipient';
+import { queryTenant } from '../../tenant/utility/query-tenant';
 import { KNOWN_EMAIL_CATEGORIES } from '../../email-category-settings/constant/known-email-categories.constant';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -66,6 +68,14 @@ const EMAIL_FIELD_LABELS: Record<keyof EmailWording, string> = {
   signature: 'Signature',
 };
 
+type OverrideRow = {
+  template_key: string;
+  title: string | null;
+  body: string | null;
+  content: Partial<EmailWording> | null;
+  updated_at: Date | string;
+};
+
 type EmailOverrides = Record<
   string,
   { content: Partial<EmailWording>; updatedAt: string }
@@ -85,7 +95,10 @@ function toPlainText(text: string): string {
 
 @Injectable()
 export class NotificationTemplateService {
+  private readonly logger = new Logger(NotificationTemplateService.name);
+
   constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(NotificationTemplateOverride)
     private readonly overrideRepo: Repository<NotificationTemplateOverride>,
     @InjectRepository(NotificationTemplateVersion)
@@ -106,31 +119,46 @@ export class NotificationTemplateService {
   private async pushOverrides(): Promise<PushOverrides> {
     const cached = await this.cacheService.get<PushOverrides>(PUSH_CACHE_KEY);
     if (cached) return cached;
-    const rows = await this.overrideRepo.find({
-      where: { channel: NotificationChannel.PUSH },
-    });
+    const rows = await this.overrideRows(NotificationChannel.PUSH);
     const map: PushOverrides = {};
     for (const row of rows) {
-      map[row.templateKey] = {
+      map[row.template_key] = {
         title: row.title,
         body: row.body,
-        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+        updatedAt: new Date(row.updated_at).toISOString(),
       };
     }
     this.cacheService.set(PUSH_CACHE_KEY, map, CACHE_TTL);
     return map;
   }
 
+  private overrideRows(channel: NotificationChannel): Promise<OverrideRow[]> {
+    return queryTenant<OverrideRow>(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (schema) =>
+        `SELECT template_key, title, body, content, updated_at FROM ${schema}.notification_template_overrides WHERE channel = $1`,
+      [channel],
+    );
+  }
+
   // Wording to send: the church's override while its plan includes customization, else the default.
+  // Never blocks a send: any lookup failure falls back to the default wording.
   async resolvePushTemplate(key: PushNotificationKey): Promise<PushTemplate> {
     const template = PUSH_CATALOGUE[key];
-    const override = (await this.pushOverrides())[key];
-    if (!override || !(await this.isCustomizationAvailable())) return template;
-    return {
-      ...template,
-      title: override.title || template.title,
-      body: override.body || template.body,
-    };
+    try {
+      if (!(await this.isCustomizationAvailable())) return template;
+      const override = (await this.pushOverrides())[key];
+      if (!override) return template;
+      return {
+        ...template,
+        title: override.title || template.title,
+        body: override.body || template.body,
+      };
+    } catch (error) {
+      this.logger.warn(`Using default push wording for ${key}: ${error}`);
+      return template;
+    }
   }
 
   async listPush(): Promise<{
@@ -226,14 +254,12 @@ export class NotificationTemplateService {
   private async emailOverrides(): Promise<EmailOverrides> {
     const cached = await this.cacheService.get<EmailOverrides>(EMAIL_CACHE_KEY);
     if (cached) return cached;
-    const rows = await this.overrideRepo.find({
-      where: { channel: NotificationChannel.EMAIL },
-    });
+    const rows = await this.overrideRows(NotificationChannel.EMAIL);
     const map: EmailOverrides = {};
     for (const row of rows) {
-      map[row.templateKey] = {
-        content: (row.content ?? {}) as Partial<EmailWording>,
-        updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+      map[row.template_key] = {
+        content: row.content ?? {},
+        updatedAt: new Date(row.updated_at).toISOString(),
       };
     }
     this.cacheService.set(EMAIL_CACHE_KEY, map, CACHE_TTL);
@@ -243,9 +269,14 @@ export class NotificationTemplateService {
   // Wording to send: church edits (while the plan includes customization) over the defaults, field by field.
   async resolveEmailWording(key: string): Promise<EmailWording> {
     const defaults = defaultWording(key);
-    const override = (await this.emailOverrides())[key];
-    if (!override || !(await this.isCustomizationAvailable())) return defaults;
-    return { ...defaults, ...override.content };
+    try {
+      if (!(await this.isCustomizationAvailable())) return defaults;
+      const override = (await this.emailOverrides())[key];
+      return override ? { ...defaults, ...override.content } : defaults;
+    } catch (error) {
+      this.logger.warn(`Using default email wording for ${key}: ${error}`);
+      return defaults;
+    }
   }
 
   async listEmail(): Promise<{
