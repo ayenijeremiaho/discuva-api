@@ -7199,11 +7199,18 @@ available regardless of plan, since `FinanceAdminController` itself carries no `
 **HOD enforcement:** Only workers with a lead assignment (`DepartmentLead` record) can create or view department
 requests. A worker can only raise a request for their own department (verified server-side).
 
+**Paid (derived, not stored):** the stored status stays `APPROVED` after the finance team attaches the payment proof
+(`PATCH /admin/finance/requests/:id/proof`). Every loaded `FinanceRequest` carries a computed `isPaid`
+(`status === APPROVED && proofUrl`, set in an `@AfterLoad` hook, and on the response of the proof upload). The admin
+portal and the HOD's member-app list show "Paid" when it's true; the HOD also gets a "View payment proof" link and, on
+rejected requests, the rejection reason. The Excel export's Status column reads `PAID` for these rows. Budget and
+report figures that count `APPROVED` requests are unaffected.
+
 **Admin list filters:** `GET /admin/finance/requests` now accepts additional query params for richer filtering:
 
 | Param | Type | Description |
 |---|---|---|
-| `status` | enum | `PENDING \| APPROVED \| REJECTED` |
+| `status` | enum | `PENDING \| APPROVED \| REJECTED`, or `AWAITING_PAYMENT` (approved, no payment proof yet) / `PAID` (approved with a payment proof). `APPROVED` still means every approved request. Unknown values → 400 |
 | `categoryId` | UUID | Filter to a specific expense category |
 | `memberId` | UUID | Filter to requests raised by a specific member |
 | `departmentId` | UUID | Filter to requests raised by a specific department |
@@ -9048,7 +9055,7 @@ outside the requested `?months=` window).
 | POST   | /admin/finance/categories                                  | AdminGuard (FINANCE_WRITE)                                    | Create finance category                                                                                       |
 | PATCH  | /admin/finance/categories/:id                              | AdminGuard (FINANCE_WRITE)                                    | Update finance category (name, description, or `isActive`)                                                    |
 | DELETE | /admin/finance/categories/:id                              | AdminGuard (FINANCE_WRITE)                                    | Delete a finance category; 400 if the category is referenced by any `FinanceRequest` (disable it via PATCH `isActive: false` instead) |
-| GET    | /admin/finance/requests                                    | AdminGuard (FINANCE_READ)                                     | List finance requests (paginated); filters: `status`, `categoryId`, `memberId`, `departmentId`, `search`      |
+| GET    | /admin/finance/requests                                    | AdminGuard (FINANCE_READ)                                     | List finance requests (paginated); filters: `status` (incl. `AWAITING_PAYMENT`, `PAID`), `categoryId`, `memberId`, `departmentId`, `search`; rows include computed `isPaid` |
 | GET    | /admin/finance/requests/download                           | AdminGuard (FINANCE_READ)                                     | Download filtered finance requests as `.xlsx`; same query params as list endpoint, no pagination              |
 | GET    | /admin/finance/requests/:id                                | AdminGuard (FINANCE_READ)                                     | Get finance request by ID                                                                                     |
 | PATCH  | /admin/finance/requests/:id/approve                        | AdminGuard (FINANCE_WRITE)                                    | Approve a pending finance request — 403 if the approver is the same member who raised the request            |

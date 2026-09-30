@@ -1,4 +1,5 @@
 import {
+  AfterLoad,
   Column,
   Entity,
   JoinColumn,
@@ -83,4 +84,13 @@ export class FinanceRequest extends BaseEntity {
   @ManyToOne(() => JournalEntry, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'journal_entry_id' })
   journalEntry: JournalEntry | null;
+
+  // Not stored: approved + payment proof attached. Shown as "Paid" in the admin portal and member app.
+  isPaid?: boolean;
+
+  @AfterLoad()
+  setIsPaid(): void {
+    this.isPaid =
+      this.status === FinanceRequestStatus.APPROVED && !!this.proofUrl;
+  }
 }

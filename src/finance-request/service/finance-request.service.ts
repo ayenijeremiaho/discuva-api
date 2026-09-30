@@ -12,7 +12,11 @@ import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { FinanceCategory } from '../entity/finance-category.entity';
 import { FinanceRequest } from '../entity/finance-request.entity';
-import { FinanceRequestStatus } from '../enum/finance-request.enum';
+import {
+  FinanceRequestPaymentFilter,
+  FinanceRequestStatus,
+  FinanceRequestStatusFilter,
+} from '../enum/finance-request.enum';
 import {
   AttachProofDto,
   CreateFinanceCategoryDto,
@@ -249,7 +253,7 @@ export class FinanceRequestService {
   async getAllRequests(
     page = 1,
     limit = 20,
-    status?: FinanceRequestStatus,
+    status?: FinanceRequestStatusFilter,
     categoryId?: string,
     memberId?: string,
     departmentId?: string,
@@ -270,7 +274,7 @@ export class FinanceRequestService {
   }
 
   async getRequestsExcel(
-    status?: FinanceRequestStatus,
+    status?: FinanceRequestStatusFilter,
     categoryId?: string,
     memberId?: string,
     departmentId?: string,
@@ -306,7 +310,7 @@ export class FinanceRequestService {
         department: r.department?.name ?? '',
         category: r.category?.name ?? '',
         amount: Number(r.amount),
-        status: r.status,
+        status: r.isPaid ? 'PAID' : r.status,
         reason: r.reason,
         reviewedBy: r.reviewedBy?.member
           ? `${r.reviewedBy.member.firstname} ${r.reviewedBy.member.lastname}`
@@ -320,7 +324,7 @@ export class FinanceRequestService {
   }
 
   private buildRequestsQb(
-    status?: FinanceRequestStatus,
+    status?: FinanceRequestStatusFilter,
     categoryId?: string,
     memberId?: string,
     departmentId?: string,
@@ -335,7 +339,17 @@ export class FinanceRequestService {
       .leftJoinAndSelect('reviewedBy.member', 'reviewedByMember')
       .orderBy('r.createdAt', 'DESC');
 
-    if (status) qb.andWhere('r.status = :status', { status });
+    if (status === FinanceRequestPaymentFilter.PAID) {
+      qb.andWhere('r.status = :status', {
+        status: FinanceRequestStatus.APPROVED,
+      }).andWhere('r.proofUrl IS NOT NULL');
+    } else if (status === FinanceRequestPaymentFilter.AWAITING_PAYMENT) {
+      qb.andWhere('r.status = :status', {
+        status: FinanceRequestStatus.APPROVED,
+      }).andWhere('r.proofUrl IS NULL');
+    } else if (status) {
+      qb.andWhere('r.status = :status', { status });
+    }
     if (categoryId) qb.andWhere('category.id = :categoryId', { categoryId });
     if (memberId) qb.andWhere('requestedBy.id = :memberId', { memberId });
     if (departmentId)
@@ -461,6 +475,7 @@ export class FinanceRequestService {
     }
 
     const saved = await this.requestRepo.save(request);
+    saved.isPaid = true;
 
     this.auditLogService.log('FINANCE_PROOF_ATTACHED', {
       actorId: actorAdmin.member?.id,
