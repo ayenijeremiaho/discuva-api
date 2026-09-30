@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -29,8 +30,25 @@ import {
   RejectFinanceRequestDto,
   UpdateFinanceCategoryDto,
 } from '../dto/finance-request.dto';
-import { FinanceRequestStatus } from '../enum/finance-request.enum';
+import {
+  FinanceRequestPaymentFilter,
+  FinanceRequestStatus,
+  FinanceRequestStatusFilter,
+} from '../enum/finance-request.enum';
 import { FinanceRequest } from '../entity/finance-request.entity';
+
+const STATUS_FILTERS: string[] = [
+  ...Object.values(FinanceRequestStatus),
+  ...Object.values(FinanceRequestPaymentFilter),
+];
+
+function assertStatusFilter(status?: string): void {
+  if (status && !STATUS_FILTERS.includes(status)) {
+    throw new BadRequestException(
+      `status must be one of ${STATUS_FILTERS.join(', ')}`,
+    );
+  }
+}
 
 @UseGuards(AdminGuard)
 @Controller('admin/finance')
@@ -81,12 +99,13 @@ export class FinanceAdminController {
   getAllRequests(
     @Query('page') page = 1,
     @Query('limit') limit = 20,
-    @Query('status') status?: FinanceRequestStatus,
+    @Query('status') status?: FinanceRequestStatusFilter,
     @Query('categoryId') categoryId?: string,
     @Query('memberId') memberId?: string,
     @Query('departmentId') departmentId?: string,
     @Query('search') search?: string,
   ) {
+    assertStatusFilter(status);
     return this.financeRequestService.getAllRequests(
       Number(page),
       Number(limit),
@@ -102,12 +121,13 @@ export class FinanceAdminController {
   @Get('requests/download')
   async downloadRequests(
     @Res() res: Response,
-    @Query('status') status?: FinanceRequestStatus,
+    @Query('status') status?: FinanceRequestStatusFilter,
     @Query('categoryId') categoryId?: string,
     @Query('memberId') memberId?: string,
     @Query('departmentId') departmentId?: string,
     @Query('search') search?: string,
   ): Promise<void> {
+    assertStatusFilter(status);
     const buffer = await this.financeRequestService.getRequestsExcel(
       status,
       categoryId,

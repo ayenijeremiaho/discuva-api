@@ -9,7 +9,10 @@ import {
 import { FinanceRequestService } from './finance-request.service';
 import { FinanceCategory } from '../entity/finance-category.entity';
 import { FinanceRequest } from '../entity/finance-request.entity';
-import { FinanceRequestStatus } from '../enum/finance-request.enum';
+import {
+  FinanceRequestPaymentFilter,
+  FinanceRequestStatus,
+} from '../enum/finance-request.enum';
 import { Admin } from '../../admin/entity/admin.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -736,6 +739,73 @@ describe('FinanceRequestService', () => {
     });
   });
 
+  describe('paid filters', () => {
+    it.each([
+      [FinanceRequestPaymentFilter.PAID, 'r.proofUrl IS NOT NULL'],
+      [FinanceRequestPaymentFilter.AWAITING_PAYMENT, 'r.proofUrl IS NULL'],
+    ])(
+      '%s narrows approved requests by payment proof',
+      async (filter, clause) => {
+        const qb = makeQb();
+        qb.getManyAndCount.mockResolvedValue([[], 0]);
+        mockRequestRepo.createQueryBuilder.mockReturnValue(qb);
+
+        await service.getAllRequests(1, 20, filter);
+
+        expect(qb.andWhere).toHaveBeenCalledWith('r.status = :status', {
+          status: FinanceRequestStatus.APPROVED,
+        });
+        expect(qb.andWhere).toHaveBeenCalledWith(clause);
+      },
+    );
+
+    it('keeps APPROVED meaning every approved request', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockRequestRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAllRequests(1, 20, FinanceRequestStatus.APPROVED);
+
+      expect(qb.andWhere).toHaveBeenCalledTimes(1);
+    });
+
+    it('labels paid requests PAID in the Excel export', async () => {
+      const qb = makeQb();
+      qb.getMany.mockResolvedValue([
+        {
+          ...pendingRequest,
+          status: FinanceRequestStatus.APPROVED,
+          isPaid: true,
+          requestedBy: { firstname: 'A', lastname: 'B', email: 'a@b.c' },
+        },
+      ]);
+      mockRequestRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getRequestsExcel();
+
+      const rows = mockExcelService.buildWorkbook.mock.calls.at(-1)[2];
+      expect(rows[0].status).toBe('PAID');
+    });
+  });
+
+  describe('FinanceRequest.isPaid', () => {
+    const load = (status: FinanceRequestStatus, proofUrl: string | null) => {
+      const entity = Object.assign(new FinanceRequest(), { status, proofUrl });
+      entity.setIsPaid();
+      return entity.isPaid;
+    };
+
+    it('is true only for an approved request with a payment proof', () => {
+      expect(load(FinanceRequestStatus.APPROVED, 'https://x/proof.jpg')).toBe(
+        true,
+      );
+      expect(load(FinanceRequestStatus.APPROVED, null)).toBe(false);
+      expect(load(FinanceRequestStatus.PENDING, 'https://x/proof.jpg')).toBe(
+        false,
+      );
+    });
+  });
+
   describe('getRequestsExcel', () => {
     it('should return an Excel buffer with correct row shape', async () => {
       const request = {
@@ -821,7 +891,8 @@ describe('FinanceRequestService', () => {
       });
       mockRequestRepo.save.mockResolvedValue(request);
 
-      await service.attachProof('req-1', file, {}, mockAdmin);
+      const saved = await service.attachProof('req-1', file, {}, mockAdmin);
+      expect(saved.isPaid).toBe(true);
 
       expect(mockCloudinaryService.uploadBuffer).toHaveBeenCalledWith(
         file.buffer,

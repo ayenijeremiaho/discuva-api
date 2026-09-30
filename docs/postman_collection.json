@@ -18064,7 +18064,7 @@
     },
     {
       "name": "Finance (Admin)",
-      "description": "Admin-side management of department finance requests raised by HODs.\n\n**Access:** AdminGuard \u2014 FINANCE_READ for list/get, FINANCE_WRITE for approve/reject/proof.\n\n**Key concepts:**\n- Finance categories group requests by expense type (e.g. Equipment, Printing, Transport). Admin creates categories first.\n- HODs raise requests with an amount, recipient bank details, reason, and optional attachment.\n- Admin reviews and approves or rejects (rejection requires a reason, which is emailed to the HOD).\n- After approving, admin can attach a payment proof file via `PATCH /admin/finance/requests/:id/proof` to confirm disbursement.\n\n**Status flow:** `PENDING` \u2192 `APPROVED` (admin approves) \u2192 proof attached OR `REJECTED` (with reason)",
+      "description": "Admin-side management of department finance requests raised by HODs.\n\n**Access:** AdminGuard \u2014 FINANCE_READ for list/get, FINANCE_WRITE for approve/reject/proof.\n\n**Key concepts:**\n- Finance categories group requests by expense type (e.g. Equipment, Printing, Transport). Admin creates categories first.\n- HODs raise requests with an amount, recipient bank details, reason, and optional attachment.\n- Admin reviews and approves or rejects (rejection requires a reason, which is emailed to the HOD).\n- After approving, admin can attach a payment proof file via `PATCH /admin/finance/requests/:id/proof` to confirm disbursement.\n\n**Status flow:** `PENDING` \u2192 `APPROVED` (admin approves) \u2192 proof attached (still `APPROVED`, but `isPaid: true` \u2014 shown as Paid) OR `REJECTED` (with reason). List filter `status` also accepts `AWAITING_PAYMENT` and `PAID`.",
       "item": [
         {
           "name": "List Finance Categories",
@@ -18285,7 +18285,8 @@
                 },
                 {
                   "key": "status",
-                  "value": "PENDING"
+                  "value": "PENDING",
+                  "description": "PENDING, APPROVED, REJECTED, AWAITING_PAYMENT (approved, no proof yet) or PAID (approved with payment proof)"
                 },
                 {
                   "key": "categoryId",
