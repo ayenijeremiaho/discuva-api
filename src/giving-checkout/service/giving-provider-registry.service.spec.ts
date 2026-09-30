@@ -4,12 +4,14 @@ import { PaystackGivingProvider } from '../provider/paystack-giving.provider';
 import { FlutterwaveGivingProvider } from '../provider/flutterwave-giving.provider';
 import { KoraGivingProvider } from '../provider/kora-giving.provider';
 import { StripeGivingProvider } from '../provider/stripe-giving.provider';
+import { MonnifyGivingProvider } from '../provider/monnify-giving.provider';
 
 describe('GivingProviderRegistryService', () => {
   const paystack = {} as PaystackGivingProvider;
   const flutterwave = {} as FlutterwaveGivingProvider;
   const kora = {} as KoraGivingProvider;
   const stripe = {} as StripeGivingProvider;
+  const monnify = {} as MonnifyGivingProvider;
   let registry: GivingProviderRegistryService;
 
   beforeEach(() => {
@@ -18,6 +20,7 @@ describe('GivingProviderRegistryService', () => {
       flutterwave,
       kora,
       stripe,
+      monnify,
     );
   });
 
@@ -26,6 +29,7 @@ describe('GivingProviderRegistryService', () => {
     ['flutterwave', () => flutterwave],
     ['kora', () => kora],
     ['stripe', () => stripe],
+    ['monnify', () => monnify],
   ])('resolves "%s" to the injected instance', (id, getExpected) => {
     expect(registry.get(id)).toBe(getExpected());
   });

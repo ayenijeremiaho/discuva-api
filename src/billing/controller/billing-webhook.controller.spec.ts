@@ -47,6 +47,21 @@ describe('BillingWebhookController', () => {
     );
   });
 
+  it('dispatches to monnify when monnify-signature is present', async () => {
+    await controller.handleWebhook(
+      req(),
+      undefined,
+      undefined,
+      undefined,
+      'monnify-sig',
+    );
+    expect(mockCheckoutService.handleWebhookEvent).toHaveBeenCalledWith(
+      'monnify',
+      expect.any(Buffer),
+      'monnify-sig',
+    );
+  });
+
   it('does nothing when no signature header is present', async () => {
     await controller.handleWebhook(req(), undefined, undefined, undefined);
     expect(mockCheckoutService.handleWebhookEvent).not.toHaveBeenCalled();

@@ -5,12 +5,22 @@ import { Repository } from 'typeorm';
 import { PaystackPaymentProvider } from '../provider/paystack-payment.provider';
 import { FlutterwavePaymentProvider } from '../provider/flutterwave-payment.provider';
 import { KoraPaymentProvider } from '../provider/kora-payment.provider';
+import { MonnifyPaymentProvider } from '../provider/monnify-payment.provider';
 import {
   FLUTTERWAVE_PROVIDER_NAME,
   IPaymentProvider,
   KORA_PROVIDER_NAME,
+  MONNIFY_PROVIDER_NAME,
   PAYSTACK_PROVIDER_NAME,
 } from '../interface/payment-provider.interface';
+
+// The env key each provider can't work without; a provider missing it isn't offered to churches.
+const REQUIRED_KEY: Record<string, string> = {
+  [PAYSTACK_PROVIDER_NAME]: 'PAYSTACK_SECRET_KEY',
+  [FLUTTERWAVE_PROVIDER_NAME]: 'FLUTTERWAVE_SECRET_KEY',
+  [KORA_PROVIDER_NAME]: 'KORA_SECRET_KEY',
+  [MONNIFY_PROVIDER_NAME]: 'MONNIFY_API_KEY',
+};
 import { PlatformPaymentProvider } from '../entity/payment-provider.entity';
 
 // Unlike SMS/email (a single platform-default concrete class chosen once at
@@ -32,11 +42,13 @@ export class PaymentProviderRegistryService {
     paystackPaymentProvider: PaystackPaymentProvider,
     flutterwavePaymentProvider: FlutterwavePaymentProvider,
     koraPaymentProvider: KoraPaymentProvider,
+    monnifyPaymentProvider: MonnifyPaymentProvider,
   ) {
     this.providers = new Map<string, IPaymentProvider>([
       [PAYSTACK_PROVIDER_NAME, paystackPaymentProvider],
       [FLUTTERWAVE_PROVIDER_NAME, flutterwavePaymentProvider],
       [KORA_PROVIDER_NAME, koraPaymentProvider],
+      [MONNIFY_PROVIDER_NAME, monnifyPaymentProvider],
     ]);
     this.defaultProviderName =
       this.configService.get<string>('DEFAULT_PAYMENT_PROVIDER') ??
@@ -64,6 +76,19 @@ export class PaymentProviderRegistryService {
       );
     }
     return provider;
+  }
+
+  // What a church can pick at checkout: switched on by the platform, registered here, and configured.
+  async listAvailable(): Promise<{ id: string; name: string }[]> {
+    const rows = await this.providerRepo.find({ order: { name: 'ASC' } });
+    return rows
+      .filter(
+        (row) =>
+          row.isActive &&
+          this.providers.has(row.id) &&
+          !!this.configService.get<string>(REQUIRED_KEY[row.id] ?? ''),
+      )
+      .map(({ id, name }) => ({ id, name }));
   }
 
   // Same "deactivation blocks new usage, not what's already in flight"

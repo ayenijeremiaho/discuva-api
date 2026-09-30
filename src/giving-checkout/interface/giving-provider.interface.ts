@@ -70,3 +70,4 @@ export const PAYSTACK_GIVING_PROVIDER_NAME = 'paystack';
 export const FLUTTERWAVE_GIVING_PROVIDER_NAME = 'flutterwave';
 export const KORA_GIVING_PROVIDER_NAME = 'kora';
 export const STRIPE_GIVING_PROVIDER_NAME = 'stripe';
+export const MONNIFY_GIVING_PROVIDER_NAME = 'monnify';

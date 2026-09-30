@@ -3851,6 +3851,7 @@ tenant-facing catalog and nothing per-tenant to cache-invalidate.
 | Method | Path                              | Permission     | Description |
 |--------|-----------------------------------|----------------|--------------|
 | GET    | `/billing/summary`                | BILLING_READ   | `{ planId, planName, subscriptionStatus, currentPeriodEnd, cancelAtPeriodEnd, sponsoredByParent }` |
+| GET    | `/billing/providers`              | BILLING_READ   | Payment providers a church can pick at plan checkout: `[{ id, name }]` — active, registered and configured only |
 | GET    | `/billing/plans`                  | BILLING_READ   | Full plan catalog (`[{ id, name, tierKey, priceCents, currency, features }]`), ordered by price ascending — every currency variant of every tier as its own row; the frontend groups by `tierKey` itself. The only tenant-accessible plan list; `GET /platform/plans` is platform-admin-only |
 | GET    | `/billing/public/plans`           | None — `@Public()` (bypasses the global `JwtAuthGuard`) and `TenantMiddleware`-excluded | Tier-grouped catalog for discuva-web (no tenant/admin context at all): `[{ tierKey, name, features, featureLimits, variants: [{ planId, currency, priceCents, billingInterval }] }]`, variants and tiers sorted by price ascending |
 | POST   | `/billing/checkout/subscribe`     | BILLING_WRITE  | Body `{ planId, provider?, successUrl, cancelUrl }` — returns `{ checkoutUrl }` to redirect the admin to; `400` if the named (or default) provider is deactivated — see "Payment Providers: deactivation has real consequences" above |
@@ -3861,8 +3862,24 @@ tenant-facing catalog and nothing per-tenant to cache-invalidate.
 | GET    | `/platform/payment-providers`     | Platform admin (`BILLING_READ`) | `[{ id, name, isActive }]`, ordered by name |
 | PATCH  | `/platform/payment-providers/:id` | Platform admin (`BILLING_WRITE`) | `{ isActive }` — activate/deactivate. See "Payment Providers: deactivation has real consequences" above. |
 
+**Monnify (Moniepoint) for platform billing (added 2026-09-30):** `MonnifyPaymentProvider`, charging Discuva's own
+Monnify account (`MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `MONNIFY_CONTRACT_CODE`; `MK_TEST_` keys use Monnify's
+sandbox). Shares `MonnifyApi` (`src/utility/monnify/monnify-api.ts` — sign-in token cache, init-transaction,
+signature check) with the giving provider. Same limits as Korapay: no recurring-plan product, so a subscription is one
+charge for the plan's price and renews through the normal lapse/checkout flow; `cancelSubscription` is a no-op;
+`refund` throws (refund in the Monnify dashboard). Webhooks arrive on the shared `POST /v1/webhooks/billing` route,
+dispatched by the `monnify-signature` header. Only a PAID `SUCCESSFUL_TRANSACTION` activates a plan; PARTIALLY_PAID /
+OVERPAID are logged and left pending for the platform team. Seeded **inactive** (root migration
+`AddMonnifyPlatformPaymentProvider`) — set the keys, then switch it on in the platform portal.
+
+**Which providers churches see:** `GET /billing/providers` (`BILLING_READ`) returns `[{ id, name }]` for providers
+that are active in `payment_providers`, registered, and have their key set (`PAYSTACK_SECRET_KEY`,
+`FLUTTERWAVE_SECRET_KEY`, `KORA_SECRET_KEY`, `MONNIFY_API_KEY`). The church admin's billing page offers
+Paystack/Flutterwave/Monnify from that list (Korapay is still not offered there); if the endpoint is missing it falls
+back to Paystack and Flutterwave.
+
 **Env vars:** `PAYSTACK_SECRET_KEY`, `PAYSTACK_BASE_URL`, `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_SECRET_HASH`,
-`FLUTTERWAVE_BASE_URL`, `DEFAULT_PAYMENT_PROVIDER`, `SUBSCRIPTION_PERIOD_DAYS` (default
+`FLUTTERWAVE_BASE_URL`, `MONNIFY_API_KEY`, `MONNIFY_SECRET_KEY`, `MONNIFY_CONTRACT_CODE`, `DEFAULT_PAYMENT_PROVIDER`, `SUBSCRIPTION_PERIOD_DAYS` (default
 `30`, monthly-plan renewal period), `ANNUAL_SUBSCRIPTION_PERIOD_DAYS` (default `365`, annual-plan renewal
 period — both read by `CheckoutService.applyChargeSucceeded()`, keyed by the charged plan's `billingInterval`),
 `GRACE_PERIOD_DAYS` (default `7`, `SubscriptionLapseScheduler`'s
@@ -6844,7 +6861,7 @@ interface IGivingProvider {
 ```
 
 `GivingProviderRegistryService` (same shape as `PaymentProviderRegistryService`/`SmsProviderRegistryService`) holds
-all four vendors live simultaneously; `GivingCheckoutService` resolves which one to use per call from the tenant's
+all five vendors live simultaneously; `GivingCheckoutService` resolves which one to use per call from the tenant's
 active `TenantGivingProviderConfig.providerId`. Credentials are always passed as a call parameter, never injected
 from `ConfigService` — there is no platform merchant account behind any of these.
 
@@ -6995,9 +7012,25 @@ platform-support surfaces —
 an active `TenantGivingProviderConfig`, no `channel` filter needed unlike SMS/email since giving-checkout has only
 the one implicit channel) — same shape as the existing `smsAdoption`/`emailAdoption`.
 
-**Env vars:** none — pure BYOK, no platform-default credentials for any of the four vendors, so nothing is
+**Env vars:** none — pure BYOK, no platform-default credentials for any of the five vendors, so nothing is
 env-driven here at all (contrast SMS's `TERMII_BASE_URL`, which stays env-driven only because it's infrastructure,
-not a secret — none of these four vendors have an equivalent fixed-but-non-secret host worth externalizing).
+not a secret — none of these five vendors have an equivalent fixed-but-non-secret host worth externalizing).
+
+**Monnify (Moniepoint) — `monnify` (added 2026-09-30, root migration `AddMonnifyGivingProvider`):**
+`MonnifyGivingProvider`. Credentials `{ apiKey, secretKey, contractCode }` (Monnify dashboard → Developer → API Keys &
+Contracts). Sandbox vs live is chosen by the key itself — `MK_TEST_` keys use `https://sandbox.monnify.com`, anything
+else `https://api.monnify.com`. Starting a checkout signs in first (`POST /api/v1/auth/login`, Basic `apiKey:secretKey`)
+for a bearer token, cached in memory per key pair until a minute before it expires, then
+`POST /api/v1/merchant/transactions/init-transaction` (amount in naira, `paymentReference` = our `giving_…` id,
+card/transfer/USSD) and redirects to `checkoutUrl`. Webhooks go to the same `v1/webhooks/giving/:tenantId/monnify`
+URL the admin page shows; the `monnify-signature` header is HMAC-SHA512 of the raw body keyed by the secret key.
+`SUCCESSFUL_TRANSACTION` with `paymentStatus` PAID completes the gift; PARTIALLY_PAID/OVERPAID are passed through
+with the amount actually paid so the charge check holds them as `needs_review`; FAILED/EXPIRED/CANCELLED/ABANDONED
+fail a pending checkout; everything else (refunds, settlements) is ignored. Reported details are stored like
+Paystack's: `transactionReference`, channel (card / bank_transfer / ussd), `paidOn`, currency, fees
+(`amountPaid − settlementAmount`) and card type/last 4. A PAID status is treated as Monnify's confirmation of the full
+amount (so passing fees to the payer doesn't trip the check). Statements show "Monnify · Card" etc. Like Kora/Stripe,
+written against Monnify's documented API and not yet exercised against live sandbox credentials.
 
 **Not built yet:** Kora/Stripe integrations are written against each vendor's documented API shape but have not
 been exercised against live sandbox credentials (same "documented reasoning, not guessed silently" caveat already
@@ -9807,7 +9840,10 @@ All optional — a provider whose secret key isn't set simply can't be selected 
 | `FLUTTERWAVE_SECRET_KEY`      | — *(optional)*                     | Flutterwave secret key, used for API calls |
 | `FLUTTERWAVE_SECRET_HASH`     | — *(optional)*                     | Shared secret configured in the Flutterwave dashboard's webhook settings — compared verbatim against the `verif-hash` header, not an HMAC key |
 | `FLUTTERWAVE_BASE_URL`        | `https://api.flutterwave.com/v3`   | Flutterwave API base URL |
-| `DEFAULT_PAYMENT_PROVIDER`    | `paystack`                         | Which provider a checkout call uses when it doesn't specify `?provider=` explicitly |
+| `MONNIFY_API_KEY`             | — *(optional)*                     | Monnify API key for platform billing; `MK_TEST_…` keys use the sandbox |
+| `MONNIFY_SECRET_KEY`          | — *(optional)*                     | Monnify secret key — sign-in and webhook signature (`monnify-signature`, HMAC-SHA512) |
+| `MONNIFY_CONTRACT_CODE`       | — *(optional)*                     | Monnify contract code the platform's charges settle under |
+| `DEFAULT_PAYMENT_PROVIDER`    | `paystack`                         | Which provider a checkout call uses when it doesn't specify `?provider=` explicitly (`paystack`, `flutterwave`, `kora`, `monnify`) |
 | `SUBSCRIPTION_PERIOD_DAYS`    | `30`                                | Renewal period `CheckoutService.applyChargeSucceeded()` extends `currentPeriodEnd` by per successful charge, for a `billingInterval: 'monthly'` plan |
 | `ANNUAL_SUBSCRIPTION_PERIOD_DAYS` | `365`                            | Same, for a `billingInterval: 'annual'` plan |
 | `GRACE_PERIOD_DAYS`           | `7`                                 | How long `SubscriptionLapseScheduler` keeps a `PAST_DUE` subscription's features before downgrading to Free |

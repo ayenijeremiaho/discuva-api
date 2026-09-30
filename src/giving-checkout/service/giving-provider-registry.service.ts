@@ -4,6 +4,7 @@ import { PaystackGivingProvider } from '../provider/paystack-giving.provider';
 import { FlutterwaveGivingProvider } from '../provider/flutterwave-giving.provider';
 import { KoraGivingProvider } from '../provider/kora-giving.provider';
 import { StripeGivingProvider } from '../provider/stripe-giving.provider';
+import { MonnifyGivingProvider } from '../provider/monnify-giving.provider';
 
 // Same shape as PaymentProviderRegistryService/SmsProviderRegistryService —
 // every registered vendor is live simultaneously, GivingCheckoutService
@@ -19,12 +20,14 @@ export class GivingProviderRegistryService {
     flutterwaveGivingProvider: FlutterwaveGivingProvider,
     koraGivingProvider: KoraGivingProvider,
     stripeGivingProvider: StripeGivingProvider,
+    monnifyGivingProvider: MonnifyGivingProvider,
   ) {
     this.providers = new Map<string, IGivingProvider>([
       ['paystack', paystackGivingProvider],
       ['flutterwave', flutterwaveGivingProvider],
       ['kora', koraGivingProvider],
       ['stripe', stripeGivingProvider],
+      ['monnify', monnifyGivingProvider],
     ]);
   }
 

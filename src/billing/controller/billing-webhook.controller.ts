@@ -13,6 +13,7 @@ import { CheckoutService } from '../service/checkout.service';
 import {
   FLUTTERWAVE_PROVIDER_NAME,
   KORA_PROVIDER_NAME,
+  MONNIFY_PROVIDER_NAME,
   PAYSTACK_PROVIDER_NAME,
 } from '../interface/payment-provider.interface';
 
@@ -22,7 +23,8 @@ import {
 // YoutubeWebhookController). A single route handles all three providers,
 // distinguished by which signature header is present — Paystack signs with
 // x-paystack-signature (HMAC-SHA512), Flutterwave with verif-hash (shared
-// secret), Kora with x-korapay-signature (HMAC-SHA256).
+// secret), Kora with x-korapay-signature (HMAC-SHA256), Monnify with
+// monnify-signature (HMAC-SHA512).
 @Controller('webhooks/billing')
 export class BillingWebhookController {
   constructor(private readonly checkoutService: CheckoutService) {}
@@ -35,6 +37,7 @@ export class BillingWebhookController {
     @Headers('x-paystack-signature') paystackSignature?: string,
     @Headers('verif-hash') flutterwaveSignature?: string,
     @Headers('x-korapay-signature') koraSignature?: string,
+    @Headers('monnify-signature') monnifySignature?: string,
   ): Promise<void> {
     if (paystackSignature) {
       await this.checkoutService.handleWebhookEvent(
@@ -57,6 +60,14 @@ export class BillingWebhookController {
         KORA_PROVIDER_NAME,
         req.rawBody!,
         koraSignature,
+      );
+      return;
+    }
+    if (monnifySignature) {
+      await this.checkoutService.handleWebhookEvent(
+        MONNIFY_PROVIDER_NAME,
+        req.rawBody!,
+        monnifySignature,
       );
       return;
     }

@@ -33284,6 +33284,44 @@
       ]
     },
     {
+      "name": "Billing (Church Admin)",
+      "description": "Church-admin plan billing. Admin JWT with billing:read/billing:write.",
+      "item": [
+        {
+          "name": "List Available Payment Providers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/billing/providers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "billing",
+                "providers"
+              ]
+            },
+            "description": "BILLING_READ. Payment providers the church can pick at plan checkout: only those the platform has switched on, that are registered, and whose keys are configured."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"monnify\",\n      \"name\": \"Monnify (Moniepoint)\"\n    },\n    {\n      \"id\": \"paystack\",\n      \"name\": \"Paystack\"\n    }\n  ]\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Billing (Public)",
       "item": [
         {
@@ -34471,7 +34509,7 @@
                 "payment-providers"
               ]
             },
-            "description": "BILLING_READ. Lists the platform-wide subscription-billing provider catalog (paystack/flutterwave/kora) used by POST /billing/checkout/subscribe \u2014 distinct from the tenant-facing, fully-BYOK giving/tithe providers (see \"Platform: List Giving Providers\")."
+            "description": "BILLING_READ. Lists the platform-wide subscription-billing provider catalog (paystack/flutterwave/kora/monnify \u2014 monnify is seeded inactive) used by POST /billing/checkout/subscribe \u2014 distinct from the tenant-facing, fully-BYOK giving/tithe providers (see \"Platform: List Giving Providers\")."
           },
           "response": []
         },

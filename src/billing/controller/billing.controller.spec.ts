@@ -6,6 +6,7 @@ import { AdminGuard } from '../../admin/guard/admin.guard';
 const mockCheckoutService = {
   getBillingSummary: jest.fn(),
   listPlans: jest.fn(),
+  listPaymentProviders: jest.fn(),
   initiateSubscriptionCheckout: jest.fn(),
   cancelSubscription: jest.fn(),
 };
@@ -30,6 +31,11 @@ describe('BillingController', () => {
   it('getSummary delegates to CheckoutService', () => {
     controller.getSummary();
     expect(mockCheckoutService.getBillingSummary).toHaveBeenCalled();
+  });
+
+  it('listProviders delegates to CheckoutService', () => {
+    controller.listProviders();
+    expect(mockCheckoutService.listPaymentProviders).toHaveBeenCalled();
   });
 
   it('listPlans delegates to CheckoutService', () => {

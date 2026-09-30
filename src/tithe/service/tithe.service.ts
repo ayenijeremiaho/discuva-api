@@ -85,6 +85,7 @@ const GIVING_PROVIDER_LABELS: Record<string, string> = {
   flutterwave: 'Flutterwave',
   kora: 'Korapay',
   stripe: 'Stripe',
+  monnify: 'Monnify',
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -96,6 +97,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   mobile_money: 'Mobile Money',
   eft: 'EFT',
   apple_pay: 'Apple Pay',
+  phone_number: 'Phone Number',
 };
 
 type CheckoutSummary = Pick<

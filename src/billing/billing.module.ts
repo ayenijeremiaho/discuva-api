@@ -11,6 +11,7 @@ import { PlanGuard } from './guard/plan.guard';
 import { PaystackPaymentProvider } from './provider/paystack-payment.provider';
 import { FlutterwavePaymentProvider } from './provider/flutterwave-payment.provider';
 import { KoraPaymentProvider } from './provider/kora-payment.provider';
+import { MonnifyPaymentProvider } from './provider/monnify-payment.provider';
 import { PaymentProviderRegistryService } from './service/payment-provider-registry.service';
 import { CheckoutService } from './service/checkout.service';
 import { FeatureUsageService } from './service/feature-usage.service';
@@ -50,6 +51,7 @@ import { PlatformAdminModule } from '../platform-admin/platform-admin.module';
     PaystackPaymentProvider,
     FlutterwavePaymentProvider,
     KoraPaymentProvider,
+    MonnifyPaymentProvider,
     PaymentProviderRegistryService,
     CheckoutService,
     FeatureUsageService,

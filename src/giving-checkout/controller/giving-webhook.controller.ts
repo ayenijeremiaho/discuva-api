@@ -37,9 +37,10 @@ export class GivingWebhookController {
     @Headers('verif-hash') flutterwaveSig?: string,
     @Headers('x-korapay-signature') koraSig?: string,
     @Headers('stripe-signature') stripeSig?: string,
+    @Headers('monnify-signature') monnifySig?: string,
   ): Promise<void> {
     const signature =
-      paystackSig ?? flutterwaveSig ?? koraSig ?? stripeSig ?? '';
+      paystackSig ?? flutterwaveSig ?? koraSig ?? stripeSig ?? monnifySig ?? '';
     await this.checkoutService.handleWebhook(
       tenantId,
       provider,

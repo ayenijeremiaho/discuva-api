@@ -32,6 +32,13 @@ export class BillingController {
     return this.checkoutService.listPlans();
   }
 
+  // Payment options for the plan checkout — only providers the platform has switched on and configured.
+  @RequiresPermission(AdminPermission.BILLING_READ)
+  @Get('providers')
+  listProviders() {
+    return this.checkoutService.listPaymentProviders();
+  }
+
   @RequiresPermission(AdminPermission.BILLING_WRITE)
   @Post('checkout/subscribe')
   initiateSubscriptionCheckout(

@@ -240,8 +240,12 @@ export const envValidationSchema = Joi.object({
   KORA_BASE_URL: Joi.string()
     .uri()
     .default('https://api.korapay.com/merchant/api/v1'),
+  // Monnify: sandbox keys start MK_TEST_ and use Monnify's sandbox automatically.
+  MONNIFY_API_KEY: Joi.string().allow('').optional(),
+  MONNIFY_SECRET_KEY: Joi.string().allow('').optional(),
+  MONNIFY_CONTRACT_CODE: Joi.string().allow('').optional(),
   DEFAULT_PAYMENT_PROVIDER: Joi.string()
-    .valid('paystack', 'flutterwave', 'kora')
+    .valid('paystack', 'flutterwave', 'kora', 'monnify')
     .default('paystack'),
   // Billing-cycle policy constants — see CheckoutService/SubscriptionLapseScheduler.
   // Grace period moved to the platform-admin-editable PlatformSettingsService

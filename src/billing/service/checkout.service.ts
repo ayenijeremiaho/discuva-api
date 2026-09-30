@@ -109,6 +109,10 @@ export class CheckoutService {
     return this.planRepo.find({ order: { priceCents: 'ASC' } });
   }
 
+  listPaymentProviders(): Promise<{ id: string; name: string }[]> {
+    return this.paymentProviderRegistry.listAvailable();
+  }
+
   // Unauthenticated reference data for discuva-web (a separate marketing
   // site with no tenant/admin context at all) — groups currency variants of
   // the same conceptual tier together so the caller doesn't have to

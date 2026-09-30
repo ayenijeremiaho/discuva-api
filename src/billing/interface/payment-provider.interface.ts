@@ -112,3 +112,4 @@ export interface IPaymentProvider {
 export const PAYSTACK_PROVIDER_NAME = 'paystack';
 export const FLUTTERWAVE_PROVIDER_NAME = 'flutterwave';
 export const KORA_PROVIDER_NAME = 'kora';
+export const MONNIFY_PROVIDER_NAME = 'monnify';

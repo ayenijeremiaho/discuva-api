@@ -12,6 +12,7 @@ import { PaystackGivingProvider } from './provider/paystack-giving.provider';
 import { FlutterwaveGivingProvider } from './provider/flutterwave-giving.provider';
 import { KoraGivingProvider } from './provider/kora-giving.provider';
 import { StripeGivingProvider } from './provider/stripe-giving.provider';
+import { MonnifyGivingProvider } from './provider/monnify-giving.provider';
 import { GivingProviderRegistryService } from './service/giving-provider-registry.service';
 import { TenantGivingProviderService } from './service/tenant-giving-provider.service';
 import { GivingCheckoutService } from './service/giving-checkout.service';
@@ -53,6 +54,7 @@ import { FinanceModule } from '../finance/finance.module';
     FlutterwaveGivingProvider,
     KoraGivingProvider,
     StripeGivingProvider,
+    MonnifyGivingProvider,
     GivingProviderRegistryService,
     TenantGivingProviderService,
     GivingCheckoutService,
