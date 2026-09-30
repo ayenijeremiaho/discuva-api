@@ -12,6 +12,17 @@ import { PledgeContribution } from '../entity/pledge-contribution.entity';
 import { PledgeContributionStatus, PledgeStatus } from '../enum/finance.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { ExcelService } from '../../utility/service/excel.service';
+import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
+import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
+
+const mockExcelService = {
+  buildWorkbook: jest.fn().mockResolvedValue(Buffer.from('xlsx')),
+};
+const mockCurrency = {
+  resolveCurrencyCode: jest.fn().mockResolvedValue('NGN'),
+};
+const mockCheckoutRepo = { find: jest.fn().mockResolvedValue([]) };
 
 const mockPledgeRepo = {
   create: jest.fn(),
@@ -57,6 +68,12 @@ describe('PledgeService', () => {
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: UtilityService, useValue: mockUtilityService },
+        { provide: ExcelService, useValue: mockExcelService },
+        { provide: TenantCurrencyService, useValue: mockCurrency },
+        {
+          provide: getRepositoryToken(GivingCheckoutSession),
+          useValue: mockCheckoutRepo,
+        },
       ],
     }).compile();
     service = module.get<PledgeService>(PledgeService);
@@ -520,6 +537,82 @@ describe('PledgeService', () => {
         undefined,
         expect.any(String),
       );
+    });
+  });
+
+  describe('exportContributions', () => {
+    const qb = () => ({
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([
+        {
+          amount: '15000',
+          paymentDate: '2026-09-12',
+          reference: 'giving_abc',
+          status: PledgeContributionStatus.CONFIRMED,
+          reviewedAt: null,
+          reviewedBy: null,
+          financeNote: null,
+          pledge: {
+            member: { firstname: 'Ada', lastname: 'Obi', email: 'ada@x.org' },
+            guestName: null,
+            campaign: { name: 'Building Fund' },
+          },
+        },
+      ]),
+    });
+
+    it('filters by payment date, campaign and status and exports one row per payment', async () => {
+      const builder = qb();
+      mockContributionRepo.createQueryBuilder.mockReturnValue(builder);
+      mockCheckoutRepo.find.mockResolvedValue([
+        { id: 'giving_abc', provider: 'monnify', paymentChannel: 'card' },
+      ]);
+
+      await service.exportContributions({
+        fromDate: '2026-09-01',
+        toDate: '2026-09-30',
+        campaignId: 'camp-1',
+        status: PledgeContributionStatus.CONFIRMED,
+      });
+
+      expect(builder.andWhere).toHaveBeenCalledWith(
+        'pc.paymentDate >= :fromDate',
+        { fromDate: '2026-09-01' },
+      );
+      expect(builder.andWhere).toHaveBeenCalledWith(
+        'pc.paymentDate <= :toDate',
+        { toDate: '2026-09-30' },
+      );
+      expect(builder.andWhere).toHaveBeenCalledWith(
+        'campaign.id = :campaignId',
+        { campaignId: 'camp-1' },
+      );
+      expect(builder.andWhere).toHaveBeenCalledWith('pc.status = :status', {
+        status: PledgeContributionStatus.CONFIRMED,
+      });
+      const [title, columns, rows] =
+        mockExcelService.buildWorkbook.mock.calls.at(-1);
+      expect(title).toBe('Pledge Payments');
+      expect(
+        columns.find((c: { key: string }) => c.key === 'amount').header,
+      ).toBe('Amount (NGN)');
+      expect(rows[0]).toMatchObject({
+        member: 'Ada Obi',
+        campaign: 'Building Fund',
+        amount: 15000,
+        paidVia: 'Monnify · Card',
+        status: 'CONFIRMED',
+      });
+    });
+
+    it('exports everything when no filters are given', async () => {
+      const builder = qb();
+      mockContributionRepo.createQueryBuilder.mockReturnValue(builder);
+      await service.exportContributions({});
+      expect(builder.andWhere).not.toHaveBeenCalled();
     });
   });
 });

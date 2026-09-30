@@ -17804,7 +17804,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/tithes/me/pledge-statement/send",
+              "raw": "{{baseUrl}}/v1/tithes/me/pledge-statement/send?fromMonth=2026-01&toMonth=2026-06",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -17814,9 +17814,27 @@
                 "me",
                 "pledge-statement",
                 "send"
+              ],
+              "query": [
+                {
+                  "key": "fromMonth",
+                  "value": "2026-01",
+                  "description": "Optional YYYY-MM (payment month)"
+                },
+                {
+                  "key": "toMonth",
+                  "value": "2026-06",
+                  "description": "Optional YYYY-MM"
+                },
+                {
+                  "key": "campaignId",
+                  "value": "",
+                  "description": "Optional campaign UUID",
+                  "disabled": true
+                }
               ]
             },
-            "description": "JwtAuthGuard. Emails a PDF containing only all-time CONFIRMED pledge contributions for the caller. Does not send an email when there are no confirmed contributions."
+            "description": "JwtAuthGuard. Emails a PDF of the caller's CONFIRMED pledge contributions. Optional fromMonth/toMonth (YYYY-MM) and campaignId narrow it; with none it covers everything to date. Sends no email when nothing matches."
           },
           "response": [
             {
@@ -28291,6 +28309,52 @@
           ]
         },
         {
+          "name": "Export pledge payments (Excel)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/finance/pledges/contributions/download?fromDate=2026-01-01&toDate=2026-06-30&status=CONFIRMED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "finance",
+                "pledges",
+                "contributions",
+                "download"
+              ],
+              "query": [
+                {
+                  "key": "fromDate",
+                  "value": "2026-01-01",
+                  "description": "Optional (payment date)"
+                },
+                {
+                  "key": "toDate",
+                  "value": "2026-06-30",
+                  "description": "Optional"
+                },
+                {
+                  "key": "status",
+                  "value": "CONFIRMED",
+                  "description": "Optional: PENDING, CONFIRMED, DECLINED"
+                },
+                {
+                  "key": "campaignId",
+                  "value": "",
+                  "description": "Optional campaign UUID",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "FINANCE_READ. Pledge payments as pledge-payments.xlsx: Member, Email, Campaign, Amount, Payment Date, Paid Via, Reference, Status, Reviewed By, Reviewed At, Finance Note. All filters optional."
+          },
+          "response": []
+        },
+        {
           "name": "List pledge contributions",
           "request": {
             "method": "GET",
@@ -29480,7 +29544,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/admin/finance/reports/pledge-summary",
+              "raw": "{{baseUrl}}/v1/admin/finance/reports/pledge-summary?campaignId={{campaignId}}&fromDate=2026-01-01&toDate=2026-06-30",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -29490,16 +29554,32 @@
                 "finance",
                 "reports",
                 "pledge-summary"
+              ],
+              "query": [
+                {
+                  "key": "campaignId",
+                  "value": "{{campaignId}}"
+                },
+                {
+                  "key": "fromDate",
+                  "value": "2026-01-01",
+                  "description": "Optional; adds paidInPeriod"
+                },
+                {
+                  "key": "toDate",
+                  "value": "2026-06-30",
+                  "description": "Optional"
+                }
               ]
             },
-            "description": "FINANCE_REPORT. Query: campaignId (required)."
+            "description": "FINANCE_REPORT. Query: campaignId (required), fromDate/toDate (optional). Flat rows per pledge: member, status, pledged, paid (confirmed, all-time), paidInPeriod (only with dates) and outstanding, plus campaign totals."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"campaign\": {\n    \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"name\": \"New Sanctuary Building Fund\",\n    \"fund\": {\n      \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n      \"name\": \"General Fund\",\n      \"type\": \"UNRESTRICTED\",\n      \"description\": \"Main operating fund for church activities\",\n      \"isActive\": true,\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"targetAmount\": 50000000.0,\n    \"startDate\": \"2026-01-01\",\n    \"endDate\": \"2026-12-31\",\n    \"description\": \"Campaign to raise funds for the new church building\",\n    \"isActive\": true,\n    \"createdBy\": {\n      \"id\": \"adm1\",\n      \"email\": \"admin@church.org\"\n    },\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"totalPledged\": 15000000.0,\n  \"totalPledgers\": 45,\n  \"fulfilledAmount\": 3750000.0,\n  \"fulfilledPercent\": 25.0,\n  \"pledges\": [\n    {\n      \"id\": \"plg1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"member\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\",\n        \"email\": \"john.doe@example.com\",\n        \"phoneNumber\": \"+2348012345678\",\n        \"role\": \"WORKER\",\n        \"status\": \"ACTIVE\",\n        \"gender\": \"MALE\",\n        \"birthDay\": 15,\n        \"birthMonth\": 3,\n        \"birthYear\": 1990,\n        \"maritalStatus\": \"MARRIED\",\n        \"changedPassword\": true,\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"campaign\": {\n        \"id\": \"cmp1a2b3-c4d5-e6f7-8901-abcdef123456\",\n        \"name\": \"New Sanctuary Building Fund\",\n        \"fund\": {\n          \"id\": \"f1a2b3c4-d5e6-7890-abcd-ef1234567890\",\n          \"name\": \"General Fund\",\n          \"type\": \"UNRESTRICTED\",\n          \"description\": \"Main operating fund for church activities\",\n          \"isActive\": true,\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"targetAmount\": 50000000.0,\n        \"startDate\": \"2026-01-01\",\n        \"endDate\": \"2026-12-31\",\n        \"description\": \"Campaign to raise funds for the new church building\",\n        \"isActive\": true,\n        \"createdBy\": {\n          \"id\": \"adm1\",\n          \"email\": \"admin@church.org\"\n        },\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"totalAmount\": 500000.0,\n      \"frequency\": \"MONTHLY\",\n      \"startDate\": \"2026-02-01\",\n      \"status\": \"ACTIVE\",\n      \"notes\": \"Committed to monthly payment of 41,667\",\n      \"createdAt\": \"2026-02-01T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    }\n  ]\n}"
+              "body": "{\n  \"campaign\": \"New Sanctuary Building Fund\",\n  \"fund\": \"Building Fund\",\n  \"period\": \"2026-01-01 to 2026-06-30\",\n  \"pledgeCount\": \"2\",\n  \"totalPledged\": 150000,\n  \"totalPaid\": 100000,\n  \"paidInPeriod\": 15000,\n  \"outstanding\": 60000,\n  \"pledges\": [\n    {\n      \"member\": \"John Doe\",\n      \"status\": \"ACTIVE\",\n      \"pledged\": 100000,\n      \"paid\": 40000,\n      \"paidInPeriod\": 15000,\n      \"outstanding\": 60000\n    },\n    {\n      \"member\": \"Visitor\",\n      \"status\": \"ACTIVE\",\n      \"pledged\": 50000,\n      \"paid\": 60000,\n      \"paidInPeriod\": 0,\n      \"outstanding\": 0\n    }\n  ]\n}"
             }
           ]
         },

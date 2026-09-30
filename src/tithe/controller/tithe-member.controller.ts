@@ -70,9 +70,29 @@ export class TitheMemberController {
     );
   }
 
+  // Optional YYYY-MM range and campaign; with none, every confirmed pledge payment is included.
   @Post('me/pledge-statement/send')
-  emailPledgeStatement(@Request() req: any) {
-    return this.titheService.emailPledgeContributionStatement(req.user);
+  emailPledgeStatement(
+    @Request() req: any,
+    @Query('fromMonth') fromMonth?: string,
+    @Query('toMonth') toMonth?: string,
+    @Query('campaignId', new ParseUUIDPipe({ optional: true }))
+    campaignId?: string,
+  ) {
+    for (const month of [fromMonth, toMonth]) {
+      if (month && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+        throw new BadRequestException('Months must be in YYYY-MM format');
+      }
+    }
+    if (fromMonth && toMonth && fromMonth > toMonth) {
+      throw new BadRequestException('fromMonth must not be after toMonth');
+    }
+    return this.titheService.emailPledgeContributionStatement(
+      req.user,
+      fromMonth,
+      toMonth,
+      campaignId,
+    );
   }
 
   @Post('proof')

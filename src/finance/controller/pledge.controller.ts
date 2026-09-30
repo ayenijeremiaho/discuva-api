@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '../../admin/guard/admin.guard';
@@ -27,8 +28,10 @@ import {
 } from '../dto/pledge.dto';
 import {
   DeclinePledgeContributionDto,
+  PledgeContributionExportDto,
   PledgeContributionQueryDto,
 } from '../dto/pledge-contribution.dto';
+import { Response } from 'express';
 
 @UseGuards(AdminGuard, PlanGuard)
 @RequiresPlan(PlanFeature.FINANCE)
@@ -87,6 +90,22 @@ export class PledgeController {
     @CurrentAdmin() admin: Admin,
   ) {
     return this.pledgeService.updatePledgeStatus(id, dto, admin);
+  }
+
+  @RequiresPermission(AdminPermission.FINANCE_READ)
+  @Get('contributions/download')
+  async downloadContributions(
+    @Query() query: PledgeContributionExportDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const buffer = await this.pledgeService.exportContributions(query);
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="pledge-payments.xlsx"',
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   @RequiresPermission(AdminPermission.FINANCE_READ)

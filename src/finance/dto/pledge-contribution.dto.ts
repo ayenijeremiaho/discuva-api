@@ -61,3 +61,22 @@ export class PledgeContributionQueryDto {
   @IsUUID()
   campaignId?: string;
 }
+
+// Filters for the pledge payments Excel export; every filter is optional.
+export class PledgeContributionExportDto {
+  @IsOptional()
+  @IsDateString()
+  fromDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  toDate?: string;
+
+  @IsOptional()
+  @IsUUID()
+  campaignId?: string;
+
+  @IsOptional()
+  @IsEnum(PledgeContributionStatus)
+  status?: PledgeContributionStatus;
+}

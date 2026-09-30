@@ -10,6 +10,7 @@ describe('TitheMemberController', () => {
   const service = {
     getMyProofs: jest.fn().mockResolvedValue({ data: [] }),
     getMyGivingSummary: jest.fn().mockResolvedValue({}),
+    emailPledgeContributionStatement: jest.fn().mockResolvedValue({}),
   };
   const controller = new TitheMemberController(service as any);
   const req = { user: { id: 'm1' } };
@@ -43,5 +44,21 @@ describe('TitheMemberController', () => {
     );
     controller.getMySummary(req, 2026);
     expect(service.getMyGivingSummary).toHaveBeenCalledWith(req.user, 2026);
+  });
+
+  it('passes the pledge statement range and campaign through, and validates months', () => {
+    controller.emailPledgeStatement(req, '2026-01', '2026-06', 'camp-1');
+    expect(service.emailPledgeContributionStatement).toHaveBeenCalledWith(
+      req.user,
+      '2026-01',
+      '2026-06',
+      'camp-1',
+    );
+    expect(() => controller.emailPledgeStatement(req, '2026-13')).toThrow(
+      BadRequestException,
+    );
+    expect(() =>
+      controller.emailPledgeStatement(req, '2026-06', '2026-01'),
+    ).toThrow(BadRequestException);
   });
 });

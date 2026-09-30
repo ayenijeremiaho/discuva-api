@@ -67,7 +67,11 @@ export class FinanceReportController {
   @RequiresPermission(AdminPermission.FINANCE_REPORT)
   @Get('pledge-summary')
   pledgeSummary(@Query() query: PledgeSummaryQueryDto) {
-    return this.reportService.pledgeSummary(query.campaignId);
+    return this.reportService.pledgeSummary(
+      query.campaignId,
+      query.fromDate,
+      query.toDate,
+    );
   }
 
   @RequiresPermission(AdminPermission.TITHE_READ)

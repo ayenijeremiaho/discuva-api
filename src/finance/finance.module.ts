@@ -61,6 +61,7 @@ import { PledgeReminderScheduler } from './scheduler/pledge-reminder.scheduler';
 import { GivingService } from './service/giving.service';
 import { FinanceMemberController } from './controller/finance-member.controller';
 import { UtilityModule } from '../utility/utility.module';
+import { GivingCheckoutSession } from '../giving-checkout/entity/giving-checkout-session.entity';
 import { AdminModule } from '../admin/admin.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
 
@@ -90,7 +91,8 @@ import { Tenant } from '../tenant/entity/tenant.entity';
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by the finance schedulers' forEachActiveTenant loops.
-    TypeOrmModule.forFeature([Tenant]),
+    // giving_checkout_sessions: which provider took an online pledge payment (export's Paid Via).
+    TypeOrmModule.forFeature([Tenant, GivingCheckoutSession]),
     BullModule.registerQueue({ name: RECONCILIATION_QUEUE }),
     UtilityModule,
     AdminModule,

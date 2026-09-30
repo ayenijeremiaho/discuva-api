@@ -2,7 +2,7 @@ import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-check
 import ExcelJS from 'exceljs';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { In } from 'typeorm';
+import { Between, In } from 'typeorm';
 import { getQueueToken } from '@nestjs/bull';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TitheService } from './tithe.service';
@@ -1402,6 +1402,69 @@ describe('TitheService', () => {
         'GIVING_RECEIPT',
       );
       expect(result.recordCount).toBe(1);
+    });
+
+    it('limits the pledge statement to a month range and campaign', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockContributionRepo.find.mockResolvedValue([
+        {
+          amount: '12500',
+          paymentDate: '2026-03-12',
+          reference: 'REF-1',
+          pledge: { campaign: { name: 'Building Fund' } },
+        },
+      ]);
+
+      await service.emailPledgeContributionStatement(
+        mockUser,
+        '2026-01',
+        '2026-06',
+        'camp-1',
+      );
+
+      expect(mockContributionRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            pledge: { member: { id: mockUser.id }, campaign: { id: 'camp-1' } },
+            status: PledgeContributionStatus.CONFIRMED,
+            paymentDate: Between('2026-01-01', '2026-06-30'),
+          },
+        }),
+      );
+      expect(mockPdfService.generateGivingStatement).toHaveBeenCalledWith(
+        mockMember,
+        expect.any(Array),
+        { from: '2026-01', to: '2026-06' },
+        'Pledge Contribution Statement',
+      );
+      expect(mockUtilityService.sendEmailWithAttachment).toHaveBeenCalledWith(
+        'john@test.com',
+        'Your Pledge Contribution Statement',
+        'tithe-statement',
+        expect.objectContaining({
+          period: 'January 2026 – June 2026 for Building Fund',
+          pledgeOnly: true,
+        }),
+        expect.any(Array),
+        'GIVING_RECEIPT',
+      );
+    });
+
+    it('says when nothing matches the chosen period', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockContributionRepo.find.mockResolvedValue([]);
+
+      await expect(
+        service.emailPledgeContributionStatement(
+          mockUser,
+          '2020-01',
+          '2020-02',
+        ),
+      ).resolves.toEqual({
+        message:
+          'You have no confirmed pledge contributions for the period or campaign you chose.',
+        recordCount: 0,
+      });
     });
 
     it('does not email a pledge statement when there are no confirmed contributions', async () => {

@@ -16,6 +16,7 @@ import {
   JournalEntryStatus,
   JournalLineType,
   PettyCashReplenishmentStatus,
+  PledgeContributionStatus,
   PledgeStatus,
 } from '../enum/finance.enum';
 
@@ -277,25 +278,74 @@ export class FinanceReportService {
     };
   }
 
-  async pledgeSummary(campaignId: string): Promise<object> {
+  // Flat rows for the admin report table: each pledge's confirmed payments, all-time and (if given) within the range.
+  async pledgeSummary(
+    campaignId: string,
+    fromDate?: string,
+    toDate?: string,
+  ): Promise<object> {
     const campaign = await this.campaignRepo.findOne({
       where: { id: campaignId },
-      relations: ['fund', 'createdBy'],
+      relations: ['fund'],
     });
     if (!campaign) throw new NotFoundException('Campaign not found.');
 
-    const pledges = await this.pledgeRepo.find({
-      where: { campaign: { id: campaignId } },
-      relations: ['member'],
+    const rows: {
+      status: string;
+      pledged: string;
+      paid: string;
+      paid_in_period: string;
+      member: string | null;
+      guest_name: string | null;
+    }[] = await this.pledgeRepo.query(
+      `SELECT p.status, p.total_amount AS pledged, p.guest_name,
+         NULLIF(TRIM(CONCAT(m.firstname, ' ', m.lastname)), '') AS member,
+         COALESCE(SUM(pc.amount) FILTER (WHERE pc.status = $2), 0) AS paid,
+         COALESCE(SUM(pc.amount) FILTER (
+           WHERE pc.status = $2
+             AND pc.payment_date >= COALESCE($3::date, '-infinity'::date)
+             AND pc.payment_date <= COALESCE($4::date, 'infinity'::date)
+         ), 0) AS paid_in_period
+       FROM finance_pledges p
+       LEFT JOIN members m ON m.id = p.member_id
+       LEFT JOIN finance_pledge_contributions pc ON pc.pledge_id = p.id
+       WHERE p.campaign_id = $1
+       GROUP BY p.id, m.id
+       ORDER BY member NULLS LAST, p.guest_name`,
+      [
+        campaignId,
+        PledgeContributionStatus.CONFIRMED,
+        fromDate ?? null,
+        toDate ?? null,
+      ],
+    );
+
+    const ranged = !!(fromDate || toDate);
+    const pledges = rows.map((r) => {
+      const pledged = Number(r.pledged);
+      const paid = Number(r.paid);
+      return {
+        member: r.member ?? r.guest_name ?? '—',
+        status: r.status,
+        pledged,
+        paid,
+        ...(ranged ? { paidInPeriod: Number(r.paid_in_period) } : {}),
+        outstanding: Math.max(0, pledged - paid),
+      };
     });
-    const totalPledged = pledges.reduce((s, p) => s + Number(p.totalAmount), 0);
+    const sum = (key: 'pledged' | 'paid' | 'outstanding' | 'paidInPeriod') =>
+      pledges.reduce((total, p) => total + Number(p[key] ?? 0), 0);
 
     return {
-      campaign,
+      campaign: campaign.name,
+      fund: campaign.fund?.name ?? '—',
+      ...(ranged ? { period: `${fromDate ?? '…'} to ${toDate ?? '…'}` } : {}),
+      pledgeCount: String(pledges.length),
+      totalPledged: sum('pledged'),
+      totalPaid: sum('paid'),
+      ...(ranged ? { paidInPeriod: sum('paidInPeriod') } : {}),
+      outstanding: sum('outstanding'),
       pledges,
-      totalPledged,
-      pledgeCount: pledges.length,
-      generatedAt: new Date(),
     };
   }
 

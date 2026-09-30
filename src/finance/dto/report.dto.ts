@@ -53,4 +53,13 @@ export class BudgetActualsQueryDto {
 export class PledgeSummaryQueryDto {
   @IsUUID()
   campaignId: string;
+
+  // Optional: adds how much was paid within this range alongside the all-time totals.
+  @IsOptional()
+  @IsDateString()
+  fromDate?: string;
+
+  @IsOptional()
+  @IsDateString()
+  toDate?: string;
 }

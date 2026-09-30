@@ -20,6 +20,7 @@ import {
 } from '../dto/pledge.dto';
 import {
   DeclinePledgeContributionDto,
+  PledgeContributionExportDto,
   PledgeContributionQueryDto,
   SubmitPledgeContributionDto,
 } from '../dto/pledge-contribution.dto';
@@ -28,6 +29,14 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+
+import { ExcelService } from '../../utility/service/excel.service';
+import { TenantCurrencyService } from '../../utility/service/tenant-currency.service';
+import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
+import {
+  loadCheckoutSummaries,
+  onlinePaidVia,
+} from '../../giving-checkout/util/paid-via';
 
 @Injectable()
 export class PledgeService {
@@ -40,6 +49,10 @@ export class PledgeService {
     private readonly contributionRepo: Repository<PledgeContribution>,
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
+    private readonly excelService: ExcelService,
+    private readonly tenantCurrencyService: TenantCurrencyService,
+    @InjectRepository(GivingCheckoutSession)
+    private readonly checkoutRepo: Repository<GivingCheckoutSession>,
   ) {}
 
   async createCampaign(
@@ -478,6 +491,82 @@ export class PledgeService {
       totalCount,
       totalPages: Math.ceil(totalCount / limit),
     };
+  }
+
+  // Pledge payments for a date range (by payment date), as an Excel sheet for the finance team.
+  async exportContributions(
+    query: PledgeContributionExportDto,
+  ): Promise<Buffer> {
+    const qb = this.contributionRepo
+      .createQueryBuilder('pc')
+      .leftJoinAndSelect('pc.pledge', 'pledge')
+      .leftJoinAndSelect('pledge.campaign', 'campaign')
+      .leftJoinAndSelect('pledge.member', 'member')
+      .leftJoinAndSelect('pc.reviewedBy', 'reviewedBy')
+      .leftJoinAndSelect('reviewedBy.member', 'reviewer')
+      .orderBy('pc.paymentDate', 'DESC')
+      .addOrderBy('pc.createdAt', 'DESC');
+    if (query.status)
+      qb.andWhere('pc.status = :status', { status: query.status });
+    if (query.campaignId) {
+      qb.andWhere('campaign.id = :campaignId', {
+        campaignId: query.campaignId,
+      });
+    }
+    if (query.fromDate) {
+      qb.andWhere('pc.paymentDate >= :fromDate', { fromDate: query.fromDate });
+    }
+    if (query.toDate) {
+      qb.andWhere('pc.paymentDate <= :toDate', { toDate: query.toDate });
+    }
+
+    const [contributions, currencyCode] = await Promise.all([
+      qb.getMany(),
+      this.tenantCurrencyService.resolveCurrencyCode(),
+    ]);
+    const checkouts = await loadCheckoutSummaries(
+      this.checkoutRepo,
+      contributions.map((c) => c.reference),
+    );
+    const name = (m?: { firstname?: string; lastname?: string } | null) =>
+      m ? `${m.firstname ?? ''} ${m.lastname ?? ''}`.trim() : '';
+
+    return this.excelService.buildWorkbook(
+      'Pledge Payments',
+      [
+        { header: 'Member', key: 'member', width: 26 },
+        { header: 'Email', key: 'email', width: 28 },
+        { header: 'Campaign', key: 'campaign', width: 24 },
+        { header: `Amount (${currencyCode})`, key: 'amount', width: 16 },
+        { header: 'Payment Date', key: 'paymentDate', width: 14 },
+        { header: 'Paid Via', key: 'paidVia', width: 22 },
+        { header: 'Reference', key: 'reference', width: 44 },
+        { header: 'Status', key: 'status', width: 12 },
+        { header: 'Reviewed By', key: 'reviewedBy', width: 22 },
+        { header: 'Reviewed At', key: 'reviewedAt', width: 14 },
+        { header: 'Finance Note', key: 'financeNote', width: 30 },
+      ],
+      contributions.map((c) => ({
+        member: name(c.pledge.member) || c.pledge.guestName || '',
+        email: c.pledge.member?.email ?? '',
+        campaign: c.pledge.campaign?.name ?? '',
+        amount: Number(c.amount),
+        paymentDate: c.paymentDate,
+        paidVia:
+          onlinePaidVia(
+            checkouts.get(c.reference ?? ''),
+            null,
+            !!c.reference?.startsWith('giving_'),
+          ) ?? '',
+        reference: c.reference ?? '',
+        status: c.status,
+        reviewedBy: name(c.reviewedBy?.member),
+        reviewedAt: c.reviewedAt
+          ? new Date(c.reviewedAt).toISOString().slice(0, 10)
+          : '',
+        financeNote: c.financeNote ?? '',
+      })),
+    );
   }
 
   async confirmContribution(

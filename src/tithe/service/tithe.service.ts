@@ -71,6 +71,11 @@ import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
+import {
+  CheckoutSummary,
+  loadCheckoutSummaries,
+  onlinePaidVia,
+} from '../../giving-checkout/util/paid-via';
 
 export interface GivingSummaryView {
   year: number;
@@ -78,55 +83,6 @@ export interface GivingSummaryView {
   total: number;
   count: number;
   byType: { type: string; total: number; count: number }[];
-}
-
-const GIVING_PROVIDER_LABELS: Record<string, string> = {
-  paystack: 'Paystack',
-  flutterwave: 'Flutterwave',
-  kora: 'Korapay',
-  stripe: 'Stripe',
-  monnify: 'Monnify',
-};
-
-const CHANNEL_LABELS: Record<string, string> = {
-  card: 'Card',
-  bank: 'Bank',
-  bank_transfer: 'Bank Transfer',
-  ussd: 'USSD',
-  qr: 'QR',
-  mobile_money: 'Mobile Money',
-  eft: 'EFT',
-  apple_pay: 'Apple Pay',
-  phone_number: 'Phone Number',
-};
-
-type CheckoutSummary = Pick<
-  GivingCheckoutSession,
-  'id' | 'provider' | 'paymentChannel'
->;
-
-// "Paystack · Card" when the provider reported a channel, "Paystack" otherwise, "Online" for older gateway rows.
-function onlinePaidVia(
-  checkout: CheckoutSummary | undefined,
-  provider: string | null,
-  isOnline: boolean,
-): string | null {
-  const name = providerLabel(checkout?.provider ?? provider);
-  if (!name) return isOnline ? 'Online' : null;
-  const channel = checkout?.paymentChannel;
-  if (!channel) return name;
-  const label =
-    CHANNEL_LABELS[channel.toLowerCase()] ??
-    channel.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  return `${name} · ${label}`;
-}
-
-function providerLabel(provider?: string | null): string | null {
-  if (!provider) return null;
-  return (
-    GIVING_PROVIDER_LABELS[provider.toLowerCase()] ??
-    provider.charAt(0).toUpperCase() + provider.slice(1)
-  );
 }
 
 const TITHE_PROOF_MAX_BYTES = 2 * 1024 * 1024;
@@ -799,15 +755,7 @@ export class TitheService {
     if (givingOptionId && !givingOption)
       throw new NotFoundException('Giving option not found');
 
-    const fromDate = fromMonth ? `${fromMonth}-01` : undefined;
-    const toDate = toMonth ? this.lastDayOfMonth(toMonth) : undefined;
-    const dateWhere = {
-      ...(fromDate && toDate ? { paymentDate: Between(fromDate, toDate) } : {}),
-      ...(fromDate && !toDate
-        ? { paymentDate: MoreThanOrEqual(fromDate) }
-        : {}),
-      ...(!fromDate && toDate ? { paymentDate: LessThanOrEqual(toDate) } : {}),
-    };
+    const dateWhere = this.monthRangeWhere(fromMonth, toMonth);
 
     const [records, contributions] = await Promise.all([
       this.recordRepo.find({
@@ -894,25 +842,38 @@ export class TitheService {
 
   async emailPledgeContributionStatement(
     user: MemberAuth,
+    fromMonth?: string,
+    toMonth?: string,
+    campaignId?: string,
   ): Promise<{ message: string; recordCount: number }> {
     const member = await this.memberRepo.findOne({ where: { id: user.id } });
     if (!member) throw new NotFoundException('Member not found');
 
     const contributions = await this.contributionRepo.find({
       where: {
-        pledge: { member: { id: user.id } },
+        pledge: {
+          member: { id: user.id },
+          ...(campaignId ? { campaign: { id: campaignId } } : {}),
+        },
         status: PledgeContributionStatus.CONFIRMED,
+        ...this.monthRangeWhere(fromMonth, toMonth),
       },
       relations: ['pledge', 'pledge.campaign'],
       order: { paymentDate: 'DESC' },
     });
 
+    const filtered = !!(fromMonth || toMonth || campaignId);
     if (contributions.length === 0) {
       return {
-        message: 'You have no confirmed pledge contributions to export.',
+        message: filtered
+          ? 'You have no confirmed pledge contributions for the period or campaign you chose.'
+          : 'You have no confirmed pledge contributions to export.',
         recordCount: 0,
       };
     }
+    const campaignName = campaignId
+      ? contributions[0].pledge.campaign.name
+      : undefined;
 
     const lines = this.pledgeStatementLines(
       contributions,
@@ -921,7 +882,7 @@ export class TitheService {
     const pdfBuffer = await this.pdfService.generateGivingStatement(
       member,
       lines,
-      undefined,
+      (fromMonth ?? toMonth) ? { from: fromMonth, to: toMonth } : undefined,
       'Pledge Contribution Statement',
     );
 
@@ -933,6 +894,15 @@ export class TitheService {
         name: UtilityService.capitalizeFirstLetter(member.firstname),
         count: lines.length,
         pledgeOnly: true,
+        ...(filtered
+          ? {
+              period: this.formatStatementPeriod(
+                fromMonth,
+                toMonth,
+                campaignName,
+              ),
+            }
+          : {}),
       },
       [{ filename: 'pledge-contribution-statement.pdf', content: pdfBuffer }],
       EmailCategory.GIVING_RECEIPT,
@@ -1285,9 +1255,20 @@ export class TitheService {
     return qb;
   }
 
+  // paymentDate filter for an optional YYYY-MM range; either end may be open.
+  private monthRangeWhere(fromMonth?: string, toMonth?: string) {
+    const fromDate = fromMonth ? `${fromMonth}-01` : undefined;
+    const toDate = toMonth ? this.lastDayOfMonth(toMonth) : undefined;
+    if (fromDate && toDate) return { paymentDate: Between(fromDate, toDate) };
+    if (fromDate) return { paymentDate: MoreThanOrEqual(fromDate) };
+    if (toDate) return { paymentDate: LessThanOrEqual(toDate) };
+    return {};
+  }
+
   private lastDayOfMonth(ym: string): string {
     const [year, month] = ym.split('-').map(Number);
-    return new Date(year, month, 0).toISOString().slice(0, 10);
+    // UTC so the date doesn't slip back a day on servers ahead of UTC.
+    return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
   }
 
   private formatStatementPeriod(
@@ -1315,20 +1296,10 @@ export class TitheService {
 
   // Online pledge payments carry their checkout reference; its session says which provider took it.
   // One query for every online gift on the statement: which provider and channel took each checkout.
-  private async checkoutDetails(
+  private checkoutDetails(
     references: (string | null | undefined)[],
   ): Promise<Map<string, CheckoutSummary>> {
-    const ids = [
-      ...new Set(
-        references.filter((ref): ref is string => !!ref?.startsWith('giving_')),
-      ),
-    ];
-    if (!ids.length) return new Map();
-    const sessions = await this.checkoutRepo.find({
-      where: { id: In(ids) },
-      select: { id: true, provider: true, paymentChannel: true },
-    });
-    return new Map(sessions.map((s) => [s.id, s]));
+    return loadCheckoutSummaries(this.checkoutRepo, references);
   }
 
   private pledgeStatementLines(

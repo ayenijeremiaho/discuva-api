@@ -37,7 +37,11 @@ const mockAccountRepo = {
   createQueryBuilder: jest.fn(),
 };
 const mockBudgetRepo = { findOne: jest.fn(), find: jest.fn() };
-const mockPledgeRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
+const mockPledgeRepo = {
+  find: jest.fn(),
+  createQueryBuilder: jest.fn(),
+  query: jest.fn(),
+};
 const mockCampaignRepo = { findOne: jest.fn() };
 const mockFundRepo = {};
 const mockPeriodRepo = {};
@@ -76,6 +80,92 @@ describe('FinanceReportService', () => {
     }).compile();
 
     service = module.get<FinanceReportService>(FinanceReportService);
+  });
+
+  describe('pledgeSummary', () => {
+    beforeEach(() => {
+      mockCampaignRepo.findOne.mockResolvedValue({
+        id: 'camp-1',
+        name: 'Building Fund',
+        fund: { name: 'Building' },
+      });
+      mockPledgeRepo.query.mockResolvedValue([
+        {
+          status: 'ACTIVE',
+          pledged: '100000.00',
+          paid: '40000.00',
+          paid_in_period: '15000.00',
+          member: 'Ada Obi',
+          guest_name: null,
+        },
+        {
+          status: 'ACTIVE',
+          pledged: '50000.00',
+          paid: '60000.00',
+          paid_in_period: '0',
+          member: null,
+          guest_name: 'Visitor',
+        },
+      ]);
+    });
+
+    it('returns flat rows with paid and outstanding, and range totals when dates are given', async () => {
+      const result: any = await service.pledgeSummary(
+        'camp-1',
+        '2026-09-01',
+        '2026-09-30',
+      );
+
+      const [, params] = mockPledgeRepo.query.mock.calls[0];
+      expect(params).toEqual([
+        'camp-1',
+        'CONFIRMED',
+        '2026-09-01',
+        '2026-09-30',
+      ]);
+      expect(result).toMatchObject({
+        campaign: 'Building Fund',
+        fund: 'Building',
+        period: '2026-09-01 to 2026-09-30',
+        pledgeCount: '2',
+        totalPledged: 150000,
+        totalPaid: 100000,
+        paidInPeriod: 15000,
+        outstanding: 60000,
+      });
+      expect(result.pledges[0]).toEqual({
+        member: 'Ada Obi',
+        status: 'ACTIVE',
+        pledged: 100000,
+        paid: 40000,
+        paidInPeriod: 15000,
+        outstanding: 60000,
+      });
+      expect(result.pledges[1]).toMatchObject({
+        member: 'Visitor',
+        outstanding: 0,
+      });
+    });
+
+    it('leaves out period figures when no range is given', async () => {
+      const result: any = await service.pledgeSummary('camp-1');
+      expect(result.period).toBeUndefined();
+      expect(result.paidInPeriod).toBeUndefined();
+      expect(result.pledges[0].paidInPeriod).toBeUndefined();
+      expect(mockPledgeRepo.query.mock.calls[0][1]).toEqual([
+        'camp-1',
+        'CONFIRMED',
+        null,
+        null,
+      ]);
+    });
+
+    it('404s for an unknown campaign', async () => {
+      mockCampaignRepo.findOne.mockResolvedValue(null);
+      await expect(service.pledgeSummary('nope')).rejects.toThrow(
+        'Campaign not found.',
+      );
+    });
   });
 
   describe('cashFlow', () => {
