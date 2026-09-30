@@ -6765,9 +6765,15 @@ largest first; `years` lists every year with giving plus the current year, for t
 aggregate queries (`GROUP BY` over `tithe_records` + pledge contributions, and a `UNION` of distinct years), both using
 the `(member_id, payment_date)` / pledge member indexes — no rows are loaded into memory.
 
+**Month groups (2026-09-30):** the statement table no longer has a Month column. Rows are grouped by month, newest
+first; each group opens with a shaded row carrying the month's subtotal (useful for annual statements). Columns are
+Date, Type, Amount, Paid Via, Reference; references print at 7.5pt so 43-character online references fit on one line.
+
 **Paid Via column (replaces "Bank"):** the sender's `bankName` for transfers; for online payments the provider from
 `TitheRecord.paymentChannel` (`paystack` → "Paystack", `flutterwave` → "Flutterwave", `kora` → "Korapay",
-`stripe` → "Stripe"), or "Online" if an older gateway row has none. Online pledge contributions carry their checkout
+`stripe` → "Stripe") plus, when the provider reported one, the channel from the checkout session (e.g.
+"Paystack · Card", "Paystack · Bank Transfer"), or "Online" if an older gateway row has none. All online gifts on a
+statement are resolved with a single `giving_checkout_sessions` lookup. Online pledge contributions carry their checkout
 reference (`giving_…`), so the provider is looked up from `giving_checkout_sessions` (public schema). Other pledge
 contributions show "—". The Amount header and total are right-aligned with the figures (the total no longer repeats
 the currency, which is in the header), and the table's columns fit within the page margins.
@@ -6876,6 +6882,17 @@ resolve a tenant from, only a `:tenantId` path param, so these must be resolvabl
   the tenant's own schema, which a public-schema table can't foreign-key into. `givingOptionId` and `pledgeId` are
   mutually exclusive (see below). A legacy `titheAccountId` column still exists on the table but is unused —
   checkout no longer lets a member pick a `TitheAccount` (see below).
+- **Reported charge details (root migration `AddGivingCheckoutPaymentDetails`):** on a successful charge the session
+  also stores what the provider reported — `providerTransactionId`, `paymentChannel` (card, bank_transfer, ussd…),
+  `paidAt`, `paidAmountCents`, `paidCurrency`, `feesCents`, and `paymentDetails` (jsonb: card type, last 4, issuing
+  bank, gateway message — never full card data). Only Paystack fills these so far (`data.id`, `channel`, `paid_at`,
+  `requested_amount` falling back to `amount`, `currency`, `fees`, `authorization.*`, `gateway_response`); other
+  providers leave them null. `requested_amount` is used because Paystack adds its fees to `amount` when a church passes
+  charges to the payer.
+- **Charge check:** when the provider reports an amount or currency that differs from the session, the session is set
+  to `needs_review` (new `GivingCheckoutStatus.NEEDS_REVIEW`) with the reported details saved, an error is logged, and
+  **no** `TitheRecord`/`PledgeContribution` is created — the money was taken, so finance resolves it rather than it
+  being silently recorded at the wrong amount. Providers that report nothing are trusted as before.
 
 **Checkout initiation (`GivingCheckoutService.initiateCheckout`, member-facing, normal in-app request — tenant
 context already resolved by `TenantMiddleware`):** resolves the tenant's active config (cached 300s per tenant,

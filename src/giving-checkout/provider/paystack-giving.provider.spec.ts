@@ -84,7 +84,55 @@ describe('PaystackGivingProvider', () => {
       expect(result).toEqual({
         type: 'charge.succeeded',
         providerReference: 'giving_abc123',
+        payment: expect.objectContaining({
+          transactionId: null,
+          amountCents: null,
+        }),
         raw: expect.any(Object),
+      });
+    });
+
+    it('extracts the transaction id, channel, amounts and card summary', () => {
+      const payload = JSON.stringify({
+        event: 'charge.success',
+        data: {
+          id: 4099260516,
+          reference: 'giving_abc123',
+          amount: 51500,
+          requested_amount: 50000,
+          fees: 1500,
+          currency: 'NGN',
+          channel: 'card',
+          paid_at: '2026-09-30T08:15:00.000Z',
+          gateway_response: 'Successful',
+          authorization: {
+            card_type: 'visa',
+            last4: '4081',
+            bank: 'TEST BANK',
+            bin: '408408',
+          },
+        },
+      });
+
+      const result = provider.verifyAndParseWebhook(
+        Buffer.from(payload),
+        sign(payload),
+        credentials,
+      );
+
+      expect(result.payment).toEqual({
+        transactionId: '4099260516',
+        channel: 'card',
+        paidAt: new Date('2026-09-30T08:15:00.000Z'),
+        amountCents: 50000,
+        currency: 'NGN',
+        feesCents: 1500,
+        details: {
+          cardType: 'visa',
+          last4: '4081',
+          bank: 'TEST BANK',
+          gatewayResponse: 'Successful',
+        },
       });
     });
 

@@ -5,6 +5,8 @@ export enum GivingCheckoutStatus {
   PENDING = 'pending',
   COMPLETED = 'completed',
   FAILED = 'failed',
+  // Charged, but the provider's amount/currency didn't match this session — not recorded as a gift until finance checks it.
+  NEEDS_REVIEW = 'needs_review',
 }
 
 // Control-plane table — lives in `public`, never a `search_path` target,
@@ -68,4 +70,27 @@ export class GivingCheckoutSession extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   completedAt: Date | null;
+
+  // What the provider reported on the successful charge (Paystack for now); null for older sessions.
+  @Column({ type: 'varchar', nullable: true })
+  providerTransactionId: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  paymentChannel: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  paidAt: Date | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  paidAmountCents: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  paidCurrency: string | null;
+
+  @Column({ type: 'bigint', nullable: true })
+  feesCents: string | null;
+
+  // Card brand/last 4, issuing bank and the gateway message — never full card data.
+  @Column({ type: 'jsonb', nullable: true })
+  paymentDetails: Record<string, string | null> | null;
 }

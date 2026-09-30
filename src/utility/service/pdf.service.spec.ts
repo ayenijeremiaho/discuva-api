@@ -213,6 +213,48 @@ describe('PdfService', () => {
       expect(text).not.toContain('>Bank<');
     });
 
+    it('groups payments under month rows with subtotals instead of a Month column', async () => {
+      mockCls.get.mockReturnValue('tenant-1');
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        address: '42 Tenant Ave',
+        tagline: null,
+        currency: 'NGN',
+      });
+
+      const text = pdfText(
+        await service.generateGivingStatement(member, [
+          {
+            amount: 500,
+            paymentDate: '2026-09-30',
+            type: 'Tithe',
+            paidVia: 'Paystack · Card',
+            reference: 'giving_a',
+          },
+          {
+            amount: 125000,
+            paymentDate: '2026-09-02',
+            type: 'Offering',
+            paidVia: 'GTBank',
+            reference: 'TRF-1',
+          },
+          {
+            amount: 15000,
+            paymentDate: '2026-08-12',
+            type: 'Tithe',
+            paidVia: null,
+            reference: 'REF-2',
+          },
+        ]),
+      );
+
+      expect(text).toContain('September 2026');
+      expect(text).toContain('125,500.00');
+      expect(text).toContain('August 2026');
+      expect(text).not.toContain('Month');
+    });
+
     it('supports a pledge-specific statement title', async () => {
       mockCls.get.mockReturnValue('tenant-1');
       mockTenantRepo.findOneBy.mockResolvedValue({

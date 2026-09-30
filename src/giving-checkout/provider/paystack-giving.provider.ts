@@ -7,6 +7,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import {
   GivingCheckoutParams,
   GivingCheckoutResult,
+  GivingPaymentDetails,
   GivingProviderCredentials,
   IGivingProvider,
   NormalizedGivingEvent,
@@ -56,6 +57,33 @@ export class PaystackGivingProvider implements IGivingProvider {
     return { checkoutUrl: json.data.authorization_url };
   }
 
+  // requested_amount excludes fees Paystack adds when the church passes charges to the payer.
+  private static paymentDetails(
+    data: Record<string, any>,
+  ): GivingPaymentDetails {
+    const num = (v: unknown) =>
+      v === null || v === undefined || v === '' || Number.isNaN(Number(v))
+        ? null
+        : Number(v);
+    const str = (v: unknown) =>
+      v === null || v === undefined || v === '' ? null : String(v);
+    const auth = data.authorization ?? {};
+    return {
+      transactionId: str(data.id),
+      channel: str(data.channel),
+      paidAt: data.paid_at ? new Date(data.paid_at) : null,
+      amountCents: num(data.requested_amount) ?? num(data.amount),
+      currency: str(data.currency),
+      feesCents: num(data.fees),
+      details: {
+        cardType: str(auth.card_type),
+        last4: str(auth.last4),
+        bank: str(auth.bank),
+        gatewayResponse: str(data.gateway_response),
+      },
+    };
+  }
+
   verifyAndParseWebhook(
     rawBody: Buffer,
     signatureHeader: string,
@@ -82,6 +110,7 @@ export class PaystackGivingProvider implements IGivingProvider {
       return {
         type: 'charge.succeeded',
         providerReference: data.reference,
+        payment: PaystackGivingProvider.paymentDetails(data),
         raw: payload,
       };
     }

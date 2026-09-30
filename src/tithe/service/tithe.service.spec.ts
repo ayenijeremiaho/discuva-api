@@ -1547,7 +1547,8 @@ describe('TitheService', () => {
         },
       ]);
       mockCheckoutRepo.find.mockResolvedValueOnce([
-        { id: 'giving_pledge', provider: 'flutterwave' },
+        { id: 'giving_pledge', provider: 'flutterwave', paymentChannel: null },
+        { id: 'giving_abc', provider: 'paystack', paymentChannel: 'card' },
       ]);
 
       await service.emailGivingStatement(mockUser);
@@ -1556,10 +1557,11 @@ describe('TitheService', () => {
       expect(lines.map((l: { paidVia: string | null }) => l.paidVia)).toEqual([
         'Flutterwave',
         'GTBank',
-        'Paystack',
+        'Paystack · Card',
         'Online',
         null,
       ]);
+      expect(mockCheckoutRepo.find).toHaveBeenCalledTimes(1);
     });
   });
 

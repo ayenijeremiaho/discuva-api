@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+import autoTable, { RowInput } from 'jspdf-autotable';
 import {
   FullEventReport,
   SessionReport,
@@ -420,6 +420,49 @@ export class PdfService {
 
   // ─── Tithe statement ─────────────────────────────────────────────────────
 
+  // Lines arrive newest first; each month opens with a shaded row carrying its subtotal.
+  private givingStatementRows(
+    lines: GivingStatementLine[],
+    branding: PdfBranding,
+  ): RowInput[] {
+    const money = (n: number) =>
+      n.toLocaleString(branding.currencyLocale, { minimumFractionDigits: 2 });
+    const months = new Map<string, GivingStatementLine[]>();
+    for (const line of lines) {
+      const key = line.paymentDate.slice(0, 7);
+      months.set(key, [...(months.get(key) ?? []), line]);
+    }
+    const rows: RowInput[] = [];
+    for (const [key, monthLines] of months) {
+      const [yr, mo] = key.split('-').map(Number);
+      const monthName = new Date(yr, mo - 1, 1).toLocaleDateString('en-GB', {
+        month: 'long',
+        year: 'numeric',
+      });
+      const shade = { fillColor: LIGHT_GOLD, fontStyle: 'bold' as const };
+      rows.push([
+        { content: monthName, colSpan: 2, styles: shade },
+        {
+          content: money(
+            monthLines.reduce((sum, l) => sum + Number(l.amount), 0),
+          ),
+          styles: { ...shade, halign: 'right', cellPadding: AMOUNT_PAD },
+        },
+        { content: '', colSpan: 2, styles: shade },
+      ]);
+      for (const r of monthLines) {
+        rows.push([
+          r.paymentDate,
+          r.type,
+          money(Number(r.amount)),
+          r.paidVia ?? '—',
+          r.reference ?? '—',
+        ]);
+      }
+    }
+    return rows;
+  }
+
   private drawGivingStatement(
     doc: jsPDF,
     member: Member,
@@ -431,6 +474,8 @@ export class PdfService {
     let y = this.drawPageHeader(doc, title, branding);
 
     const total = lines.reduce((sum, r) => sum + Number(r.amount), 0);
+    const money = (n: number) =>
+      n.toLocaleString(branding.currencyLocale, { minimumFractionDigits: 2 });
 
     const generatedText = `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}`;
 
@@ -481,7 +526,6 @@ export class PdfService {
       margin: { left: MARGIN, right: MARGIN },
       head: [
         [
-          'Month',
           'Date',
           'Type',
           `Amount (${branding.currencyCode})`,
@@ -489,44 +533,17 @@ export class PdfService {
           'Reference',
         ],
       ],
-      body: lines.map((r) => {
-        const [yr, mo] = r.paymentDate.split('-').map(Number);
-        const monthName = new Date(yr, mo - 1, 1).toLocaleDateString('en-GB', {
-          month: 'long',
-          year: 'numeric',
-        });
-        return [
-          monthName,
-          r.paymentDate,
-          r.type,
-          Number(r.amount).toLocaleString(branding.currencyLocale, {
-            minimumFractionDigits: 2,
-          }),
-          r.paidVia ?? '—',
-          r.reference ?? '—',
-        ];
-      }),
-      foot: [
-        [
-          'Total',
-          '',
-          '',
-          total.toLocaleString(branding.currencyLocale, {
-            minimumFractionDigits: 2,
-          }),
-          '',
-          '',
-        ],
-      ],
+      body: this.givingStatementRows(lines, branding),
+      foot: [['Total', '', money(total), '', '']],
 
       // 174mm between the margins; Reference takes what's left.
       columnStyles: {
-        0: { cellWidth: 24 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 33 },
-        3: { cellWidth: 31, halign: 'right', cellPadding: AMOUNT_PAD },
-        4: { cellWidth: 24 },
-        5: { cellWidth: 'auto' },
+        0: { cellWidth: 21 },
+        1: { cellWidth: 34 },
+        2: { cellWidth: 31, halign: 'right', cellPadding: AMOUNT_PAD },
+        3: { cellWidth: 26 },
+        // Online references are 43 characters; 7.5pt keeps them on one line.
+        4: { cellWidth: 'auto', fontSize: 7.5 },
       },
       headStyles: {
         fillColor: ACCENT,
@@ -535,7 +552,7 @@ export class PdfService {
         fontSize: 9,
       },
       bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: LIGHT_GOLD },
+      alternateRowStyles: { fillColor: WHITE },
       footStyles: {
         fillColor: DARK,
         textColor: WHITE,
@@ -545,7 +562,7 @@ export class PdfService {
       showFoot: 'lastPage',
       // columnStyles only reach the body; keep the Amount header and total aligned with the figures.
       didParseCell: (data) => {
-        if (data.section !== 'body' && data.column.index === 3) {
+        if (data.section !== 'body' && data.column.index === 2) {
           data.cell.styles.halign = 'right';
           data.cell.styles.cellPadding = AMOUNT_PAD;
         }
@@ -956,7 +973,7 @@ export class PdfService {
       body: tableBody,
       columnStyles: {
         0: { cellWidth: 10, halign: 'center' },
-        1: { cellWidth: 36 },
+        1: { cellWidth: 34 },
         2: { cellWidth: 54 },
         3: { cellWidth: 20, halign: 'right' },
         4: { cellWidth: 20, halign: 'right' },

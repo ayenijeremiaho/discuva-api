@@ -2,12 +2,14 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
+import { GivingPaymentDetails } from '../interface/giving-provider.interface';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { randomUUID } from 'node:crypto';
@@ -51,6 +53,29 @@ interface ResolvedGivingConfig {
 // briefly did before it was removed).
 @Injectable()
 export class GivingCheckoutService {
+  private readonly logger = new Logger(GivingCheckoutService.name);
+
+  // Only checks what the provider reported; providers that report nothing are trusted as before.
+  static chargeMismatch(
+    session: Pick<GivingCheckoutSession, 'amountCents' | 'currency'>,
+    payment?: GivingPaymentDetails,
+  ): string | null {
+    if (!payment) return null;
+    if (
+      payment.currency &&
+      payment.currency.toUpperCase() !== session.currency.toUpperCase()
+    ) {
+      return `charged in ${payment.currency}, expected ${session.currency}`;
+    }
+    if (
+      payment.amountCents !== null &&
+      payment.amountCents !== Number(session.amountCents)
+    ) {
+      return `charged ${payment.amountCents}, expected ${session.amountCents} (minor units)`;
+    }
+    return null;
+  }
+
   constructor(
     private readonly cls: ClsService<AppClsStore>,
     private readonly configService: ConfigService,
@@ -294,8 +319,31 @@ export class GivingCheckoutService {
       });
       if (!session) return;
 
-      session.status = GivingCheckoutStatus.COMPLETED;
+      const payment = event.payment;
+      if (payment) {
+        session.providerTransactionId = payment.transactionId;
+        session.paymentChannel = payment.channel;
+        session.paidAt = payment.paidAt;
+        session.paidAmountCents =
+          payment.amountCents === null ? null : String(payment.amountCents);
+        session.paidCurrency = payment.currency;
+        session.feesCents =
+          payment.feesCents === null ? null : String(payment.feesCents);
+        session.paymentDetails = payment.details;
+      }
       session.completedAt = new Date();
+
+      const mismatch = GivingCheckoutService.chargeMismatch(session, payment);
+      if (mismatch) {
+        session.status = GivingCheckoutStatus.NEEDS_REVIEW;
+        await manager.save(session);
+        this.logger.error(
+          `Giving checkout ${session.id} (tenant ${tenantId}) held for review: ${mismatch}. Not recorded as a gift.`,
+        );
+        return;
+      }
+
+      session.status = GivingCheckoutStatus.COMPLETED;
       await manager.save(session);
       completedSession = session;
     });

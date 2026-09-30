@@ -33,7 +33,20 @@ export interface NormalizedGivingEvent {
   // looked up against GivingCheckoutSession.id, never read for
   // amount/member/tenant identity from the payload itself.
   providerReference?: string;
+  // Filled by providers that report it; used to check the charge against the session and shown on statements.
+  payment?: GivingPaymentDetails;
   raw: unknown;
+}
+
+export interface GivingPaymentDetails {
+  transactionId: string | null;
+  channel: string | null;
+  paidAt: Date | null;
+  // The amount the checkout asked for, before any fees passed on to the payer.
+  amountCents: number | null;
+  currency: string | null;
+  feesCents: number | null;
+  details: Record<string, string | null>;
 }
 
 export interface IGivingProvider {

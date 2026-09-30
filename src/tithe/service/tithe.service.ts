@@ -87,6 +87,38 @@ const GIVING_PROVIDER_LABELS: Record<string, string> = {
   stripe: 'Stripe',
 };
 
+const CHANNEL_LABELS: Record<string, string> = {
+  card: 'Card',
+  bank: 'Bank',
+  bank_transfer: 'Bank Transfer',
+  ussd: 'USSD',
+  qr: 'QR',
+  mobile_money: 'Mobile Money',
+  eft: 'EFT',
+  apple_pay: 'Apple Pay',
+};
+
+type CheckoutSummary = Pick<
+  GivingCheckoutSession,
+  'id' | 'provider' | 'paymentChannel'
+>;
+
+// "Paystack · Card" when the provider reported a channel, "Paystack" otherwise, "Online" for older gateway rows.
+function onlinePaidVia(
+  checkout: CheckoutSummary | undefined,
+  provider: string | null,
+  isOnline: boolean,
+): string | null {
+  const name = providerLabel(checkout?.provider ?? provider);
+  if (!name) return isOnline ? 'Online' : null;
+  const channel = checkout?.paymentChannel;
+  if (!channel) return name;
+  const label =
+    CHANNEL_LABELS[channel.toLowerCase()] ??
+    channel.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return `${name} · ${label}`;
+}
+
 function providerLabel(provider?: string | null): string | null {
   if (!provider) return null;
   return (
@@ -798,17 +830,27 @@ export class TitheService {
           }),
     ]);
 
+    const checkouts = await this.checkoutDetails([
+      ...records.map((r) => r.externalReference),
+      ...contributions.map((c) => c.reference),
+    ]);
     const recordLines: GivingStatementLine[] = records.map((r) => ({
       paymentDate: r.paymentDate,
       amount: Number(r.amount),
       type: this.givingRecordTypeLabel(r),
       paidVia:
         r.bankName ||
-        providerLabel(r.paymentChannel) ||
-        (r.source === TitheSource.PAYMENT_GATEWAY ? 'Online' : null),
+        onlinePaidVia(
+          checkouts.get(r.externalReference ?? ''),
+          r.paymentChannel,
+          r.source === TitheSource.PAYMENT_GATEWAY,
+        ),
       reference: r.reference ?? r.externalReference,
     }));
-    const contributionLines = await this.pledgeStatementLines(contributions);
+    const contributionLines = this.pledgeStatementLines(
+      contributions,
+      checkouts,
+    );
     const lines = [...recordLines, ...contributionLines].sort((a, b) =>
       b.paymentDate.localeCompare(a.paymentDate),
     );
@@ -870,7 +912,10 @@ export class TitheService {
       };
     }
 
-    const lines = await this.pledgeStatementLines(contributions);
+    const lines = this.pledgeStatementLines(
+      contributions,
+      await this.checkoutDetails(contributions.map((c) => c.reference)),
+    );
     const pdfBuffer = await this.pdfService.generateGivingStatement(
       member,
       lines,
@@ -1267,26 +1312,36 @@ export class TitheService {
   }
 
   // Online pledge payments carry their checkout reference; its session says which provider took it.
-  private async pledgeStatementLines(
+  // One query for every online gift on the statement: which provider and channel took each checkout.
+  private async checkoutDetails(
+    references: (string | null | undefined)[],
+  ): Promise<Map<string, CheckoutSummary>> {
+    const ids = [
+      ...new Set(
+        references.filter((ref): ref is string => !!ref?.startsWith('giving_')),
+      ),
+    ];
+    if (!ids.length) return new Map();
+    const sessions = await this.checkoutRepo.find({
+      where: { id: In(ids) },
+      select: { id: true, provider: true, paymentChannel: true },
+    });
+    return new Map(sessions.map((s) => [s.id, s]));
+  }
+
+  private pledgeStatementLines(
     contributions: PledgeContribution[],
-  ): Promise<GivingStatementLine[]> {
-    const checkoutIds = contributions
-      .map((c) => c.reference)
-      .filter((ref): ref is string => !!ref?.startsWith('giving_'));
-    const sessions = checkoutIds.length
-      ? await this.checkoutRepo.find({
-          where: { id: In(checkoutIds) },
-          select: { id: true, provider: true },
-        })
-      : [];
-    const providers = new Map(sessions.map((s) => [s.id, s.provider]));
+    checkouts: Map<string, CheckoutSummary>,
+  ): GivingStatementLine[] {
     return contributions.map((c) => ({
       paymentDate: c.paymentDate,
       amount: Number(c.amount),
       type: `Pledge: ${c.pledge.campaign.name}`,
-      paidVia: c.reference?.startsWith('giving_')
-        ? (providerLabel(providers.get(c.reference)) ?? 'Online')
-        : null,
+      paidVia: onlinePaidVia(
+        checkouts.get(c.reference ?? ''),
+        null,
+        !!c.reference?.startsWith('giving_'),
+      ),
       reference: c.reference,
     }));
   }

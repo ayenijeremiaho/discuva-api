@@ -463,6 +463,106 @@ describe('GivingCheckoutService', () => {
       );
     });
 
+    describe('reported charge details', () => {
+      const payment = {
+        transactionId: '4099260516',
+        channel: 'card',
+        paidAt: new Date('2026-09-30T08:15:00Z'),
+        amountCents: 500000,
+        currency: 'NGN',
+        feesCents: 7500,
+        details: {
+          cardType: 'visa',
+          last4: '4081',
+          bank: null,
+          gatewayResponse: 'Successful',
+        },
+      };
+      const session = () => ({
+        id: 'giving_abc',
+        tenantId: 'tenant-1',
+        memberId: 'member-1',
+        amountCents: 500000,
+        currency: 'NGN',
+        provider: 'paystack',
+        status: GivingCheckoutStatus.PENDING,
+      });
+
+      beforeEach(() => {
+        mockConfigQB({
+          providerId: 'paystack',
+          credentialsEncrypted: { secretKey: 'sk_1' },
+        });
+        mockTenantRepo.findOneByOrFail.mockResolvedValue({
+          id: 'tenant-1',
+          schemaName: 'tenant_schema_1',
+        });
+      });
+
+      it('stores what Paystack reported and records the gift when it matches', async () => {
+        mockGivingProvider.verifyAndParseWebhook.mockReturnValue({
+          type: 'charge.succeeded',
+          providerReference: 'giving_abc',
+          payment,
+          raw: {},
+        });
+        mockManager.findOne.mockResolvedValue(session());
+
+        await service.handleWebhook(
+          'tenant-1',
+          'paystack',
+          Buffer.from('{}'),
+          'sig',
+        );
+
+        expect(mockManager.save).toHaveBeenCalledWith(
+          expect.objectContaining({
+            status: GivingCheckoutStatus.COMPLETED,
+            providerTransactionId: '4099260516',
+            paymentChannel: 'card',
+            paidAmountCents: '500000',
+            paidCurrency: 'NGN',
+            feesCents: '7500',
+            paymentDetails: expect.objectContaining({ last4: '4081' }),
+          }),
+        );
+        expect(mockManagerTx.create).toHaveBeenCalledWith(
+          TitheRecord,
+          expect.anything(),
+        );
+      });
+
+      it.each([
+        ['amount', { ...payment, amountCents: 400000 }],
+        ['currency', { ...payment, currency: 'USD' }],
+      ])(
+        'holds the charge for review, without a gift, when the %s differs',
+        async (_what, reported) => {
+          mockGivingProvider.verifyAndParseWebhook.mockReturnValue({
+            type: 'charge.succeeded',
+            providerReference: 'giving_abc',
+            payment: reported,
+            raw: {},
+          });
+          mockManager.findOne.mockResolvedValue(session());
+
+          await service.handleWebhook(
+            'tenant-1',
+            'paystack',
+            Buffer.from('{}'),
+            'sig',
+          );
+
+          expect(mockManager.save).toHaveBeenCalledWith(
+            expect.objectContaining({
+              status: GivingCheckoutStatus.NEEDS_REVIEW,
+            }),
+          );
+          expect(mockManagerTx.create).not.toHaveBeenCalled();
+        },
+      );
+    });
+
     it('sets givingOption on the TitheRecord when the session designated one', async () => {
       mockConfigQB({
         providerId: 'paystack',
