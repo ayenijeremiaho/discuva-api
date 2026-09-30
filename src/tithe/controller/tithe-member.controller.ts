@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -14,6 +15,7 @@ import {
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { TitheService } from '../service/tithe.service';
 import { SubmitTitheProofDto } from '../dto/tithe.dto';
+import { TitheProofStatus } from '../enum/tithe.enum';
 import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
@@ -38,6 +40,18 @@ export class TitheMemberController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit = 20,
   ) {
     return this.titheService.getMyTithes(req.user, page, limit);
+  }
+
+  // Year's giving by type for the History tab; `years` lists the years with any giving.
+  @Get('me/summary')
+  getMySummary(
+    @Request() req: any,
+    @Query('year', new ParseIntPipe({ optional: true })) year?: number,
+  ) {
+    if (year !== undefined && (year < 2000 || year > 2100)) {
+      throw new BadRequestException('year must be between 2000 and 2100');
+    }
+    return this.titheService.getMyGivingSummary(req.user, year);
   }
 
   @Post('me/statement/send')
@@ -71,12 +85,29 @@ export class TitheMemberController {
     return this.titheService.submitProof(req.user, dto, file);
   }
 
+  // status: optional comma list (e.g. PENDING,DECLINED) — the History tab only needs proofs still awaiting action.
   @Get('proof')
   getMyProofs(
     @Request() req: any,
     @Query('page', new ParseIntPipe({ optional: true })) page = 1,
     @Query('limit', new ParseIntPipe({ optional: true })) limit = 20,
+    @Query('status') status?: string,
   ) {
-    return this.titheService.getMyProofs(req.user, page, limit);
+    const statuses = status
+      ?.split(',')
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean);
+    const valid = Object.values(TitheProofStatus) as string[];
+    if (statuses?.some((s) => !valid.includes(s))) {
+      throw new BadRequestException(
+        `status must be one or more of ${valid.join(', ')}`,
+      );
+    }
+    return this.titheService.getMyProofs(
+      req.user,
+      page,
+      limit,
+      statuses as TitheProofStatus[] | undefined,
+    );
   }
 }

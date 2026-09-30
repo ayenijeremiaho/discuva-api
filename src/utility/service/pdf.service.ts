@@ -73,7 +73,8 @@ export interface GivingStatementLine {
   paymentDate: string;
   amount: number;
   type: string;
-  bankName: string | null;
+  // Sender's bank for transfers, or the online provider (e.g. Paystack).
+  paidVia: string | null;
   reference: string | null;
 }
 
@@ -87,6 +88,8 @@ const WHITE = '#FFFFFF';
 
 const PAGE_W = 210;
 const MARGIN = 18;
+// autoTable's default padding, with extra room between right-aligned amounts and the next column.
+const AMOUNT_PAD = { top: 1.76, bottom: 1.76, left: 1.76, right: 5 };
 const CONTENT_W = PAGE_W - MARGIN * 2;
 
 @Injectable()
@@ -482,7 +485,7 @@ export class PdfService {
           'Date',
           'Type',
           `Amount (${branding.currencyCode})`,
-          'Bank',
+          'Paid Via',
           'Reference',
         ],
       ],
@@ -499,7 +502,7 @@ export class PdfService {
           Number(r.amount).toLocaleString(branding.currencyLocale, {
             minimumFractionDigits: 2,
           }),
-          r.bankName ?? '—',
+          r.paidVia ?? '—',
           r.reference ?? '—',
         ];
       }),
@@ -508,19 +511,22 @@ export class PdfService {
           'Total',
           '',
           '',
-          `${branding.currencyCode} ${total.toLocaleString(branding.currencyLocale, { minimumFractionDigits: 2 })}`,
+          total.toLocaleString(branding.currencyLocale, {
+            minimumFractionDigits: 2,
+          }),
           '',
           '',
         ],
       ],
 
+      // 174mm between the margins; Reference takes what's left.
       columnStyles: {
-        0: { cellWidth: 26 },
+        0: { cellWidth: 24 },
         1: { cellWidth: 20 },
-        2: { cellWidth: 34 },
-        3: { cellWidth: 32, halign: 'right' },
-        4: { cellWidth: 30 },
-        5: { cellWidth: 38 },
+        2: { cellWidth: 33 },
+        3: { cellWidth: 31, halign: 'right', cellPadding: AMOUNT_PAD },
+        4: { cellWidth: 24 },
+        5: { cellWidth: 'auto' },
       },
       headStyles: {
         fillColor: ACCENT,
@@ -537,9 +543,11 @@ export class PdfService {
         fontSize: 9,
       },
       showFoot: 'lastPage',
+      // columnStyles only reach the body; keep the Amount header and total aligned with the figures.
       didParseCell: (data) => {
-        if (data.section === 'foot' && data.column.index === 3) {
+        if (data.section !== 'body' && data.column.index === 3) {
           data.cell.styles.halign = 'right';
+          data.cell.styles.cellPadding = AMOUNT_PAD;
         }
       },
     });

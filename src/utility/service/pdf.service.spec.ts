@@ -133,7 +133,7 @@ describe('PdfService', () => {
         amount: 5000,
         paymentDate: '2026-01-15',
         type: 'Tithe',
-        bankName: 'Test Bank',
+        paidVia: 'Test Bank',
         reference: 'REF-1',
       },
     ];
@@ -169,28 +169,28 @@ describe('PdfService', () => {
           amount: 5000,
           paymentDate: '2026-01-15',
           type: 'Tithe',
-          bankName: 'Test Bank',
+          paidVia: 'Test Bank',
           reference: 'REF-1',
         },
         {
           amount: 10000,
           paymentDate: '2026-01-20',
           type: 'General Giving',
-          bankName: null,
+          paidVia: 'Paystack',
           reference: 'giving_abc',
         },
         {
           amount: 25000,
           paymentDate: '2026-01-25',
           type: 'Building Fund',
-          bankName: null,
+          paidVia: 'Paystack',
           reference: 'giving_def',
         },
         {
           amount: 15000,
           paymentDate: '2026-01-28',
           type: 'Pledge: Roof Repair Fund',
-          bankName: null,
+          paidVia: 'Paystack',
           reference: 'giving_ghi',
         },
       ];
@@ -208,6 +208,9 @@ describe('PdfService', () => {
       // in the raw PDF byte stream.
       expect(text).toContain('Pledge:');
       expect(text).toContain('Roof');
+      expect(text).toContain('Paid Via');
+      expect(text).toContain('Paystack');
+      expect(text).not.toContain('>Bank<');
     });
 
     it('supports a pledge-specific statement title', async () => {

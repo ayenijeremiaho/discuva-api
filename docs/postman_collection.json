@@ -17607,7 +17607,7 @@
     },
     {
       "name": "Tithes (Member)",
-      "description": "Member-facing tithe features: view active bank accounts to pay into, see your own giving history, submit a payment proof, and email yourself a Giving Statement PDF.\n\n**Access:** JwtAuthGuard \u2014 any authenticated member or worker.\n\n**Typical flow:**\n1. `GET /tithes/accounts` \u2014 see active bank accounts and select where you paid\n2. `POST /tithes/proof` \u2014 upload receipt image/PDF (multipart) with amount, date, account, optional reference\n3. `GET /tithes/proof` \u2014 track the status of your submitted proofs (PENDING \u2192 CONFIRMED or DECLINED)\n4. `GET /tithes/me` \u2014 view your confirmed giving history\n5. `POST /tithes/me/statement/send` \u2014 request a Giving Statement PDF emailed to you",
+      "description": "Member-facing tithe features: view active bank accounts to pay into, see your own giving history, submit a payment proof, and email yourself a Giving Statement PDF.\n\n**Access:** JwtAuthGuard \u2014 any authenticated member or worker.\n\n**Typical flow:**\n1. `GET /tithes/accounts` \u2014 see active bank accounts and select where you paid\n2. `POST /tithes/proof` \u2014 upload receipt image/PDF (multipart) with amount, date, account, optional reference\n3. `GET /tithes/proof` \u2014 track the status of your submitted proofs (PENDING \u2192 CONFIRMED or DECLINED)\n4. `GET /tithes/me` \u2014 view your confirmed giving history\n4a. `GET /tithes/me/summary?year=` \u2014 your giving for a year, by type\n5. `POST /tithes/me/statement/send` \u2014 request a Giving Statement PDF emailed to you",
       "item": [
         {
           "name": "List Active Tithe Accounts",
@@ -17690,6 +17690,46 @@
               "status": "Unauthorized",
               "code": 401,
               "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "My Giving Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/tithes/me/summary?year=2026",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "tithes",
+                "me",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "year",
+                  "value": "2026",
+                  "description": "Optional, 2000–2100; defaults to the current year"
+                }
+              ]
+            },
+            "description": "JwtAuthGuard. The caller's giving for one year grouped by type (bank account, chosen purpose, bank, else General Giving; confirmed pledge payments as 'Pledge: {campaign}'), largest first. `years` lists every year with giving plus the current year."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"year\": 2026,\n    \"years\": [\n      2026,\n      2025\n    ],\n    \"total\": 1000,\n    \"count\": 2,\n    \"byType\": [\n      {\n        \"type\": \"Tithe\",\n        \"total\": 500,\n        \"count\": 1\n      },\n      {\n        \"type\": \"Offering\",\n        \"total\": 500,\n        \"count\": 1\n      }\n    ]\n  }\n}"
             }
           ]
         },
@@ -17879,7 +17919,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/tithes/proof?page=1&limit=20",
+              "raw": "{{baseUrl}}/tithes/proof?page=1&limit=20&status=PENDING,DECLINED",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -17895,10 +17935,15 @@
                 {
                   "key": "limit",
                   "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING,DECLINED",
+                  "description": "Optional comma list of PENDING, CONFIRMED, DECLINED"
                 }
               ]
             },
-            "description": "JwtAuthGuard. Returns the authenticated member's own tithe payment proofs (paginated)."
+            "description": "JwtAuthGuard. Returns the authenticated member's own tithe payment proofs (paginated). Optional `status` filter; the member app requests PENDING,DECLINED since confirmed proofs already appear as giving records. Declined proofs include `financeNote`."
           },
           "response": [
             {

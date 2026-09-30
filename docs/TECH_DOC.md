@@ -6743,11 +6743,34 @@ Enables the finance team to manage bank accounts, upload Excel tithe payment she
 Members can request a separate all-time pledge contribution PDF at `POST /tithes/me/pledge-statement/send`. It contains only CONFIRMED contributions from the caller's pledges, with campaign names, dates, amounts, and references; pending/declined contributions and regular giving are excluded. If there are no confirmed contributions, no email is sent and the response explains that there is nothing to export.
 
 **Giving Statement — not just a "Tithe Statement" (added 2026-09-01):** the emailed PDF is called "Giving Statement," not "Tithe Statement" — `TitheRecord` already holds every type of online/manual giving (Tithe, Offering, General Giving, a `GivingOption` like "Building Fund"), and calling the whole document "Tithe Statement" wrongly implied it covered only one type. `emailGivingStatement` also merges in the member's CONFIRMED `PledgeContribution`s for the same date range — pledge-designated gifts live in a separate table (see Finance Module's Pledge section) and were previously invisible on this statement entirely, understating a member's real total giving. Each line gets a `Type` column via one shared rule (also used by the frontend history list, see `discuva-member`'s `giving.tsx`):
-- A `PAYMENT_GATEWAY` `TitheRecord` with `givingOption` set → the option's name (e.g. "Building Fund").
-- A `PAYMENT_GATEWAY` `TitheRecord` with no `givingOption` → "General Giving".
-- A `MANUAL_PROOF` `TitheRecord` matched to a `TitheAccount`, or with a `bankName` on file → that account/bank name.
-- A `MANUAL_PROOF` `TitheRecord` with neither → "Tithe" (manual bank-proof reconciliation has always specifically meant tithes; `GivingOption` designation only ever applies to online checkout).
+- The uploaded bank account's name when the record came from a bank-statement upload (`batch.titheAccount`).
+- Otherwise the purpose the member chose (`givingOption` — set at online checkout, or carried over from a confirmed proof of payment).
+- Otherwise the sender's `bankName` (legacy manual deposits).
+- Otherwise "General Giving".
 - A `PledgeContribution` → "Pledge: {campaign name}".
+
+(Changed 2026-09-30: previously an unmatched `MANUAL_PROOF` row was always labelled "Tithe", so a confirmed proof the
+member had marked "Offering" showed as a tithe. The same rule is applied in SQL by the History summary and by the
+member app's history list.)
+
+**Member proof list filter:** `GET /tithes/proof` takes an optional `status` query — a comma list of `PENDING`,
+`CONFIRMED`, `DECLINED` (unknown values → 400). The member app asks for `PENDING,DECLINED` only: a confirmed proof is
+already a `TitheRecord` in the giving history, so listing it again would show the same gift twice. Declined proofs
+return `financeNote` so the app can show why.
+
+**Member giving summary — `GET /tithes/me/summary?year=YYYY`** (JwtAuthGuard; `year` optional, defaults to the current
+year, 2000–2100): `{ year, years, total, count, byType: [{ type, total, count }] }` for the member's History tab.
+`byType` covers `TitheRecord`s (labelled with the rule above) and CONFIRMED `PledgeContribution`s ("Pledge: {campaign}"),
+largest first; `years` lists every year with giving plus the current year, for the year picker. Computed with two
+aggregate queries (`GROUP BY` over `tithe_records` + pledge contributions, and a `UNION` of distinct years), both using
+the `(member_id, payment_date)` / pledge member indexes — no rows are loaded into memory.
+
+**Paid Via column (replaces "Bank"):** the sender's `bankName` for transfers; for online payments the provider from
+`TitheRecord.paymentChannel` (`paystack` → "Paystack", `flutterwave` → "Flutterwave", `kora` → "Korapay",
+`stripe` → "Stripe"), or "Online" if an older gateway row has none. Online pledge contributions carry their checkout
+reference (`giving_…`), so the provider is looked up from `giving_checkout_sessions` (public schema). Other pledge
+contributions show "—". The Amount header and total are right-aligned with the figures (the total no longer repeats
+the currency, which is in the header), and the table's columns fit within the page margins.
 
 `Offering` (`finance_offerings`) is deliberately excluded — it has no member relation (anonymous in-service collection), so it can't be attributed to an individual's personal statement. This is a different feature from the annual `POST /finance/me/giving-statement/send` (summary-only, previous calendar year, see Finance Module below) — that one already merged `TitheRecord` + `PledgeContribution` totals, just without line items or a member-triggered range.
 
@@ -7068,7 +7091,7 @@ Eight notification-timestamp columns track when each alert was last sent (to pre
 | `GET` | `/finance/me/pledges` | List the authenticated member's pledges |
 | `POST` | `/finance/me/pledges/:id/contributions` | Log a payment claim toward one of the member's own pledges (`amount`, `paymentDate`, optional `reference`) |
 | `GET` | `/finance/me/pledges/:id/contributions` | List the contribution claims (any status) for one of the member's own pledges |
-| `GET` | `/finance/me/giving-summary` | YTD tithe total, active pledges, last tithe — cross-type giving view |
+| `GET` | `/finance/me/giving-summary` | YTD total of all `TitheRecord` giving (tithes, offerings, options — `ytdTithes` is a legacy name), active pledges, last gift. No longer used by the member app's Pledges tab, which summarizes pledges only from `GET /finance/me/pledges` |
 | `POST` | `/finance/me/giving-statement/send` | Trigger annual giving statement email for the previous year (on-demand, always available) |
 
 **Pledge campaign discovery (`GET /finance/pledge-campaigns`):** Filters to `isActive = true AND endDate >= CURRENT_DATE` — a campaign that's lapsed or been deactivated is never pledge-able even if a member still has the ID. Not paginated (bounded, admin-controlled reference data, same category as departments/venues). This is distinct from `GET /admin/finance/pledges/campaigns`, which is admin-only and returns the full entity including `createdBy`.
@@ -9013,6 +9036,7 @@ outside the requested `?months=` window).
 | PATCH  | /admin/tithes/disputes/:id/approve                         | AdminGuard (FINANCE_WRITE)                                    | Approve a tithe dispute (creates TitheRecord)                                                                 |
 | PATCH  | /admin/tithes/disputes/:id/reject                          | AdminGuard (FINANCE_WRITE)                                    | Reject a tithe dispute                                                                                        |
 | GET    | /tithes/me                                                 | Any (JwtAuthGuard)                                            | Member's own tithe records (paginated)                                                                        |
+| GET    | /tithes/me/summary                                         | Any (JwtAuthGuard)                                            | The caller's giving for one year by type (`year` query, default current year): `{ year, years, total, count, byType }` |
 | POST   | /tithes/me/statement/send                                  | Any (JwtAuthGuard)                                            | Email a PDF Giving Statement to the caller's registered email. Optional query: `fromMonth` (YYYY-MM), `toMonth` (YYYY-MM), `givingOptionId` (UUID). Selecting an option includes matching TitheRecords only; omitting it includes all giving, including confirmed pledge contributions |
 | POST   | /tithes/me/pledge-statement/send                            | Any (JwtAuthGuard)                                            | Email a PDF statement of the caller's confirmed pledge contributions only; all-time, no date filter. Returns a message and recordCount; sends no email when there are no confirmed contributions |
 | POST   | /tithes/proof                                              | Any (JwtAuthGuard)                                            | Submit tithe payment proof (multipart, field: file, max 2 MB); body: titheAccountId, amount, paymentDate, reference?, givingOptionId? (what this payment was for; omit for General Giving) |

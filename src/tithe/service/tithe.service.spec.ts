@@ -1,6 +1,8 @@
+import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
 import ExcelJS from 'exceljs';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { In } from 'typeorm';
 import { getQueueToken } from '@nestjs/bull';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TitheService } from './tithe.service';
@@ -70,6 +72,7 @@ const mockBatchRepo = {
 };
 
 const mockRecordRepo = {
+  query: jest.fn(),
   find: jest.fn(),
   findAndCount: jest.fn(),
   create: jest.fn(),
@@ -97,6 +100,10 @@ const mockContributionRepo = {
 
 const mockGivingOptionRepo = {
   findOne: jest.fn(),
+};
+
+const mockCheckoutRepo = {
+  find: jest.fn().mockResolvedValue([]),
 };
 
 const mockMemberRepo = {
@@ -265,6 +272,10 @@ describe('TitheService', () => {
         {
           provide: getRepositoryToken(GivingOption),
           useValue: mockGivingOptionRepo,
+        },
+        {
+          provide: getRepositoryToken(GivingCheckoutSession),
+          useValue: mockCheckoutRepo,
         },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
@@ -1370,7 +1381,7 @@ describe('TitheService', () => {
             paymentDate: '2026-08-12',
             amount: 12500,
             type: 'Pledge: Building Fund',
-            bankName: null,
+            paidVia: null,
             reference: 'PLEDGE-REF-1',
           },
         ],
@@ -1482,6 +1493,189 @@ describe('TitheService', () => {
         }),
       );
       expect(result.recordCount).toBe(2);
+    });
+
+    it('shows the bank for transfers and the provider for online payments under "Paid Via"', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockRecordRepo.find.mockResolvedValue([
+        {
+          paymentDate: '2026-09-02',
+          amount: 500,
+          bankName: 'GTBank',
+          reference: 'TRF-1',
+          externalReference: null,
+          paymentChannel: null,
+          source: 'MANUAL_PROOF',
+          batch: null,
+          givingOption: null,
+        },
+        {
+          paymentDate: '2026-09-01',
+          amount: 500,
+          bankName: null,
+          reference: null,
+          externalReference: 'giving_abc',
+          paymentChannel: 'paystack',
+          source: 'PAYMENT_GATEWAY',
+          batch: null,
+          givingOption: { name: 'Offering' },
+        },
+        {
+          paymentDate: '2026-08-30',
+          amount: 100,
+          bankName: null,
+          reference: null,
+          externalReference: 'giving_old',
+          paymentChannel: null,
+          source: 'PAYMENT_GATEWAY',
+          batch: null,
+          givingOption: null,
+        },
+      ]);
+      mockContributionRepo.find.mockResolvedValue([
+        {
+          paymentDate: '2026-09-03',
+          amount: 1000,
+          reference: 'giving_pledge',
+          pledge: { campaign: { name: 'Roof' } },
+        },
+        {
+          paymentDate: '2026-08-01',
+          amount: 1000,
+          reference: 'BANK-REF',
+          pledge: { campaign: { name: 'Roof' } },
+        },
+      ]);
+      mockCheckoutRepo.find.mockResolvedValueOnce([
+        { id: 'giving_pledge', provider: 'flutterwave' },
+      ]);
+
+      await service.emailGivingStatement(mockUser);
+
+      const lines = mockPdfService.generateGivingStatement.mock.calls.at(-1)[1];
+      expect(lines.map((l: { paidVia: string | null }) => l.paidVia)).toEqual([
+        'Flutterwave',
+        'GTBank',
+        'Paystack',
+        'Online',
+        null,
+      ]);
+    });
+  });
+
+  describe('getMyProofs', () => {
+    beforeEach(() => mockProofRepo.findAndCount.mockResolvedValue([[], 0]));
+
+    it('returns every proof when no status is given', async () => {
+      await service.getMyProofs(mockUser, 1, 20);
+      expect(mockProofRepo.findAndCount.mock.calls[0][0].where).toEqual({
+        member: { id: mockUser.id },
+      });
+    });
+
+    it('limits to the requested statuses', async () => {
+      await service.getMyProofs(mockUser, 1, 20, [
+        TitheProofStatus.PENDING,
+        TitheProofStatus.DECLINED,
+      ]);
+      expect(mockProofRepo.findAndCount.mock.calls[0][0].where).toEqual({
+        member: { id: mockUser.id },
+        status: In([TitheProofStatus.PENDING, TitheProofStatus.DECLINED]),
+      });
+    });
+  });
+
+  describe('gift type labels', () => {
+    it('uses the uploaded account, then the chosen purpose, then the bank, else General Giving', async () => {
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      const base = {
+        amount: 500,
+        reference: null,
+        externalReference: null,
+        paymentChannel: null,
+        bankName: null,
+        batch: null,
+        givingOption: null,
+      };
+      mockRecordRepo.find.mockResolvedValue([
+        {
+          ...base,
+          paymentDate: '2026-09-05',
+          source: 'MANUAL_PROOF',
+          batch: { titheAccount: { accountName: 'Tithe Account' } },
+          givingOption: { name: 'Offering' },
+        },
+        {
+          ...base,
+          paymentDate: '2026-09-04',
+          source: 'MANUAL_PROOF',
+          givingOption: { name: 'Offering' },
+        },
+        {
+          ...base,
+          paymentDate: '2026-09-03',
+          source: 'MANUAL_PROOF',
+          bankName: 'GTBank',
+        },
+        { ...base, paymentDate: '2026-09-02', source: 'MANUAL_PROOF' },
+        { ...base, paymentDate: '2026-09-01', source: 'PAYMENT_GATEWAY' },
+      ]);
+      mockContributionRepo.find.mockResolvedValue([]);
+
+      await service.emailGivingStatement(mockUser);
+
+      const lines = mockPdfService.generateGivingStatement.mock.calls.at(-1)[1];
+      expect(lines.map((l: { type: string }) => l.type)).toEqual([
+        'Tithe Account',
+        'Offering',
+        'GTBank',
+        'General Giving',
+        'General Giving',
+      ]);
+    });
+  });
+
+  describe('getMyGivingSummary', () => {
+    it("totals a year's giving by type in the database, with the years to pick from", async () => {
+      mockRecordRepo.query
+        .mockResolvedValueOnce([
+          { type: 'Tithe', total: '500.00', count: 1 },
+          { type: 'Offering', total: 500, count: '1' },
+        ])
+        .mockResolvedValueOnce([{ year: 2025 }, { year: 2024 }]);
+
+      const summary = await service.getMyGivingSummary(mockUser, 2025);
+
+      const [sql, params] = mockRecordRepo.query.mock.calls[0];
+      expect(sql).toContain('GROUP BY type');
+      expect(sql).toContain('finance_pledge_contributions');
+      expect(params).toEqual([mockUser.id, '2025-01-01', '2025-12-31']);
+      expect(summary).toEqual({
+        year: 2025,
+        years: [new Date().getFullYear(), 2025, 2024].filter(
+          (y, i, all) => all.indexOf(y) === i,
+        ),
+        total: 1000,
+        count: 2,
+        byType: [
+          { type: 'Tithe', total: 500, count: 1 },
+          { type: 'Offering', total: 500, count: 1 },
+        ],
+      });
+      expect(mockRecordRepo.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('defaults to the current year and handles no giving', async () => {
+      mockRecordRepo.query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      const year = new Date().getFullYear();
+
+      await expect(service.getMyGivingSummary(mockUser)).resolves.toEqual({
+        year,
+        years: [year],
+        total: 0,
+        count: 0,
+        byType: [],
+      });
     });
   });
 });

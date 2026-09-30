@@ -7,7 +7,13 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import {
+  Between,
+  In,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 import { InjectQueue } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Cron } from '@nestjs/schedule';
@@ -64,6 +70,30 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { GivingCheckoutSession } from '../../giving-checkout/entity/giving-checkout-session.entity';
+
+export interface GivingSummaryView {
+  year: number;
+  years: number[];
+  total: number;
+  count: number;
+  byType: { type: string; total: number; count: number }[];
+}
+
+const GIVING_PROVIDER_LABELS: Record<string, string> = {
+  paystack: 'Paystack',
+  flutterwave: 'Flutterwave',
+  kora: 'Korapay',
+  stripe: 'Stripe',
+};
+
+function providerLabel(provider?: string | null): string | null {
+  if (!provider) return null;
+  return (
+    GIVING_PROVIDER_LABELS[provider.toLowerCase()] ??
+    provider.charAt(0).toUpperCase() + provider.slice(1)
+  );
+}
 
 const TITHE_PROOF_MAX_BYTES = 2 * 1024 * 1024;
 
@@ -119,6 +149,8 @@ export class TitheService {
     private readonly contributionRepo: Repository<PledgeContribution>,
     @InjectRepository(GivingOption)
     private readonly givingOptionRepo: Repository<GivingOption>,
+    @InjectRepository(GivingCheckoutSession)
+    private readonly checkoutRepo: Repository<GivingCheckoutSession>,
     @InjectQueue(TITHE_QUEUE)
     private readonly titheQueue: Queue,
     private readonly utilityService: UtilityService,
@@ -639,6 +671,62 @@ export class TitheService {
     });
   }
 
+  // Two aggregate queries (indexed on member_id/payment_date) rather than loading every gift.
+  async getMyGivingSummary(
+    user: MemberAuth,
+    year = new Date().getFullYear(),
+  ): Promise<GivingSummaryView> {
+    const from = `${year}-01-01`;
+    const to = `${year}-12-31`;
+    const [rows, yearRows] = await Promise.all([
+      this.recordRepo.query(
+        `SELECT type, SUM(amount)::float AS total, COUNT(*)::int AS count FROM (
+          SELECT COALESCE(
+              NULLIF(ta.account_name, ''), NULLIF(gopt.name, ''),
+              NULLIF(r.bank_name, ''), 'General Giving'
+            ) AS type, r.amount
+          FROM tithe_records r
+          LEFT JOIN tithe_upload_batches b ON b.id = r.batch_id
+          LEFT JOIN tithe_accounts ta ON ta.id = b.tithe_account_id
+          LEFT JOIN finance_giving_options gopt ON gopt.id = r.giving_option_id
+          WHERE r.member_id = $1 AND r.payment_date BETWEEN $2 AND $3
+          UNION ALL
+          SELECT 'Pledge: ' || c.name, pc.amount
+          FROM finance_pledge_contributions pc
+          JOIN finance_pledges p ON p.id = pc.pledge_id
+          JOIN finance_pledge_campaigns c ON c.id = p.campaign_id
+          WHERE p.member_id = $1 AND pc.status = '${PledgeContributionStatus.CONFIRMED}'
+            AND pc.payment_date BETWEEN $2 AND $3
+        ) gifts GROUP BY type ORDER BY total DESC, type`,
+        [user.id, from, to],
+      ),
+      this.recordRepo.query(
+        `SELECT EXTRACT(YEAR FROM payment_date)::int AS year FROM tithe_records WHERE member_id = $1
+         UNION
+         SELECT EXTRACT(YEAR FROM pc.payment_date)::int FROM finance_pledge_contributions pc
+           JOIN finance_pledges p ON p.id = pc.pledge_id
+         WHERE p.member_id = $1 AND pc.status = '${PledgeContributionStatus.CONFIRMED}'`,
+        [user.id],
+      ),
+    ]);
+    const byType = (rows as GivingSummaryView['byType']).map((r) => ({
+      type: r.type,
+      total: Number(r.total),
+      count: Number(r.count),
+    }));
+    const years = new Set<number>(
+      (yearRows as { year: number }[]).map((r) => Number(r.year)),
+    );
+    years.add(new Date().getFullYear());
+    return {
+      year,
+      years: [...years].sort((a, b) => b - a),
+      total: byType.reduce((sum, t) => sum + t.total, 0),
+      count: byType.reduce((sum, t) => sum + t.count, 0),
+      byType,
+    };
+  }
+
   async getMyTithes(
     user: MemberAuth,
     page = 1,
@@ -714,16 +802,13 @@ export class TitheService {
       paymentDate: r.paymentDate,
       amount: Number(r.amount),
       type: this.givingRecordTypeLabel(r),
-      bankName: r.bankName,
+      paidVia:
+        r.bankName ||
+        providerLabel(r.paymentChannel) ||
+        (r.source === TitheSource.PAYMENT_GATEWAY ? 'Online' : null),
       reference: r.reference ?? r.externalReference,
     }));
-    const contributionLines: GivingStatementLine[] = contributions.map((c) => ({
-      paymentDate: c.paymentDate,
-      amount: Number(c.amount),
-      type: `Pledge: ${c.pledge.campaign.name}`,
-      bankName: null,
-      reference: c.reference,
-    }));
+    const contributionLines = await this.pledgeStatementLines(contributions);
     const lines = [...recordLines, ...contributionLines].sort((a, b) =>
       b.paymentDate.localeCompare(a.paymentDate),
     );
@@ -785,13 +870,7 @@ export class TitheService {
       };
     }
 
-    const lines: GivingStatementLine[] = contributions.map((contribution) => ({
-      paymentDate: contribution.paymentDate,
-      amount: Number(contribution.amount),
-      type: `Pledge: ${contribution.pledge.campaign.name}`,
-      bankName: null,
-      reference: contribution.reference,
-    }));
+    const lines = await this.pledgeStatementLines(contributions);
     const pdfBuffer = await this.pdfService.generateGivingStatement(
       member,
       lines,
@@ -899,9 +978,13 @@ export class TitheService {
     user: MemberAuth,
     page = 1,
     limit = 20,
+    statuses?: TitheProofStatus[],
   ): Promise<PaginationResponseDto<TithePaymentProof>> {
     const [data, total] = await this.proofRepo.findAndCount({
-      where: { member: { id: user.id } },
+      where: {
+        member: { id: user.id },
+        ...(statuses?.length ? { status: In(statuses) } : {}),
+      },
       relations: ['titheAccount', 'givingOption'],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
@@ -1183,20 +1266,40 @@ export class TitheService {
     return givingOptionName ? `${period} for ${givingOptionName}` : period;
   }
 
-  // Same rule everywhere a TitheRecord's purpose needs a human label
-  // (Giving Statement, member history list): a bank/account match means a
-  // real manual deposit, so show it; an unmatched MANUAL_PROOF row is, and
-  // always was, specifically a tithe; a PAYMENT_GATEWAY row falls back to
-  // "General Giving" only when the member didn't pick a GivingOption.
+  // Online pledge payments carry their checkout reference; its session says which provider took it.
+  private async pledgeStatementLines(
+    contributions: PledgeContribution[],
+  ): Promise<GivingStatementLine[]> {
+    const checkoutIds = contributions
+      .map((c) => c.reference)
+      .filter((ref): ref is string => !!ref?.startsWith('giving_'));
+    const sessions = checkoutIds.length
+      ? await this.checkoutRepo.find({
+          where: { id: In(checkoutIds) },
+          select: { id: true, provider: true },
+        })
+      : [];
+    const providers = new Map(sessions.map((s) => [s.id, s.provider]));
+    return contributions.map((c) => ({
+      paymentDate: c.paymentDate,
+      amount: Number(c.amount),
+      type: `Pledge: ${c.pledge.campaign.name}`,
+      paidVia: c.reference?.startsWith('giving_')
+        ? (providerLabel(providers.get(c.reference)) ?? 'Online')
+        : null,
+      reference: c.reference,
+    }));
+  }
+
+  // One label rule for the statement, the History summary (SQL CASE in getMyGivingSummary) and the
+  // member app's history list: uploaded bank account → purpose the member chose → sender's bank → General Giving.
   private givingRecordTypeLabel(record: TitheRecord): string {
-    if (record.batch?.titheAccount?.accountName) {
-      return record.batch.titheAccount.accountName;
-    }
-    if (record.bankName) return record.bankName;
-    if (record.source === TitheSource.PAYMENT_GATEWAY) {
-      return record.givingOption?.name ?? 'General Giving';
-    }
-    return 'Tithe';
+    return (
+      record.batch?.titheAccount?.accountName ||
+      record.givingOption?.name ||
+      record.bankName ||
+      'General Giving'
+    );
   }
 
   private async notifyFinanceTeam(
