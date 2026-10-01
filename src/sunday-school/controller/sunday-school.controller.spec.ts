@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SundaySchoolController } from './sunday-school.controller';
 import { SundaySchoolService } from '../service/sunday-school.service';
+import { SundaySchoolSettingsService } from '../service/sunday-school-settings.service';
 import { SundaySchoolAttendanceStatus } from '../enums/sunday-school-attendance-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { AdminGuard } from '../../admin/guard/admin.guard';
@@ -35,6 +36,11 @@ const mockSundaySchoolService = {
   answerQuestion: jest.fn(),
 };
 
+const mockSettingsService = {
+  teacherPermissions: jest.fn(),
+  isOneClassPerMember: jest.fn(),
+};
+
 const mockUser = {
   id: 'worker-1',
   role: MemberRoleEnum.WORKER,
@@ -53,6 +59,7 @@ describe('SundaySchoolController', () => {
       controllers: [SundaySchoolController],
       providers: [
         { provide: SundaySchoolService, useValue: mockSundaySchoolService },
+        { provide: SundaySchoolSettingsService, useValue: mockSettingsService },
       ],
     })
       .overrideGuard(AdminGuard)
@@ -361,5 +368,19 @@ describe('SundaySchoolController', () => {
       'q-1',
       dto,
     );
+  });
+
+  it('tells teachers what the church lets them do', async () => {
+    mockSettingsService.teacherPermissions.mockResolvedValue({
+      teachersCanAddMembers: false,
+      teachersCanCheckInFirstTimers: true,
+    });
+    mockSettingsService.isOneClassPerMember.mockResolvedValue(true);
+
+    await expect(controller.getTeacherSettings()).resolves.toEqual({
+      teachersCanAddMembers: false,
+      teachersCanCheckInFirstTimers: true,
+      oneClassPerMember: true,
+    });
   });
 });

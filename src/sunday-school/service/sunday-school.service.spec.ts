@@ -1,3 +1,4 @@
+import { SundaySchoolSettingsService } from './sunday-school-settings.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -55,6 +56,7 @@ const mockSessionRepo = {
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
+  existsBy: jest.fn(),
   find: jest.fn(),
   count: jest.fn().mockResolvedValue(0),
 };
@@ -69,9 +71,22 @@ const mockAttendanceRepo = {
   },
 };
 
+const mockSettings = {
+  isOneClassPerMember: jest.fn(),
+  assertTeachersCanAddMembers: jest.fn(),
+  assertTeachersCanCheckInFirstTimers: jest.fn(),
+};
+
+const mockMemberEmailQb = {
+  select: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  getMany: jest.fn().mockResolvedValue([]),
+};
 const mockMemberRepo = {
   existsBy: jest.fn(),
   findOne: jest.fn(),
+  find: jest.fn().mockResolvedValue([]),
+  createQueryBuilder: jest.fn(() => mockMemberEmailQb),
 };
 
 const mockQuestionRepo = {
@@ -139,6 +154,11 @@ describe('SundaySchoolService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    mockSettings.isOneClassPerMember.mockResolvedValue(false);
+    mockSettings.assertTeachersCanAddMembers.mockResolvedValue(undefined);
+    mockSettings.assertTeachersCanCheckInFirstTimers.mockResolvedValue(
+      undefined,
+    );
 
     mockMembersCountQueryBuilder.innerJoin.mockReturnThis();
     mockMembersCountQueryBuilder.select.mockReturnThis();
@@ -196,6 +216,7 @@ describe('SundaySchoolService', () => {
           },
         },
         { provide: FollowUpService, useValue: mockFollowUpService },
+        { provide: SundaySchoolSettingsService, useValue: mockSettings },
       ],
     }).compile();
 
@@ -1098,7 +1119,7 @@ describe('SundaySchoolService', () => {
           lastname: 'Visitor',
           phone: '08000000000',
         }),
-        ssWorkerUser.id,
+        { memberCreatorId: ssWorkerUser.id },
       );
       expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1108,6 +1129,60 @@ describe('SundaySchoolService', () => {
         }),
       );
       expect(result.firstTimer).toEqual(firstTimer);
+    });
+
+    it('refuses teachers when the church has first-timer check-in set to admins only', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      mockSettings.assertTeachersCanCheckInFirstTimers.mockRejectedValue(
+        new ForbiddenException('admins only'),
+      );
+
+      await expect(
+        service.checkInFirstTimer(ssWorkerUser, 'session-1', {
+          firstname: 'Guest',
+          lastname: 'Visitor',
+          phone: '08000000000',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin check in a first-timer, recorded as created by the admin', async () => {
+      mockSessionRepo.existsBy.mockResolvedValue(true);
+      const firstTimer = { id: 'ft-2' };
+      mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn.mockResolvedValue(
+        firstTimer,
+      );
+      mockAttendanceRepo.create.mockImplementation((v) => v);
+      mockAttendanceRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.adminCheckInFirstTimer(
+        'session-1',
+        { firstname: 'Guest', lastname: 'Visitor', phone: '08000000000' },
+        'admin-1',
+      );
+
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).toHaveBeenCalledWith(expect.anything(), { adminCreatorId: 'admin-1' });
+      expect(
+        mockSettings.assertTeachersCanCheckInFirstTimers,
+      ).not.toHaveBeenCalled();
+      expect(result.firstTimer).toEqual(firstTimer);
+    });
+
+    it('admin check-in 404s for an unknown session', async () => {
+      mockSessionRepo.existsBy.mockResolvedValue(false);
+      await expect(
+        service.adminCheckInFirstTimer(
+          'nope',
+          { firstname: 'G', lastname: 'V', phone: '08000000000' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('rejects a teacher with no authorization for this class', async () => {
@@ -1537,6 +1612,254 @@ describe('SundaySchoolService', () => {
       await service.adminDeleteQuestion('q-1');
 
       expect(mockQuestionRepo.remove).toHaveBeenCalledWith(question);
+    });
+  });
+
+  describe('adminBulkAssignMembers', () => {
+    beforeEach(() => {
+      mockMemberEmailQb.select.mockReturnThis();
+      mockMemberEmailQb.where.mockReturnThis();
+      mockMemberEmailQb.getMany.mockResolvedValue([]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(mockMemberEmailQb);
+      mockMemberRepo.find.mockResolvedValue([]);
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1' });
+      mockMemberAssignRepo.create.mockImplementation((v) => v);
+      mockMemberAssignRepo.save.mockImplementation((v) => Promise.resolve(v));
+    });
+
+    it('adds new members by id and email, skipping those already in the class', async () => {
+      mockMemberRepo.find.mockResolvedValue([{ id: 'm1' }, { id: 'm2' }]);
+      mockMemberEmailQb.getMany.mockResolvedValue([
+        { id: 'm3', email: 'Ada@x.org' },
+      ]);
+      mockMemberAssignRepo.find.mockResolvedValue([{ member: { id: 'm2' } }]);
+
+      const result = await service.adminBulkAssignMembers(
+        'class-1',
+        ['m1', 'm2', 'm-missing'],
+        ['ada@x.org', ' NOBODY@x.org'],
+      );
+
+      expect(mockMemberEmailQb.where).toHaveBeenCalledWith(
+        'LOWER(m.email) IN (:...emails)',
+        { emails: ['ada@x.org', 'nobody@x.org'] },
+      );
+      const saved = mockMemberAssignRepo.save.mock.calls[0][0];
+      expect(saved.map((a: any) => a.member.id)).toEqual(['m1', 'm3']);
+      expect(result).toEqual({
+        added: 2,
+        alreadyInClass: 1,
+        notFound: ['m-missing', 'nobody@x.org'],
+        inAnotherClass: [],
+      });
+    });
+
+    it('saves nothing when everyone is already in the class', async () => {
+      mockMemberRepo.find.mockResolvedValue([{ id: 'm1' }]);
+      mockMemberAssignRepo.find.mockResolvedValue([{ member: { id: 'm1' } }]);
+
+      await expect(
+        service.adminBulkAssignMembers('class-1', ['m1']),
+      ).resolves.toEqual({
+        added: 0,
+        alreadyInClass: 1,
+        notFound: [],
+        inAnotherClass: [],
+      });
+      expect(mockMemberAssignRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty request and an unknown class', async () => {
+      await expect(
+        service.adminBulkAssignMembers('class-1', [], []),
+      ).rejects.toThrow(BadRequestException);
+      mockClassRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.adminBulkAssignMembers('nope', ['m1']),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('one class per member', () => {
+    beforeEach(() => {
+      mockSettings.isOneClassPerMember.mockResolvedValue(true);
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'class-1',
+        name: 'Seniors',
+      });
+      mockMemberRepo.existsBy.mockResolvedValue(true);
+      mockMemberAssignRepo.findOne.mockResolvedValue(null);
+      mockMemberAssignRepo.create.mockImplementation((v) => v);
+      mockMemberAssignRepo.save.mockImplementation((v) => Promise.resolve(v));
+    });
+
+    it('refuses to add a member who is already in another class', async () => {
+      mockMemberAssignRepo.find.mockResolvedValue([
+        {
+          member: { id: 'm1' },
+          sundaySchoolClass: { id: 'class-2', name: 'Juniors' },
+        },
+      ]);
+      await expect(service.adminAssignMember('class-1', 'm1')).rejects.toThrow(
+        'This member is already in Juniors.',
+      );
+      expect(mockMemberAssignRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows several classes when the setting is off', async () => {
+      mockSettings.isOneClassPerMember.mockResolvedValue(false);
+      await service.adminAssignMember('class-1', 'm1');
+      expect(mockMemberAssignRepo.save).toHaveBeenCalled();
+      expect(mockMemberAssignRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('skips and reports members in another class during a bulk add', async () => {
+      mockMemberEmailQb.select.mockReturnThis();
+      mockMemberEmailQb.where.mockReturnThis();
+      mockMemberRepo.createQueryBuilder.mockReturnValue(mockMemberEmailQb);
+      mockMemberRepo.find.mockResolvedValue([{ id: 'm1' }, { id: 'm2' }]);
+      mockMemberAssignRepo.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            member: { id: 'm2' },
+            sundaySchoolClass: { id: 'class-2', name: 'Juniors' },
+          },
+        ]);
+
+      const result = await service.adminBulkAssignMembers('class-1', [
+        'm1',
+        'm2',
+      ]);
+
+      expect(result).toMatchObject({
+        added: 1,
+        inAnotherClass: [{ memberId: 'm2', className: 'Juniors' }],
+      });
+      const saved = mockMemberAssignRepo.save.mock.calls[0][0];
+      expect(saved.map((a: any) => a.member.id)).toEqual(['m1']);
+    });
+  });
+
+  describe('teacher bulk add and candidates', () => {
+    it('lets the class teacher bulk add and list candidates for their class', async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(mockClass);
+      const bulk = jest
+        .spyOn(service, 'adminBulkAssignMembers')
+        .mockResolvedValue({
+          added: 1,
+          alreadyInClass: 0,
+          notFound: [],
+          inAnotherClass: [],
+        });
+      const candidates = jest
+        .spyOn(service, 'adminClassCandidates')
+        .mockResolvedValue({ data: [] } as never);
+
+      await service.bulkAssignMembers(otherWorkerUser, 'class-1', ['m1'], []);
+      await service.classCandidates(otherWorkerUser, 'class-1', 'ada', 2, 25);
+
+      expect(bulk).toHaveBeenCalledWith('class-1', ['m1'], []);
+      expect(candidates).toHaveBeenCalledWith('class-1', 'ada', 2, 25);
+    });
+
+    it('refuses teachers when the church has adding members set to admins only', async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      mockSettings.assertTeachersCanAddMembers.mockRejectedValue(
+        new ForbiddenException('admins only'),
+      );
+      const bulk = jest.spyOn(service, 'adminBulkAssignMembers');
+
+      await expect(
+        service.bulkAssignMembers(ssWorkerUser, 'class-1', ['m1']),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.classCandidates(ssWorkerUser, 'class-1'),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.assignMember(ssWorkerUser, 'class-1', { memberId: 'm1' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(bulk).not.toHaveBeenCalled();
+      expect(mockMemberAssignRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("refuses a worker who is neither Sunday School staff nor the class's teacher", async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(null);
+      const bulk = jest.spyOn(service, 'adminBulkAssignMembers');
+
+      await expect(
+        service.bulkAssignMembers(otherWorkerUser, 'class-2', ['m1']),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.classCandidates(otherWorkerUser, 'class-2'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(bulk).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('adminClassCandidates', () => {
+    const qb = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn(),
+    };
+
+    beforeEach(() => {
+      Object.values(qb).forEach((fn) => fn.mockReturnThis());
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb as never);
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1' });
+      qb.getManyAndCount.mockResolvedValue([
+        [
+          { id: 'm1', firstname: 'Ada', lastname: 'Obi', email: 'ada@x.org' },
+          {
+            id: 'm2',
+            firstname: 'Tunde',
+            lastname: 'Bello',
+            email: 'tunde@x.org',
+          },
+        ],
+        2,
+      ]);
+      mockMemberAssignRepo.find.mockResolvedValue([
+        {
+          member: { id: 'm2' },
+          sundaySchoolClass: { id: 'class-2', name: 'Juniors' },
+        },
+      ]);
+    });
+
+    it('leaves out members already in the class and searches by name or email', async () => {
+      await service.adminClassCandidates('class-1', ' Ada ');
+      expect(qb.where.mock.calls[0][0]).toContain('NOT EXISTS');
+      expect(qb.where.mock.calls[0][1]).toEqual({ classId: 'class-1' });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LOWER(m.email) LIKE :s'),
+        { s: '%ada%' },
+      );
+    });
+
+    it('marks members in other classes, blocking them only when the church allows one class', async () => {
+      let result = await service.adminClassCandidates('class-1');
+      expect(result.data[1]).toMatchObject({
+        otherClasses: ['Juniors'],
+        blocked: false,
+      });
+
+      mockSettings.isOneClassPerMember.mockResolvedValue(true);
+      result = await service.adminClassCandidates('class-1');
+      expect(result.data[0]).toMatchObject({
+        otherClasses: [],
+        blocked: false,
+      });
+      expect(result.data[1]).toMatchObject({ blocked: true });
+      expect(result.oneClassPerMember).toBe(true);
     });
   });
 });

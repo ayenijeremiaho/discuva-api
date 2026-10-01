@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { SundaySchoolService } from '../service/sunday-school.service';
+import { SundaySchoolSettingsService } from '../service/sunday-school-settings.service';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { Roles } from '../../auth/decorator/roles.decorator';
@@ -21,6 +22,7 @@ import {
   UpdateSundaySchoolClassDto,
 } from '../dto/create-sunday-school-class.dto';
 import { AssignSundaySchoolMemberDto } from '../dto/assign-sunday-school-member.dto';
+import { BulkAssignSundaySchoolMembersDto } from '../dto/bulk-assign-sunday-school-members.dto';
 import {
   CreateSundaySchoolSessionDto,
   OpenSelfMarkDto,
@@ -41,7 +43,22 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 @UseGuards(ModuleEnabledGuard)
 @Controller('sunday-school')
 export class SundaySchoolController {
-  constructor(private readonly sundaySchoolService: SundaySchoolService) {}
+  constructor(
+    private readonly sundaySchoolService: SundaySchoolService,
+    private readonly settingsService: SundaySchoolSettingsService,
+  ) {}
+
+  // What teachers may do from the member app, so it can hide what's switched off.
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('settings')
+  async getTeacherSettings() {
+    const [teachers, oneClassPerMember] = await Promise.all([
+      this.settingsService.teacherPermissions(),
+      this.settingsService.isOneClassPerMember(),
+    ]);
+    return { ...teachers, oneClassPerMember };
+  }
 
   @UseGuards(RolesGuard)
   @Roles(MemberRoleEnum.WORKER)
@@ -94,6 +111,41 @@ export class SundaySchoolController {
     @Body() dto: AssignSundaySchoolMemberDto,
   ) {
     return this.sundaySchoolService.assignMember(req.user, classId, dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Post('classes/:id/members/bulk')
+  async bulkAssignMembers(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) classId: string,
+    @Body() dto: BulkAssignSundaySchoolMembersDto,
+  ) {
+    return this.sundaySchoolService.bulkAssignMembers(
+      req.user,
+      classId,
+      dto.memberIds,
+      dto.emails,
+    );
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('classes/:id/candidates')
+  async getClassCandidates(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) classId: string,
+    @Query('search') search?: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 50,
+  ) {
+    return this.sundaySchoolService.classCandidates(
+      req.user,
+      classId,
+      search,
+      +page,
+      +limit,
+    );
   }
 
   @UseGuards(RolesGuard)

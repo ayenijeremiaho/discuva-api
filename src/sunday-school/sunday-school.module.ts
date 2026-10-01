@@ -1,3 +1,5 @@
+import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
+import { SundaySchoolSettingsService } from './service/sunday-school-settings.service';
 import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { SundaySchoolClass } from './entity/sunday-school-class.entity';
@@ -21,6 +23,7 @@ import { FollowUpModule } from '../follow-up/follow-up.module';
       SundaySchoolSession,
       SundaySchoolAttendance,
       SundaySchoolQuestion,
+      ChurchSetting,
     ]),
     MemberModule,
     UtilityModule,
@@ -28,7 +31,7 @@ import { FollowUpModule } from '../follow-up/follow-up.module';
     FollowUpModule,
   ],
   controllers: [SundaySchoolController, SundaySchoolAdminController],
-  providers: [SundaySchoolService],
+  providers: [SundaySchoolSettingsService, SundaySchoolService],
   exports: [SundaySchoolService],
 })
 export class SundaySchoolModule {}

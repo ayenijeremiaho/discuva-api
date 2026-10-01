@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Request,
   UseGuards,
@@ -15,16 +16,22 @@ import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { SundaySchoolService } from '../service/sunday-school.service';
+import { SundaySchoolSettingsService } from '../service/sunday-school-settings.service';
+import { UpdateSundaySchoolSettingsDto } from '../dto/sunday-school-settings.dto';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
 import {
   CreateSundaySchoolClassDto,
   UpdateSundaySchoolClassDto,
 } from '../dto/create-sunday-school-class.dto';
+import { BulkAssignSundaySchoolMembersDto } from '../dto/bulk-assign-sunday-school-members.dto';
 import { AssignSundaySchoolMemberDto } from '../dto/assign-sunday-school-member.dto';
 import {
   CreateSundaySchoolSessionDto,
   OpenSelfMarkDto,
 } from '../dto/create-sunday-school-session.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
+import { CheckInFirstTimerDto } from '../dto/checkin-first-timer.dto';
 import { AnswerQuestionDto } from '../dto/sunday-school-question.dto';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
@@ -33,7 +40,27 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 @UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('admin/sunday-school')
 export class SundaySchoolAdminController {
-  constructor(private readonly sundaySchoolService: SundaySchoolService) {}
+  constructor(
+    private readonly sundaySchoolService: SundaySchoolService,
+    private readonly settingsService: SundaySchoolSettingsService,
+  ) {}
+
+  // ─── Settings ──────────────────────────────────────────────────────────────
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_READ)
+  @Get('settings')
+  getSettings() {
+    return this.settingsService.getSettings();
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)
+  @Put('settings')
+  updateSettings(
+    @Body() dto: UpdateSundaySchoolSettingsDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.settingsService.update(dto, admin.member?.id);
+  }
 
   // ─── Classes ───────────────────────────────────────────────────────────────
 
@@ -81,6 +108,36 @@ export class SundaySchoolAdminController {
     @Body() dto: AssignSundaySchoolMemberDto,
   ) {
     return this.sundaySchoolService.adminAssignMember(classId, dto.memberId);
+  }
+
+  // Members not yet in this class, for the bulk-add picker.
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_READ)
+  @Get('classes/:id/candidates')
+  getClassCandidates(
+    @Param('id', ParseUUIDPipe) classId: string,
+    @Query('search') search?: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 50,
+  ) {
+    return this.sundaySchoolService.adminClassCandidates(
+      classId,
+      search,
+      +page || 1,
+      +limit || 50,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)
+  @Post('classes/:id/members/bulk')
+  bulkAssignMembers(
+    @Param('id', ParseUUIDPipe) classId: string,
+    @Body() dto: BulkAssignSundaySchoolMembersDto,
+  ) {
+    return this.sundaySchoolService.adminBulkAssignMembers(
+      classId,
+      dto.memberIds,
+      dto.emails,
+    );
   }
 
   @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)
@@ -135,6 +192,16 @@ export class SundaySchoolAdminController {
   @Get('sessions/:id/roster')
   getSessionRoster(@Param('id', ParseUUIDPipe) id: string) {
     return this.sundaySchoolService.adminGetSessionRoster(id);
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)
+  @Post('sessions/:id/checkin-first-timer')
+  checkInFirstTimer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CheckInFirstTimerDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.sundaySchoolService.adminCheckInFirstTimer(id, dto, admin.id);
   }
 
   @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)

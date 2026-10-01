@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, MoreThan, QueryFailedError, Repository } from 'typeorm';
+import { SundaySchoolSettingsService } from './sunday-school-settings.service';
+import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { SundaySchoolClass } from '../entity/sunday-school-class.entity';
 import { SundaySchoolMember } from '../entity/sunday-school-member.entity';
 import { SundaySchoolSession } from '../entity/sunday-school-session.entity';
@@ -84,7 +86,40 @@ export class SundaySchoolService {
     private readonly departmentAccessService: DepartmentAccessService,
     private readonly notificationDispatchService: NotificationDispatchService,
     private readonly followUpService: FollowUpService,
+    private readonly settings: SundaySchoolSettingsService,
   ) {}
+
+  // With "one class per member" on: memberId → name of another class they're already in.
+  private async otherClassOf(
+    memberIds: string[],
+    classId: string,
+  ): Promise<Map<string, string>> {
+    if (!memberIds.length || !(await this.settings.isOneClassPerMember())) {
+      return new Map();
+    }
+    const rows = await this.memberAssignRepo.find({
+      where: { member: { id: In(memberIds) } },
+      relations: ['member', 'sundaySchoolClass'],
+    });
+    const other = new Map<string, string>();
+    for (const row of rows) {
+      if (row.sundaySchoolClass.id !== classId && !other.has(row.member.id)) {
+        other.set(row.member.id, row.sundaySchoolClass.name);
+      }
+    }
+    return other;
+  }
+
+  private async assertNotInAnotherClass(memberId: string, classId: string) {
+    const className = (await this.otherClassOf([memberId], classId)).get(
+      memberId,
+    );
+    if (className) {
+      throw new BadRequestException(
+        `This member is already in ${className}. Your church allows one Sunday School class per member — remove them from ${className} first.`,
+      );
+    }
+  }
 
   async createClass(
     user: MemberAuth,
@@ -181,6 +216,7 @@ export class SundaySchoolService {
     dto: AssignSundaySchoolMemberDto,
   ): Promise<SundaySchoolMember> {
     await this.requireSundaySchoolAuth(user, classId);
+    await this.settings.assertTeachersCanAddMembers();
     this.logger.log(
       `Assigning member ${dto.memberId} to Sunday School class ${classId}`,
     );
@@ -198,11 +234,35 @@ export class SundaySchoolService {
       throw new BadRequestException(
         'This member is already assigned to this Sunday School class.',
       );
+    await this.assertNotInAnotherClass(dto.memberId, classId);
     const assignment = this.memberAssignRepo.create({
       member: { id: dto.memberId } as Member,
       sundaySchoolClass: cls,
     });
     return this.memberAssignRepo.save(assignment);
+  }
+
+  async bulkAssignMembers(
+    user: MemberAuth,
+    classId: string,
+    memberIds?: string[],
+    emails?: string[],
+  ) {
+    await this.requireSundaySchoolAuth(user, classId);
+    await this.settings.assertTeachersCanAddMembers();
+    return this.adminBulkAssignMembers(classId, memberIds, emails);
+  }
+
+  async classCandidates(
+    user: MemberAuth,
+    classId: string,
+    search?: string,
+    page = 1,
+    limit = 50,
+  ) {
+    await this.requireSundaySchoolAuth(user, classId);
+    await this.settings.assertTeachersCanAddMembers();
+    return this.adminClassCandidates(classId, search, page, limit);
   }
 
   async removeMember(
@@ -595,7 +655,29 @@ export class SundaySchoolService {
     });
     if (!session) throw new NotFoundException('Session not found');
     await this.requireSundaySchoolAuth(user, session.sundaySchoolClass.id);
+    await this.settings.assertTeachersCanCheckInFirstTimers();
+    return this.recordFirstTimerCheckIn(sessionId, dto, {
+      memberCreatorId: user.id,
+    });
+  }
 
+  async adminCheckInFirstTimer(
+    sessionId: string,
+    dto: CheckInFirstTimerDto,
+    adminId: string,
+  ): Promise<SundaySchoolAttendance> {
+    const exists = await this.sessionRepo.existsBy({ id: sessionId });
+    if (!exists) throw new NotFoundException('Session not found');
+    return this.recordFirstTimerCheckIn(sessionId, dto, {
+      adminCreatorId: adminId,
+    });
+  }
+
+  private async recordFirstTimerCheckIn(
+    sessionId: string,
+    dto: CheckInFirstTimerDto,
+    actor: { memberCreatorId?: string; adminCreatorId?: string },
+  ): Promise<SundaySchoolAttendance> {
     const firstTimer =
       await this.followUpService.createFirstTimerFromSundaySchoolCheckIn(
         {
@@ -604,7 +686,7 @@ export class SundaySchoolService {
           phone: dto.phone,
           notes: dto.notes,
         },
-        user.id,
+        actor,
       );
 
     const attendance = this.attendanceRepo.create({
@@ -958,11 +1040,158 @@ export class SundaySchoolService {
       throw new BadRequestException(
         'This member is already assigned to this Sunday School class.',
       );
+    await this.assertNotInAnotherClass(memberId, classId);
     const assignment = this.memberAssignRepo.create({
       member: { id: memberId } as Member,
       sundaySchoolClass: cls,
     });
     return this.memberAssignRepo.save(assignment);
+  }
+
+  // One request for many members: already-assigned ones are skipped, unknown emails reported back.
+  async adminBulkAssignMembers(
+    classId: string,
+    memberIds: string[] = [],
+    emails: string[] = [],
+  ): Promise<{
+    added: number;
+    alreadyInClass: number;
+    notFound: string[];
+    inAnotherClass: { memberId: string; className: string }[];
+  }> {
+    if (!memberIds.length && !emails.length) {
+      throw new BadRequestException('Choose at least one member to add.');
+    }
+    const cls = await this.classRepo.findOne({ where: { id: classId } });
+    if (!cls) throw new NotFoundException('Sunday School class not found');
+
+    const wantedEmails = [
+      ...new Set(emails.map((e) => e.trim().toLowerCase())),
+    ];
+    const [byId, byEmail] = await Promise.all([
+      memberIds.length
+        ? this.memberRepo.find({
+            where: { id: In([...new Set(memberIds)]) },
+            select: { id: true },
+          })
+        : Promise.resolve([] as Member[]),
+      wantedEmails.length
+        ? this.memberRepo
+            .createQueryBuilder('m')
+            .select(['m.id', 'm.email'])
+            .where('LOWER(m.email) IN (:...emails)', { emails: wantedEmails })
+            .getMany()
+        : Promise.resolve([] as Member[]),
+    ]);
+
+    const foundEmails = new Set(byEmail.map((m) => m.email.toLowerCase()));
+    const foundIds = new Set(byId.map((m) => m.id));
+    const notFound = [
+      ...memberIds.filter((id) => !foundIds.has(id)),
+      ...wantedEmails.filter((email) => !foundEmails.has(email)),
+    ];
+    const ids = [...new Set([...foundIds, ...byEmail.map((m) => m.id)])];
+    if (!ids.length) {
+      return { added: 0, alreadyInClass: 0, notFound, inAnotherClass: [] };
+    }
+
+    const existing = await this.memberAssignRepo.find({
+      where: { sundaySchoolClass: { id: classId }, member: { id: In(ids) } },
+      relations: ['member'],
+    });
+    const assigned = new Set(existing.map((a) => a.member.id));
+    const otherClass = await this.otherClassOf(
+      ids.filter((id) => !assigned.has(id)),
+      classId,
+    );
+    const toAdd = ids.filter((id) => !assigned.has(id) && !otherClass.has(id));
+    if (toAdd.length) {
+      await this.memberAssignRepo.save(
+        toAdd.map((id) =>
+          this.memberAssignRepo.create({
+            member: { id } as Member,
+            sundaySchoolClass: cls,
+          }),
+        ),
+      );
+    }
+    return {
+      added: toAdd.length,
+      alreadyInClass: assigned.size,
+      notFound,
+      inAnotherClass: [...otherClass].map(([memberId, className]) => ({
+        memberId,
+        className,
+      })),
+    };
+  }
+
+  // Members who can be added to a class: not already in it, active, optionally searched. Each row says which other
+  // class (if any) they're in, and whether that blocks them under "one class per member".
+  async adminClassCandidates(
+    classId: string,
+    search?: string,
+    page = 1,
+    limit = 50,
+  ) {
+    const cls = await this.classRepo.findOne({ where: { id: classId } });
+    if (!cls) throw new NotFoundException('Sunday School class not found');
+    const size = Math.min(Math.max(limit, 1), 100);
+    const qb = this.memberRepo
+      .createQueryBuilder('m')
+      .select(['m.id', 'm.firstname', 'm.lastname', 'm.email'])
+      .where(
+        `NOT EXISTS (SELECT 1 FROM sunday_school_members x WHERE x.member_id = m.id AND x.sunday_school_class_id = :classId)`,
+        { classId },
+      )
+      .andWhere('m.status != :inactive', {
+        inactive: MemberStatusEnum.INACTIVE,
+      })
+      .orderBy('m.firstname', 'ASC')
+      .addOrderBy('m.lastname', 'ASC')
+      .skip((page - 1) * size)
+      .take(size);
+    if (search?.trim()) {
+      qb.andWhere(
+        `(LOWER(m.firstname) LIKE :s OR LOWER(m.lastname) LIKE :s OR LOWER(CONCAT(m.firstname, ' ', m.lastname)) LIKE :s OR LOWER(m.email) LIKE :s)`,
+        { s: `%${search.trim().toLowerCase()}%` },
+      );
+    }
+    const [members, totalCount] = await qb.getManyAndCount();
+    const [oneClassPerMember, memberships] = await Promise.all([
+      this.settings.isOneClassPerMember(),
+      members.length
+        ? this.memberAssignRepo.find({
+            where: { member: { id: In(members.map((m) => m.id)) } },
+            relations: ['member', 'sundaySchoolClass'],
+          })
+        : Promise.resolve([] as SundaySchoolMember[]),
+    ]);
+    const classesOf = new Map<string, string[]>();
+    for (const row of memberships) {
+      classesOf.set(row.member.id, [
+        ...(classesOf.get(row.member.id) ?? []),
+        row.sundaySchoolClass.name,
+      ]);
+    }
+    return {
+      data: members.map((m) => {
+        const otherClasses = classesOf.get(m.id) ?? [];
+        return {
+          id: m.id,
+          firstname: m.firstname,
+          lastname: m.lastname,
+          email: m.email,
+          otherClasses,
+          blocked: oneClassPerMember && otherClasses.length > 0,
+        };
+      }),
+      page,
+      limit: size,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / size)),
+      oneClassPerMember,
+    };
   }
 
   async adminRemoveMember(classId: string, memberId: string): Promise<void> {
