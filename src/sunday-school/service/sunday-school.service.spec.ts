@@ -1,3 +1,4 @@
+import { SundaySchoolSettingsService } from './sunday-school-settings.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -7,7 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { QueryFailedError } from 'typeorm';
-import { SundaySchoolService } from './sunday-school.service';
+import { SundaySchoolService, seriesDates } from './sunday-school.service';
 import { SundaySchoolClass } from '../entity/sunday-school-class.entity';
 import { SundaySchoolMember } from '../entity/sunday-school-member.entity';
 import { SundaySchoolSession } from '../entity/sunday-school-session.entity';
@@ -55,6 +56,7 @@ const mockSessionRepo = {
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
+  existsBy: jest.fn(),
   find: jest.fn(),
   count: jest.fn().mockResolvedValue(0),
 };
@@ -69,9 +71,23 @@ const mockAttendanceRepo = {
   },
 };
 
+const mockSettings = {
+  isOneClassPerMember: jest.fn(),
+  assertTeachersCanAddMembers: jest.fn(),
+  assertTeachersCanCheckInFirstTimers: jest.fn(),
+  teacherMarkingDays: jest.fn(),
+};
+
+const mockMemberEmailQb = {
+  select: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  getMany: jest.fn().mockResolvedValue([]),
+};
 const mockMemberRepo = {
   existsBy: jest.fn(),
   findOne: jest.fn(),
+  find: jest.fn().mockResolvedValue([]),
+  createQueryBuilder: jest.fn(() => mockMemberEmailQb),
 };
 
 const mockQuestionRepo = {
@@ -139,6 +155,13 @@ describe('SundaySchoolService', () => {
 
   beforeEach(async () => {
     jest.resetAllMocks();
+    mockSettings.isOneClassPerMember.mockResolvedValue(false);
+    mockSettings.assertTeachersCanAddMembers.mockResolvedValue(undefined);
+    // Fixtures use fixed past dates; keep the teacher marking window wide unless a test narrows it.
+    mockSettings.teacherMarkingDays.mockResolvedValue(10000);
+    mockSettings.assertTeachersCanCheckInFirstTimers.mockResolvedValue(
+      undefined,
+    );
 
     mockMembersCountQueryBuilder.innerJoin.mockReturnThis();
     mockMembersCountQueryBuilder.select.mockReturnThis();
@@ -196,6 +219,7 @@ describe('SundaySchoolService', () => {
           },
         },
         { provide: FollowUpService, useValue: mockFollowUpService },
+        { provide: SundaySchoolSettingsService, useValue: mockSettings },
       ],
     }).compile();
 
@@ -632,6 +656,7 @@ describe('SundaySchoolService', () => {
     it('should set selfMarkClosesAt to now + closesInMinutes', async () => {
       const session = {
         id: 'session-1',
+        sessionDate: '2026-06-08',
         selfMarkClosesAt: null,
         sundaySchoolClass: mockClass,
       };
@@ -648,6 +673,53 @@ describe('SundaySchoolService', () => {
         before.getTime() + 29 * 60 * 1000,
       );
       expect(closesAtMs).toBeLessThanOrEqual(after.getTime() + 31 * 60 * 1000);
+      expect(result.selfMarkOpen).toBe(true);
+    });
+
+    it('pushes "check-in is open" to class members not yet marked', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        id: 'session-1',
+        sessionDate: '2026-06-08',
+        selfMarkClosesAt: null,
+        sundaySchoolClass: mockClass,
+      });
+      mockSessionRepo.save.mockImplementation((e) => Promise.resolve(e));
+      mockMemberAssignRepo.find.mockResolvedValue([
+        { member: { id: 'm1' } },
+        { member: { id: 'm2' } },
+      ]);
+      mockAttendanceRepo.find.mockResolvedValue([{ member: { id: 'm2' } }]);
+      mockNotificationDispatchService.notifyMember.mockResolvedValue(undefined);
+
+      await service.openSelfMark(ssWorkerUser, 'session-1', 30);
+
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: 'SUNDAY_SCHOOL_ATTENDANCE',
+          push: expect.objectContaining({
+            memberIds: ['m1'],
+            key: 'SUNDAY_SCHOOL_CHECKIN_OPEN',
+            vars: expect.objectContaining({ class_name: mockClass.name }),
+          }),
+        }),
+      );
+    });
+
+    it('still opens check-in when the push fails', async () => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        id: 'session-1',
+        sessionDate: '2026-06-08',
+        selfMarkClosesAt: null,
+        sundaySchoolClass: mockClass,
+      });
+      mockSessionRepo.save.mockImplementation((e) => Promise.resolve(e));
+      mockMemberAssignRepo.find.mockResolvedValue([{ member: { id: 'm1' } }]);
+      mockAttendanceRepo.find.mockResolvedValue([]);
+      mockNotificationDispatchService.notifyMember.mockRejectedValue(
+        new Error('push down'),
+      );
+
+      const result = await service.openSelfMark(ssWorkerUser, 'session-1', 30);
       expect(result.selfMarkOpen).toBe(true);
     });
   });
@@ -1098,7 +1170,7 @@ describe('SundaySchoolService', () => {
           lastname: 'Visitor',
           phone: '08000000000',
         }),
-        ssWorkerUser.id,
+        { memberCreatorId: ssWorkerUser.id },
       );
       expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1108,6 +1180,60 @@ describe('SundaySchoolService', () => {
         }),
       );
       expect(result.firstTimer).toEqual(firstTimer);
+    });
+
+    it('refuses teachers when the church has first-timer check-in set to admins only', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      mockSettings.assertTeachersCanCheckInFirstTimers.mockRejectedValue(
+        new ForbiddenException('admins only'),
+      );
+
+      await expect(
+        service.checkInFirstTimer(ssWorkerUser, 'session-1', {
+          firstname: 'Guest',
+          lastname: 'Visitor',
+          phone: '08000000000',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin check in a first-timer, recorded as created by the admin', async () => {
+      mockSessionRepo.existsBy.mockResolvedValue(true);
+      const firstTimer = { id: 'ft-2' };
+      mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn.mockResolvedValue(
+        firstTimer,
+      );
+      mockAttendanceRepo.create.mockImplementation((v) => v);
+      mockAttendanceRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.adminCheckInFirstTimer(
+        'session-1',
+        { firstname: 'Guest', lastname: 'Visitor', phone: '08000000000' },
+        'admin-1',
+      );
+
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).toHaveBeenCalledWith(expect.anything(), { adminCreatorId: 'admin-1' });
+      expect(
+        mockSettings.assertTeachersCanCheckInFirstTimers,
+      ).not.toHaveBeenCalled();
+      expect(result.firstTimer).toEqual(firstTimer);
+    });
+
+    it('admin check-in 404s for an unknown session', async () => {
+      mockSessionRepo.existsBy.mockResolvedValue(false);
+      await expect(
+        service.adminCheckInFirstTimer(
+          'nope',
+          { firstname: 'G', lastname: 'V', phone: '08000000000' },
+          'admin-1',
+        ),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('rejects a teacher with no authorization for this class', async () => {
@@ -1144,7 +1270,38 @@ describe('SundaySchoolService', () => {
 
       const result = await service.getMyClasses(memberUser);
 
-      expect(result).toEqual([mockClass, { id: 'class-2', name: 'Teens' }]);
+      expect(result).toEqual([
+        { ...mockClass, teacher: { id: 'ss-worker-1' } },
+        { id: 'class-2', name: 'Teens', teacher: null },
+      ]);
+    });
+
+    it("only shares the teacher's name with members", async () => {
+      mockMemberAssignRepo.find.mockResolvedValue([
+        {
+          sundaySchoolClass: {
+            id: 'class-1',
+            name: 'Juniors',
+            meetingDay: 'SUNDAY',
+            teacher: {
+              id: 't1',
+              firstname: 'Tunde',
+              lastname: 'Bello',
+              phoneNumber: '+2348000000000',
+              email: 't@x.org',
+            },
+          },
+        },
+      ]);
+
+      const [cls] = await service.getMyClasses(memberUser);
+
+      expect(cls.teacher).toEqual({
+        id: 't1',
+        firstname: 'Tunde',
+        lastname: 'Bello',
+      });
+      expect(cls.meetingDay).toBe('SUNDAY');
     });
   });
 
@@ -1537,6 +1694,612 @@ describe('SundaySchoolService', () => {
       await service.adminDeleteQuestion('q-1');
 
       expect(mockQuestionRepo.remove).toHaveBeenCalledWith(question);
+    });
+  });
+
+  describe('adminBulkAssignMembers', () => {
+    beforeEach(() => {
+      mockMemberEmailQb.select.mockReturnThis();
+      mockMemberEmailQb.where.mockReturnThis();
+      mockMemberEmailQb.getMany.mockResolvedValue([]);
+      mockMemberRepo.createQueryBuilder.mockReturnValue(mockMemberEmailQb);
+      mockMemberRepo.find.mockResolvedValue([]);
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1' });
+      mockMemberAssignRepo.create.mockImplementation((v) => v);
+      mockMemberAssignRepo.save.mockImplementation((v) => Promise.resolve(v));
+    });
+
+    it('adds new members by id and email, skipping those already in the class', async () => {
+      mockMemberRepo.find.mockResolvedValue([{ id: 'm1' }, { id: 'm2' }]);
+      mockMemberEmailQb.getMany.mockResolvedValue([
+        { id: 'm3', email: 'Ada@x.org' },
+      ]);
+      mockMemberAssignRepo.find.mockResolvedValue([{ member: { id: 'm2' } }]);
+
+      const result = await service.adminBulkAssignMembers(
+        'class-1',
+        ['m1', 'm2', 'm-missing'],
+        ['ada@x.org', ' NOBODY@x.org'],
+      );
+
+      expect(mockMemberEmailQb.where).toHaveBeenCalledWith(
+        'LOWER(m.email) IN (:...emails)',
+        { emails: ['ada@x.org', 'nobody@x.org'] },
+      );
+      const saved = mockMemberAssignRepo.save.mock.calls[0][0];
+      expect(saved.map((a: any) => a.member.id)).toEqual(['m1', 'm3']);
+      expect(result).toEqual({
+        added: 2,
+        alreadyInClass: 1,
+        notFound: ['m-missing', 'nobody@x.org'],
+        inAnotherClass: [],
+      });
+    });
+
+    it('saves nothing when everyone is already in the class', async () => {
+      mockMemberRepo.find.mockResolvedValue([{ id: 'm1' }]);
+      mockMemberAssignRepo.find.mockResolvedValue([{ member: { id: 'm1' } }]);
+
+      await expect(
+        service.adminBulkAssignMembers('class-1', ['m1']),
+      ).resolves.toEqual({
+        added: 0,
+        alreadyInClass: 1,
+        notFound: [],
+        inAnotherClass: [],
+      });
+      expect(mockMemberAssignRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects an empty request and an unknown class', async () => {
+      await expect(
+        service.adminBulkAssignMembers('class-1', [], []),
+      ).rejects.toThrow(BadRequestException);
+      mockClassRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.adminBulkAssignMembers('nope', ['m1']),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('one class per member', () => {
+    beforeEach(() => {
+      mockSettings.isOneClassPerMember.mockResolvedValue(true);
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'class-1',
+        name: 'Seniors',
+      });
+      mockMemberRepo.existsBy.mockResolvedValue(true);
+      mockMemberAssignRepo.findOne.mockResolvedValue(null);
+      mockMemberAssignRepo.create.mockImplementation((v) => v);
+      mockMemberAssignRepo.save.mockImplementation((v) => Promise.resolve(v));
+    });
+
+    it('refuses to add a member who is already in another class', async () => {
+      mockMemberAssignRepo.find.mockResolvedValue([
+        {
+          member: { id: 'm1' },
+          sundaySchoolClass: { id: 'class-2', name: 'Juniors' },
+        },
+      ]);
+      await expect(service.adminAssignMember('class-1', 'm1')).rejects.toThrow(
+        'This member is already in Juniors.',
+      );
+      expect(mockMemberAssignRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('allows several classes when the setting is off', async () => {
+      mockSettings.isOneClassPerMember.mockResolvedValue(false);
+      await service.adminAssignMember('class-1', 'm1');
+      expect(mockMemberAssignRepo.save).toHaveBeenCalled();
+      expect(mockMemberAssignRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('skips and reports members in another class during a bulk add', async () => {
+      mockMemberEmailQb.select.mockReturnThis();
+      mockMemberEmailQb.where.mockReturnThis();
+      mockMemberRepo.createQueryBuilder.mockReturnValue(mockMemberEmailQb);
+      mockMemberRepo.find.mockResolvedValue([{ id: 'm1' }, { id: 'm2' }]);
+      mockMemberAssignRepo.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            member: { id: 'm2' },
+            sundaySchoolClass: { id: 'class-2', name: 'Juniors' },
+          },
+        ]);
+
+      const result = await service.adminBulkAssignMembers('class-1', [
+        'm1',
+        'm2',
+      ]);
+
+      expect(result).toMatchObject({
+        added: 1,
+        inAnotherClass: [{ memberId: 'm2', className: 'Juniors' }],
+      });
+      const saved = mockMemberAssignRepo.save.mock.calls[0][0];
+      expect(saved.map((a: any) => a.member.id)).toEqual(['m1']);
+    });
+  });
+
+  describe('teacher bulk add and candidates', () => {
+    it('lets the class teacher bulk add and list candidates for their class', async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(mockClass);
+      const bulk = jest
+        .spyOn(service, 'adminBulkAssignMembers')
+        .mockResolvedValue({
+          added: 1,
+          alreadyInClass: 0,
+          notFound: [],
+          inAnotherClass: [],
+        });
+      const candidates = jest
+        .spyOn(service, 'adminClassCandidates')
+        .mockResolvedValue({ data: [] } as never);
+
+      await service.bulkAssignMembers(otherWorkerUser, 'class-1', ['m1'], []);
+      await service.classCandidates(otherWorkerUser, 'class-1', 'ada', 2, 25);
+
+      expect(bulk).toHaveBeenCalledWith('class-1', ['m1'], []);
+      expect(candidates).toHaveBeenCalledWith('class-1', 'ada', 2, 25);
+    });
+
+    it('refuses teachers when the church has adding members set to admins only', async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      mockSettings.assertTeachersCanAddMembers.mockRejectedValue(
+        new ForbiddenException('admins only'),
+      );
+      const bulk = jest.spyOn(service, 'adminBulkAssignMembers');
+
+      await expect(
+        service.bulkAssignMembers(ssWorkerUser, 'class-1', ['m1']),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.classCandidates(ssWorkerUser, 'class-1'),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.assignMember(ssWorkerUser, 'class-1', { memberId: 'm1' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(bulk).not.toHaveBeenCalled();
+      expect(mockMemberAssignRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("refuses a worker who is neither Sunday School staff nor the class's teacher", async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(null);
+      const bulk = jest.spyOn(service, 'adminBulkAssignMembers');
+
+      await expect(
+        service.bulkAssignMembers(otherWorkerUser, 'class-2', ['m1']),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.classCandidates(otherWorkerUser, 'class-2'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(bulk).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('adminClassCandidates', () => {
+    const qb = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn(),
+    };
+
+    beforeEach(() => {
+      Object.values(qb).forEach((fn) => fn.mockReturnThis());
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb as never);
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-1' });
+      qb.getManyAndCount.mockResolvedValue([
+        [
+          { id: 'm1', firstname: 'Ada', lastname: 'Obi', email: 'ada@x.org' },
+          {
+            id: 'm2',
+            firstname: 'Tunde',
+            lastname: 'Bello',
+            email: 'tunde@x.org',
+          },
+        ],
+        2,
+      ]);
+      mockMemberAssignRepo.find.mockResolvedValue([
+        {
+          member: { id: 'm2' },
+          sundaySchoolClass: { id: 'class-2', name: 'Juniors' },
+        },
+      ]);
+    });
+
+    it('leaves out members already in the class and searches by name or email', async () => {
+      await service.adminClassCandidates('class-1', ' Ada ');
+      expect(qb.where.mock.calls[0][0]).toContain('NOT EXISTS');
+      expect(qb.where.mock.calls[0][1]).toEqual({ classId: 'class-1' });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(m.firstname ILIKE :w0 OR m.lastname ILIKE :w0 OR m.email ILIKE :w0)',
+        { w0: '%Ada%' },
+      );
+    });
+
+    it('matches "first last" word by word and escapes LIKE wildcards', async () => {
+      await service.adminClassCandidates('class-1', 'ada  o_bi%');
+      expect(qb.andWhere).toHaveBeenCalledWith(expect.any(String), {
+        w0: '%ada%',
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(expect.any(String), {
+        w1: '%o\\_bi\\%%',
+      });
+    });
+
+    it('marks members in other classes, blocking them only when the church allows one class', async () => {
+      let result = await service.adminClassCandidates('class-1');
+      expect(result.data[1]).toMatchObject({
+        otherClasses: ['Juniors'],
+        blocked: false,
+      });
+
+      mockSettings.isOneClassPerMember.mockResolvedValue(true);
+      result = await service.adminClassCandidates('class-1');
+      expect(result.data[0]).toMatchObject({
+        otherClasses: [],
+        blocked: false,
+      });
+      expect(result.data[1]).toMatchObject({ blocked: true });
+      expect(result.oneClassPerMember).toBe(true);
+    });
+  });
+
+  // ─── Class details & assistants ──────────────────────────────────────────
+
+  describe('class details and assistants', () => {
+    it('saves age group, meeting day/time, room and assistants (dropping the teacher from assistants)', async () => {
+      mockClassRepo.create.mockImplementation((v) => v);
+      mockClassRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'class-9', ...v }),
+      );
+      mockMemberRepo.existsBy.mockResolvedValue(true);
+      mockMemberRepo.find.mockResolvedValue([{ id: 'a1' }]);
+
+      await service.adminCreateClass({
+        name: 'Teens',
+        teacherId: 't1',
+        ageGroup: '13–17',
+        meetingDay: 'SUNDAY' as never,
+        meetingTime: '09:00',
+        location: 'Room 2',
+        assistantIds: ['a1', 't1', 'a1'],
+      });
+
+      expect(mockMemberRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: expect.anything() } }),
+      );
+      expect(mockClassRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ageGroup: '13–17',
+          meetingDay: 'SUNDAY',
+          meetingTime: '09:00',
+          location: 'Room 2',
+          assistants: [{ id: 'a1' }],
+        }),
+      );
+    });
+
+    it('refuses an assistant who is not a member', async () => {
+      mockClassRepo.create.mockImplementation((v) => v);
+      mockMemberRepo.find.mockResolvedValue([]);
+
+      await expect(
+        service.adminCreateClass({ name: 'Teens', assistantIds: ['ghost'] }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockClassRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('clears details with null and leaves untouched ones alone', async () => {
+      const entity = {
+        id: 'class-1',
+        name: 'Teens',
+        teacher: null,
+        ageGroup: '13–17',
+        meetingDay: 'SUNDAY',
+        meetingTime: '09:00',
+        location: 'Room 2',
+      };
+      mockClassRepo.findOne.mockResolvedValue(entity);
+      mockClassRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      await service.adminUpdateClass('class-1', {
+        location: null,
+        meetingTime: null,
+      });
+
+      expect(mockClassRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ageGroup: '13–17',
+          meetingDay: 'SUNDAY',
+          meetingTime: null,
+          location: null,
+        }),
+      );
+    });
+
+    it('treats an assistant like the class teacher for authorization', async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(mockClass);
+
+      await expect(
+        service.assertCanManageClass(otherWorkerUser, 'class-1'),
+      ).resolves.toBeUndefined();
+      expect(mockClassRepo.findOne).toHaveBeenCalledWith({
+        where: [
+          { id: 'class-1', teacher: { id: otherWorkerUser.id } },
+          { id: 'class-1', assistants: { id: otherWorkerUser.id } },
+        ],
+      });
+    });
+
+    it('lists the classes a worker teaches or assists, with member counts', async () => {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockClass]),
+      };
+      (mockClassRepo as any).createQueryBuilder = jest.fn(() => qb);
+      mockMembersCountQueryBuilder.getRawMany.mockResolvedValue([
+        { classId: 'class-1', count: '4' },
+      ]);
+
+      const result = await service.getMyTeachingClasses(otherWorkerUser);
+
+      expect(qb.where).toHaveBeenCalledWith(expect.any(String), {
+        me: otherWorkerUser.id,
+      });
+      expect(result).toEqual([
+        expect.objectContaining({ id: 'class-1', membersCount: 4 }),
+      ]);
+    });
+  });
+
+  // ─── Session editing & series ────────────────────────────────────────────
+
+  describe('seriesDates', () => {
+    it('steps by whole weeks in UTC, inclusive of both ends', () => {
+      expect(seriesDates('2026-10-04', '2026-10-25', 1)).toEqual([
+        '2026-10-04',
+        '2026-10-11',
+        '2026-10-18',
+        '2026-10-25',
+      ]);
+      expect(seriesDates('2026-10-04', '2026-11-01', 2)).toEqual([
+        '2026-10-04',
+        '2026-10-18',
+        '2026-11-01',
+      ]);
+      expect(seriesDates('2026-10-04', '2026-10-01', 1)).toEqual([]);
+    });
+
+    it('crosses a daylight-saving change without drifting a day', () => {
+      expect(seriesDates('2026-03-22', '2026-04-05', 1)).toEqual([
+        '2026-03-22',
+        '2026-03-29',
+        '2026-04-05',
+      ]);
+    });
+  });
+
+  describe('adminCreateSessionSeries', () => {
+    const insertQb = {
+      insert: jest.fn().mockReturnThis(),
+      values: jest.fn().mockReturnThis(),
+      orIgnore: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({}),
+    };
+
+    beforeEach(() => {
+      Object.values(insertQb).forEach((fn) => fn.mockReturnThis());
+      insertQb.execute.mockResolvedValue({});
+      (mockSessionRepo as any).createQueryBuilder = jest.fn(() => insertQb);
+      mockClassRepo.findOne.mockResolvedValue(mockClass);
+    });
+
+    it('creates every week in range, skipping dates that already have a session', async () => {
+      mockSessionRepo.find.mockResolvedValue([
+        { id: 's1', sessionDate: '2026-10-11' },
+      ]);
+
+      const result = await service.adminCreateSessionSeries({
+        classId: 'class-1',
+        startDate: '2026-10-04',
+        endDate: '2026-10-25',
+        notes: 'Term 4',
+      });
+
+      expect(result).toEqual({
+        created: 3,
+        skipped: ['2026-10-11'],
+        dates: ['2026-10-04', '2026-10-18', '2026-10-25'],
+      });
+      expect(insertQb.values).toHaveBeenCalledWith([
+        expect.objectContaining({ sessionDate: '2026-10-04', notes: 'Term 4' }),
+        expect.objectContaining({ sessionDate: '2026-10-18' }),
+        expect.objectContaining({ sessionDate: '2026-10-25' }),
+      ]);
+      expect(insertQb.orIgnore).toHaveBeenCalled();
+    });
+
+    it('refuses an end date before the start, or more than 60 sessions', async () => {
+      await expect(
+        service.adminCreateSessionSeries({
+          classId: 'class-1',
+          startDate: '2026-10-04',
+          endDate: '2026-10-01',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.adminCreateSessionSeries({
+          classId: 'class-1',
+          startDate: '2026-01-04',
+          endDate: '2028-01-04',
+        }),
+      ).rejects.toThrow(/at most 60/);
+      expect(insertQb.execute).not.toHaveBeenCalled();
+    });
+
+    it('teachers need rights to the class', async () => {
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(false);
+      mockClassRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.createSessionSeries(otherWorkerUser, {
+          classId: 'class-2',
+          startDate: '2026-10-04',
+          endDate: '2026-10-25',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('adminUpdateSession', () => {
+    it('moves the date and edits notes/link, keeping the session (and its attendance)', async () => {
+      const session = {
+        id: 'session-1',
+        sessionDate: '2026-10-04',
+        notes: 'old',
+        documentUrl: 'https://old.example',
+        selfMarkClosesAt: null,
+        sundaySchoolClass: mockClass,
+      };
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce(session)
+        .mockResolvedValueOnce(null);
+      mockSessionRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.adminUpdateSession('session-1', {
+        sessionDate: '2026-10-05',
+        notes: '',
+        documentUrl: 'https://new.example',
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'session-1',
+          sessionDate: '2026-10-05',
+          notes: null,
+          documentUrl: 'https://new.example',
+        }),
+      );
+      expect(mockSessionRepo.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses to move onto a date the class already has a session on', async () => {
+      mockSessionRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'session-1',
+          sessionDate: '2026-10-04',
+          sundaySchoolClass: mockClass,
+        })
+        .mockResolvedValueOnce({ id: 'session-2' });
+
+      await expect(
+        service.adminUpdateSession('session-1', { sessionDate: '2026-10-11' }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('404s for an unknown session', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.adminUpdateSession('nope', { notes: 'x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  // ─── Teacher marking window ──────────────────────────────────────────────
+
+  describe('teacher marking window', () => {
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(new Date('2026-10-14T12:00:00Z'));
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      mockSettings.teacherMarkingDays.mockResolvedValue(2);
+    });
+    afterEach(() => jest.useRealTimers());
+
+    const sessionOn = (sessionDate: string) => ({
+      id: 'session-1',
+      sessionDate,
+      selfMarkClosesAt: null,
+      sundaySchoolClass: mockClass,
+    });
+
+    it('lets teachers mark up to N days after the session', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(sessionOn('2026-10-12'));
+      mockAttendanceRepo.manager = {
+        transaction: jest.fn().mockResolvedValue([]),
+      } as never;
+
+      await expect(
+        service.bulkMarkAttendance(ssWorkerUser, 'session-1', {
+          attendances: [{ memberId: 'm1', status: 'PRESENT' as never }],
+        }),
+      ).resolves.toEqual([]);
+    });
+
+    it('closes marking, check-in and first-timer check-in for teachers after that', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(sessionOn('2026-10-11'));
+
+      await expect(
+        service.bulkMarkAttendance(ssWorkerUser, 'session-1', {
+          attendances: [{ memberId: 'm1', status: 'PRESENT' as never }],
+        }),
+      ).rejects.toThrow(/closed on 2026-10-13/);
+      await expect(
+        service.openSelfMark(ssWorkerUser, 'session-1', 30),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.checkInFirstTimer(ssWorkerUser, 'session-1', {
+          firstname: 'G',
+          lastname: 'V',
+          phone: '08000000000',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
+      expect(
+        mockFollowUpService.createFirstTimerFromSundaySchoolCheckIn,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('tells the roster whether teachers can still mark', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(sessionOn('2026-10-11'));
+      mockMemberAssignRepo.find.mockResolvedValue([]);
+      mockAttendanceRepo.find.mockResolvedValue([]);
+
+      const roster = await service.getSessionRoster(ssWorkerUser, 'session-1');
+
+      expect(roster).toEqual(
+        expect.objectContaining({
+          teacherMarkingOpen: false,
+          teacherMarkingClosesOn: '2026-10-13',
+        }),
+      );
+    });
+
+    it('does not limit admins', async () => {
+      mockSessionRepo.findOne.mockResolvedValue(sessionOn('2026-01-04'));
+      mockSessionRepo.save.mockImplementation((v) => Promise.resolve(v));
+      mockMemberAssignRepo.find.mockResolvedValue([]);
+      mockAttendanceRepo.find.mockResolvedValue([]);
+
+      await expect(service.adminOpenSession('session-1', 30)).resolves.toEqual(
+        expect.objectContaining({ selfMarkOpen: true }),
+      );
+      expect(mockSettings.teacherMarkingDays).not.toHaveBeenCalled();
     });
   });
 });

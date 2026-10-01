@@ -94,6 +94,11 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Sent when a student asks a Sunday School question and when a teacher answers it.',
     },
+    [EmailCategory.SUNDAY_SCHOOL_ATTENDANCE]: {
+      label: 'Sunday School Attendance',
+      description:
+        'Push to class members when check-in opens for their session, and a weekly note to teachers about members who keep missing class.',
+    },
     [EmailCategory.DEPARTMENT_GOAL_ACTIVITY]: {
       label: 'Department Goal Approval & Comments',
       description:

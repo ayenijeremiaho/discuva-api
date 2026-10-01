@@ -11,6 +11,8 @@ export enum PushNotificationKey {
   SUNDAY_SCHOOL_QUESTION_ASKED = 'SUNDAY_SCHOOL_QUESTION_ASKED',
   SUNDAY_SCHOOL_QUESTION_UNASSIGNED = 'SUNDAY_SCHOOL_QUESTION_UNASSIGNED',
   SUNDAY_SCHOOL_QUESTION_ANSWERED = 'SUNDAY_SCHOOL_QUESTION_ANSWERED',
+  SUNDAY_SCHOOL_CHECKIN_OPEN = 'SUNDAY_SCHOOL_CHECKIN_OPEN',
+  SUNDAY_SCHOOL_ABSENTEES = 'SUNDAY_SCHOOL_ABSENTEES',
   PASTOR_FEEDBACK_REMINDER = 'PASTOR_FEEDBACK_REMINDER',
   PASTOR_FEEDBACK_RESPONSE = 'PASTOR_FEEDBACK_RESPONSE',
   SERVICE_SLOT_ASSIGNED = 'SERVICE_SLOT_ASSIGNED',
@@ -129,6 +131,26 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: 'Your question in {{class_name}} has been answered.',
     url: '/sunday-school',
     placeholders: { class_name: 'Youth Class' },
+  },
+  [PushNotificationKey.SUNDAY_SCHOOL_CHECKIN_OPEN]: {
+    category: EmailCategory.SUNDAY_SCHOOL_ATTENDANCE,
+    label: 'Sunday School check-in open',
+    description:
+      'Sent to members of a class when check-in opens for their session.',
+    title: 'Check-in is open',
+    body: 'Check-in for {{class_name}} is open until {{closes_at}}. Tap to mark yourself present.',
+    url: '/sunday-school',
+    placeholders: { class_name: 'Youth Class', closes_at: '10:30' },
+  },
+  [PushNotificationKey.SUNDAY_SCHOOL_ABSENTEES]: {
+    category: EmailCategory.SUNDAY_SCHOOL_ATTENDANCE,
+    label: 'Sunday School members missing class',
+    description:
+      "Weekly note to a class's teacher and assistants listing how many members have missed several sessions in a row.",
+    title: 'Members missing {{class_name}}',
+    body: '{{count}} member(s) have missed {{misses}}+ sessions in a row. Tap to see who and reach out.',
+    url: '/sunday-school',
+    placeholders: { class_name: 'Youth Class', count: '3', misses: '3' },
   },
   [PushNotificationKey.PASTOR_FEEDBACK_REMINDER]: {
     category: EmailCategory.PASTOR_FEEDBACK,

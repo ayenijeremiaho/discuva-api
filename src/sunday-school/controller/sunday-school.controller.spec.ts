@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { SundaySchoolController } from './sunday-school.controller';
 import { SundaySchoolService } from '../service/sunday-school.service';
+import { SundaySchoolSettingsService } from '../service/sunday-school-settings.service';
+import { SundaySchoolReportService } from '../service/sunday-school-report.service';
 import { SundaySchoolAttendanceStatus } from '../enums/sunday-school-attendance-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { AdminGuard } from '../../admin/guard/admin.guard';
@@ -33,6 +35,17 @@ const mockSundaySchoolService = {
   getMyQuestions: jest.fn(),
   getAllQuestions: jest.fn(),
   answerQuestion: jest.fn(),
+  assertCanManageClass: jest.fn(),
+  getMyTeachingClasses: jest.fn(),
+  createSessionSeries: jest.fn(),
+  updateSession: jest.fn(),
+};
+
+const mockReportService = { absentees: jest.fn() };
+
+const mockSettingsService = {
+  teacherPermissions: jest.fn(),
+  isOneClassPerMember: jest.fn(),
 };
 
 const mockUser = {
@@ -53,6 +66,8 @@ describe('SundaySchoolController', () => {
       controllers: [SundaySchoolController],
       providers: [
         { provide: SundaySchoolService, useValue: mockSundaySchoolService },
+        { provide: SundaySchoolSettingsService, useValue: mockSettingsService },
+        { provide: SundaySchoolReportService, useValue: mockReportService },
       ],
     })
       .overrideGuard(AdminGuard)
@@ -360,6 +375,67 @@ describe('SundaySchoolController', () => {
       mockUser,
       'q-1',
       dto,
+    );
+  });
+
+  it('tells teachers what the church lets them do', async () => {
+    mockSettingsService.teacherPermissions.mockResolvedValue({
+      teachersCanAddMembers: false,
+      teachersCanCheckInFirstTimers: true,
+    });
+    mockSettingsService.isOneClassPerMember.mockResolvedValue(true);
+
+    await expect(controller.getTeacherSettings()).resolves.toEqual({
+      teachersCanAddMembers: false,
+      teachersCanCheckInFirstTimers: true,
+      oneClassPerMember: true,
+    });
+  });
+
+  it('absentees: checks the worker can manage the class before listing', async () => {
+    mockSundaySchoolService.assertCanManageClass.mockResolvedValue(undefined);
+    mockReportService.absentees.mockResolvedValue([]);
+
+    await controller.getClassAbsentees(mockReq, 'class-1', { misses: 4 });
+
+    expect(mockSundaySchoolService.assertCanManageClass).toHaveBeenCalledWith(
+      mockUser,
+      'class-1',
+    );
+    expect(mockReportService.absentees).toHaveBeenCalledWith('class-1', 4);
+  });
+
+  it('absentees: refused workers never reach the report', async () => {
+    mockSundaySchoolService.assertCanManageClass.mockRejectedValue(
+      new Error('forbidden'),
+    );
+    await expect(
+      controller.getClassAbsentees(mockReq, 'class-1', {}),
+    ).rejects.toThrow('forbidden');
+    expect(mockReportService.absentees).not.toHaveBeenCalled();
+  });
+
+  it('series, session edit and my-teaching pass the worker through', async () => {
+    const series = {
+      classId: 'c1',
+      startDate: '2026-10-04',
+      endDate: '2026-10-25',
+    };
+    await controller.createSessionSeries(mockReq, series);
+    await controller.updateSession(mockReq, 's1', { notes: 'x' });
+    await controller.getMyTeachingClasses(mockReq);
+
+    expect(mockSundaySchoolService.createSessionSeries).toHaveBeenCalledWith(
+      mockUser,
+      series,
+    );
+    expect(mockSundaySchoolService.updateSession).toHaveBeenCalledWith(
+      mockUser,
+      's1',
+      { notes: 'x' },
+    );
+    expect(mockSundaySchoolService.getMyTeachingClasses).toHaveBeenCalledWith(
+      mockUser,
     );
   });
 });

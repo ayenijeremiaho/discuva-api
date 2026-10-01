@@ -193,14 +193,14 @@ export class FollowUpService {
   // reasoning as createFirstTimerFromPublicForm forcing ONLINE.
   async createFirstTimerFromSundaySchoolCheckIn(
     dto: CreateFirstTimerDto,
-    memberId: string,
+    actor: { memberCreatorId?: string; adminCreatorId?: string },
   ): Promise<FirstTimer> {
     const created = await this.doCreateFirstTimer(
       { ...dto, source: FirstTimerSourceEnum.SUNDAY_SCHOOL },
-      { memberCreatorId: memberId },
+      actor,
     );
     this.logger.log(
-      `First-timer ${created.id} recorded via Sunday School check-in by ${memberId}`,
+      `First-timer ${created.id} recorded via Sunday School check-in by ${actor.memberCreatorId ?? `admin ${actor.adminCreatorId}`}`,
     );
     return created;
   }

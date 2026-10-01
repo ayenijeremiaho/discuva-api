@@ -1,4 +1,10 @@
+import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
+import { SundaySchoolSettingsService } from './service/sunday-school-settings.service';
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Tenant } from '../tenant/entity/tenant.entity';
+import { SundaySchoolReportService } from './service/sunday-school-report.service';
+import { SundaySchoolAbsenteeScheduler } from './scheduler/sunday-school-absentee.scheduler';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { SundaySchoolClass } from './entity/sunday-school-class.entity';
 import { SundaySchoolMember } from './entity/sunday-school-member.entity';
@@ -21,14 +27,21 @@ import { FollowUpModule } from '../follow-up/follow-up.module';
       SundaySchoolSession,
       SundaySchoolAttendance,
       SundaySchoolQuestion,
+      ChurchSetting,
     ]),
+    TypeOrmModule.forFeature([Tenant]),
     MemberModule,
     UtilityModule,
     DepartmentModule,
     FollowUpModule,
   ],
   controllers: [SundaySchoolController, SundaySchoolAdminController],
-  providers: [SundaySchoolService],
+  providers: [
+    SundaySchoolSettingsService,
+    SundaySchoolService,
+    SundaySchoolReportService,
+    SundaySchoolAbsenteeScheduler,
+  ],
   exports: [SundaySchoolService],
 })
 export class SundaySchoolModule {}
