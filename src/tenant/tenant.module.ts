@@ -189,6 +189,7 @@ export class TenantModule implements NestModule {
         { path: '/', method: RequestMethod.GET },
         { path: 'docs', method: RequestMethod.GET },
         { path: 'health', method: RequestMethod.GET },
+        { path: 'health/deep', method: RequestMethod.GET },
       )
       .forRoutes('*');
   }

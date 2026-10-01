@@ -65,10 +65,28 @@ describe('AppController', () => {
   });
 
   describe('health', () => {
-    it('returns ok when db and redis are healthy', async () => {
+    beforeEach(() => jest.clearAllMocks());
+
+    it("checks Redis but never the database, so Fly's 30-second check can't keep it awake", async () => {
       const result = await appController.health();
       expect(result.status).toBe('ok');
       expect(typeof result.uptime).toBe('number');
+      expect(mockCacheService.ping).toHaveBeenCalled();
+      expect(mockDataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('reports unhealthy when Redis is unreachable', async () => {
+      mockCacheService.ping.mockRejectedValueOnce(new Error('down'));
+      await expect(appController.health()).rejects.toThrow('redis');
+    });
+
+    it('the deep check includes the database', async () => {
+      await expect(appController.deepHealth()).resolves.toMatchObject({
+        status: 'ok',
+      });
+      expect(mockDataSource.query).toHaveBeenCalledWith('SELECT 1');
+      mockDataSource.query.mockRejectedValueOnce(new Error('down'));
+      await expect(appController.deepHealth()).rejects.toThrow('database');
     });
   });
 });
