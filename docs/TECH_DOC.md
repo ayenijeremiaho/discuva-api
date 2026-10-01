@@ -776,6 +776,11 @@ A permanent Sunday School class. Members are assigned indefinitely (no graduatio
 | name        | string         |                                                   |
 | description | string         | Optional                                          |
 | teacher     | Member \| null | ManyToOne, nullable — the appointed class teacher |
+| assistants  | Member[]       | ManyToMany via `sunday_school_class_assistants` (class id, member id; both cascade). Up to 10. Same rights as the teacher for that class |
+| ageGroup    | string \| null | Free text, e.g. "Ages 6–9" (≤60 chars) |
+| meetingDay  | `MeetingDayEnum` \| null | `SUNDAY`…`SATURDAY` (varchar) |
+| meetingTime | string \| null | `HH:mm`, church local time |
+| location    | string \| null | Room or place (≤120 chars) |
 
 **Delete guard (class):** Blocked if any members are assigned or any sessions have been recorded. Remove all members and sessions before deleting.
 
@@ -6482,6 +6487,7 @@ dedicated host).
 | `CLASS_SESSION_REMINDER` | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` |
 | `FORM_SUBMISSION` | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` |
 | `SUNDAY_SCHOOL_QA` | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` |
+| `SUNDAY_SCHOOL_ATTENDANCE` | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` (push-only: check-in open, weekly absentees) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -6702,6 +6708,56 @@ notifies the asking member back the same way (email + push). Both legs go throug
 `NotificationDispatchService.notifyMember()` — the shared category-gated dispatcher — not the older, ungated
 `PushNotificationService.dispatchToMemberIds`/`sendEmailWithTemplate` pair some pre-existing modules (e.g.
 `PastorFeedbackService`) still call directly.
+
+**Class details & assistants (added 2026-10-01):** create/update (admin or worker) accept `ageGroup`, `meetingDay`,
+`meetingTime`, `location` (send `null` to clear) and `assistantIds: uuid[]` (replaces the list; the teacher is dropped
+from it if included; unknown ids → 404). `requireSundaySchoolAuth`'s class-teacher fallback now also passes for an
+assistant. `GET /sunday-school/my-teaching` lists the classes a worker teaches or assists (with `membersCount`), so the
+member app can show a Teach view to teachers outside the Sunday School department.
+
+**Editing and recurring sessions (added 2026-10-01):** `PATCH .../sessions/:id` changes `sessionDate`, `notes`,
+`documentUrl` (empty string/null clears) and keeps the session's attendance; moving onto a date the class already has
+→ 409. `POST .../sessions/series` (`{ classId, startDate, endDate, everyWeeks?: 1–4, notes? }`) creates a session every
+N weeks from start to end inclusive (UTC date stepping, so DST never shifts a day), skipping dates that already have a
+session; at most 60 per call. Returns `{ created, skipped: date[], dates: date[] }`.
+
+**Reports (`SundaySchoolReportService`, added 2026-10-01):** `GET /admin/sunday-school/reports/attendance?from&to&classId`
+— default range is the last 12 weeks; `to` is capped at today (church timezone), so future sessions never count.
+Returns `{ from, to, summary, byClass, bySession, members? }`:
+- `bySession`: `enrolled` (current members who had joined by that date), `present`/`absent`/`excused`, `unmarked`
+  (enrolled − marked), `firstTimers`, `rate`.
+- `byClass`: `enrolled` (current), `sessions`, `averagePresent`, `firstTimers`, `rate`.
+- `members` (only with `classId`): per current member — `sessionsHeld` (since they joined), counts, `rate`, `lastPresent`.
+- `rate` everywhere is present ÷ (expected − excused) as a percentage with one decimal, or `null` when nobody was expected.
+  Members who have since been removed from a class aren't counted as expected (attendance is measured against current membership).
+`GET .../reports/attendance/export` downloads the same range as an `.xlsx` with Classes, Sessions and Members sheets
+(members across every class in range).
+
+**Absentees ("missing lately"):** a member is listed when their most recent N sessions in a row (only sessions since they
+joined, up to the last 10, none in the future) were missed — `ABSENT` or never marked; `EXCUSED` counts as attended.
+Inactive members are skipped. `misses` defaults to 3 (2–10). Admin: `GET /admin/sunday-school/reports/absentees?classId&misses`;
+teacher/assistant: `GET /sunday-school/classes/:id/absentees?misses`. Rows: `{ classId, className, memberId, firstname,
+lastname, email, phoneNumber, missedInARow, lastAttended }`, longest streak first.
+
+**Indexes for these queries:** reports and absentees use the existing `sunday_school_sessions(session_date)`,
+`(sunday_school_class_id, session_date)` unique, `sunday_school_attendances(session_id)` and
+`sunday_school_members(sunday_school_class_id)` indexes; assistants have a composite PK plus `member_id` index. The
+candidates search ILIKEs `firstname`/`lastname`/`email` word by word so each branch uses the members trigram indexes, and
+bulk add by email uses `IDX_members_email_lower` (`LOWER(email)`, migration `1799737200000-AddMembersLowerEmailIndex`).
+
+**Teacher marking window (added 2026-10-01):** teachers (worker routes) can mark attendance, open check-in and check in
+first-timers for a session only until `sessionDate + teacherMarkingDays` (church timezone; 0 = the session day only,
+default 2). After that those routes return 403 "Attendance for this session closed on YYYY-MM-DD. Ask an admin…".
+Admin routes are never limited. The worker roster (`GET /sunday-school/sessions/:id/roster`) adds `teacherMarkingOpen`
+and `teacherMarkingClosesOn` so the member app shows the session read-only. Members' own self check-in is unchanged — it
+is governed only by the timed `selfMarkClosesAt` window.
+
+**Notifications (`EmailCategory.SUNDAY_SCHOOL_ATTENDANCE`, push only):**
+- `SUNDAY_SCHOOL_CHECKIN_OPEN` — when check-in opens (teacher or admin), to class members not yet marked for that session.
+  Idempotency key `sunday-school-checkin-open:{sessionId}:{closesAt}`, so re-opening sends again. A failed push never blocks opening.
+- `SUNDAY_SCHOOL_ABSENTEES` — `SundaySchoolAbsenteeScheduler`, Mondays 08:00 church time, every active tenant with the
+  `sunday_school` module on: to each class's teacher and assistants, with how many members have missed 3+ in a row.
+  One per class per week (`sunday-school-absentees:{classId}:{date}`).
 
 ### Tithe Module
 
@@ -9034,7 +9090,7 @@ outside the requested `?months=` window).
 | GET    | /dashboard/worker                                          | WORKER                                                        | Worker dashboard                                                                                              |
 | GET    | /dashboard/admin                                           | AdminGuard (DASHBOARD_READ)                                   | Admin dashboard                                                                                               |
 | POST   | /sunday-school/classes                                     | WORKER (SS-dept or class teacher)                             | Create SS class                                                                                               |
-| PATCH  | /sunday-school/classes/:id                                 | WORKER (SS-dept or class teacher)                             | Update SS class                                                                                               |
+| PATCH  | /sunday-school/classes/:id                                 | WORKER (SS-dept or class teacher)                             | Update SS class (incl. `ageGroup`, `meetingDay`, `meetingTime`, `location`, `assistantIds`)                    |
 | DELETE | /sunday-school/classes/:id                                 | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Delete SS class                                                                                               |
 | GET    | /sunday-school/classes                                     | Any                                                           | List SS classes                                                                                               |
 | GET    | /sunday-school/classes/:id                                 | Any                                                           | Get SS class by ID                                                                                            |
@@ -9044,19 +9100,23 @@ outside the requested `?months=` window).
 | DELETE | /sunday-school/classes/:id/members/:memberId               | WORKER (SS-dept or class teacher)                             | Remove member from class                                                                                      |
 | GET    | /sunday-school/classes/:id/members                         | WORKER (SS-dept or class teacher)                             | List class members                                                                                            |
 | POST   | /sunday-school/sessions                                    | WORKER (SS-dept or class teacher)                             | Create SS session                                                                                             |
-| PATCH  | /sunday-school/sessions/:id/open                           | WORKER (SS-dept or class teacher)                             | Open self-mark window for N minutes (body: `{ closesInMinutes }`)                                            |
+| POST   | /sunday-school/sessions/series                             | WORKER (SS-dept or class teacher)                             | Create a session every N weeks between two dates (skips existing dates; ≤60) |
+| PATCH  | /sunday-school/sessions/:id                                | WORKER (SS-dept or class teacher)                             | Edit a session's date, notes or lesson link; attendance is kept |
+| GET    | /sunday-school/classes/:id/absentees?misses=               | WORKER (SS-dept, class teacher or assistant)                  | Members who missed their last N sessions in a row (default 3) |
+| PATCH  | /sunday-school/sessions/:id/open                           | WORKER (SS-dept or class teacher)                             | Open self-mark window for N minutes (body: `{ closesInMinutes }`); pushes "check-in open" to unmarked class members |
 | PATCH  | /sunday-school/sessions/:id/close                          | WORKER (SS-dept or class teacher)                             | Close self-mark window immediately                                                                            |
 | GET    | /sunday-school/sessions/open                               | Any authenticated member                                      | List sessions with an active self-mark window that the member is enrolled in                                  |
 | GET    | /sunday-school/attendance/me                               | Any authenticated member                                      | Paginated list of the member's own Sunday School attendance history                                           |
 | POST   | /sunday-school/sessions/:id/checkin                        | Any (self-mark; member must be enrolled; window must be open) | Self-mark attendance                                                                                          |
-| POST   | /sunday-school/sessions/:id/bulk-mark                      | WORKER (SS-dept or class teacher)                             | Bulk mark session attendance                                                                                  |
+| POST   | /sunday-school/sessions/:id/bulk-mark                      | WORKER (SS-dept or class teacher)                             | Bulk mark session attendance; 403 after the teacher marking window (`teacherMarkingDays`)                     |
 | POST   | /sunday-school/sessions/:id/checkin-first-timer            | WORKER (SS-dept or class teacher)                             | Check in someone with no Member record — creates a real FirstTimer (+ follow-up task) and marks them PRESENT. 403 when `teachersCanCheckInFirstTimers` is off |
 | GET    | /sunday-school/settings                                    | WORKER                                                        | `{ teachersCanAddMembers, teachersCanCheckInFirstTimers, oneClassPerMember }` — the member app hides switched-off teacher options |
-| GET    | /sunday-school/sessions/:id/roster                         | WORKER (SS-dept or class teacher)                             | Get session attendance roster — now also returns `firstTimerCheckIns[]`                                       |
+| GET    | /sunday-school/sessions/:id/roster                         | WORKER (SS-dept or class teacher)                             | Get session attendance roster — also returns `firstTimerCheckIns[]`, `teacherMarkingOpen`, `teacherMarkingClosesOn` |
 | GET    | /sunday-school/sessions?classId=                           | Any                                                           | List sessions for a class (paginated)                                                                         |
 | GET    | /sunday-school/sessions/:id                                | Any                                                           | Get SS session by ID                                                                                          |
 | DELETE | /sunday-school/sessions/:id                                | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Delete SS session                                                                                             |
-| GET    | /sunday-school/my-classes                                  | Any authenticated member                                      | Classes the caller is assigned to                                                                             |
+| GET    | /sunday-school/my-classes                                  | Any authenticated member                                      | Classes the caller is assigned to (with teacher and class details)                                            |
+| GET    | /sunday-school/my-teaching                                 | WORKER                                                        | Classes the caller teaches or assists, with `membersCount` |
 | POST   | /sunday-school/classes/:id/questions                       | Any (member must be enrolled in the class)                    | Ask a private question in a class                                                                             |
 | GET    | /sunday-school/classes/:id/questions                       | WORKER (SS-dept or class teacher)                             | List questions asked in a class (paginated)                                                                   |
 | GET    | /sunday-school/questions/me                                | Any authenticated member                                      | Paginated list of the member's own questions, across all classes                                              |
@@ -9064,19 +9124,24 @@ outside the requested `?months=` window).
 | GET    | /sunday-school/questions                                   | WORKER (SS-dept capability only, no class-teacher fallback)   | Questions across every class, paginated                                                                       |
 | GET    | /admin/sunday-school/classes                               | AdminGuard (SUNDAY_SCHOOL_READ)                               | List SS classes (paginated)                                                                                   |
 | POST   | /admin/sunday-school/classes                               | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Create SS class (no auth restriction on department or teacher)                                                |
-| PATCH  | /admin/sunday-school/classes/:id                           | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Update SS class                                                                                               |
+| PATCH  | /admin/sunday-school/classes/:id                           | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Update SS class (incl. `ageGroup`, `meetingDay`, `meetingTime`, `location`, `assistantIds`)                    |
 | DELETE | /admin/sunday-school/classes/:id                           | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Delete SS class                                                                                               |
 | GET    | /admin/sunday-school/classes/:id/members                   | AdminGuard (SUNDAY_SCHOOL_READ)                               | List members of an SS class (paginated)                                                                       |
 | POST   | /admin/sunday-school/classes/:id/members                   | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Assign a member to an SS class                                                                                |
 | POST   | /admin/sunday-school/classes/:id/members/bulk              | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Add many members at once. Body `{ memberIds?: uuid[], emails?: string[] }` (≤500 each, at least one). Members already in the class are skipped; with one-class-per-member on, members already in another class are skipped too. Returns `{ added, alreadyInClass, notFound, inAnotherClass: [{ memberId, className }] }` (`notFound` = unknown ids/emails). The admin's class panel uses it for "Choose from list" and "Paste emails" |
 | GET    | /admin/sunday-school/classes/:id/candidates?search=&page=&limit= | AdminGuard (SUNDAY_SCHOOL_READ)                         | Members who can be added to the class (not already in it, not `INACTIVE`); `search` matches first/last/full name or email; `limit` ≤100. Each row has `otherClasses: string[]` and `blocked` (true when one-class-per-member is on and they're in another class). Response also carries `oneClassPerMember` |
-| GET    | /admin/sunday-school/settings                              | AdminGuard (SUNDAY_SCHOOL_READ)                               | `{ oneClassPerMember, teachersCanAddMembers, teachersCanCheckInFirstTimers, membersInSeveralClasses }`. Each switch is a `church_settings` row `{ enabled }`: `sunday_school:one_class_per_member` (default `false`), `sunday_school:teachers_can_add_members` (default `true`), `sunday_school:teachers_can_check_in_first_timers` (default `true`); each cached 5 min |
-| PUT    | /admin/sunday-school/settings                              | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Body: any of `{ oneClassPerMember?, teachersCanAddMembers?, teachersCanCheckInFirstTimers? }` (booleans; only sent switches change). `teachersCanAddMembers: false` → teacher add/bulk add/candidates return 403 (admins only); `teachersCanCheckInFirstTimers: false` → teacher first-timer check-in returns 403 (admins use the admin route). `oneClassPerMember` on: adding a member who is already in another class (admin single/bulk add or worker assign) is refused with 400; existing extra memberships are left alone and counted in `membersInSeveralClasses`. Audited as `SUNDAY_SCHOOL_SETTINGS_UPDATED` |
+| GET    | /admin/sunday-school/settings                              | AdminGuard (SUNDAY_SCHOOL_READ)                               | `{ oneClassPerMember, teachersCanAddMembers, teachersCanCheckInFirstTimers, teacherMarkingDays, membersInSeveralClasses }`. `teacherMarkingDays` is the `church_settings` row `sunday_school:teacher_marking_days` `{ days }` (default `2`, 0–30). Each switch is a `church_settings` row `{ enabled }`: `sunday_school:one_class_per_member` (default `false`), `sunday_school:teachers_can_add_members` (default `true`), `sunday_school:teachers_can_check_in_first_timers` (default `true`); each cached 5 min |
+| PUT    | /admin/sunday-school/settings                              | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Body: any of `{ oneClassPerMember?, teachersCanAddMembers?, teachersCanCheckInFirstTimers?, teacherMarkingDays? }` (booleans, plus `teacherMarkingDays` 0–30; only sent fields change). `teachersCanAddMembers: false` → teacher add/bulk add/candidates return 403 (admins only); `teachersCanCheckInFirstTimers: false` → teacher first-timer check-in returns 403 (admins use the admin route). `oneClassPerMember` on: adding a member who is already in another class (admin single/bulk add or worker assign) is refused with 400; existing extra memberships are left alone and counted in `membersInSeveralClasses`. Audited as `SUNDAY_SCHOOL_SETTINGS_UPDATED` |
 | DELETE | /admin/sunday-school/classes/:id/members/:memberId         | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Remove a member from an SS class                                                                              |
 | GET    | /admin/sunday-school/sessions?classId=                     | AdminGuard (SUNDAY_SCHOOL_READ)                               | List sessions for a class (paginated; `classId` required UUID query param)                                    |
 | POST   | /admin/sunday-school/sessions                              | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Create SS session                                                                                             |
+| POST   | /admin/sunday-school/sessions/series                       | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Create a session every N weeks between two dates (skips existing dates; ≤60) |
+| PATCH  | /admin/sunday-school/sessions/:id                          | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Edit a session's date, notes or lesson link; attendance is kept |
+| GET    | /admin/sunday-school/reports/attendance?from&to&classId    | AdminGuard (SUNDAY_SCHOOL_READ)                               | Attendance report: summary, per class, per session, per member (with `classId`) — see Sunday School Module |
+| GET    | /admin/sunday-school/reports/attendance/export?from&to&classId | AdminGuard (SUNDAY_SCHOOL_READ)                           | `.xlsx` download: Classes, Sessions, Members sheets |
+| GET    | /admin/sunday-school/reports/absentees?classId&misses      | AdminGuard (SUNDAY_SCHOOL_READ)                               | Members who missed their last N sessions in a row, all classes or one |
 | DELETE | /admin/sunday-school/sessions/:id                          | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Delete SS session                                                                                             |
-| PATCH  | /admin/sunday-school/sessions/:id/open                     | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Open self-mark window (body: `{ closesInMinutes }`)                                                           |
+| PATCH  | /admin/sunday-school/sessions/:id/open                     | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Open self-mark window (body: `{ closesInMinutes }`); pushes "check-in open" to unmarked class members          |
 | PATCH  | /admin/sunday-school/sessions/:id/close                    | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Close self-mark window                                                                                        |
 | GET    | /admin/sunday-school/sessions/:id/roster                   | AdminGuard (SUNDAY_SCHOOL_READ)                               | Get session attendance roster                                                                                 |
 | POST   | /admin/sunday-school/sessions/:id/bulk-mark                | AdminGuard (SUNDAY_SCHOOL_WRITE)                              | Bulk mark session attendance; returns `{ marked: number }`                                                    |
@@ -9683,6 +9748,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_CLASS_SESSION_REMINDER_ENABLED` | `true` | Class next-session reminders |
 | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` | Admin notification on a new form submission (also requires the form's own `notifyOnSubmission` to be on) |
 | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` | Sunday School question-asked / question-answered notifications |
+| `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` | Sunday School check-in-open and weekly absentee pushes |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
@@ -9969,6 +10035,10 @@ department, so it stays meaningful regardless of what a given church calls the d
 ### SundaySchoolAttendanceStatus
 
 `PRESENT` · `ABSENT` · `EXCUSED`
+
+### MeetingDayEnum (Sunday School)
+
+`SUNDAY` · `MONDAY` · `TUESDAY` · `WEDNESDAY` · `THURSDAY` · `FRIDAY` · `SATURDAY`
 
 ### GuardianRelationshipEnum
 

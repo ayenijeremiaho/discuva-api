@@ -33,11 +33,19 @@ const FLAGS: Record<
 };
 const CACHE_TTL = 300;
 
+const MARKING_DAYS = {
+  storageKey: 'sunday_school:teacher_marking_days',
+  cacheKey: 'sunday-school-settings:teacher-marking-days',
+  default: 2,
+};
+
 export interface TeacherPermissions {
   // Off = only admins add members to classes (admin portal); teachers can't from the member app.
   teachersCanAddMembers: boolean;
   // Off = only admins check in first-timers at a session.
   teachersCanCheckInFirstTimers: boolean;
+  // Teachers can mark/change a session's attendance until this many days after its date; admins always can.
+  teacherMarkingDays: number;
 }
 
 export interface SundaySchoolSettings extends TeacherPermissions {
@@ -73,13 +81,33 @@ export class SundaySchoolSettingsService {
     return this.flag('oneClassPerMember');
   }
 
+  async teacherMarkingDays(): Promise<number> {
+    const cached = await this.cacheService.get<number>(MARKING_DAYS.cacheKey);
+    if (cached !== undefined) return cached;
+    const row = await this.settingRepo.findOne({
+      where: { key: MARKING_DAYS.storageKey },
+    });
+    const stored = (row?.value as { days?: number } | undefined)?.days;
+    const days = typeof stored === 'number' ? stored : MARKING_DAYS.default;
+    this.cacheService.set(MARKING_DAYS.cacheKey, days, CACHE_TTL);
+    return days;
+  }
+
   async teacherPermissions(): Promise<TeacherPermissions> {
-    const [teachersCanAddMembers, teachersCanCheckInFirstTimers] =
-      await Promise.all([
-        this.flag('teachersCanAddMembers'),
-        this.flag('teachersCanCheckInFirstTimers'),
-      ]);
-    return { teachersCanAddMembers, teachersCanCheckInFirstTimers };
+    const [
+      teachersCanAddMembers,
+      teachersCanCheckInFirstTimers,
+      teacherMarkingDays,
+    ] = await Promise.all([
+      this.flag('teachersCanAddMembers'),
+      this.flag('teachersCanCheckInFirstTimers'),
+      this.teacherMarkingDays(),
+    ]);
+    return {
+      teachersCanAddMembers,
+      teachersCanCheckInFirstTimers,
+      teacherMarkingDays,
+    };
   }
 
   async assertTeachersCanAddMembers(): Promise<void> {
@@ -115,7 +143,7 @@ export class SundaySchoolSettingsService {
   }
 
   async update(
-    changes: Partial<Record<Flag, boolean>>,
+    changes: Partial<Record<Flag, boolean>> & { teacherMarkingDays?: number },
     actorMemberId?: string,
   ): Promise<SundaySchoolSettings> {
     const updates = (Object.keys(FLAGS) as Flag[]).filter(
@@ -137,10 +165,30 @@ export class SundaySchoolSettingsService {
       await this.settingRepo.save(row);
       this.cacheService.del(cacheKey);
     }
-    if (updates.length) {
+    const days = changes.teacherMarkingDays;
+    if (typeof days === 'number') {
+      let row = await this.settingRepo.findOne({
+        where: { key: MARKING_DAYS.storageKey },
+      });
+      if (!row) {
+        row = this.settingRepo.create({
+          key: MARKING_DAYS.storageKey,
+          moduleName: 'Sunday School',
+          value: { days },
+        });
+      } else {
+        row.value = { days };
+      }
+      await this.settingRepo.save(row);
+      this.cacheService.del(MARKING_DAYS.cacheKey);
+    }
+    if (updates.length || typeof days === 'number') {
       this.auditLogService.log('SUNDAY_SCHOOL_SETTINGS_UPDATED', {
         actorId: actorMemberId,
-        metadata: Object.fromEntries(updates.map((n) => [n, changes[n]])),
+        metadata: {
+          ...Object.fromEntries(updates.map((n) => [n, changes[n]])),
+          ...(typeof days === 'number' && { teacherMarkingDays: days }),
+        },
       });
     }
     return this.getSettings();

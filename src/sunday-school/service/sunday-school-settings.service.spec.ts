@@ -40,6 +40,7 @@ describe('SundaySchoolSettingsService', () => {
       oneClassPerMember: false,
       teachersCanAddMembers: true,
       teachersCanCheckInFirstTimers: true,
+      teacherMarkingDays: 2,
       membersInSeveralClasses: 2,
     });
   });
@@ -49,6 +50,7 @@ describe('SundaySchoolSettingsService', () => {
     await expect(service.teacherPermissions()).resolves.toEqual({
       teachersCanAddMembers: false,
       teachersCanCheckInFirstTimers: false,
+      teacherMarkingDays: 2,
     });
   });
 
@@ -117,5 +119,29 @@ describe('SundaySchoolSettingsService', () => {
     await expect(service.assertTeachersCanCheckInFirstTimers()).rejects.toThrow(
       ForbiddenException,
     );
+  });
+
+  it('saves how many days teachers can mark attendance after a session', async () => {
+    settingRepo.findOne.mockResolvedValue(null);
+    await service.update({ teacherMarkingDays: 0 }, 'admin-member');
+
+    expect(settingRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'sunday_school:teacher_marking_days',
+        value: { days: 0 },
+      }),
+    );
+    expect(cache.del).toHaveBeenCalledWith(
+      'sunday-school-settings:teacher-marking-days',
+    );
+    expect(audit.log).toHaveBeenCalledWith(
+      'SUNDAY_SCHOOL_SETTINGS_UPDATED',
+      expect.objectContaining({ metadata: { teacherMarkingDays: 0 } }),
+    );
+  });
+
+  it('reads a stored 0 days as 0, not the default', async () => {
+    settingRepo.findOne.mockResolvedValue({ value: { days: 0 } });
+    await expect(service.teacherMarkingDays()).resolves.toBe(0);
   });
 });

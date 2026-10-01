@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class UpdateSundaySchoolSettingsDto {
   @IsOptional()
@@ -12,4 +12,10 @@ export class UpdateSundaySchoolSettingsDto {
   @IsOptional()
   @IsBoolean()
   teachersCanCheckInFirstTimers?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  teacherMarkingDays?: number;
 }

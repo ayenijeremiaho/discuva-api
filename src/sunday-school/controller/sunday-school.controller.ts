@@ -25,8 +25,12 @@ import { AssignSundaySchoolMemberDto } from '../dto/assign-sunday-school-member.
 import { BulkAssignSundaySchoolMembersDto } from '../dto/bulk-assign-sunday-school-members.dto';
 import {
   CreateSundaySchoolSessionDto,
+  CreateSundaySchoolSessionSeriesDto,
   OpenSelfMarkDto,
+  UpdateSundaySchoolSessionDto,
 } from '../dto/create-sunday-school-session.dto';
+import { SundaySchoolReportService } from '../service/sunday-school-report.service';
+import { SundaySchoolAbsenteeQueryDto } from '../dto/sunday-school-report.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
 import { CheckInFirstTimerDto } from '../dto/checkin-first-timer.dto';
 import {
@@ -46,7 +50,49 @@ export class SundaySchoolController {
   constructor(
     private readonly sundaySchoolService: SundaySchoolService,
     private readonly settingsService: SundaySchoolSettingsService,
+    private readonly reportService: SundaySchoolReportService,
   ) {}
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('my-teaching')
+  async getMyTeachingClasses(@Request() req: any) {
+    return this.sundaySchoolService.getMyTeachingClasses(req.user);
+  }
+
+  // Members of this class who have missed several sessions in a row.
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Get('classes/:id/absentees')
+  async getClassAbsentees(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) classId: string,
+    @Query() query: SundaySchoolAbsenteeQueryDto,
+  ) {
+    await this.sundaySchoolService.assertCanManageClass(req.user, classId);
+    return this.reportService.absentees(classId, query.misses ?? 3);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Post('sessions/series')
+  async createSessionSeries(
+    @Request() req: any,
+    @Body() dto: CreateSundaySchoolSessionSeriesDto,
+  ) {
+    return this.sundaySchoolService.createSessionSeries(req.user, dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles(MemberRoleEnum.WORKER)
+  @Patch('sessions/:id')
+  async updateSession(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSundaySchoolSessionDto,
+  ) {
+    return this.sundaySchoolService.updateSession(req.user, id, dto);
+  }
 
   // What teachers may do from the member app, so it can hide what's switched off.
   @UseGuards(RolesGuard)

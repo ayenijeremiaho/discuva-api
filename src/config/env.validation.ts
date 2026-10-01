@@ -190,6 +190,7 @@ export const envValidationSchema = Joi.object({
   EMAIL_CLASS_SESSION_REMINDER_ENABLED: Joi.boolean().default(true),
   EMAIL_FORM_SUBMISSION_ENABLED: Joi.boolean().default(true),
   EMAIL_SUNDAY_SCHOOL_QA_ENABLED: Joi.boolean().default(true),
+  EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED: Joi.boolean().default(true),
 
   BULL_BOARD_USER: Joi.string().allow('').optional(),
   BULL_BOARD_PASSWORD: Joi.string().allow('').optional(),

@@ -10,8 +10,15 @@ import {
   Put,
   Query,
   Request,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { SundaySchoolReportService } from '../service/sunday-school-report.service';
+import {
+  SundaySchoolAbsenteeQueryDto,
+  SundaySchoolReportQueryDto,
+} from '../dto/sunday-school-report.dto';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
@@ -28,7 +35,9 @@ import { BulkAssignSundaySchoolMembersDto } from '../dto/bulk-assign-sunday-scho
 import { AssignSundaySchoolMemberDto } from '../dto/assign-sunday-school-member.dto';
 import {
   CreateSundaySchoolSessionDto,
+  CreateSundaySchoolSessionSeriesDto,
   OpenSelfMarkDto,
+  UpdateSundaySchoolSessionDto,
 } from '../dto/create-sunday-school-session.dto';
 import { BulkMarkAttendanceDto } from '../dto/bulk-mark-attendance.dto';
 import { CheckInFirstTimerDto } from '../dto/checkin-first-timer.dto';
@@ -43,7 +52,39 @@ export class SundaySchoolAdminController {
   constructor(
     private readonly sundaySchoolService: SundaySchoolService,
     private readonly settingsService: SundaySchoolSettingsService,
+    private readonly reportService: SundaySchoolReportService,
   ) {}
+
+  // ─── Reports ───────────────────────────────────────────────────────────────
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_READ)
+  @Get('reports/attendance')
+  attendanceReport(@Query() query: SundaySchoolReportQueryDto) {
+    return this.reportService.attendanceReport(query);
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_READ)
+  @Get('reports/attendance/export')
+  async exportAttendance(
+    @Query() query: SundaySchoolReportQueryDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { from, to } = this.reportService.resolveRange(query);
+    const buffer = await this.reportService.exportWorkbook(query);
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="sunday-school-attendance-${from}-to-${to}.xlsx"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_READ)
+  @Get('reports/absentees')
+  absentees(@Query() query: SundaySchoolAbsenteeQueryDto) {
+    return this.reportService.absentees(query.classId, query.misses ?? 3);
+  }
 
   // ─── Settings ──────────────────────────────────────────────────────────────
 
@@ -165,6 +206,21 @@ export class SundaySchoolAdminController {
   @Post('sessions')
   createSession(@Body() dto: CreateSundaySchoolSessionDto) {
     return this.sundaySchoolService.adminCreateSession(dto);
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)
+  @Post('sessions/series')
+  createSessionSeries(@Body() dto: CreateSundaySchoolSessionSeriesDto) {
+    return this.sundaySchoolService.adminCreateSessionSeries(dto);
+  }
+
+  @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)
+  @Patch('sessions/:id')
+  updateSession(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSundaySchoolSessionDto,
+  ) {
+    return this.sundaySchoolService.adminUpdateSession(id, dto);
   }
 
   @RequiresPermission(AdminPermission.SUNDAY_SCHOOL_WRITE)

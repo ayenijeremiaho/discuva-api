@@ -13161,7 +13161,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Beginners Class \u2014 Updated\",\n  \"description\": \"Updated description\",\n  \"teacherId\": \"{{memberId}}\"\n}",
+              "raw": "{\n  \"name\": \"Beginners Class \u2014 Updated\",\n  \"description\": \"Updated description\",\n  \"teacherId\": \"{{memberId}}\",\n  \"ageGroup\": \"Ages 6–9\",\n  \"meetingDay\": \"SUNDAY\",\n  \"meetingTime\": \"09:00\",\n  \"location\": \"Room 2\",\n  \"assistantIds\": [\"{{memberId2}}\"]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -13546,6 +13546,144 @@
           ]
         },
         {
+          "name": "Create SS Session Series",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sunday-school/sessions/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sunday-school",
+                "sessions",
+                "series"
+              ]
+            },
+            "description": "SS-dept worker, class teacher or assistant. Creates a session every everyWeeks (1–4, default 1) weeks from startDate to endDate inclusive, skipping dates that already have a session. At most 60 per call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classId\": \"{{ssClassId}}\",\n  \"startDate\": \"2026-10-04\",\n  \"endDate\": \"2026-12-20\",\n  \"everyWeeks\": 1,\n  \"notes\": \"Term 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"created\": 11,\n    \"skipped\": [\n      \"2026-10-11\"\n    ],\n    \"dates\": [\n      \"2026-10-04\",\n      \"2026-10-18\",\n      \"…\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update SS Session",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sunday-school/sessions/{{ssSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sunday-school",
+                "sessions",
+                "{{ssSessionId}}"
+              ]
+            },
+            "description": "SS-dept worker, class teacher or assistant. Change the date, notes or lesson link; attendance is kept. Empty string or null clears notes/documentUrl. 409 if the class already has a session on the new date.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionDate\": \"2026-10-05\",\n  \"notes\": \"Moved to Monday\",\n  \"documentUrl\": \"https://example.com/lesson-5.pdf\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Class Absentees",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sunday-school/classes/{{ssClassId}}/absentees?misses=3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sunday-school",
+                "classes",
+                "{{ssClassId}}",
+                "absentees"
+              ],
+              "query": [
+                {
+                  "key": "misses",
+                  "value": "3"
+                }
+              ]
+            },
+            "description": "SS-dept worker, class teacher or assistant. Members whose last N sessions in a row (default 3; 2–10) were missed — absent or never marked. Excused counts as attended. Longest streak first."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"classId\": \"{{ssClassId}}\",\n      \"className\": \"Juniors\",\n      \"memberId\": \"{{memberId}}\",\n      \"firstname\": \"Ada\",\n      \"lastname\": \"Obi\",\n      \"email\": \"ada@example.com\",\n      \"phoneNumber\": \"+2348012345678\",\n      \"missedInARow\": 4,\n      \"lastAttended\": \"2026-09-06\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get My Teaching Classes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/sunday-school/my-teaching",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "sunday-school",
+                "my-teaching"
+              ]
+            },
+            "description": "WORKER. Classes the caller teaches or assists, with membersCount — lets teachers outside the Sunday School department use the Teach view."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"{{ssClassId}}\",\n      \"name\": \"Juniors\",\n      \"ageGroup\": \"Ages 6–9\",\n      \"meetingDay\": \"SUNDAY\",\n      \"meetingTime\": \"09:00\",\n      \"location\": \"Room 2\",\n      \"teacher\": {\n        \"id\": \"{{memberId}}\",\n        \"firstname\": \"Tunde\",\n        \"lastname\": \"Bello\"\n      },\n      \"assistants\": [],\n      \"membersCount\": 18\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
           "name": "Create SS Session",
           "request": {
             "method": "POST",
@@ -13880,7 +14018,7 @@
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "body": "{\n  \"data\": {\n    \"teachersCanAddMembers\": true,\n    \"teachersCanCheckInFirstTimers\": false,\n    \"oneClassPerMember\": false\n  }\n}"
+              "body": "{\n  \"data\": {\n    \"teachersCanAddMembers\": true,\n    \"teachersCanCheckInFirstTimers\": false,\n    \"teacherMarkingDays\": 2,\n    \"oneClassPerMember\": false\n  }\n}"
             }
           ]
         },
@@ -14463,7 +14601,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Name\"\n}",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"ageGroup\": \"Ages 6–9\",\n  \"meetingDay\": \"SUNDAY\",\n  \"meetingTime\": \"09:00\",\n  \"location\": \"Room 2\",\n  \"assistantIds\": [\"{{memberId2}}\"]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14569,7 +14707,7 @@
                 "settings"
               ]
             },
-            "description": "SUNDAY_SCHOOL_READ. Church-wide Sunday School settings. oneClassPerMember (default false) limits each member to one class; teachersCanAddMembers and teachersCanCheckInFirstTimers (default true) control whether teachers can do those from the member app — off means admins only; membersInSeveralClasses counts members who are in more than one class today."
+            "description": "SUNDAY_SCHOOL_READ. Church-wide Sunday School settings. oneClassPerMember (default false) limits each member to one class; teachersCanAddMembers and teachersCanCheckInFirstTimers (default true) control whether teachers can do those from the member app — off means admins only; teacherMarkingDays (default 2) is how many days after a session teachers can still mark it; membersInSeveralClasses counts members who are in more than one class today."
           },
           "response": [
             {
@@ -14577,7 +14715,7 @@
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "body": "{\n  \"data\": {\n    \"oneClassPerMember\": false,\n    \"teachersCanAddMembers\": true,\n    \"teachersCanCheckInFirstTimers\": true,\n    \"membersInSeveralClasses\": 3\n  }\n}"
+              "body": "{\n  \"data\": {\n    \"oneClassPerMember\": false,\n    \"teachersCanAddMembers\": true,\n    \"teachersCanCheckInFirstTimers\": true,\n    \"teacherMarkingDays\": 2,\n    \"membersInSeveralClasses\": 3\n  }\n}"
             }
           ]
         },
@@ -14606,10 +14744,10 @@
                 "settings"
               ]
             },
-            "description": "SUNDAY_SCHOOL_WRITE. Send only the switches to change. oneClassPerMember: turning it on does not remove existing extra memberships; it only blocks new ones. teachersCanAddMembers / teachersCanCheckInFirstTimers: false makes that admin-only — teachers get 403 and the member app hides the option. Audited as SUNDAY_SCHOOL_SETTINGS_UPDATED.",
+            "description": "SUNDAY_SCHOOL_WRITE. Send only the switches to change. oneClassPerMember: turning it on does not remove existing extra memberships; it only blocks new ones. teachersCanAddMembers / teachersCanCheckInFirstTimers: false makes that admin-only — teachers get 403 and the member app hides the option. teacherMarkingDays (0–30): teachers can mark attendance, open check-in and check in first-timers until that many days after the session date; admins are never limited. Audited as SUNDAY_SCHOOL_SETTINGS_UPDATED.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"oneClassPerMember\": true,\n  \"teachersCanAddMembers\": false,\n  \"teachersCanCheckInFirstTimers\": true\n}",
+              "raw": "{\n  \"oneClassPerMember\": true,\n  \"teachersCanAddMembers\": false,\n  \"teachersCanCheckInFirstTimers\": true,\n  \"teacherMarkingDays\": 2\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -14833,6 +14971,217 @@
               "status": "OK",
               "code": 200,
               "body": "[\n  {\n    \"id\": \"sss1a2b3-c4d5-e6f7-8901-abcdef123456\",\n    \"sundaySchoolClass\": {\n      \"id\": \"ssc1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"name\": \"Foundations of Faith\",\n      \"description\": \"Core doctrine class for new and growing believers\",\n      \"teacher\": {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"John\",\n        \"lastname\": \"Doe\"\n      },\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"sessionDate\": \"2026-07-06\",\n    \"selfMarkClosesAt\": null,\n    \"notes\": \"Chapter 4 - Salvation\", \"documentUrl\": \"https://drive.google.com/file/d/example\",\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Create Session Series (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sunday-school/sessions/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sunday-school",
+                "sessions",
+                "series"
+              ]
+            },
+            "description": "SUNDAY_SCHOOL_WRITE. Creates a session every everyWeeks (1–4, default 1) weeks from startDate to endDate inclusive, skipping dates that already have a session. At most 60 per call.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classId\": \"{{ssClassId}}\",\n  \"startDate\": \"2026-10-04\",\n  \"endDate\": \"2026-12-20\",\n  \"everyWeeks\": 1,\n  \"notes\": \"Term 4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"created\": 11,\n    \"skipped\": [\n      \"2026-10-11\"\n    ],\n    \"dates\": [\n      \"2026-10-04\",\n      \"2026-10-18\",\n      \"…\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Session (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sunday-school/sessions/{{ssSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sunday-school",
+                "sessions",
+                "{{ssSessionId}}"
+              ]
+            },
+            "description": "SUNDAY_SCHOOL_WRITE. Change the date, notes or lesson link; attendance is kept. 409 if the class already has a session on the new date.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sessionDate\": \"2026-10-05\",\n  \"notes\": \"Moved to Monday\",\n  \"documentUrl\": \"https://example.com/lesson-5.pdf\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Attendance Report (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sunday-school/reports/attendance?from=2026-07-28&to=2026-10-20&classId={{ssClassId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sunday-school",
+                "reports",
+                "attendance"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-07-28"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-20"
+                },
+                {
+                  "key": "classId",
+                  "value": "{{ssClassId}}"
+                }
+              ]
+            },
+            "description": "SUNDAY_SCHOOL_READ. Defaults to the last 12 weeks; to is capped at today. rate = present ÷ (expected − excused) %, null when nobody was expected. members is only included when classId is given."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"from\": \"2026-07-28\",\n    \"to\": \"2026-10-20\",\n    \"summary\": {\n      \"sessions\": 24,\n      \"present\": 310,\n      \"firstTimers\": 6,\n      \"averagePresent\": 12.9,\n      \"rate\": 78.4\n    },\n    \"byClass\": [\n      {\n        \"classId\": \"{{ssClassId}}\",\n        \"className\": \"Juniors\",\n        \"enrolled\": 18,\n        \"sessions\": 12,\n        \"averagePresent\": 14.2,\n        \"firstTimers\": 4,\n        \"rate\": 81.3\n      }\n    ],\n    \"bySession\": [\n      {\n        \"sessionId\": \"{{ssSessionId}}\",\n        \"classId\": \"{{ssClassId}}\",\n        \"className\": \"Juniors\",\n        \"sessionDate\": \"2026-10-18\",\n        \"enrolled\": 18,\n        \"present\": 15,\n        \"absent\": 2,\n        \"excused\": 1,\n        \"unmarked\": 0,\n        \"firstTimers\": 1,\n        \"rate\": 88.2\n      }\n    ],\n    \"members\": [\n      {\n        \"memberId\": \"{{memberId}}\",\n        \"classId\": \"{{ssClassId}}\",\n        \"className\": \"Juniors\",\n        \"firstname\": \"Ada\",\n        \"lastname\": \"Obi\",\n        \"email\": \"ada@example.com\",\n        \"sessionsHeld\": 12,\n        \"present\": 9,\n        \"absent\": 2,\n        \"excused\": 1,\n        \"rate\": 81.8,\n        \"lastPresent\": \"2026-10-18\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Export Attendance Report (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sunday-school/reports/attendance/export?from=2026-07-28&to=2026-10-20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sunday-school",
+                "reports",
+                "attendance",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-07-28"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-20"
+                }
+              ]
+            },
+            "description": "SUNDAY_SCHOOL_READ. Downloads an .xlsx for the same range/class as the report, with Classes, Sessions and Members sheets."
+          },
+          "response": []
+        },
+        {
+          "name": "Absentees (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/sunday-school/reports/absentees?misses=3",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "sunday-school",
+                "reports",
+                "absentees"
+              ],
+              "query": [
+                {
+                  "key": "misses",
+                  "value": "3"
+                }
+              ]
+            },
+            "description": "SUNDAY_SCHOOL_READ. Members whose last N sessions in a row (default 3; 2–10) were missed, across all classes or one (classId)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"classId\": \"{{ssClassId}}\",\n      \"className\": \"Juniors\",\n      \"memberId\": \"{{memberId}}\",\n      \"firstname\": \"Ada\",\n      \"lastname\": \"Obi\",\n      \"email\": \"ada@example.com\",\n      \"phoneNumber\": \"+2348012345678\",\n      \"missedInARow\": 4,\n      \"lastAttended\": \"2026-09-06\"\n    }\n  ]\n}"
             }
           ]
         },
