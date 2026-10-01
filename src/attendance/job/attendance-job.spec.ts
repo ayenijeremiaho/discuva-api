@@ -6,8 +6,12 @@ import { AttendanceJobService } from './attendance-job';
 import { AttendanceService } from '../service/attendance.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
+import { realGateProvider } from '../../tenant/scheduler-gate/scheduler-gate.testing';
 
-const mockAttendanceService = { markAbsentees: jest.fn() };
+const mockAttendanceService = {
+  markAbsentees: jest.fn(),
+  nextAbsenceMarkingDue: jest.fn().mockResolvedValue(null),
+};
 const mockCacheService = {
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
@@ -36,6 +40,7 @@ describe('AttendanceJobService', () => {
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        realGateProvider(mockTenantRepo, mockCls),
       ],
     }).compile();
     service = module.get(AttendanceJobService);
@@ -59,9 +64,9 @@ describe('AttendanceJobService', () => {
 
     await service.scheduledMarkAbsentees();
 
-    expect(mockTenantRepo.find).toHaveBeenCalledWith({
-      where: { isActive: true },
-    });
+    expect(mockTenantRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { isActive: true } }),
+    );
     expect(mockAttendanceService.markAbsentees).toHaveBeenCalledTimes(2);
     expect(mockTxHost.tx.query).toHaveBeenCalledWith(
       'SET LOCAL search_path TO "church_a", public',
@@ -85,5 +90,21 @@ describe('AttendanceJobService', () => {
 
     expect(mockAttendanceService.markAbsentees).toHaveBeenCalledTimes(2);
     expect(mockCacheService.releaseLock).toHaveBeenCalled();
+  });
+
+  it('records when the next event ends so absence marking can sleep until then', async () => {
+    mockTenantRepo.find.mockResolvedValue([
+      { id: 't9', subdomain: 'z', schemaName: 'church_z' },
+    ]);
+    mockAttendanceService.markAbsentees.mockResolvedValue(undefined);
+    mockAttendanceService.nextAbsenceMarkingDue.mockResolvedValue(
+      new Date(Date.now() + 10 * 60_000),
+    );
+    await service.scheduledMarkAbsentees();
+    expect(mockAttendanceService.nextAbsenceMarkingDue).toHaveBeenCalled();
+    mockAttendanceService.markAbsentees.mockClear();
+    await service.scheduledMarkAbsentees();
+    // Second tick a moment later: nothing due yet, so the church is skipped entirely.
+    expect(mockAttendanceService.markAbsentees).not.toHaveBeenCalled();
   });
 });

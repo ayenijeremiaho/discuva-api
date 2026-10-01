@@ -275,6 +275,10 @@ export class AttendanceService {
   // this.dataSource.transaction(...), which would start an independent
   // transaction (likely a different pooled connection) that never sees the
   // outer SET LOCAL search_path and would silently write to the wrong schema.
+  nextAbsenceMarkingDue(): Promise<Date | null> {
+    return this.eventService.nextAbsenceMarkingDue();
+  }
+
   async markAbsentees(): Promise<void> {
     this.logger.log('Running absence marking job...');
 

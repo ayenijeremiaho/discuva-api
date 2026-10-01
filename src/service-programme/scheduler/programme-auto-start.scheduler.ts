@@ -2,7 +2,6 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { ServiceProgramme } from '../entity/service-programme.entity';
@@ -10,9 +9,7 @@ import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enu
 import { ServiceSessionService } from '../service/service-session.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { DateService } from '../../utility/service/date.service';
-import { Tenant } from '../../tenant/entity/tenant.entity';
-import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
-import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 
 const AUTO_START_LOCK = 'lock:programme-auto-start';
 
@@ -23,12 +20,10 @@ export class ProgrammeAutoStartScheduler {
   constructor(
     @InjectRepository(ServiceProgramme)
     private readonly programmeRepo: Repository<ServiceProgramme>,
-    @InjectRepository(Tenant)
-    private readonly tenantRepo: Repository<Tenant>,
     private readonly sessionService: ServiceSessionService,
     private readonly cacheService: CacheService,
     private readonly dateService: DateService,
-    private readonly cls: ClsService<AppClsStore>,
+    private readonly gate: SchedulerGateService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
@@ -42,9 +37,8 @@ export class ProgrammeAutoStartScheduler {
       return;
     }
     try {
-      await forEachActiveTenant(
-        this.tenantRepo,
-        this.cls,
+      await this.gate.forEachDueTenant(
+        'programme-auto-start',
         this.txHost,
         this.logger,
         () => this.runAutoStart(),
@@ -54,7 +48,8 @@ export class ProgrammeAutoStartScheduler {
     }
   }
 
-  private async runAutoStart(): Promise<void> {
+  // Returns when this church next needs a run: now if something due is still waiting, else the next auto-start time.
+  async runAutoStart(): Promise<Date | null> {
     const now = new Date();
     // Bounded to "today" (church-local), not a short trailing window — a
     // later slot in a multi-slot event (e.g. Second Service) only becomes
@@ -82,8 +77,30 @@ export class ProgrammeAutoStartScheduler {
       })
       .getMany();
 
-    if (!programmes.length) return;
+    if (programmes.length) await this.startDue(programmes);
+    return this.nextDue(windowStart);
+  }
 
+  async nextDue(windowStart: Date): Promise<Date | null> {
+    const now = new Date();
+    const row = await this.programmeRepo
+      .createQueryBuilder('programme')
+      .innerJoin('programme.serviceSlot', 'slot')
+      .innerJoin('slot.config', 'config')
+      .select('MIN(slot.start_time)', 'next')
+      .addSelect('COUNT(*) FILTER (WHERE slot.start_time <= :now)', 'waiting')
+      .where('programme.status = :status', {
+        status: ServiceProgrammeStatusEnum.DRAFT,
+      })
+      .andWhere('config.auto_start_session = true')
+      .andWhere('slot.start_time >= :windowStart', { windowStart, now })
+      .getRawOne<{ next: Date | string | null; waiting: string }>();
+    // A due programme still waiting (e.g. on an earlier slot's live session) keeps the usual 5-minute cadence.
+    if (Number(row?.waiting ?? 0) > 0) return now;
+    return row?.next ? new Date(row.next) : null;
+  }
+
+  private async startDue(programmes: ServiceProgramme[]): Promise<void> {
     // Several DRAFT programmes in this batch can belong to the same
     // multi-slot event (e.g. First and Second Service both due) — group by
     // event and only start the earliest-due one per event; a second due

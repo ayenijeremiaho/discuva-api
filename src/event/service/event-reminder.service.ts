@@ -8,7 +8,6 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
-import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { EventReminder } from '../entity/event-reminder.entity';
@@ -32,9 +31,7 @@ import {
   NotifyMemberEmail,
   NotifyMemberPush,
 } from '../../utility/service/notification-dispatch.service';
-import { Tenant } from '../../tenant/entity/tenant.entity';
-import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
-import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 @Injectable()
@@ -52,12 +49,10 @@ export class EventReminderService {
     private readonly memberRepo: Repository<Member>,
     @InjectRepository(Announcement)
     private readonly announcementRepo: Repository<Announcement>,
-    @InjectRepository(Tenant)
-    private readonly tenantRepo: Repository<Tenant>,
     private readonly notificationDispatchService: NotificationDispatchService,
     private readonly cacheService: CacheService,
     private readonly config: ConfigService,
-    private readonly cls: ClsService<AppClsStore>,
+    private readonly gate: SchedulerGateService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
@@ -165,9 +160,8 @@ export class EventReminderService {
     }
 
     try {
-      await forEachActiveTenant(
-        this.tenantRepo,
-        this.cls,
+      await this.gate.forEachDueTenant(
+        'event-reminders',
         this.txHost,
         this.logger,
         () => this.runReminderDispatch(),
@@ -177,7 +171,8 @@ export class EventReminderService {
     }
   }
 
-  private async runReminderDispatch(): Promise<void> {
+  // Returns when this church's next unsent reminder is due (null if none).
+  async runReminderDispatch(): Promise<Date | null> {
     const now = new Date();
 
     const toFire = await this.reminderRepo
@@ -193,6 +188,21 @@ export class EventReminderService {
     for (const reminder of toFire) {
       await this.fireReminder(reminder, now);
     }
+
+    return this.nextReminderDue(now);
+  }
+
+  async nextReminderDue(now = new Date()): Promise<Date | null> {
+    const next = await this.reminderRepo
+      .createQueryBuilder('r')
+      .innerJoin('r.serviceSlot', 'slot')
+      .select('MIN(r.fire_at)', 'next')
+      .where('r.enabled = true')
+      .andWhere('r.last_sent_at IS NULL')
+      .andWhere('r.fire_at > :now', { now })
+      .andWhere('slot.start_time > :now', { now })
+      .getRawOne<{ next: Date | string | null }>();
+    return next?.next ? new Date(next.next) : null;
   }
 
   private async fireReminder(

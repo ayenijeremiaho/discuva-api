@@ -18,6 +18,7 @@ import {
 } from '../enum/reminder-interval-preset.enum';
 import { AnnouncementAudienceEnum } from '../../announcement/enum/announcement-audience.enum';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { realGateProvider } from '../../tenant/scheduler-gate/scheduler-gate.testing';
 
 const SLOT_START = new Date('2026-07-01T09:00:00.000Z');
 
@@ -48,6 +49,9 @@ const mockReminderQb = {
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
   getMany: jest.fn().mockResolvedValue([]),
+  innerJoin: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  getRawOne: jest.fn().mockResolvedValue({ next: null }),
 };
 
 const mockReminderRepo = {
@@ -138,6 +142,7 @@ describe('EventReminderService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        realGateProvider(mockTenantRepo, mockCls),
       ],
     }).compile();
 
@@ -358,7 +363,7 @@ describe('EventReminderService', () => {
 
       await service.dispatchDueReminders();
 
-      expect(mockReminderRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockReminderQb.getMany).toHaveBeenCalledTimes(2);
       expect(mockTxHost.tx.query).toHaveBeenCalledWith(
         'SET LOCAL search_path TO "church_a", public',
       );
@@ -377,8 +382,27 @@ describe('EventReminderService', () => {
         .mockResolvedValue([]);
 
       await expect(service.dispatchDueReminders()).resolves.toBeUndefined();
-      expect(mockReminderRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+      expect(mockReminderQb.getMany).toHaveBeenCalledTimes(2);
       expect(mockCacheService.releaseLock).toHaveBeenCalled();
+    });
+  });
+
+  describe('next due', () => {
+    it('reports the earliest unsent reminder still ahead', async () => {
+      mockReminderQb.getMany.mockResolvedValue([]);
+      mockReminderQb.getRawOne.mockResolvedValueOnce({
+        next: '2026-10-04T08:45:00.000Z',
+      });
+      await expect(service.runReminderDispatch()).resolves.toEqual(
+        new Date('2026-10-04T08:45:00.000Z'),
+      );
+      expect(mockReminderQb.select).toHaveBeenCalledWith(
+        'MIN(r.fire_at)',
+        'next',
+      );
+      expect(mockReminderQb.andWhere).toHaveBeenCalledWith(
+        'r.last_sent_at IS NULL',
+      );
     });
   });
 });

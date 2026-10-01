@@ -2179,6 +2179,24 @@ token, so `@InjectRepository(Entity)` call sites in services need no changes. On
 tables (`Tenant`, `PlatformAdmin`, `Plan`/`Subscription`, and similar control-plane entities) should keep plain
 `TypeOrmModule.forFeature()`.
 
+**Letting the database scale to zero (`SchedulerGateService`, added 2026-10-01):** the frequent jobs — programme
+auto-start (5 min), absence marking (5 min), rental status (10 min), event reminders (15 min), class session reminders
+(hourly) — used to open a transaction in every church on every tick, so the Neon database never stayed idle for the
+5 minutes it needs to scale to zero. They now use `SchedulerGateService.forEachDueTenant(job, txHost, logger, fn)`
+(`src/tenant/scheduler-gate/`): `fn` returns when that church next needs the job (next auto-start time / event end /
+booking start or end / reminder `fire_at` / class reminder threshold or session start; "now" while something due is
+still waiting), stored in Redis as `global:scheduler:next-due:{job}:{tenantId}`. Later ticks skip that church — no
+transaction, no query — until then. Safety rails: never sleeps past the top of the next hour (so a missed wake-up delays
+work by at most an hour, and all jobs wake the database together); `SchedulerGateSubscriber` (TypeORM subscriber on the
+shared DataSource) clears the marker on any insert/update/delete of the tables a job reads (`JOBS_BY_ENTITY`: service
+programmes/sessions/slots/configs, events, event reminders, rental bookings, church classes, class sessions, church
+settings), whichever code path writes; a write during a run (`global:scheduler:woken:*`) stops that run from sleeping;
+a failed run or a Redis error means the job runs as before. The active-church list is cached in Redis for 10 minutes
+(`global:scheduler:active-tenants`, cleared when a `Tenant` row changes). Simulated over days of random schedules, every
+item fires at the same tick as without the gate; a quiet day goes from 288 runs per 5-minute job to 24. Daily jobs are
+unchanged. The connection pool's `DATABASE_POOL_MIN` now defaults to `0` (idle connections close after 30s) and
+`connectionTimeoutMillis` is 10s so the first query after the database wakes doesn't fail.
+
 **Scheduler tenant iteration (`forEachActiveTenant`):** `@Cron()`-decorated methods run with no CLS context at all —
 there's no HTTP request for `TenantMiddleware` to hook into. A tenant-scoped repository called from inside a
 scheduler with no CLS context silently falls back to the plain `public`-search-path manager instead of throwing, so
@@ -9775,7 +9793,7 @@ elsewhere in the dependency graph) and calls `Sentry.init()` only when both `SEN
 | `DATABASE_LOGGING`   | `false`        | Enable TypeORM query logging                                                 |
 | `DATABASE_DEBUG`     | `false`        | Enable TypeORM debug-level query logging                                     |
 | `DATABASE_POOL_SIZE` | `50`           | Max connections in the pool                                                  |
-| `DATABASE_POOL_MIN`  | `10`           | Min idle connections kept alive                                              |
+| `DATABASE_POOL_MIN`  | `0`            | Min idle connections kept alive. 0 lets the database scale to zero when the app is quiet |
 | `DATABASE_POOL`      | `transaction`  | Pool mode for PgBouncer/Supavisor: `transaction` \| `session` \| `statement` |
 | `DATABASE_POOL_LOG`  | `false`        | Log pool connection acquire/release events                                   |
 

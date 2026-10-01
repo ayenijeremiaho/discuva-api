@@ -26,9 +26,11 @@ const dbConfig = (): PostgresConnectionOptions => ({
     : 50,
   extra: {
     max: process.env.DATABASE_POOL_SIZE ? +process.env.DATABASE_POOL_SIZE : 50,
-    min: process.env.DATABASE_POOL_MIN ? +process.env.DATABASE_POOL_MIN : 10,
+    // 0 so idle connections close and the database can scale to zero when the app is quiet.
+    min: process.env.DATABASE_POOL_MIN ? +process.env.DATABASE_POOL_MIN : 0,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    // Room for the database to wake from scale-to-zero (normally a few hundred ms).
+    connectionTimeoutMillis: 10000,
     poolTimeoutMillis: 5000,
     reapIntervalMillis: 10000,
     log: process.env.DATABASE_POOL_LOG === 'true',

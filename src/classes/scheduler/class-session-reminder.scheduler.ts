@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { ChurchClass } from '../entity/church-class.entity';
@@ -16,9 +15,7 @@ import { buildIcsEvent } from '../../utility/util/ics-builder';
 import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
 import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
-import { Tenant } from '../../tenant/entity/tenant.entity';
-import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
-import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 import { ClassSessionService } from '../service/class-session.service';
 
 // Same structure as AssignmentReminderScheduler, keyed per ChurchClass
@@ -41,12 +38,10 @@ export class ClassSessionReminderScheduler {
     private readonly churchClassRepo: Repository<ChurchClass>,
     @InjectRepository(ClassEnrollment)
     private readonly enrollmentRepo: Repository<ClassEnrollment>,
-    @InjectRepository(Tenant)
-    private readonly tenantRepo: Repository<Tenant>,
     private readonly utilityService: UtilityService,
     private readonly cacheService: CacheService,
     private readonly smsService: SmsService,
-    private readonly cls: ClsService<AppClsStore>,
+    private readonly gate: SchedulerGateService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly reminderSettingsService: ReminderSettingsService,
     private readonly classSessions: ClassSessionService,
@@ -61,9 +56,8 @@ export class ClassSessionReminderScheduler {
     if (!acquired) return;
 
     try {
-      await forEachActiveTenant(
-        this.tenantRepo,
-        this.cls,
+      await this.gate.forEachDueTenant(
+        'class-session-reminders',
         this.txHost,
         this.logger,
         () => this.runReminders(),
@@ -73,12 +67,13 @@ export class ClassSessionReminderScheduler {
     }
   }
 
-  private async runReminders(): Promise<void> {
+  // Returns when this church next needs a run: the earliest reminder threshold or session start still ahead.
+  async runReminders(): Promise<Date | null> {
     const { enabled, thresholds, smsEnabled } =
       await this.reminderSettingsService.getConfig(
         ReminderSettingKey.CLASS_SESSION,
       );
-    if (!enabled) return;
+    if (!enabled) return null;
 
     await this.classSessions.advancePastNextSessions();
 
@@ -99,6 +94,28 @@ export class ClassSessionReminderScheduler {
         );
       }
     }
+    return ClassSessionReminderScheduler.nextDue(classes, thresholds, now);
+  }
+
+  // A reminder for threshold t goes out on the hourly run where round(hours to go) = t, i.e. the first run after
+  // (t + ½) hours before the session; the session start itself is when the class moves on to its next session.
+  static nextDue(
+    classes: Pick<ChurchClass, 'nextSessionAt'>[],
+    thresholds: number[],
+    now: Date,
+  ): Date | null {
+    const hour = 3_600_000;
+    const future: number[] = [];
+    for (const c of classes) {
+      if (!c.nextSessionAt) continue;
+      const at = new Date(c.nextSessionAt).getTime();
+      for (const when of [
+        at,
+        ...thresholds.map((t) => at - (t + 0.5) * hour + 1000),
+      ])
+        if (when > now.getTime()) future.push(when);
+    }
+    return future.length ? new Date(Math.min(...future)) : null;
   }
 
   private async processClass(

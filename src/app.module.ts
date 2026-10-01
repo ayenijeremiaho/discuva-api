@@ -63,6 +63,7 @@ import { SmsModule } from './sms/sms.module';
 import { EvangelismModule } from './evangelism/evangelism.module';
 import { BillingModule } from './billing/billing.module';
 import { TenantModule } from './tenant/tenant.module';
+import { SchedulerGateModule } from './tenant/scheduler-gate/scheduler-gate.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
 import { CommunicationProviderModule } from './communication-provider/communication-provider.module';
 import { GivingCheckoutModule } from './giving-checkout/giving-checkout.module';
@@ -243,6 +244,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     AdminModule,
     BillingModule,
     TenantModule,
+    SchedulerGateModule,
     PlatformAdminModule,
     CommunicationProviderModule,
     GivingCheckoutModule,

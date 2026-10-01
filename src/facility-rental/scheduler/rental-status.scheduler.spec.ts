@@ -6,8 +6,17 @@ import { RentalStatusScheduler } from './rental-status.scheduler';
 import { RentalBooking } from '../entity/rental-booking.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { RentalBookingStatus } from '../enum/rental.enum';
+import { realGateProvider } from '../../tenant/scheduler-gate/scheduler-gate.testing';
 
+const mockNextQb = {
+  select: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  setParameters: jest.fn().mockReturnThis(),
+  getRawOne: jest.fn().mockResolvedValue({ next: null }),
+};
 const mockBookingRepo = {
+  createQueryBuilder: jest.fn(() => mockNextQb),
   find: jest.fn().mockResolvedValue([]),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
 };
@@ -37,6 +46,7 @@ describe('RentalStatusScheduler', () => {
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        realGateProvider(mockTenantRepo, mockCls),
       ],
     }).compile();
     scheduler = module.get(RentalStatusScheduler);
@@ -87,5 +97,19 @@ describe('RentalStatusScheduler', () => {
       scheduler.transitionBookingStatuses(),
     ).resolves.toBeUndefined();
     expect(mockBookingRepo.find).toHaveBeenCalled();
+  });
+
+  it('reports when the next booking starts or ends so quiet churches can be skipped', async () => {
+    mockNextQb.getRawOne.mockResolvedValueOnce({
+      next: '2026-10-04T15:00:00.000Z',
+    });
+    await expect(scheduler.runTransitions()).resolves.toEqual(
+      new Date('2026-10-04T15:00:00.000Z'),
+    );
+    expect(mockNextQb.where).toHaveBeenCalledWith('b.status IN (:...open)', {
+      open: [RentalBookingStatus.CONFIRMED, RentalBookingStatus.IN_PROGRESS],
+    });
+    mockNextQb.getRawOne.mockResolvedValueOnce({ next: null });
+    await expect(scheduler.runTransitions()).resolves.toBeNull();
   });
 });
