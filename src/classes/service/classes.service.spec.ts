@@ -132,6 +132,38 @@ describe('ClassesService', () => {
   });
 
   describe('createClass', () => {
+    const full = {
+      id: 'class-1',
+      name: 'New Believers',
+      classType: { id: 'class-type-1', name: "Believers' Class" },
+      facilitators: [{ order: 0, member: { id: 'member-1' } }],
+      materials: [],
+    };
+    beforeEach(() => mockClassRepo.findOne.mockResolvedValue(full));
+
+    it('returns the new class with its type, facilitators and materials for the admin list', async () => {
+      mockClassRepo.create.mockImplementation((v) => v);
+      mockClassRepo.save.mockResolvedValue({ id: 'class-1' });
+
+      const result = await service.createClass({
+        name: 'New Believers',
+        classTypeId: 'class-type-1',
+        facilitators: [{ memberId: 'member-1' }],
+      } as any);
+
+      expect(mockClassRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'class-1' },
+          relations: expect.arrayContaining([
+            'facilitators',
+            'classType',
+            'materials',
+          ]),
+        }),
+      );
+      expect(result).toEqual(full);
+    });
+
     it('should create and save church class', async () => {
       const dto = {
         name: 'New Believers',
@@ -1484,6 +1516,84 @@ describe('ClassesService', () => {
         'f-3',
         'f-2',
       ]);
+    });
+  });
+
+  describe('closeClass', () => {
+    const updateQb = () => {
+      const b: Record<string, jest.Mock> = {};
+      for (const m of ['update', 'set', 'where', 'andWhere'])
+        b[m] = jest.fn().mockReturnValue(b);
+      b.execute = jest.fn().mockResolvedValue({ affected: 2 });
+      return b;
+    };
+
+    it('completes everyone in progress when no list is given', async () => {
+      const qb = updateQb();
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        name: 'Believers',
+        status: 'ACTIVE',
+      });
+      mockEnrollmentRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await expect(service.closeClass('c1')).resolves.toEqual({
+        closedEnrollments: 2,
+      });
+      expect(qb.andWhere).toHaveBeenCalledTimes(1);
+      expect(mockClassRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'CLOSED' }),
+      );
+    });
+
+    it('completes only the given enrollments, or nobody when the list is empty', async () => {
+      const qb = updateQb();
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        name: 'Believers',
+        status: 'ACTIVE',
+      });
+      mockEnrollmentRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.closeClass('c1', ['e1', 'e3']);
+      expect(qb.andWhere).toHaveBeenCalledWith('id IN (:...ids)', {
+        ids: ['e1', 'e3'],
+      });
+
+      mockEnrollmentRepo.createQueryBuilder.mockClear();
+      mockClassRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        name: 'Believers',
+        status: 'ACTIVE',
+      });
+      await expect(service.closeClass('c1', [])).resolves.toEqual({
+        closedEnrollments: 0,
+      });
+      expect(mockEnrollmentRepo.createQueryBuilder).not.toHaveBeenCalled();
+    });
+
+    it('saves completion rules and request settings on create', async () => {
+      mockClassRepo.create.mockImplementation((v) => v);
+      mockClassRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'c9', ...v }),
+      );
+      await service.createClass({
+        name: 'Baptismal',
+        classTypeId: 't1',
+        facilitators: [],
+        minAttendancePercent: 75,
+        requireAllAssignments: true,
+        openForRequests: true,
+        capacity: 30,
+      } as never);
+      expect(mockClassRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          minAttendancePercent: 75,
+          requireAllAssignments: true,
+          openForRequests: true,
+          capacity: 30,
+        }),
+      );
     });
   });
 });

@@ -450,8 +450,12 @@ A log entry recorded each time the Prayer team prays with/visits a pregnant woma
 |---------------------|----------------------------------------------------------------|
 | classType           | ManyToOne → ClassType (nullable: false, onDelete: RESTRICT)   |
 | startDate / endDate | date strings                                                   |
-| nextSessionAt       | timestamptz, nullable — a single "next session" field the facilitator(s) update as the class progresses week to week, not a full multi-session schedule entity |
-| meetingLink         | varchar, nullable — join link for a virtual session, shown alongside `nextSessionAt` |
+| nextSessionAt       | timestamptz, nullable — the next session time used by session reminders. Once a class has `ClassSession` rows it is kept in step automatically (next upcoming session); without sessions it's still set by hand via `PATCH /classes/:id/session` |
+| meetingLink         | varchar, nullable — join link shown alongside `nextSessionAt`; synced from the next session when that session has its own link |
+| minAttendancePercent | int 1–100, nullable — completion rule (null = no attendance rule) |
+| requireAllAssignments | boolean, default false — completion rule: every published assignment submitted |
+| openForRequests     | boolean, default false — members can ask to join from the app |
+| capacity            | int, nullable — max people IN_PROGRESS; requests/approvals are refused when full |
 | materials           | OneToMany → ClassMaterial, `cascade: true` — see below         |
 | facilitators        | OneToMany → ClassFacilitator, `cascade: true` — see below      |
 
@@ -516,6 +520,12 @@ Replaces the old hardcoded `ChurchClassTypeEnum` — class types are now admin-c
 | nextClassType   | ManyToOne → ClassType, nullable, self-referencing (`onDelete: SET NULL`) |
 
 **Promotion chain:** `nextClassType` is a self-referencing pointer, not a `level` number — a class type either points to the next type in its progression or is `null` (standalone, no promotion). The chain is entirely admin-configured via the ClassType CRUD endpoints; nothing is pre-wired by the migration (the 5 seeded legacy types — Believers' Class, Baptismal Class, Workers in Training, Bible College, School of Discipleship — all seed with `nextClassType = null`). Writes are validated server-side against self-reference and cycles (walks the proposed chain up to 20 hops looking for a loop back to the type being edited) since a DB FK can't express "no cycles."
+
+**Seeded ids re-keyed (migration `1799823600000-ReplaceSeededClassTypeIds`):** the genesis seed used ids like
+`11111111-0000-0000-0000-000000000001`, which aren't RFC 4122 UUIDs, so `@IsUUID()` and `ParseUUIDPipe` rejected them
+("classTypeId must be a UUID" when creating a class; editing/deleting a seeded type also failed). The migration gives
+those rows `gen_random_uuid()` ids and repoints `church_classes.class_type_id` and `class_types.next_class_type_id`;
+custom types are untouched. The class-type list cache key moved to `class-types:all:v2` so stale cached ids aren't served.
 
 ### Guest
 
@@ -3223,7 +3233,7 @@ Tracks member progress through structured church programs. The module, route pat
 
 **Enrollment statuses:** IN_PROGRESS → COMPLETED or CANCELLED. A `COMPLETED` enrollment whose class type has a `nextClassType` becomes eligible for level promotion (`GET classes/enrollments/:id/promotion-candidate` → `POST classes/enrollments/:id/promote`) — an explicit, separate, admin-confirmed action, not automatic.
 
-**Certificates:** A `COMPLETED` enrollment can be marked as having received a certificate via `PATCH classes/enrollments/:id/certificate` (optional `certificateNumber`) — see the `ClassEnrollment` entity section above.
+**Certificates:** A `COMPLETED` enrollment can be marked as having received a certificate via `PATCH classes/enrollments/:id/certificate` (optional `certificateNumber`; auto-numbered when omitted, and downloadable as a PDF — see "Sessions, attendance… certificates" below).
 
 **Guest enrollment:** non-members can take a class alongside members — see the `Guest`/`ClassEnrollment` entity sections above for the data model and portal-access mechanics. `POST classes/enroll/guest` (body: `EnrollGuestDto` — `classId` + either `guestId` for a returning guest, or `firstName`/`lastName`/`email`(+`phone`/`churchName`/`address`/`notes`) for a new one, + optional per-enrollment `purpose`) enrolls a single guest, finding-or-creating the `Guest` row by email and sending the `class-guest-access` portal-link email on a fresh enrollment (not on re-enrollment of a `CANCELLED` row). `POST classes/enroll/guests/bulk` (body: `BulkEnrollGuestsDto` — `classId` + `guests: {firstName, lastName, email, phone?}[]`) loops the same logic per entry, catching and logging per-entry failures rather than aborting the whole batch, and returns `{ enrolled, skipped }` — mirroring `bulkEnrollMembers`'s all-or-nothing-per-row (not all-or-nothing-per-batch) behavior. Both are blocked (`400`) against a `CLOSED` class.
 
@@ -3279,11 +3289,120 @@ used by tithe/finance proof review.
 | GET    | `/classes/guests`                                        | AdminGuard (CLASSES_READ)  | Paginated, `?search=` by name/email |
 | GET    | `/classes/guests/:id`                                    | AdminGuard (CLASSES_READ)  | Guest profile + every enrollment across all classes |
 | POST   | `/classes/guests/:guestId/convert-to-member`             | AdminGuard (CLASSES_WRITE) | See Guest-to-member conversion above |
-| GET    | `/classes/guest/:enrollmentId`                           | `@Public()`                | Class info (incl. `nextSessionAt`/`meetingLink`) + guest name + assignments + progress |
+| GET    | `/classes/guest/:enrollmentId`                           | `@Public()`                | Class info (incl. `nextSessionAt`/`meetingLink`) + guest name + assignments + progress, plus `schedule` (with `myStatus`), `attendance` summary and `enrollment` certificate status |
 | POST   | `/classes/guest/:enrollmentId/assignments/:assignmentId/submit` | `@Public()`, rate-limited (5/min) | `{ content }` |
 
 Assignments reuse the existing `classes:read`/`classes:write` permissions rather than adding new ones — managing
 assignments is the same admin surface as managing the classes they belong to.
+
+#### Sessions, attendance, progress, facilitators, requests, certificates, reports (added 2026-10-01)
+
+New tables (tenant migration `1799910000000-AddTrainingClassSessionsAndRequests`): `class_sessions`,
+`class_session_attendances`, `class_join_requests`; new `church_classes` columns (see `ChurchClass`); and
+`assignment_submissions.graded_by_member_id`. All routes live on `ClassTrainingController`, registered before
+`ClassesController` so literal paths (`teaching`, `reports`, `my/...`, `join-requests/...`) aren't captured by `:id`.
+
+**Sessions (`ClassSession`):** one scheduled day of a class — `startsAt`, optional `endsAt`, `mode`
+(`PHYSICAL`/`VIRTUAL`/`HYBRID`), optional `title`, `location`, `meetingLink`, `notes`. Create one, or a series
+(`{ startDate, endDate, time: "HH:mm", durationMinutes?, everyWeeks: 1–4, title?, mode, location?, meetingLink?, notes? }`)
+— every N weeks at the same *local* time in the church timezone (`wallTimeToUtc`, DST-safe), ≤60 per call, skipping
+start times that already exist; returns `{ created, skipped: date[] }`. **Every session ends:** without `endsAt` (single) or
+`durationMinutes` (series) the session lasts 2 hours (`DEFAULT_SESSION_MINUTES`); moving a session's start without a
+new end keeps its length, and sending `endsAt: null` resets it to 2 hours. Migration
+`1800082800000-BackfillClassSessionEndTimes` gives any older session without an end the same default. A session with attendance can't be deleted (400),
+only edited. Every create/edit/delete re-syncs the class's `nextSessionAt`/`meetingLink`, and
+`ClassSessionReminderScheduler` calls `advancePastNextSessions()` each hour before its sweep, so existing session
+reminders follow the schedule.
+
+**Attendance (`ClassSessionAttendance`):** keyed by **enrollment** (members and guests alike), `UNIQUE(session, enrollment)`,
+`status` `PRESENT`/`ABSENT`/`EXCUSED`, `markedByAdmin` or `markedByMember` (facilitator). Roster = every non-cancelled
+enrollment with its mark; marking upserts and silently skips enrollments not on the class.
+
+**Progress & completion rules (`ClassProgressService`):** per non-cancelled enrollment — sessions held since the day
+they enrolled (church timezone), present/absent/excused, `attendancePercent` = present ÷ (held − excused), published
+assignments submitted, `averageScorePercent` (graded scores as % of each max), `meetsRules`, and `missing[]`
+(plain-language reasons). **Closing a class** (`PATCH /classes/:id/close`) now returns
+`{ closedEnrollments, needsReview: [{ enrollmentId, name, missing }] }`: with rules set, only IN_PROGRESS people who meet
+them are completed and the rest stay IN_PROGRESS for an admin decision; with no rules, everyone is completed as before.
+
+**Facilitators (member app):** a member listed as a `ClassFacilitator` of a class can, for that class only, manage
+sessions, mark attendance, see progress, list assignments with submitted/graded counts and grade submissions
+(`gradedByMember` is set instead of `gradedBy`). Non-facilitators get 403. `GET /classes/teaching` lists the caller's classes.
+
+**Join requests (`ClassJoinRequest`):** members ask to join a class with `openForRequests`; refused if the class is
+closed, full (`capacity` vs IN_PROGRESS count), they're already in it (a CANCELLED enrolment may ask again) or they
+already have a PENDING request (partial unique index `UQ_class_join_requests_pending`). Approving enrols them via
+`ClassesService.enrollMember` and pushes `CLASS_JOIN_APPROVED`; declining stores an optional reason and pushes
+`CLASS_JOIN_DECLINED`. Members can withdraw a pending request. `GET /classes/:id/join-status` tells the app where the
+caller stands (`openForRequests`, `classClosed`, `capacity`, `spotsLeft`, `enrollmentStatus`, `enrollmentId`, latest `request`).
+
+**Certificates:** issuing without a number now assigns the next `CERT-YYYY-NNNN` (per calendar year, serialised with
+`pg_advisory_xact_lock`, ordered by length then value) and pushes `CLASS_CERTIFICATE_READY` to members. A typed number is
+kept as given. `POST /classes/:id/certificates/issue-all` issues for every COMPLETED enrollment without one. The PDF
+(`PdfService.generateClassCertificate`, landscape A4) uses the tenant's name and logo, the class and class-type name,
+the completion date and the first two facilitators as signatories; available to admins, to the member (own enrollment
+only) and to guests via their portal link.
+
+**Reports (`ClassReportService`):** classes running in `[from, to]` (open-ended dates count) optionally by
+`classTypeId`: per class enrolled/in progress/completed/cancelled, `completionRate` (completed ÷ everyone enrolled),
+sessions held, `averageAttendance` (mean of people's attendance %), certificates; totals; and **next steps** — for each
+class type with a `nextClassType`, members who completed it (completedAt in range) and how many have a non-cancelled
+enrollment in the next type. Excel export: Classes, Next steps, People sheets.
+
+**Performance & indexes:** `ClassProgressService.progressFor(classIds, enrollmentIds?)` computes any number of classes
+(or just some enrollments) in a fixed set of queries — reports call it once for every class in range, and a member's
+or guest's own view asks for their enrollment only. Member/guest schedules skip the attendance totals and reuse the
+session list. Next-steps uses one CTE query per class type. `issue-all` takes the numbering lock once, saves every
+certificate in one write and sends one push. Indexes: `class_sessions(church_class_id, starts_at)`;
+`class_session_attendances` UNIQUE `(session_id, enrollment_id)` + `(enrollment_id)`; `class_join_requests`
+`(church_class_id)`, `(member_id)` and the partial unique `(church_class_id, member_id) WHERE status='PENDING'` (also
+serves pending counts); `assignment_submissions(graded_by_member_id)`; and
+`IDX_class_enrollments_certificate_number` (`text_pattern_ops`, partial on non-null, migration
+`1799996400000-AddClassEnrollmentCertificateNumberIndex`) for the `LIKE 'CERT-YYYY-%'` lookup. Existing indexes cover
+the rest (`class_enrollments` by class and the unique `(member_id, church_class_id)`, `class_facilitators(member_id)`,
+`assignments(church_class_id)`, `assignment_submissions(assignment_id)`).
+
+**Notifications:** new `EmailCategory.TRAINING_CLASSES` ("Training Class Updates", env `EMAIL_TRAINING_CLASSES_ENABLED`),
+push only: `CLASS_JOIN_APPROVED`, `CLASS_JOIN_DECLINED`, `CLASS_CERTIFICATE_READY`.
+
+| Method | Route | Auth | Notes |
+|--------|-------|------|-------|
+| GET    | `/classes/:id/sessions`                                  | AdminGuard (CLASSES_READ)  | Sessions with `held` and attendance counts |
+| POST   | `/classes/:id/sessions`                                  | AdminGuard (CLASSES_WRITE) | `{ startsAt, endsAt?, title?, mode?, location?, meetingLink?, notes? }` |
+| POST   | `/classes/:id/sessions/series`                           | AdminGuard (CLASSES_WRITE) | See Sessions above → `{ created, skipped }` |
+| PATCH  | `/classes/sessions/:sessionId`                           | AdminGuard (CLASSES_WRITE) | Any session field; `null`/empty clears optional text |
+| DELETE | `/classes/sessions/:sessionId`                           | AdminGuard (CLASSES_WRITE) | 400 once attendance exists |
+| GET    | `/classes/sessions/:sessionId/roster`                    | AdminGuard (CLASSES_READ)  | `{ session, entries: [{ enrollmentId, name, email, isGuest, status }] }` |
+| POST   | `/classes/sessions/:sessionId/attendance`                | AdminGuard (CLASSES_WRITE) | `{ attendances: [{ enrollmentId, status }] }` (≤500) → `{ marked }` |
+| GET    | `/classes/:id/progress`                                  | AdminGuard (CLASSES_READ)  | `{ rules, sessionsHeld, sessionsTotal, people[] }` |
+| PATCH  | `/classes/:id/close`                                     | AdminGuard (CLASSES_WRITE) | → `{ closedEnrollments, needsReview[] }` (rule-aware) |
+| GET    | `/classes/:id/join-requests`                             | AdminGuard (CLASSES_READ)  | Pending first, then recent decisions (≤200) |
+| GET    | `/classes/join-requests/pending-counts`                  | AdminGuard (CLASSES_READ)  | `{ [classId]: count }` |
+| POST   | `/classes/join-requests/:requestId/approve`              | AdminGuard (CLASSES_WRITE) | Enrols the member → the enrollment |
+| POST   | `/classes/join-requests/:requestId/decline`              | AdminGuard (CLASSES_WRITE) | `{ reason? }` |
+| POST   | `/classes/:id/certificates/issue-all`                    | AdminGuard (CLASSES_WRITE) | → `{ issued }` |
+| GET    | `/classes/enrollments/:enrollmentId/certificate`         | AdminGuard (CLASSES_READ)  | PDF |
+| GET    | `/classes/reports/summary?from&to&classTypeId`           | AdminGuard (CLASSES_READ)  | `{ from, to, totals, classes[], pipeline[] }` |
+| GET    | `/classes/reports/export?from&to&classTypeId`            | AdminGuard (CLASSES_READ)  | `.xlsx` |
+| GET    | `/classes/teaching`                                      | JwtAuthGuard               | Classes the caller facilitates, with `enrolledCount` |
+| GET    | `/classes/teaching/:id/sessions`                         | Facilitator of the class   | As the admin list |
+| POST   | `/classes/teaching/:id/sessions`                         | Facilitator of the class   | Create a session |
+| POST   | `/classes/teaching/:id/sessions/series`                  | Facilitator of the class   | Create a series |
+| PATCH  | `/classes/teaching/sessions/:sessionId`                  | Facilitator of the class   | Edit a session |
+| DELETE | `/classes/teaching/sessions/:sessionId`                  | Facilitator of the class   | Delete (no attendance yet) |
+| GET    | `/classes/teaching/sessions/:sessionId/roster`           | Facilitator of the class   | Roster |
+| POST   | `/classes/teaching/sessions/:sessionId/attendance`       | Facilitator of the class   | Mark attendance (`markedByMember`) |
+| GET    | `/classes/teaching/:id/progress`                         | Facilitator of the class   | Progress |
+| GET    | `/classes/teaching/:id/assignments`                      | Facilitator of the class   | Assignments with `submittedCount`, `gradedCount` |
+| GET    | `/classes/teaching/assignments/:assignmentId/submissions` | Facilitator of the class  | Paginated submissions (members and guests) |
+| PATCH  | `/classes/teaching/submissions/:submissionId/grade`      | Facilitator of the class   | `{ score, feedback? }` |
+| GET    | `/classes/:id/my-progress`                               | JwtAuthGuard               | `{ enrolled, schedule[], progress, rules, join }` — schedule for anyone; own marks/progress only when enrolled; `join` is the same object as `/join-status` so the class page needs one call |
+| GET    | `/classes/:id/join-status`                               | JwtAuthGuard               | See Join requests above |
+| POST   | `/classes/:id/join-requests`                             | JwtAuthGuard               | `{ message? }` |
+| DELETE | `/classes/join-requests/:requestId`                      | JwtAuthGuard               | Withdraw own pending request (204) |
+| GET    | `/classes/my/join-requests`                              | JwtAuthGuard               | Own requests (≤50) |
+| GET    | `/classes/my/enrollments/:enrollmentId/certificate`      | JwtAuthGuard               | Own certificate PDF |
+| GET    | `/classes/guest/:enrollmentId/certificate`               | `@Public()`, 10/min        | Guest's certificate PDF |
 
 **Routes prefix:** `/classes`, `/classes/types`
 
@@ -6488,6 +6607,7 @@ dedicated host).
 | `FORM_SUBMISSION` | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` |
 | `SUNDAY_SCHOOL_QA` | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` |
 | `SUNDAY_SCHOOL_ATTENDANCE` | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` (push-only: check-in open, weekly absentees) |
+| `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -9051,14 +9171,14 @@ outside the requested `?months=` window).
 | GET    | /leave/my-history?page=&limit=&status=                     | WORKER                                                        | Own leave history (paginated)                                                                                 |
 | GET    | /leave/history                                             | AdminGuard (LEAVE_READ)                                       | All leave requests                                                                                            |
 | GET    | /leave/department?page=&limit=&status=                     | WORKER                                                        | Department leave requests (lead only, paginated)                                                              |
-| POST   | /classes                                                   | AdminGuard (CLASSES_WRITE)                                    | Create class (body: `classTypeId`, not `type`)                                                                |
-| PATCH  | /classes/:id                                               | AdminGuard (CLASSES_WRITE)                                    | Update class                                                                                                  |
+| POST   | /classes                                                   | AdminGuard (CLASSES_WRITE)                                    | Create class (body: `classTypeId`, not `type`; optional `minAttendancePercent`, `requireAllAssignments`, `openForRequests`, `capacity`). Returns the full class (type, facilitators, materials) |
+| PATCH  | /classes/:id                                               | AdminGuard (CLASSES_WRITE)                                    | Update class; returns the full class (type, facilitators, materials)                                           |
 | DELETE | /classes/:id                                               | AdminGuard (CLASSES_WRITE)                                    | Delete class                                                                                                  |
 | GET    | /classes?classTypeId=                                      | Any                                                           | List classes (filterable by `classTypeId`)                                                                    |
 | GET    | /classes/:id                                               | Any                                                           | Get class                                                                                                     |
 | POST   | /classes/enroll                                            | AdminGuard (CLASSES_WRITE)                                    | Enrol member in class                                                                                         |
 | PATCH  | /classes/enrollments/:id/status                            | AdminGuard (CLASSES_WRITE)                                    | Update enrolment status                                                                                       |
-| PATCH  | /classes/enrollments/:id/certificate                       | AdminGuard (CLASSES_WRITE)                                    | Issue a certificate for a COMPLETED enrolment (body: optional `certificateNumber`)                            |
+| PATCH  | /classes/enrollments/:id/certificate                       | AdminGuard (CLASSES_WRITE)                                    | Issue a certificate for a COMPLETED enrolment (body: optional `certificateNumber`; next `CERT-YYYY-NNNN` when omitted) |
 | GET    | /classes/enrollments/:id/promotion-candidate                | AdminGuard (CLASSES_READ)                                     | Check level-promotion eligibility + open classes of the next type                                             |
 | POST   | /classes/enrollments/:id/promote                            | AdminGuard (CLASSES_WRITE)                                    | Promote a COMPLETED enrolment into the next class type (body: `targetClassId`)                                |
 | GET    | /classes/my/enrollments                                    | Any                                                           | Own enrolments                                                                                                |
@@ -9749,6 +9869,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_FORM_SUBMISSION_ENABLED` | `true` | Admin notification on a new form submission (also requires the form's own `notifyOnSubmission` to be on) |
 | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` | Sunday School question-asked / question-answered notifications |
 | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` | Sunday School check-in-open and weekly absentee pushes |
+| `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP

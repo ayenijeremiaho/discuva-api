@@ -19,6 +19,8 @@ import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-k
 import { UPLOAD_HARD_CEILING_BYTES } from '../../platform-admin/constant/known-platform-settings.constant';
 import { ClassesService } from '../service/classes.service';
 import { GuestService } from '../service/guest.service';
+import { ClassProgressService } from '../service/class-progress.service';
+import { ClassCertificateService } from '../service/class-certificate.service';
 import {
   CreateChurchClassDto,
   UpdateChurchClassDto,
@@ -51,6 +53,8 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 export class ClassesController {
   constructor(
     private readonly classesService: ClassesService,
+    private readonly progressService: ClassProgressService,
+    private readonly certificateService: ClassCertificateService,
     private readonly guestService: GuestService,
   ) {}
 
@@ -232,7 +236,7 @@ export class ClassesController {
   @RequiresPermission(AdminPermission.CLASSES_WRITE)
   @Patch(':id/close')
   closeClass(@Param('id', ParseUUIDPipe) id: string) {
-    return this.classesService.closeClass(id);
+    return this.progressService.closeClass(id);
   }
 
   @UseGuards(AdminGuard)
@@ -311,7 +315,11 @@ export class ClassesController {
     @Body() dto: IssueCertificateDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    return this.classesService.issueCertificate(enrollmentId, dto, user.id);
+    return this.certificateService.issue(
+      enrollmentId,
+      dto.certificateNumber,
+      user.id,
+    );
   }
 
   @UseGuards(AdminGuard)

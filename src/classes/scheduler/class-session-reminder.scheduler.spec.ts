@@ -1,3 +1,4 @@
+import { ClassSessionService } from '../service/class-session.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -46,6 +47,10 @@ const mockReminderSettingsService = {
   }),
 };
 
+const mockClassSessions = {
+  advancePastNextSessions: jest.fn().mockResolvedValue(0),
+};
+
 const mockCls = {
   runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
 };
@@ -86,6 +91,7 @@ describe('ClassSessionReminderScheduler', () => {
           provide: ReminderSettingsService,
           useValue: mockReminderSettingsService,
         },
+        { provide: ClassSessionService, useValue: mockClassSessions },
       ],
     }).compile();
     scheduler = module.get(ClassSessionReminderScheduler);

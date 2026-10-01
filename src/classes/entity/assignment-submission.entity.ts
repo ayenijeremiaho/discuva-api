@@ -56,6 +56,11 @@ export class AssignmentSubmission extends BaseEntity {
   @JoinColumn({ name: 'graded_by' })
   gradedBy: Admin | null;
 
+  // Set instead of gradedBy when a facilitator grades from the member app.
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'graded_by_member_id' })
+  gradedByMember: Member | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   gradedAt: Date | null;
 }

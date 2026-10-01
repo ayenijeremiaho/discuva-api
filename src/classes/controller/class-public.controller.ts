@@ -7,8 +7,13 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Res,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { ClassSessionService } from '../service/class-session.service';
+import { ClassProgressService } from '../service/class-progress.service';
+import { ClassCertificateService } from '../service/class-certificate.service';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../auth/decorator/public.decorator';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
@@ -33,17 +38,27 @@ export class ClassPublicController {
   constructor(
     private readonly classesService: ClassesService,
     private readonly assignmentService: AssignmentService,
+    private readonly sessions: ClassSessionService,
+    private readonly progressService: ClassProgressService,
+    private readonly certificates: ClassCertificateService,
   ) {}
 
   @Get(':enrollmentId')
   async getPortal(@Param('enrollmentId', ParseUUIDPipe) enrollmentId: string) {
     const enrollment =
       await this.classesService.getGuestEnrollmentOrThrow(enrollmentId);
-    const { assignments, progress } =
-      await this.assignmentService.getForGuestEnrollment(
-        enrollment.churchClass.id,
-        enrollmentId,
-      );
+    const [{ assignments, progress }, schedule, classProgress] =
+      await Promise.all([
+        this.assignmentService.getForGuestEnrollment(
+          enrollment.churchClass.id,
+          enrollmentId,
+        ),
+        this.sessions.scheduleForEnrollment(enrollment),
+        this.progressService.enrollmentProgress(
+          enrollment.churchClass.id,
+          enrollmentId,
+        ),
+      ]);
 
     return {
       class: {
@@ -65,7 +80,39 @@ export class ClassPublicController {
       },
       assignments,
       progress,
+      schedule,
+      attendance: classProgress
+        ? {
+            sessionsHeld: classProgress.sessionsHeld,
+            present: classProgress.present,
+            attendancePercent: classProgress.attendancePercent,
+            meetsRules: classProgress.meetsRules,
+            missing: classProgress.missing,
+          }
+        : null,
+      enrollment: {
+        status: enrollment.status,
+        certificateIssued: enrollment.certificateIssued,
+        certificateNumber: enrollment.certificateNumber,
+      },
     };
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Get(':enrollmentId/certificate')
+  async certificate(
+    @Param('enrollmentId', ParseUUIDPipe) enrollmentId: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const { buffer, filename } = await this.certificates.pdf(enrollmentId, {
+      guestOnly: true,
+    });
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   // Rate-limited — this is an open, unauthenticated write endpoint.

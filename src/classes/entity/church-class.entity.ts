@@ -48,6 +48,20 @@ export class ChurchClass extends BaseEntity {
   @Column({ name: 'meeting_link', nullable: true })
   meetingLink: string | null;
 
+  // Completion rules (null/false = no rule): checked when the class is closed and shown as progress.
+  @Column({ type: 'int', nullable: true })
+  minAttendancePercent: number | null;
+
+  @Column({ default: false })
+  requireAllAssignments: boolean;
+
+  // Members can ask to join from the catalogue; capacity (null = no limit) counts active enrollments.
+  @Column({ default: false })
+  openForRequests: boolean;
+
+  @Column({ type: 'int', nullable: true })
+  capacity: number | null;
+
   @OneToMany(() => ClassEnrollment, (enrollment) => enrollment.churchClass)
   enrollments: ClassEnrollment[];
 

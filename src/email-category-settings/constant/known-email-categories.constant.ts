@@ -99,6 +99,11 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Push to class members when check-in opens for their session, and a weekly note to teachers about members who keep missing class.',
     },
+    [EmailCategory.TRAINING_CLASSES]: {
+      label: 'Training Class Updates',
+      description:
+        'Push to members when their request to join a training class is approved or declined, and when their certificate is ready.',
+    },
     [EmailCategory.DEPARTMENT_GOAL_ACTIVITY]: {
       label: 'Department Goal Approval & Comments',
       description:

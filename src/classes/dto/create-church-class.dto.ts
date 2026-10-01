@@ -1,6 +1,11 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
+  IsInt,
+  Max,
+  Min,
+  ValidateIf,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -11,7 +16,32 @@ import {
 import { Type } from 'class-transformer';
 import { ClassFacilitatorInputDto } from './class-facilitator.dto';
 
-export class CreateChurchClassDto {
+// Completion rules and join-request settings; null clears a number.
+class ClassRulesDto {
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsInt()
+  @Min(1)
+  @Max(100)
+  minAttendancePercent?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  requireAllAssignments?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  openForRequests?: boolean;
+
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsInt()
+  @Min(1)
+  @Max(5000)
+  capacity?: number | null;
+}
+
+export class CreateChurchClassDto extends ClassRulesDto {
   @IsNotEmpty()
   @IsString()
   name: string;
@@ -39,7 +69,7 @@ export class CreateChurchClassDto {
   endDate?: string;
 }
 
-export class UpdateChurchClassDto {
+export class UpdateChurchClassDto extends ClassRulesDto {
   @IsOptional()
   @IsString()
   name?: string;

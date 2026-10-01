@@ -19,6 +19,7 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { ClassSessionService } from '../service/class-session.service';
 
 // Same structure as AssignmentReminderScheduler, keyed per ChurchClass
 // instead of per-Assignment — thresholds here are in hours, not days
@@ -48,6 +49,7 @@ export class ClassSessionReminderScheduler {
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly reminderSettingsService: ReminderSettingsService,
+    private readonly classSessions: ClassSessionService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR, { timeZone: CHURCH_TIMEZONE })
@@ -77,6 +79,8 @@ export class ClassSessionReminderScheduler {
         ReminderSettingKey.CLASS_SESSION,
       );
     if (!enabled) return;
+
+    await this.classSessions.advancePastNextSessions();
 
     const classes = await this.churchClassRepo
       .createQueryBuilder('c')
