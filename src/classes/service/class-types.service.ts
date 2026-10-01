@@ -15,7 +15,8 @@ const MAX_CHAIN_DEPTH = 20;
 
 @Injectable()
 export class ClassTypesService {
-  private static readonly CACHE_KEY = 'class-types:all';
+  // v2: class type ids were re-keyed (ReplaceSeededClassTypeIds), so old cached lists are stale.
+  private static readonly CACHE_KEY = 'class-types:all:v2';
   private readonly logger = new Logger(ClassTypesService.name);
 
   constructor(

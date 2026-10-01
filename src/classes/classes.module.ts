@@ -9,6 +9,16 @@ import { AssignmentSubmission } from './entity/assignment-submission.entity';
 import { Guest } from './entity/guest.entity';
 import { ClassMaterial } from './entity/class-material.entity';
 import { ClassFacilitator } from './entity/class-facilitator.entity';
+import { ClassSession } from './entity/class-session.entity';
+import { ClassSessionAttendance } from './entity/class-session-attendance.entity';
+import { ClassJoinRequest } from './entity/class-join-request.entity';
+import { ClassSessionService } from './service/class-session.service';
+import { ClassProgressService } from './service/class-progress.service';
+import { ClassFacilitatorAccessService } from './service/class-facilitator-access.service';
+import { ClassJoinRequestService } from './service/class-join-request.service';
+import { ClassCertificateService } from './service/class-certificate.service';
+import { ClassReportService } from './service/class-report.service';
+import { ClassTrainingController } from './controller/class-training.controller';
 import { ClassesService } from './service/classes.service';
 import { ClassTypesService } from './service/class-types.service';
 import { AssignmentService } from './service/assignment.service';
@@ -35,6 +45,9 @@ import { ClassSessionReminderScheduler } from './scheduler/class-session-reminde
       Guest,
       ClassMaterial,
       ClassFacilitator,
+      ClassSession,
+      ClassSessionAttendance,
+      ClassJoinRequest,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by the two class schedulers' forEachActiveTenant loops.
@@ -48,6 +61,12 @@ import { ClassSessionReminderScheduler } from './scheduler/class-session-reminde
     ClassTypesService,
     AssignmentService,
     GuestService,
+    ClassSessionService,
+    ClassProgressService,
+    ClassFacilitatorAccessService,
+    ClassJoinRequestService,
+    ClassCertificateService,
+    ClassReportService,
     AssignmentReminderScheduler,
     ClassSessionReminderScheduler,
   ],
@@ -57,6 +76,7 @@ import { ClassSessionReminderScheduler } from './scheduler/class-session-reminde
   // "types" as :id) since both are checked as plain 2-segment paths.
   controllers: [
     ClassTypesController,
+    ClassTrainingController,
     ClassesController,
     AssignmentController,
     ClassPublicController,

@@ -13,6 +13,9 @@ export enum PushNotificationKey {
   SUNDAY_SCHOOL_QUESTION_ANSWERED = 'SUNDAY_SCHOOL_QUESTION_ANSWERED',
   SUNDAY_SCHOOL_CHECKIN_OPEN = 'SUNDAY_SCHOOL_CHECKIN_OPEN',
   SUNDAY_SCHOOL_ABSENTEES = 'SUNDAY_SCHOOL_ABSENTEES',
+  CLASS_JOIN_APPROVED = 'CLASS_JOIN_APPROVED',
+  CLASS_JOIN_DECLINED = 'CLASS_JOIN_DECLINED',
+  CLASS_CERTIFICATE_READY = 'CLASS_CERTIFICATE_READY',
   PASTOR_FEEDBACK_REMINDER = 'PASTOR_FEEDBACK_REMINDER',
   PASTOR_FEEDBACK_RESPONSE = 'PASTOR_FEEDBACK_RESPONSE',
   SERVICE_SLOT_ASSIGNED = 'SERVICE_SLOT_ASSIGNED',
@@ -151,6 +154,36 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: '{{count}} member(s) have missed {{misses}}+ sessions in a row. Tap to see who and reach out.',
     url: '/sunday-school',
     placeholders: { class_name: 'Youth Class', count: '3', misses: '3' },
+  },
+  [PushNotificationKey.CLASS_JOIN_APPROVED]: {
+    category: EmailCategory.TRAINING_CLASSES,
+    label: 'Training class request approved',
+    description:
+      'Sent to a member when their request to join a class is approved.',
+    title: "You're in!",
+    body: 'Your request to join {{class_name}} was approved. Tap to see the schedule.',
+    url: '/classes',
+    placeholders: { class_name: "Believers' Class" },
+  },
+  [PushNotificationKey.CLASS_JOIN_DECLINED]: {
+    category: EmailCategory.TRAINING_CLASSES,
+    label: 'Training class request declined',
+    description:
+      "Sent to a member when their request to join a class isn't approved.",
+    title: 'About your class request',
+    body: "Your request to join {{class_name}} wasn't approved this time. Tap for details.",
+    url: '/classes',
+    placeholders: { class_name: "Believers' Class" },
+  },
+  [PushNotificationKey.CLASS_CERTIFICATE_READY]: {
+    category: EmailCategory.TRAINING_CLASSES,
+    label: 'Training certificate ready',
+    description:
+      'Sent to a member when their certificate for a completed class is issued.',
+    title: 'Your certificate is ready',
+    body: 'Congratulations on completing {{class_name}}! Tap to download your certificate.',
+    url: '/classes',
+    placeholders: { class_name: "Believers' Class" },
   },
   [PushNotificationKey.PASTOR_FEEDBACK_REMINDER]: {
     category: EmailCategory.PASTOR_FEEDBACK,

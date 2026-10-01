@@ -82,6 +82,34 @@ export class AssignmentService {
     });
   }
 
+  // With how many have been submitted and graded, for the facilitator view.
+  async getForClassWithCounts(classId: string) {
+    const assignments = await this.getForClass(classId);
+    if (!assignments.length) return [];
+    const counts = await this.submissionRepo
+      .createQueryBuilder('s')
+      .select('s.assignment_id', 'assignmentId')
+      .addSelect('COUNT(*)', 'submitted')
+      .addSelect('COUNT(s.graded_at)', 'graded')
+      .where('s.assignment_id IN (:...ids)', {
+        ids: assignments.map((a) => a.id),
+      })
+      .groupBy('s.assignment_id')
+      .getRawMany<{
+        assignmentId: string;
+        submitted: string;
+        graded: string;
+      }>();
+    return assignments.map((a) => {
+      const c = counts.find((x) => x.assignmentId === a.id);
+      return {
+        ...a,
+        submittedCount: Number(c?.submitted ?? 0),
+        gradedCount: Number(c?.graded ?? 0),
+      };
+    });
+  }
+
   // Published assignments only, each merged with the caller's own
   // submission (if any) so the member app can show submitted/scored state
   // in one call rather than a second round-trip per assignment, plus a
@@ -265,7 +293,7 @@ export class AssignmentService {
     await this.getAssignmentOrThrow(assignmentId);
     const [data, total] = await this.submissionRepo.findAndCount({
       where: { assignment: { id: assignmentId } },
-      relations: ['member'],
+      relations: ['member', 'classEnrollment', 'classEnrollment.guest'],
       order: { submittedAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
@@ -277,6 +305,23 @@ export class AssignmentService {
     submissionId: string,
     dto: GradeAssignmentDto,
     adminId: string,
+  ): Promise<AssignmentSubmission> {
+    return this.gradeBy(submissionId, dto, { adminId });
+  }
+
+  // Facilitators grade from the member app; recorded against their member record.
+  async gradeAsFacilitator(
+    submissionId: string,
+    dto: GradeAssignmentDto,
+    memberId: string,
+  ): Promise<AssignmentSubmission> {
+    return this.gradeBy(submissionId, dto, { memberId });
+  }
+
+  private async gradeBy(
+    submissionId: string,
+    dto: GradeAssignmentDto,
+    actor: { adminId?: string; memberId?: string },
   ): Promise<AssignmentSubmission> {
     const submission = await this.submissionRepo.findOne({
       where: { id: submissionId },
@@ -292,7 +337,12 @@ export class AssignmentService {
 
     submission.score = dto.score;
     submission.feedback = dto.feedback ?? null;
-    submission.gradedBy = { id: adminId } as Admin;
+    submission.gradedBy = actor.adminId
+      ? ({ id: actor.adminId } as Admin)
+      : null;
+    submission.gradedByMember = actor.memberId
+      ? ({ id: actor.memberId } as Member)
+      : null;
     submission.gradedAt = new Date();
 
     const saved = await this.submissionRepo.save(submission);

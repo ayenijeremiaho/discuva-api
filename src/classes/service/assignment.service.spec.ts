@@ -189,6 +189,24 @@ describe('AssignmentService', () => {
       expect(result.gradedAt).toBeInstanceOf(Date);
     });
 
+    it('records a facilitator as the grader when they grade from the member app', async () => {
+      mockSubmissionRepo.findOne.mockResolvedValue({
+        id: 'sub-1',
+        assignment: { id: 'assign-1', maxScore: 20 },
+        member: { id: 'member-1' },
+      });
+      mockSubmissionRepo.save.mockImplementation((s) => Promise.resolve(s));
+
+      const result = await service.gradeAsFacilitator(
+        'sub-1',
+        { score: 15 },
+        'fac-1',
+      );
+
+      expect(result.gradedByMember).toEqual({ id: 'fac-1' });
+      expect(result.gradedBy).toBeNull();
+    });
+
     it('rejects a score above the assignment max', async () => {
       mockSubmissionRepo.findOne.mockResolvedValue({
         id: 'sub-1',

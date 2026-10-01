@@ -78,6 +78,15 @@ export interface GivingStatementLine {
   reference: string | null;
 }
 
+export interface ClassCertificatePdf {
+  recipientName: string;
+  className: string;
+  classTypeName: string | null;
+  completedOn: string;
+  certificateNumber: string | null;
+  signatories: string[];
+}
+
 const DARK = '#121212';
 const MUTED = '#8A817C';
 const ACCENT = '#EADCC9';
@@ -174,6 +183,106 @@ export class PdfService {
       },
       this.cacheTtl,
     );
+  }
+
+  // Landscape certificate of completion for a training class, in the church's branding.
+  async generateClassCertificate(cert: ClassCertificatePdf): Promise<Buffer> {
+    const branding = await this.resolveBranding();
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    });
+    const W = 297;
+    const H = 210;
+    const mid = W / 2;
+
+    doc.setDrawColor(ACCENT);
+    doc.setLineWidth(3);
+    doc.rect(8, 8, W - 16, H - 16);
+    doc.setDrawColor(DARK);
+    doc.setLineWidth(0.4);
+    doc.rect(13, 13, W - 26, H - 26);
+
+    let y = 42;
+    if (branding.logoImage) {
+      try {
+        doc.addImage(
+          branding.logoImage.dataUrl,
+          branding.logoImage.format,
+          mid - 11,
+          24,
+          22,
+          22,
+        );
+        y = 56;
+      } catch {
+        // drawn without a logo
+      }
+    }
+    doc.setTextColor(MUTED);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text((branding.churchName ?? '').toUpperCase(), mid, y, {
+      align: 'center',
+    });
+
+    doc.setTextColor(DARK);
+    doc.setFont('times', 'normal');
+    doc.setFontSize(34);
+    doc.text('Certificate of Completion', mid, y + 20, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
+    doc.setTextColor(MUTED);
+    doc.text('This is to certify that', mid, y + 36, { align: 'center' });
+
+    doc.setTextColor(DARK);
+    doc.setFont('times', 'bold');
+    doc.setFontSize(28);
+    doc.text(cert.recipientName, mid, y + 52, { align: 'center' });
+    doc.setDrawColor(ACCENT);
+    doc.setLineWidth(0.6);
+    doc.line(mid - 80, y + 56, mid + 80, y + 56);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(12);
+    doc.setTextColor(MUTED);
+    doc.text('has successfully completed', mid, y + 68, { align: 'center' });
+    doc.setTextColor(DARK);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(18);
+    doc.text(cert.className, mid, y + 79, { align: 'center' });
+    if (cert.classTypeName && cert.classTypeName !== cert.className) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(11);
+      doc.setTextColor(MUTED);
+      doc.text(cert.classTypeName, mid, y + 86, { align: 'center' });
+    }
+
+    const baseY = H - 38;
+    doc.setFontSize(10);
+    doc.setTextColor(DARK);
+    doc.setFont('helvetica', 'normal');
+    const signers = cert.signatories.slice(0, 2);
+    const slots = signers.length ? signers : [''];
+    slots.forEach((name, i) => {
+      const x = slots.length === 1 ? 60 : 45 + i * 70;
+      doc.setDrawColor(DARK);
+      doc.setLineWidth(0.3);
+      doc.line(x - 25, baseY, x + 25, baseY);
+      doc.text(name || 'Facilitator', x, baseY + 5, { align: 'center' });
+    });
+    doc.text(`Completed ${cert.completedOn}`, W - 60, baseY, {
+      align: 'center',
+    });
+    if (cert.certificateNumber) {
+      doc.setTextColor(MUTED);
+      doc.text(`Certificate No. ${cert.certificateNumber}`, W - 60, baseY + 5, {
+        align: 'center',
+      });
+    }
+    return Buffer.from(doc.output('arraybuffer'));
   }
 
   async generateSessionReport(report: SessionReport): Promise<Buffer> {

@@ -91,6 +91,10 @@ export class ClassesService {
       description: dto.description ?? null,
       startDate: dto.startDate ?? null,
       endDate: dto.endDate ?? null,
+      minAttendancePercent: dto.minAttendancePercent ?? null,
+      requireAllAssignments: dto.requireAllAssignments ?? false,
+      openForRequests: dto.openForRequests ?? false,
+      capacity: dto.capacity ?? null,
     });
     const saved = await this.classRepo.save(churchClass);
 
@@ -98,7 +102,8 @@ export class ClassesService {
     if (facilitators.length) await this.facilitatorRepo.save(facilitators);
 
     this.logger.log(`Class "${saved.name}" created (id: ${saved.id})`);
-    return saved;
+    // With facilitators, type and materials, so the admin list can show it straight away.
+    return this.getClass(saved.id);
   }
 
   async updateClass(
@@ -114,6 +119,13 @@ export class ClassesService {
       churchClass.description = dto.description;
     if (dto.startDate !== undefined) churchClass.startDate = dto.startDate;
     if (dto.endDate !== undefined) churchClass.endDate = dto.endDate;
+    if (dto.minAttendancePercent !== undefined)
+      churchClass.minAttendancePercent = dto.minAttendancePercent;
+    if (dto.requireAllAssignments !== undefined)
+      churchClass.requireAllAssignments = dto.requireAllAssignments;
+    if (dto.openForRequests !== undefined)
+      churchClass.openForRequests = dto.openForRequests;
+    if (dto.capacity !== undefined) churchClass.capacity = dto.capacity;
 
     const saved = await this.classRepo.save(churchClass);
 
@@ -127,7 +139,7 @@ export class ClassesService {
     }
 
     this.logger.log(`Class "${saved.name}" updated (id: ${saved.id})`);
-    return saved;
+    return this.getClass(saved.id);
   }
 
   // Every update replaces the full facilitator list (simplest correct
@@ -247,7 +259,11 @@ export class ClassesService {
     return UtilityService.createPaginationResponse(classes, page, limit, total);
   }
 
-  async closeClass(id: string): Promise<{ closedEnrollments: number }> {
+  // completeOnly: when given, only those in-progress enrollments are completed (the rest are left for review).
+  async closeClass(
+    id: string,
+    completeOnly?: string[],
+  ): Promise<{ closedEnrollments: number }> {
     const churchClass = await this.getClassOrThrow(id);
 
     if (churchClass.status === ChurchClassStatusEnum.CLOSED) {
@@ -256,20 +272,25 @@ export class ClassesService {
 
     const now = new Date();
 
-    const result = await this.enrollmentRepo
-      .createQueryBuilder()
-      .update(ClassEnrollment)
-      .set({ status: EnrollmentStatusEnum.COMPLETED, completedAt: now })
-      .where('church_class_id = :id', { id })
-      .andWhere('status = :status', {
-        status: EnrollmentStatusEnum.IN_PROGRESS,
-      })
-      .execute();
+    let closedEnrollments = 0;
+    if (!completeOnly || completeOnly.length) {
+      const update = this.enrollmentRepo
+        .createQueryBuilder()
+        .update(ClassEnrollment)
+        .set({ status: EnrollmentStatusEnum.COMPLETED, completedAt: now })
+        .where('church_class_id = :id', { id })
+        .andWhere('status = :status', {
+          status: EnrollmentStatusEnum.IN_PROGRESS,
+        });
+      if (completeOnly)
+        update.andWhere('id IN (:...ids)', { ids: completeOnly });
+      const result = await update.execute();
+      closedEnrollments = result.affected ?? 0;
+    }
 
     churchClass.status = ChurchClassStatusEnum.CLOSED;
     await this.classRepo.save(churchClass);
 
-    const closedEnrollments = result.affected ?? 0;
     this.logger.log(
       `Class "${churchClass.name}" closed — ${closedEnrollments} in-progress enrollment(s) completed`,
     );

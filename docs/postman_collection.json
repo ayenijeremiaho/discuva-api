@@ -8355,7 +8355,7 @@
                 }
               ]
             },
-            "description": "Admin only (CLASSES_WRITE). Only a COMPLETED enrollment can have a certificate issued. certificateNumber is optional. Sets certificateIssued=true, certificateIssuedAt=now(), logs CLASS_CERTIFICATE_ISSUED. No file upload involved."
+            "description": "Admin only (CLASSES_WRITE). Only a COMPLETED enrollment can have a certificate issued. certificateNumber is optional — when omitted the next CERT-YYYY-NNNN is assigned; members get a CLASS_CERTIFICATE_READY push. Sets certificateIssued=true, certificateIssuedAt=now(), logs CLASS_CERTIFICATE_ISSUED. No file upload involved."
           },
           "response": [
             {
@@ -8365,6 +8365,1267 @@
               "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Only completed enrollments can have a certificate issued\"\n}"
             }
           ]
+        },
+        {
+          "name": "Close Class (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "close"
+              ]
+            },
+            "description": "CLASSES_WRITE. Marks the class CLOSED. With completion rules (minAttendancePercent / requireAllAssignments), only in-progress people who meet them are completed; the rest stay in progress and are listed in needsReview. Without rules everyone in progress is completed."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"closedEnrollments\": 24,\n    \"needsReview\": [\n      {\n        \"enrollmentId\": \"{{enrollmentId}}\",\n        \"name\": \"Tunde Bello\",\n        \"missing\": [\n          \"Attendance 60% (needs 75%)\"\n        ]\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Class Sessions (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "sessions"
+              ]
+            },
+            "description": "CLASSES_READ. The class schedule in order, each with held (start time passed) and attendance counts."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"{{classSessionId}}\",\n      \"title\": \"Week 3 — Prayer\",\n      \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n      \"endsAt\": \"2026-10-18T09:30:00.000Z\",\n      \"mode\": \"HYBRID\",\n      \"location\": \"Room 2\",\n      \"meetingLink\": \"https://meet.example.com/abc\",\n      \"notes\": null,\n      \"held\": false,\n      \"attendance\": {\n        \"present\": 0,\n        \"absent\": 0,\n        \"excused\": 0\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Class Session (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "sessions"
+              ]
+            },
+            "description": "CLASSES_WRITE. One class day. mode PHYSICAL | VIRTUAL | HYBRID. endsAt defaults to 2 hours after startsAt. Re-syncs the class's nextSessionAt/meetingLink used by reminders.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n  \"endsAt\": \"2026-10-18T09:30:00.000Z\",\n  \"title\": \"Week 3 — Prayer\",\n  \"mode\": \"HYBRID\",\n  \"location\": \"Room 2\",\n  \"meetingLink\": \"https://meet.example.com/abc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"id\": \"{{classSessionId}}\",\n    \"title\": \"Week 3 — Prayer\",\n    \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n    \"endsAt\": \"2026-10-18T09:30:00.000Z\",\n    \"mode\": \"HYBRID\",\n    \"location\": \"Room 2\",\n    \"meetingLink\": \"https://meet.example.com/abc\",\n    \"notes\": null,\n    \"held\": false,\n    \"attendance\": {\n      \"present\": 0,\n      \"absent\": 0,\n      \"excused\": 0\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Class Session Series (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/sessions/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "sessions",
+                "series"
+              ]
+            },
+            "description": "CLASSES_WRITE. A session every everyWeeks (1–4) weeks from startDate to endDate at the same local time (church timezone, DST-safe), each durationMinutes long (default 120). Up to 60; start times that already exist are skipped.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-10-04\",\n  \"endDate\": \"2026-12-20\",\n  \"time\": \"09:00\",\n  \"durationMinutes\": 90,\n  \"everyWeeks\": 1,\n  \"mode\": \"PHYSICAL\",\n  \"location\": \"Room 2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"created\": 11,\n    \"skipped\": [\n      \"2026-10-11\"\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Class Session (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/sessions/{{classSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "sessions",
+                "{{classSessionId}}"
+              ]
+            },
+            "description": "CLASSES_WRITE. Any field; null or empty string clears title/location/meetingLink/notes.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startsAt\": \"2026-10-19T17:00:00.000Z\",\n  \"mode\": \"VIRTUAL\",\n  \"location\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Class Session (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/sessions/{{classSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "sessions",
+                "{{classSessionId}}"
+              ]
+            },
+            "description": "CLASSES_WRITE. 400 once attendance has been taken for the session."
+          },
+          "response": []
+        },
+        {
+          "name": "Session Roster (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/sessions/{{classSessionId}}/roster",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "sessions",
+                "{{classSessionId}}",
+                "roster"
+              ]
+            },
+            "description": "CLASSES_READ. Everyone on the class (not cancelled), members and guests, with their mark for this session."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"session\": {\n      \"id\": \"{{classSessionId}}\",\n      \"startsAt\": \"2026-10-18T08:00:00.000Z\"\n    },\n    \"entries\": [\n      {\n        \"enrollmentId\": \"{{enrollmentId}}\",\n        \"name\": \"Ada Obi\",\n        \"email\": \"ada@example.com\",\n        \"isGuest\": false,\n        \"status\": \"PRESENT\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Mark Session Attendance (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/sessions/{{classSessionId}}/attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "sessions",
+                "{{classSessionId}}",
+                "attendance"
+              ]
+            },
+            "description": "CLASSES_WRITE. Upserts PRESENT/ABSENT/EXCUSED per enrollment (≤500); people not on the class are skipped.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attendances\": [\n    {\n      \"enrollmentId\": \"{{enrollmentId}}\",\n      \"status\": \"PRESENT\"\n    },\n    {\n      \"enrollmentId\": \"{{enrollmentId2}}\",\n      \"status\": \"EXCUSED\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"marked\": 2\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Class Progress (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "progress"
+              ]
+            },
+            "description": "CLASSES_READ. Per person: attendance % (present ÷ (held − excused), counting sessions since they enrolled), assignments submitted, average score, and whether they meet the class's completion rules (missing explains why not)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"rules\": {\n      \"minAttendancePercent\": 75,\n      \"requireAllAssignments\": true\n    },\n    \"sessionsHeld\": 8,\n    \"sessionsTotal\": 14,\n    \"people\": [\n      {\n        \"enrollmentId\": \"{{enrollmentId}}\",\n        \"memberId\": \"{{memberId}}\",\n        \"guestId\": null,\n        \"name\": \"Ada Obi\",\n        \"email\": \"ada@example.com\",\n        \"status\": \"IN_PROGRESS\",\n        \"certificateIssued\": false,\n        \"sessionsHeld\": 8,\n        \"present\": 7,\n        \"absent\": 1,\n        \"excused\": 0,\n        \"attendancePercent\": 87.5,\n        \"assignmentsTotal\": 3,\n        \"assignmentsSubmitted\": 2,\n        \"averageScorePercent\": 81,\n        \"meetsRules\": false,\n        \"missing\": [\n          \"1 assignment(s) not submitted\"\n        ]\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Class Join Requests (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "join-requests"
+              ]
+            },
+            "description": "CLASSES_READ. Pending first, then recent decisions."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"{{joinRequestId}}\",\n      \"status\": \"PENDING\",\n      \"message\": \"I was baptised last month\",\n      \"declineReason\": null,\n      \"createdAt\": \"2026-10-01T10:00:00.000Z\",\n      \"decidedAt\": null,\n      \"member\": {\n        \"id\": \"{{memberId}}\",\n        \"firstname\": \"Ada\",\n        \"lastname\": \"Obi\",\n        \"email\": \"ada@example.com\",\n        \"phoneNumber\": \"+2348012345678\"\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Pending Join Request Counts (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/join-requests/pending-counts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "join-requests",
+                "pending-counts"
+              ]
+            },
+            "description": "CLASSES_READ. { classId: count } for badges on the class list."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"{{classId}}\": 3\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Approve Join Request (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/join-requests/{{joinRequestId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "join-requests",
+                "{{joinRequestId}}",
+                "approve"
+              ]
+            },
+            "description": "CLASSES_WRITE. Enrols the member (refused if the class is full) and pushes CLASS_JOIN_APPROVED."
+          },
+          "response": []
+        },
+        {
+          "name": "Decline Join Request (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/join-requests/{{joinRequestId}}/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "join-requests",
+                "{{joinRequestId}}",
+                "decline"
+              ]
+            },
+            "description": "CLASSES_WRITE. Optional reason is shown to the member; pushes CLASS_JOIN_DECLINED.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"The next intake starts in January.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Issue All Certificates (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/certificates/issue-all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "certificates",
+                "issue-all"
+              ]
+            },
+            "description": "CLASSES_WRITE. Issues a numbered certificate to every COMPLETED enrollment that doesn't have one."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"issued\": 12\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Download Certificate PDF (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/enrollments/{{enrollmentId}}/certificate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "enrollments",
+                "{{enrollmentId}}",
+                "certificate"
+              ]
+            },
+            "description": "CLASSES_READ. Landscape PDF with the church name/logo, class, completion date, certificate number and facilitator signature lines. 400 if not issued."
+          },
+          "response": []
+        },
+        {
+          "name": "Training Report Summary (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/reports/summary?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "reports",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "CLASSES_READ. Classes running in the range (open-ended dates count), per-class completion and attendance, totals, and next-step rates (completers of a type who enrolled in its next type)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"from\": \"2026-01-01\",\n    \"to\": \"2026-12-31\",\n    \"totals\": {\n      \"classes\": 4,\n      \"enrolled\": 96,\n      \"inProgress\": 20,\n      \"completed\": 70,\n      \"cancelled\": 6,\n      \"certificatesIssued\": 64,\n      \"completionRate\": 72.9\n    },\n    \"classes\": [\n      {\n        \"classId\": \"{{classId}}\",\n        \"className\": \"Believers Jan\",\n        \"classTypeName\": \"Believers' Class\",\n        \"status\": \"CLOSED\",\n        \"startDate\": \"2026-01-04\",\n        \"endDate\": \"2026-04-12\",\n        \"enrolled\": 30,\n        \"inProgress\": 0,\n        \"completed\": 26,\n        \"cancelled\": 4,\n        \"completionRate\": 86.7,\n        \"sessionsHeld\": 14,\n        \"averageAttendance\": 82.4,\n        \"certificatesIssued\": 26\n      }\n    ],\n    \"pipeline\": [\n      {\n        \"classTypeId\": \"{{classTypeId}}\",\n        \"classTypeName\": \"Believers' Class\",\n        \"nextClassTypeName\": \"Baptismal Class\",\n        \"completed\": 26,\n        \"movedOn\": 19,\n        \"rate\": 73.1\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Training Report Export (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/reports/export?from=2026-01-01&to=2026-12-31",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "reports",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-12-31"
+                }
+              ]
+            },
+            "description": "CLASSES_READ. .xlsx with Classes, Next steps and People sheets."
+          },
+          "response": []
+        },
+        {
+          "name": "My Facilitated Classes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching"
+              ]
+            },
+            "description": "Member. Classes the caller facilitates, with enrolledCount."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"{{classId}}\",\n      \"name\": \"Believers Jan\",\n      \"status\": \"ACTIVE\",\n      \"enrolledCount\": 24,\n      \"classType\": {\n        \"name\": \"Believers' Class\"\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Sessions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/{{classId}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "{{classId}}",
+                "sessions"
+              ]
+            },
+            "description": "Facilitator of the class only (403 otherwise). Same as the admin list."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"{{classSessionId}}\",\n      \"title\": \"Week 3 — Prayer\",\n      \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n      \"endsAt\": \"2026-10-18T09:30:00.000Z\",\n      \"mode\": \"HYBRID\",\n      \"location\": \"Room 2\",\n      \"meetingLink\": \"https://meet.example.com/abc\",\n      \"notes\": null,\n      \"held\": false,\n      \"attendance\": {\n        \"present\": 0,\n        \"absent\": 0,\n        \"excused\": 0\n      }\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Create Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/{{classId}}/sessions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "{{classId}}",
+                "sessions"
+              ]
+            },
+            "description": "Facilitator of the class only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n  \"endsAt\": \"2026-10-18T09:30:00.000Z\",\n  \"title\": \"Week 3 — Prayer\",\n  \"mode\": \"HYBRID\",\n  \"location\": \"Room 2\",\n  \"meetingLink\": \"https://meet.example.com/abc\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"id\": \"{{classSessionId}}\",\n    \"title\": \"Week 3 — Prayer\",\n    \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n    \"endsAt\": \"2026-10-18T09:30:00.000Z\",\n    \"mode\": \"HYBRID\",\n    \"location\": \"Room 2\",\n    \"meetingLink\": \"https://meet.example.com/abc\",\n    \"notes\": null,\n    \"held\": false,\n    \"attendance\": {\n      \"present\": 0,\n      \"absent\": 0,\n      \"excused\": 0\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Create Session Series",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/{{classId}}/sessions/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "{{classId}}",
+                "sessions",
+                "series"
+              ]
+            },
+            "description": "Facilitator of the class only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"startDate\": \"2026-10-04\",\n  \"endDate\": \"2026-12-20\",\n  \"time\": \"09:00\",\n  \"durationMinutes\": 90,\n  \"everyWeeks\": 1,\n  \"mode\": \"PHYSICAL\",\n  \"location\": \"Room 2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"created\": 12,\n    \"skipped\": []\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Update Session",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/sessions/{{classSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "sessions",
+                "{{classSessionId}}"
+              ]
+            },
+            "description": "Facilitator of the class only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Bring a Bible and notebook\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Facilitator: Delete Session",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/sessions/{{classSessionId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "sessions",
+                "{{classSessionId}}"
+              ]
+            },
+            "description": "Facilitator of the class only. 400 once attendance exists."
+          },
+          "response": []
+        },
+        {
+          "name": "Facilitator: Session Roster",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/sessions/{{classSessionId}}/roster",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "sessions",
+                "{{classSessionId}}",
+                "roster"
+              ]
+            },
+            "description": "Facilitator of the class only."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"session\": {\n      \"id\": \"{{classSessionId}}\",\n      \"startsAt\": \"2026-10-18T08:00:00.000Z\"\n    },\n    \"entries\": [\n      {\n        \"enrollmentId\": \"{{enrollmentId}}\",\n        \"name\": \"Ada Obi\",\n        \"email\": \"ada@example.com\",\n        \"isGuest\": false,\n        \"status\": \"PRESENT\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Mark Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/sessions/{{classSessionId}}/attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "sessions",
+                "{{classSessionId}}",
+                "attendance"
+              ]
+            },
+            "description": "Facilitator of the class only; recorded as markedByMember.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"attendances\": [\n    {\n      \"enrollmentId\": \"{{enrollmentId}}\",\n      \"status\": \"PRESENT\"\n    },\n    {\n      \"enrollmentId\": \"{{enrollmentId2}}\",\n      \"status\": \"EXCUSED\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"marked\": 2\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Class Progress",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/{{classId}}/progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "{{classId}}",
+                "progress"
+              ]
+            },
+            "description": "Facilitator of the class only."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"rules\": {\n      \"minAttendancePercent\": 75,\n      \"requireAllAssignments\": true\n    },\n    \"sessionsHeld\": 8,\n    \"sessionsTotal\": 14,\n    \"people\": [\n      {\n        \"enrollmentId\": \"{{enrollmentId}}\",\n        \"memberId\": \"{{memberId}}\",\n        \"guestId\": null,\n        \"name\": \"Ada Obi\",\n        \"email\": \"ada@example.com\",\n        \"status\": \"IN_PROGRESS\",\n        \"certificateIssued\": false,\n        \"sessionsHeld\": 8,\n        \"present\": 7,\n        \"absent\": 1,\n        \"excused\": 0,\n        \"attendancePercent\": 87.5,\n        \"assignmentsTotal\": 3,\n        \"assignmentsSubmitted\": 2,\n        \"averageScorePercent\": 81,\n        \"meetsRules\": false,\n        \"missing\": [\n          \"1 assignment(s) not submitted\"\n        ]\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Assignments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/{{classId}}/assignments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "{{classId}}",
+                "assignments"
+              ]
+            },
+            "description": "Facilitator of the class only. Each with submittedCount and gradedCount."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": [\n    {\n      \"id\": \"{{assignmentId}}\",\n      \"title\": \"Reflection 1\",\n      \"maxScore\": 20,\n      \"isPublished\": true,\n      \"submittedCount\": 18,\n      \"gradedCount\": 10\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Facilitator: Submissions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/assignments/{{assignmentId}}/submissions?page=1&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "assignments",
+                "{{assignmentId}}",
+                "submissions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Facilitator of the class only. Paginated; includes guest submissions (classEnrollment.guest)."
+          },
+          "response": []
+        },
+        {
+          "name": "Facilitator: Grade Submission",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/teaching/submissions/{{submissionId}}/grade",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "teaching",
+                "submissions",
+                "{{submissionId}}",
+                "grade"
+              ]
+            },
+            "description": "Facilitator of the class only; recorded as gradedByMember.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"score\": 17,\n  \"feedback\": \"Clear and thoughtful.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My Class Progress",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/my-progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "my-progress"
+              ]
+            },
+            "description": "Member. The schedule for anyone; when the caller is enrolled, their mark per session (myStatus), progress and the class's rules. join is the same as join-status, so the class page needs one request."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"enrolled\": true,\n    \"schedule\": [\n      {\n        \"id\": \"{{classSessionId}}\",\n        \"startsAt\": \"2026-10-18T08:00:00.000Z\",\n        \"mode\": \"PHYSICAL\",\n        \"location\": \"Room 2\",\n        \"held\": true,\n        \"myStatus\": \"PRESENT\"\n      }\n    ],\n    \"progress\": {\n      \"enrollmentId\": \"{{enrollmentId}}\",\n      \"memberId\": \"{{memberId}}\",\n      \"guestId\": null,\n      \"name\": \"Ada Obi\",\n      \"email\": \"ada@example.com\",\n      \"status\": \"IN_PROGRESS\",\n      \"certificateIssued\": false,\n      \"sessionsHeld\": 8,\n      \"present\": 7,\n      \"absent\": 1,\n      \"excused\": 0,\n      \"attendancePercent\": 87.5,\n      \"assignmentsTotal\": 3,\n      \"assignmentsSubmitted\": 2,\n      \"averageScorePercent\": 81,\n      \"meetsRules\": false,\n      \"missing\": [\n        \"1 assignment(s) not submitted\"\n      ]\n    },\n    \"rules\": {\n      \"minAttendancePercent\": 75,\n      \"requireAllAssignments\": true\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "My Join Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/join-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "join-status"
+              ]
+            },
+            "description": "Member. Whether the class takes requests, places left, the caller's enrollment status and latest request."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "body": "{\n  \"data\": {\n    \"openForRequests\": true,\n    \"classClosed\": false,\n    \"capacity\": 30,\n    \"spotsLeft\": 4,\n    \"enrollmentStatus\": null,\n    \"enrollmentId\": null,\n    \"request\": null\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Request to Join Class",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/{{classId}}/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "{{classId}}",
+                "join-requests"
+              ]
+            },
+            "description": "Member. Refused if the class isn't open for requests, is full or closed, they're already in it, or they already have a pending request.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"I was baptised last month and would love to join.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Withdraw Join Request",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/join-requests/{{joinRequestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "join-requests",
+                "{{joinRequestId}}"
+              ]
+            },
+            "description": "Member. Own pending request only."
+          },
+          "response": []
+        },
+        {
+          "name": "My Join Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/my/join-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "my",
+                "join-requests"
+              ]
+            },
+            "description": "Member. Own requests, newest first (≤50)."
+          },
+          "response": []
+        },
+        {
+          "name": "Download My Certificate",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/classes/my/enrollments/{{enrollmentId}}/certificate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "my",
+                "enrollments",
+                "{{enrollmentId}}",
+                "certificate"
+              ]
+            },
+            "description": "Member. PDF of the caller's own issued certificate (403 for someone else's)."
+          },
+          "response": []
+        },
+        {
+          "name": "Guest Certificate PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/classes/guest/{{enrollmentId}}/certificate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "classes",
+                "guest",
+                "{{enrollmentId}}",
+                "certificate"
+              ]
+            },
+            "description": "Public (guest portal link), 10/min. PDF of a guest enrollment's issued certificate."
+          },
+          "response": []
         },
         {
           "name": "My Enrollments",
