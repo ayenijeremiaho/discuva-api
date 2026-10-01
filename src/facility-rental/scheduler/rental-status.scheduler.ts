@@ -2,14 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, MoreThan, Repository } from 'typeorm';
-import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { RentalBooking } from '../entity/rental-booking.entity';
 import { RentalBookingStatus } from '../enum/rental.enum';
-import { Tenant } from '../../tenant/entity/tenant.entity';
-import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
-import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 
 @Injectable()
 export class RentalStatusScheduler {
@@ -18,24 +15,22 @@ export class RentalStatusScheduler {
   constructor(
     @InjectRepository(RentalBooking)
     private readonly bookingRepo: Repository<RentalBooking>,
-    @InjectRepository(Tenant)
-    private readonly tenantRepo: Repository<Tenant>,
-    private readonly cls: ClsService<AppClsStore>,
+    private readonly gate: SchedulerGateService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
   @Cron(CronExpression.EVERY_10_MINUTES)
   async transitionBookingStatuses(): Promise<void> {
-    await forEachActiveTenant(
-      this.tenantRepo,
-      this.cls,
+    await this.gate.forEachDueTenant(
+      'rental-status',
       this.txHost,
       this.logger,
       () => this.runTransitions(),
     );
   }
 
-  private async runTransitions(): Promise<void> {
+  // Returns when this church's next booking starts or ends (null if none).
+  async runTransitions(): Promise<Date | null> {
     const now = new Date();
 
     const toInProgress = await this.bookingRepo.find({
@@ -72,5 +67,23 @@ export class RentalStatusScheduler {
         `Transitioned ${toCompleted.length} booking(s) to COMPLETED`,
       );
     }
+
+    return this.nextTransitionDue(now);
+  }
+
+  async nextTransitionDue(now = new Date()): Promise<Date | null> {
+    const row = await this.bookingRepo
+      .createQueryBuilder('b')
+      .select(
+        `MIN(CASE WHEN b.status = :confirmed AND b.start_date_time > :now THEN b.start_date_time ELSE b.end_date_time END)`,
+        'next',
+      )
+      .where('b.status IN (:...open)', {
+        open: [RentalBookingStatus.CONFIRMED, RentalBookingStatus.IN_PROGRESS],
+      })
+      .andWhere('b.end_date_time > :now')
+      .setParameters({ now, confirmed: RentalBookingStatus.CONFIRMED })
+      .getRawOne<{ next: Date | string | null }>();
+    return row?.next ? new Date(row.next) : null;
   }
 }

@@ -12,6 +12,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { SmsService } from '../../sms/service/sms.service';
 import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { realGateProvider } from '../../tenant/scheduler-gate/scheduler-gate.testing';
 
 const makeClassQb = () => ({
   where: jest.fn().mockReturnThis(),
@@ -87,6 +88,7 @@ describe('ClassSessionReminderScheduler', () => {
         { provide: SmsService, useValue: mockSmsService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        realGateProvider(mockTenantRepo, mockCls),
         {
           provide: ReminderSettingsService,
           useValue: mockReminderSettingsService,
@@ -364,5 +366,63 @@ describe('ClassSessionReminderScheduler', () => {
     await scheduler.dispatchClassSessionReminders();
 
     expect(mockTenantRepo.find).not.toHaveBeenCalled();
+  });
+
+  // Gating must not change when reminders go out: simulate hourly runs with the real rounding rule.
+  describe('nextDue equivalence', () => {
+    const HOUR = 3_600_000;
+    const sendsAt = (
+      sessionAt: number,
+      thresholds: number[],
+      ticks: number[],
+      gated: boolean,
+    ) => {
+      const sent: string[] = [];
+      let due: number | null = null;
+      for (const t of ticks) {
+        if (gated && due !== null && t < due) continue;
+        const diff = Math.round((sessionAt - t) / HOUR);
+        if (thresholds.includes(diff)) sent.push(`${diff}@${t}`);
+        const next = ClassSessionReminderScheduler.nextDue(
+          [{ nextSessionAt: new Date(sessionAt) }],
+          thresholds,
+          new Date(t),
+        );
+        // Mirrors SchedulerGateService.sleepUntil: never past the top of the next hour.
+        const cap = Math.floor(t / HOUR) * HOUR + HOUR;
+        due = Math.min(next ? next.getTime() : Infinity, cap);
+      }
+      return sent;
+    };
+
+    it.each([[[24, 1]], [[48, 2, 0]], [[3]]])(
+      'sends every reminder at the same hourly run with thresholds %j',
+      (thresholds) => {
+        const start = new Date('2026-10-04T00:00:00Z').getTime();
+        const ticks = Array.from(
+          { length: 24 * 5 },
+          (_, i) => start + i * HOUR,
+        );
+        for (const offsetMinutes of [0, 7, 29, 30, 31, 59, 90, 61 * 24 + 15]) {
+          const sessionAt = start + 2 * 24 * HOUR + offsetMinutes * 60_000;
+          expect(sendsAt(sessionAt, thresholds, ticks, true)).toEqual(
+            sendsAt(sessionAt, thresholds, ticks, false),
+          );
+        }
+      },
+    );
+
+    it('returns null when nothing is ahead', () => {
+      expect(
+        ClassSessionReminderScheduler.nextDue(
+          [
+            { nextSessionAt: new Date('2020-01-01T00:00:00Z') },
+            { nextSessionAt: null },
+          ],
+          [24],
+          new Date('2026-10-04T00:00:00Z'),
+        ),
+      ).toBeNull();
+    });
   });
 });

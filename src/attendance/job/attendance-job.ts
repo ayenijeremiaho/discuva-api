@@ -1,15 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { AttendanceService } from '../service/attendance.service';
 import { CacheService } from '../../utility/service/cache.service';
-import { Tenant } from '../../tenant/entity/tenant.entity';
-import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
-import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 
 const LOCK_KEY = 'lock:absence-marking';
 const LOCK_TTL_SECONDS = 270;
@@ -21,9 +16,7 @@ export class AttendanceJobService {
   constructor(
     private readonly attendanceService: AttendanceService,
     private readonly cacheService: CacheService,
-    @InjectRepository(Tenant)
-    private readonly tenantRepo: Repository<Tenant>,
-    private readonly cls: ClsService<AppClsStore>,
+    private readonly gate: SchedulerGateService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
@@ -40,16 +33,19 @@ export class AttendanceJobService {
       return;
     }
     try {
-      const { succeeded, failed } = await forEachActiveTenant(
-        this.tenantRepo,
-        this.cls,
+      const { succeeded, failed, skipped } = await this.gate.forEachDueTenant(
+        'absence-marking',
         this.txHost,
         this.logger,
-        () => this.attendanceService.markAbsentees(),
+        async () => {
+          await this.attendanceService.markAbsentees();
+          return this.attendanceService.nextAbsenceMarkingDue();
+        },
       );
-      this.logger.log(
-        `Absence marking complete for ${succeeded} tenant(s), ${failed} failure(s)`,
-      );
+      if (succeeded || failed)
+        this.logger.log(
+          `Absence marking complete for ${succeeded} tenant(s), ${failed} failure(s), ${skipped} with nothing due`,
+        );
     } finally {
       this.cacheService.releaseLock(LOCK_KEY);
     }

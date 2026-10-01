@@ -9,6 +9,7 @@ import { ServiceSessionService } from '../service/service-session.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { DateService } from '../../utility/service/date.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
+import { realGateProvider } from '../../tenant/scheduler-gate/scheduler-gate.testing';
 
 const mockCacheService = {
   acquireLock: jest.fn().mockResolvedValue(true),
@@ -37,6 +38,10 @@ const mockProgrammeQb = {
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
   getMany: jest.fn(),
+  innerJoin: jest.fn().mockReturnThis(),
+  select: jest.fn().mockReturnThis(),
+  addSelect: jest.fn().mockReturnThis(),
+  getRawOne: jest.fn().mockResolvedValue({ next: null, waiting: '0' }),
 };
 
 const mockProgrammeRepo = {
@@ -86,6 +91,7 @@ describe('ProgrammeAutoStartScheduler', () => {
         { provide: DateService, useValue: mockDateService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        realGateProvider(mockTenantRepo, mockCls),
       ],
     }).compile();
 
@@ -225,12 +231,37 @@ describe('ProgrammeAutoStartScheduler', () => {
 
     await scheduler.autoStartDueProgrammes();
 
-    expect(mockProgrammeRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
+    expect(mockProgrammeQb.getMany).toHaveBeenCalledTimes(2);
     expect(mockTxHost.tx.query).toHaveBeenCalledWith(
       'SET LOCAL search_path TO "church_a", public',
     );
     expect(mockTxHost.tx.query).toHaveBeenCalledWith(
       'SET LOCAL search_path TO "church_b", public',
     );
+  });
+
+  describe('next due', () => {
+    it('keeps the 5-minute cadence while a due programme is still waiting to start', async () => {
+      mockProgrammeQb.getMany.mockResolvedValue([]);
+      mockProgrammeQb.getRawOne.mockResolvedValueOnce({
+        next: '2026-10-04T08:00:00.000Z',
+        waiting: '1',
+      });
+      const before = Date.now();
+      const next = await scheduler.runAutoStart();
+      expect(next!.getTime()).toBeGreaterThanOrEqual(before);
+      expect(next!.getTime()).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('otherwise sleeps until the next auto-start time', async () => {
+      mockProgrammeQb.getMany.mockResolvedValue([]);
+      mockProgrammeQb.getRawOne.mockResolvedValueOnce({
+        next: '2026-10-11T08:00:00.000Z',
+        waiting: '0',
+      });
+      await expect(scheduler.runAutoStart()).resolves.toEqual(
+        new Date('2026-10-11T08:00:00.000Z'),
+      );
+    });
   });
 });

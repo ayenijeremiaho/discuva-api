@@ -252,6 +252,20 @@ export class EventService {
       .getMany();
   }
 
+  // When the next event with service slots ends and will need absence marking (null if none).
+  async nextAbsenceMarkingDue(): Promise<Date | null> {
+    const row = await this.eventRepository
+      .createQueryBuilder('event')
+      .select('MIN(event.end_time)', 'next')
+      .where('event.attendance_marked = false')
+      .andWhere('event.end_time >= :now', { now: new Date() })
+      .andWhere(
+        'EXISTS (SELECT 1 FROM service_slots s WHERE s.event_id = event.id)',
+      )
+      .getRawOne<{ next: Date | string | null }>();
+    return row?.next ? new Date(row.next) : null;
+  }
+
   async getUpcomingEvents(limit = 5): Promise<Event[]> {
     return this.eventRepository.find({
       where: { endTime: MoreThanOrEqual(new Date()) },
