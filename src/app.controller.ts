@@ -38,11 +38,29 @@ export class AppController {
     res.redirect(301, '/');
   }
 
+  // Fly's 30-second check. Deliberately no database query: that alone would keep the database from ever scaling
+  // to zero, and restarting the app wouldn't fix a database outage anyway. Use /health/deep to include the database.
   @Public()
   @SkipThrottle()
   @Version(VERSION_NEUTRAL)
   @Get('health')
   async health(): Promise<{ status: string; uptime: number }> {
+    const errors: string[] = [];
+    await this.cacheService.ping().catch(() => errors.push('redis'));
+    if (errors.length) {
+      throw new ServiceUnavailableException(
+        `Unhealthy: ${errors.join(', ')} unreachable`,
+      );
+    }
+    return { status: 'ok', uptime: Math.floor(process.uptime()) };
+  }
+
+  // Also checks the database (waking it if it has scaled to zero) — for manual checks or a low-frequency monitor.
+  @Public()
+  @SkipThrottle()
+  @Version(VERSION_NEUTRAL)
+  @Get('health/deep')
+  async deepHealth(): Promise<{ status: string; uptime: number }> {
     const errors: string[] = [];
 
     await this.dataSource

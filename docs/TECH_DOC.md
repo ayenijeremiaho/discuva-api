@@ -2194,7 +2194,7 @@ settings), whichever code path writes; a write during a run (`global:scheduler:w
 a failed run or a Redis error means the job runs as before. The active-church list is cached in Redis for 10 minutes
 (`global:scheduler:active-tenants`, cleared when a `Tenant` row changes). Simulated over days of random schedules, every
 item fires at the same tick as without the gate; a quiet day goes from 288 runs per 5-minute job to 24. Daily jobs are
-unchanged. The connection pool's `DATABASE_POOL_MIN` now defaults to `0` (idle connections close after 30s) and
+unchanged. The connection pool's Fly's 30-second `/health` check no longer queries the database (`/health/deep` does). `DATABASE_POOL_MIN` now defaults to `0` (idle connections close after 30s) and
 `connectionTimeoutMillis` is 10s so the first query after the database wakes doesn't fail.
 
 **Scheduler tenant iteration (`forEachActiveTenant`):** `@Cron()`-decorated methods run with no CLS context at all —
@@ -8949,7 +8949,8 @@ outside the requested `?months=` window).
 
 | Method | Route                                                      | Role                                                          | Description                                                                                                   |
 |--------|------------------------------------------------------------|---------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| GET    | /health                                                    | Public                                                        | Liveness check (served at `/v1/health`) — probes DB and Redis; returns 503 with details if either is unreachable. Exempt from rate limiting (`@SkipThrottle`). |
+| GET    | /health                                                    | Public                                                        | Liveness check used by Fly every 30s — probes Redis only (no database query, so it can't stop Neon scaling to zero); 503 if Redis is unreachable. Exempt from rate limiting (`@SkipThrottle`). |
+| GET    | /health/deep                                               | Public                                                        | Also probes the database (wakes it if scaled to zero); 503 listing whatever is unreachable. For manual checks or a low-frequency monitor. |
 | POST   | /auth/signup                                               | Public                                                        | Register new member (server generates temp password; emailed to user)                                         |
 | POST   | /auth/login                                                | Public                                                        | Mobile app login — requires `deviceId`; enforces one-device-per-account lock                                  |
 | POST   | /auth/admin-login                                          | Public                                                        | Admin portal login — verifies active Admin record; no device check                                            |
