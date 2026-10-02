@@ -14,6 +14,7 @@ import { AdminModule } from '../admin/admin.module';
 import { ChurchCalendarModule } from '../church-calendar/church-calendar.module';
 import { ServiceProgrammeModule } from '../service-programme/service-programme.module';
 import { BillingModule } from '../billing/billing.module';
+import { BuilderTemplateModule } from '../builder-template/builder-template.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { BillingModule } from '../billing/billing.module';
     ChurchCalendarModule,
     ServiceProgrammeModule,
     BillingModule,
+    BuilderTemplateModule,
   ],
   providers: [PageService, GalleryFolderSyncService],
   // PagePublicController must come first — PageAdminController's GET

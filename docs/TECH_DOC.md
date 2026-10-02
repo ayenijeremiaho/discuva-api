@@ -2053,6 +2053,15 @@ pastoral-record types the way a hardcoded "Notes" module would be — an admin d
 record type needs, and gets the same generic per-field analytics (see below) any other form gets, with zero new
 backend code per record type.
 
+**Reusable builder templates** (`builder_templates`, tenant migration `1800342000000-CreateBuilderTemplates`) —
+one tenant-scoped JSONB store backs saved Forms, reusable field groups, and Pages. Each row has `kind` (`FORM`,
+`FIELD_GROUP`, or `PAGE`), a required name, optional description, and opaque `data`; the URL determines the kind.
+Form template routes are `GET/POST /forms/templates` and `DELETE /forms/templates/:templateId`; field-group
+routes are `GET/POST /forms/field-groups` and `DELETE /forms/field-groups/:templateId`. Reads require
+`FORMS_READ`; writes/deletes require `FORMS_WRITE`, in addition to the Forms module and plan guards. Save bodies
+are `{ name, description?, data: object }`. Applying a stored template remains a normal form create/update
+operation, so existing form DTO and service validation still applies.
+
 **Field order is always explicit, never left to Postgres's default row order.** `Form.fields` is an eager
 `@OneToMany` relation with no `orderBy` of its own, so every `formRepo.find`/`findOne` call across
 `FormService`/`FormSubmissionService` passes `order: { fields: { order: 'ASC' } }` explicitly — an unordered join
@@ -2640,6 +2649,12 @@ identically to an unknown slug, so a visitor can never distinguish "never existe
 content }`, plain `jsonb`, whole-array replace on every save — same convention `Form.postSubmitOutcomes` uses,
 since there's no per-section DB row to diff against). `id` is client-generated (a uuid), not server-assigned —
 sections have no relation of their own for TypeORM to assign an id to.
+
+**Reusable Page templates** share the tenant-scoped `builder_templates` table described under Forms.
+`GET/POST /pages/templates` and `DELETE /pages/templates/:templateId` are guarded by `PAGES_READ` for reads
+and `PAGES_WRITE` for mutations, along with the Pages module gate. Save bodies use
+`{ name, description?, data: object }`; the admin builder applies a stored Page as a new draft with fresh
+section ids. These endpoints do not publish or modify an existing Page.
 
 **Draft/publish split** (`AddPageDraftFields1796540400000`) — `title`, `seoDescription`, `ogImageUrl`/
 `ogImagePublicId`, and `sections` each have a `draft*` counterpart (`draftTitle`, `draftSeoDescription`,

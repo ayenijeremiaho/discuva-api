@@ -38,6 +38,9 @@ import {
   UpdateFormDto,
 } from '../dto/form.dto';
 import { FormVisibility } from '../enum/form.enum';
+import { BuilderTemplateService } from '../../builder-template/service/builder-template.service';
+import { BuilderTemplateKind } from '../../builder-template/enum/builder-template-kind.enum';
+import { SaveBuilderTemplateDto } from '../../builder-template/dto/save-builder-template.dto';
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -59,7 +62,53 @@ export class FormAdminController {
     private readonly formService: FormService,
     private readonly submissionService: FormSubmissionService,
     private readonly groupService: GroupService,
+    private readonly builderTemplateService: BuilderTemplateService,
   ) {}
+
+  @RequiresPermission(AdminPermission.FORMS_READ)
+  @Get('templates')
+  getTemplates() {
+    return this.builderTemplateService.list(BuilderTemplateKind.FORM);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post('templates')
+  saveTemplate(@Body() dto: SaveBuilderTemplateDto) {
+    return this.builderTemplateService.create(BuilderTemplateKind.FORM, dto);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Delete('templates/:templateId')
+  deleteTemplate(@Param('templateId', ParseUUIDPipe) templateId: string) {
+    return this.builderTemplateService.delete(
+      BuilderTemplateKind.FORM,
+      templateId,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_READ)
+  @Get('field-groups')
+  getFieldGroups() {
+    return this.builderTemplateService.list(BuilderTemplateKind.FIELD_GROUP);
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Post('field-groups')
+  saveFieldGroup(@Body() dto: SaveBuilderTemplateDto) {
+    return this.builderTemplateService.create(
+      BuilderTemplateKind.FIELD_GROUP,
+      dto,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.FORMS_WRITE)
+  @Delete('field-groups/:templateId')
+  deleteFieldGroup(@Param('templateId', ParseUUIDPipe) templateId: string) {
+    return this.builderTemplateService.delete(
+      BuilderTemplateKind.FIELD_GROUP,
+      templateId,
+    );
+  }
 
   // Own route + FORMS_WRITE gate rather than reusing GroupController's
   // GET /groups/lookup (gated on ANNOUNCEMENTS_WRITE) — an admin who can

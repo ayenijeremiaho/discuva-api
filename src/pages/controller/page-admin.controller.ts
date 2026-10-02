@@ -30,6 +30,9 @@ import {
   UpdatePageDto,
 } from '../dto/page.dto';
 import { TestimonialSubmissionStatus } from '../enum/page.enum';
+import { BuilderTemplateService } from '../../builder-template/service/builder-template.service';
+import { BuilderTemplateKind } from '../../builder-template/enum/builder-template-kind.enum';
+import { SaveBuilderTemplateDto } from '../../builder-template/dto/save-builder-template.dto';
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -46,7 +49,31 @@ function imageOnlyFilter(
 @UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('pages')
 export class PageAdminController {
-  constructor(private readonly pageService: PageService) {}
+  constructor(
+    private readonly pageService: PageService,
+    private readonly builderTemplateService: BuilderTemplateService,
+  ) {}
+
+  @RequiresPermission(AdminPermission.PAGES_READ)
+  @Get('templates')
+  getTemplates() {
+    return this.builderTemplateService.list(BuilderTemplateKind.PAGE);
+  }
+
+  @RequiresPermission(AdminPermission.PAGES_WRITE)
+  @Post('templates')
+  saveTemplate(@Body() dto: SaveBuilderTemplateDto) {
+    return this.builderTemplateService.create(BuilderTemplateKind.PAGE, dto);
+  }
+
+  @RequiresPermission(AdminPermission.PAGES_WRITE)
+  @Delete('templates/:templateId')
+  deleteTemplate(@Param('templateId', ParseUUIDPipe) templateId: string) {
+    return this.builderTemplateService.delete(
+      BuilderTemplateKind.PAGE,
+      templateId,
+    );
+  }
 
   // The admin frontend's "Coming Soon" gate reads this — a lightweight,
   // side-effect-free access ping rather than a real functional endpoint, so

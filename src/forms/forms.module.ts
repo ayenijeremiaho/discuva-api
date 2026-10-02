@@ -19,6 +19,7 @@ import { FollowUpModule } from '../follow-up/follow-up.module';
 import { GroupModule } from '../group/group.module';
 import { UtilityModule } from '../utility/utility.module';
 import { AdminModule } from '../admin/admin.module';
+import { BuilderTemplateModule } from '../builder-template/builder-template.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AdminModule } from '../admin/admin.module';
     GroupModule,
     UtilityModule,
     AdminModule,
+    BuilderTemplateModule,
   ],
   providers: [
     FormService,

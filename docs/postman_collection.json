@@ -11502,6 +11502,62 @@
       "description": "Admin-built dynamic forms \u2014 not tied to one use case (events, surveys, sign-ups, and admin-recorded pastoral records all reuse the same builder). A form's `visibility` is `MEMBERS`, `PUBLIC`, or `ADMIN_ONLY`. `ADMIN_ONLY` forms have no member-facing or public-facing fill surface at all \u2014 the only way a submission is created against one is `POST /forms/:id/submissions` below, used for record-keeping an admin fills in on someone's behalf (e.g. pastoral records: child naming, dedication, marriage, baptism \u2014 an admin defines whatever fields a given record type needs, with generic per-field analytics via `GET /forms/:id/analytics`). `POST /forms/:id/submissions` also works against any visibility, not just `ADMIN_ONLY` (e.g. backfilling a `MEMBERS`-visibility form entry for someone who called in). Only the admin-submission endpoint is documented here \u2014 see `src/forms/` for the full form-builder/member/public API surface.",
       "item": [
         {
+          "name": "List Saved Form Templates",
+          "description": "FORMS_READ. Returns this tenant's FORM templates, newest first.",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/forms/templates", "host": ["{{baseUrl}}"], "path": ["forms", "templates"] }
+          }
+        },
+        {
+          "name": "Save Form Template",
+          "description": "FORMS_WRITE. The route sets kind=FORM. `data` stores a form builder payload; applying it still goes through the normal form create/update validation.",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Registration\",\n  \"description\": \"Reusable public sign-up\",\n  \"data\": { \"title\": \"Registration\", \"visibility\": \"PUBLIC\", \"fields\": [] }\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/forms/templates", "host": ["{{baseUrl}}"], "path": ["forms", "templates"] }
+          }
+        },
+        {
+          "name": "Delete Form Template",
+          "description": "FORMS_WRITE. Deletes only a FORM template belonging to the current tenant.",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/forms/templates/{{templateId}}", "host": ["{{baseUrl}}"], "path": ["forms", "templates", "{{templateId}}"] }
+          }
+        },
+        {
+          "name": "List Reusable Field Groups",
+          "description": "FORMS_READ. Returns this tenant's FIELD_GROUP templates, newest first.",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/forms/field-groups", "host": ["{{baseUrl}}"], "path": ["forms", "field-groups"] }
+          }
+        },
+        {
+          "name": "Save Reusable Field Group",
+          "description": "FORMS_WRITE. The route sets kind=FIELD_GROUP. `data.fields` contains reusable field definitions.",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Contact details\",\n  \"description\": \"Basic contact fields\",\n  \"data\": { \"fields\": [{ \"label\": \"Full name\", \"type\": \"TEXT\", \"required\": true }] }\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/forms/field-groups", "host": ["{{baseUrl}}"], "path": ["forms", "field-groups"] }
+          }
+        },
+        {
+          "name": "Delete Reusable Field Group",
+          "description": "FORMS_WRITE. Deletes only a FIELD_GROUP template belonging to the current tenant.",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/forms/field-groups/{{templateId}}", "host": ["{{baseUrl}}"], "path": ["forms", "field-groups", "{{templateId}}"] }
+          }
+        },
+        {
           "name": "Get Audience Group Lookup",
           "description": "{id, name}[] of every Contact List, for the audience-restriction picker when building a MEMBERS-visibility form. Own route + FORMS_WRITE gate rather than reusing GET /groups/lookup (gated on ANNOUNCEMENTS_WRITE) so a forms admin doesn't need a second permission grant.",
           "request": {
@@ -12374,6 +12430,34 @@
     {
       "name": "Pages (Admin)",
       "item": [
+        {
+          "name": "List Saved Page Templates",
+          "description": "PAGES_READ. Returns this tenant's PAGE templates, newest first.",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/pages/templates", "host": ["{{baseUrl}}"], "path": ["pages", "templates"] }
+          }
+        },
+        {
+          "name": "Save Page Template",
+          "description": "PAGES_WRITE. The route sets kind=PAGE. Applying the payload in the admin builder creates a fresh draft with new section ids; it does not publish or update an existing page.",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Welcome page\",\n  \"description\": \"Starter page layout\",\n  \"data\": { \"title\": \"Welcome\", \"theme\": \"minimal\", \"sections\": [] }\n}", "options": { "raw": { "language": "json" } } },
+            "url": { "raw": "{{baseUrl}}/pages/templates", "host": ["{{baseUrl}}"], "path": ["pages", "templates"] }
+          }
+        },
+        {
+          "name": "Delete Page Template",
+          "description": "PAGES_WRITE. Deletes only a PAGE template belonging to the current tenant.",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/pages/templates/{{templateId}}", "host": ["{{baseUrl}}"], "path": ["pages", "templates", "{{templateId}}"] }
+          }
+        },
         {
           "name": "Get Pages Platform-Enabled (Admin)",
           "request": {
