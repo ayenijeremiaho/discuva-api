@@ -1397,7 +1397,9 @@ palette by default and can set the flag to `false` to keep the standard portal c
 member profile responses. Members update either or both through `PATCH /members/me/appearance`; admins use
 `PATCH /admin/users/me/appearance`. Both routes write the same tenant-scoped Member row, so preferences are shared
 if that account uses both portals. Applying a church palette changes brand accents while preserving existing
-surfaces and semantic colors. The tenant migration `AddMemberChurchThemePreference` adds the field with a true
+surfaces and semantic colors. Tenant migration `AddMemberAppearanceMode` creates the `appearance_mode` column;
+`RepairMemberAppearanceMode1800345600000` reasserts it with `ADD COLUMN IF NOT EXISTS` to repair tenant schemas
+where migration history and actual table state have drifted. The tenant migration `AddMemberChurchThemePreference` adds the field with a true
 default; `SetMemberChurchThemeDefault` updates existing rows and the database default for tenants that already ran
 the original preference migration.
 
