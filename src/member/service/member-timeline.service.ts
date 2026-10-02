@@ -4,8 +4,8 @@ import { In, Repository } from 'typeorm';
 import { Member } from '../entity/member.entity';
 import { Department } from '../../department/entity/department.entity';
 import {
-  AuditLogService,
   AuditAction,
+  AuditLogService,
 } from '../../utility/service/audit-log.service';
 import { FollowUpService } from '../../follow-up/service/follow-up.service';
 import {
@@ -113,11 +113,15 @@ export class MemberTimelineService {
       // No first-timer record (e.g. created directly by an admin, bulk
       // import, or self-signup outside the visitor pipeline) — the join
       // date is the only "became a member" signal available.
+      const joinedAt = (member.dateJoinedChurch ?? member.createdAt) as
+        Date | string;
       events.push({
         type: MemberTimelineEventType.BECAME_MEMBER,
         title: 'Joined the Church',
         description: null,
-        occurredAt: (member.dateJoinedChurch ?? member.createdAt).toISOString(),
+        occurredAt: new Date(
+          joinedAt instanceof Date ? joinedAt.getTime() : joinedAt,
+        ).toISOString(),
       });
     }
 

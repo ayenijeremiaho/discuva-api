@@ -124,6 +124,21 @@ describe('MemberTimelineService', () => {
     expect(sundaySchoolVisitCount).toBe(0);
   });
 
+  it('serializes dateJoinedChurch when TypeORM returns the date column as a string', async () => {
+    mockMemberRepo.findOne.mockResolvedValueOnce({
+      ...baseMember,
+      dateJoinedChurch: '2024-02-14',
+    });
+
+    const { events } = await service.getTimeline('member-1');
+
+    expect(events[0]).toMatchObject({
+      type: MemberTimelineEventType.BECAME_MEMBER,
+      title: 'Joined the Church',
+      occurredAt: '2024-02-14T00:00:00.000Z',
+    });
+  });
+
   it('builds the pre-membership timeline from a first-timer record with visits', async () => {
     mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
     mockFollowUpService.getFirstTimerByConvertedMemberId.mockResolvedValueOnce({
@@ -148,6 +163,16 @@ describe('MemberTimelineService', () => {
     // FIRST_VISIT + REPEAT_VISIT, no Sunday School or regular attendance mocked.
     expect(serviceVisitCount).toBe(2);
     expect(sundaySchoolVisitCount).toBe(0);
+  });
+  it('normalizes a date-only string from the database for the join event', async () => {
+    mockMemberRepo.findOne.mockResolvedValueOnce({
+      ...baseMember,
+      dateJoinedChurch: '2024-01-15',
+    });
+
+    const { events } = await service.getTimeline('member-1');
+
+    expect(events[0].occurredAt).toBe('2024-01-15T00:00:00.000Z');
   });
 
   it('keeps serviceVisitCount and sundaySchoolVisitCount as independent totals', async () => {
