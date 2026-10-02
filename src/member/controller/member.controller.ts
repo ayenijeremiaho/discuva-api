@@ -122,8 +122,12 @@ export class MemberController {
     const member = await this.memberService.updateAppearanceMode(
       user.id,
       dto.appearanceMode,
+      dto.useChurchTheme,
     );
-    return { appearanceMode: member.appearanceMode };
+    return {
+      appearanceMode: member.appearanceMode,
+      useChurchTheme: member.useChurchTheme,
+    };
   }
 
   @UseGuards(JwtAuthGuard)

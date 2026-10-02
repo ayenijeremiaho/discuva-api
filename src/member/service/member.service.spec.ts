@@ -1301,6 +1301,31 @@ describe('MemberService', () => {
         expect.objectContaining({ appearanceMode: 'dark' }),
       );
     });
+
+    it('persists the church theme preference independently of appearance mode', async () => {
+      const member = {
+        id: 'member-1',
+        appearanceMode: 'system',
+        useChurchTheme: true,
+      };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockMemberRepo.save.mockImplementation((value) => Promise.resolve(value));
+
+      const result = await service.updateAppearanceMode(
+        'member-1',
+        undefined,
+        true,
+      );
+
+      expect(result.useChurchTheme).toBe(true);
+      expect(result.appearanceMode).toBe('system');
+      expect(mockMemberRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          appearanceMode: 'system',
+          useChurchTheme: true,
+        }),
+      );
+    });
   });
 
   describe('setServeInterest', () => {

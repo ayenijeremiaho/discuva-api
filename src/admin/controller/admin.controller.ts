@@ -50,6 +50,7 @@ export class AdminController {
     return this.adminService.updateMyAppearanceMode(
       admin.id,
       dto.appearanceMode,
+      dto.useChurchTheme,
     );
   }
 

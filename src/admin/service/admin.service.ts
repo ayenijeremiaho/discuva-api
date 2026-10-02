@@ -162,14 +162,19 @@ export class AdminService {
 
   async updateMyAppearanceMode(
     id: string,
-    appearanceMode: AppearanceMode,
-  ): Promise<{ appearanceMode: AppearanceMode }> {
+    appearanceMode?: AppearanceMode,
+    useChurchTheme?: boolean,
+  ): Promise<{ appearanceMode: AppearanceMode; useChurchTheme: boolean }> {
     const admin = await this.findById(id);
     const member = await this.memberService.updateAppearanceMode(
       admin.member.id,
       appearanceMode,
+      useChurchTheme,
     );
-    return { appearanceMode: member.appearanceMode };
+    return {
+      appearanceMode: member.appearanceMode,
+      useChurchTheme: member.useChurchTheme,
+    };
   }
 
   async findById(id: string): Promise<Admin> {

@@ -7,4 +7,8 @@ export enum ChurchThemePreset {
   PLUM = 'plum',
   MARIGOLD = 'marigold',
   ROSE = 'rose',
+  TEAL = 'teal',
+  CRIMSON = 'crimson',
+  INDIGO = 'indigo',
+  OLIVE = 'olive',
 }

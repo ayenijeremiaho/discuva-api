@@ -59,6 +59,9 @@ export class Member extends BaseEntity {
   @Column({ type: 'varchar', default: AppearanceMode.SYSTEM })
   appearanceMode: AppearanceMode;
 
+  @Column({ default: true })
+  useChurchTheme: boolean;
+
   @Column({ nullable: true })
   gender: GenderEnum;
 

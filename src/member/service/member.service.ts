@@ -736,10 +736,12 @@ export class MemberService {
 
   async updateAppearanceMode(
     memberId: string,
-    appearanceMode: AppearanceMode,
+    appearanceMode?: AppearanceMode,
+    useChurchTheme?: boolean,
   ): Promise<Member> {
     const member = await this.getById(memberId);
-    member.appearanceMode = appearanceMode;
+    if (appearanceMode !== undefined) member.appearanceMode = appearanceMode;
+    if (useChurchTheme !== undefined) member.useChurchTheme = useChurchTheme;
     return this.memberRepository.save(member);
   }
 

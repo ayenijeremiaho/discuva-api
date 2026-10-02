@@ -188,14 +188,16 @@ describe('AdminService', () => {
       mockAdminRepo.findOne.mockResolvedValue(mockAdmin);
       mockMemberService.updateAppearanceMode.mockResolvedValue({
         appearanceMode: 'dark',
+        useChurchTheme: false,
       });
 
       await expect(
         service.updateMyAppearanceMode('admin-1', AppearanceMode.DARK),
-      ).resolves.toEqual({ appearanceMode: 'dark' });
+      ).resolves.toEqual({ appearanceMode: 'dark', useChurchTheme: false });
       expect(mockMemberService.updateAppearanceMode).toHaveBeenCalledWith(
         'member-1',
         AppearanceMode.DARK,
+        undefined,
       );
     });
   });

@@ -1354,7 +1354,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"appearanceMode\": \"dark\"\n}",
+              "raw": "{\n  \"appearanceMode\": \"dark\",\n  \"useChurchTheme\": true\n}",
               "options": { "raw": { "language": "json" } }
             },
             "url": {
@@ -1362,14 +1362,14 @@
               "host": ["{{baseUrl}}"],
               "path": ["members", "me", "appearance"]
             },
-            "description": "JwtAuthGuard. Persist the caller's personal appearance mode: system, light, or dark."
+            "description": "JwtAuthGuard. Persist appearanceMode (system, light, or dark), useChurchTheme (boolean), or both. Church colors are used by default; set useChurchTheme to false to opt out."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{ \"data\": { \"appearanceMode\": \"dark\" } }"
+              "body": "{ \"data\": { \"appearanceMode\": \"dark\", \"useChurchTheme\": true } }"
             }
           ]
         },
@@ -2858,7 +2858,7 @@
                 ],
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"appearanceMode\": \"dark\"\n}",
+                  "raw": "{\n  \"appearanceMode\": \"dark\",\n  \"useChurchTheme\": true\n}",
                   "options": { "raw": { "language": "json" } }
                 },
                 "url": {
@@ -2866,14 +2866,14 @@
                   "host": ["{{baseUrl}}"],
                   "path": ["admin", "users", "me", "appearance"]
                 },
-                "description": "Any admin. Updates the appearance mode on the admin's linked Member account: system, light, or dark."
+                "description": "Any admin. Updates appearanceMode (system, light, or dark), useChurchTheme (boolean), or both on the admin's linked Member account. Church colors are used by default; set useChurchTheme to false to opt out."
               },
               "response": [
                 {
                   "name": "200 OK",
                   "status": "OK",
                   "code": 200,
-                  "body": "{ \"data\": { \"appearanceMode\": \"dark\" } }"
+                  "body": "{ \"data\": { \"appearanceMode\": \"dark\", \"useChurchTheme\": true } }"
                 }
               ]
             },
@@ -25219,7 +25219,7 @@
                 "info"
               ]
             },
-            "description": "Public branding/config for the current tenant subdomain, including themePreset (classic, ocean, forest, sunset, sky, plum, marigold, or rose). phoneRegion is the ISO country the API uses for local-format phone numbers."
+            "description": "Public branding/config for the current tenant subdomain, including the suggested themePreset (classic, ocean, forest, sunset, sky, plum, marigold, rose, teal, crimson, indigo, or olive). The preset is applied only for accounts that opt in. phoneRegion is the ISO country the API uses for local-format phone numbers."
           },
           "response": [
             {
@@ -25249,7 +25249,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["tenant", "info"]
             },
-            "description": "AdminGuard with CHURCH_PROFILE_WRITE. Sets the tenant-wide portal themePreset: classic, ocean, forest, sunset, sky, plum, marigold, or rose."
+            "description": "AdminGuard with CHURCH_PROFILE_WRITE. Sets the suggested tenant themePreset: classic, ocean, forest, sunset, sky, plum, marigold, rose, teal, crimson, indigo, or olive. Each member/admin opts in to use it from personal appearance settings."
           },
           "response": [
             {

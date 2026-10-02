@@ -67,6 +67,9 @@ export class MemberDto {
   appearanceMode: AppearanceMode;
 
   @Expose()
+  useChurchTheme: boolean;
+
+  @Expose()
   gender: GenderEnum;
 
   @Expose()
