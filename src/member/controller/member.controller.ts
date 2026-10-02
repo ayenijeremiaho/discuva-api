@@ -30,6 +30,7 @@ import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
 import { LinkSpouseDto } from '../dto/link-spouse.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
+import { UpdateAppearanceModeDto } from '../dto/update-appearance-mode.dto';
 import { AssignClergyDto } from '../dto/assign-clergy.dto';
 import { SetClergyReviewAccessDto } from '../dto/set-clergy-review-access.dto';
 import { SignupDto } from '../dto/signup.dto';
@@ -110,6 +111,19 @@ export class MemberController {
     return plainToInstance(MemberDto, member, {
       excludeExtraneousValues: true,
     });
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me/appearance')
+  async updateMyAppearance(
+    @CurrentUser() user: MemberAuth,
+    @Body() dto: UpdateAppearanceModeDto,
+  ) {
+    const member = await this.memberService.updateAppearanceMode(
+      user.id,
+      dto.appearanceMode,
+    );
+    return { appearanceMode: member.appearanceMode };
   }
 
   @UseGuards(JwtAuthGuard)

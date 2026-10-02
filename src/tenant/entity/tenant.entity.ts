@@ -1,6 +1,7 @@
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
+import { ChurchThemePreset } from '../enum/church-theme-preset.enum';
 
 // Control-plane table — lives in `public`, never a `search_path` target.
 // See docs/MULTI_TENANT_MIGRATION.md §4.1.
@@ -49,6 +50,12 @@ export class Tenant extends BaseEntity {
   // app/manifest.ts and context/tenant-context.tsx.
   @Column({ nullable: true, length: 20 })
   pwaShortName: string | null;
+
+  @Column({ type: 'varchar', default: ChurchThemePreset.CLASSIC })
+  themePreset: ChurchThemePreset;
+
+  @Column({ type: 'varchar', nullable: true })
+  previousThemePreset: ChurchThemePreset | null;
 
   @Column({ default: 'NGN' })
   currency: string;

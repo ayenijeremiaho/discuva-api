@@ -1,4 +1,11 @@
-import { IsEmail, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsEmail,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
+import { ChurchThemePreset } from '../enum/church-theme-preset.enum';
 
 // Tenant self-service counterpart to platform-admin's UpdateTenantDto
 // (src/platform-admin/dto/update-tenant.dto.ts) — same fields, kept as a
@@ -34,6 +41,10 @@ export class UpdateTenantProfileDto {
   @IsString()
   @MaxLength(20)
   pwaShortName?: string;
+
+  @IsOptional()
+  @IsEnum(ChurchThemePreset)
+  themePreset?: ChurchThemePreset;
 
   @IsOptional()
   @IsString()

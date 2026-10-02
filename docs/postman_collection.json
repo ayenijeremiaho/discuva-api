@@ -1341,7 +1341,35 @@
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"changedPassword\": true,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Software Engineer\",\n    \"yearJoinedWorkforce\": \"2022\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"department\": { \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\", \"name\": \"Sunday School\", \"capabilities\": [\"MANAGE_SUNDAY_SCHOOL\"] },\n    \"secondaryDepartment\": null\n  }\n}"
+              "body": "{\n  \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\",\n  \"firstname\": \"John\",\n  \"lastname\": \"Doe\",\n  \"email\": \"john.doe@example.com\",\n  \"phoneNumber\": \"+2348012345678\",\n  \"role\": \"WORKER\",\n  \"status\": \"ACTIVE\",\n  \"appearanceMode\": \"system\",\n  \"gender\": \"MALE\",\n  \"maritalStatus\": \"MARRIED\",\n  \"birthDay\": 15,\n  \"birthMonth\": 5,\n  \"birthYear\": 1990,\n  \"changedPassword\": true,\n  \"workerProfile\": {\n    \"id\": \"c5d4e3f2-7a6b-4c5d-8e9f-0a1b2c3d4e5f\",\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Software Engineer\",\n    \"yearJoinedWorkforce\": \"2022\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"department\": { \"id\": \"d6e5f4a3-8b7c-4d6e-9f0a-1b2c3d4e5f6a\", \"name\": \"Sunday School\", \"capabilities\": [\"MANAGE_SUNDAY_SCHOOL\"] },\n    \"secondaryDepartment\": null\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update My Appearance",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"appearanceMode\": \"dark\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/me/appearance",
+              "host": ["{{baseUrl}}"],
+              "path": ["members", "me", "appearance"]
+            },
+            "description": "JwtAuthGuard. Persist the caller's personal appearance mode: system, light, or dark."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"appearanceMode\": \"dark\" } }"
             }
           ]
         },
@@ -2817,6 +2845,35 @@
                   "status": "Unauthorized",
                   "code": 401,
                   "body": "{\n  \"statusCode\": 401,\n  \"message\": \"Unauthorized\"\n}"
+                }
+              ]
+            },
+            {
+              "name": "Update My Appearance",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"appearanceMode\": \"dark\"\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/admin/users/me/appearance",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["admin", "users", "me", "appearance"]
+                },
+                "description": "Any admin. Updates the appearance mode on the admin's linked Member account: system, light, or dark."
+              },
+              "response": [
+                {
+                  "name": "200 OK",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{ \"data\": { \"appearanceMode\": \"dark\" } }"
                 }
               ]
             },
@@ -25162,7 +25219,7 @@
                 "info"
               ]
             },
-            "description": "Public branding/config for the current tenant subdomain. phoneRegion is the ISO country the API uses for local-format phone numbers (from CURRENCY_LOCALE) \u2014 clients default their phone country picker to it."
+            "description": "Public branding/config for the current tenant subdomain, including themePreset (classic, ocean, forest, sunset, sky, plum, marigold, or rose). phoneRegion is the ISO country the API uses for local-format phone numbers."
           },
           "response": [
             {
@@ -25170,7 +25227,36 @@
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "body": "{ \"data\": { \"name\": \"Your Church\", \"subdomain\": \"your-church\", \"logoUrl\": null, \"tagline\": null, \"address\": null, \"supportEmail\": null, \"pwaShortName\": null, \"currency\": \"NGN\", \"timezone\": \"Africa/Lagos\", \"phoneRegion\": \"NG\", \"assets\": {} } }"
+              "body": "{ \"data\": { \"name\": \"Your Church\", \"subdomain\": \"your-church\", \"logoUrl\": null, \"tagline\": null, \"address\": null, \"supportEmail\": null, \"pwaShortName\": null, \"themePreset\": \"classic\", \"previousThemePreset\": null, \"currency\": \"NGN\", \"timezone\": \"Africa/Lagos\", \"phoneRegion\": \"NG\", \"assets\": {} } }"
+            }
+          ]
+        },
+        {
+          "name": "Update Church Theme",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"themePreset\": \"ocean\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/tenant/info",
+              "host": ["{{baseUrl}}"],
+              "path": ["tenant", "info"]
+            },
+            "description": "AdminGuard with CHURCH_PROFILE_WRITE. Sets the tenant-wide portal themePreset: classic, ocean, forest, sunset, sky, plum, marigold, or rose."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{ \"data\": { \"themePreset\": \"ocean\", \"previousThemePreset\": \"classic\" } }"
             }
           ]
         },

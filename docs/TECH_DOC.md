@@ -1383,6 +1383,18 @@ which was the bug this field was added to fix) — see discuva-member's `app/man
 field for parity, though no discuva-platform UI currently exposes editing it — self-service via discuva-admin's
 Church Profile page is the only intended write path today.
 
+### Church Theme and User Appearance
+
+`Tenant.themePreset` is the church-wide preset (`classic`, `ocean`, `forest`, `sunset`, `sky`, `plum`, `marigold`, or `rose`); `previousThemePreset` stores the last saved preset for one-click revert. It is returned by the
+public `GET /tenant/info` response and can be changed with `PATCH /tenant/info` by an admin with
+`CHURCH_PROFILE_WRITE`. Existing tenants default to `classic`; both portals provide matching light and dark token
+sets for each preset. `previous_theme_preset` is added by the root migration `AddPreviousTenantThemePreset` because
+`tenants` lives in the public control plane; apply it with `npm run migration:run`, not the tenant-schema runner.
+
+`Member.appearanceMode` is each account's `system`, `light`, or `dark` preference and is included in member profile
+responses. Members update it through `PATCH /members/me/appearance`; admins use `PATCH /admin/users/me/appearance`.
+Both routes write the same tenant-scoped Member row, so the preference is shared if that account uses both portals.
+
 **Logo upload (`POST /tenant/logo`, `DELETE /tenant/logo`, both `CHURCH_PROFILE_WRITE`):** `logoUrl` on
 `PATCH /tenant/info` only ever accepted an already-hosted URL — these two routes are the actual upload path, same
 shape as `MemberController`'s `POST members/me/photo` (`DynamicLimitedFileInterceptor`, image-mimetype-only filter,

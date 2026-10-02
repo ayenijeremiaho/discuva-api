@@ -13,6 +13,7 @@ import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
+import { AppearanceMode } from '../enums/appearance-mode.enum';
 import { WorkerProfile } from './worker-profile.entity';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { ClassEnrollment } from '../../classes/entity/class-enrollment.entity';
@@ -54,6 +55,9 @@ export class Member extends BaseEntity {
   @Index()
   @Column({ default: MemberStatusEnum.ACTIVE })
   status: MemberStatusEnum;
+
+  @Column({ type: 'varchar', default: AppearanceMode.SYSTEM })
+  appearanceMode: AppearanceMode;
 
   @Column({ nullable: true })
   gender: GenderEnum;

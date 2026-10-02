@@ -19,6 +19,7 @@ import { MemberSessionService } from './member-session.service';
 import { ConfigService } from '@nestjs/config';
 import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
+import { AppearanceMode } from '../enums/appearance-mode.enum';
 import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
@@ -1281,6 +1282,24 @@ describe('MemberService', () => {
       expect(result.yearBornAgain).toEqual(new Date('2008-01-01'));
       expect(result.yearBaptized).toBeNull();
       expect(result.baptizedWithHolyGhost).toBe(true);
+    });
+  });
+
+  describe('updateAppearanceMode', () => {
+    it('persists the signed-in member appearance preference', async () => {
+      const member = { id: 'member-1', appearanceMode: 'system' };
+      mockMemberRepo.findOne.mockResolvedValue(member);
+      mockMemberRepo.save.mockImplementation((value) => Promise.resolve(value));
+
+      const result = await service.updateAppearanceMode(
+        'member-1',
+        AppearanceMode.DARK,
+      );
+
+      expect(result.appearanceMode).toBe('dark');
+      expect(mockMemberRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ appearanceMode: 'dark' }),
+      );
     });
   });
 

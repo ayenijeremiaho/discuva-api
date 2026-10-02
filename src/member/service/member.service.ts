@@ -29,6 +29,7 @@ import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
+import { AppearanceMode } from '../enums/appearance-mode.enum';
 import { AssignClergyDto } from '../dto/assign-clergy.dto';
 import { SetClergyReviewAccessDto } from '../dto/set-clergy-review-access.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
@@ -731,6 +732,15 @@ export class MemberService {
       metadata: { changes: Object.keys(dto), self: true },
     });
     return saved;
+  }
+
+  async updateAppearanceMode(
+    memberId: string,
+    appearanceMode: AppearanceMode,
+  ): Promise<Member> {
+    const member = await this.getById(memberId);
+    member.appearanceMode = appearanceMode;
+    return this.memberRepository.save(member);
   }
 
   async updateMyPhoto(

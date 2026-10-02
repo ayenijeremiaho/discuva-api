@@ -73,6 +73,9 @@ export class TenantInfoController {
   @Patch('info')
   async updateInfo(@Body() dto: UpdateTenantProfileDto) {
     const tenant = await this.currentTenantOrThrow();
+    if (dto.themePreset && dto.themePreset !== tenant.themePreset) {
+      tenant.previousThemePreset = tenant.themePreset;
+    }
     Object.assign(tenant, dto);
     await this.tenantRepository.save(tenant);
     this.cacheService.del(`tenant-branding:${tenant.id}`);
@@ -198,6 +201,8 @@ export class TenantInfoController {
       address: tenant.address,
       supportEmail: tenant.supportEmail,
       pwaShortName: tenant.pwaShortName,
+      themePreset: tenant.themePreset,
+      previousThemePreset: tenant.previousThemePreset,
       currency: tenant.currency,
       timezone: tenant.timezone,
       // Same region the API uses to parse local-format phone numbers.

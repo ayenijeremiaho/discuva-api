@@ -9,6 +9,7 @@ import { AdminGuard } from '../../admin/guard/admin.guard';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
+import { ChurchThemePreset } from '../enum/church-theme-preset.enum';
 
 const mockTenantRepo = {
   findOneBy: jest.fn(),
@@ -54,6 +55,8 @@ const baseTenant = {
   address: null,
   supportEmail: null,
   pwaShortName: null,
+  themePreset: 'classic',
+  previousThemePreset: null,
   currency: 'NGN',
   timezone: 'UTC',
 };
@@ -106,6 +109,8 @@ describe('TenantInfoController', () => {
         address: null,
         supportEmail: null,
         pwaShortName: null,
+        themePreset: 'classic',
+        previousThemePreset: null,
         currency: 'NGN',
         timezone: 'UTC',
         phoneRegion: 'GB',
@@ -175,6 +180,35 @@ describe('TenantInfoController', () => {
         expect.objectContaining({ pwaShortName: 'FBC Lagos' }),
       );
       expect(result.pwaShortName).toBe('FBC Lagos');
+    });
+
+    it('persists and returns the church-wide theme preset', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
+
+      const result = await controller.updateInfo({
+        themePreset: ChurchThemePreset.OCEAN,
+      });
+
+      expect(mockTenantRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ themePreset: ChurchThemePreset.OCEAN }),
+      );
+      expect(result.themePreset).toBe(ChurchThemePreset.OCEAN);
+      expect(result.previousThemePreset).toBe(ChurchThemePreset.CLASSIC);
+    });
+
+    it('swaps the current preset into previous when reverting', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        themePreset: ChurchThemePreset.OCEAN,
+        previousThemePreset: ChurchThemePreset.CLASSIC,
+      });
+
+      const result = await controller.updateInfo({
+        themePreset: ChurchThemePreset.CLASSIC,
+      });
+
+      expect(result.themePreset).toBe(ChurchThemePreset.CLASSIC);
+      expect(result.previousThemePreset).toBe(ChurchThemePreset.OCEAN);
     });
   });
 

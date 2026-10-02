@@ -13,6 +13,7 @@ import { GrantAdminDto, UpdateAdminUserDto } from '../dto/admin-user.dto';
 import { MemberService } from '../../member/service/member.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { AppearanceMode } from '../../member/enums/appearance-mode.enum';
 
 @Injectable()
 export class AdminService {
@@ -157,6 +158,18 @@ export class AdminService {
       }
     }
     return admins;
+  }
+
+  async updateMyAppearanceMode(
+    id: string,
+    appearanceMode: AppearanceMode,
+  ): Promise<{ appearanceMode: AppearanceMode }> {
+    const admin = await this.findById(id);
+    const member = await this.memberService.updateAppearanceMode(
+      admin.member.id,
+      appearanceMode,
+    );
+    return { appearanceMode: member.appearanceMode };
   }
 
   async findById(id: string): Promise<Admin> {

@@ -24,6 +24,7 @@ import { CurrentAdmin } from '../decorator/current-admin.decorator';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { Admin } from '../entity/admin.entity';
 import { MemberAuth } from '../../auth/interface/auth.interface';
+import { UpdateAppearanceModeDto } from '../../member/dto/update-appearance-mode.dto';
 
 @UseGuards(AdminGuard)
 @Controller('admin/users')
@@ -39,6 +40,17 @@ export class AdminController {
   @Get('me')
   getMe(@CurrentAdmin() admin: Admin) {
     return this.adminService.getMyProfile(admin.id);
+  }
+
+  @Patch('me/appearance')
+  updateMyAppearance(
+    @CurrentAdmin() admin: Admin,
+    @Body() dto: UpdateAppearanceModeDto,
+  ) {
+    return this.adminService.updateMyAppearanceMode(
+      admin.id,
+      dto.appearanceMode,
+    );
   }
 
   @Put('me/favourite-pages')

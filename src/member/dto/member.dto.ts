@@ -3,6 +3,7 @@ import { MemberRoleEnum } from '../enums/member-role.enum';
 import { MemberStatusEnum } from '../enums/member-status.enum';
 import { GenderEnum } from '../enums/gender.enum';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
+import { AppearanceMode } from '../enums/appearance-mode.enum';
 import { DepartmentCapability } from '../../department/enums/department-capability.enum';
 import { WorkerProfileDto } from './worker-profile.dto';
 
@@ -61,6 +62,9 @@ export class MemberDto {
 
   @Expose()
   status: MemberStatusEnum;
+
+  @Expose()
+  appearanceMode: AppearanceMode;
 
   @Expose()
   gender: GenderEnum;

@@ -7,6 +7,7 @@ import { Admin } from '../entity/admin.entity';
 import { AdminRoleService } from './admin-role.service';
 import { MemberService } from '../../member/service/member.service';
 import { AdminPermission } from '../enum/admin-permission.enum';
+import { AppearanceMode } from '../../member/enums/appearance-mode.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UtilityService } from '../../utility/service/utility.service';
 
@@ -25,6 +26,7 @@ const mockAdminRoleService = {
 
 const mockMemberService = {
   getById: jest.fn(),
+  updateAppearanceMode: jest.fn(),
 };
 
 const mockAuditLogService = { log: jest.fn() };
@@ -178,6 +180,23 @@ describe('AdminService', () => {
         where: { id: 'admin-1' },
         relations: ['member', 'member.spouse', 'adminRole'],
       });
+    });
+  });
+
+  describe('updateMyAppearanceMode', () => {
+    it('updates the appearance preference on the linked member account', async () => {
+      mockAdminRepo.findOne.mockResolvedValue(mockAdmin);
+      mockMemberService.updateAppearanceMode.mockResolvedValue({
+        appearanceMode: 'dark',
+      });
+
+      await expect(
+        service.updateMyAppearanceMode('admin-1', AppearanceMode.DARK),
+      ).resolves.toEqual({ appearanceMode: 'dark' });
+      expect(mockMemberService.updateAppearanceMode).toHaveBeenCalledWith(
+        'member-1',
+        AppearanceMode.DARK,
+      );
     });
   });
 
