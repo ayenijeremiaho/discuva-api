@@ -1300,6 +1300,7 @@ describe('MemberService', () => {
       expect(mockMemberRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ appearanceMode: 'dark' }),
       );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
 
     it('persists the church theme preference independently of appearance mode', async () => {
@@ -1325,6 +1326,7 @@ describe('MemberService', () => {
           useChurchTheme: true,
         }),
       );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
   });
 

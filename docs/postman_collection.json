@@ -25333,7 +25333,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["tenant", "info"]
             },
-            "description": "AdminGuard with CHURCH_PROFILE_WRITE. Sets the suggested tenant themePreset: classic, ocean, forest, sunset, sky, plum, marigold, rose, teal, crimson, indigo, or olive. Each member/admin opts in to use it from personal appearance settings."
+            "description": "AdminGuard with CHURCH_PROFILE_WRITE. Sets the suggested tenant themePreset: classic, ocean, forest, sunset, sky, plum, marigold, rose, teal, crimson, indigo, or olive. Successful changes, including reverts, queue CHURCH_THEME_CHANGED in the church audit log with the administrator's linked member as actor and adminId, previousThemePreset, and themePreset in metadata. Unchanged presets and failed saves do not emit the event. Personal Light/Dark/System and church-color preferences are not audited."
           },
           "response": [
             {

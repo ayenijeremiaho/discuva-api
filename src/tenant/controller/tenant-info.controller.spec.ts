@@ -1,3 +1,5 @@
+/// <reference types="jest" />
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -10,6 +12,12 @@ import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
 import { ChurchThemePreset } from '../enum/church-theme-preset.enum';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { Admin } from '../../admin/entity/admin.entity';
+import { TenantProfileService } from '../service/tenant-profile.service';
+
+const currentAdmin = { id: 'admin-1', member: { id: 'member-1' } } as Admin;
+const mockAuditLogService = { log: jest.fn() };
 
 const mockTenantRepo = {
   findOneBy: jest.fn(),
@@ -63,6 +71,7 @@ const baseTenant = {
 
 describe('TenantInfoController', () => {
   let controller: TenantInfoController;
+  let tenantProfileService: TenantProfileService;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -84,12 +93,15 @@ describe('TenantInfoController', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: TenantAssetService, useValue: mockTenantAssetService },
+        { provide: AuditLogService, useValue: mockAuditLogService },
+        TenantProfileService,
       ],
     })
       .overrideGuard(AdminGuard)
       .useValue({ canActivate: () => true })
       .compile();
     controller = module.get(TenantInfoController);
+    tenantProfileService = module.get(TenantProfileService);
   });
 
   describe('getInfo', () => {
@@ -139,13 +151,34 @@ describe('TenantInfoController', () => {
   });
 
   describe('updateInfo', () => {
+    it('delegates profile updates with the authenticated administrator identity', async () => {
+      const update = jest
+        .spyOn(tenantProfileService, 'updateProfile')
+        .mockResolvedValueOnce({ ...baseTenant } as Tenant);
+      const dto = { themePreset: ChurchThemePreset.OCEAN };
+
+      const result = await controller.updateInfo(dto, currentAdmin);
+
+      expect(update).toHaveBeenCalledWith(dto, {
+        adminId: 'admin-1',
+        memberId: 'member-1',
+      });
+      expect(result.name).toBe('Test Church');
+      expect(mockTenantRepo.save).not.toHaveBeenCalled();
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
+      update.mockRestore();
+    });
+
     it('applies only the provided fields and persists them', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
 
-      const result = await controller.updateInfo({
-        tagline: 'New tagline',
-        supportEmail: 'help@example.com',
-      });
+      const result = await controller.updateInfo(
+        {
+          tagline: 'New tagline',
+          supportEmail: 'help@example.com',
+        },
+        currentAdmin,
+      );
 
       expect(mockTenantRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -160,21 +193,25 @@ describe('TenantInfoController', () => {
       expect(mockCacheService.del).toHaveBeenCalledWith(
         'tenant-branding:tenant-1',
       );
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
 
     it('throws NotFoundException when there is no tenant in CLS', async () => {
       mockCls.get.mockReturnValue(undefined);
-      await expect(controller.updateInfo({ tagline: 'x' })).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        controller.updateInfo({ tagline: 'x' }, currentAdmin),
+      ).rejects.toThrow(NotFoundException);
     });
 
     it('persists and returns pwaShortName', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
 
-      const result = await controller.updateInfo({
-        pwaShortName: 'FBC Lagos',
-      });
+      const result = await controller.updateInfo(
+        {
+          pwaShortName: 'FBC Lagos',
+        },
+        currentAdmin,
+      );
 
       expect(mockTenantRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ pwaShortName: 'FBC Lagos' }),
@@ -185,15 +222,32 @@ describe('TenantInfoController', () => {
     it('persists and returns the church-wide theme preset', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
 
-      const result = await controller.updateInfo({
-        themePreset: ChurchThemePreset.OCEAN,
-      });
+      const result = await controller.updateInfo(
+        {
+          themePreset: ChurchThemePreset.OCEAN,
+        },
+        currentAdmin,
+      );
 
       expect(mockTenantRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ themePreset: ChurchThemePreset.OCEAN }),
       );
       expect(result.themePreset).toBe(ChurchThemePreset.OCEAN);
       expect(result.previousThemePreset).toBe(ChurchThemePreset.CLASSIC);
+      expect(mockAuditLogService.log).toHaveBeenCalledTimes(1);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'CHURCH_THEME_CHANGED',
+        {
+          actorId: 'member-1',
+          targetId: 'tenant-1',
+          targetName: 'Test Church',
+          metadata: {
+            adminId: 'admin-1',
+            previousThemePreset: ChurchThemePreset.CLASSIC,
+            themePreset: ChurchThemePreset.OCEAN,
+          },
+        },
+      );
     });
 
     it('swaps the current preset into previous when reverting', async () => {
@@ -203,12 +257,50 @@ describe('TenantInfoController', () => {
         previousThemePreset: ChurchThemePreset.CLASSIC,
       });
 
-      const result = await controller.updateInfo({
-        themePreset: ChurchThemePreset.CLASSIC,
-      });
+      const result = await controller.updateInfo(
+        {
+          themePreset: ChurchThemePreset.CLASSIC,
+        },
+        currentAdmin,
+      );
 
       expect(result.themePreset).toBe(ChurchThemePreset.CLASSIC);
       expect(result.previousThemePreset).toBe(ChurchThemePreset.OCEAN);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'CHURCH_THEME_CHANGED',
+        expect.objectContaining({
+          metadata: {
+            adminId: 'admin-1',
+            previousThemePreset: ChurchThemePreset.OCEAN,
+            themePreset: ChurchThemePreset.CLASSIC,
+          },
+        }),
+      );
+    });
+
+    it('does not audit an unchanged palette', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
+
+      await controller.updateInfo(
+        { themePreset: ChurchThemePreset.CLASSIC },
+        currentAdmin,
+      );
+
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
+    });
+
+    it('does not audit a palette update that failed to save', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
+      mockTenantRepo.save.mockRejectedValueOnce(new Error('Save failed'));
+
+      await expect(
+        controller.updateInfo(
+          { themePreset: ChurchThemePreset.OCEAN },
+          currentAdmin,
+        ),
+      ).rejects.toThrow('Save failed');
+
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
   });
 

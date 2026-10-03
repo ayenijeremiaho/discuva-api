@@ -1391,6 +1391,16 @@ public `GET /tenant/info` response and can be changed with `PATCH /tenant/info` 
 sets for each preset. `previous_theme_preset` is added by the root migration `AddPreviousTenantThemePreset` because
 `tenants` lives in the public control plane; apply it with `npm run migration:run`, not the tenant-schema runner.
 
+`TenantProfileService` owns current-tenant lookup, profile persistence, branding-cache invalidation, and palette
+auditing. `TenantInfoController.updateInfo` only forwards the validated DTO and authenticated administrator IDs,
+then maps the returned tenant to the existing public profile response.
+Successful changes to the church-wide preset emit `CHURCH_THEME_CHANGED` through the tenant-scoped audit queue.
+The entry identifies the administrator's linked member as actor and the tenant as target; metadata contains
+`adminId`, `previousThemePreset`, and `themePreset`. Reverting emits the same event with the reversed values.
+Unchanged presets, failed saves, and unrelated church-profile updates do not emit this event. Personal
+Light/Dark/System and `useChurchTheme` preferences are deliberately not audited. Existing audit-log indexes
+cover action, actor, target, and creation time; no new schema or index migration is required.
+
 `Member.appearanceMode` is each account's `system`, `light`, or `dark` preference (default `light`) and `Member.useChurchTheme` is an
 independent preference (default `true`) for applying that tenant's palette. Members inherit the church's selected
 palette by default and can set the flag to `false` to keep the standard portal colors. Both fields are included in

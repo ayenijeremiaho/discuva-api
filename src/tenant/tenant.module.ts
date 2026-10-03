@@ -23,6 +23,7 @@ import {
   TenantProvisioningService,
 } from './service/tenant-provisioning.service';
 import { TenantAssetService } from './service/tenant-asset.service';
+import { TenantProfileService } from './service/tenant-profile.service';
 import { TenantProvisioningProcessor } from './processor/tenant-provisioning.processor';
 import { FounderWelcomeEmailScheduler } from './scheduler/founder-welcome-email.scheduler';
 import { BranchModule } from '../branch/branch.module';
@@ -134,6 +135,7 @@ import { BranchModule } from '../branch/branch.module';
     TenantMiddleware,
     TenantProvisioningService,
     TenantAssetService,
+    TenantProfileService,
     TenantProvisioningProcessor,
     FounderWelcomeEmailScheduler,
   ],

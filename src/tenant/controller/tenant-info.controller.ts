@@ -4,7 +4,6 @@ import {
   Controller,
   Delete,
   Get,
-  NotFoundException,
   Param,
   Patch,
   Post,
@@ -15,7 +14,6 @@ import {
 import 'multer';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ClsService } from 'nestjs-cls';
 import { ConfigService } from '@nestjs/config';
 import { DynamicLimitedFileInterceptor } from '../../utility/interceptors/dynamic-limited-file.interceptor';
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
@@ -25,12 +23,14 @@ import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { Tenant } from '../entity/tenant.entity';
-import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
 import { phoneRegionFromLocale } from '../../utility/decorators/normalize-phone.decorator';
+import { TenantProfileService } from '../service/tenant-profile.service';
+import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
+import { Admin } from '../../admin/entity/admin.entity';
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -49,13 +49,13 @@ function imageOnlyFilter(
 @Controller('tenant')
 export class TenantInfoController {
   constructor(
-    private readonly cls: ClsService<AppClsStore>,
     private readonly cloudinaryService: CloudinaryService,
     private readonly cacheService: CacheService,
     private readonly config: ConfigService,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
     private readonly tenantAssetService: TenantAssetService,
+    private readonly tenantProfileService: TenantProfileService,
   ) {}
 
   @Public()
@@ -71,14 +71,14 @@ export class TenantInfoController {
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.CHURCH_PROFILE_WRITE)
   @Patch('info')
-  async updateInfo(@Body() dto: UpdateTenantProfileDto) {
-    const tenant = await this.currentTenantOrThrow();
-    if (dto.themePreset && dto.themePreset !== tenant.themePreset) {
-      tenant.previousThemePreset = tenant.themePreset;
-    }
-    Object.assign(tenant, dto);
-    await this.tenantRepository.save(tenant);
-    this.cacheService.del(`tenant-branding:${tenant.id}`);
+  async updateInfo(
+    @Body() dto: UpdateTenantProfileDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    const tenant = await this.tenantProfileService.updateProfile(dto, {
+      adminId: admin.id,
+      memberId: admin.member?.id,
+    });
     return this.toProfile(tenant);
   }
 
@@ -214,12 +214,6 @@ export class TenantInfoController {
   }
 
   private async currentTenantOrThrow(): Promise<Tenant> {
-    const tenantId = this.cls.get('tenantId');
-    const tenant = tenantId
-      ? await this.tenantRepository.findOneBy({ id: tenantId })
-      : null;
-
-    if (!tenant) throw new NotFoundException('Tenant not found');
-    return tenant;
+    return this.tenantProfileService.getCurrentTenant();
   }
 }
