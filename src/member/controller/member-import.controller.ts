@@ -1,7 +1,9 @@
 import {
   Controller,
+  Body,
   Get,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Res,
@@ -17,6 +19,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { LimitedFileInterceptor } from '../../utility/interceptors/limited-file.interceptor';
+import { UpdateMemberImportRowDto } from '../dto/update-member-import-row.dto';
 
 const MEMBER_IMPORT_MAX_BYTES =
   Number.parseInt(process.env.MAX_FILE_UPLOAD_BYTES ?? '', 10) ||
@@ -58,6 +61,22 @@ export class MemberImportController {
     const job = await this.memberImportService.getJob(jobId);
     const rows = await this.memberImportService.getJobRows(jobId);
     return { ...job, rows };
+  }
+
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @Patch(':jobId/rows/:rowId')
+  updateRow(
+    @Param('jobId', ParseUUIDPipe) jobId: string,
+    @Param('rowId', ParseUUIDPipe) rowId: string,
+    @Body() dto: UpdateMemberImportRowDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.memberImportService.updateImportRow(
+      jobId,
+      rowId,
+      dto.data,
+      admin,
+    );
   }
 
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)

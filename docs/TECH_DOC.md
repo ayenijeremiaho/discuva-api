@@ -63,6 +63,7 @@ can be reviewed before anything is written. Controller: `MemberImportController`
 | GET    | `/members/bulk-import/template`   | Streams a `.xlsx` template with the expected columns (see below)                                     |
 | POST   | `/members/bulk-import/preview`    | Multipart upload, field name `file`, 5 MB cap (`LimitedFileInterceptor`). Parses and validates every row, persists a `MemberImportJob` + `MemberImportRow[]`, returns `{ ...job, rows }` |
 | GET    | `/members/bulk-import/:jobId`     | Refetch a previously-previewed job and its rows                                                       |
+| PATCH  | `/members/bulk-import/:jobId/rows/:rowId` | Save partial draft field corrections and revalidate the whole job; returns `{ ...job, rows }` |
 | POST   | `/members/bulk-import/:jobId/commit` | Creates a `Member` (+ `WorkerProfile` if the row's `department` column was filled) for every row with zero validation errors; generates a random temp password per member and emails it via the `welcome-member` template; returns `{ createdCount, failedRows }` |
 
 **Commit is batched, not per-row.** `commitImport` resolves duplicate-email and department-name lookups for the
@@ -78,6 +79,29 @@ rare case a pre-validated row fails for a reason pre-validation couldn't catch.
 Month (1-12), Birth Year, Marital Status (SINGLE/MARRIED/DIVORCED/WIDOWED), Year Born Again, Year Baptized, Baptized
 With Holy Ghost (TRUE/FALSE), Date Joined Church (YYYY-MM-DD), Department (optional — creates the member as a
 Worker), Profession, Year Joined Workforce.
+
+**Excel cell parsing:** headers and data fields use ExcelJS `cell.text`, so hyperlink and rich-text cells are
+read as their displayed text instead of becoming `[object Object]`. Cached formula results are supported;
+the API does not evaluate spreadsheet formulas. Email display text is trimmed and lowercased before validation
+and the existing batched duplicate checks. A hyperlink destination is not substituted for invalid display text.
+For jobs previewed before this parsing fix, correct affected fields directly during review or upload the
+spreadsheet again. The original structured cell contents are not retained in previously parsed row data.
+
+**Review corrections:** an admin with `MEMBERS_WRITE` can PATCH `{ "data": { "email": "corrected@example.com",
+"department": "Media" } }` to an existing row in a `READY_FOR_REVIEW` job. Only template field keys and scalar/null
+values are accepted; omitted fields are retained, while empty strings or null clear a field. Text is trimmed,
+emails lowercased, enums uppercased, and numeric/boolean draft fields normalized before validation. Invalid draft
+values stay in the review with errors instead of creating a member; invalid numeric text is preserved rather than
+serialized as null. Preview and edits share batched existing-email/department lookups and `SignupDto` validation.
+Every row is revalidated after an edit so duplicate errors can be introduced or cleared on other rows, and
+`validRows` is recomputed from that result. Edits never create members, worker profiles, or welcome emails.
+Committed jobs and rows outside the selected job are rejected. Edits and commits take the same pessimistic job
+row lock within the tenant request transaction, serializing competing saves/imports. The existing job primary key
+and import-row job-ID index cover these lookups; no schema/index migration is needed.
+Successful corrections emit `MEMBER_IMPORT_ROW_UPDATED` with the linked member as actor and metadata containing
+the administrator ID, spreadsheet row number, changed field names, and valid-row count (not field values).
+The admin review page exposes inline save/cancel editing, keeps draft changes after a failed save, and disables
+upload/confirm actions until the active edit is saved or cancelled.
 
 **Validation (at preview time, one pass over every row):**
 

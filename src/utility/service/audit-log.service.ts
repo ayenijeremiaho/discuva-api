@@ -120,6 +120,7 @@ export type AuditAction =
   // Bulk operations
   | 'BULK_WORKER_PROMOTED'
   | 'MEMBER_IMPORT_PREVIEWED'
+  | 'MEMBER_IMPORT_ROW_UPDATED'
   | 'MEMBER_IMPORT_COMMITTED'
   // Admin roles
   | 'ADMIN_ROLE_CREATED'

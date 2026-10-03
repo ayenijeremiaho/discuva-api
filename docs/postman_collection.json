@@ -2387,7 +2387,7 @@
                     "preview"
                   ]
                 },
-                "description": "AdminGuard (MEMBERS_WRITE). Parses and validates every row (SignupDto rules, duplicate email within the file, email already in DB, unknown department name lookup \u2014 all case-insensitive on department). Persists a MemberImportJob + MemberImportRow[] (status READY_FOR_REVIEW) and returns { ...job, rows }. Nothing is created in the members table at this step."
+                "description": "AdminGuard (MEMBERS_WRITE). Parses displayed Excel cell text, including hyperlink/rich-text cells and cached formula results; formulas are not evaluated. Email text is trimmed and lowercased, then each row is validated (SignupDto rules, duplicate email within the file, email already in DB, unknown department name lookup). Hyperlink destinations do not replace invalid displayed emails. Persists a MemberImportJob + MemberImportRow[] (status READY_FOR_REVIEW) and returns { ...job, rows }. No members are created at preview time. Re-upload spreadsheets to recreate previews affected by the earlier structured-cell parsing issue."
               },
               "event": [
                 {
@@ -2415,6 +2415,28 @@
                   "body": "{ \"statusCode\": 400, \"message\": \"The uploaded file does not match the expected template \u2014 download a fresh template and try again.\" }"
                 }
               ]
+            },
+            {
+              "name": "Correct Import Review Row",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  { "key": "Authorization", "value": "Bearer {{accessToken}}" },
+                  { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"data\": {\n    \"email\": \"corrected@example.com\",\n    \"department\": \"Media\"\n  }\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/members/bulk-import/{{importJobId}}/rows/{{importRowId}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["members", "bulk-import", "{{importJobId}}", "rows", "{{importRowId}}"]
+                },
+                "description": "AdminGuard (MEMBERS_WRITE). Correct supported fields on an existing row of a READY_FOR_REVIEW import. Send partial data; empty strings/null clear fields. Revalidates all rows, including duplicate propagation, and returns the updated job with rows and validRows. Invalid draft values are saved with review errors, not imported. Committed jobs and cross-job rows are rejected. Edits and commits share a job row lock. No members/emails are created until commit. Audit metadata records changed field names, not values."
+              },
+              "response": []
             },
             {
               "name": "Get Import Job",

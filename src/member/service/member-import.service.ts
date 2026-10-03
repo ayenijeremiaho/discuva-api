@@ -37,6 +37,15 @@ interface TemplateColumn {
   key: keyof MemberImportRowData;
 }
 
+interface ParsedImportRow {
+  rowNumber: number;
+  data: MemberImportRowData;
+}
+
+interface ValidatedImportRow extends ParsedImportRow {
+  errors: string[];
+}
+
 const TEMPLATE_COLUMNS: TemplateColumn[] = [
   { header: 'First Name*', key: 'firstname' },
   { header: 'Last Name*', key: 'lastname' },
@@ -114,7 +123,7 @@ export class MemberImportService {
     const headerRow = sheet.getRow(1);
     const columnIndexByKey = new Map<keyof MemberImportRowData, number>();
     headerRow.eachCell((cell, colNumber) => {
-      const header = String(cell.value ?? '').trim();
+      const header = cell.text.trim();
       const match = TEMPLATE_COLUMNS.find((c) => c.header === header);
       if (match) columnIndexByKey.set(match.key, colNumber);
     });
@@ -125,15 +134,21 @@ export class MemberImportService {
       );
     }
 
-    const parsedRows: { rowNumber: number; data: MemberImportRowData }[] = [];
+    const parsedRows: ParsedImportRow[] = [];
     sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
       if (rowNumber === 1) return;
       const get = (key: keyof MemberImportRowData): string | undefined => {
         const idx = columnIndexByKey.get(key);
         if (!idx) return undefined;
-        const value = row.getCell(idx).value;
-        if (value === null || value === undefined) return undefined;
-        return String(value).trim() || undefined;
+        return row.getCell(idx).text.trim() || undefined;
+      };
+      const getNumeric = (
+        key: keyof MemberImportRowData,
+      ): number | string | undefined => {
+        const text = get(key);
+        if (text === undefined) return undefined;
+        const numeric = Number(text);
+        return Number.isFinite(numeric) ? numeric : text;
       };
 
       const data: MemberImportRowData = {
@@ -142,15 +157,16 @@ export class MemberImportService {
         email: get('email')?.toLowerCase(),
         phoneNumber: get('phoneNumber'),
         gender: get('gender')?.toUpperCase(),
-        birthDay: get('birthDay') ? Number(get('birthDay')) : undefined,
-        birthMonth: get('birthMonth') ? Number(get('birthMonth')) : undefined,
-        birthYear: get('birthYear') ? Number(get('birthYear')) : undefined,
+        birthDay: getNumeric('birthDay'),
+        birthMonth: getNumeric('birthMonth'),
+        birthYear: getNumeric('birthYear'),
         maritalStatus: get('maritalStatus')?.toUpperCase(),
         yearBornAgain: get('yearBornAgain'),
         yearBaptized: get('yearBaptized'),
-        baptizedWithHolyGhost: get('baptizedWithHolyGhost')
-          ? /^(true|yes|1)$/i.test(get('baptizedWithHolyGhost')!)
-          : undefined,
+        baptizedWithHolyGhost:
+          get('baptizedWithHolyGhost') === undefined
+            ? undefined
+            : this.normalizeBoolean(get('baptizedWithHolyGhost')!),
         dateJoinedChurch: get('dateJoinedChurch'),
         department: get('department'),
         profession: get('profession'),
@@ -167,97 +183,7 @@ export class MemberImportService {
       throw new BadRequestException('The uploaded file has no data rows.');
     }
 
-    const emailsInFile = new Map<string, number>();
-    const rowsWithErrors: {
-      rowNumber: number;
-      data: MemberImportRowData;
-      errors: string[];
-    }[] = [];
-
-    // Batched up front instead of queried per-row — a 1,000-row import used
-    // to fire ~2,000 sequential DB round trips (one email lookup + one
-    // department lookup per row) inside this loop.
-    const candidateEmails = Array.from(
-      new Set(
-        parsedRows.map((r) => r.data.email).filter((e): e is string => !!e),
-      ),
-    );
-    const existingEmails = new Set(
-      candidateEmails.length
-        ? (
-            await this.memberRepository.find({
-              where: { email: In(candidateEmails) },
-              select: ['email'],
-            })
-          ).map((m) => m.email)
-        : [],
-    );
-    const departmentByLowerName = new Map(
-      (await this.departmentRepository.find()).map((d) => [
-        d.name.toLowerCase(),
-        d,
-      ]),
-    );
-
-    for (const { rowNumber, data } of parsedRows) {
-      const errors: string[] = [];
-
-      if (data.phoneNumber) {
-        const normalizedPhone = normalizePhoneNumber(
-          data.phoneNumber,
-          this.defaultPhoneRegion,
-        );
-        if (normalizedPhone) {
-          data.phoneNumber = normalizedPhone;
-        } else {
-          errors.push(
-            `Phone Number is invalid for ${this.defaultPhoneRegion}; include the country code for international numbers.`,
-          );
-        }
-      }
-
-      const dtoInstance = plainToInstance(SignupDto, {
-        firstname: data.firstname,
-        lastname: data.lastname,
-        email: data.email,
-        phoneNumber: data.phoneNumber,
-        gender: data.gender,
-        birthDay: data.birthDay,
-        birthMonth: data.birthMonth,
-        birthYear: data.birthYear,
-        maritalStatus: data.maritalStatus,
-        yearBornAgain: data.yearBornAgain,
-        yearBaptized: data.yearBaptized,
-        baptizedWithHolyGhost: data.baptizedWithHolyGhost,
-        dateJoinedChurch: data.dateJoinedChurch,
-      });
-      const validationErrors = await validate(dtoInstance);
-      for (const ve of validationErrors) {
-        errors.push(...Object.values(ve.constraints ?? {}));
-      }
-
-      if (data.email) {
-        if (emailsInFile.has(data.email)) {
-          errors.push(
-            `Duplicate email in file — also used on row ${emailsInFile.get(data.email)}`,
-          );
-        } else {
-          emailsInFile.set(data.email, rowNumber);
-          if (existingEmails.has(data.email)) {
-            errors.push('A member with this email already exists');
-          }
-        }
-      }
-
-      if (data.department) {
-        if (!departmentByLowerName.has(data.department.toLowerCase())) {
-          errors.push(`Unknown department: "${data.department}"`);
-        }
-      }
-
-      rowsWithErrors.push({ rowNumber, data, errors });
-    }
-
+    const rowsWithErrors = await this.validateRows(parsedRows);
     const validRowCount = rowsWithErrors.filter(
       (r) => r.errors.length === 0,
     ).length;
@@ -298,8 +224,13 @@ export class MemberImportService {
     return this.getJob(job.id);
   }
 
-  async getJob(jobId: string): Promise<MemberImportJob> {
-    const job = await this.jobRepository.findOneBy({ id: jobId });
+  async getJob(jobId: string, lock = false): Promise<MemberImportJob> {
+    const job = lock
+      ? await this.jobRepository.findOne({
+          where: { id: jobId },
+          lock: { mode: 'pessimistic_write' },
+        })
+      : await this.jobRepository.findOneBy({ id: jobId });
     if (!job) throw new NotFoundException('Import job not found');
     return job;
   }
@@ -312,6 +243,198 @@ export class MemberImportService {
     });
   }
 
+  async updateImportRow(
+    jobId: string,
+    rowId: string,
+    changes: Record<string, unknown>,
+    admin: Admin,
+  ): Promise<MemberImportJob & { rows: MemberImportRow[] }> {
+    const keys = Object.keys(changes);
+    if (
+      keys.length === 0 ||
+      keys.some((key) => !TEMPLATE_COLUMNS.some((column) => column.key === key))
+    ) {
+      throw new BadRequestException(
+        'Provide supported member import fields only.',
+      );
+    }
+    const normalizedChanges = Object.fromEntries(
+      keys.map((key) => [key, this.normalizeDraftValue(key, changes[key])]),
+    );
+    const job = await this.getJob(jobId, true);
+    if (job.status !== MemberImportJobStatus.READY_FOR_REVIEW) {
+      throw new BadRequestException(
+        'Only imports ready for review can be edited.',
+      );
+    }
+    const rows = await this.rowRepository.find({
+      where: { job: { id: jobId } },
+      order: { rowNumber: 'ASC' },
+    });
+    const row = rows.find((candidate) => candidate.id === rowId);
+    if (!row) throw new NotFoundException('Import row not found in this job');
+
+    row.data = this.applyCorrections(row.data, normalizedChanges);
+    const validated = await this.validateRows(
+      rows.map((candidate) => ({
+        rowNumber: candidate.rowNumber,
+        data: { ...candidate.data },
+      })),
+    );
+    rows.forEach((candidate, index) => {
+      candidate.data = validated[index].data;
+      candidate.errors = validated[index].errors;
+      candidate.status = MemberImportRowStatus.PENDING;
+      candidate.commitError = null;
+    });
+    await this.rowRepository.save(rows);
+    job.validRows = validated.filter(
+      (candidate) => candidate.errors.length === 0,
+    ).length;
+    await this.jobRepository.save(job);
+    this.auditLogService.log('MEMBER_IMPORT_ROW_UPDATED', {
+      actorId: admin.member?.id,
+      targetId: job.id,
+      targetName: job.originalFilename,
+      metadata: {
+        adminId: admin.id,
+        rowNumber: row.rowNumber,
+        changedFields: keys,
+        validRows: job.validRows,
+      },
+    });
+    return Object.assign(job, { rows });
+  }
+
+  private normalizeBoolean(text: string): boolean | string {
+    if (/^(true|yes|1)$/i.test(text)) return true;
+    if (/^(false|no|0)$/i.test(text)) return false;
+    return text;
+  }
+
+  private normalizeDraftValue(
+    key: string,
+    value: unknown,
+  ): string | number | boolean | undefined {
+    if (value === null) return undefined;
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean'
+    ) {
+      throw new BadRequestException(
+        'Import field values must be text, numbers, booleans, or null.',
+      );
+    }
+    const text = value.toString().trim();
+    if (!text) return undefined;
+    if (['birthDay', 'birthMonth', 'birthYear'].includes(key)) {
+      const numeric = Number(text);
+      return Number.isFinite(numeric) ? numeric : text;
+    }
+    if (key === 'baptizedWithHolyGhost') return this.normalizeBoolean(text);
+    if (key === 'email') return text.toLowerCase();
+    if (key === 'gender' || key === 'maritalStatus') return text.toUpperCase();
+    return text;
+  }
+
+  private applyCorrections(
+    current: MemberImportRowData,
+    changes: Record<string, string | number | boolean | undefined>,
+  ): MemberImportRowData {
+    const result: Record<string, unknown> = { ...current };
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === undefined) delete result[key];
+      else result[key] = value;
+    }
+    return result as MemberImportRowData;
+  }
+
+  private numericOrNull(value: number | string | undefined): number | null {
+    return value == null ? null : Number(value);
+  }
+
+  private async validateRows(
+    parsedRows: ParsedImportRow[],
+  ): Promise<ValidatedImportRow[]> {
+    const emailsInFile = new Map<string, number>();
+    const rowsWithErrors: ValidatedImportRow[] = [];
+    const candidateEmails = Array.from(
+      new Set(
+        parsedRows
+          .map((row) => row.data.email)
+          .filter((email): email is string => !!email),
+      ),
+    );
+    const existingEmails = new Set(
+      candidateEmails.length
+        ? (
+            await this.memberRepository.find({
+              where: { email: In(candidateEmails) },
+              select: ['email'],
+            })
+          ).map((member) => member.email)
+        : [],
+    );
+    const departmentByLowerName = new Map(
+      (await this.departmentRepository.find()).map((department) => [
+        department.name.toLowerCase(),
+        department,
+      ]),
+    );
+
+    for (const { rowNumber, data } of parsedRows) {
+      const errors: string[] = [];
+      if (data.phoneNumber) {
+        const normalizedPhone = normalizePhoneNumber(
+          data.phoneNumber,
+          this.defaultPhoneRegion,
+        );
+        if (normalizedPhone) data.phoneNumber = normalizedPhone;
+        else
+          errors.push(
+            `Phone Number is invalid for ${this.defaultPhoneRegion}; include the country code for international numbers.`,
+          );
+      }
+      const dtoInstance = plainToInstance(SignupDto, {
+        firstname: data.firstname,
+        lastname: data.lastname,
+        email: data.email,
+        phoneNumber: data.phoneNumber,
+        gender: data.gender,
+        birthDay: data.birthDay,
+        birthMonth: data.birthMonth,
+        birthYear: data.birthYear,
+        maritalStatus: data.maritalStatus,
+        yearBornAgain: data.yearBornAgain,
+        yearBaptized: data.yearBaptized,
+        baptizedWithHolyGhost: data.baptizedWithHolyGhost,
+        dateJoinedChurch: data.dateJoinedChurch,
+      });
+      const validationErrors = await validate(dtoInstance);
+      for (const validationError of validationErrors)
+        errors.push(...Object.values(validationError.constraints ?? {}));
+      if (data.email) {
+        if (emailsInFile.has(data.email))
+          errors.push(
+            `Duplicate email in file — also used on row ${emailsInFile.get(data.email)}`,
+          );
+        else {
+          emailsInFile.set(data.email, rowNumber);
+          if (existingEmails.has(data.email))
+            errors.push('A member with this email already exists');
+        }
+      }
+      if (
+        data.department &&
+        !departmentByLowerName.has(data.department.toLowerCase())
+      )
+        errors.push(`Unknown department: "${data.department}"`);
+      rowsWithErrors.push({ rowNumber, data, errors });
+    }
+    return rowsWithErrors;
+  }
+
   async commitImport(
     jobId: string,
     admin: Admin,
@@ -319,7 +442,7 @@ export class MemberImportService {
     createdCount: number;
     failedRows: { rowNumber: number; reason: string }[];
   }> {
-    const job = await this.getJob(jobId);
+    const job = await this.getJob(jobId, true);
     if (job.status === MemberImportJobStatus.COMMITTED) {
       throw new BadRequestException('This import has already been committed.');
     }
@@ -407,9 +530,9 @@ export class MemberImportService {
         password,
         phoneNumber: data.phoneNumber,
         gender: data.gender as any,
-        birthDay: data.birthDay ?? null,
-        birthMonth: data.birthMonth ?? null,
-        birthYear: data.birthYear ?? null,
+        birthDay: this.numericOrNull(data.birthDay),
+        birthMonth: this.numericOrNull(data.birthMonth),
+        birthYear: this.numericOrNull(data.birthYear),
         maritalStatus: data.maritalStatus as any,
         yearBornAgain: data.yearBornAgain
           ? new Date(`${data.yearBornAgain}-01-01`)
@@ -417,7 +540,7 @@ export class MemberImportService {
         yearBaptized: data.yearBaptized
           ? new Date(`${data.yearBaptized}-01-01`)
           : null,
-        baptizedWithHolyGhost: data.baptizedWithHolyGhost ?? false,
+        baptizedWithHolyGhost: data.baptizedWithHolyGhost === true,
         dateJoinedChurch: data.dateJoinedChurch
           ? new Date(data.dateJoinedChurch)
           : null,
