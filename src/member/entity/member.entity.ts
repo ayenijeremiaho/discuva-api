@@ -56,7 +56,7 @@ export class Member extends BaseEntity {
   @Column({ default: MemberStatusEnum.ACTIVE })
   status: MemberStatusEnum;
 
-  @Column({ type: 'varchar', default: AppearanceMode.SYSTEM })
+  @Column({ type: 'varchar', default: AppearanceMode.LIGHT })
   appearanceMode: AppearanceMode;
 
   @Column({ default: true })

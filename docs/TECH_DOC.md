@@ -1391,7 +1391,7 @@ public `GET /tenant/info` response and can be changed with `PATCH /tenant/info` 
 sets for each preset. `previous_theme_preset` is added by the root migration `AddPreviousTenantThemePreset` because
 `tenants` lives in the public control plane; apply it with `npm run migration:run`, not the tenant-schema runner.
 
-`Member.appearanceMode` is each account's `system`, `light`, or `dark` preference and `Member.useChurchTheme` is an
+`Member.appearanceMode` is each account's `system`, `light`, or `dark` preference (default `light`) and `Member.useChurchTheme` is an
 independent preference (default `true`) for applying that tenant's palette. Members inherit the church's selected
 palette by default and can set the flag to `false` to keep the standard portal colors. Both fields are included in
 member profile responses. Members update either or both through `PATCH /members/me/appearance`; admins use
@@ -1399,7 +1399,9 @@ member profile responses. Members update either or both through `PATCH /members/
 if that account uses both portals. Applying a church palette changes brand accents while preserving existing
 surfaces and semantic colors. Tenant migration `AddMemberAppearanceMode` creates the `appearance_mode` column;
 `RepairMemberAppearanceMode1800345600000` reasserts it with `ADD COLUMN IF NOT EXISTS` to repair tenant schemas
-where migration history and actual table state have drifted. The tenant migration `AddMemberChurchThemePreference` adds the field with a true
+where migration history and actual table state have drifted. Tenant migration `DefaultMemberAppearanceToLight1800432000000`
+sets Light as the database default and moves existing System values to Light; users can still explicitly select System
+or Dark afterward. The tenant migration `AddMemberChurchThemePreference` adds the field with a true
 default; `SetMemberChurchThemeDefault` updates existing rows and the database default for tenants that already ran
 the original preference migration.
 
