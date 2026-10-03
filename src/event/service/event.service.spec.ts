@@ -90,6 +90,33 @@ describe('EventService', () => {
   });
 
   describe('create', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('rejects creating an event with a slot in the past', async () => {
+      await expect(
+        service.create(
+          {
+            name: 'Past Service',
+            isRecurring: false,
+            serviceSlots: [
+              {
+                startTime: '2024-12-31T23:00:00.000Z',
+                endTime: '2024-12-31T23:30:00.000Z',
+              },
+            ],
+          } as any,
+          'actor-1',
+        ),
+      ).rejects.toThrow('Service slots cannot start in the past');
+    });
+
     it('should throw BadRequestException for an invalid slot startTime', async () => {
       await expect(
         service.create(

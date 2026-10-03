@@ -50,6 +50,7 @@ export class EventService {
         throw new BadRequestException(
           'Recurrence details required for recurring events',
         );
+      this.validateFutureSlots(dto.serviceSlots);
       const result = await this.createRecurring(dto);
       this.auditLogService.log('EVENT_CREATED', {
         actorId,
@@ -59,6 +60,7 @@ export class EventService {
       return result;
     }
 
+    this.validateFutureSlots(dto.serviceSlots);
     const result = await this.createSingle(dto);
     this.auditLogService.log('EVENT_CREATED', {
       actorId,
@@ -321,6 +323,13 @@ export class EventService {
       enforceMemberLocation:
         slot.enforceMemberLocationOverride ?? c.enforceMemberLocation,
     };
+  }
+
+  private validateFutureSlots(slots: CreateServiceSlotDto[]): void {
+    const now = Date.now();
+    if (slots.some((slot) => new Date(slot.startTime).getTime() < now)) {
+      throw new BadRequestException('Service slots cannot start in the past');
+    }
   }
 
   private async createSingle(dto: CreateEventDto): Promise<Event> {
