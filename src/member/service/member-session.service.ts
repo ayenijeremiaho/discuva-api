@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { MemberSession } from '../entity/member-session.entity';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 
@@ -18,24 +18,37 @@ export class MemberSessionService {
     hashedRefreshToken: string,
     surface: SessionSurface,
   ): Promise<void> {
-    const existing = await this.sessionRepository.findOne({
-      where: { member: { id: memberId }, surface },
-    });
+    try {
+      const existing = await this.sessionRepository.findOne({
+        where: { member: { id: memberId }, surface },
+      });
 
-    if (existing) {
-      existing.hashedRefreshToken = hashedRefreshToken;
-      existing.lastLogin = new Date();
-      existing.lastLogout = null;
-      await this.sessionRepository.save(existing);
-    } else {
-      await this.sessionRepository.save(
-        this.sessionRepository.create({
-          member: { id: memberId },
-          hashedRefreshToken,
-          lastLogin: new Date(),
-          surface,
-        }),
-      );
+      if (existing) {
+        existing.hashedRefreshToken = hashedRefreshToken;
+        existing.lastLogin = new Date();
+        existing.lastLogout = null;
+        await this.sessionRepository.save(existing);
+      } else {
+        await this.sessionRepository.save(
+          this.sessionRepository.create({
+            member: { id: memberId },
+            hashedRefreshToken,
+            lastLogin: new Date(),
+            surface,
+          }),
+        );
+      }
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        error.driverError.code === '23503' &&
+        error.driverError.constraint === 'FK_member_sessions_member_id'
+      ) {
+        throw new UnauthorizedException(
+          'Your session has expired. Please log in again.',
+        );
+      }
+      throw error;
     }
     this.logger.log(`Login session recorded: member ${memberId} [${surface}]`);
   }

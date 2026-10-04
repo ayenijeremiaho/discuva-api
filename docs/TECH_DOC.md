@@ -9747,6 +9747,7 @@ Every call to `POST /auth/refresh` performs a full rotation:
   - **Within the reuse grace window (10s)** — treated as a benign concurrent-request race, not theft (e.g. two browser tabs on the same admin login, or the proactive pre-expiry refresh racing a reactive 401-triggered refresh). The server does **not** rotate again or touch the session; it replays the exact tokens issued by the rotation that already happened, so both callers converge on the same valid pair.
   - **Outside the grace window** — treated as **credential reuse**, the server immediately invalidates the entire session for that surface, and returns HTTP 401. This limits the blast radius of a stolen refresh token to a single use.
 - On reuse detection (outside the grace window) the member receives a `session-security-alert` email advising them to change their password if the sign-out was unexpected.
+- If the member row disappears before the rotated session is saved, the matching `member_sessions.member_id` foreign-key violation returns HTTP 401 with a sign-in-again message. Other database errors are not converted.
 
 ### Absolute Session Lifetime
 
@@ -12142,6 +12143,7 @@ Every call to `POST /auth/refresh` performs a full rotation:
   - **Within the reuse grace window (10s)** — treated as a benign concurrent-request race, not theft (e.g. two browser tabs on the same admin login, or the proactive pre-expiry refresh racing a reactive 401-triggered refresh). The server does **not** rotate again or touch the session; it replays the exact tokens issued by the rotation that already happened, so both callers converge on the same valid pair.
   - **Outside the grace window** — treated as **credential reuse**, the server immediately invalidates the entire session for that surface, and returns HTTP 401. This limits the blast radius of a stolen refresh token to a single use.
 - On reuse detection (outside the grace window) the member receives a `session-security-alert` email advising them to change their password if the sign-out was unexpected.
+- If the member row disappears before the rotated session is saved, the matching `member_sessions.member_id` foreign-key violation returns HTTP 401 with a sign-in-again message. Other database errors are not converted.
 
 ### Absolute Session Lifetime
 
