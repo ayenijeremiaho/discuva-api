@@ -18,6 +18,8 @@ import {
 } from '../entity/service-programme-template.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Member } from '../../member/entity/member.entity';
+import { Department } from '../../department/entity/department.entity';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { Admin } from '../../admin/entity/admin.entity';
 import { CreateServiceProgrammeDto } from '../dto/create-service-programme.dto';
 import { UpdateServiceProgrammeDto } from '../dto/update-service-programme.dto';
@@ -69,6 +71,8 @@ export interface MyAssignment {
   topic: string | null;
   allocatedMinutes: number;
   isBackup: boolean;
+  // Set when the caller has this slot through their department rather than personally.
+  asDepartment: { id: string; name: string } | null;
   programmeStatus: ServiceProgrammeStatusEnum;
   // Only populated once the programme has actually gone LIVE — this is what
   // the frontend needs to poll GET /service-session/:code/my-status.
@@ -81,10 +85,12 @@ export interface UpcomingProgrammeSlotView {
   type: ServiceSlotTypeEnum;
   topic: string | null;
   allocatedMinutes: number;
-  // memberName ?? guestName — never the raw Member row (email/phone etc.),
+  // memberName ?? guestName ?? department name — never the raw Member row (email/phone etc.),
   // since this is returned to any authenticated member, not just admins.
   speakerName: string | null;
   backupSpeakerName: string | null;
+  // Set when a whole department has the slot (speakerName is then the department's name).
+  departmentName: string | null;
 }
 
 export interface UpcomingProgrammeView {
@@ -125,6 +131,59 @@ function slotAssignmentPush(
   };
 }
 
+interface DepartmentAudience {
+  memberIds: string[];
+  hod: Awaited<ReturnType<DepartmentAccessService['findHeadOfDepartment']>>;
+}
+
+// How the caller is on a slot: personally beats via their department, and primary beats backup.
+export function myPartIn(
+  slot: Pick<
+    ServiceProgrammeSlot,
+    'member' | 'backupMember' | 'department' | 'backupDepartment'
+  >,
+  memberId: string,
+  departmentIds: string[],
+): { isBackup: boolean; asDepartment: { id: string; name: string } | null } {
+  const inDept = (d: Department | null | undefined) =>
+    !!d && departmentIds.includes(d.id);
+  if (slot.member?.id === memberId)
+    return { isBackup: false, asDepartment: null };
+  if (inDept(slot.department)) {
+    return {
+      isBackup: false,
+      asDepartment: { id: slot.department!.id, name: slot.department!.name },
+    };
+  }
+  if (slot.backupMember?.id === memberId) {
+    return { isBackup: true, asDepartment: null };
+  }
+  if (inDept(slot.backupDepartment)) {
+    return {
+      isBackup: true,
+      asDepartment: {
+        id: slot.backupDepartment!.id,
+        name: slot.backupDepartment!.name,
+      },
+    };
+  }
+  return { isBackup: true, asDepartment: null };
+}
+
+// A department can't share a slot with a person — one or the other.
+function assertSingleAssignee(slot: ServiceProgrammeSlot): void {
+  if (slot.department && (slot.member || slot.guestName)) {
+    throw new BadRequestException(
+      'A slot can be taken by a member, a guest or a department — choose one',
+    );
+  }
+  if (slot.backupDepartment && (slot.backupMember || slot.backupGuestName)) {
+    throw new BadRequestException(
+      'The backup can be a member, a guest or a department — choose one',
+    );
+  }
+}
+
 @Injectable()
 export class ServiceProgrammeService {
   constructor(
@@ -139,8 +198,11 @@ export class ServiceProgrammeService {
     private readonly serviceSlotRepo: Repository<ServiceSlot>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(Department)
+    private readonly departmentRepo: Repository<Department>,
     private readonly pdfService: PdfService,
     private readonly notificationDispatchService: NotificationDispatchService,
+    private readonly departmentAccessService: DepartmentAccessService,
   ) {}
 
   private readonly logger = new Logger(ServiceProgrammeService.name);
@@ -195,6 +257,21 @@ export class ServiceProgrammeService {
       : [];
     const memberById = new Map(members.map((m) => [m.id, m]));
 
+    const departmentIds = new Set<string>();
+    for (const item of dto.programmes) {
+      for (const slotDto of item.slots ?? []) {
+        if (slotDto.departmentId) departmentIds.add(slotDto.departmentId);
+        if (slotDto.backupDepartmentId)
+          departmentIds.add(slotDto.backupDepartmentId);
+      }
+    }
+    const departments = departmentIds.size
+      ? await this.departmentRepo.find({
+          where: { id: In([...departmentIds]) },
+        })
+      : [];
+    const departmentById = new Map(departments.map((d) => [d.id, d]));
+
     const slotsToSave: ServiceProgrammeSlot[] = [];
     dto.programmes.forEach((item, programmeIndex) => {
       const saved = savedProgrammes[programmeIndex];
@@ -211,19 +288,33 @@ export class ServiceProgrammeService {
         if (slotDto.backupMemberId && !backupMember) {
           throw new NotFoundException('Backup member not found');
         }
-        slotsToSave.push(
-          this.slotRepo.create({
-            programme: saved,
-            position,
-            type: slotDto.type,
-            topic: slotDto.topic ?? null,
-            member: member ?? null,
-            guestName: slotDto.guestName ?? null,
-            backupMember: backupMember ?? null,
-            backupGuestName: slotDto.backupGuestName ?? null,
-            allocatedMinutes: slotDto.allocatedMinutes,
-          }),
-        );
+        const department = slotDto.departmentId
+          ? departmentById.get(slotDto.departmentId)
+          : null;
+        if (slotDto.departmentId && !department) {
+          throw new NotFoundException('Department not found');
+        }
+        const backupDepartment = slotDto.backupDepartmentId
+          ? departmentById.get(slotDto.backupDepartmentId)
+          : null;
+        if (slotDto.backupDepartmentId && !backupDepartment) {
+          throw new NotFoundException('Backup department not found');
+        }
+        const slot = this.slotRepo.create({
+          programme: saved,
+          position,
+          type: slotDto.type,
+          topic: slotDto.topic ?? null,
+          member: member ?? null,
+          guestName: slotDto.guestName ?? null,
+          department: department ?? null,
+          backupMember: backupMember ?? null,
+          backupGuestName: slotDto.backupGuestName ?? null,
+          backupDepartment: backupDepartment ?? null,
+          allocatedMinutes: slotDto.allocatedMinutes,
+        });
+        assertSingleAssignee(slot);
+        slotsToSave.push(slot);
       });
       if (item.slots?.length) {
         this.logger.log(
@@ -265,6 +356,27 @@ export class ServiceProgrammeService {
     }
     if (assignmentItems.length) {
       this.notifyBulkSlotAssignments(assignmentItems);
+    }
+    const audiences = new Map<string, Promise<DepartmentAudience>>();
+    for (const slot of savedSlots) {
+      if (slot.department) {
+        this.notifyDepartmentAssignment(
+          slot.department,
+          slot.programme,
+          slot,
+          false,
+          audiences,
+        );
+      }
+      if (slot.backupDepartment) {
+        this.notifyDepartmentAssignment(
+          slot.backupDepartment,
+          slot.programme,
+          slot,
+          true,
+          audiences,
+        );
+      }
     }
 
     const summaries = await this.findManyWithSummary(
@@ -311,18 +423,23 @@ export class ServiceProgrammeService {
   // doing this month" view a member/worker has no other way to see today
   // (currently the only signal is a one-off assignment email).
   async getMyUpcomingAssignments(memberId: string): Promise<MyAssignment[]> {
+    const departmentIds =
+      await this.departmentAccessService.findDepartmentIdsForMember(memberId);
+    const teamClause = departmentIds.length
+      ? ' OR slot.department_id IN (:...departmentIds) OR slot.backup_department_id IN (:...departmentIds)'
+      : '';
     const slots = await this.slotRepo
       .createQueryBuilder('slot')
       .innerJoinAndSelect('slot.programme', 'programme')
       .innerJoinAndSelect('programme.serviceSlot', 'serviceSlot')
       .leftJoinAndSelect('serviceSlot.event', 'event')
       .leftJoinAndSelect('slot.member', 'member')
+      .leftJoinAndSelect('slot.department', 'department')
+      .leftJoinAndSelect('slot.backupDepartment', 'backupDepartment')
       .leftJoinAndSelect('programme.session', 'session')
       .where(
-        '(slot.member_id = :memberId OR slot.backup_member_id = :memberId)',
-        {
-          memberId,
-        },
+        `(slot.member_id = :memberId OR slot.backup_member_id = :memberId${teamClause})`,
+        { memberId, departmentIds },
       )
       .andWhere('serviceSlot.start_time >= :now', { now: new Date() })
       .andWhere('programme.status IN (:...statuses)', {
@@ -344,7 +461,7 @@ export class ServiceProgrammeService {
       type: slot.type,
       topic: slot.topic,
       allocatedMinutes: slot.allocatedMinutes,
-      isBackup: slot.member?.id !== memberId,
+      ...myPartIn(slot, memberId, departmentIds),
       programmeStatus: slot.programme.status,
       sessionCode: slot.programme.session?.sessionCode ?? null,
     }));
@@ -368,6 +485,8 @@ export class ServiceProgrammeService {
       .leftJoinAndSelect('programme.slots', 'slots')
       .leftJoinAndSelect('slots.member', 'member')
       .leftJoinAndSelect('slots.backupMember', 'backupMember')
+      .leftJoinAndSelect('slots.department', 'department')
+      .leftJoinAndSelect('slots.backupDepartment', 'backupDepartment')
       .where(
         `(programme.status = :live OR (programme.status = :draft AND serviceSlot.start_time >= :now))`,
         {
@@ -399,8 +518,14 @@ export class ServiceProgrammeService {
         type: slot.type,
         topic: slot.topic,
         allocatedMinutes: slot.allocatedMinutes,
-        speakerName: slot.memberName ?? slot.guestName,
-        backupSpeakerName: slot.backupMemberName ?? slot.backupGuestName,
+        speakerName:
+          slot.memberName ?? slot.guestName ?? slot.departmentName ?? null,
+        backupSpeakerName:
+          slot.backupMemberName ??
+          slot.backupGuestName ??
+          slot.backupDepartmentName ??
+          null,
+        departmentName: slot.departmentName ?? null,
       })),
     };
   }
@@ -416,6 +541,8 @@ export class ServiceProgrammeService {
         'slots',
         'slots.member',
         'slots.backupMember',
+        'slots.department',
+        'slots.backupDepartment',
       ],
       order: { slots: { position: 'ASC' } },
     });
@@ -439,6 +566,8 @@ export class ServiceProgrammeService {
         'slots',
         'slots.member',
         'slots.backupMember',
+        'slots.department',
+        'slots.backupDepartment',
       ],
       order: { slots: { position: 'ASC' } },
     });
@@ -551,6 +680,12 @@ export class ServiceProgrammeService {
     if (dto.backupMemberId && !backupMember)
       throw new NotFoundException('Backup member not found');
 
+    const department = await this.findDepartment(dto.departmentId);
+    const backupDepartment = await this.findDepartment(
+      dto.backupDepartmentId,
+      'Backup department not found',
+    );
+
     const slot = this.slotRepo.create({
       programme,
       position,
@@ -558,10 +693,13 @@ export class ServiceProgrammeService {
       topic: dto.topic ?? null,
       member: member ?? null,
       guestName: dto.guestName ?? null,
+      department,
       backupMember: backupMember ?? null,
       backupGuestName: dto.backupGuestName ?? null,
+      backupDepartment,
       allocatedMinutes: dto.allocatedMinutes,
     });
+    assertSingleAssignee(slot);
     const saved = await this.slotRepo.save(slot);
     this.logger.log(
       `Slot added to programme ${programme.id} at position ${position}`,
@@ -570,6 +708,12 @@ export class ServiceProgrammeService {
     if (member) this.notifySlotAssignment(member, programme, saved);
     if (backupMember) {
       this.notifySlotAssignment(backupMember, programme, saved, true);
+    }
+    if (department) {
+      this.notifyDepartmentAssignment(department, programme, saved);
+    }
+    if (backupDepartment) {
+      this.notifyDepartmentAssignment(backupDepartment, programme, saved, true);
     }
 
     const conflictWarning = member
@@ -593,6 +737,8 @@ export class ServiceProgrammeService {
         'programme.serviceSlot.event',
         'member',
         'backupMember',
+        'department',
+        'backupDepartment',
       ],
     });
     if (!slot) throw new NotFoundException('Slot not found');
@@ -604,6 +750,8 @@ export class ServiceProgrammeService {
 
     const previousMemberId = slot.member?.id ?? null;
     const previousBackupMemberId = slot.backupMember?.id ?? null;
+    const previousDepartmentId = slot.department?.id ?? null;
+    const previousBackupDepartmentId = slot.backupDepartment?.id ?? null;
 
     if (dto.memberId !== undefined) {
       slot.member = dto.memberId
@@ -617,6 +765,8 @@ export class ServiceProgrammeService {
     }
 
     this.applySlotFields(slot, dto);
+    await this.applyDepartmentFields(slot, dto);
+    assertSingleAssignee(slot);
 
     const saved = await this.slotRepo.save(slot);
     this.logger.log(`Slot ${slotId} updated on programme ${programmeId}`);
@@ -644,12 +794,69 @@ export class ServiceProgrammeService {
       );
     }
 
+    if (saved.department && saved.department.id !== previousDepartmentId) {
+      this.notifyDepartmentAssignment(saved.department, slot.programme, saved);
+    }
+    if (
+      saved.backupDepartment &&
+      saved.backupDepartment.id !== previousBackupDepartmentId
+    ) {
+      this.notifyDepartmentAssignment(
+        saved.backupDepartment,
+        slot.programme,
+        saved,
+        true,
+      );
+    }
+
     const conflictWarning = isNewAssignment
       ? await this.findMemberConflictWarning(saved.member, slot.programme)
       : undefined;
 
     const result = withMemberNames(saved);
     return conflictWarning ? { ...result, conflictWarning } : result;
+  }
+
+  private async findDepartment(
+    id: string | null | undefined,
+    notFound = 'Department not found',
+  ): Promise<Department | null> {
+    if (!id) return null;
+    const department = await this.departmentRepo.findOne({ where: { id } });
+    if (!department) throw new NotFoundException(notFound);
+    return department;
+  }
+
+  // Switching a slot to a department clears the person on it, and vice versa; sending both is a 400.
+  private async applyDepartmentFields(
+    slot: ServiceProgrammeSlot,
+    dto: UpdateServiceProgrammeSlotDto,
+  ): Promise<void> {
+    if (dto.departmentId !== undefined) {
+      slot.department = await this.findDepartment(dto.departmentId);
+      if (slot.department && !dto.memberId && !dto.guestName) {
+        slot.member = null;
+        slot.guestName = null;
+      }
+    } else if (dto.memberId || dto.guestName) {
+      slot.department = null;
+    }
+    if (dto.backupDepartmentId !== undefined) {
+      slot.backupDepartment = await this.findDepartment(
+        dto.backupDepartmentId,
+        'Backup department not found',
+      );
+      if (
+        slot.backupDepartment &&
+        !dto.backupMemberId &&
+        !dto.backupGuestName
+      ) {
+        slot.backupMember = null;
+        slot.backupGuestName = null;
+      }
+    } else if (dto.backupMemberId || dto.backupGuestName) {
+      slot.backupDepartment = null;
+    }
   }
 
   private applySlotFields(
@@ -832,6 +1039,87 @@ export class ServiceProgrammeService {
     });
   }
 
+  // One push to the whole department; the email goes only to the HOD as the team's contact.
+  // Shared across one request so a department holding several slots is looked up once.
+  private departmentAudience(
+    departmentId: string,
+    cache?: Map<string, Promise<DepartmentAudience>>,
+  ): Promise<DepartmentAudience> {
+    const cached = cache?.get(departmentId);
+    if (cached) return cached;
+    const audience = Promise.all([
+      this.departmentAccessService.findMemberIdsInDepartment(departmentId),
+      this.departmentAccessService.findHeadOfDepartment(departmentId),
+    ]).then(([memberIds, hod]) => ({ memberIds, hod }));
+    cache?.set(departmentId, audience);
+    return audience;
+  }
+
+  private async notifyDepartmentAssignment(
+    department: Department,
+    programme: ServiceProgramme,
+    slot: ServiceProgrammeSlot,
+    isBackup = false,
+    audiences?: Map<string, Promise<DepartmentAudience>>,
+  ): Promise<void> {
+    try {
+      const { memberIds, hod } = await this.departmentAudience(
+        department.id,
+        audiences,
+      );
+      const recipients = new Set(memberIds);
+      if (hod) recipients.add(hod.id);
+      if (!recipients.size) return;
+
+      const line = this.buildAssignmentLine(programme, slot, isBackup);
+      const { serviceSlotName, slotType, serviceDate, serviceTime } = line;
+      let when = '';
+      if (serviceDate) when += ` on ${serviceDate}`;
+      if (serviceDate && serviceTime) when += ` at ${serviceTime}`;
+
+      const email: NotifyMemberEmail | undefined = hod?.email
+        ? {
+            to: hod.email,
+            recipientMemberId: hod.id,
+            subject: isBackup
+              ? `${department.name} is the backup for: ${serviceSlotName}`
+              : `${department.name} is on the programme: ${serviceSlotName}`,
+            template: 'service-slot-assigned',
+            data: {
+              memberName: hod.firstname,
+              serviceSlotName,
+              slotType: `${slotType} (${department.name})`,
+              topic: slot.topic ?? '',
+              allocatedMinutes: slot.allocatedMinutes,
+              isBackup,
+              serviceDate,
+              serviceTime,
+            },
+          }
+        : undefined;
+
+      this.notificationDispatchService.notifyMember({
+        category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+        email,
+        push: {
+          memberIds: [...recipients],
+          key: PushNotificationKey.SERVICE_SLOT_TEAM_ASSIGNED,
+          vars: {
+            department_name: department.name,
+            slot_type: isBackup ? `${slotType} (backup)` : slotType,
+            service_name: serviceSlotName,
+            when,
+          },
+          idempotencyKey: `service-slot-team-assigned:${slot.id}:${department.id}:${isBackup ? 'backup' : 'primary'}`,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Could not notify ${department.name} of slot ${slot.id}: ${(err as Error).message}`,
+      );
+    }
+  }
+
   // create() can assign the same member to several parts of the order of
   // service in one request — group by member and send ONE email listing
   // every part they've been assigned, instead of notifySlotAssignment's one
@@ -1006,6 +1294,20 @@ export class ServiceProgrammeService {
     if (programme.slots.length > 0) {
       await manager.remove(ServiceProgrammeSlot, programme.slots);
     }
+    // A department deleted since the template was saved is simply left off.
+    const templateDepartmentIds = [
+      ...new Set(
+        template.slots
+          .map((s) => s.departmentId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const departments = templateDepartmentIds.length
+      ? await this.departmentRepo.find({
+          where: { id: In(templateDepartmentIds) },
+        })
+      : [];
+    const departmentById = new Map(departments.map((d) => [d.id, d]));
     const newSlots = template.slots.map((s) =>
       manager.create(ServiceProgrammeSlot, {
         programme,
@@ -1013,10 +1315,25 @@ export class ServiceProgrammeService {
         type: s.type,
         topic: s.topic,
         allocatedMinutes: s.allocatedMinutes,
+        department: s.departmentId
+          ? (departmentById.get(s.departmentId) ?? null)
+          : null,
       }),
     );
     programme.slots = await manager.save(ServiceProgrammeSlot, newSlots);
     const result = await manager.save(ServiceProgramme, programme);
+    const audiences = new Map<string, Promise<DepartmentAudience>>();
+    for (const slot of programme.slots) {
+      if (slot.department) {
+        this.notifyDepartmentAssignment(
+          slot.department,
+          programme,
+          slot,
+          false,
+          audiences,
+        );
+      }
+    }
     this.logger.log(
       `Template ${templateId} applied to programme ${programmeId} (${result.slots.length} slots)`,
     );
@@ -1043,6 +1360,8 @@ export class ServiceProgrammeService {
         'slots',
         'slots.member',
         'slots.backupMember',
+        'slots.department',
+        'slots.backupDepartment',
       ],
       order: { slots: { position: 'ASC' } },
     });
@@ -1063,7 +1382,14 @@ export class ServiceProgrammeService {
 
     const programmes = await this.programmeRepo.find({
       where: slots.map((s) => ({ serviceSlot: { id: s.id } })),
-      relations: ['serviceSlot', 'slots', 'slots.member', 'slots.backupMember'],
+      relations: [
+        'serviceSlot',
+        'slots',
+        'slots.member',
+        'slots.backupMember',
+        'slots.department',
+        'slots.backupDepartment',
+      ],
       order: { slots: { position: 'ASC' } },
     });
 
@@ -1095,6 +1421,7 @@ export class ServiceProgrammeService {
         type: s.type,
         topic: s.topic,
         allocatedMinutes: s.allocatedMinutes,
+        departmentId: s.department?.id ?? null,
       }));
 
     const existing = await this.templateRepo.findOne({
@@ -1156,7 +1483,14 @@ export class ServiceProgrammeService {
   async assertProgrammeIsDraft(id: string): Promise<ServiceProgramme> {
     const programme = await this.programmeRepo.findOne({
       where: { id },
-      relations: ['slots', 'slots.member', 'slots.backupMember', 'serviceSlot'],
+      relations: [
+        'slots',
+        'slots.member',
+        'slots.backupMember',
+        'slots.department',
+        'slots.backupDepartment',
+        'serviceSlot',
+      ],
     });
     if (!programme) throw new NotFoundException('Programme not found');
     if (programme.status !== ServiceProgrammeStatusEnum.DRAFT) {

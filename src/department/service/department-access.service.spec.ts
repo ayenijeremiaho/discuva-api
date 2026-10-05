@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ForbiddenException } from '@nestjs/common';
 import { DepartmentAccessService } from './department-access.service';
+import { DepartmentLead } from '../entity/department-lead.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { DepartmentCapability } from '../enums/department-capability.enum';
 
@@ -19,6 +20,8 @@ const mockWorkerProfileRepo = {
   createQueryBuilder: jest.fn(() => mockQueryBuilder),
 };
 
+const mockLeadRepo = { findOne: jest.fn() };
+
 describe('DepartmentAccessService', () => {
   let service: DepartmentAccessService;
 
@@ -30,6 +33,10 @@ describe('DepartmentAccessService', () => {
         {
           provide: getRepositoryToken(WorkerProfile),
           useValue: mockWorkerProfileRepo,
+        },
+        {
+          provide: getRepositoryToken(DepartmentLead),
+          useValue: mockLeadRepo,
         },
       ],
     }).compile();
@@ -177,6 +184,48 @@ describe('DepartmentAccessService', () => {
       );
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('team lookups', () => {
+    it("returns a member's primary and secondary departments", async () => {
+      mockWorkerProfileRepo.findOne.mockResolvedValueOnce({
+        department: { id: 'd-1' },
+        secondaryDepartment: { id: 'd-2' },
+      });
+
+      await expect(service.findDepartmentIdsForMember('m-1')).resolves.toEqual([
+        'd-1',
+        'd-2',
+      ]);
+    });
+
+    it('returns no departments for a non-worker', async () => {
+      mockWorkerProfileRepo.findOne.mockResolvedValueOnce(null);
+
+      await expect(service.findDepartmentIdsForMember('m-1')).resolves.toEqual(
+        [],
+      );
+    });
+
+    it('returns the HOD as a contact', async () => {
+      mockLeadRepo.findOne.mockResolvedValueOnce({
+        workerProfile: {
+          member: {
+            id: 'm-hod',
+            firstname: 'Hilda',
+            lastname: 'O',
+            email: 'h@example.com',
+          },
+        },
+      });
+
+      await expect(service.findHeadOfDepartment('d-1')).resolves.toEqual({
+        id: 'm-hod',
+        firstname: 'Hilda',
+        lastname: 'O',
+        email: 'h@example.com',
+      });
     });
   });
 });

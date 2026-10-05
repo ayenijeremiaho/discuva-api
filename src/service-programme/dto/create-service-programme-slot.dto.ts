@@ -25,6 +25,11 @@ export class CreateServiceProgrammeSlotDto {
   @IsOptional()
   guestName?: string;
 
+  // At most one of memberId / guestName / departmentId per slot (same for the backup).
+  @IsUUID()
+  @IsOptional()
+  departmentId?: string | null;
+
   @IsUUID()
   @IsOptional()
   backupMemberId?: string;
@@ -32,6 +37,10 @@ export class CreateServiceProgrammeSlotDto {
   @IsString()
   @IsOptional()
   backupGuestName?: string;
+
+  @IsUUID()
+  @IsOptional()
+  backupDepartmentId?: string | null;
 
   @IsInt()
   @Min(1)

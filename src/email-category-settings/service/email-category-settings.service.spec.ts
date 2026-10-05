@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { EmailCategorySettingsService } from './email-category-settings.service';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
@@ -128,7 +128,7 @@ describe('EmailCategorySettingsService', () => {
       expect(mockSettingRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           key: 'email_category:INCIDENT_REPORT',
-          value: { enabled: false, pushEnabled: true },
+          value: { enabled: false, pushEnabled: true, pushFirst: false },
         }),
       );
       expect(result.enabled).toBe(false);
@@ -145,7 +145,11 @@ describe('EmailCategorySettingsService', () => {
       await service.upsert(EmailCategory.INCIDENT_REPORT, { enabled: false });
 
       expect(mockSettingRepo.create).not.toHaveBeenCalled();
-      expect(existing.value).toEqual({ enabled: false, pushEnabled: true });
+      expect(existing.value).toEqual({
+        enabled: false,
+        pushEnabled: true,
+        pushFirst: false,
+      });
     });
 
     it('invalidates the cache after upsert', async () => {
@@ -209,7 +213,11 @@ describe('EmailCategorySettingsService', () => {
         pushEnabled: false,
       });
 
-      expect(existing.value).toEqual({ enabled: true, pushEnabled: false });
+      expect(existing.value).toEqual({
+        enabled: true,
+        pushEnabled: false,
+        pushFirst: false,
+      });
       expect(result).toMatchObject({ enabled: true, pushEnabled: false });
       expect(mockCacheService.del).toHaveBeenCalledWith(
         'push-category-settings:PRAYER_REMINDER',
@@ -230,6 +238,77 @@ describe('EmailCategorySettingsService', () => {
       ).resolves.toBe(true);
       expect(mockCacheService.set).toHaveBeenCalledWith(
         'push-category-settings:PRAYER_REMINDER',
+        true,
+        300,
+      );
+    });
+  });
+
+  describe('delivery mode', () => {
+    it.each([
+      [
+        'EMAIL_AND_PUSH',
+        { enabled: true, pushEnabled: true, pushFirst: false },
+      ],
+      ['PUSH_FIRST', { enabled: true, pushEnabled: true, pushFirst: true }],
+      ['PUSH_ONLY', { enabled: false, pushEnabled: true, pushFirst: false }],
+      ['EMAIL_ONLY', { enabled: true, pushEnabled: false, pushFirst: false }],
+      ['OFF', { enabled: false, pushEnabled: false, pushFirst: false }],
+    ] as const)('stores %s as its switches', async (mode, flags) => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      mockSettingRepo.create.mockImplementation((v) => v);
+      mockSettingRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.upsert(EmailCategory.PRAYER_REMINDER, {
+        mode,
+      });
+
+      expect(mockSettingRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ value: flags }),
+      );
+      expect(result.mode).toBe(mode);
+      expect(mockCacheService.del).toHaveBeenCalledWith(
+        'push-first-category-settings:PRAYER_REMINDER',
+      );
+    });
+
+    it('refuses a push mode for a category with no push notifications', async () => {
+      await expect(
+        service.upsert(EmailCategory.INCIDENT_REPORT, { mode: 'PUSH_FIRST' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('reports existing churches as Email + Push by default', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.findOne(EmailCategory.PRAYER_REMINDER);
+
+      expect(result).toMatchObject({
+        pushFirst: false,
+        mode: 'EMAIL_AND_PUSH',
+      });
+    });
+
+    it('treats Push first as off when email or push is switched off', async () => {
+      mockDataSource.query.mockResolvedValue([
+        { value: { enabled: false, pushEnabled: true, pushFirst: true } },
+      ]);
+
+      await expect(
+        service.isPushFirst(EmailCategory.PRAYER_REMINDER),
+      ).resolves.toBe(false);
+    });
+
+    it('reads Push first from the stored switches and caches it', async () => {
+      mockDataSource.query.mockResolvedValue([
+        { value: { enabled: true, pushEnabled: true, pushFirst: true } },
+      ]);
+
+      await expect(
+        service.isPushFirst(EmailCategory.PRAYER_REMINDER),
+      ).resolves.toBe(true);
+      expect(mockCacheService.set).toHaveBeenCalledWith(
+        'push-first-category-settings:PRAYER_REMINDER',
         true,
         300,
       );

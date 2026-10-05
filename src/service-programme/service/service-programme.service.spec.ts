@@ -12,6 +12,9 @@ import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import { ServiceProgrammeTemplate } from '../entity/service-programme-template.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Member } from '../../member/entity/member.entity';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { Department } from '../../department/entity/department.entity';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { Admin } from '../../admin/entity/admin.entity';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
@@ -117,6 +120,16 @@ const liveProgramme = {
   status: ServiceProgrammeStatusEnum.LIVE,
 };
 
+const mockDepartmentRepo = {
+  find: jest.fn().mockResolvedValue([]),
+  findOne: jest.fn().mockResolvedValue(null),
+};
+const mockDepartmentAccessService = {
+  findMemberIdsInDepartment: jest.fn().mockResolvedValue([]),
+  findHeadOfDepartment: jest.fn().mockResolvedValue(null),
+  findDepartmentIdsForMember: jest.fn().mockResolvedValue([]),
+};
+
 describe('ServiceProgrammeService', () => {
   let service: ServiceProgrammeService;
 
@@ -160,6 +173,14 @@ describe('ServiceProgrammeService', () => {
           useValue: mockServiceSlotRepo,
         },
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
+        {
+          provide: getRepositoryToken(Department),
+          useValue: mockDepartmentRepo,
+        },
+        {
+          provide: DepartmentAccessService,
+          useValue: mockDepartmentAccessService,
+        },
         { provide: PdfService, useValue: mockPdfService },
         {
           provide: NotificationDispatchService,
@@ -1659,6 +1680,254 @@ describe('ServiceProgrammeService', () => {
       await service.applyTemplate('prog-1', 'tpl-1');
 
       expect(mockManager.remove).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('department slots', () => {
+    const choir = { id: 'dept-choir', name: 'Choir' };
+    const dto = { type: ServiceSlotTypeEnum.WORSHIP, allocatedMinutes: 20 };
+    const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+    beforeEach(() => {
+      mockDepartmentRepo.findOne.mockResolvedValue(choir);
+      mockDepartmentAccessService.findMemberIdsInDepartment.mockResolvedValue([
+        'm-1',
+        'm-2',
+      ]);
+      mockDepartmentAccessService.findHeadOfDepartment.mockResolvedValue({
+        id: 'm-hod',
+        firstname: 'Hilda',
+        lastname: 'O',
+        email: 'hilda@example.com',
+      });
+      mockSlotRepo.create.mockImplementation((v) => v);
+      mockSlotRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'slot-d', ...v }),
+      );
+    });
+
+    it('gives a slot to a department, pushing every member and emailing only the HOD', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+
+      const result = await service.addSlot('prog-1', {
+        ...dto,
+        departmentId: 'dept-choir',
+      });
+      await flush();
+
+      expect(result.departmentName).toBe('Choir');
+      const call =
+        mockNotificationDispatchService.notifyMember.mock.calls[0][0];
+      expect(call.email).toEqual(
+        expect.objectContaining({
+          to: 'hilda@example.com',
+          recipientMemberId: 'm-hod',
+          subject: expect.stringContaining('Choir is on the programme'),
+        }),
+      );
+      expect(call.push.memberIds.sort()).toEqual(['m-1', 'm-2', 'm-hod']);
+      expect(call.push.key).toBe(
+        PushNotificationKey.SERVICE_SLOT_TEAM_ASSIGNED,
+      );
+      expect(call.push.vars.department_name).toBe('Choir');
+    });
+
+    it('looks a department up once when it holds several slots in one programme', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+      mockProgrammeRepo.find.mockResolvedValue([]);
+      mockProgrammeRepo.create.mockImplementation((v) => v);
+      mockProgrammeRepo.save.mockImplementation((v) =>
+        Promise.resolve(v.map((p: object) => ({ id: 'prog-1', ...p }))),
+      );
+      mockDepartmentRepo.find.mockResolvedValue([choir]);
+      mockSlotRepo.save.mockImplementation((v) =>
+        Promise.resolve(
+          v.map((slot: object, i: number) => ({ id: `slot-${i}`, ...slot })),
+        ),
+      );
+
+      await service
+        .create(
+          {
+            programmes: [
+              {
+                serviceSlotId: mockServiceSlot.id,
+                slots: [
+                  { ...dto, departmentId: 'dept-choir' },
+                  { ...dto, departmentId: 'dept-choir' },
+                ],
+              },
+            ],
+          } as never,
+          mockAdmin as never,
+        )
+        .catch(() => undefined);
+      await flush();
+
+      expect(
+        mockDepartmentAccessService.findMemberIdsInDepartment,
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        mockNotificationDispatchService.notifyMember,
+      ).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects a slot given to both a person and a department', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1' });
+
+      await expect(
+        service.addSlot('prog-1', {
+          ...dto,
+          memberId: 'member-1',
+          departmentId: 'dept-choir',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockSlotRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('404s for an unknown department', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(draftProgramme);
+      mockDepartmentRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.addSlot('prog-1', { ...dto, departmentId: 'dept-x' }),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('switching a slot from a person to a department clears the person and notifies the team', async () => {
+      mockSlotRepo.findOne.mockResolvedValue({
+        id: 'slot-1',
+        type: ServiceSlotTypeEnum.WORSHIP,
+        allocatedMinutes: 20,
+        member: { id: 'member-1', firstname: 'Ada' },
+        guestName: null,
+        department: null,
+        backupMember: null,
+        backupDepartment: null,
+        programme: draftProgramme,
+      });
+      mockSlotRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.updateSlot('prog-1', 'slot-1', {
+        departmentId: 'dept-choir',
+      });
+      await flush();
+
+      expect(result.member).toBeNull();
+      expect(result.departmentName).toBe('Choir');
+      expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          push: expect.objectContaining({
+            key: PushNotificationKey.SERVICE_SLOT_TEAM_ASSIGNED,
+          }),
+        }),
+      );
+    });
+
+    it('does not re-notify the department when it is unchanged', async () => {
+      mockSlotRepo.findOne.mockResolvedValue({
+        id: 'slot-1',
+        type: ServiceSlotTypeEnum.WORSHIP,
+        allocatedMinutes: 20,
+        member: null,
+        department: choir,
+        backupMember: null,
+        backupDepartment: null,
+        programme: draftProgramme,
+      });
+      mockSlotRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      await service.updateSlot('prog-1', 'slot-1', {
+        departmentId: 'dept-choir',
+        allocatedMinutes: 25,
+      });
+      await flush();
+
+      expect(
+        mockNotificationDispatchService.notifyMember,
+      ).not.toHaveBeenCalled();
+    });
+
+    it("shows a department slot in a member's assignments, labelled with the department", async () => {
+      mockDepartmentAccessService.findDepartmentIdsForMember.mockResolvedValue([
+        'dept-choir',
+      ]);
+      mockSlotConflictQueryBuilder.getMany.mockResolvedValueOnce([
+        {
+          id: 'ps-1',
+          type: ServiceSlotTypeEnum.WORSHIP,
+          topic: null,
+          allocatedMinutes: 20,
+          member: null,
+          department: choir,
+          programme: {
+            id: 'prog-1',
+            status: ServiceProgrammeStatusEnum.DRAFT,
+            serviceSlot: mockServiceSlot,
+          },
+        },
+      ]);
+
+      const result = await service.getMyUpcomingAssignments('member-9');
+
+      expect(mockSlotConflictQueryBuilder.where).toHaveBeenCalledWith(
+        expect.stringContaining('slot.department_id IN (:...departmentIds)'),
+        { memberId: 'member-9', departmentIds: ['dept-choir'] },
+      );
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          isBackup: false,
+          asDepartment: { id: 'dept-choir', name: 'Choir' },
+        }),
+      );
+    });
+
+    it('keeps the department when saving a template and restores it when applying', async () => {
+      mockTemplateRepo.findOne.mockResolvedValueOnce(null);
+      mockTemplateRepo.create.mockImplementation((v) => v);
+      await service.upsertTemplateFromProgramme({
+        ...draftProgramme,
+        slots: [
+          {
+            position: 0,
+            type: ServiceSlotTypeEnum.WORSHIP,
+            topic: null,
+            allocatedMinutes: 20,
+            department: choir,
+          },
+        ],
+      } as never);
+      expect(mockTemplateRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slots: [expect.objectContaining({ departmentId: 'dept-choir' })],
+        }),
+      );
+
+      mockProgrammeRepo.findOne.mockResolvedValue({
+        ...draftProgramme,
+        slots: [],
+      });
+      mockTemplateRepo.findOne.mockResolvedValue({
+        id: 'tpl-1',
+        slots: [
+          {
+            position: 0,
+            type: ServiceSlotTypeEnum.WORSHIP,
+            topic: null,
+            allocatedMinutes: 20,
+            departmentId: 'dept-choir',
+          },
+        ],
+      });
+      mockDepartmentRepo.find.mockResolvedValue([choir]);
+
+      await service.applyTemplate('prog-1', 'tpl-1');
+
+      expect(mockManager.create).toHaveBeenCalledWith(
+        ServiceProgrammeSlot,
+        expect.objectContaining({ department: choir }),
+      );
     });
   });
 });

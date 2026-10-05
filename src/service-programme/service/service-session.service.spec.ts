@@ -103,6 +103,7 @@ const mockWorkerProfileRepo = {
 };
 
 const mockDepartmentAccessService = {
+  findDepartmentIdsForMember: jest.fn().mockResolvedValue([]),
   hasCapability: jest.fn(),
   assertHasCapability: jest.fn(),
 };
@@ -1276,6 +1277,59 @@ describe('ServiceSessionService', () => {
       expect(result.estimatedSecondsUntilMyTurn).toBeNull();
     });
 
+    it('matches a member through their department, and says so', async () => {
+      mockDepartmentAccessService.findDepartmentIdsForMember.mockResolvedValueOnce(
+        ['dept-choir'],
+      );
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [
+          buildSlot({
+            position: 1,
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              department: { id: 'dept-choir', name: 'Choir' },
+            },
+          }),
+        ],
+      });
+      mockCacheService.get.mockResolvedValue({
+        ...liveAnchor,
+        currentSlotPosition: 1,
+      });
+
+      const result = await service.getMyLiveStatus('SVC-ABC123', 'member-9');
+
+      expect(result.myRole).toBe('PRIMARY');
+      expect(result.isMyTurnNow).toBe(true);
+      expect(result.asDepartment).toEqual({ id: 'dept-choir', name: 'Choir' });
+      expect(result.runningOrder[0].departmentName).toBe('Choir');
+    });
+
+    it('does not match the department once someone has been put in its place on the day', async () => {
+      mockDepartmentAccessService.findDepartmentIdsForMember.mockResolvedValueOnce(
+        ['dept-choir'],
+      );
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        sessionSlots: [
+          buildSlot({
+            position: 0,
+            overriddenSpeakerName: 'Guest Soloist',
+            programmeSlot: {
+              ...buildSlot({}).programmeSlot,
+              department: { id: 'dept-choir', name: 'Choir' },
+            },
+          }),
+        ],
+      });
+      mockCacheService.get.mockResolvedValue(liveAnchor);
+
+      await expect(
+        service.getMyLiveStatus('SVC-ABC123', 'member-9'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
     it('identifies a BACKUP-role match when the member is not the primary speaker', async () => {
       mockSessionRepo.findOne.mockResolvedValue({
         ...mockSession,
@@ -2049,6 +2103,55 @@ describe('ServiceSessionService', () => {
         }),
       );
       expect(result.totalActualSeconds).toBe(1800);
+    });
+
+    it("includes the department's slots as team performance", async () => {
+      mockDepartmentAccessService.findDepartmentIdsForMember.mockResolvedValueOnce(
+        ['dept-choir'],
+      );
+      const session = buildSession({
+        sessionSlots: [
+          {
+            status: ServiceSessionSlotStatusEnum.COMPLETED,
+            programmeSlot: {
+              type: ServiceSlotTypeEnum.WORSHIP,
+              topic: null,
+              allocatedMinutes: 20,
+              member: null,
+              department: { id: 'dept-choir', name: 'Choir' },
+            },
+            overriddenMember: null,
+            overriddenSpeakerName: null,
+            overriddenTopic: null,
+            adjustedAllocatedMinutes: null,
+            actualSeconds: 1500,
+          },
+        ],
+      });
+      const qb = buildQb([session]);
+      mockSessionRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getMyServiceHistory('member-9');
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('ps.department_id IN (:...departmentIds)'),
+        { memberId: 'member-9', departmentIds: ['dept-choir'] },
+      );
+      expect(result.entries[0]).toEqual(
+        expect.objectContaining({
+          asDepartment: { id: 'dept-choir', name: 'Choir' },
+          overrunSeconds: 300,
+        }),
+      );
+      expect(result.byDepartment).toEqual([
+        {
+          departmentId: 'dept-choir',
+          name: 'Choir',
+          count: 1,
+          totalActualSeconds: 1500,
+          totalOverrunSeconds: 300,
+        },
+      ]);
     });
 
     it('credits an override to whoever actually stepped in, not the originally-assigned member', async () => {

@@ -6,7 +6,9 @@ import { ServiceProgrammeReminderScheduler } from './service-programme-reminder.
 import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
-import { EmailQueueService } from '../../utility/service/email-queue.service';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
+import { DepartmentAccessService } from '../../department/service/department-access.service';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
@@ -42,9 +44,10 @@ const mockSlotRepo = {
   update: jest.fn().mockResolvedValue({ affected: 1 }),
 };
 
-const mockEmailQueueService = {
-  queueEmailWithTemplate: jest.fn().mockResolvedValue('job-1'),
-  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
+const mockDispatch = { notifyMember: jest.fn().mockResolvedValue(undefined) };
+const mockDepartmentAccess = {
+  findMemberIdsInDepartment: jest.fn().mockResolvedValue([]),
+  findHeadOfDepartment: jest.fn().mockResolvedValue(null),
 };
 
 const makeSlot = (overrides: Record<string, any> = {}) => ({
@@ -83,7 +86,8 @@ describe('ServiceProgrammeReminderScheduler', () => {
           useValue: mockSlotRepo,
         },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
-        { provide: EmailQueueService, useValue: mockEmailQueueService },
+        { provide: NotificationDispatchService, useValue: mockDispatch },
+        { provide: DepartmentAccessService, useValue: mockDepartmentAccess },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
@@ -99,22 +103,27 @@ describe('ServiceProgrammeReminderScheduler', () => {
     expect(mockSlotRepo.createQueryBuilder).not.toHaveBeenCalled();
   });
 
-  it('sends a reminder with an .ics attachment for each upcoming assigned slot', async () => {
+  it('sends a reminder email with an .ics attachment and a push for each upcoming assigned slot', async () => {
     mockSlotQb.getMany.mockResolvedValue([makeSlot()]);
 
     await scheduler.sendUpcomingSlotReminders();
 
-    expect(
-      mockEmailQueueService.queueEmailWithTemplateAndAttachments,
-    ).toHaveBeenCalledWith(
-      'ada@example.com',
-      expect.any(String),
-      'service-slot-reminder',
-      expect.objectContaining({ memberName: 'Ada' }),
-      [expect.objectContaining({ filename: 'service-slot.ics' })],
-      undefined,
-      EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-    );
+    expect(mockDispatch.notifyMember).toHaveBeenCalledWith({
+      category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+      email: expect.objectContaining({
+        to: 'ada@example.com',
+        recipientMemberId: 'member-1',
+        template: 'service-slot-reminder',
+        data: expect.objectContaining({ memberName: 'Ada' }),
+        attachments: [
+          expect.objectContaining({ filename: 'service-slot.ics' }),
+        ],
+      }),
+      push: expect.objectContaining({
+        memberIds: ['member-1'],
+        key: PushNotificationKey.SERVICE_SLOT_REMINDER,
+      }),
+    });
     expect(mockSlotRepo.update).toHaveBeenCalledWith(
       'slot-1',
       expect.objectContaining({ reminderSentAt: expect.any(Date) }),
@@ -122,27 +131,59 @@ describe('ServiceProgrammeReminderScheduler', () => {
     expect(mockCacheService.releaseLock).toHaveBeenCalled();
   });
 
-  it('skips slots whose assigned member has no email', async () => {
+  it('still pushes to a member with no email on file', async () => {
     mockSlotQb.getMany.mockResolvedValue([
       makeSlot({ member: { id: 'member-1', firstname: 'Ada', email: null } }),
     ]);
 
     await scheduler.sendUpcomingSlotReminders();
 
-    expect(mockEmailQueueService.queueEmailWithTemplate).not.toHaveBeenCalled();
-    expect(
-      mockEmailQueueService.queueEmailWithTemplateAndAttachments,
-    ).not.toHaveBeenCalled();
-    expect(mockSlotRepo.update).not.toHaveBeenCalled();
+    expect(mockDispatch.notifyMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: undefined,
+        push: expect.objectContaining({ memberIds: ['member-1'] }),
+      }),
+    );
+    expect(mockSlotRepo.update).toHaveBeenCalled();
+  });
+
+  it('reminds the whole department by push and emails the HOD', async () => {
+    mockSlotQb.getMany.mockResolvedValue([
+      makeSlot({ member: null, department: { id: 'dept-1', name: 'Choir' } }),
+    ]);
+    mockDepartmentAccess.findMemberIdsInDepartment.mockResolvedValue([
+      'm-1',
+      'm-2',
+    ]);
+    mockDepartmentAccess.findHeadOfDepartment.mockResolvedValue({
+      id: 'm-hod',
+      firstname: 'Hilda',
+      lastname: 'O',
+      email: 'hilda@example.com',
+    });
+
+    await scheduler.sendUpcomingSlotReminders();
+
+    const call = mockDispatch.notifyMember.mock.calls[0][0];
+    expect(call.email).toEqual(
+      expect.objectContaining({
+        to: 'hilda@example.com',
+        recipientMemberId: 'm-hod',
+        subject: expect.stringContaining('Choir'),
+      }),
+    );
+    expect(call.push.memberIds.sort()).toEqual(['m-1', 'm-2', 'm-hod']);
+    expect(call.push.vars.team_suffix).toBe(' with Choir');
+    expect(mockSlotRepo.update).toHaveBeenCalledWith(
+      'slot-1',
+      expect.objectContaining({ reminderSentAt: expect.any(Date) }),
+    );
   });
 
   it('does nothing when no slots are due for a reminder', async () => {
     mockSlotQb.getMany.mockResolvedValue([]);
     await scheduler.sendUpcomingSlotReminders();
-    expect(mockEmailQueueService.queueEmailWithTemplate).not.toHaveBeenCalled();
-    expect(
-      mockEmailQueueService.queueEmailWithTemplateAndAttachments,
-    ).not.toHaveBeenCalled();
+    expect(mockDispatch.notifyMember).not.toHaveBeenCalled();
   });
 
   it('releases the lock even when the query fails', async () => {

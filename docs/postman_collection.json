@@ -22708,9 +22708,9 @@
                 },
                 "body": {
                   "mode": "raw",
-                  "raw": "{\n  \"type\": \"SPEAKER\",\n  \"topic\": \"Opening Prayer\",\n  \"memberId\": \"{{memberId}}\",\n  \"allocatedMinutes\": 10\n}"
+                  "raw": "{\n  \"type\": \"SPEAKER\",\n  \"topic\": \"Opening Prayer\",\n  \"allocatedMinutes\": 10,\n  \"departmentId\": \"{{departmentId}}\"\n}"
                 },
-                "description": "Append a slot at the next position. type: SPEAKER | BREAK. 400 if programme is not DRAFT. AdminGuard."
+                "description": "Append a slot at the next position. type: SPEAKER | BREAK. 400 if programme is not DRAFT. AdminGuard. Give the slot to a whole department with departmentId (and/or backupDepartmentId) instead of memberId/guestName — 400 if both. Every member of the department gets a SERVICE_SLOT_TEAM_ASSIGNED push and sees it in My Assignments; the HOD also gets the email."
               },
               "response": [
                 {
@@ -22832,7 +22832,7 @@
                   "mode": "raw",
                   "raw": "{\n  \"topic\": \"Updated Topic\",\n  \"allocatedMinutes\": 15\n}"
                 },
-                "description": "Update a single slot (all fields optional). 400 if programme is not DRAFT. AdminGuard."
+                "description": "Update a single slot (all fields optional). 400 if programme is not DRAFT. AdminGuard. departmentId / backupDepartmentId switch the slot to or from a department; setting a department clears the member/guest and vice versa."
               },
               "response": [
                 {
@@ -23783,7 +23783,7 @@
                     }
                   ]
                 },
-                "description": "Any authenticated member/worker who has a primary or backup slot in this LIVE session. Returns their role, position, whether it's currently their turn, whether they've already gone, an estimated seconds-until-their-turn, and the full running order. 404 if the caller has no slot in this session."
+                "description": "Any authenticated member/worker who has a primary or backup slot in this LIVE session. Returns their role, position, whether it's currently their turn, whether they've already gone, an estimated seconds-until-their-turn, and the full running order. 404 if the caller has no slot in this session. Also matches a slot held by the caller's department (unless someone was put in its place on the day); returns asDepartment."
               },
               "response": [
                 {
@@ -23946,7 +23946,7 @@
                     }
                   ]
                 },
-                "description": "Any authenticated member/worker. Paginated list of the caller's own COMPLETED-session slots, with a summary (totalSlots, totalActualSeconds) and a per-slot-type breakdown computed over the full history, not just the current page. Only credits the effective speaker of a slot (an overriding member, or the originally assigned member if never overridden) \u2014 a backup who never went on gets no credit."
+                "description": "Any authenticated member/worker. Paginated list of the caller's own COMPLETED-session slots, with a summary (totalSlots, totalActualSeconds) and a per-slot-type breakdown computed over the full history, not just the current page. Only credits the effective speaker of a slot (an overriding member, or the originally assigned member if never overridden) — a backup who never went on gets no credit. Includes the caller's department slots (asDepartment per entry) and byDepartment: [{ departmentId, name, count, totalActualSeconds, totalOverrunSeconds }] — the team's performance."
               },
               "response": [
                 {
@@ -24171,7 +24171,7 @@
                     "my-assignments"
                   ]
                 },
-                "description": "The calling member/worker's own upcoming service-programme slots \u2014 as primary or backup \u2014 across every DRAFT/LIVE programme, ordered by service start time. Excludes COMPLETED programmes and anything already in the past. Any authenticated member can call this (no admin permission or WORKER role required); used by the member-facing app's home screen to show \u201cWhat am I doing this Sunday.\u201d"
+                "description": "The calling member/worker's own upcoming service-programme slots — as primary or backup — across every DRAFT/LIVE programme, ordered by service start time. Excludes COMPLETED programmes and anything already in the past. Any authenticated member can call this (no admin permission or WORKER role required); used by the member-facing app's home screen to show “What am I doing this Sunday.” Includes slots held by the caller's department(s); those rows carry asDepartment: { id, name }."
               },
               "response": [
                 {
@@ -25753,14 +25753,14 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"enabled\": true,\n  \"pushEnabled\": false\n}",
+              "raw": "{\n  \"mode\": \"PUSH_FIRST\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
                 }
               }
             },
-            "description": "Turn a category's email and/or push on or off for this tenant only. Send enabled (email) and/or pushEnabled (push) \u2014 at least one; the response includes hasPush (whether this category sends any push) and pushEnabled. Email has two independent gates: the platform-wide EMAIL_<CATEGORY>_ENABLED env var (checked first) and this per-tenant setting - either being off suppresses it. Requires admin:write."
+            "description": "Turn a category's email and/or push on or off for this tenant only. Send enabled (email) and/or pushEnabled (push) — at least one; the response includes hasPush (whether this category sends any push) and pushEnabled. Email has two independent gates: the platform-wide EMAIL_<CATEGORY>_ENABLED env var (checked first) and this per-tenant setting - either being off suppresses it. Requires admin:write. Send { mode } — EMAIL_AND_PUSH | PUSH_FIRST | PUSH_ONLY | EMAIL_ONLY | OFF — or the raw enabled / pushEnabled / pushFirst switches. PUSH_FIRST: a paired email is skipped for anyone who gets the same notification as a push on a subscribed device. Push modes on a category with no push notifications return 400. Responses include pushFirst and mode."
           },
           "response": [
             {

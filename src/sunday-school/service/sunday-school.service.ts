@@ -914,6 +914,7 @@ export class SundaySchoolService {
         category: EmailCategory.SUNDAY_SCHOOL_QA,
         email: {
           to: teacher.email,
+          recipientMemberId: teacher.id,
           subject: `New question in ${cls.name}`,
           template: 'sunday-school-question-asked',
           data: { name: teacher.firstname, className: cls.name, askerName },
@@ -1064,6 +1065,7 @@ export class SundaySchoolService {
       category: EmailCategory.SUNDAY_SCHOOL_QA,
       email: {
         to: question.askedBy.email,
+        recipientMemberId: question.askedBy.id,
         subject: `Your question in ${question.sundaySchoolClass.name} was answered`,
         template: 'sunday-school-question-answered',
         data: {

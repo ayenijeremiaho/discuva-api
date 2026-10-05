@@ -233,15 +233,16 @@ export class EventReminderService {
     });
     await this.announcementRepo.save(announcement);
 
-    const [recipients, recipientIds] = await Promise.all([
-      this.getRecipientEmails(reminder),
-      this.getRecipientMemberIds(reminder),
-    ]);
+    const audience = await this.getRecipients(reminder);
+    const withEmail = audience.filter((m) => !!m.email);
+    const recipients = withEmail.map((m) => m.email);
+    const recipientIds = audience.map((m) => m.id);
 
     const email: NotifyMemberEmail | undefined =
       recipients.length > 0
         ? {
             to: recipients,
+            recipientMemberIds: withEmail.map((m) => m.id),
             subject: title,
             template: 'service-reminder',
             data: {
@@ -280,41 +281,12 @@ export class EventReminderService {
     );
   }
 
-  private async getRecipientEmails(reminder: EventReminder): Promise<string[]> {
-    const qb = this.memberRepo
-      .createQueryBuilder('m')
-      .select('m.email')
-      .where('m.status = :status', { status: MemberStatusEnum.ACTIVE });
-
-    if (reminder.audience === AnnouncementAudienceEnum.WORKERS_ONLY) {
-      qb.innerJoin('m.workerProfile', 'wp')
-        .andWhere('wp.status = :wpStatus', {
-          wpStatus: WorkerStatusEnum.ACTIVE,
-        })
-        .andWhere('m.role = :role', { role: MemberRoleEnum.WORKER });
-    } else if (
-      reminder.audience === AnnouncementAudienceEnum.DEPARTMENT &&
-      reminder.department
-    ) {
-      qb.innerJoin('m.workerProfile', 'wp')
-        .andWhere('wp.status = :wpStatus', {
-          wpStatus: WorkerStatusEnum.ACTIVE,
-        })
-        .andWhere('wp.departmentId = :deptId', {
-          deptId: reminder.department.id,
-        });
-    }
-
-    const members = await qb.getMany();
-    return members.map((m) => m.email);
-  }
-
-  private async getRecipientMemberIds(
+  private async getRecipients(
     reminder: EventReminder,
-  ): Promise<string[]> {
+  ): Promise<{ id: string; email: string }[]> {
     const qb = this.memberRepo
       .createQueryBuilder('m')
-      .select('m.id')
+      .select(['m.id', 'm.email'])
       .where('m.status = :status', { status: MemberStatusEnum.ACTIVE });
 
     if (reminder.audience === AnnouncementAudienceEnum.WORKERS_ONLY) {
@@ -337,7 +309,7 @@ export class EventReminderService {
     }
 
     const members = await qb.getMany();
-    return members.map((m) => m.id);
+    return members.map((m) => ({ id: m.id, email: m.email }));
   }
 
   private async getOrThrow(id: string): Promise<EventReminder> {

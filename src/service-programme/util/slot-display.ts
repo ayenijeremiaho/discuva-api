@@ -6,6 +6,8 @@ import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 export type ServiceProgrammeSlotWithNames = ServiceProgrammeSlot & {
   memberName?: string | null;
   backupMemberName?: string | null;
+  departmentName?: string | null;
+  backupDepartmentName?: string | null;
 };
 
 export interface EffectiveSessionSlot {
@@ -17,9 +19,13 @@ export interface EffectiveSessionSlot {
   allocatedMinutes: number;
   memberName: string | null;
   guestName: string | null;
+  // Set when a whole department has the slot (and nobody has been put in its place on the day).
+  departmentId: string | null;
+  departmentName: string | null;
   backupMemberId: string | null;
   backupMemberName: string | null;
   backupGuestName: string | null;
+  backupDepartmentName: string | null;
   actualSeconds: number | null;
   startedAt: Date | null;
   completedAt: Date | null;
@@ -34,23 +40,47 @@ function fullName(
 function resolveSpeaker(sessionSlot: ServiceSessionSlot): {
   memberName: string | null;
   guestName: string | null;
+  departmentId: string | null;
+  departmentName: string | null;
 } {
+  const none = { departmentId: null, departmentName: null };
   if (sessionSlot.overriddenMember) {
     return {
       memberName: fullName(sessionSlot.overriddenMember),
       guestName: null,
+      ...none,
     };
   }
   if (sessionSlot.overriddenSpeakerName) {
-    return { memberName: null, guestName: sessionSlot.overriddenSpeakerName };
+    return {
+      memberName: null,
+      guestName: sessionSlot.overriddenSpeakerName,
+      ...none,
+    };
   }
   if (sessionSlot.programmeSlot.member) {
     return {
       memberName: fullName(sessionSlot.programmeSlot.member),
       guestName: null,
+      ...none,
     };
   }
-  return { memberName: null, guestName: sessionSlot.programmeSlot.guestName };
+  const department = sessionSlot.programmeSlot.department;
+  return {
+    memberName: null,
+    guestName: sessionSlot.programmeSlot.guestName,
+    departmentId: department?.id ?? null,
+    departmentName: department?.name ?? null,
+  };
+}
+
+// Who is on the slot, for places that show a single name.
+export function speakerLabel(slot: {
+  memberName: string | null;
+  guestName: string | null;
+  departmentName: string | null;
+}): string | null {
+  return slot.memberName ?? slot.guestName ?? slot.departmentName;
 }
 
 export function toEffectiveSessionSlot(
@@ -72,6 +102,8 @@ export function toEffectiveSessionSlot(
     backupMemberId: sessionSlot.programmeSlot.backupMember?.id ?? null,
     backupMemberName: fullName(sessionSlot.programmeSlot.backupMember),
     backupGuestName: sessionSlot.programmeSlot.backupGuestName,
+    backupDepartmentName:
+      sessionSlot.programmeSlot.backupDepartment?.name ?? null,
     actualSeconds: sessionSlot.actualSeconds,
     startedAt: sessionSlot.startedAt,
     completedAt: sessionSlot.completedAt,
@@ -93,6 +125,8 @@ export function withMemberNames(
     ...slot,
     memberName: fullName(slot.member),
     backupMemberName: fullName(slot.backupMember),
+    departmentName: slot.department?.name ?? null,
+    backupDepartmentName: slot.backupDepartment?.name ?? null,
   };
 }
 

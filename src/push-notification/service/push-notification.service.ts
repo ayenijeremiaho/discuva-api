@@ -97,6 +97,19 @@ export class PushNotificationService implements OnModuleInit {
     return this.subRepo.exists({ where: { memberId } });
   }
 
+  // Tenant-qualified: dispatch often runs after the caller's tenant transaction has closed.
+  async membersWithSubscription(memberIds: string[]): Promise<Set<string>> {
+    if (!memberIds.length) return new Set();
+    const rows = await queryTenant<{ memberId: string }>(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (schema) =>
+        `SELECT member_id AS "memberId" FROM ${schema}.push_subscriptions WHERE member_id = ANY($1::uuid[])`,
+      [memberIds],
+    );
+    return new Set(rows.map((r) => r.memberId));
+  }
+
   async unsubscribe(memberId: string): Promise<void> {
     await this.subRepo.delete({ memberId });
   }

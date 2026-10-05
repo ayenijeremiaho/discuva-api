@@ -20,6 +20,8 @@ export enum PushNotificationKey {
   PASTOR_FEEDBACK_RESPONSE = 'PASTOR_FEEDBACK_RESPONSE',
   SERVICE_SLOT_ASSIGNED = 'SERVICE_SLOT_ASSIGNED',
   SERVICE_SLOT_BACKUP = 'SERVICE_SLOT_BACKUP',
+  SERVICE_SLOT_TEAM_ASSIGNED = 'SERVICE_SLOT_TEAM_ASSIGNED',
+  SERVICE_SLOT_REMINDER = 'SERVICE_SLOT_REMINDER',
   SERVICE_REMINDER = 'SERVICE_REMINDER',
   GOAL_CHANGES_REQUESTED = 'GOAL_CHANGES_REQUESTED',
   GOAL_LEVEL_APPROVED = 'GOAL_LEVEL_APPROVED',
@@ -231,6 +233,36 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       when: ' on 2026-10-04 at 09:00',
     },
   },
+  [PushNotificationKey.SERVICE_SLOT_TEAM_ASSIGNED]: {
+    category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+    label: 'Department on the programme',
+    description:
+      'Sent to every member of a department when the department is given a part of the service programme.',
+    title: '{{department_name}} is on the programme',
+    body: '{{slot_type}} — {{service_name}}{{when}}.',
+    url: '/events',
+    placeholders: {
+      department_name: 'Choir',
+      slot_type: 'Praise & Worship',
+      service_name: 'Sunday Service',
+      when: ' on Sunday, 12 October 2026 at 09:00 AM',
+    },
+  },
+  [PushNotificationKey.SERVICE_SLOT_REMINDER]: {
+    category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+    label: 'Programme reminder',
+    description:
+      'Sent the day before to whoever has a part in the service programme (every member, for a department).',
+    title: 'Tomorrow: {{slot_type}}',
+    body: "You're on the programme for {{service_name}}{{team_suffix}}.",
+    url: '/events',
+    placeholders: {
+      slot_type: 'Praise & Worship',
+      service_name: 'Sunday Service',
+      team_suffix: ' with Choir',
+    },
+  },
+
   [PushNotificationKey.SERVICE_REMINDER]: {
     category: EmailCategory.EVENT_REMINDER,
     label: 'Service reminder',

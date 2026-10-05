@@ -9,6 +9,7 @@ import {
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { ServiceProgramme } from './service-programme.entity';
 import { Member } from '../../member/entity/member.entity';
+import { Department } from '../../department/entity/department.entity';
 import { ServiceSlotTypeEnum } from '../enum/service-slot-type.enum';
 
 @Entity({ name: 'service_programme_slots' })
@@ -39,12 +40,23 @@ export class ServiceProgrammeSlot extends BaseEntity {
   @Column({ name: 'guest_name', nullable: true })
   guestName: string | null;
 
+  // A whole team (e.g. the choir) — every active member of the department sees and is notified of the slot.
+  @Index()
+  @ManyToOne(() => Department, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'department_id' })
+  department: Department | null;
+
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'backup_member_id' })
   backupMember: Member | null;
 
   @Column({ name: 'backup_guest_name', nullable: true })
   backupGuestName: string | null;
+
+  @Index()
+  @ManyToOne(() => Department, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'backup_department_id' })
+  backupDepartment: Department | null;
 
   @Column({ name: 'allocated_minutes', type: 'int' })
   allocatedMinutes: number;

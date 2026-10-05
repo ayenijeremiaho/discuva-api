@@ -3,6 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
+import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { DepartmentLead } from '../entity/department-lead.entity';
+import { DepartmentLeadTypeEnum } from '../enums/department-lead-type.enum';
 import { DepartmentCapability } from '../enums/department-capability.enum';
 
 // Collapses what used to be 7 near-identical assertIsXDeptWorker() methods
@@ -15,6 +18,8 @@ export class DepartmentAccessService {
   constructor(
     @InjectRepository(WorkerProfile)
     private readonly workerProfileRepo: Repository<WorkerProfile>,
+    @InjectRepository(DepartmentLead)
+    private readonly leadRepo: Repository<DepartmentLead>,
   ) {}
 
   async hasCapability(
@@ -66,5 +71,57 @@ export class DepartmentAccessService {
       .andWhere('wp.status = :status', { status: WorkerStatusEnum.ACTIVE })
       .getRawMany<{ memberId: string }>();
     return rows.map((r) => r.memberId);
+  }
+
+  // Everyone who belongs to a department (primary or secondary), for team-wide notifications.
+  async findMemberIdsInDepartment(departmentId: string): Promise<string[]> {
+    const rows = await this.workerProfileRepo
+      .createQueryBuilder('wp')
+      .select('m.id', 'memberId')
+      .innerJoin('wp.member', 'm')
+      .where(
+        '(wp.department_id = :departmentId OR wp.secondary_department_id = :departmentId)',
+        { departmentId },
+      )
+      .andWhere('wp.status = :wpStatus', { wpStatus: WorkerStatusEnum.ACTIVE })
+      .andWhere('m.status = :mStatus', { mStatus: MemberStatusEnum.ACTIVE })
+      .getRawMany<{ memberId: string }>();
+    return rows.map((r) => r.memberId);
+  }
+
+  // The departments a member serves in (primary and secondary), for matching team assignments.
+  async findDepartmentIdsForMember(memberId: string): Promise<string[]> {
+    const profile = await this.workerProfileRepo.findOne({
+      where: { member: { id: memberId }, status: WorkerStatusEnum.ACTIVE },
+      relations: ['department', 'secondaryDepartment'],
+    });
+    if (!profile) return [];
+    return [profile.department?.id, profile.secondaryDepartment?.id].filter(
+      (id): id is string => !!id,
+    );
+  }
+
+  async findHeadOfDepartment(departmentId: string): Promise<{
+    id: string;
+    firstname: string;
+    lastname: string;
+    email: string | null;
+  } | null> {
+    const lead = await this.leadRepo.findOne({
+      where: {
+        department: { id: departmentId },
+        leadType: DepartmentLeadTypeEnum.HOD,
+      },
+      relations: ['workerProfile', 'workerProfile.member'],
+    });
+    const m = lead?.workerProfile?.member;
+    return m
+      ? {
+          id: m.id,
+          firstname: m.firstname,
+          lastname: m.lastname,
+          email: m.email ?? null,
+        }
+      : null;
   }
 }

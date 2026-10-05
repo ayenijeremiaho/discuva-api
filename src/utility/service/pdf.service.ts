@@ -1299,7 +1299,9 @@ export class PdfService {
     serviceStart: Date | null,
     slots: ServiceProgrammeSlot[],
   ): number {
-    const hasBackup = slots.some((s) => s.backupMember || s.backupGuestName);
+    const hasBackup = slots.some(
+      (s) => s.backupMember || s.backupGuestName || s.backupDepartment,
+    );
 
     const COL = hasBackup
       ? {
@@ -1341,6 +1343,7 @@ export class PdfService {
       if (s.member)
         minister = `${this.cap(s.member.firstname)} ${this.cap(s.member.lastname)}`;
       else if (s.guestName) minister = s.guestName;
+      else if (s.department) minister = s.department.name;
 
       const row: any[] = [
         String(i + 1),
@@ -1356,6 +1359,7 @@ export class PdfService {
         if (s.backupMember)
           backup = `${this.cap(s.backupMember.firstname)} ${this.cap(s.backupMember.lastname)}`;
         else if (s.backupGuestName) backup = s.backupGuestName;
+        else if (s.backupDepartment) backup = s.backupDepartment.name;
         row.push(backup);
       }
 

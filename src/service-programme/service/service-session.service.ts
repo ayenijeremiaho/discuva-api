@@ -27,6 +27,7 @@ import { ServiceSessionSlotStatusEnum } from '../enum/service-session-slot-statu
 import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
 import { ServiceProgrammeStatusEnum } from '../enum/service-programme-status.enum';
 import { DepartmentCapability } from '../../department/enums/department-capability.enum';
+import { Department } from '../../department/entity/department.entity';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { WorkerStatusEnum } from '../../member/enums/worker-status.enum';
 import { Admin } from '../../admin/entity/admin.entity';
@@ -66,6 +67,8 @@ export interface MyLiveSlotStatus {
   myPosition: number;
   myType: string;
   myTopic: string | null;
+  // Set when the caller is on this slot through their department.
+  asDepartment: { id: string; name: string } | null;
   currentPosition: number;
   isMyTurnNow: boolean;
   hasPassed: boolean;
@@ -178,6 +181,8 @@ export interface MyServiceHistoryEntry {
   overrunSeconds: number | null;
   startedAt: Date | null;
   completedAt: Date | null;
+  // Set for a slot the caller's department did, rather than the caller personally.
+  asDepartment: { id: string; name: string } | null;
 }
 
 export interface MyServiceHistoryResult {
@@ -188,11 +193,26 @@ export interface MyServiceHistoryResult {
     count: number;
     totalActualSeconds: number;
   }>;
+  // Team performance: each department the caller serves in, across its slots.
+  byDepartment: Array<{
+    departmentId: string;
+    name: string;
+    count: number;
+    totalActualSeconds: number;
+    totalOverrunSeconds: number;
+  }>;
   entries: MyServiceHistoryEntry[];
   page: number;
   limit: number;
   totalCount: number;
   totalPages: number;
+}
+
+// The department doing a slot on the day — none once a person has been put in its place.
+function teamOnSlot(slot: ServiceSessionSlot): Department | null {
+  if (slot.overriddenMember || slot.overriddenSpeakerName) return null;
+  if (slot.programmeSlot?.member) return null;
+  return slot.programmeSlot?.department ?? null;
 }
 
 const SESSION_TTL_LIVE = 86400 * 2;
@@ -1157,10 +1177,14 @@ export class ServiceSessionService {
       'programme.slots',
       'programme.slots.member',
       'programme.slots.backupMember',
+      'programme.slots.department',
+      'programme.slots.backupDepartment',
       'sessionSlots',
       'sessionSlots.programmeSlot',
       'sessionSlots.programmeSlot.member',
       'sessionSlots.programmeSlot.backupMember',
+      'sessionSlots.programmeSlot.department',
+      'sessionSlots.programmeSlot.backupDepartment',
       'sessionSlots.overriddenMember',
     ]);
 
@@ -1196,22 +1220,43 @@ export class ServiceSessionService {
     sessionCode: string,
     memberId: string,
   ): Promise<MyLiveSlotStatus> {
-    const { session, anchor } = await this.getState(sessionCode);
+    const [{ session, anchor }, departmentIds] = await Promise.all([
+      this.getState(sessionCode),
+      this.departmentAccessService.findDepartmentIdsForMember(memberId),
+    ]);
     const sessionSlots = session.sessionSlots ?? [];
 
-    const myPrimarySlot = sessionSlots.find(
-      (s) =>
-        s.programmeSlot.member?.id === memberId ||
-        s.overriddenMember?.id === memberId,
-    );
-    const myBackupSlot = sessionSlots.find(
-      (s) => s.programmeSlot.backupMember?.id === memberId,
-    );
+    const myPrimarySlot =
+      sessionSlots.find(
+        (s) =>
+          s.programmeSlot.member?.id === memberId ||
+          s.overriddenMember?.id === memberId,
+      ) ??
+      sessionSlots.find((s) => {
+        const team = teamOnSlot(s);
+        return !!team && departmentIds.includes(team.id);
+      });
+    const myBackupSlot =
+      sessionSlots.find((s) => s.programmeSlot.backupMember?.id === memberId) ??
+      sessionSlots.find(
+        (s) =>
+          !!s.programmeSlot.backupDepartment &&
+          departmentIds.includes(s.programmeSlot.backupDepartment.id),
+      );
     const mySlot = myPrimarySlot ?? myBackupSlot;
     if (!mySlot) {
       throw new NotFoundException("You don't have a slot in this session");
     }
     const myRole: 'PRIMARY' | 'BACKUP' = myPrimarySlot ? 'PRIMARY' : 'BACKUP';
+    const personallyOn =
+      mySlot.programmeSlot.member?.id === memberId ||
+      mySlot.overriddenMember?.id === memberId ||
+      mySlot.programmeSlot.backupMember?.id === memberId;
+    const myTeam = personallyOn
+      ? null
+      : myRole === 'PRIMARY'
+        ? teamOnSlot(mySlot)
+        : (mySlot.programmeSlot.backupDepartment ?? null);
 
     const currentPosition = anchor.currentSlotPosition;
     const isMyTurnNow = mySlot.position === currentPosition;
@@ -1252,6 +1297,7 @@ export class ServiceSessionService {
       myPosition: mySlot.position,
       myType: mySlot.programmeSlot.type,
       myTopic: mySlot.overriddenTopic ?? mySlot.programmeSlot.topic,
+      asDepartment: myTeam ? { id: myTeam.id, name: myTeam.name } : null,
       currentPosition,
       isMyTurnNow,
       hasPassed,
@@ -1293,6 +1339,7 @@ export class ServiceSessionService {
       'sessionSlots',
       'sessionSlots.programmeSlot',
       'sessionSlots.programmeSlot.member',
+      'sessionSlots.programmeSlot.department',
       'sessionSlots.overriddenMember',
     ]);
     const slot = session.sessionSlots?.find((s) => s.position === position);
@@ -1339,6 +1386,7 @@ export class ServiceSessionService {
         'sessionSlots',
         'sessionSlots.programmeSlot',
         'sessionSlots.programmeSlot.member',
+        'sessionSlots.programmeSlot.department',
         'sessionSlots.overriddenMember',
         'pauseEntries',
       ],
@@ -1425,6 +1473,7 @@ export class ServiceSessionService {
       .leftJoinAndSelect('session.sessionSlots', 'sessionSlots')
       .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
       .leftJoinAndSelect('programmeSlot.member', 'member')
+      .leftJoinAndSelect('programmeSlot.department', 'programmeSlotDepartment')
       .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
       .leftJoinAndSelect('session.pauseEntries', 'pauseEntries')
       .where('event.id = :eventId', { eventId })
@@ -1508,6 +1557,7 @@ export class ServiceSessionService {
       .leftJoinAndSelect('session.sessionSlots', 'sessionSlots')
       .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
       .leftJoinAndSelect('programmeSlot.member', 'member')
+      .leftJoinAndSelect('programmeSlot.department', 'programmeSlotDepartment')
       .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
       .leftJoinAndSelect('session.pauseEntries', 'pauseEntries')
       .where('event.id = :eventId', { eventId })
@@ -1616,7 +1666,10 @@ export class ServiceSessionService {
           s.overriddenSpeakerName ??
           (effectiveMember
             ? `${effectiveMember.firstname} ${effectiveMember.lastname}`
-            : null),
+            : null) ??
+          s.programmeSlot?.guestName ??
+          teamOnSlot(s)?.name ??
+          null,
         speakerId: effectiveMember?.id ?? null,
         allocatedMinutes: allocatedMins,
         actualSeconds: s.actualSeconds ?? null,
@@ -1720,6 +1773,7 @@ export class ServiceSessionService {
       .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
       .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
       .leftJoinAndSelect('programmeSlot.member', 'member')
+      .leftJoinAndSelect('programmeSlot.department', 'programmeSlotDepartment')
       .leftJoinAndSelect('session.pauseEntries', 'pauseEntries')
       .where('session.status = :status', {
         status: ServiceSessionStatusEnum.COMPLETED,
@@ -1874,6 +1928,11 @@ export class ServiceSessionService {
     page = 1,
     limit = 10,
   ): Promise<MyServiceHistoryResult> {
+    const departmentIds =
+      await this.departmentAccessService.findDepartmentIdsForMember(memberId);
+    const teamClause = departmentIds.length
+      ? ' OR ps.department_id IN (:...departmentIds)'
+      : '';
     const sessions = await this.sessionRepo
       .createQueryBuilder('session')
       .innerJoinAndSelect('session.programme', 'programme')
@@ -1883,6 +1942,7 @@ export class ServiceSessionService {
       .leftJoinAndSelect('sessionSlots.programmeSlot', 'programmeSlot')
       .leftJoinAndSelect('sessionSlots.overriddenMember', 'overriddenMember')
       .leftJoinAndSelect('programmeSlot.member', 'member')
+      .leftJoinAndSelect('programmeSlot.department', 'programmeSlotDepartment')
       .where('session.status IN (:...statuses)', {
         statuses: [
           ServiceSessionStatusEnum.LIVE,
@@ -1893,9 +1953,9 @@ export class ServiceSessionService {
         `session.id IN (
           SELECT ss.session_id FROM service_session_slots ss
           INNER JOIN service_programme_slots ps ON ps.id = ss.programme_slot_id
-          WHERE ps.member_id = :memberId OR ss.overridden_member_id = :memberId
+          WHERE ps.member_id = :memberId OR ss.overridden_member_id = :memberId${teamClause}
         )`,
-        { memberId },
+        { memberId, departmentIds },
       )
       .orderBy('session.startedAt', 'DESC')
       .getMany();
@@ -1904,6 +1964,10 @@ export class ServiceSessionService {
     const bySlotTypeMap = new Map<
       string,
       { count: number; totalActualSeconds: number }
+    >();
+    const byDepartmentMap = new Map<
+      string,
+      MyServiceHistoryResult['byDepartment'][number]
     >();
 
     for (const session of sessions) {
@@ -1914,10 +1978,19 @@ export class ServiceSessionService {
         if (slot.status !== ServiceSessionSlotStatusEnum.COMPLETED) continue;
         const effectiveMemberId =
           slot.overriddenMember?.id ?? slot.programmeSlot?.member?.id;
-        if (effectiveMemberId !== memberId) continue;
+        const team = teamOnSlot(slot);
+        const viaTeam =
+          effectiveMemberId !== memberId &&
+          !!team &&
+          departmentIds.includes(team.id);
+        if (effectiveMemberId !== memberId && !viaTeam) continue;
 
         const allocatedMins =
           slot.adjustedAllocatedMinutes ?? slot.programmeSlot.allocatedMinutes;
+        const overrunSeconds =
+          slot.actualSeconds == null
+            ? null
+            : Math.round(slot.actualSeconds - allocatedMins * 60);
 
         entries.push({
           eventName: session.programme.serviceSlot.event?.name ?? null,
@@ -1927,13 +2000,25 @@ export class ServiceSessionService {
           topic: slot.overriddenTopic ?? slot.programmeSlot.topic,
           allocatedMinutes: allocatedMins,
           actualSeconds: slot.actualSeconds,
-          overrunSeconds:
-            slot.actualSeconds == null
-              ? null
-              : Math.round(slot.actualSeconds - allocatedMins * 60),
+          overrunSeconds,
           startedAt: slot.startedAt,
           completedAt: slot.completedAt,
+          asDepartment: viaTeam ? { id: team!.id, name: team!.name } : null,
         });
+
+        if (viaTeam) {
+          const dept = byDepartmentMap.get(team!.id) ?? {
+            departmentId: team!.id,
+            name: team!.name,
+            count: 0,
+            totalActualSeconds: 0,
+            totalOverrunSeconds: 0,
+          };
+          dept.count += 1;
+          dept.totalActualSeconds += slot.actualSeconds ?? 0;
+          dept.totalOverrunSeconds += overrunSeconds ?? 0;
+          byDepartmentMap.set(team!.id, dept);
+        }
 
         const existing = bySlotTypeMap.get(slot.programmeSlot.type) ?? {
           count: 0,
@@ -1959,6 +2044,7 @@ export class ServiceSessionService {
         type,
         ...v,
       })),
+      byDepartment: Array.from(byDepartmentMap.values()),
       entries: entries.slice(start, start + limit),
       page,
       limit,

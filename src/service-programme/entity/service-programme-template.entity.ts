@@ -14,6 +14,8 @@ export interface TemplateProgrammeSlot {
   type: ServiceSlotTypeEnum;
   topic: string | null;
   allocatedMinutes: number;
+  // Teams are stable week to week, so templates keep them; individual people are not kept.
+  departmentId?: string | null;
 }
 
 @Entity({ name: 'service_programme_templates' })

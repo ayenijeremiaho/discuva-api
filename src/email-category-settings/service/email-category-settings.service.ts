@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -6,6 +10,7 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { queryTenant } from '../../tenant/utility/query-tenant';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
 import {
+  DeliveryMode,
   EmailCategorySettingResponseDto,
   UpdateEmailCategorySettingDto,
 } from '../dto/email-category-setting.dto';
@@ -16,10 +21,33 @@ import { PUSH_CATALOGUE } from '../../notification-catalogue/push-catalogue';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 
 // pushEnabled absent on rows saved before Push had its own switch — those followed `enabled`.
-type EmailCategorySettingValue = { enabled: boolean; pushEnabled?: boolean };
+type EmailCategorySettingValue = {
+  enabled: boolean;
+  pushEnabled?: boolean;
+  pushFirst?: boolean;
+};
 
 function pushEnabledOf(value?: EmailCategorySettingValue): boolean {
   return value?.pushEnabled ?? value?.enabled ?? true;
+}
+
+const MODE_FLAGS: Record<DeliveryMode, Required<EmailCategorySettingValue>> = {
+  EMAIL_AND_PUSH: { enabled: true, pushEnabled: true, pushFirst: false },
+  PUSH_FIRST: { enabled: true, pushEnabled: true, pushFirst: true },
+  PUSH_ONLY: { enabled: false, pushEnabled: true, pushFirst: false },
+  EMAIL_ONLY: { enabled: true, pushEnabled: false, pushFirst: false },
+  OFF: { enabled: false, pushEnabled: false, pushFirst: false },
+};
+
+function modeOf(
+  email: boolean,
+  push: boolean,
+  pushFirst: boolean,
+): DeliveryMode {
+  if (email && push) return pushFirst ? 'PUSH_FIRST' : 'EMAIL_AND_PUSH';
+  if (push) return 'PUSH_ONLY';
+  if (email) return 'EMAIL_ONLY';
+  return 'OFF';
 }
 
 const PUSH_CATEGORIES = new Set(
@@ -70,19 +98,28 @@ export class EmailCategorySettingsService {
     return `push-category-settings:${category}`;
   }
 
+  private pushFirstCacheKey(category: EmailCategory): string {
+    return `push-first-category-settings:${category}`;
+  }
+
   private toDto(
     category: EmailCategory,
     value?: EmailCategorySettingValue,
   ): EmailCategorySettingResponseDto {
     const known = KNOWN_EMAIL_CATEGORIES[category];
     const hasPush = PUSH_CATEGORIES.has(category);
+    const enabled = value?.enabled ?? true;
+    const pushEnabled = hasPush ? pushEnabledOf(value) : false;
+    const pushFirst = enabled && pushEnabled && !!value?.pushFirst;
     return {
       category,
       label: known.label,
       description: known.description,
-      enabled: value?.enabled ?? true,
+      enabled,
       hasPush,
-      pushEnabled: hasPush ? pushEnabledOf(value) : false,
+      pushEnabled,
+      pushFirst,
+      mode: modeOf(enabled, pushEnabled, pushFirst),
     };
   }
 
@@ -122,12 +159,25 @@ export class EmailCategorySettingsService {
     const known = KNOWN_EMAIL_CATEGORIES[category];
     const storageKey = this.storageKey(category);
 
+    if (
+      dto.mode &&
+      MODE_FLAGS[dto.mode].pushEnabled &&
+      !PUSH_CATEGORIES.has(category)
+    ) {
+      throw new BadRequestException(
+        `${known.label} has no push notifications, so it can only be Email only or Off`,
+      );
+    }
+
     let row = await this.settingRepo.findOne({ where: { key: storageKey } });
     const current = row?.value as EmailCategorySettingValue | undefined;
-    const value: EmailCategorySettingValue = {
-      enabled: dto.enabled ?? current?.enabled ?? true,
-      pushEnabled: dto.pushEnabled ?? pushEnabledOf(current),
-    };
+    const value: EmailCategorySettingValue = dto.mode
+      ? { ...MODE_FLAGS[dto.mode] }
+      : {
+          enabled: dto.enabled ?? current?.enabled ?? true,
+          pushEnabled: dto.pushEnabled ?? pushEnabledOf(current),
+          pushFirst: dto.pushFirst ?? current?.pushFirst ?? false,
+        };
 
     if (!row) {
       row = this.settingRepo.create({
@@ -141,11 +191,16 @@ export class EmailCategorySettingsService {
     await this.settingRepo.save(row);
     this.cacheService.del(this.cacheKey(category));
     this.cacheService.del(this.pushCacheKey(category));
+    this.cacheService.del(this.pushFirstCacheKey(category));
 
     this.auditLogService.log('EMAIL_CATEGORY_SETTING_UPDATED', {
       actorId: actorMemberId,
       targetId: category,
-      metadata: { enabled: value.enabled, pushEnabled: value.pushEnabled },
+      metadata: {
+        enabled: value.enabled,
+        pushEnabled: value.pushEnabled,
+        pushFirst: value.pushFirst,
+      },
     });
 
     return this.toDto(category, value);
@@ -173,6 +228,22 @@ export class EmailCategorySettingsService {
     const enabled = pushEnabledOf(await this.storedValue(category));
     this.cacheService.set(cacheKey, enabled, this.CACHE_TTL);
     return enabled;
+  }
+
+  // Push first only means something while both email and push are on.
+  async isPushFirst(category: EmailCategory): Promise<boolean> {
+    const cacheKey = this.pushFirstCacheKey(category);
+    const cached = await this.cacheService.get<boolean>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const value = await this.storedValue(category);
+    const pushFirst =
+      !!value?.pushFirst &&
+      (value?.enabled ?? true) &&
+      pushEnabledOf(value) &&
+      PUSH_CATEGORIES.has(category);
+    this.cacheService.set(cacheKey, pushFirst, this.CACHE_TTL);
+    return pushFirst;
   }
 
   private assertKnownCategory(category: EmailCategory): void {

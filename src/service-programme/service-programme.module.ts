@@ -29,6 +29,8 @@ import { Tenant } from '../tenant/entity/tenant.entity';
 import jwtConfig from '../config/jwt.config';
 import refreshJwtConfig from '../config/refresh.jwt.config';
 
+import { Department } from '../department/entity/department.entity';
+
 @Module({
   imports: [
     // Independent registration from AuthModule's own (same jwtConfig/
@@ -50,6 +52,7 @@ import refreshJwtConfig from '../config/refresh.jwt.config';
       ServiceSlot,
       Member,
       WorkerProfile,
+      Department,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by ServiceProgrammeReminderScheduler's forEachActiveTenant loop.
