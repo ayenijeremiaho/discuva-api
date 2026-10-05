@@ -8,6 +8,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { TransactionHost } from '@nestjs-cls/transactional';
+import { FirstTimerConvertService } from './first-timer-convert.service';
 import { FollowUpService } from './follow-up.service';
 import { FirstTimer } from '../entity/first-timer.entity';
 import { FollowUpTask } from '../entity/follow-up-task.entity';
@@ -169,6 +170,14 @@ const mockDepartmentAccessService = {
   assertHasCapability: jest.fn(),
 };
 
+const mockFirstTimerConvertService = {
+  findMatches: jest.fn().mockResolvedValue([]),
+  findIdsWithMatches: jest.fn().mockResolvedValue(new Set()),
+  findLinked: jest.fn().mockResolvedValue(null),
+  timelineEntries: jest.fn().mockResolvedValue([]),
+  propagateMembership: jest.fn().mockResolvedValue(undefined),
+};
+
 const followUpProfile = {
   id: 'wp-1',
   status: WorkerStatusEnum.ACTIVE,
@@ -194,6 +203,12 @@ describe('FollowUpService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockFirstTimerConvertService.findMatches.mockResolvedValue([]);
+    mockFirstTimerConvertService.findIdsWithMatches.mockResolvedValue(
+      new Set(),
+    );
+    mockFirstTimerConvertService.findLinked.mockResolvedValue(null);
+    mockFirstTimerConvertService.timelineEntries.mockResolvedValue([]);
     // Default: authorize as a Follow-Up dept worker so functional tests focus
     // on business logic; individual tests override with mockRejectedValueOnce.
     mockDepartmentAccessService.assertHasCapability.mockResolvedValue(
@@ -259,6 +274,10 @@ describe('FollowUpService', () => {
         {
           provide: DepartmentAccessService,
           useValue: mockDepartmentAccessService,
+        },
+        {
+          provide: FirstTimerConvertService,
+          useValue: mockFirstTimerConvertService,
         },
       ],
     }).compile();
@@ -826,10 +845,26 @@ describe('FollowUpService', () => {
         Promise.resolve(v),
       );
 
-      await service.markConverted('ft-1', 'member-99');
+      await service.markConverted('ft-1', 'member-99', 'admin-member');
       expect(mockFirstTimerRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ convertedMember: { id: 'member-99' } }),
       );
+      expect(
+        mockFirstTimerConvertService.propagateMembership,
+      ).toHaveBeenCalledWith('ft-1', 'member-99', 'admin-member');
+    });
+
+    it('does not touch a linked convert when no member is given', async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValue({ id: 'ft-1' });
+      mockFirstTimerRepo.save.mockImplementation((v: any) =>
+        Promise.resolve(v),
+      );
+
+      await service.markConverted('ft-1');
+
+      expect(
+        mockFirstTimerConvertService.propagateMembership,
+      ).not.toHaveBeenCalled();
     });
   });
 
@@ -1562,6 +1597,20 @@ describe('FollowUpService', () => {
       expect(result.data[1].visitCount).toBe(1);
     });
 
+    it('flags rows that may be an outreach convert', async () => {
+      firstTimersListQbMock.getManyAndCount.mockResolvedValueOnce([
+        [{ id: 'ft-a' }, { id: 'ft-b' }],
+        2,
+      ]);
+      mockFirstTimerConvertService.findIdsWithMatches.mockResolvedValueOnce(
+        new Set(['ft-b']),
+      );
+
+      const result = await service.getFirstTimers();
+
+      expect(result.data.map((f) => f.hasConvertMatch)).toEqual([false, true]);
+    });
+
     it('skips the Sunday School batch query when the page is empty', async () => {
       firstTimersListQbMock.getManyAndCount.mockResolvedValueOnce([[], 0]);
 
@@ -1615,6 +1664,62 @@ describe('FollowUpService', () => {
         'SUNDAY_SCHOOL',
       ]);
       expect(result.timeline[2].label).toBe('Kids Class');
+      expect(result.convertMatches).toEqual([]);
+      expect(result.linkedConvert).toBeNull();
+    });
+
+    it("puts a linked convert's outreach history first without counting it as visits", async () => {
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce({
+        id: 'ft-1',
+        createdAt: new Date('2026-01-10T09:00:00Z'),
+        visitedEvent: null,
+        visits: [],
+      });
+      mockFirstTimerConvertService.findLinked.mockResolvedValueOnce({
+        id: 'convert-1',
+      });
+      mockFirstTimerConvertService.timelineEntries.mockResolvedValueOnce([
+        {
+          source: 'OUTREACH_MET',
+          label: 'Met on outreach',
+          occurredAt: new Date('2026-01-01T10:00:00Z'),
+        },
+        {
+          source: 'EVANGELISM_FOLLOW_UP',
+          label: 'Contacted by Ada L',
+          occurredAt: new Date('2026-01-03T10:00:00Z'),
+        },
+      ]);
+
+      const result = await service.getFirstTimerDetail('ft-1');
+
+      expect(result.timeline.map((t) => t.source)).toEqual([
+        'OUTREACH_MET',
+        'EVANGELISM_FOLLOW_UP',
+        'INITIAL_VISIT',
+      ]);
+      expect(result.visitCount).toBe(1);
+      expect(mockFirstTimerConvertService.findMatches).not.toHaveBeenCalled();
+    });
+
+    it('suggests possible converts while none is linked', async () => {
+      const ft = {
+        id: 'ft-1',
+        createdAt: new Date('2026-01-10T09:00:00Z'),
+        visitedEvent: null,
+        visits: [],
+      };
+      mockFirstTimerRepo.findOne.mockResolvedValueOnce(ft);
+      mockFirstTimerConvertService.findMatches.mockResolvedValueOnce([
+        { id: 'convert-1', matchedOn: 'phone' },
+      ]);
+
+      const result = await service.getFirstTimerDetail('ft-1');
+
+      expect(mockFirstTimerConvertService.findMatches).toHaveBeenCalledWith(ft);
+      expect(result.convertMatches).toEqual([
+        { id: 'convert-1', matchedOn: 'phone' },
+      ]);
     });
   });
 

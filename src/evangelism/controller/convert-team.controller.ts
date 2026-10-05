@@ -10,8 +10,11 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ConvertService } from '../service/convert.service';
-import { LogFollowUpDto, UpdateConvertStatusDto } from '../dto/convert.dto';
-import { ConvertStatusEnum } from '../enum/convert-status.enum';
+import {
+  LogFollowUpDto,
+  MemberConvertListQueryDto,
+  UpdateConvertStatusDto,
+} from '../dto/convert.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
@@ -20,53 +23,48 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 
 @RequiresModule('evangelism')
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard)
-@Controller()
+@Controller('evangelism/converts')
 export class ConvertTeamController {
   constructor(private readonly convertService: ConvertService) {}
 
-  @Get('evangelism/converts/team')
-  async getTeamConverts(
+  @Get()
+  list(
+    @Query() query: MemberConvertListQueryDto,
     @CurrentUser() user: MemberAuth,
-    @Query('status') status?: ConvertStatusEnum,
-    @Query('page') page = 1,
-    @Query('limit') limit = 10,
   ) {
-    await this.convertService.assertIsEvangelismDeptWorker(user.id);
-    return this.convertService.getTeamConverts(
-      Number(page),
-      Number(limit),
-      status,
-    );
+    return this.convertService.listForMember(query, user.id);
   }
 
-  @Post('evangelism/converts/:id/follow-up')
+  @Post(':id/follow-up')
   async logFollowUp(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: LogFollowUpDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    await this.convertService.assertIsEvangelismDeptWorker(user.id);
+    await this.convertService.assertCanActOnConvert(id, user.id);
     return this.convertService.logFollowUp(id, dto, user);
   }
 
-  @Patch('evangelism/converts/:id/status')
+  @Patch(':id/status')
   async updateStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateConvertStatusDto,
     @CurrentUser() user: MemberAuth,
   ) {
-    await this.convertService.assertIsEvangelismDeptWorker(user.id);
+    await this.convertService.assertCanActOnConvert(id, user.id);
     return this.convertService.updateStatus(id, dto, user.id);
   }
 
-  @Get('evangelism/converts/:id/follow-up-history')
+  @Get(':id/follow-up-history')
   async getFollowUpHistory(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: MemberAuth,
     @Query('page') page = 1,
     @Query('limit') limit = 10,
   ) {
-    await this.convertService.assertIsEvangelismDeptWorker(user.id);
+    await this.convertService.assertCanActOnConvert(id, user.id, {
+      write: false,
+    });
     return this.convertService.getFollowUpHistory(
       id,
       Number(page),

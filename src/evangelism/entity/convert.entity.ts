@@ -10,6 +10,8 @@ import { Member } from '../../member/entity/member.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { ConvertStatusEnum } from '../enum/convert-status.enum';
+import { Outreach } from './outreach.entity';
+import { FirstTimer } from '../../follow-up/entity/first-timer.entity';
 
 @Entity({ name: 'converts' })
 export class Convert extends BaseEntity {
@@ -19,6 +21,7 @@ export class Convert extends BaseEntity {
   @Column()
   name: string;
 
+  @Index()
   @Column({ nullable: true })
   phone: string | null;
 
@@ -42,6 +45,11 @@ export class Convert extends BaseEntity {
   @Column({ name: 'onboarded_by_name' })
   onboardedByName: string;
 
+  @Index()
+  @ManyToOne(() => Outreach, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'outreach_id' })
+  outreach: Outreach | null;
+
   // WorkerProfile, not Member — mirrors FollowUpTask.assignedTo, so
   // reassignment can reuse the same "must be in the target department"
   // validation idiom as the Follow-Up module.
@@ -61,6 +69,19 @@ export class Convert extends BaseEntity {
 
   @Column({ name: 'linked_at', type: 'timestamptz', nullable: true })
   linkedAt: Date | null;
+
+  // Set when Follow-Up confirms this convert visited church; Follow-Up then owns the follow-up.
+  @Index()
+  @ManyToOne(() => FirstTimer, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'first_timer_id' })
+  firstTimer: FirstTimer | null;
+
+  @Column({
+    name: 'first_timer_linked_at',
+    type: 'timestamptz',
+    nullable: true,
+  })
+  firstTimerLinkedAt: Date | null;
 
   // Denormalized for the follow-up staleness/overdue indicator — updated
   // whenever a new ConvertFollowUpLog is added.

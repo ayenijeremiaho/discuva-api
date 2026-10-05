@@ -25,6 +25,10 @@ export enum PushNotificationKey {
   GOAL_LEVEL_APPROVED = 'GOAL_LEVEL_APPROVED',
   GOAL_FULLY_APPROVED = 'GOAL_FULLY_APPROVED',
   GOAL_NEW_COMMENT = 'GOAL_NEW_COMMENT',
+  OUTREACH_TEAM_ADDED = 'OUTREACH_TEAM_ADDED',
+  CONVERT_ASSIGNED = 'CONVERT_ASSIGNED',
+  CONVERTS_BULK_ASSIGNED = 'CONVERTS_BULK_ASSIGNED',
+  CONVERT_VISITED_CHURCH = 'CONVERT_VISITED_CHURCH',
 }
 
 export interface PushTemplate {
@@ -281,6 +285,47 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: '{{comment}}',
     url: '/department-goals',
     placeholders: { comment: 'Can we move the retreat to November?' },
+  },
+  [PushNotificationKey.OUTREACH_TEAM_ADDED]: {
+    category: EmailCategory.EVANGELISM,
+    label: 'Added to an outreach team',
+    description: 'Sent to a worker when someone adds them to an outreach team.',
+    title: 'You were added to an outreach team',
+    body: '{{creator_name}} added you to the team for {{outreach_label}}.',
+    url: '/evangelism',
+    placeholders: {
+      creator_name: 'Ada Obi',
+      outreach_label: 'Market outreach (12 Oct)',
+    },
+  },
+  [PushNotificationKey.CONVERT_ASSIGNED]: {
+    category: EmailCategory.EVANGELISM,
+    label: 'Convert assigned',
+    description: 'Sent to a worker when a convert is assigned to them.',
+    title: 'New convert to follow up',
+    body: '{{convert_name}} has been assigned to you for follow-up.',
+    url: '/evangelism',
+    placeholders: { convert_name: 'John Smith' },
+  },
+  [PushNotificationKey.CONVERTS_BULK_ASSIGNED]: {
+    category: EmailCategory.EVANGELISM,
+    label: 'Converts reassigned in bulk',
+    description:
+      'Sent to a worker when an admin moves several converts to them at once.',
+    title: 'New converts to follow up',
+    body: '{{count}} converts have been assigned to you for follow-up.',
+    url: '/evangelism',
+    placeholders: { count: '5' },
+  },
+  [PushNotificationKey.CONVERT_VISITED_CHURCH]: {
+    category: EmailCategory.EVANGELISM,
+    label: 'Convert visited church',
+    description:
+      'Sent to the outreach team and assignee when Follow-Up confirms a convert came to church as a first-timer.',
+    title: '{{convert_name}} visited church!',
+    body: 'The Follow-Up team is now following them up.',
+    url: '/evangelism',
+    placeholders: { convert_name: 'John Smith' },
   },
 };
 

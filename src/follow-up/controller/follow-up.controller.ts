@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -14,6 +15,8 @@ import { RolesGuard } from '../../auth/guard/roles.guard';
 import { Roles } from '../../auth/decorator/roles.decorator';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { FollowUpService } from '../service/follow-up.service';
+import { FirstTimerConvertService } from '../service/first-timer-convert.service';
+import { LinkConvertDto } from '../dto/link-convert.dto';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
 import { UpdateFirstTimerDto } from '../dto/update-first-timer.dto';
 import { UpdateFollowUpTaskDto } from '../dto/update-follow-up-task.dto';
@@ -27,7 +30,10 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 @Roles(MemberRoleEnum.WORKER)
 @Controller('follow-up')
 export class FollowUpController {
-  constructor(private readonly followUpService: FollowUpService) {}
+  constructor(
+    private readonly followUpService: FollowUpService,
+    private readonly firstTimerConvertService: FirstTimerConvertService,
+  ) {}
 
   @Post('first-timers')
   async createFirstTimer(
@@ -53,6 +59,35 @@ export class FollowUpController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.followUpService.getFirstTimerDetailForWorker(id, req.user.id);
+  }
+
+  @Post('first-timers/:id/link-convert')
+  async linkConvert(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LinkConvertDto,
+  ) {
+    await this.followUpService.assertWorkerInFollowUpDept(req.user.id);
+    return this.firstTimerConvertService.link(id, dto.convertId, req.user.id);
+  }
+
+  @Post('first-timers/:id/dismiss-convert')
+  async dismissConvert(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LinkConvertDto,
+  ) {
+    await this.followUpService.assertWorkerInFollowUpDept(req.user.id);
+    return this.firstTimerConvertService.dismiss(id, dto.convertId);
+  }
+
+  @Delete('first-timers/:id/link-convert')
+  async unlinkConvert(
+    @Request() req: any,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.followUpService.assertWorkerInFollowUpDept(req.user.id);
+    return this.firstTimerConvertService.unlink(id, req.user.id);
   }
 
   @Patch('first-timers/:id')

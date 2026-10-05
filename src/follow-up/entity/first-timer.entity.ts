@@ -69,6 +69,15 @@ export class FirstTimer extends BaseEntity {
   @Column({ name: 'invite_sent_at', nullable: true, type: 'timestamptz' })
   inviteSentAt: Date | null;
 
+  // Outreach converts Follow-Up said are not this person, so they stop being suggested.
+  @Column({
+    name: 'dismissed_convert_ids',
+    type: 'uuid',
+    array: true,
+    default: () => "'{}'",
+  })
+  dismissedConvertIds: string[];
+
   @OneToOne(() => FollowUpTask, (task) => task.firstTimer)
   followUpTask: FollowUpTask;
 
@@ -77,6 +86,9 @@ export class FirstTimer extends BaseEntity {
 
   // Transient — populated explicitly by FollowUpService, not persisted.
   visitCount?: number;
+
+  // Transient — list rows only: an outreach convert may be this person.
+  hasConvertMatch?: boolean;
 
   // Transient — set only when created with no active Follow-Up worker to
   // assign, so the caller can surface a warning instead of blocking.

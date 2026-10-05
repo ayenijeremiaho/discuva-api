@@ -23,6 +23,9 @@ import { ChildCheckIn } from '../children-church/entity/child-check-in.entity';
 import { UtilityModule } from '../utility/utility.module';
 import { FollowUpModule } from '../follow-up/follow-up.module';
 
+import { Convert } from '../evangelism/entity/convert.entity';
+import { ConvertFollowUpLog } from '../evangelism/entity/convert-follow-up-log.entity';
+
 @Module({
   imports: [
     TenantTypeOrmModule.forFeature([
@@ -42,6 +45,9 @@ import { FollowUpModule } from '../follow-up/follow-up.module';
       Attendance,
       ChildGuardian,
       ChildCheckIn,
+      // Read-only, for the outreach part of the timeline — EvangelismModule imports MemberModule.
+      Convert,
+      ConvertFollowUpLog,
     ]),
     UtilityModule,
     FollowUpModule,

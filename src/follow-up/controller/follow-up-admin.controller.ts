@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -16,6 +17,8 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 import { FollowUpService } from '../service/follow-up.service';
+import { FirstTimerConvertService } from '../service/first-timer-convert.service';
+import { LinkConvertDto } from '../dto/link-convert.dto';
 import { CreateFirstTimerDto } from '../dto/create-first-timer.dto';
 import { ReassignTaskDto } from '../dto/reassign-task.dto';
 import { BulkUpdateTasksDto } from '../dto/bulk-update-tasks.dto';
@@ -40,7 +43,10 @@ class MarkConvertedDto {
 @UseGuards(AdminGuard, ModuleEnabledGuard)
 @Controller('admin/follow-up')
 export class FollowUpAdminController {
-  constructor(private readonly followUpService: FollowUpService) {}
+  constructor(
+    private readonly followUpService: FollowUpService,
+    private readonly firstTimerConvertService: FirstTimerConvertService,
+  ) {}
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
   @Post('first-timers')
@@ -144,8 +150,45 @@ export class FollowUpAdminController {
   async markConverted(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: MarkConvertedDto,
+    @CurrentAdmin() admin: Admin,
   ) {
-    return this.followUpService.markConverted(id, dto.memberId);
+    return this.followUpService.markConverted(
+      id,
+      dto.memberId,
+      admin.member?.id,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Post('first-timers/:id/link-convert')
+  linkConvert(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LinkConvertDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.firstTimerConvertService.link(
+      id,
+      dto.convertId,
+      admin.member.id,
+    );
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Post('first-timers/:id/dismiss-convert')
+  dismissConvert(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LinkConvertDto,
+  ) {
+    return this.firstTimerConvertService.dismiss(id, dto.convertId);
+  }
+
+  @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)
+  @Delete('first-timers/:id/link-convert')
+  unlinkConvert(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.firstTimerConvertService.unlink(id, admin.member.id);
   }
 
   @RequiresPermission(AdminPermission.FOLLOW_UP_WRITE)

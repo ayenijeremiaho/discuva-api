@@ -12,6 +12,8 @@ import { SundaySchoolAttendanceStatus } from '../../sunday-school/enums/sunday-s
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { ChildGuardian } from '../../children-church/entity/child-guardian.entity';
 import { ChildCheckIn } from '../../children-church/entity/child-check-in.entity';
+import { Convert } from '../../evangelism/entity/convert.entity';
+import { ConvertFollowUpLog } from '../../evangelism/entity/convert-follow-up-log.entity';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
@@ -47,6 +49,8 @@ const childCheckInQbMock = {
 const mockChildCheckInRepo = {
   createQueryBuilder: jest.fn().mockReturnValue(childCheckInQbMock),
 };
+const mockConvertRepo = { findOne: jest.fn().mockResolvedValue(null) };
+const mockConvertLogRepo = { find: jest.fn().mockResolvedValue([]) };
 
 const baseMember = {
   id: 'member-1',
@@ -69,6 +73,8 @@ describe('MemberTimelineService', () => {
     attendanceQbMock.getCount.mockResolvedValue(0);
     mockChildGuardianRepo.find.mockResolvedValue([]);
     childCheckInQbMock.getCount.mockResolvedValue(0);
+    mockConvertRepo.findOne.mockResolvedValue(null);
+    mockConvertLogRepo.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -93,6 +99,11 @@ describe('MemberTimelineService', () => {
         {
           provide: getRepositoryToken(ChildCheckIn),
           useValue: mockChildCheckInRepo,
+        },
+        { provide: getRepositoryToken(Convert), useValue: mockConvertRepo },
+        {
+          provide: getRepositoryToken(ConvertFollowUpLog),
+          useValue: mockConvertLogRepo,
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: FollowUpService, useValue: mockFollowUpService },
@@ -392,6 +403,119 @@ describe('MemberTimelineService', () => {
         { ids: ['guardian-1', 'guardian-2'] },
       );
       expect(childrenChurchDropOffs).toBe(5);
+    });
+  });
+
+  describe('outreach journey', () => {
+    it('adds met-on-outreach, status and evangelism follow-up events without counting them as visits', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
+      mockFollowUpService.getFirstTimerByConvertedMemberId.mockResolvedValueOnce(
+        {
+          id: 'ft-1',
+          createdAt: new Date('2024-01-20T10:00:00Z'),
+          visitedEvent: { name: 'Sunday Service' },
+          visits: [],
+          convertedAt: new Date('2024-02-01T10:00:00Z'),
+        },
+      );
+      mockConvertRepo.findOne.mockResolvedValueOnce({
+        id: 'convert-1',
+        createdAt: new Date('2024-01-02T10:00:00Z'),
+        onboardedByName: 'Ada L',
+        firstTimerLinkedAt: new Date('2024-01-20T10:00:00Z'),
+        outreach: {
+          title: 'Market outreach',
+          team: [
+            { firstname: 'Ada', lastname: 'L' },
+            { firstname: 'Grace', lastname: 'H' },
+          ],
+        },
+      });
+      mockConvertLogRepo.find.mockResolvedValueOnce([
+        {
+          contactedAt: new Date('2024-01-05T10:00:00Z'),
+          loggedByName: 'Ada L',
+        },
+        {
+          contactedAt: new Date('2024-01-12T10:00:00Z'),
+          loggedByName: 'Grace H',
+        },
+        {
+          contactedAt: new Date('2024-01-20T10:00:00Z'),
+          loggedByName: 'Follow-Up',
+        },
+      ]);
+      mockAuditLogService.findAll.mockImplementation((_p, _l, filters) =>
+        Promise.resolve({
+          data:
+            filters?.targetId === 'convert-1'
+              ? [
+                  {
+                    action: 'CONVERT_STATUS_UPDATED',
+                    createdAt: new Date('2024-01-03T10:00:00Z'),
+                    metadata: { status: 'SAVED' },
+                  },
+                  {
+                    action: 'CONVERT_STATUS_UPDATED',
+                    createdAt: new Date('2024-01-04T10:00:00Z'),
+                    metadata: { status: 'UNSAVED' },
+                  },
+                ]
+              : [],
+        }),
+      );
+
+      const result = await service.getTimeline('member-1');
+
+      expect(mockConvertRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [
+            { member: { id: 'member-1' } },
+            { firstTimer: { id: 'ft-1' } },
+          ],
+        }),
+      );
+      const outreach = result.events.filter((e) =>
+        [
+          MemberTimelineEventType.MET_ON_OUTREACH,
+          MemberTimelineEventType.CONVERT_STATUS_CHANGED,
+          MemberTimelineEventType.EVANGELISM_FOLLOW_UP,
+        ].includes(e.type),
+      );
+      expect(outreach).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: MemberTimelineEventType.MET_ON_OUTREACH,
+            description: 'Market outreach · with Ada L, Grace H',
+          }),
+          expect.objectContaining({
+            type: MemberTimelineEventType.CONVERT_STATUS_CHANGED,
+            title: 'Saved',
+          }),
+          expect.objectContaining({
+            type: MemberTimelineEventType.EVANGELISM_FOLLOW_UP,
+            description: '2 contacts by Ada L, Grace H',
+            occurredAt: '2024-01-12T10:00:00.000Z',
+          }),
+        ]),
+      );
+      expect(outreach).toHaveLength(3);
+      expect(result.serviceVisitCount).toBe(1);
+    });
+
+    it('adds nothing when the member was never a convert', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce(baseMember);
+
+      const result = await service.getTimeline('member-1');
+
+      expect(mockConvertRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { member: { id: 'member-1' } } }),
+      );
+      expect(
+        result.events.some(
+          (e) => e.type === MemberTimelineEventType.MET_ON_OUTREACH,
+        ),
+      ).toBe(false);
     });
   });
 });

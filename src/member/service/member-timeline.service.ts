@@ -18,6 +18,8 @@ import { Attendance } from '../../attendance/entity/attendance.entity';
 import { AttendanceStatusEnum } from '../../attendance/enums/check-in.enum';
 import { ChildGuardian } from '../../children-church/entity/child-guardian.entity';
 import { ChildCheckIn } from '../../children-church/entity/child-check-in.entity';
+import { Convert } from '../../evangelism/entity/convert.entity';
+import { ConvertFollowUpLog } from '../../evangelism/entity/convert-follow-up-log.entity';
 
 export interface MemberTimeline {
   events: MemberTimelineEvent[];
@@ -42,6 +44,11 @@ export interface MemberTimeline {
 // belong on a "digital footprint" — noisy ones like MEMBER_UPDATED,
 // MEMBER_LOGIN, or the generic WORKER_PROFILE_UPDATED (fires for any
 // profile field edit, no clean before/after) are deliberately left out.
+const CONVERT_STATUS_TITLES: Record<string, string> = {
+  SAVED: 'Saved',
+  UNDERGOING_DISCIPLESHIP: 'Started Discipleship',
+};
+
 const MILESTONE_ACTIONS: AuditAction[] = [
   'MEMBER_ACTIVATED',
   'MEMBER_DEACTIVATED',
@@ -70,6 +77,10 @@ export class MemberTimelineService {
     private readonly childGuardianRepo: Repository<ChildGuardian>,
     @InjectRepository(ChildCheckIn)
     private readonly childCheckInRepo: Repository<ChildCheckIn>,
+    @InjectRepository(Convert)
+    private readonly convertRepo: Repository<Convert>,
+    @InjectRepository(ConvertFollowUpLog)
+    private readonly convertLogRepo: Repository<ConvertFollowUpLog>,
     private readonly auditLogService: AuditLogService,
     private readonly followUpService: FollowUpService,
   ) {}
@@ -124,6 +135,8 @@ export class MemberTimelineService {
         ).toISOString(),
       });
     }
+
+    events.push(...(await this.outreachEvents(memberId, firstTimer?.id)));
 
     const { data: logs } = await this.auditLogService.findAll(1, 200, {
       targetId: memberId,
@@ -262,6 +275,78 @@ export class MemberTimelineService {
       isTraineeNow: member.workerProfile?.isTrainee ?? false,
       childrenChurchDropOffs,
     };
+  }
+
+  // The evangelism part of the journey: met on outreach, came to faith, followed up — before they ever visited.
+  private async outreachEvents(
+    memberId: string,
+    firstTimerId?: string,
+  ): Promise<MemberTimelineEvent[]> {
+    const convert = await this.convertRepo.findOne({
+      where: firstTimerId
+        ? [{ member: { id: memberId } }, { firstTimer: { id: firstTimerId } }]
+        : { member: { id: memberId } },
+      relations: ['outreach', 'outreach.team'],
+    });
+    if (!convert) return [];
+
+    const team = (convert.outreach?.team ?? [])
+      .map((m) => `${m.firstname} ${m.lastname}`)
+      .join(', ');
+    const events: MemberTimelineEvent[] = [
+      {
+        type: MemberTimelineEventType.MET_ON_OUTREACH,
+        title: 'Met on Outreach',
+        description:
+          [
+            convert.outreach?.title,
+            team ? `with ${team}` : convert.onboardedByName,
+          ]
+            .filter(Boolean)
+            .join(' · ') || null,
+        occurredAt: convert.createdAt.toISOString(),
+      },
+    ];
+
+    const [{ data: statusLogs }, contacts] = await Promise.all([
+      this.auditLogService.findAll(1, 50, {
+        targetId: convert.id,
+        action: 'CONVERT_STATUS_UPDATED',
+      }),
+      this.convertLogRepo.find({
+        where: { convert: { id: convert.id } },
+        order: { contactedAt: 'ASC' },
+      }),
+    ]);
+    for (const log of statusLogs) {
+      const status = (log.metadata as { status?: string } | null)?.status;
+      const title = CONVERT_STATUS_TITLES[status ?? ''];
+      if (!title) continue;
+      events.push({
+        type: MemberTimelineEventType.CONVERT_STATUS_CHANGED,
+        title,
+        description: null,
+        occurredAt: new Date(log.createdAt).toISOString(),
+      });
+    }
+
+    // Evangelism contacts only — the hand-over to Follow-Up is the first visit itself.
+    const cutoff = convert.firstTimerLinkedAt?.getTime() ?? Infinity;
+    const beforeVisit = contacts.filter(
+      (c) => new Date(c.contactedAt).getTime() < cutoff,
+    );
+    if (beforeVisit.length) {
+      const names = [...new Set(beforeVisit.map((c) => c.loggedByName))];
+      events.push({
+        type: MemberTimelineEventType.EVANGELISM_FOLLOW_UP,
+        title: 'Followed Up After Outreach',
+        description: `${beforeVisit.length} contact${beforeVisit.length === 1 ? '' : 's'} by ${names.join(', ')}`,
+        occurredAt: new Date(
+          beforeVisit[beforeVisit.length - 1].contactedAt,
+        ).toISOString(),
+      });
+    }
+    return events;
   }
 
   private toTimelineEvent(

@@ -12,6 +12,14 @@
   `first_timer_id` and post-conversion via `member_id`) also becomes its own `SUNDAY_SCHOOL_VISIT` event, title
   "Attended Sunday School", `description` the class name, `occurredAt` the session's `sessionDate` — so the count is
   never a bare number with no dated entries backing it; every visit it includes is individually visible in `events`.
+- **Outreach journey** — if the member was an evangelism `Convert` (`converts.member_id = memberId`, or
+  `converts.first_timer_id` = the member's first-timer), the timeline opens with: `MET_ON_OUTREACH` ("Met on
+  Outreach", outreach title + team, at the convert's `createdAt`); `CONVERT_STATUS_CHANGED` from that convert's
+  `CONVERT_STATUS_UPDATED` audit rows (looked up by `targetId = convert.id`; `SAVED` → "Saved",
+  `UNDERGOING_DISCIPLESHIP` → "Started Discipleship", `UNSAVED` skipped); and one `EVANGELISM_FOLLOW_UP` event
+  ("Followed Up After Outreach", "N contacts by …", at the last evangelism contact before Follow-Up took over).
+  `Convert`/`ConvertFollowUpLog` are registered read-only in `MemberModule` (importing `EvangelismModule` would be
+  circular). None of these count toward the visit counts.
 
 `isTraineeNow` is a live status read straight off `member.workerProfile?.isTrainee` (not derived from `events`) — a
 current-state badge for "is this person in training right now," separate from the dated `TRAINEE_STATUS_CHANGED`
@@ -19,9 +27,8 @@ history entries. `false` for a non-worker.
 
 `childrenChurchDropOffs` is a separate rollup, not part of `serviceVisitCount`/`sundaySchoolVisitCount` — see
 §Children Church Module for what it counts and why it's kept apart from the member's own visit counts.
-- **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` and the evangelism `Convert` pipeline's
-  `CONVERT_LINKED_TO_MEMBER` are not yet included — those audit entries target the department/convert row (not the
-  member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
+- **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` are not yet included — those audit entries target the
+  department row (not the member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
   it doesn't have today. A worker whose promotion predates audit logging (legacy data, bulk imports) falls back to
   `WorkerProfile.createdAt` for a "Became a Worker" event so they aren't silently missing from the timeline.
 
@@ -4299,6 +4306,7 @@ dedicated host).
 | `SUNDAY_SCHOOL_QA` | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` |
 | `SUNDAY_SCHOOL_ATTENDANCE` | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` (push-only: check-in open, weekly absentees) |
 | `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
+| `EVANGELISM` | `EMAIL_EVANGELISM_ENABLED` | `true` (push-only: added to an outreach team, convert(s) assigned) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -5176,7 +5184,7 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 
 **Editing a first-timer's own details (`PATCH /admin/follow-up/first-timers/:id`, admin; `PATCH /follow-up/first-timers/:id`, worker; both `UpdateFirstTimerDto`):** for correcting a record after the fact — e.g. an admin forgot to set the event visited, or a Sunday School check-in only captured partial info. All fields optional/independent (`firstname`, `lastname`, `phone`, `email`, `wantsToJoinChurch`, `wantsToJoinWorkforce`, `enjoyedAboutChurch`, `notes`, `visitedEventId`); `source` is deliberately **not** editable here — it's forced server-side at creation to stay non-spoofable, and changing it after the fact would corrupt source attribution in reports. `convertedAt`/`inviteSentAt` have their own dedicated endpoints. `FollowUpService.updateFirstTimer()` reloads the record with its `visitedEvent` relation before returning, so the response reflects the current event name, not just the id that was set. The worker variant (`updateFirstTimerByWorker`) is a thin wrapper adding `assertWorkerInFollowUpDept` first — same shape as `getFirstTimerDetailForWorker` — and isn't scoped to only first-timers on the caller's own tasks, matching `createFirstTimerByWorker`'s existing department-wide (not just own-task) access. Backs an inline "Edit Details" toggle on the member app's task detail screen, using the same public today-first event picker (`GET /follow-up/public/events`) as the self-onboarding form, since it's `@Public()` and works fine from an authenticated session too.
 
-**First-timer visit history (`GET /admin/follow-up/first-timers/:id`, admin; `GET /follow-up/first-timers/:id`, worker):** Returns `{ firstTimer, visitCount, timeline }` — `FollowUpService.getFirstTimerDetail()` (worker variant wraps it with `assertWorkerInFollowUpDept` first). `timeline` merges three sources into one dated list, each entry `{ source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL', label, occurredAt, notes? }`: the first-timer's own `createdAt` as `INITIAL_VISIT`; each `FirstTimerVisit` row as `LOGGED_VISIT`; and each `SundaySchoolAttendance` row linked via `first_timer_id` as `SUNDAY_SCHOOL` (queried directly — `SundaySchoolAttendance` is registered read-only in `FollowUpModule` rather than importing `SundaySchoolModule`, which would be circular since it already imports `FollowUpModule`). `visitCount` is simply `timeline.length`. The admin route is declared *after* `first-timers/pipeline` in `FollowUpAdminController` so that static path keeps matching first. `getFirstTimers` (the list endpoint) carries a lighter version of the same idea: `loadRelationCountAndMap('ft.visitCount', 'ft.visits')` for the logged-visit count, then one batched `SundaySchoolAttendance` count query (`first_timer_id IN (:...ids)`, grouped) across the whole page — never per-row — plus `+1` per row for the initial visit.
+**First-timer visit history (`GET /admin/follow-up/first-timers/:id`, admin; `GET /follow-up/first-timers/:id`, worker):** Returns `{ firstTimer, visitCount, timeline, convertMatches, linkedConvert }` — `FollowUpService.getFirstTimerDetail()` (worker variant wraps it with `assertWorkerInFollowUpDept` first). `timeline` merges three sources into one dated list, each entry `{ source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL' | 'OUTREACH_MET' | 'EVANGELISM_FOLLOW_UP', label, occurredAt, notes? }`: the first-timer's own `createdAt` as `INITIAL_VISIT`; each `FirstTimerVisit` row as `LOGGED_VISIT`; and each `SundaySchoolAttendance` row linked via `first_timer_id` as `SUNDAY_SCHOOL` (queried directly — `SundaySchoolAttendance` is registered read-only in `FollowUpModule` rather than importing `SundaySchoolModule`, which would be circular since it already imports `FollowUpModule`). `visitCount` counts only the three visit sources — the outreach entries (see "Outreach convert → first-timer" below) are history, not visits. The admin route is declared *after* `first-timers/pipeline` in `FollowUpAdminController` so that static path keeps matching first. `getFirstTimers` (the list endpoint) carries a lighter version of the same idea: `loadRelationCountAndMap('ft.visitCount', 'ft.visits')` for the logged-visit count, then one batched `SundaySchoolAttendance` count query (`first_timer_id IN (:...ids)`, grouped) across the whole page — never per-row — plus `+1` per row for the initial visit.
 
 **Post-event jobs (Bull queue `follow-up`):**
 
@@ -5204,7 +5212,15 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Membership invitation:** `POST /admin/follow-up/first-timers/:id/invite-to-membership` (requires `FOLLOW_UP_WRITE`) queues a personalised invitation email to the first-timer. Returns `{ queued: true }` on success or `{ queued: false }` if the invitation was already sent (`inviteSentAt` is set). Throws `404` if the first-timer is not found or `400` if no email address is on record. Sets `FirstTimer.inviteSentAt` on first send to prevent duplicate emails.
 
-**First-timer conversion:** `PATCH /admin/follow-up/first-timers/:id/mark-converted` (requires `FOLLOW_UP_WRITE`) marks a first-timer as having joined the congregation. Accepts an optional `memberId` (UUID) body field to link the first-timer to their new `Member` record. Sets `FirstTimer.convertedAt` and optionally `FirstTimer.convertedMember`.
+**First-timer conversion:** `PATCH /admin/follow-up/first-timers/:id/mark-converted` (requires `FOLLOW_UP_WRITE`) marks a first-timer as having joined the congregation. Accepts an optional `memberId` (UUID) body field to link the first-timer to their new `Member` record. Sets `FirstTimer.convertedAt` and optionally `FirstTimer.convertedMember`. When a `memberId` is given and an outreach convert is linked to this first-timer, that convert is marked joined too (`member`/`linkedAt`, audit `CONVERT_LINKED_TO_MEMBER` with `metadata.via = 'first_timer'`) — the church records joining once. The reverse also holds: Evangelism's `PATCH evangelism/converts/admin/:id/link-member` sets `convertedAt`/`convertedMember` on the linked first-timer if it isn't converted yet.
+
+**Outreach convert → first-timer (`FirstTimerConvertService`):** someone met on outreach (an evangelism `Convert`) who later visits is registered as a new `FirstTimer`; Follow-Up confirms whether the two are the same person — nothing links automatically.
+- **Suggestions** — `convertMatches` on the first-timer detail: up to 5 converts not yet linked to a first-timer or member, not in `first_timers.dismissed_convert_ids`, whose E.164 `phone` equals the first-timer's, or (when the convert has no phone) whose `name` equals `firstname lastname` case-insensitively; each carries `matchedOn: 'phone' | 'name'`. The list endpoint adds `hasConvertMatch` per row from one batched query for the page.
+- **Confirm** — `POST /follow-up/first-timers/:id/link-convert` (Follow-Up dept worker) / `POST /admin/follow-up/first-timers/:id/link-convert` (`FOLLOW_UP_WRITE`), body `{ convertId }`. `409` if the convert is already linked or already a member, or the first-timer already has a convert (`converts.first_timer_id` is unique). Sets `converts.first_timer_id`/`first_timer_linked_at`, clears the convert's `assignedTo` (the `FollowUpTask` now owns the follow-up), logs a `ConvertFollowUpLog` "Visited church as a first-timer…", audits `CONVERT_LINKED_TO_FIRST_TIMER`, flushes both report caches and pushes `CONVERT_VISITED_CHURCH` to the convert's previous assignee, onboarder and outreach team (not the actor).
+- **Dismiss** — `POST …/first-timers/:id/dismiss-convert` `{ convertId }` appends to `dismissed_convert_ids` so it isn't suggested again.
+- **Unlink** — `DELETE …/first-timers/:id/link-convert` undoes a wrong match; the convert returns to Evangelism unassigned. Audit `CONVERT_UNLINKED_FROM_FIRST_TIMER`.
+- **Timeline** — once linked, the first-timer detail `timeline` starts with `OUTREACH_MET` (outreach title, team in `notes`, at the convert's `createdAt`) and one `EVANGELISM_FOLLOW_UP` per evangelism contact logged before the hand-over.
+- `Convert`, `ConvertFollowUpLog` and `Member` are registered in `FollowUpModule` directly — importing `EvangelismModule` would be circular (Evangelism → Member → FollowUp).
 
 **Admin task update:** `PATCH /admin/follow-up/tasks/:id` (requires `FOLLOW_UP_WRITE`) lets an admin update any task's `status`, `outcome`, `outcomeNotes`, `dueDate`, and add a `noteContent` (with optional `contactMethod`) note. Unlike the worker endpoint, this is not restricted by assignment. Also sets `lastActivityAt`.
 
@@ -5231,42 +5247,127 @@ Tracks converts from initial outreach contact through to becoming a church membe
 module above, which is scoped to first-timers who visited a service. A convert here is not assumed to be an
 existing `Member`; they may just be a name and phone number an outreach worker captured in the field.
 
-**Entities:** `Convert` (`converts`) — `name`, `phone` (nullable), `notes` (nullable), `status`
-(`UNSAVED` \| `SAVED` \| `UNDERGOING_DISCIPLESHIP`, default `UNSAVED`), `onboardedBy`/`onboardedByName` (who
-uploaded them, snapshotted), `assignedTo` (ManyToOne → `WorkerProfile`, nullable `SET NULL` — who is currently
-following up, mirrors `FollowUpTask.assignedTo`), `member`/`linkedAt` (set once the convert becomes an actual
-`Member`, mirrors `first_timers.converted_member_id`/`converted_at`), `lastContactedAt` (denormalized, updated on
-every new follow-up log). `ConvertFollowUpLog` (`convert_follow_up_logs`) — one row per contact attempt: `convert`
-(CASCADE), `loggedBy`/`loggedByName`, `note` (nullable), `contactedAt` — mirrors the `FirstTimerVisit` idiom.
+**Entities:**
+- `Outreach` (`outreaches`) — one outing: `title`/`location` (nullable), `outreachDate` (`date`, defaults to the
+  church's today via `DateService.today()`), `createdBy` (SET NULL; also exposed as `createdById`) / `createdByName` (snapshot), and `team`
+  (ManyToMany → `Member` via `outreach_team(outreach_id, member_id)`, both CASCADE). Evangelism is usually done in
+  twos or threes, so the team is recorded once per outing rather than re-tagged on every convert. The creator is
+  always on the team and can't be removed from it.
+- `Convert` (`converts`) — `name`, `phone` (nullable, E.164, indexed for the duplicate check), `notes` (nullable),
+  `status` (`UNSAVED` \| `SAVED` \| `UNDERGOING_DISCIPLESHIP`, default `UNSAVED`), `onboardedBy`/`onboardedByName`
+  (who added them, snapshotted), `outreach` (nullable, SET NULL — null means the adder went alone), `assignedTo`
+  (ManyToOne → `WorkerProfile`, nullable SET NULL — who owns the follow-up), `member`/`linkedAt` (set once the
+  convert becomes an actual `Member`, mirrors `first_timers.converted_member_id`/`converted_at`),
+  `firstTimer`/`firstTimerLinkedAt` (set when Follow-Up confirms the convert visited church — see the Follow-Up
+  module's "Outreach convert → first-timer"; unique, SET NULL), `lastContactedAt`
+  (denormalized, updated on every new follow-up log).
+- `ConvertFollowUpLog` (`convert_follow_up_logs`) — one row per contact attempt: `convert` (CASCADE),
+  `loggedBy`/`loggedByName`, `note` (nullable), `contactedAt` — mirrors the `FirstTimerVisit` idiom.
+
+A convert's **outreach team** is its outreach's `team` plus `onboardedBy`.
+
+**Journey stage** (`stage` on every list row): `JOINED` (linked to a member) → `WITH_FOLLOW_UP` (visited church;
+Follow-Up owns the follow-up) → `FOLLOWED_UP` (any contact logged) → `MET`. Once `WITH_FOLLOW_UP`, the convert is
+read-only for Evangelism: follow-up logging and status changes return `409`
+(`assertCanActOnConvert(…, { write: true })`; history uses `write: false`), admin reassign returns `409`, bulk
+reassign skips it, `isOverdue` is `false`, and it's excluded from every "open" count (`member_id IS NULL AND
+first_timer_id IS NULL`): the `overdue` filter, auto-assign round-robin load, `searchWorkers.openAssigned`, bulk
+"move all open", and the report's `needsFollowUp`/`unassigned`/`assignedOpen`. List filter
+`stage=open|with_follow_up|joined`. The converts CSV gains a Stage column.
+
+**Settings** (`EvangelismSettingsService`, stored as the `church_settings` row `evangelism:settings` — same
+pattern as `SundaySchoolSettingsService`, cached 5 min):
+- `overdueDays` (1–90, default 7) — a convert not yet linked to a member and not contacted for longer than this
+  (or never) "needs follow-up". Used by the `isOverdue` flag, the `overdue` list filter and the report.
+- `autoAssign` (default `true`) — off leaves new converts unassigned for an admin to assign.
 
 **Access model:**
-- **Uploading a convert** (`POST evangelism/converts`) is open to any authenticated worker — deliberately as
-  simple as possible (only `name` is required).
-- **Team inbox and follow-up logging** (`GET evangelism/converts/team`, `POST
-  evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`) require the caller to be a worker
-  whose primary or secondary department has the `MANAGE_EVANGELISM_CONVERTS` capability — enforced by
-  `ConvertService.assertIsEvangelismDeptWorker()`, a direct copy of `assertIsAdminDeptWorker()`
-  (`service-programme/service/service-session.service.ts`) with the capability swapped.
-- **Admin portal** (`AdminGuard` + new `EVANGELISM_READ`/`EVANGELISM_WRITE` permissions) — cross-member view of
-  every convert, plus `PATCH evangelism/converts/admin/:id/reassign` (validates the target `workerProfileId`
-  resolves to an Evangelism-department worker, else `400`) and `PATCH
-  evangelism/converts/admin/:id/link-member` (links a convert to a real `Member` once they join).
+- **Adding a convert / starting an outreach** — any `WORKER` (`RolesGuard`). Only `name` is required for a convert.
+- **Acting on a convert** (`POST :id/follow-up`, `PATCH :id/status`, `GET :id/follow-up-history`) —
+  `ConvertService.assertCanActOnConvert()`: the onboarder, anyone on its outreach team, the assignee, or a worker
+  whose primary or secondary department has `MANAGE_EVANGELISM_CONVERTS`. Anyone else gets `403`.
+- **Listing** — `GET evangelism/converts?scope=mine` (default) is open to any worker and returns converts where
+  the caller is the onboarder, on the outreach team, or the assignee. `scope=team` returns every convert and
+  requires the `MANAGE_EVANGELISM_CONVERTS` capability. Each row carries `myRoles` (`onboarder` \| `team` \|
+  `assignee`) for the caller. This replaces the old `GET evangelism/converts/team`.
+- **Admin portal** — `AdminGuard` + `EVANGELISM_READ`/`EVANGELISM_WRITE`. Admins can assign to **any active
+  worker** (`WorkerProfile` and `Member` both `ACTIVE`, else `400`), not only the Evangelism department.
 
-**Follow-up staleness (no cron):** `GET evangelism/converts/team` computes `daysSinceLastContact` and `isOverdue`
-per convert on every read (overdue = no contact in the last 7 days, and not yet linked to a member) — a UI
-indicator only, not a background job or notification.
+**Auto-assignment on create** (`ConvertService.pickAssignee`, skipped when `autoAssign` is off): the adder if
+they have the capability, else the first outreach teammate who does, else round-robin to the active
+capability worker with the fewest open (not-yet-linked) converts — the same shape as
+`FollowUpService.pickRoundRobinAssignee`. No candidate → unassigned.
 
-**Follow-up history:** every `ConvertFollowUpLog` row written by `POST evangelism/converts/:id/follow-up` is
-readable back via `GET evangelism/converts/:id/follow-up-history` (mobile, Evangelism-dept worker) and `GET
-evangelism/converts/admin/:id/follow-up-history` (admin, `EVANGELISM_READ`) — paginated, newest first. Both share
-`ConvertService.getFollowUpHistory()`.
+**Duplicate check:** when `phone` is given and `allowDuplicate` isn't `true`, an existing convert with the same
+E.164 phone returns `409 { code: 'CONVERT_DUPLICATE', existing: { id, name, onboardedByName, createdAt } }`. The
+client then offers `POST evangelism/converts/:id/met-again` (any worker; logs a follow-up prefixed "Met again")
+or a retry with `allowDuplicate: true`.
 
-**Routes (mobile, worker/team):** `POST evangelism/converts`, `GET evangelism/converts/team?status=&page=&limit=`,
-`POST evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`, `GET
-evangelism/converts/:id/follow-up-history?page=&limit=`
-**Routes (admin portal):** `GET evangelism/converts/admin?status=&page=&limit=`, `PATCH
-evangelism/converts/admin/:id/reassign`, `PATCH evangelism/converts/admin/:id/link-member`, `GET
-evangelism/converts/admin/:id/follow-up-history?page=&limit=`
+**List filters** (shared by the member list, the admin list and the converts export via
+`ConvertService.buildConvertQuery`): `status`, `assignedTo` (`workerProfileId` \| `unassigned` \| `me` — `me`
+is member-only, `400` in the admin portal), `overdue=true`, `outreachId`, `search` (name or phone, ILIKE),
+`from`/`to` (created date), `page`/`limit` (max 100). Ids are paged with `DISTINCT` first, then loaded with
+relations, because the outreach-team join is many-to-many. Team members are returned as
+`{ id, firstname, lastname }` only.
+
+**Admin management:**
+- `PATCH converts/admin/:id/reassign` `{ workerProfileId }`, `PATCH converts/admin/:id/unassign`.
+- `PATCH converts/admin/bulk-reassign` `{ toWorkerProfileId, convertIds? (≤500) | fromWorkerProfileId? }` —
+  exactly one source; `fromWorkerProfileId` moves all of that worker's open converts (e.g. when they step down).
+  One `UPDATE`; returns `{ updated }`.
+- `PATCH converts/admin/:id/outreach` `{ outreachId | null }` — re-file or detach a convert.
+- `PATCH outreaches/admin/:id/team` `{ teamMemberIds }` — fix an outreach team (members can do the same from the
+  app via `PATCH outreaches/:id/team` if they're on it).
+- `GET outreaches/admin?from=&to=` — up to 200 outreaches with their teams, for filters and pickers.
+- `GET converts/admin/workers?q=` / `GET evangelism/workers?q=` — one `OutreachService.searchWorkers` method
+  behind both: up to 20 active workers as `{ memberId, workerProfileId, firstname, lastname, isEvangelism,
+  openAssigned }`, Evangelism workers first; the member route excludes the caller.
+
+**Report** (`GET evangelism/report?from=&to=`, `EVANGELISM_READ`; default last 90 days; cached 5 min under
+`evangelism:report:*`, flushed on every convert/outreach/follow-up write):
+- `summary` — `added`, `byStatus` (of converts added in range), `visitedChurch` (`first_timer_linked_at` in range),
+  `joinedChurch` (`linked_at` in range),
+  `followUpsLogged`, `outreaches` (in range); `needsFollowUp` and `unassigned` are current, not range-bound.
+- `trend` — `[{ period, added, visited, joined }]`, weekly buckets up to 26 weeks, monthly beyond.
+- `byWorker` — `outreaches` (team memberships in range), `broughtIn` (converts in range where they were the adder
+  or on the team, counted once), `joinedChurch` (of those, now linked), `followUpsLogged` (in range);
+  `assignedOpen`/`overdue` are current.
+- `byOutreach` — date, title, location, `teamSize`, `converts`, `saved`, `discipleship`, `visitedChurch` (linked to a
+  first-timer or already a member), `joinedChurch`.
+
+**Export** (`GET evangelism/export?type=converts|workers|outreaches&…`, `EVANGELISM_READ` +
+`@RequiresPlan(BULK_EXPORT)`): one CSV route rather than a `format` flag per endpoint, because `PlanGuard` gates
+per route. `converts` takes the list filters (unpaged, capped at 5,000 rows); `workers`/`outreaches` take
+`from`/`to` and reuse the report rows. Cells are quoted; free text starting with `= + - @` (other than a plain
+number such as an E.164 phone) is prefixed with `'` to stop spreadsheet formula injection.
+
+**Notifications** — push only, category `EVANGELISM` (`EMAIL_EVANGELISM_ENABLED`, default `true`; per-church
+switch in notification settings), never sent to the actor:
+- `OUTREACH_TEAM_ADDED` — to members added when an outreach is created or its team is edited (only newly added).
+- `CONVERT_ASSIGNED` — to the assignee on auto-assign (unless they added it) and on admin reassign.
+- `CONVERTS_BULK_ASSIGNED` — one push with the count to the target of a bulk reassign.
+- `CONVERT_VISITED_CHURCH` — to the previous assignee, onboarder and outreach team when Follow-Up confirms the
+  convert came to church.
+
+**Audit actions:** `CONVERT_CREATED` (metadata `outreachId`, `assignedTo`), `CONVERT_STATUS_UPDATED`,
+`CONVERT_FOLLOW_UP_LOGGED`, `CONVERT_REASSIGNED`, `CONVERT_UNASSIGNED`, `CONVERTS_BULK_REASSIGNED`,
+`CONVERT_OUTREACH_CHANGED`, `CONVERT_LINKED_TO_MEMBER`, `OUTREACH_CREATED`, `OUTREACH_TEAM_UPDATED`,
+`EVANGELISM_SETTINGS_UPDATED`, plus `CONVERT_LINKED_TO_FIRST_TIMER`/`CONVERT_UNLINKED_FROM_FIRST_TIMER` from
+Follow-Up. Admin actions log the admin's member id as the actor.
+
+**Routes (member app, workers):** `POST evangelism/converts`, `POST evangelism/converts/:id/met-again`,
+`GET evangelism/converts?scope=&status=&assignedTo=&overdue=&outreachId=&search=&from=&to=&page=&limit=`,
+`POST evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`,
+`GET evangelism/converts/:id/follow-up-history?page=&limit=`, `GET evangelism/workers?q=`,
+`POST evangelism/outreaches`, `GET evangelism/outreaches/recent` (outreaches the caller is on, last 14 days —
+the app pre-selects today's so teammates on different phones add into the same outreach),
+`PATCH evangelism/outreaches/:id/team`
+**Routes (admin portal):** `GET evangelism/converts/admin?…filters…`, `GET evangelism/converts/admin/workers?q=`,
+`PATCH evangelism/converts/admin/bulk-reassign`, `PATCH evangelism/converts/admin/:id/reassign`,
+`PATCH evangelism/converts/admin/:id/unassign`, `PATCH evangelism/converts/admin/:id/outreach`,
+`PATCH evangelism/converts/admin/:id/link-member`, `GET evangelism/converts/admin/:id/follow-up-history`,
+`GET evangelism/outreaches/admin?from=&to=`, `PATCH evangelism/outreaches/admin/:id/team`,
+`GET|PATCH evangelism/settings/admin`, `GET evangelism/report?from=&to=`, `GET evangelism/export?type=…`
 
 ### Sermon Module
 
@@ -6708,6 +6809,9 @@ outside the requested `?months=` window).
 | GET    | /attendances/department/search-members?q=                 | JwtAuthGuard (Admin-department worker)                        | Narrow member lookup (≤10 results, id/firstname/lastname/role only) backing the mobile check-in picker         |
 | POST   | /attendances/online-confirm                                | JwtAuthGuard (any authenticated member)                       | Confirm online attendance for an event (updates ABSENT → ATTENDED_ONLINE within window)                       |
 | POST   | /follow-up/first-timers                                    | WORKER (FOLLOW_UP dept)                                       | Register a first-timer (auto-creates FollowUpTask via round-robin)                                            |
+| POST   | /follow-up/first-timers/:id/link-convert                   | WORKER (FOLLOW_UP dept)                                       | Confirm a suggested outreach convert `{ convertId }`                                                          |
+| POST   | /follow-up/first-timers/:id/dismiss-convert                | WORKER (FOLLOW_UP dept)                                       | Dismiss a suggested outreach convert `{ convertId }`                                                          |
+| DELETE | /follow-up/first-timers/:id/link-convert                   | WORKER (FOLLOW_UP dept)                                       | Unlink the outreach convert                                                                                    |
 | GET    | /follow-up/tasks/mine                                      | WORKER (FOLLOW_UP dept)                                       | List follow-up tasks assigned to the caller                                                                   |
 | PATCH  | /follow-up/tasks/:id                                       | WORKER (FOLLOW_UP dept)                                       | Update task status/outcome/notes+contactMethod (caller must be the assignee); sets `lastActivityAt`           |
 | POST   | /follow-up/tasks/:id/notes                                 | WORKER (FOLLOW_UP dept)                                       | Add a note (with optional `contactMethod`) without changing task status; sets `lastActivityAt`                |
@@ -6720,18 +6824,35 @@ outside the requested `?months=` window).
 | PATCH  | /admin/follow-up/tasks/:id/reassign                        | AdminGuard (FOLLOW_UP_WRITE)                                  | Reassign a task to a different FOLLOW_UP-dept worker                                                          |
 | PATCH  | /admin/follow-up/tasks/bulk                                | AdminGuard (FOLLOW_UP_WRITE)                                  | Bulk update task statuses                                                                                     |
 | POST   | /admin/follow-up/first-timers/:id/invite-to-membership     | AdminGuard (FOLLOW_UP_WRITE)                                  | Queue membership invitation email. Returns `{ queued: true/false }`. Deduped by `inviteSentAt`.              |
-| PATCH  | /admin/follow-up/first-timers/:id/mark-converted           | AdminGuard (FOLLOW_UP_WRITE)                                  | Mark first-timer as converted; optional `{ memberId }` body links to their Member record                     |
+| PATCH  | /admin/follow-up/first-timers/:id/mark-converted           | AdminGuard (FOLLOW_UP_WRITE)                                  | Mark first-timer as converted; optional `{ memberId }` body links to their Member record (and marks a linked outreach convert joined) |
+| POST   | /admin/follow-up/first-timers/:id/link-convert             | AdminGuard (FOLLOW_UP_WRITE)                                  | Confirm a suggested outreach convert is this first-timer `{ convertId }`; Follow-Up takes over               |
+| POST   | /admin/follow-up/first-timers/:id/dismiss-convert          | AdminGuard (FOLLOW_UP_WRITE)                                  | "Not them" — stop suggesting `{ convertId }` for this first-timer                                              |
+| DELETE | /admin/follow-up/first-timers/:id/link-convert             | AdminGuard (FOLLOW_UP_WRITE)                                  | Undo a wrong outreach match; convert returns to Evangelism unassigned                                        |
 | PATCH  | /admin/follow-up/tasks/:id                                 | AdminGuard (FOLLOW_UP_WRITE)                                  | Admin update of any task: `status`, `outcome`, `outcomeNotes`, `dueDate`, `noteContent`, `contactMethod`     |
 | GET    | /admin/follow-up/report                                    | AdminGuard (FOLLOW_UP_READ)                                   | Pastoral report: first-timer totals, task stats, overdue count, conversion rate, by-worker, by-event         |
-| POST   | /evangelism/converts                                       | JwtAuthGuard (any worker)                                     | Upload a convert (only `name` required)                                                                       |
-| GET    | /evangelism/converts/team?status=&page=&limit=             | JwtAuthGuard (Evangelism-dept worker)                          | Cross-member browse with follow-up staleness fields (mobile)                                                  |
-| POST   | /evangelism/converts/:id/follow-up                         | JwtAuthGuard (Evangelism-dept worker)                          | Log a follow-up contact                                                                                       |
-| PATCH  | /evangelism/converts/:id/status                            | JwtAuthGuard (Evangelism-dept worker)                          | Update convert status                                                                                          |
-| GET    | /evangelism/converts/:id/follow-up-history?page=&limit=    | JwtAuthGuard (Evangelism-dept worker)                          | Full follow-up log for a convert, newest first (mobile)                                                       |
-| GET    | /evangelism/converts/admin?status=&page=&limit=            | AdminGuard (EVANGELISM_READ)                                   | Cross-member browse (admin portal)                                                                            |
-| PATCH  | /evangelism/converts/admin/:id/reassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Reassign follow-up to another Evangelism-dept worker                                                          |
+| POST   | /evangelism/converts                                       | WORKER                                                        | Add a convert (only `name` required); optional `outreachId`, `allowDuplicate`. 409 `CONVERT_DUPLICATE` on a known phone |
+| POST   | /evangelism/converts/:id/met-again                         | WORKER                                                        | Log a "Met again" follow-up on an existing convert (duplicate path)                                           |
+| GET    | /evangelism/converts?scope=mine\|team&…filters…            | JwtAuthGuard (`team` needs Evangelism capability)             | My converts (added / on the outreach team / assigned) or the whole team list, with staleness + `myRoles`      |
+| POST   | /evangelism/converts/:id/follow-up                         | Outreach team, assignee or Evangelism dept                    | Log a follow-up contact                                                                                       |
+| PATCH  | /evangelism/converts/:id/status                            | Outreach team, assignee or Evangelism dept                    | Update convert status                                                                                          |
+| GET    | /evangelism/converts/:id/follow-up-history?page=&limit=    | Outreach team, assignee or Evangelism dept                    | Full follow-up log for a convert, newest first (mobile)                                                       |
+| GET    | /evangelism/workers?q=                                     | WORKER                                                        | Active workers for team pickers (excludes caller)                                                             |
+| POST   | /evangelism/outreaches                                     | WORKER                                                        | Start an outreach `{ title?, location?, date?, teamMemberIds }`; creator always on the team                   |
+| GET    | /evangelism/outreaches/recent                              | WORKER                                                        | Outreaches the caller is on, last 14 days                                                                     |
+| PATCH  | /evangelism/outreaches/:id/team                            | WORKER (on the team)                                          | Replace the team (creator kept); pushes newly added members                                                    |
+| GET    | /evangelism/converts/admin?…filters…&stage=               | AdminGuard (EVANGELISM_READ)                                   | Cross-member browse (admin portal); `stage=open\|with_follow_up\|joined`                                     |
+| GET    | /evangelism/converts/admin/workers?q=                      | AdminGuard (EVANGELISM_READ)                                   | Active workers with Evangelism flag + open load, for assignee/team pickers                                    |
+| PATCH  | /evangelism/converts/admin/bulk-reassign                   | AdminGuard (EVANGELISM_WRITE)                                  | Move `convertIds` or all of `fromWorkerProfileId`'s open converts to `toWorkerProfileId`                      |
+| PATCH  | /evangelism/converts/admin/:id/reassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Assign follow-up to any active worker                                                                          |
+| PATCH  | /evangelism/converts/admin/:id/unassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Clear the assignee                                                                                             |
+| PATCH  | /evangelism/converts/admin/:id/outreach                    | AdminGuard (EVANGELISM_WRITE)                                  | Move a convert to another outreach, or `null` to detach                                                        |
 | PATCH  | /evangelism/converts/admin/:id/link-member                 | AdminGuard (EVANGELISM_WRITE)                                  | Link a convert to their new Member record                                                                     |
 | GET    | /evangelism/converts/admin/:id/follow-up-history?page=&limit= | AdminGuard (EVANGELISM_READ)                                | Full follow-up log for a convert, newest first (admin portal)                                                 |
+| GET    | /evangelism/outreaches/admin?from=&to=                     | AdminGuard (EVANGELISM_READ)                                   | Outreaches with teams (up to 200)                                                                              |
+| PATCH  | /evangelism/outreaches/admin/:id/team                      | AdminGuard (EVANGELISM_WRITE)                                  | Replace an outreach team                                                                                       |
+| GET/PATCH | /evangelism/settings/admin                              | AdminGuard (EVANGELISM_READ / _WRITE)                          | `overdueDays` (1–90), `autoAssign`                                                                             |
+| GET    | /evangelism/report?from=&to=                               | AdminGuard (EVANGELISM_READ)                                   | Summary, trend, per-worker and per-outreach report                                                             |
+| GET    | /evangelism/export?type=converts\|workers\|outreaches&…    | AdminGuard (EVANGELISM_READ) + plan BULK_EXPORT               | CSV export                                                                                                     |
 
 | POST   | /admin/sermons                                             | AdminGuard (SERMON_WRITE)                                     | Create a sermon archive entry — body: title, speakerName, date, description?, youtubeUrl?, mixlrUrl?, series?. 400 if neither youtubeUrl nor mixlrUrl is set. |
 | GET    | /admin/sermons?page=&limit=&series=                        | AdminGuard (SERMON_READ)                                      | Paginated list, newest first, optional exact `series` filter                                                   |
@@ -7562,6 +7683,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` | Sunday School question-asked / question-answered notifications |
 | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` | Sunday School check-in-open and weekly absentee pushes |
 | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
+| `EMAIL_EVANGELISM_ENABLED` | `true` | Evangelism outreach-team and convert-assignment pushes |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
@@ -12849,6 +12971,14 @@ not a dedicated history table:
   `first_timer_id` and post-conversion via `member_id`) also becomes its own `SUNDAY_SCHOOL_VISIT` event, title
   "Attended Sunday School", `description` the class name, `occurredAt` the session's `sessionDate` — so the count is
   never a bare number with no dated entries backing it; every visit it includes is individually visible in `events`.
+- **Outreach journey** — if the member was an evangelism `Convert` (`converts.member_id = memberId`, or
+  `converts.first_timer_id` = the member's first-timer), the timeline opens with: `MET_ON_OUTREACH` ("Met on
+  Outreach", outreach title + team, at the convert's `createdAt`); `CONVERT_STATUS_CHANGED` from that convert's
+  `CONVERT_STATUS_UPDATED` audit rows (looked up by `targetId = convert.id`; `SAVED` → "Saved",
+  `UNDERGOING_DISCIPLESHIP` → "Started Discipleship", `UNSAVED` skipped); and one `EVANGELISM_FOLLOW_UP` event
+  ("Followed Up After Outreach", "N contacts by …", at the last evangelism contact before Follow-Up took over).
+  `Convert`/`ConvertFollowUpLog` are registered read-only in `MemberModule` (importing `EvangelismModule` would be
+  circular). None of these count toward the visit counts.
 
 `isTraineeNow` is a live status read straight off `member.workerProfile?.isTrainee` (not derived from `events`) — a
 current-state badge for "is this person in training right now," separate from the dated `TRAINEE_STATUS_CHANGED`
@@ -12856,9 +12986,8 @@ history entries. `false` for a non-worker.
 
 `childrenChurchDropOffs` is a separate rollup, not part of `serviceVisitCount`/`sundaySchoolVisitCount` — see
 §Children Church Module for what it counts and why it's kept apart from the member's own visit counts.
-- **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` and the evangelism `Convert` pipeline's
-  `CONVERT_LINKED_TO_MEMBER` are not yet included — those audit entries target the department/convert row (not the
-  member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
+- **Known gap:** `DEPARTMENT_LEAD_ASSIGNED`/`REMOVED` are not yet included — those audit entries target the
+  department row (not the member), so `AuditLogService.findAll`'s `targetId` filter can't find them without a `metadata` query capability
   it doesn't have today. A worker whose promotion predates audit logging (legacy data, bulk imports) falls back to
   `WorkerProfile.createdAt` for a "Became a Worker" event so they aren't silently missing from the timeline.
 
@@ -17063,6 +17192,7 @@ dedicated host).
 | `SUNDAY_SCHOOL_QA` | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` |
 | `SUNDAY_SCHOOL_ATTENDANCE` | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` (push-only: check-in open, weekly absentees) |
 | `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
+| `EVANGELISM` | `EMAIL_EVANGELISM_ENABLED` | `true` (push-only: added to an outreach team, convert(s) assigned) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -17940,7 +18070,7 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 
 **Editing a first-timer's own details (`PATCH /admin/follow-up/first-timers/:id`, admin; `PATCH /follow-up/first-timers/:id`, worker; both `UpdateFirstTimerDto`):** for correcting a record after the fact — e.g. an admin forgot to set the event visited, or a Sunday School check-in only captured partial info. All fields optional/independent (`firstname`, `lastname`, `phone`, `email`, `wantsToJoinChurch`, `wantsToJoinWorkforce`, `enjoyedAboutChurch`, `notes`, `visitedEventId`); `source` is deliberately **not** editable here — it's forced server-side at creation to stay non-spoofable, and changing it after the fact would corrupt source attribution in reports. `convertedAt`/`inviteSentAt` have their own dedicated endpoints. `FollowUpService.updateFirstTimer()` reloads the record with its `visitedEvent` relation before returning, so the response reflects the current event name, not just the id that was set. The worker variant (`updateFirstTimerByWorker`) is a thin wrapper adding `assertWorkerInFollowUpDept` first — same shape as `getFirstTimerDetailForWorker` — and isn't scoped to only first-timers on the caller's own tasks, matching `createFirstTimerByWorker`'s existing department-wide (not just own-task) access. Backs an inline "Edit Details" toggle on the member app's task detail screen, using the same public today-first event picker (`GET /follow-up/public/events`) as the self-onboarding form, since it's `@Public()` and works fine from an authenticated session too.
 
-**First-timer visit history (`GET /admin/follow-up/first-timers/:id`, admin; `GET /follow-up/first-timers/:id`, worker):** Returns `{ firstTimer, visitCount, timeline }` — `FollowUpService.getFirstTimerDetail()` (worker variant wraps it with `assertWorkerInFollowUpDept` first). `timeline` merges three sources into one dated list, each entry `{ source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL', label, occurredAt, notes? }`: the first-timer's own `createdAt` as `INITIAL_VISIT`; each `FirstTimerVisit` row as `LOGGED_VISIT`; and each `SundaySchoolAttendance` row linked via `first_timer_id` as `SUNDAY_SCHOOL` (queried directly — `SundaySchoolAttendance` is registered read-only in `FollowUpModule` rather than importing `SundaySchoolModule`, which would be circular since it already imports `FollowUpModule`). `visitCount` is simply `timeline.length`. The admin route is declared *after* `first-timers/pipeline` in `FollowUpAdminController` so that static path keeps matching first. `getFirstTimers` (the list endpoint) carries a lighter version of the same idea: `loadRelationCountAndMap('ft.visitCount', 'ft.visits')` for the logged-visit count, then one batched `SundaySchoolAttendance` count query (`first_timer_id IN (:...ids)`, grouped) across the whole page — never per-row — plus `+1` per row for the initial visit.
+**First-timer visit history (`GET /admin/follow-up/first-timers/:id`, admin; `GET /follow-up/first-timers/:id`, worker):** Returns `{ firstTimer, visitCount, timeline, convertMatches, linkedConvert }` — `FollowUpService.getFirstTimerDetail()` (worker variant wraps it with `assertWorkerInFollowUpDept` first). `timeline` merges three sources into one dated list, each entry `{ source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL' | 'OUTREACH_MET' | 'EVANGELISM_FOLLOW_UP', label, occurredAt, notes? }`: the first-timer's own `createdAt` as `INITIAL_VISIT`; each `FirstTimerVisit` row as `LOGGED_VISIT`; and each `SundaySchoolAttendance` row linked via `first_timer_id` as `SUNDAY_SCHOOL` (queried directly — `SundaySchoolAttendance` is registered read-only in `FollowUpModule` rather than importing `SundaySchoolModule`, which would be circular since it already imports `FollowUpModule`). `visitCount` counts only the three visit sources — the outreach entries (see "Outreach convert → first-timer" below) are history, not visits. The admin route is declared *after* `first-timers/pipeline` in `FollowUpAdminController` so that static path keeps matching first. `getFirstTimers` (the list endpoint) carries a lighter version of the same idea: `loadRelationCountAndMap('ft.visitCount', 'ft.visits')` for the logged-visit count, then one batched `SundaySchoolAttendance` count query (`first_timer_id IN (:...ids)`, grouped) across the whole page — never per-row — plus `+1` per row for the initial visit.
 
 **Post-event jobs (Bull queue `follow-up`):**
 
@@ -17968,7 +18098,15 @@ Members receive an email after an online-attendance-enabled event. They confirm 
 
 **Membership invitation:** `POST /admin/follow-up/first-timers/:id/invite-to-membership` (requires `FOLLOW_UP_WRITE`) queues a personalised invitation email to the first-timer. Returns `{ queued: true }` on success or `{ queued: false }` if the invitation was already sent (`inviteSentAt` is set). Throws `404` if the first-timer is not found or `400` if no email address is on record. Sets `FirstTimer.inviteSentAt` on first send to prevent duplicate emails.
 
-**First-timer conversion:** `PATCH /admin/follow-up/first-timers/:id/mark-converted` (requires `FOLLOW_UP_WRITE`) marks a first-timer as having joined the congregation. Accepts an optional `memberId` (UUID) body field to link the first-timer to their new `Member` record. Sets `FirstTimer.convertedAt` and optionally `FirstTimer.convertedMember`.
+**First-timer conversion:** `PATCH /admin/follow-up/first-timers/:id/mark-converted` (requires `FOLLOW_UP_WRITE`) marks a first-timer as having joined the congregation. Accepts an optional `memberId` (UUID) body field to link the first-timer to their new `Member` record. Sets `FirstTimer.convertedAt` and optionally `FirstTimer.convertedMember`. When a `memberId` is given and an outreach convert is linked to this first-timer, that convert is marked joined too (`member`/`linkedAt`, audit `CONVERT_LINKED_TO_MEMBER` with `metadata.via = 'first_timer'`) — the church records joining once. The reverse also holds: Evangelism's `PATCH evangelism/converts/admin/:id/link-member` sets `convertedAt`/`convertedMember` on the linked first-timer if it isn't converted yet.
+
+**Outreach convert → first-timer (`FirstTimerConvertService`):** someone met on outreach (an evangelism `Convert`) who later visits is registered as a new `FirstTimer`; Follow-Up confirms whether the two are the same person — nothing links automatically.
+- **Suggestions** — `convertMatches` on the first-timer detail: up to 5 converts not yet linked to a first-timer or member, not in `first_timers.dismissed_convert_ids`, whose E.164 `phone` equals the first-timer's, or (when the convert has no phone) whose `name` equals `firstname lastname` case-insensitively; each carries `matchedOn: 'phone' | 'name'`. The list endpoint adds `hasConvertMatch` per row from one batched query for the page.
+- **Confirm** — `POST /follow-up/first-timers/:id/link-convert` (Follow-Up dept worker) / `POST /admin/follow-up/first-timers/:id/link-convert` (`FOLLOW_UP_WRITE`), body `{ convertId }`. `409` if the convert is already linked or already a member, or the first-timer already has a convert (`converts.first_timer_id` is unique). Sets `converts.first_timer_id`/`first_timer_linked_at`, clears the convert's `assignedTo` (the `FollowUpTask` now owns the follow-up), logs a `ConvertFollowUpLog` "Visited church as a first-timer…", audits `CONVERT_LINKED_TO_FIRST_TIMER`, flushes both report caches and pushes `CONVERT_VISITED_CHURCH` to the convert's previous assignee, onboarder and outreach team (not the actor).
+- **Dismiss** — `POST …/first-timers/:id/dismiss-convert` `{ convertId }` appends to `dismissed_convert_ids` so it isn't suggested again.
+- **Unlink** — `DELETE …/first-timers/:id/link-convert` undoes a wrong match; the convert returns to Evangelism unassigned. Audit `CONVERT_UNLINKED_FROM_FIRST_TIMER`.
+- **Timeline** — once linked, the first-timer detail `timeline` starts with `OUTREACH_MET` (outreach title, team in `notes`, at the convert's `createdAt`) and one `EVANGELISM_FOLLOW_UP` per evangelism contact logged before the hand-over.
+- `Convert`, `ConvertFollowUpLog` and `Member` are registered in `FollowUpModule` directly — importing `EvangelismModule` would be circular (Evangelism → Member → FollowUp).
 
 **Admin task update:** `PATCH /admin/follow-up/tasks/:id` (requires `FOLLOW_UP_WRITE`) lets an admin update any task's `status`, `outcome`, `outcomeNotes`, `dueDate`, and add a `noteContent` (with optional `contactMethod`) note. Unlike the worker endpoint, this is not restricted by assignment. Also sets `lastActivityAt`.
 
@@ -17995,42 +18133,127 @@ Tracks converts from initial outreach contact through to becoming a church membe
 module above, which is scoped to first-timers who visited a service. A convert here is not assumed to be an
 existing `Member`; they may just be a name and phone number an outreach worker captured in the field.
 
-**Entities:** `Convert` (`converts`) — `name`, `phone` (nullable), `notes` (nullable), `status`
-(`UNSAVED` \| `SAVED` \| `UNDERGOING_DISCIPLESHIP`, default `UNSAVED`), `onboardedBy`/`onboardedByName` (who
-uploaded them, snapshotted), `assignedTo` (ManyToOne → `WorkerProfile`, nullable `SET NULL` — who is currently
-following up, mirrors `FollowUpTask.assignedTo`), `member`/`linkedAt` (set once the convert becomes an actual
-`Member`, mirrors `first_timers.converted_member_id`/`converted_at`), `lastContactedAt` (denormalized, updated on
-every new follow-up log). `ConvertFollowUpLog` (`convert_follow_up_logs`) — one row per contact attempt: `convert`
-(CASCADE), `loggedBy`/`loggedByName`, `note` (nullable), `contactedAt` — mirrors the `FirstTimerVisit` idiom.
+**Entities:**
+- `Outreach` (`outreaches`) — one outing: `title`/`location` (nullable), `outreachDate` (`date`, defaults to the
+  church's today via `DateService.today()`), `createdBy` (SET NULL; also exposed as `createdById`) / `createdByName` (snapshot), and `team`
+  (ManyToMany → `Member` via `outreach_team(outreach_id, member_id)`, both CASCADE). Evangelism is usually done in
+  twos or threes, so the team is recorded once per outing rather than re-tagged on every convert. The creator is
+  always on the team and can't be removed from it.
+- `Convert` (`converts`) — `name`, `phone` (nullable, E.164, indexed for the duplicate check), `notes` (nullable),
+  `status` (`UNSAVED` \| `SAVED` \| `UNDERGOING_DISCIPLESHIP`, default `UNSAVED`), `onboardedBy`/`onboardedByName`
+  (who added them, snapshotted), `outreach` (nullable, SET NULL — null means the adder went alone), `assignedTo`
+  (ManyToOne → `WorkerProfile`, nullable SET NULL — who owns the follow-up), `member`/`linkedAt` (set once the
+  convert becomes an actual `Member`, mirrors `first_timers.converted_member_id`/`converted_at`),
+  `firstTimer`/`firstTimerLinkedAt` (set when Follow-Up confirms the convert visited church — see the Follow-Up
+  module's "Outreach convert → first-timer"; unique, SET NULL), `lastContactedAt`
+  (denormalized, updated on every new follow-up log).
+- `ConvertFollowUpLog` (`convert_follow_up_logs`) — one row per contact attempt: `convert` (CASCADE),
+  `loggedBy`/`loggedByName`, `note` (nullable), `contactedAt` — mirrors the `FirstTimerVisit` idiom.
+
+A convert's **outreach team** is its outreach's `team` plus `onboardedBy`.
+
+**Journey stage** (`stage` on every list row): `JOINED` (linked to a member) → `WITH_FOLLOW_UP` (visited church;
+Follow-Up owns the follow-up) → `FOLLOWED_UP` (any contact logged) → `MET`. Once `WITH_FOLLOW_UP`, the convert is
+read-only for Evangelism: follow-up logging and status changes return `409`
+(`assertCanActOnConvert(…, { write: true })`; history uses `write: false`), admin reassign returns `409`, bulk
+reassign skips it, `isOverdue` is `false`, and it's excluded from every "open" count (`member_id IS NULL AND
+first_timer_id IS NULL`): the `overdue` filter, auto-assign round-robin load, `searchWorkers.openAssigned`, bulk
+"move all open", and the report's `needsFollowUp`/`unassigned`/`assignedOpen`. List filter
+`stage=open|with_follow_up|joined`. The converts CSV gains a Stage column.
+
+**Settings** (`EvangelismSettingsService`, stored as the `church_settings` row `evangelism:settings` — same
+pattern as `SundaySchoolSettingsService`, cached 5 min):
+- `overdueDays` (1–90, default 7) — a convert not yet linked to a member and not contacted for longer than this
+  (or never) "needs follow-up". Used by the `isOverdue` flag, the `overdue` list filter and the report.
+- `autoAssign` (default `true`) — off leaves new converts unassigned for an admin to assign.
 
 **Access model:**
-- **Uploading a convert** (`POST evangelism/converts`) is open to any authenticated worker — deliberately as
-  simple as possible (only `name` is required).
-- **Team inbox and follow-up logging** (`GET evangelism/converts/team`, `POST
-  evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`) require the caller to be a worker
-  whose primary or secondary department has the `MANAGE_EVANGELISM_CONVERTS` capability — enforced by
-  `ConvertService.assertIsEvangelismDeptWorker()`, a direct copy of `assertIsAdminDeptWorker()`
-  (`service-programme/service/service-session.service.ts`) with the capability swapped.
-- **Admin portal** (`AdminGuard` + new `EVANGELISM_READ`/`EVANGELISM_WRITE` permissions) — cross-member view of
-  every convert, plus `PATCH evangelism/converts/admin/:id/reassign` (validates the target `workerProfileId`
-  resolves to an Evangelism-department worker, else `400`) and `PATCH
-  evangelism/converts/admin/:id/link-member` (links a convert to a real `Member` once they join).
+- **Adding a convert / starting an outreach** — any `WORKER` (`RolesGuard`). Only `name` is required for a convert.
+- **Acting on a convert** (`POST :id/follow-up`, `PATCH :id/status`, `GET :id/follow-up-history`) —
+  `ConvertService.assertCanActOnConvert()`: the onboarder, anyone on its outreach team, the assignee, or a worker
+  whose primary or secondary department has `MANAGE_EVANGELISM_CONVERTS`. Anyone else gets `403`.
+- **Listing** — `GET evangelism/converts?scope=mine` (default) is open to any worker and returns converts where
+  the caller is the onboarder, on the outreach team, or the assignee. `scope=team` returns every convert and
+  requires the `MANAGE_EVANGELISM_CONVERTS` capability. Each row carries `myRoles` (`onboarder` \| `team` \|
+  `assignee`) for the caller. This replaces the old `GET evangelism/converts/team`.
+- **Admin portal** — `AdminGuard` + `EVANGELISM_READ`/`EVANGELISM_WRITE`. Admins can assign to **any active
+  worker** (`WorkerProfile` and `Member` both `ACTIVE`, else `400`), not only the Evangelism department.
 
-**Follow-up staleness (no cron):** `GET evangelism/converts/team` computes `daysSinceLastContact` and `isOverdue`
-per convert on every read (overdue = no contact in the last 7 days, and not yet linked to a member) — a UI
-indicator only, not a background job or notification.
+**Auto-assignment on create** (`ConvertService.pickAssignee`, skipped when `autoAssign` is off): the adder if
+they have the capability, else the first outreach teammate who does, else round-robin to the active
+capability worker with the fewest open (not-yet-linked) converts — the same shape as
+`FollowUpService.pickRoundRobinAssignee`. No candidate → unassigned.
 
-**Follow-up history:** every `ConvertFollowUpLog` row written by `POST evangelism/converts/:id/follow-up` is
-readable back via `GET evangelism/converts/:id/follow-up-history` (mobile, Evangelism-dept worker) and `GET
-evangelism/converts/admin/:id/follow-up-history` (admin, `EVANGELISM_READ`) — paginated, newest first. Both share
-`ConvertService.getFollowUpHistory()`.
+**Duplicate check:** when `phone` is given and `allowDuplicate` isn't `true`, an existing convert with the same
+E.164 phone returns `409 { code: 'CONVERT_DUPLICATE', existing: { id, name, onboardedByName, createdAt } }`. The
+client then offers `POST evangelism/converts/:id/met-again` (any worker; logs a follow-up prefixed "Met again")
+or a retry with `allowDuplicate: true`.
 
-**Routes (mobile, worker/team):** `POST evangelism/converts`, `GET evangelism/converts/team?status=&page=&limit=`,
-`POST evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`, `GET
-evangelism/converts/:id/follow-up-history?page=&limit=`
-**Routes (admin portal):** `GET evangelism/converts/admin?status=&page=&limit=`, `PATCH
-evangelism/converts/admin/:id/reassign`, `PATCH evangelism/converts/admin/:id/link-member`, `GET
-evangelism/converts/admin/:id/follow-up-history?page=&limit=`
+**List filters** (shared by the member list, the admin list and the converts export via
+`ConvertService.buildConvertQuery`): `status`, `assignedTo` (`workerProfileId` \| `unassigned` \| `me` — `me`
+is member-only, `400` in the admin portal), `overdue=true`, `outreachId`, `search` (name or phone, ILIKE),
+`from`/`to` (created date), `page`/`limit` (max 100). Ids are paged with `DISTINCT` first, then loaded with
+relations, because the outreach-team join is many-to-many. Team members are returned as
+`{ id, firstname, lastname }` only.
+
+**Admin management:**
+- `PATCH converts/admin/:id/reassign` `{ workerProfileId }`, `PATCH converts/admin/:id/unassign`.
+- `PATCH converts/admin/bulk-reassign` `{ toWorkerProfileId, convertIds? (≤500) | fromWorkerProfileId? }` —
+  exactly one source; `fromWorkerProfileId` moves all of that worker's open converts (e.g. when they step down).
+  One `UPDATE`; returns `{ updated }`.
+- `PATCH converts/admin/:id/outreach` `{ outreachId | null }` — re-file or detach a convert.
+- `PATCH outreaches/admin/:id/team` `{ teamMemberIds }` — fix an outreach team (members can do the same from the
+  app via `PATCH outreaches/:id/team` if they're on it).
+- `GET outreaches/admin?from=&to=` — up to 200 outreaches with their teams, for filters and pickers.
+- `GET converts/admin/workers?q=` / `GET evangelism/workers?q=` — one `OutreachService.searchWorkers` method
+  behind both: up to 20 active workers as `{ memberId, workerProfileId, firstname, lastname, isEvangelism,
+  openAssigned }`, Evangelism workers first; the member route excludes the caller.
+
+**Report** (`GET evangelism/report?from=&to=`, `EVANGELISM_READ`; default last 90 days; cached 5 min under
+`evangelism:report:*`, flushed on every convert/outreach/follow-up write):
+- `summary` — `added`, `byStatus` (of converts added in range), `visitedChurch` (`first_timer_linked_at` in range),
+  `joinedChurch` (`linked_at` in range),
+  `followUpsLogged`, `outreaches` (in range); `needsFollowUp` and `unassigned` are current, not range-bound.
+- `trend` — `[{ period, added, visited, joined }]`, weekly buckets up to 26 weeks, monthly beyond.
+- `byWorker` — `outreaches` (team memberships in range), `broughtIn` (converts in range where they were the adder
+  or on the team, counted once), `joinedChurch` (of those, now linked), `followUpsLogged` (in range);
+  `assignedOpen`/`overdue` are current.
+- `byOutreach` — date, title, location, `teamSize`, `converts`, `saved`, `discipleship`, `visitedChurch` (linked to a
+  first-timer or already a member), `joinedChurch`.
+
+**Export** (`GET evangelism/export?type=converts|workers|outreaches&…`, `EVANGELISM_READ` +
+`@RequiresPlan(BULK_EXPORT)`): one CSV route rather than a `format` flag per endpoint, because `PlanGuard` gates
+per route. `converts` takes the list filters (unpaged, capped at 5,000 rows); `workers`/`outreaches` take
+`from`/`to` and reuse the report rows. Cells are quoted; free text starting with `= + - @` (other than a plain
+number such as an E.164 phone) is prefixed with `'` to stop spreadsheet formula injection.
+
+**Notifications** — push only, category `EVANGELISM` (`EMAIL_EVANGELISM_ENABLED`, default `true`; per-church
+switch in notification settings), never sent to the actor:
+- `OUTREACH_TEAM_ADDED` — to members added when an outreach is created or its team is edited (only newly added).
+- `CONVERT_ASSIGNED` — to the assignee on auto-assign (unless they added it) and on admin reassign.
+- `CONVERTS_BULK_ASSIGNED` — one push with the count to the target of a bulk reassign.
+- `CONVERT_VISITED_CHURCH` — to the previous assignee, onboarder and outreach team when Follow-Up confirms the
+  convert came to church.
+
+**Audit actions:** `CONVERT_CREATED` (metadata `outreachId`, `assignedTo`), `CONVERT_STATUS_UPDATED`,
+`CONVERT_FOLLOW_UP_LOGGED`, `CONVERT_REASSIGNED`, `CONVERT_UNASSIGNED`, `CONVERTS_BULK_REASSIGNED`,
+`CONVERT_OUTREACH_CHANGED`, `CONVERT_LINKED_TO_MEMBER`, `OUTREACH_CREATED`, `OUTREACH_TEAM_UPDATED`,
+`EVANGELISM_SETTINGS_UPDATED`, plus `CONVERT_LINKED_TO_FIRST_TIMER`/`CONVERT_UNLINKED_FROM_FIRST_TIMER` from
+Follow-Up. Admin actions log the admin's member id as the actor.
+
+**Routes (member app, workers):** `POST evangelism/converts`, `POST evangelism/converts/:id/met-again`,
+`GET evangelism/converts?scope=&status=&assignedTo=&overdue=&outreachId=&search=&from=&to=&page=&limit=`,
+`POST evangelism/converts/:id/follow-up`, `PATCH evangelism/converts/:id/status`,
+`GET evangelism/converts/:id/follow-up-history?page=&limit=`, `GET evangelism/workers?q=`,
+`POST evangelism/outreaches`, `GET evangelism/outreaches/recent` (outreaches the caller is on, last 14 days —
+the app pre-selects today's so teammates on different phones add into the same outreach),
+`PATCH evangelism/outreaches/:id/team`
+**Routes (admin portal):** `GET evangelism/converts/admin?…filters…`, `GET evangelism/converts/admin/workers?q=`,
+`PATCH evangelism/converts/admin/bulk-reassign`, `PATCH evangelism/converts/admin/:id/reassign`,
+`PATCH evangelism/converts/admin/:id/unassign`, `PATCH evangelism/converts/admin/:id/outreach`,
+`PATCH evangelism/converts/admin/:id/link-member`, `GET evangelism/converts/admin/:id/follow-up-history`,
+`GET evangelism/outreaches/admin?from=&to=`, `PATCH evangelism/outreaches/admin/:id/team`,
+`GET|PATCH evangelism/settings/admin`, `GET evangelism/report?from=&to=`, `GET evangelism/export?type=…`
 
 ### Sermon Module
 
@@ -19472,6 +19695,9 @@ outside the requested `?months=` window).
 | GET    | /attendances/department/search-members?q=                 | JwtAuthGuard (Admin-department worker)                        | Narrow member lookup (≤10 results, id/firstname/lastname/role only) backing the mobile check-in picker         |
 | POST   | /attendances/online-confirm                                | JwtAuthGuard (any authenticated member)                       | Confirm online attendance for an event (updates ABSENT → ATTENDED_ONLINE within window)                       |
 | POST   | /follow-up/first-timers                                    | WORKER (FOLLOW_UP dept)                                       | Register a first-timer (auto-creates FollowUpTask via round-robin)                                            |
+| POST   | /follow-up/first-timers/:id/link-convert                   | WORKER (FOLLOW_UP dept)                                       | Confirm a suggested outreach convert `{ convertId }`                                                          |
+| POST   | /follow-up/first-timers/:id/dismiss-convert                | WORKER (FOLLOW_UP dept)                                       | Dismiss a suggested outreach convert `{ convertId }`                                                          |
+| DELETE | /follow-up/first-timers/:id/link-convert                   | WORKER (FOLLOW_UP dept)                                       | Unlink the outreach convert                                                                                    |
 | GET    | /follow-up/tasks/mine                                      | WORKER (FOLLOW_UP dept)                                       | List follow-up tasks assigned to the caller                                                                   |
 | PATCH  | /follow-up/tasks/:id                                       | WORKER (FOLLOW_UP dept)                                       | Update task status/outcome/notes+contactMethod (caller must be the assignee); sets `lastActivityAt`           |
 | POST   | /follow-up/tasks/:id/notes                                 | WORKER (FOLLOW_UP dept)                                       | Add a note (with optional `contactMethod`) without changing task status; sets `lastActivityAt`                |
@@ -19484,18 +19710,35 @@ outside the requested `?months=` window).
 | PATCH  | /admin/follow-up/tasks/:id/reassign                        | AdminGuard (FOLLOW_UP_WRITE)                                  | Reassign a task to a different FOLLOW_UP-dept worker                                                          |
 | PATCH  | /admin/follow-up/tasks/bulk                                | AdminGuard (FOLLOW_UP_WRITE)                                  | Bulk update task statuses                                                                                     |
 | POST   | /admin/follow-up/first-timers/:id/invite-to-membership     | AdminGuard (FOLLOW_UP_WRITE)                                  | Queue membership invitation email. Returns `{ queued: true/false }`. Deduped by `inviteSentAt`.              |
-| PATCH  | /admin/follow-up/first-timers/:id/mark-converted           | AdminGuard (FOLLOW_UP_WRITE)                                  | Mark first-timer as converted; optional `{ memberId }` body links to their Member record                     |
+| PATCH  | /admin/follow-up/first-timers/:id/mark-converted           | AdminGuard (FOLLOW_UP_WRITE)                                  | Mark first-timer as converted; optional `{ memberId }` body links to their Member record (and marks a linked outreach convert joined) |
+| POST   | /admin/follow-up/first-timers/:id/link-convert             | AdminGuard (FOLLOW_UP_WRITE)                                  | Confirm a suggested outreach convert is this first-timer `{ convertId }`; Follow-Up takes over               |
+| POST   | /admin/follow-up/first-timers/:id/dismiss-convert          | AdminGuard (FOLLOW_UP_WRITE)                                  | "Not them" — stop suggesting `{ convertId }` for this first-timer                                              |
+| DELETE | /admin/follow-up/first-timers/:id/link-convert             | AdminGuard (FOLLOW_UP_WRITE)                                  | Undo a wrong outreach match; convert returns to Evangelism unassigned                                        |
 | PATCH  | /admin/follow-up/tasks/:id                                 | AdminGuard (FOLLOW_UP_WRITE)                                  | Admin update of any task: `status`, `outcome`, `outcomeNotes`, `dueDate`, `noteContent`, `contactMethod`     |
 | GET    | /admin/follow-up/report                                    | AdminGuard (FOLLOW_UP_READ)                                   | Pastoral report: first-timer totals, task stats, overdue count, conversion rate, by-worker, by-event         |
-| POST   | /evangelism/converts                                       | JwtAuthGuard (any worker)                                     | Upload a convert (only `name` required)                                                                       |
-| GET    | /evangelism/converts/team?status=&page=&limit=             | JwtAuthGuard (Evangelism-dept worker)                          | Cross-member browse with follow-up staleness fields (mobile)                                                  |
-| POST   | /evangelism/converts/:id/follow-up                         | JwtAuthGuard (Evangelism-dept worker)                          | Log a follow-up contact                                                                                       |
-| PATCH  | /evangelism/converts/:id/status                            | JwtAuthGuard (Evangelism-dept worker)                          | Update convert status                                                                                          |
-| GET    | /evangelism/converts/:id/follow-up-history?page=&limit=    | JwtAuthGuard (Evangelism-dept worker)                          | Full follow-up log for a convert, newest first (mobile)                                                       |
-| GET    | /evangelism/converts/admin?status=&page=&limit=            | AdminGuard (EVANGELISM_READ)                                   | Cross-member browse (admin portal)                                                                            |
-| PATCH  | /evangelism/converts/admin/:id/reassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Reassign follow-up to another Evangelism-dept worker                                                          |
+| POST   | /evangelism/converts                                       | WORKER                                                        | Add a convert (only `name` required); optional `outreachId`, `allowDuplicate`. 409 `CONVERT_DUPLICATE` on a known phone |
+| POST   | /evangelism/converts/:id/met-again                         | WORKER                                                        | Log a "Met again" follow-up on an existing convert (duplicate path)                                           |
+| GET    | /evangelism/converts?scope=mine\|team&…filters…            | JwtAuthGuard (`team` needs Evangelism capability)             | My converts (added / on the outreach team / assigned) or the whole team list, with staleness + `myRoles`      |
+| POST   | /evangelism/converts/:id/follow-up                         | Outreach team, assignee or Evangelism dept                    | Log a follow-up contact                                                                                       |
+| PATCH  | /evangelism/converts/:id/status                            | Outreach team, assignee or Evangelism dept                    | Update convert status                                                                                          |
+| GET    | /evangelism/converts/:id/follow-up-history?page=&limit=    | Outreach team, assignee or Evangelism dept                    | Full follow-up log for a convert, newest first (mobile)                                                       |
+| GET    | /evangelism/workers?q=                                     | WORKER                                                        | Active workers for team pickers (excludes caller)                                                             |
+| POST   | /evangelism/outreaches                                     | WORKER                                                        | Start an outreach `{ title?, location?, date?, teamMemberIds }`; creator always on the team                   |
+| GET    | /evangelism/outreaches/recent                              | WORKER                                                        | Outreaches the caller is on, last 14 days                                                                     |
+| PATCH  | /evangelism/outreaches/:id/team                            | WORKER (on the team)                                          | Replace the team (creator kept); pushes newly added members                                                    |
+| GET    | /evangelism/converts/admin?…filters…&stage=               | AdminGuard (EVANGELISM_READ)                                   | Cross-member browse (admin portal); `stage=open\|with_follow_up\|joined`                                     |
+| GET    | /evangelism/converts/admin/workers?q=                      | AdminGuard (EVANGELISM_READ)                                   | Active workers with Evangelism flag + open load, for assignee/team pickers                                    |
+| PATCH  | /evangelism/converts/admin/bulk-reassign                   | AdminGuard (EVANGELISM_WRITE)                                  | Move `convertIds` or all of `fromWorkerProfileId`'s open converts to `toWorkerProfileId`                      |
+| PATCH  | /evangelism/converts/admin/:id/reassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Assign follow-up to any active worker                                                                          |
+| PATCH  | /evangelism/converts/admin/:id/unassign                    | AdminGuard (EVANGELISM_WRITE)                                  | Clear the assignee                                                                                             |
+| PATCH  | /evangelism/converts/admin/:id/outreach                    | AdminGuard (EVANGELISM_WRITE)                                  | Move a convert to another outreach, or `null` to detach                                                        |
 | PATCH  | /evangelism/converts/admin/:id/link-member                 | AdminGuard (EVANGELISM_WRITE)                                  | Link a convert to their new Member record                                                                     |
 | GET    | /evangelism/converts/admin/:id/follow-up-history?page=&limit= | AdminGuard (EVANGELISM_READ)                                | Full follow-up log for a convert, newest first (admin portal)                                                 |
+| GET    | /evangelism/outreaches/admin?from=&to=                     | AdminGuard (EVANGELISM_READ)                                   | Outreaches with teams (up to 200)                                                                              |
+| PATCH  | /evangelism/outreaches/admin/:id/team                      | AdminGuard (EVANGELISM_WRITE)                                  | Replace an outreach team                                                                                       |
+| GET/PATCH | /evangelism/settings/admin                              | AdminGuard (EVANGELISM_READ / _WRITE)                          | `overdueDays` (1–90), `autoAssign`                                                                             |
+| GET    | /evangelism/report?from=&to=                               | AdminGuard (EVANGELISM_READ)                                   | Summary, trend, per-worker and per-outreach report                                                             |
+| GET    | /evangelism/export?type=converts\|workers\|outreaches&…    | AdminGuard (EVANGELISM_READ) + plan BULK_EXPORT               | CSV export                                                                                                     |
 
 | POST   | /admin/sermons                                             | AdminGuard (SERMON_WRITE)                                     | Create a sermon archive entry — body: title, speakerName, date, description?, youtubeUrl?, mixlrUrl?, series?. 400 if neither youtubeUrl nor mixlrUrl is set. |
 | GET    | /admin/sermons?page=&limit=&series=                        | AdminGuard (SERMON_READ)                                      | Paginated list, newest first, optional exact `series` filter                                                   |
@@ -20326,6 +20569,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_SUNDAY_SCHOOL_QA_ENABLED` | `true` | Sunday School question-asked / question-answered notifications |
 | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` | Sunday School check-in-open and weekly absentee pushes |
 | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
+| `EMAIL_EVANGELISM_ENABLED` | `true` | Evangelism outreach-team and convert-assignment pushes |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
