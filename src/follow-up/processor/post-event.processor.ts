@@ -1,3 +1,8 @@
+import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
+import {
+  formatWindow,
+  readOnlineWindowMinutes,
+} from '../../attendance/util/online-window';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue, OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Job, Queue } from 'bull';
@@ -36,7 +41,7 @@ export interface OnlineWindowClosedJobData extends TenantJobEnvelope {
 @Processor(FOLLOW_UP_QUEUE)
 export class PostEventProcessor {
   private readonly logger = new Logger(PostEventProcessor.name);
-  private readonly onlineWindowHours: number;
+  private readonly defaultWindowHours: number;
   private readonly churchName: string;
 
   constructor(
@@ -49,12 +54,13 @@ export class PostEventProcessor {
     private readonly eventRepo: Repository<Event>,
     @InjectRepository(Attendance)
     private readonly attendanceRepo: Repository<Attendance>,
+    @InjectRepository(ChurchSetting)
+    private readonly settingRepo: Repository<ChurchSetting>,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {
-    this.onlineWindowHours = this.configService.get<number>(
-      'ONLINE_CHECKIN_WINDOW_HOURS',
-    );
+    this.defaultWindowHours =
+      this.configService.get<number>('ONLINE_CHECKIN_WINDOW_HOURS') ?? 3;
     this.churchName = this.configService.get<string>('CHURCH_NAME');
   }
 
@@ -118,10 +124,22 @@ export class PostEventProcessor {
 
     if (!absentMembers.length) return;
 
+    const { minutes: windowMinutes } = await readOnlineWindowMinutes(
+      this.settingRepo,
+      this.defaultWindowHours,
+    );
+    const sentAt = new Date();
     await this.eventRepo.update(eventId, {
-      onlineNotificationSentAt: new Date(),
+      onlineNotificationSentAt: sentAt,
+      onlineConfirmClosesAt: new Date(
+        sentAt.getTime() + windowMinutes * 60_000,
+      ),
     });
 
+    // The service's page in this church's member app, where "Confirm Online Attendance" lives.
+    const confirmUrl = await this.emailQueueService.resolveMemberUrl(
+      `/events/${eventId}`,
+    );
     for (const record of absentMembers) {
       if (!record.member?.email) continue;
       this.emailQueueService.queueEmailWithTemplate(
@@ -133,7 +151,9 @@ export class PostEventProcessor {
           eventName: event.name,
           churchName: this.churchName,
           eventId,
-          windowHours: this.onlineWindowHours,
+          confirmUrl,
+          windowHours: Math.round((windowMinutes / 60) * 100) / 100,
+          windowLabel: formatWindow(windowMinutes),
         },
         undefined,
         EmailCategory.FOLLOW_UP,
@@ -144,7 +164,7 @@ export class PostEventProcessor {
       `Queued ${absentMembers.length} online-confirm email(s) for event "${event.name}"`,
     );
 
-    const delayMs = this.onlineWindowHours * 60 * 60 * 1000;
+    const delayMs = windowMinutes * 60_000;
     await this.followUpQueue.add(
       ONLINE_WINDOW_CLOSED_JOB,
       { eventId, ...buildJobEnvelope(this.cls) },

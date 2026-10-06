@@ -142,6 +142,9 @@ const mockDepartmentAccessService = {
 
 const mockAttendanceSettingsService = {
   isEnabled: jest.fn().mockResolvedValue(false),
+  getOnlineWindow: jest
+    .fn()
+    .mockResolvedValue({ minutes: 180, isDefault: true }),
 };
 
 const defaultVenue = {
@@ -916,6 +919,23 @@ describe('AttendanceService', () => {
       await expect(
         service.confirmOnlineAttendance('member-1', 'event-1'),
       ).rejects.toThrow(NotFoundException);
+    });
+
+    it('closes at the time fixed when the emails went out, not the current setting', async () => {
+      mockEventRepoForDataSource.findOne.mockResolvedValue({
+        id: 'event-1',
+        onlineAttendanceEnabled: true,
+        onlineNotificationSentAt: subHours(new Date(), 2),
+        onlineConfirmClosesAt: subHours(new Date(), 1),
+      });
+      mockAttendanceSettingsService.getOnlineWindow.mockResolvedValueOnce({
+        minutes: 2880,
+        isDefault: false,
+      });
+
+      await expect(
+        service.confirmOnlineAttendance('member-1', 'event-1'),
+      ).rejects.toThrow('The online attendance window has closed');
     });
 
     it('throws "not enabled" when the window was never opened and the toggle is off', async () => {

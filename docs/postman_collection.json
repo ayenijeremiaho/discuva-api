@@ -5050,6 +5050,73 @@
           ]
         },
         {
+          "name": "Get Online Attendance Window",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/attendances/settings/online-window",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "settings",
+                "online-window"
+              ]
+            },
+            "description": "ADMIN (ATTENDANCE_READ). Minutes members have to confirm online attendance after the follow-up email. isDefault = following env ONLINE_CHECKIN_WINDOW_HOURS."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"minutes\": 180,\n  \"isDefault\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Online Attendance Window",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": 150\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendances/settings/online-window",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "settings",
+                "online-window"
+              ]
+            },
+            "description": "ADMIN (ATTENDANCE_WRITE). 15\u201310080 minutes (15 min to 7 days). Applies to the next service's emails; each event keeps the closing time (onlineConfirmClosesAt) set when its emails went out."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"minutes\": 150,\n  \"isDefault\": false\n}"
+            }
+          ]
+        },
+        {
           "name": "Get Enforce Distance Check Setting (Admin)",
           "request": {
             "method": "GET",

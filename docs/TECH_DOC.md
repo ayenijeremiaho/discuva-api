@@ -5251,14 +5251,14 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 
 1. After `markAbsentees()` completes for an event, a `post-event` Bull job is dispatched.
 2. `PostEventProcessor.handlePostEvent` sends thank-you emails to all PRESENT/LATE members if `event.thankYouSentAt` is null, then sets `thankYouSentAt` — preventing duplicate sends on re-trigger.
-3. If `event.onlineAttendanceEnabled = true`: sends online-confirm request emails to ABSENT members, sets `event.onlineNotificationSentAt`, and schedules a `online-window-closed` delayed job (`ONLINE_CHECKIN_WINDOW_HOURS` hours later, default 3).
+3. If `event.onlineAttendanceEnabled = true`: sends online-confirm request emails to ABSENT members (button links to the service's page in the church's member app — `resolveMemberUrl('/events/:id')`; a signed-out member is returned there after sign-in), sets `event.onlineNotificationSentAt` and `event.onlineConfirmClosesAt`, and schedules a `online-window-closed` delayed job (`ONLINE_CHECKIN_WINDOW_HOURS` hours later, default 3).
 4. `handleOnlineWindowClosed` creates `ONLINE_NO_RESPONSE` follow-up tasks for all members still marked ABSENT.
 
 **Online confirm flow:**
 
 Members receive an email after an online-attendance-enabled event. They confirm via `POST /attendances/online-confirm { eventId }`. The system:
 1. Checks `event.onlineAttendanceEnabled = true`
-2. Validates that `now ≤ onlineNotificationSentAt + ONLINE_CHECKIN_WINDOW_HOURS`
+2. Validates that `now ≤ onlineConfirmClosesAt` (set alongside `onlineNotificationSentAt` when the emails go out, from the church's window — `church_settings` key `attendance:online_confirm_window_minutes`, managed at `GET/PATCH /attendances/settings/online-window`, else env `ONLINE_CHECKIN_WINDOW_HOURS`; events from before the column existed fall back to `onlineNotificationSentAt + current window`)
 3. Finds the ABSENT record for `(member, event)` and updates status to `ATTENDED_ONLINE`
 
 **Task assignment email:** When a `FollowUpTask` is created (first-timer registration or online non-responder) or reassigned, an email is sent to the assigned worker using the `follow-up-task-assigned` template. Includes the first-timer's name, phone, email, and due date. Fire-and-forget via the `email` Bull queue.
@@ -6990,6 +6990,8 @@ outside the requested `?months=` window).
 | POST   | /events/series/:id/stop                                    | AdminGuard (EVENTS_WRITE)                                     | Stop repeating — body `{ from }`; removes upcoming dates without history, returns `{ removed }`               |
 | GET    | /events/templates                                          | AdminGuard (EVENTS_READ)                                      | Saved service types, by name (with `audienceGroup`)                                                           |
 | GET    | /events/audience-groups                                    | AdminGuard (EVENTS_WRITE)                                     | Groups an event can be for — `[{ id, name }]`, by name                                                        |
+| GET    | /attendances/settings/online-window                        | AdminGuard (ATTENDANCE_READ)                                  | Online-attendance confirmation window — `{ minutes, isDefault }`                                                |
+| PATCH  | /attendances/settings/online-window                        | AdminGuard (ATTENDANCE_WRITE)                                 | Set the window — body `{ minutes }` (15–10080); applies to the next service's emails                              |
 | POST   | /events/templates                                          | AdminGuard (EVENTS_WRITE)                                     | Save a service type — body: name, description?, onlineAttendanceEnabled?, slotBlueprint, defaultRecurrence?, autoProgramme? |
 | PATCH  | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Replace a service type (same body as POST)                                                                    |
 | DELETE | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Delete a service type                                                                                         |
@@ -7818,7 +7820,7 @@ with application cache keys.
 | Variable                      | Default | Description                                                        |
 |-------------------------------|---------|--------------------------------------------------------------------|
 | `ENFORCE_DISTANCE_CHECK`      | `false` | No longer read directly by AttendanceService — now only the fallback-of-the-fallback for `PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT` (see "Attendance Distance Check Setting" below) when no `PlatformSetting` row exists yet either. Kept as a real env var (not removed) specifically so an environment that already has it set isn't silently reset to `false` the moment this shipped. |
-| `ONLINE_CHECKIN_WINDOW_HOURS` | `3`     | Hours after online-confirm emails are sent during which members can confirm online attendance |
+| `ONLINE_CHECKIN_WINDOW_HOURS` | `3`     | Default hours after online-confirm emails are sent during which members can confirm online attendance; each church can override it in minutes (Event Config → Online Attendance Confirmation, 15 min – 7 days); the email shows it as e.g. "2 hours 30 minutes" (`window_label`) |
 | `FOLLOW_UP_DUE_DAYS`          | `3`     | Days from task creation before a follow-up task is considered overdue (sets `dueDate`) |
 | `FOLLOW_UP_STALE_DAYS`        | `7`     | Days of inactivity before an open task is flagged stale (daily cron + stale endpoint)  |
 
@@ -8482,6 +8484,7 @@ A church gathering on a specific date.
 | attendanceMarked           | boolean          | Set to `true` by the cron job after absence records are created. Guards against double-processing.      |
 | onlineAttendanceEnabled    | boolean          | Default `false`. When `true`, absent members receive an online-confirm email after the event ends.      |
 | onlineNotificationSentAt   | timestamptz \| null | Set when the online-confirm emails are dispatched. Used to calculate the confirmation window.        |
+| onlineConfirmClosesAt      | timestamptz \| null | When members can no longer confirm online attendance; fixed when the online-confirm emails go out.  |
 | thankYouSentAt             | timestamptz \| null | Set after thank-you emails are queued for the event; guards against resending on re-trigger.        |
 | recurringEventId           | UUID             | Groups events in a recurring series; for series created since `EventSeries` exists, this is `event_series.id` |
 | seriesOccurrenceDate       | date \| null     | Church-local date this occurrence stands for in its series; unique per series (`UQ_events_series_occurrence`) |
@@ -10915,6 +10918,7 @@ A church gathering on a specific date.
 | attendanceMarked           | boolean          | Set to `true` by the cron job after absence records are created. Guards against double-processing.      |
 | onlineAttendanceEnabled    | boolean          | Default `false`. When `true`, absent members receive an online-confirm email after the event ends.      |
 | onlineNotificationSentAt   | timestamptz \| null | Set when the online-confirm emails are dispatched. Used to calculate the confirmation window.        |
+| onlineConfirmClosesAt      | timestamptz \| null | When members can no longer confirm online attendance; fixed when the online-confirm emails go out.  |
 | thankYouSentAt             | timestamptz \| null | Set after thank-you emails are queued for the event; guards against resending on re-trigger.        |
 | recurringEventId           | UUID             | Groups events in a recurring series; for series created since `EventSeries` exists, this is `event_series.id` |
 | seriesOccurrenceDate       | date \| null     | Church-local date this occurrence stands for in its series; unique per series (`UQ_events_series_occurrence`) |
@@ -18283,14 +18287,14 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 
 1. After `markAbsentees()` completes for an event, a `post-event` Bull job is dispatched.
 2. `PostEventProcessor.handlePostEvent` sends thank-you emails to all PRESENT/LATE members if `event.thankYouSentAt` is null, then sets `thankYouSentAt` — preventing duplicate sends on re-trigger.
-3. If `event.onlineAttendanceEnabled = true`: sends online-confirm request emails to ABSENT members, sets `event.onlineNotificationSentAt`, and schedules a `online-window-closed` delayed job (`ONLINE_CHECKIN_WINDOW_HOURS` hours later, default 3).
+3. If `event.onlineAttendanceEnabled = true`: sends online-confirm request emails to ABSENT members (button links to the service's page in the church's member app — `resolveMemberUrl('/events/:id')`; a signed-out member is returned there after sign-in), sets `event.onlineNotificationSentAt` and `event.onlineConfirmClosesAt`, and schedules a `online-window-closed` delayed job (`ONLINE_CHECKIN_WINDOW_HOURS` hours later, default 3).
 4. `handleOnlineWindowClosed` creates `ONLINE_NO_RESPONSE` follow-up tasks for all members still marked ABSENT.
 
 **Online confirm flow:**
 
 Members receive an email after an online-attendance-enabled event. They confirm via `POST /attendances/online-confirm { eventId }`. The system:
 1. Checks `event.onlineAttendanceEnabled = true`
-2. Validates that `now ≤ onlineNotificationSentAt + ONLINE_CHECKIN_WINDOW_HOURS`
+2. Validates that `now ≤ onlineConfirmClosesAt` (set alongside `onlineNotificationSentAt` when the emails go out, from the church's window — `church_settings` key `attendance:online_confirm_window_minutes`, managed at `GET/PATCH /attendances/settings/online-window`, else env `ONLINE_CHECKIN_WINDOW_HOURS`; events from before the column existed fall back to `onlineNotificationSentAt + current window`)
 3. Finds the ABSENT record for `(member, event)` and updates status to `ATTENDED_ONLINE`
 
 **Task assignment email:** When a `FollowUpTask` is created (first-timer registration or online non-responder) or reassigned, an email is sent to the assigned worker using the `follow-up-task-assigned` template. Includes the first-timer's name, phone, email, and due date. Fire-and-forget via the `email` Bull queue.
@@ -20022,6 +20026,8 @@ outside the requested `?months=` window).
 | POST   | /events/series/:id/stop                                    | AdminGuard (EVENTS_WRITE)                                     | Stop repeating — body `{ from }`; removes upcoming dates without history, returns `{ removed }`               |
 | GET    | /events/templates                                          | AdminGuard (EVENTS_READ)                                      | Saved service types, by name (with `audienceGroup`)                                                           |
 | GET    | /events/audience-groups                                    | AdminGuard (EVENTS_WRITE)                                     | Groups an event can be for — `[{ id, name }]`, by name                                                        |
+| GET    | /attendances/settings/online-window                        | AdminGuard (ATTENDANCE_READ)                                  | Online-attendance confirmation window — `{ minutes, isDefault }`                                                |
+| PATCH  | /attendances/settings/online-window                        | AdminGuard (ATTENDANCE_WRITE)                                 | Set the window — body `{ minutes }` (15–10080); applies to the next service's emails                              |
 | POST   | /events/templates                                          | AdminGuard (EVENTS_WRITE)                                     | Save a service type — body: name, description?, onlineAttendanceEnabled?, slotBlueprint, defaultRecurrence?, autoProgramme? |
 | PATCH  | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Replace a service type (same body as POST)                                                                    |
 | DELETE | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Delete a service type                                                                                         |
@@ -20850,7 +20856,7 @@ with application cache keys.
 | Variable                      | Default | Description                                                        |
 |-------------------------------|---------|--------------------------------------------------------------------|
 | `ENFORCE_DISTANCE_CHECK`      | `false` | No longer read directly by AttendanceService — now only the fallback-of-the-fallback for `PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT` (see "Attendance Distance Check Setting" below) when no `PlatformSetting` row exists yet either. Kept as a real env var (not removed) specifically so an environment that already has it set isn't silently reset to `false` the moment this shipped. |
-| `ONLINE_CHECKIN_WINDOW_HOURS` | `3`     | Hours after online-confirm emails are sent during which members can confirm online attendance |
+| `ONLINE_CHECKIN_WINDOW_HOURS` | `3`     | Default hours after online-confirm emails are sent during which members can confirm online attendance; each church can override it in minutes (Event Config → Online Attendance Confirmation, 15 min – 7 days); the email shows it as e.g. "2 hours 30 minutes" (`window_label`) |
 | `FOLLOW_UP_DUE_DAYS`          | `3`     | Days from task creation before a follow-up task is considered overdue (sets `dueDate`) |
 | `FOLLOW_UP_STALE_DAYS`        | `7`     | Days of inactivity before an open task is flagged stale (daily cron + stale endpoint)  |
 

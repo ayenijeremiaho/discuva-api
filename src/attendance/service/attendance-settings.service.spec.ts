@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AttendanceSettingsService } from './attendance-settings.service';
@@ -47,6 +48,7 @@ describe('AttendanceSettingsService', () => {
           provide: PlatformSettingsService,
           useValue: mockPlatformSettingsService,
         },
+        { provide: ConfigService, useValue: { get: () => 3 } },
       ],
     }).compile();
 
@@ -154,6 +156,35 @@ describe('AttendanceSettingsService', () => {
           actorId: 'member-1',
           metadata: { enabled: true },
         }),
+      );
+    });
+  });
+
+  describe('online window', () => {
+    it('follows the server default until the church sets its own', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      await expect(service.getOnlineWindow()).resolves.toEqual({
+        minutes: 180,
+        isDefault: true,
+      });
+
+      mockSettingRepo.findOne.mockResolvedValue({ value: { minutes: 90 } });
+      await expect(service.getOnlineWindow()).resolves.toEqual({
+        minutes: 90,
+        isDefault: false,
+      });
+    });
+
+    it('saves a new window and audits it', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      mockSettingRepo.create.mockImplementation((v) => v);
+
+      await expect(service.setOnlineWindow(150, 'm1')).resolves.toEqual({
+        minutes: 150,
+        isDefault: false,
+      });
+      expect(mockSettingRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ value: { minutes: 150 } }),
       );
     });
   });

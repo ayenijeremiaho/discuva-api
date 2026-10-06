@@ -1,3 +1,8 @@
+import { IsInt, Max, Min } from 'class-validator';
+import {
+  ONLINE_WINDOW_MAX_MINUTES,
+  ONLINE_WINDOW_MIN_MINUTES,
+} from '../util/online-window';
 import { IsBoolean, IsEnum, IsNotEmpty, IsUUID } from 'class-validator';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { Exclude, Expose } from 'class-transformer';
@@ -53,4 +58,11 @@ export class AttendanceDto {
   @Expose()
   @ToDateString()
   updatedAt: Date;
+}
+
+export class UpdateOnlineWindowDto {
+  @IsInt()
+  @Min(ONLINE_WINDOW_MIN_MINUTES)
+  @Max(ONLINE_WINDOW_MAX_MINUTES)
+  minutes: number;
 }

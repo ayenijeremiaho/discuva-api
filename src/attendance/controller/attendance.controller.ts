@@ -19,6 +19,7 @@ import {
   AdminMarkAttendanceDto,
   CorrectAttendanceDto,
   UpdateEnforceDistanceCheckDto,
+  UpdateOnlineWindowDto,
 } from '../dto/attendance.dto';
 import { OnlineConfirmDto } from '../../follow-up/dto/online-confirm.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -208,6 +209,26 @@ export class AttendanceController {
       to,
       +page,
       +limit,
+    );
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_READ)
+  @Get('settings/online-window')
+  async getOnlineWindow() {
+    return this.attendanceSettingsService.getOnlineWindow();
+  }
+
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_WRITE)
+  @Patch('settings/online-window')
+  async updateOnlineWindow(
+    @Body() dto: UpdateOnlineWindowDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.attendanceSettingsService.setOnlineWindow(
+      dto.minutes,
+      admin.member?.id,
     );
   }
 

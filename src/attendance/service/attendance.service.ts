@@ -666,12 +666,14 @@ export class AttendanceService {
       );
     }
 
-    const windowHours = this.configService.get<number>(
-      'ONLINE_CHECKIN_WINDOW_HOURS',
-    );
-    const windowCloseTime = new Date(
-      event.onlineNotificationSentAt.getTime() + windowHours * 60 * 60 * 1000,
-    );
+    // Events from before closing times were stored fall back to the church's current window.
+    const windowCloseTime =
+      event.onlineConfirmClosesAt ??
+      new Date(
+        event.onlineNotificationSentAt.getTime() +
+          (await this.attendanceSettingsService.getOnlineWindow()).minutes *
+            60_000,
+      );
     if (this.dateService.now() > windowCloseTime) {
       throw new BadRequestException('The online attendance window has closed');
     }

@@ -955,7 +955,7 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     subject: '{{default_subject}}',
     heading: 'Did You Join Us Online, {{first_name}}?',
     message:
-      "<p>We noticed you didn't check in physically for <strong>{{event_name}}</strong>. Did you join us online?</p><p>If you attended online, please confirm your attendance using the app within the next <strong>{{window_hours}} hour(s)</strong>.</p>",
+      "<p>We noticed you didn't check in physically for <strong>{{event_name}}</strong>. Did you join us online?</p><p>If you attended online, please confirm your attendance using the button below within the next <strong>{{window_label}}</strong>.</p>",
     closing: '',
     signoff: 'God bless you,',
     signature: '{{church_name}}',
@@ -965,13 +965,21 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
       event_name: 'Sunday Service',
       first_name: 'Ada',
       window_hours: '48',
+      window_label: '2 hours 30 minutes',
     },
     toVars: pick({
       event_name: 'eventName',
       first_name: 'name',
       window_hours: 'windowHours',
+      window_label: 'windowLabel',
     }),
-    sampleData: { eventName: 'Sunday Service', name: 'Ada', windowHours: '48' },
+    sampleData: {
+      eventName: 'Sunday Service',
+      name: 'Ada',
+      windowHours: '48',
+      windowLabel: '2 hours 30 minutes',
+      confirmUrl: 'https://example.com/events/sample',
+    },
   },
   'password-changed': {
     category: null,

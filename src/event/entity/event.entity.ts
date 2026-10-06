@@ -53,6 +53,14 @@ export class Event extends BaseEntity {
   })
   onlineNotificationSentAt: Date | null;
 
+  // When members can no longer confirm online attendance; set with onlineNotificationSentAt.
+  @Column({
+    name: 'online_confirm_closes_at',
+    nullable: true,
+    type: 'timestamptz',
+  })
+  onlineConfirmClosesAt: Date | null;
+
   @Column({ name: 'thank_you_sent_at', nullable: true, type: 'timestamptz' })
   thankYouSentAt: Date | null;
 

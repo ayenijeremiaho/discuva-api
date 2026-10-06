@@ -5,6 +5,17 @@ import { ChurchSetting } from '../../church-settings/entity/church-setting.entit
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { ConfigService } from '@nestjs/config';
+import {
+  ONLINE_WINDOW_KEY,
+  readOnlineWindowMinutes,
+} from '../util/online-window';
+
+export interface OnlineWindowConfig {
+  minutes: number;
+  // true while the church follows the server default.
+  isDefault: boolean;
+}
 
 const STORAGE_KEY = 'attendance:enforce_distance_check';
 const CACHE_KEY = 'attendance-settings:enforce-distance-check';
@@ -30,7 +41,39 @@ export class AttendanceSettingsService {
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
     private readonly platformSettingsService: PlatformSettingsService,
+    private readonly configService: ConfigService,
   ) {}
+
+  getOnlineWindow(): Promise<OnlineWindowConfig> {
+    return readOnlineWindowMinutes(
+      this.settingRepo,
+      this.configService.get<number>('ONLINE_CHECKIN_WINDOW_HOURS') ?? 3,
+    );
+  }
+
+  async setOnlineWindow(
+    minutes: number,
+    actorMemberId?: string,
+  ): Promise<OnlineWindowConfig> {
+    let row = await this.settingRepo.findOne({
+      where: { key: ONLINE_WINDOW_KEY },
+    });
+    if (!row) {
+      row = this.settingRepo.create({
+        key: ONLINE_WINDOW_KEY,
+        moduleName: 'Attendance',
+        value: { minutes },
+      });
+    } else {
+      row.value = { minutes };
+    }
+    await this.settingRepo.save(row);
+    this.auditLogService.log('ATTENDANCE_ONLINE_WINDOW_UPDATED', {
+      actorId: actorMemberId,
+      metadata: { minutes },
+    });
+    return { minutes, isDefault: false };
+  }
 
   async getConfig(): Promise<EnforceDistanceCheckConfig> {
     const row = await this.settingRepo.findOne({

@@ -1,3 +1,4 @@
+import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
@@ -35,6 +36,7 @@ import { FirstTimerConvertService } from './service/first-timer-convert.service'
   imports: [
     ConfigModule,
     TenantTypeOrmModule.forFeature([
+      ChurchSetting,
       FirstTimer,
       FirstTimerVisit,
       FollowUpTask,
