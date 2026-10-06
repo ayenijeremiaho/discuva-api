@@ -14,6 +14,25 @@ export interface ChurchCalendarEntry {
   imageUrl?: string;
 }
 
+// How a repeating service shows: one "Every Sunday" line, or a line per date.
+export enum CalendarRepeatDisplay {
+  SUMMARY = 'SUMMARY',
+  EACH = 'EACH',
+}
+
+// One line of a calendar as shown to people: a manual entry, an event, or a repeating service.
+export interface ChurchCalendarItem {
+  key: string; // entry id | "event:<id>" | "series:<recurringEventId>"
+  source: 'entry' | 'event' | 'series';
+  date: string; // church-local YYYY-MM-DD (first date for a series)
+  time?: string; // church-local HH:mm
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  repeatLabel?: string; // "Every Sunday"
+  dates?: string[]; // a series' dates in range
+}
+
 @Entity({ name: 'church_calendars' })
 export class ChurchCalendar extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
@@ -51,4 +70,22 @@ export class ChurchCalendar extends BaseEntity {
 
   @Column({ type: 'jsonb', default: [] })
   entries: ChurchCalendarEntry[];
+
+  // Scheduled events in the date range appear automatically, alongside the manual entries.
+  @Column({ name: 'include_events', default: true })
+  includeEvents: boolean;
+
+  @Column({
+    name: 'repeat_display',
+    type: 'varchar',
+    default: CalendarRepeatDisplay.SUMMARY,
+  })
+  repeatDisplay: CalendarRepeatDisplay;
+
+  // Event items an admin left off this calendar ("event:<id>" / "series:<id>").
+  @Column({ name: 'hidden_event_keys', type: 'jsonb', default: [] })
+  hiddenEventKeys: string[];
+
+  // Not stored: the merged list to show (see ChurchCalendarService.withItems).
+  items?: ChurchCalendarItem[];
 }

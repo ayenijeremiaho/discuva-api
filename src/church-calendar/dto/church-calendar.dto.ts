@@ -1,9 +1,10 @@
+import { CalendarRepeatDisplay } from '../entity/church-calendar.entity';
 import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsDateString,
+  IsEnum,
   IsHexColor,
   IsNotEmpty,
   IsOptional,
@@ -74,6 +75,19 @@ export class CreateChurchCalendarDto {
   @ValidateNested({ each: true })
   @Type(() => ChurchCalendarEntryDto)
   entries: ChurchCalendarEntryDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  includeEvents?: boolean;
+
+  @IsOptional()
+  @IsEnum(CalendarRepeatDisplay)
+  repeatDisplay?: CalendarRepeatDisplay;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  hiddenEventKeys?: string[];
 }
 
 export class UpdateChurchCalendarDto {
@@ -107,10 +121,20 @@ export class UpdateChurchCalendarDto {
   // per-entry id to diff against).
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1, {
-    message: 'A published calendar needs at least one entry',
-  })
   @ValidateNested({ each: true })
   @Type(() => ChurchCalendarEntryDto)
   entries?: ChurchCalendarEntryDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  includeEvents?: boolean;
+
+  @IsOptional()
+  @IsEnum(CalendarRepeatDisplay)
+  repeatDisplay?: CalendarRepeatDisplay;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  hiddenEventKeys?: string[];
 }

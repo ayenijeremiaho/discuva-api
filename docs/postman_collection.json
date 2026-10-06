@@ -13518,7 +13518,7 @@
               }
             }
           ],
-          "description": "Entries are automatically sorted by date on save, regardless of the order sent here. Each entry's date must fall within [startDate, endDate]."
+          "description": "Entries are automatically sorted by date on save, regardless of the order sent here. Each entry's date must fall within [startDate, endDate].\n\n**Events flow in:** calendars include scheduled events in their range by default (`includeEvents`), shown as one line per repeating service (`repeatDisplay: SUMMARY`) or every date (`EACH`); `hiddenEventKeys` hides chosen ones (`event:<id>` / `series:<id>`). Responses include the merged `items`; admin GET /:id also returns `eventOptions`."
         },
         {
           "name": "Get All Church Calendars (Admin)",

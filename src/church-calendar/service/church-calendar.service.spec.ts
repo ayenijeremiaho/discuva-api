@@ -1,3 +1,5 @@
+import { Event } from '../../event/entity/event.entity';
+import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -21,6 +23,15 @@ const mockDateService = {
   today: jest.fn(),
 };
 
+const mockEventQb = {
+  select: jest.fn().mockReturnThis(),
+  where: jest.fn().mockReturnThis(),
+  andWhere: jest.fn().mockReturnThis(),
+  orderBy: jest.fn().mockReturnThis(),
+  getMany: jest.fn().mockResolvedValue([]),
+};
+const mockEventRepo = { createQueryBuilder: jest.fn(() => mockEventQb) };
+
 describe('ChurchCalendarService', () => {
   let service: ChurchCalendarService;
 
@@ -35,6 +46,11 @@ describe('ChurchCalendarService', () => {
         },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: DateService, useValue: mockDateService },
+        { provide: getRepositoryToken(Event), useValue: mockEventRepo },
+        {
+          provide: ChurchTimezoneService,
+          useValue: { get: jest.fn().mockResolvedValue('Africa/Lagos') },
+        },
       ],
     }).compile();
     service = module.get(ChurchCalendarService);
@@ -243,6 +259,86 @@ describe('ChurchCalendarService', () => {
       await expect(
         service.uploadEntryImage('missing', {} as Express.Multer.File),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('events on the calendar', () => {
+    const calendar = (over = {}) =>
+      ({
+        id: 'c1',
+        startDate: '2026-10-01',
+        endDate: '2026-10-31',
+        entries: [],
+        includeEvents: true,
+        repeatDisplay: 'SUMMARY',
+        hiddenEventKeys: [],
+        ...over,
+      }) as any;
+    const sunday = (id: string, iso: string) => ({
+      id,
+      name: 'Sunday Service',
+      description: null,
+      startTime: new Date(iso),
+      recurringEventId: 's1',
+    });
+
+    beforeEach(() => {
+      mockEventQb.getMany.mockResolvedValue([
+        sunday('e1', '2026-10-04T07:00:00Z'),
+        sunday('e2', '2026-10-11T07:00:00Z'),
+        {
+          id: 'e3',
+          name: 'Workers Meeting',
+          description: null,
+          startTime: new Date('2026-10-17T15:00:00Z'),
+          recurringEventId: null,
+        },
+      ]);
+    });
+
+    it('merges events in church-local time, with repeats summarised', async () => {
+      const result = await service.withItems(calendar(), {});
+      expect(result.items).toEqual([
+        expect.objectContaining({
+          key: 'series:s1',
+          repeatLabel: 'Every Sunday',
+          time: '08:00',
+          dates: ['2026-10-04', '2026-10-11'],
+        }),
+        expect.objectContaining({
+          key: 'event:e3',
+          date: '2026-10-17',
+          time: '16:00',
+        }),
+      ]);
+    });
+
+    it('can list every date instead, and leaves out what the admin hid', async () => {
+      const result = await service.withItems(
+        calendar({ repeatDisplay: 'EACH', hiddenEventKeys: ['event:e3'] }),
+        {},
+      );
+      expect(result.items?.map((i) => i.key)).toEqual(['event:e1', 'event:e2']);
+    });
+
+    it('only shows a member the events meant for them', async () => {
+      await service.withItems(calendar(), {
+        viewer: { id: 'm1', isWorker: false },
+      });
+      expect(mockEventQb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('audience'),
+        { viewerId: 'm1', viewerIsWorker: false },
+      );
+    });
+
+    it('skips events entirely when the calendar is set not to include them', async () => {
+      mockEventRepo.createQueryBuilder.mockClear();
+      const result = await service.withItems(
+        calendar({ includeEvents: false }),
+        {},
+      );
+      expect(result.items).toEqual([]);
+      expect(mockEventRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 });

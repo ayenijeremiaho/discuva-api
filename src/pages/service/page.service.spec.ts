@@ -67,6 +67,7 @@ const DEFAULT_CHURCH = {
 };
 const mockChurchCalendarService = {
   getById: jest.fn(),
+  withItems: jest.fn((c) => Promise.resolve({ ...c, items: [] })),
 };
 const mockServiceSessionService = {
   getActiveSessions: jest.fn().mockResolvedValue([]),

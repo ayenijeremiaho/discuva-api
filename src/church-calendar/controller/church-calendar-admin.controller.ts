@@ -50,8 +50,10 @@ export class ChurchCalendarAdminController {
 
   @RequiresPermission(AdminPermission.CHURCH_CALENDAR_WRITE)
   @Post()
-  create(@Body() dto: CreateChurchCalendarDto) {
-    return this.calendarService.create(dto);
+  async create(@Body() dto: CreateChurchCalendarDto) {
+    return this.calendarService.forAdmin(
+      await this.calendarService.create(dto),
+    );
   }
 
   @RequiresPermission(AdminPermission.CHURCH_CALENDAR_READ)
@@ -63,16 +65,18 @@ export class ChurchCalendarAdminController {
   @RequiresPermission(AdminPermission.CHURCH_CALENDAR_READ)
   @Get(':id')
   getById(@Param('id', ParseUUIDPipe) id: string) {
-    return this.calendarService.getById(id);
+    return this.calendarService.getForAdmin(id);
   }
 
   @RequiresPermission(AdminPermission.CHURCH_CALENDAR_WRITE)
   @Patch(':id')
-  update(
+  async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateChurchCalendarDto,
   ) {
-    return this.calendarService.update(id, dto);
+    return this.calendarService.forAdmin(
+      await this.calendarService.update(id, dto),
+    );
   }
 
   @RequiresPermission(AdminPermission.CHURCH_CALENDAR_WRITE)

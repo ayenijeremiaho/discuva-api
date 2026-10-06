@@ -1,3 +1,6 @@
+import { CurrentUser } from '../../auth/decorator/current-user.decorator';
+import { MemberAuth } from '../../auth/interface/auth.interface';
+import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { Controller, Get, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
@@ -19,8 +22,12 @@ import { ChurchCalendarService } from '../service/church-calendar.service';
 export class ChurchCalendarMemberController {
   constructor(private readonly calendarService: ChurchCalendarService) {}
 
+  // Only events meant for this member are merged in.
   @Get('current')
-  getCurrent() {
-    return this.calendarService.getCurrentForMember();
+  getCurrent(@CurrentUser() user: MemberAuth) {
+    return this.calendarService.getCurrentForMember({
+      id: user.id,
+      isWorker: user.role === MemberRoleEnum.WORKER,
+    });
   }
 }

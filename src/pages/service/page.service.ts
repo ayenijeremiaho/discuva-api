@@ -396,6 +396,11 @@ export class PageService {
             theme: calendar.theme,
             accentColor: calendar.accentColor,
             entries: calendar.entries,
+            items: (
+              await this.churchCalendarService.withItems(calendar, {
+                publicOnly: true,
+              })
+            ).items,
           },
         };
       }),
