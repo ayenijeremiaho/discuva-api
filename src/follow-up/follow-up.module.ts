@@ -26,6 +26,11 @@ import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
 
+import { Convert } from '../evangelism/entity/convert.entity';
+import { Member } from '../member/entity/member.entity';
+import { ConvertFollowUpLog } from '../evangelism/entity/convert-follow-up-log.entity';
+import { FirstTimerConvertService } from './service/first-timer-convert.service';
+
 @Module({
   imports: [
     ConfigModule,
@@ -41,6 +46,10 @@ import { Tenant } from '../tenant/entity/tenant.entity';
       AdminRole,
       // Read-only — importing SundaySchoolModule would be circular.
       SundaySchoolAttendance,
+      // Importing EvangelismModule would be circular (Evangelism → Member → FollowUp).
+      Convert,
+      ConvertFollowUpLog,
+      Member,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by FollowUpScheduler's forEachActiveTenant loops.
@@ -69,7 +78,12 @@ import { Tenant } from '../tenant/entity/tenant.entity';
     FollowUpAdminController,
     FollowUpPublicController,
   ],
-  providers: [FollowUpService, PostEventProcessor, FollowUpScheduler],
+  providers: [
+    FollowUpService,
+    FirstTimerConvertService,
+    PostEventProcessor,
+    FollowUpScheduler,
+  ],
   exports: [FollowUpService],
 })
 export class FollowUpModule {}

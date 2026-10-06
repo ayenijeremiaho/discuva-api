@@ -109,4 +109,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Sent to a HOD/Deputy-HOD when an approval decision or comment is posted on their department’s goals.',
     },
+    [EmailCategory.EVANGELISM]: {
+      label: 'Evangelism Outreach & Converts',
+      description:
+        'Push to workers when they are added to an outreach team or a convert is assigned to them for follow-up.',
+    },
   };

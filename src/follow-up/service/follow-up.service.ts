@@ -40,6 +40,11 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Event } from '../../event/entity/event.entity';
 import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { SundaySchoolAttendance } from '../../sunday-school/entity/sunday-school-attendance.entity';
+import {
+  ConvertMatch,
+  FirstTimerConvertService,
+  LinkedConvert,
+} from './first-timer-convert.service';
 
 export interface PublicEventOption {
   id: string;
@@ -66,7 +71,12 @@ function dateOnly(value: Date | string): string {
 }
 
 export interface FirstTimerTimelineEntry {
-  source: 'INITIAL_VISIT' | 'LOGGED_VISIT' | 'SUNDAY_SCHOOL';
+  source:
+    | 'INITIAL_VISIT'
+    | 'LOGGED_VISIT'
+    | 'SUNDAY_SCHOOL'
+    | 'OUTREACH_MET'
+    | 'EVANGELISM_FOLLOW_UP';
   label: string;
   occurredAt: Date | string;
   notes?: string | null;
@@ -76,7 +86,16 @@ export interface FirstTimerDetail {
   firstTimer: FirstTimer;
   visitCount: number;
   timeline: FirstTimerTimelineEntry[];
+  // Outreach converts that may be this person, for Follow-Up to confirm; empty once one is linked.
+  convertMatches: ConvertMatch[];
+  linkedConvert: LinkedConvert | null;
 }
+
+const VISIT_SOURCES = new Set<FirstTimerTimelineEntry['source']>([
+  'INITIAL_VISIT',
+  'LOGGED_VISIT',
+  'SUNDAY_SCHOOL',
+]);
 
 const REPORT_CACHE_TTL = 300;
 
@@ -115,6 +134,7 @@ export class FollowUpService {
     @InjectRepository(SundaySchoolAttendance)
     private readonly sundaySchoolAttendanceRepo: Repository<SundaySchoolAttendance>,
     private readonly departmentAccessService: DepartmentAccessService,
+    private readonly firstTimerConvertService: FirstTimerConvertService,
   ) {
     this.followUpDueDays = this.configService.get<number>('FOLLOW_UP_DUE_DAYS');
     this.churchName = this.configService.get<string>('CHURCH_NAME');
@@ -265,9 +285,12 @@ export class FollowUpService {
       const ssCountByFirstTimerId = new Map(
         ssCounts.map((r) => [r.firstTimerId, Number(r.count)]),
       );
+      const withMatches =
+        await this.firstTimerConvertService.findIdsWithMatches(data);
       for (const ft of data) {
         ft.visitCount =
           1 + (ft.visitCount ?? 0) + (ssCountByFirstTimerId.get(ft.id) ?? 0);
+        ft.hasConvertMatch = withMatches.has(ft.id);
       }
     }
 
@@ -278,13 +301,22 @@ export class FollowUpService {
   private async buildFirstTimerDetail(
     firstTimer: FirstTimer,
   ): Promise<FirstTimerDetail> {
-    const sundaySchoolCheckIns = await this.sundaySchoolAttendanceRepo.find({
-      where: { firstTimer: { id: firstTimer.id } },
-      relations: ['session', 'session.sundaySchoolClass'],
-      order: { markedAt: 'ASC' },
-    });
+    const [sundaySchoolCheckIns, linkedConvert, convertHistory] =
+      await Promise.all([
+        this.sundaySchoolAttendanceRepo.find({
+          where: { firstTimer: { id: firstTimer.id } },
+          relations: ['session', 'session.sundaySchoolClass'],
+          order: { markedAt: 'ASC' },
+        }),
+        this.firstTimerConvertService.findLinked(firstTimer.id),
+        this.firstTimerConvertService.timelineEntries(firstTimer.id),
+      ]);
+    const convertMatches = linkedConvert
+      ? []
+      : await this.firstTimerConvertService.findMatches(firstTimer);
 
     const timeline: FirstTimerTimelineEntry[] = [
+      ...convertHistory,
       {
         source: 'INITIAL_VISIT' as const,
         label: firstTimer.visitedEvent?.name ?? 'Initial visit',
@@ -306,7 +338,13 @@ export class FollowUpService {
         new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime(),
     );
 
-    return { firstTimer, visitCount: timeline.length, timeline };
+    return {
+      firstTimer,
+      visitCount: timeline.filter((e) => VISIT_SOURCES.has(e.source)).length,
+      timeline,
+      convertMatches,
+      linkedConvert,
+    };
   }
 
   async getFirstTimerDetail(id: string): Promise<FirstTimerDetail> {
@@ -972,6 +1010,7 @@ export class FollowUpService {
   async markConverted(
     firstTimerId: string,
     memberId?: string,
+    actorMemberId?: string,
   ): Promise<FirstTimer> {
     const ft = await this.firstTimerRepo.findOne({
       where: { id: firstTimerId },
@@ -980,6 +1019,13 @@ export class FollowUpService {
     ft.convertedAt = new Date();
     ft.convertedMember = memberId ? ({ id: memberId } as any) : null;
     const saved = await this.firstTimerRepo.save(ft);
+    if (memberId) {
+      await this.firstTimerConvertService.propagateMembership(
+        firstTimerId,
+        memberId,
+        actorMemberId,
+      );
+    }
     this.cacheService.flushNamespace('follow-up:report');
     this.logger.log(
       `First-timer ${firstTimerId} marked as converted${memberId ? ` → member ${memberId}` : ''}`,

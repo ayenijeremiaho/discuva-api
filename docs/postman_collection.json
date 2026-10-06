@@ -171,6 +171,21 @@
       "type": "string"
     },
     {
+      "key": "workerProfileId2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "convertId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "outreachId",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "dayConfigId",
       "value": "",
       "type": "string"
@@ -21576,7 +21591,7 @@
                 }
               ]
             },
-            "description": "RolesGuard (WORKER) + assertWorkerInFollowUpDept. Same { firstTimer, visitCount, timeline } shape as the admin endpoint below — for a worker reviewing a first-timer assigned to their own task before a call/visit."
+            "description": "RolesGuard (WORKER) + assertWorkerInFollowUpDept. Same { firstTimer, visitCount, timeline } shape as the admin endpoint below — for a worker reviewing a first-timer assigned to their own task before a call/visit. Also returns convertMatches (outreach converts that may be this person: { id, name, phone, status, onboardedByName, outreach, lastContactedAt, createdAt, matchedOn: 'phone'|'name' }, empty once one is linked) and linkedConvert (with firstTimerLinkedAt, followUpCount). Once linked, timeline starts with OUTREACH_MET and EVANGELISM_FOLLOW_UP entries; visitCount counts only the visit sources."
           },
           "response": [
             {
@@ -21734,12 +21749,120 @@
               "body": "{\n  \"id\": \"fn1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n  \"task\": {\n    \"id\": \"ft1a2b3c-d4e5-f6a7-8901-abcdef123456\"\n  },\n  \"addedBy\": {\n    \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n    \"member\": {\n      \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n      \"firstname\": \"John\",\n      \"lastname\": \"Doe\",\n      \"email\": \"john.doe@example.com\",\n      \"phoneNumber\": \"+2348012345678\",\n      \"role\": \"WORKER\",\n      \"status\": \"ACTIVE\",\n      \"gender\": \"MALE\",\n      \"birthDay\": 15,\n      \"birthMonth\": 3,\n      \"birthYear\": 1990,\n      \"maritalStatus\": \"MARRIED\",\n      \"changedPassword\": true,\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"department\": {\n      \"id\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n      \"name\": \"Worship Department\",\n      \"description\": \"Handles all worship activities\",\n      \"key\": \"WORSHIP\",\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    },\n    \"status\": \"ACTIVE\",\n    \"profession\": \"Software Engineer\",\n    \"yearJoinedWorkforce\": \"2022-01-01\",\n    \"completedSOD\": true,\n    \"completedBibleCollege\": false,\n    \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n    \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n  },\n  \"content\": \"Called the first-timer; they expressed interest in joining a small group.\",\n  \"contactMethod\": \"PHONE_CALL\",\n  \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n  \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n}"
             }
           ]
+        },
+        {
+          "name": "Link Outreach Convert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"convertId\": \"{{convertId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/first-timers/{{firstTimerId}}/link-convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "first-timers",
+                "{{firstTimerId}}",
+                "link-convert"
+              ],
+              "variable": [
+                {
+                  "key": "firstTimerId",
+                  "value": "{{firstTimerId}}"
+                }
+              ]
+            },
+            "description": "Follow-Up dept worker. Confirms a suggested outreach convert is this first-timer. 409 if the convert is already linked or a member, or the first-timer already has a convert. Follow-Up takes over: the convert's Evangelism assignee is cleared, a hand-over log is added, and the outreach team + previous assignee get CONVERT_VISITED_CHURCH."
+          },
+          "response": []
+        },
+        {
+          "name": "Dismiss Outreach Convert Match",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"convertId\": \"{{convertId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/first-timers/{{firstTimerId}}/dismiss-convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "first-timers",
+                "{{firstTimerId}}",
+                "dismiss-convert"
+              ],
+              "variable": [
+                {
+                  "key": "firstTimerId",
+                  "value": "{{firstTimerId}}"
+                }
+              ]
+            },
+            "description": "Follow-Up dept worker. 'Not them' — the convert is no longer suggested for this first-timer."
+          },
+          "response": []
+        },
+        {
+          "name": "Unlink Outreach Convert",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/follow-up/first-timers/{{firstTimerId}}/link-convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "follow-up",
+                "first-timers",
+                "{{firstTimerId}}",
+                "link-convert"
+              ],
+              "variable": [
+                {
+                  "key": "firstTimerId",
+                  "value": "{{firstTimerId}}"
+                }
+              ]
+            },
+            "description": "Follow-Up dept worker. Undoes a wrong match; the convert returns to Evangelism, unassigned."
+          },
+          "response": []
         }
       ]
     },
     {
       "name": "Follow-Up (Admin)",
-      "description": "Admin-level follow-up management: full visibility of first-timers and tasks, reassignment, bulk updates, and pastoral reporting.\n\n**Access:** AdminGuard \u2014 FOLLOW_UP_READ for list/report, FOLLOW_UP_WRITE for mutations.\n\n**Typical flow:**\n1. `GET /admin/follow-up/first-timers` \u2014 review all registered first-timers\n2. `GET /admin/follow-up/tasks?status=PENDING` \u2014 see unresolved tasks\n3. `PATCH /admin/follow-up/tasks/:id/reassign` \u2014 move a task to a different Follow-Up worker\n4. `PATCH /admin/follow-up/tasks/bulk` \u2014 bulk-update statuses for multiple tasks\n5. `GET /admin/follow-up/report` \u2014 review conversion rate, source breakdown, and per-worker performance",
+      "description": "Admin-level follow-up management: full visibility of first-timers and tasks, reassignment, bulk updates, and pastoral reporting.\n\n**Access:** AdminGuard — FOLLOW_UP_READ for list/report, FOLLOW_UP_WRITE for mutations.\n\n**Typical flow:**\n1. `GET /admin/follow-up/first-timers` — review all registered first-timers\n2. `GET /admin/follow-up/tasks?status=PENDING` — see unresolved tasks\n3. `PATCH /admin/follow-up/tasks/:id/reassign` — move a task to a different Follow-Up worker\n4. `PATCH /admin/follow-up/tasks/bulk` — bulk-update statuses for multiple tasks\n5. `GET /admin/follow-up/report` — review conversion rate, source breakdown, and per-worker performance",
       "item": [
         {
           "name": "Register First-Timer (Admin)",
@@ -21899,7 +22022,7 @@
                 }
               ]
             },
-            "description": "List all first-timers. Requires FOLLOW_UP_READ permission. Optional ?eventId= filter."
+            "description": "List all first-timers. Requires FOLLOW_UP_READ permission. Optional ?eventId= filter. Each row carries hasConvertMatch — an outreach convert may be this person."
           },
           "response": [
             {
@@ -22158,7 +22281,8 @@
                 "{{firstTimerId}}",
                 "mark-converted"
               ]
-            }
+            },
+            "description": " With a memberId, a linked outreach convert is marked joined too."
           },
           "response": [
             {
@@ -22363,7 +22487,7 @@
                 }
               ]
             },
-            "description": "AdminGuard + FOLLOW_UP_READ. Backs the \"visits\" count/history panel on the admin First Timers list. visitCount rolls up the initial visit + FirstTimerVisit rows (logged returns) + SundaySchoolAttendance rows linked to this first-timer (auto-captured, no manual logging needed). timeline is the same list, dated and sorted oldest-first. Declared after admin/follow-up/first-timers/pipeline in the controller so that static path keeps matching first."
+            "description": "AdminGuard + FOLLOW_UP_READ. Backs the \"visits\" count/history panel on the admin First Timers list. visitCount rolls up the initial visit + FirstTimerVisit rows (logged returns) + SundaySchoolAttendance rows linked to this first-timer (auto-captured, no manual logging needed). timeline is the same list, dated and sorted oldest-first. Declared after admin/follow-up/first-timers/pipeline in the controller so that static path keeps matching first. Also returns convertMatches (outreach converts that may be this person: { id, name, phone, status, onboardedByName, outreach, lastContactedAt, createdAt, matchedOn: 'phone'|'name' }, empty once one is linked) and linkedConvert (with firstTimerLinkedAt, followUpCount). Once linked, timeline starts with OUTREACH_MET and EVANGELISM_FOLLOW_UP entries; visitCount counts only the visit sources."
           },
           "response": [
             {
@@ -22420,14 +22544,9 @@
               "body": "{\n  \"data\": [\n    {\n      \"id\": \"tsk1a2b3-c4d5-e6f7-8901-abcdef123456\",\n      \"type\": \"FIRST_TIMER\",\n      \"status\": \"IN_PROGRESS\",\n      \"firstTimer\": {\n        \"id\": \"ft1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n        \"firstname\": \"Emmanuel\",\n        \"lastname\": \"Adebayo\",\n        \"phone\": \"+2348023456789\",\n        \"email\": \"emmanuel.adebayo@example.com\",\n        \"source\": \"WALK_IN\",\n        \"wantsToJoinChurch\": true,\n        \"enjoyedAboutChurch\": \"The praise and worship session\",\n        \"wantsToJoinWorkforce\": false,\n        \"notes\": \"Very receptive; came with a friend\",\n        \"visitedEvent\": null,\n        \"createdByMember\": null,\n        \"createdByAdmin\": null,\n        \"convertedMember\": null,\n        \"convertedAt\": null,\n        \"inviteSentAt\": null,\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"member\": null,\n      \"event\": null,\n      \"assignedTo\": {\n        \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n        \"member\": {\n          \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n          \"firstname\": \"John\",\n          \"lastname\": \"Doe\",\n          \"email\": \"john.doe@example.com\",\n          \"phoneNumber\": \"+2348012345678\",\n          \"role\": \"WORKER\",\n          \"status\": \"ACTIVE\",\n          \"gender\": \"MALE\",\n          \"birthDay\": 15,\n          \"birthMonth\": 3,\n          \"birthYear\": 1990,\n          \"maritalStatus\": \"MARRIED\",\n          \"changedPassword\": true,\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"department\": {\n          \"id\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n          \"name\": \"Worship Department\",\n          \"description\": \"Handles all worship activities\",\n          \"key\": \"WORSHIP\",\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        },\n        \"status\": \"ACTIVE\",\n        \"profession\": \"Software Engineer\",\n        \"yearJoinedWorkforce\": \"2022-01-01\",\n        \"completedSOD\": true,\n        \"completedBibleCollege\": false,\n        \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n        \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n      },\n      \"outcome\": null,\n      \"outcomeNotes\": null,\n      \"dueDate\": \"2026-07-09\",\n      \"notes\": [\n        {\n          \"id\": \"fn1a2b3c-d4e5-f6a7-8901-abcdef123456\",\n          \"task\": {\n            \"id\": \"ft1a2b3c-d4e5-f6a7-8901-abcdef123456\"\n          },\n          \"addedBy\": {\n            \"id\": \"c3d4e5f6-a7b8-9012-cdef-123456789012\",\n            \"member\": {\n              \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n              \"firstname\": \"John\",\n              \"lastname\": \"Doe\",\n              \"email\": \"john.doe@example.com\",\n              \"phoneNumber\": \"+2348012345678\",\n              \"role\": \"WORKER\",\n              \"status\": \"ACTIVE\",\n              \"gender\": \"MALE\",\n              \"birthDay\": 15,\n              \"birthMonth\": 3,\n              \"birthYear\": 1990,\n              \"maritalStatus\": \"MARRIED\",\n              \"changedPassword\": true,\n              \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n              \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n            },\n            \"department\": {\n              \"id\": \"b2c3d4e5-f6a7-8901-bcde-f12345678901\",\n              \"name\": \"Worship Department\",\n              \"description\": \"Handles all worship activities\",\n              \"key\": \"WORSHIP\",\n              \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n              \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n            },\n            \"status\": \"ACTIVE\",\n            \"profession\": \"Software Engineer\",\n            \"yearJoinedWorkforce\": \"2022-01-01\",\n            \"completedSOD\": true,\n            \"completedBibleCollege\": false,\n            \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n            \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n          },\n          \"content\": \"Called the first-timer; they expressed interest in joining a small group.\",\n          \"contactMethod\": \"PHONE_CALL\",\n          \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n          \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n        }\n      ],\n      \"lastActivityAt\": \"2026-07-02T08:00:00.000Z\",\n      \"createdAt\": \"2026-07-02T08:00:00.000Z\",\n      \"updatedAt\": \"2026-07-02T08:00:00.000Z\"\n    }\n  ],\n  \"page\": 1,\n  \"limit\": 20,\n  \"totalCount\": 1,\n  \"totalPages\": 1\n}"
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "Evangelism (Worker/Team)",
-      "item": [
+        },
         {
-          "name": "Upload Convert",
+          "name": "Link Outreach Convert (Admin)",
           "request": {
             "method": "POST",
             "header": [
@@ -22438,7 +22557,240 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"John Smith\",\n  \"phone\": \"+2348012345678\",\n  \"notes\": \"Met at outreach event\"\n}",
+              "raw": "{\n  \"convertId\": \"{{convertId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/first-timers/{{firstTimerId}}/link-convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "first-timers",
+                "{{firstTimerId}}",
+                "link-convert"
+              ],
+              "variable": [
+                {
+                  "key": "firstTimerId",
+                  "value": "{{firstTimerId}}"
+                }
+              ]
+            },
+            "description": "Admin (FOLLOW_UP_WRITE). Same as the worker route: confirm a suggested outreach convert; Follow-Up takes over."
+          },
+          "response": []
+        },
+        {
+          "name": "Dismiss Outreach Convert Match (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"convertId\": \"{{convertId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/first-timers/{{firstTimerId}}/dismiss-convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "first-timers",
+                "{{firstTimerId}}",
+                "dismiss-convert"
+              ],
+              "variable": [
+                {
+                  "key": "firstTimerId",
+                  "value": "{{firstTimerId}}"
+                }
+              ]
+            },
+            "description": "Admin (FOLLOW_UP_WRITE). Stop suggesting this convert for this first-timer."
+          },
+          "response": []
+        },
+        {
+          "name": "Unlink Outreach Convert (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/admin/follow-up/first-timers/{{firstTimerId}}/link-convert",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "follow-up",
+                "first-timers",
+                "{{firstTimerId}}",
+                "link-convert"
+              ],
+              "variable": [
+                {
+                  "key": "firstTimerId",
+                  "value": "{{firstTimerId}}"
+                }
+              ]
+            },
+            "description": "Admin (FOLLOW_UP_WRITE). Undo a wrong match; the convert returns to Evangelism, unassigned."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Evangelism (Worker/Team)",
+      "item": [
+        {
+          "name": "Start Outreach",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Market outreach\",\n  \"location\": \"Central market\",\n  \"date\": \"2026-10-05\",\n  \"teamMemberIds\": [\n    \"{{memberId2}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/outreaches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "outreaches"
+              ]
+            },
+            "description": "Workers only. Records one outing. The creator is always on the team; teamMemberIds (max 10) must be ACTIVE workers, else 400. date defaults to the church's today. Pushes OUTREACH_TEAM_ADDED to the other members. Response team is { id, firstname, lastname }[]."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Recent Outreaches",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/outreaches/recent",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "outreaches",
+                "recent"
+              ]
+            },
+            "description": "Workers only. Outreaches the caller is on from the last 14 days, newest first. The member app pre-selects today's so teammates add into the same outreach."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Outreach Team",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"teamMemberIds\": [\n    \"{{memberId2}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/outreaches/{{outreachId}}/team",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "outreaches",
+                "{{outreachId}}",
+                "team"
+              ],
+              "variable": [
+                {
+                  "key": "outreachId",
+                  "value": "{{outreachId}}"
+                }
+              ]
+            },
+            "description": "Workers on the team only (else 403). Replaces the team; the creator is always kept. Pushes only newly added members."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Workers",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/workers?q=ada",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "workers"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ada"
+                }
+              ]
+            },
+            "description": "Workers only. Up to 20 ACTIVE workers other than the caller, matched on name, Evangelism workers first: { memberId, workerProfileId, firstname, lastname, isEvangelism, openAssigned }[]. Backs the team picker."
+          },
+          "response": []
+        },
+        {
+          "name": "Add Convert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"John Smith\",\n  \"phone\": \"+2348012345678\",\n  \"notes\": \"Met at outreach event\",\n  \"outreachId\": \"{{outreachId}}\",\n  \"allowDuplicate\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -22455,25 +22807,69 @@
                 "converts"
               ]
             },
-            "description": "Any authenticated worker. Only `name` is required \u2014 kept as simple as possible. status defaults to UNSAVED. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
+            "description": "Workers only. Only name is required; status defaults to UNSAVED. Phone accepts local format or with country code and is stored as E.164; invalid numbers return 400. outreachId must be an outreach the caller is on (403 otherwise). If the phone already exists and allowDuplicate isn't true, returns 409 { code: 'CONVERT_DUPLICATE', existing: { id, name, onboardedByName, createdAt } }. When auto-assign is on, assigns the adder or a teammate in the Evangelism department, else the least-loaded Evangelism worker, and pushes CONVERT_ASSIGNED to them."
           },
           "response": []
         },
         {
-          "name": "Get Team Converts",
+          "name": "Met Again (Duplicate)",
           "request": {
-            "method": "GET",
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"At the market again\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
             "url": {
-              "raw": "{{baseUrl}}/evangelism/converts/team?page=1&limit=10",
+              "raw": "{{baseUrl}}/evangelism/converts/{{convertId}}/met-again",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "evangelism",
                 "converts",
-                "team"
+                "{{convertId}}",
+                "met-again"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Workers only. Logs a follow-up prefixed \"Met again\" on an existing convert instead of creating a duplicate."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Converts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts?scope=mine&page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts"
               ],
               "query": [
+                {
+                  "key": "scope",
+                  "value": "mine"
+                },
                 {
                   "key": "page",
                   "value": "1"
@@ -22486,10 +22882,40 @@
                   "key": "status",
                   "value": "SAVED",
                   "disabled": true
+                },
+                {
+                  "key": "assignedTo",
+                  "value": "unassigned",
+                  "disabled": true
+                },
+                {
+                  "key": "overdue",
+                  "value": "true",
+                  "disabled": true
+                },
+                {
+                  "key": "outreachId",
+                  "value": "{{outreachId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "john",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-30",
+                  "disabled": true
                 }
               ]
             },
-            "description": "Caller must be a worker whose primary or secondary department key is EVANGELISM. Each convert includes computed daysSinceLastContact and isOverdue (>7 days idle and not yet linked to a member)."
+            "description": "scope=mine (default, any worker): converts the caller added, is on the outreach team for, or is assigned. scope=team: every convert; requires MANAGE_EVANGELISM_CONVERTS. assignedTo accepts a workerProfileId, 'unassigned' or 'me'. Each row has daysSinceLastContact, isOverdue (uses the church's overdueDays setting) and myRoles (onboarder | team | assignee). Replaces GET /evangelism/converts/team."
           },
           "response": []
         },
@@ -22530,7 +22956,7 @@
                 }
               ]
             },
-            "description": "Evangelism-dept worker only. Updates the convert's lastContactedAt to now."
+            "description": "Caller must be the convert's onboarder, on its outreach team, its assignee, or a worker whose department has MANAGE_EVANGELISM_CONVERTS; otherwise 403. Updates the convert's lastContactedAt to now. 409 once Follow-Up has taken over (the convert visited church)."
           },
           "response": []
         },
@@ -22571,7 +22997,7 @@
                 }
               ]
             },
-            "description": "Evangelism-dept worker only. status: UNSAVED | SAVED | UNDERGOING_DISCIPLESHIP"
+            "description": "Caller must be the convert's onboarder, on its outreach team, its assignee, or a worker whose department has MANAGE_EVANGELISM_CONVERTS; otherwise 403. status: UNSAVED | SAVED | UNDERGOING_DISCIPLESHIP 409 once Follow-Up has taken over (the convert visited church)."
           },
           "response": []
         },
@@ -22607,7 +23033,7 @@
                 }
               ]
             },
-            "description": "Evangelism-dept worker only. Full ConvertFollowUpLog history for a convert, newest first \u2014 not just the denormalized lastContactedAt date."
+            "description": "Caller must be the convert's onboarder, on its outreach team, its assignee, or a worker whose department has MANAGE_EVANGELISM_CONVERTS; otherwise 403. Paginated, newest first."
           },
           "response": []
         }
@@ -22641,12 +23067,73 @@
                 },
                 {
                   "key": "status",
-                  "value": "UNSAVED",
+                  "value": "SAVED",
+                  "disabled": true
+                },
+                {
+                  "key": "assignedTo",
+                  "value": "unassigned",
+                  "disabled": true
+                },
+                {
+                  "key": "overdue",
+                  "value": "true",
+                  "disabled": true
+                },
+                {
+                  "key": "outreachId",
+                  "value": "{{outreachId}}",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "john",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-30",
+                  "disabled": true
+                },
+                {
+                  "key": "stage",
+                  "value": "with_follow_up",
                   "disabled": true
                 }
               ]
             },
-            "description": "Admin only (EVANGELISM_READ). Cross-member browse with onboardedBy/assignedTo populated."
+            "description": "Admin only (EVANGELISM_READ). Cross-member browse with onboardedBy, outreach (with team) and assignedTo populated. Filters: status, assignedTo (workerProfileId | 'unassigned'), overdue, outreachId, search (name/phone), from/to (created date). stage=open|with_follow_up|joined. Rows carry stage (MET|FOLLOWED_UP|WITH_FOLLOW_UP|JOINED) and firstTimerLinkedAt."
+          },
+          "response": []
+        },
+        {
+          "name": "Search Workers (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/workers?q=ada",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "workers"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ada"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ). Up to 20 ACTIVE workers with isEvangelism and openAssigned, Evangelism workers first. Backs the assignee and team pickers."
           },
           "response": []
         },
@@ -22688,16 +23175,113 @@
                 }
               ]
             },
-            "description": "Admin only (EVANGELISM_WRITE). workerProfileId must belong to a worker in the Evangelism department (primary or secondary), else 400."
+            "description": "Admin only (EVANGELISM_WRITE). Any ACTIVE worker can be assigned (400 if inactive, 404 if unknown). Pushes CONVERT_ASSIGNED to the new assignee."
           },
-          "response": [
-            {
-              "name": "400 Bad Request \u2014 not an Evangelism worker",
-              "status": "Bad Request",
-              "code": 400,
-              "body": "{\n  \"statusCode\": 400,\n  \"message\": \"Target worker must be in the Evangelism department\"\n}"
-            }
-          ]
+          "response": []
+        },
+        {
+          "name": "Unassign Convert (Admin)",
+          "request": {
+            "method": "PATCH",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/{{convertId}}/unassign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "{{convertId}}",
+                "unassign"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). Clears the assignee."
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk Reassign Converts (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"toWorkerProfileId\": \"{{workerProfileId}}\",\n  \"fromWorkerProfileId\": \"{{workerProfileId2}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/bulk-reassign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "bulk-reassign"
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). Exactly one of convertIds (max 500) or fromWorkerProfileId (moves all of that worker's open converts). Returns { updated }. One CONVERTS_BULK_ASSIGNED push with the count."
+          },
+          "response": []
+        },
+        {
+          "name": "Move Convert to Outreach (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"outreachId\": \"{{outreachId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/converts/admin/{{convertId}}/outreach",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "converts",
+                "admin",
+                "{{convertId}}",
+                "outreach"
+              ],
+              "variable": [
+                {
+                  "key": "convertId",
+                  "value": "{{convertId}}"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). outreachId: uuid, or null to detach."
+          },
+          "response": []
         },
         {
           "name": "Link Convert to Member (Admin)",
@@ -22737,7 +23321,7 @@
                 }
               ]
             },
-            "description": "Admin only (EVANGELISM_WRITE). Marks the convert as having joined \u2014 sets member and linkedAt."
+            "description": "Admin only (EVANGELISM_WRITE). Links the convert to their Member record and sets linkedAt."
           },
           "response": []
         },
@@ -22774,7 +23358,200 @@
                 }
               ]
             },
-            "description": "Admin only (EVANGELISM_READ). Full ConvertFollowUpLog history for a convert, newest first."
+            "description": "Admin only (EVANGELISM_READ). Paginated, newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "List Outreaches (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/outreaches/admin?",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "outreaches",
+                "admin"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-09-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-30",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ). Up to 200 outreaches with teams, newest first."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Outreach Team (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"teamMemberIds\": [\n    \"{{memberId2}}\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/outreaches/admin/{{outreachId}}/team",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "outreaches",
+                "admin",
+                "{{outreachId}}",
+                "team"
+              ],
+              "variable": [
+                {
+                  "key": "outreachId",
+                  "value": "{{outreachId}}"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). Replaces the team; the creator is kept. Pushes only newly added members."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Evangelism Settings (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/settings/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "settings",
+                "admin"
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ). { overdueDays, autoAssign }, defaults 7 / true."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Evangelism Settings (Admin)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"overdueDays\": 7,\n  \"autoAssign\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/settings/admin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "settings",
+                "admin"
+              ]
+            },
+            "description": "Admin only (EVANGELISM_WRITE). overdueDays 1-90; autoAssign off leaves new converts unassigned."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Evangelism Report (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/report?from=2026-07-01&to=2026-09-30",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "report"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-07-01"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-30"
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ). Defaults to the last 90 days. Returns summary, trend (weekly up to 26 weeks, else monthly), byWorker and byOutreach. Cached 5 minutes."
+          },
+          "response": []
+        },
+        {
+          "name": "Export Evangelism CSV (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/evangelism/export?type=converts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "evangelism",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "converts"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-07-01",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-30",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "SAVED",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Admin only (EVANGELISM_READ) and the BULK_EXPORT plan feature (403 PLAN_UPGRADE_REQUIRED otherwise). type=converts takes the list filters (max 5,000 rows); workers/outreaches take from/to."
           },
           "response": []
         }
