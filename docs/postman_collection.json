@@ -51,6 +51,16 @@
       "type": "string"
     },
     {
+      "key": "seriesId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "eventTemplateId",
+      "value": "",
+      "type": "string"
+    },
+    {
       "key": "classId",
       "value": "",
       "type": "string"
@@ -5105,7 +5115,7 @@
     },
     {
       "name": "Events",
-      "description": "Manages church events (Sunday services, midweek services, etc.) and their service slots.\n\n**Access:** Admin-only for create/update/delete. Any authenticated user can list and get events.\n\n**Key concepts:**\n- Each event has one or more `serviceSlots`, each defining a time window and referencing an `EventConfig`.\n- **Recurring events** (`isRecurring: true`) generate one Event record per weekly occurrence up to `recurrenceEndDate` (max 1 year). All occurrences share the same slot template.\n- **Slot times** must fall within the event date range. Slots are auto-sorted and validated for no overlap.\n- To delete an entire recurring series, use `DELETE /events/recurring/:recurringEventId` \u2014 this removes all future occurrences.\n- **You must create an EventConfig and Venue before creating events** (slots reference `configId` and optionally `venueOverrideId`).\n\n**Typical flow:**\n1. Create a Venue (`POST /venues`)\n2. Create an EventConfig (`POST /event-config`) referencing the venue\n3. Create the Event (`POST /events`) with slots referencing the configId\n4. Reference slot UUIDs in attendance check-in and reminders",
+      "description": "Manages church events (Sunday services, midweek services, etc.) and their service slots.\n\n**Access:** Admin-only for create/update/delete. Any authenticated user can list and get events.\n\n**Key concepts:**\n- Each event has one or more `serviceSlots`, each defining a time window and referencing an `EventConfig`.\n- **Recurring events** (`isRecurring: true`) create an event series. With `recurrence.ongoing: true` there is no end date: the next 8 weeks are kept scheduled by a nightly job; otherwise occurrences run to `recurrenceEndDate` (max 1 year). Edit or stop a series via `/events/series/:id`.\n- **Programmes:** services whose name matches a programme template get a DRAFT programme on creation (no notifications). Send `autoProgramme: false` to skip.\n- **Service types** (`/events/templates`) save a reusable setup to start new events from.\n- **Slot times** must fall within the event date range. Slots are auto-sorted and validated for no overlap.\n- To delete an entire recurring series, use `DELETE /events/recurring/:recurringEventId` \u2014 this removes all future occurrences.\n- **Audience:** `audience` (`EVERYONE` default | `WORKERS` | `GROUP` + `audienceGroupId`) on create/update decides who can check in, sees the event in the member app, is reminded and is marked absent. Groups to choose from: `GET /events/audience-groups`.\n- **Check-in close per service:** a slot may send `checkinCloseModeOverride` (`SERVICE_END` | `AFTER_START`, with `checkinStopOverride` seconds for the latter) to override its config's close rule.\n- **You must create an EventConfig and Venue before creating events** (slots reference `configId` and optionally `venueOverrideId`).\n\n**Typical flow:**\n1. Create a Venue (`POST /venues`)\n2. Create an EventConfig (`POST /event-config`) referencing the venue\n3. Create the Event (`POST /events`) with slots referencing the configId\n4. Reference slot UUIDs in attendance check-in and reminders",
       "item": [
         {
           "name": "Create Event (Single)",
@@ -5119,7 +5129,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5222,6 +5232,45 @@
           ]
         },
         {
+          "name": "Create Event (Recurring Weekly, Ongoing)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true\n  },\n  \"autoProgramme\": true,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-10-11T07:00:00.000Z\",\n      \"endTime\": \"2026-10-11T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-10-11T09:30:00.000Z\",\n      \"endTime\": \"2026-10-11T11:30:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events"
+              ]
+            },
+            "description": "Creates an open-ended weekly series: no recurrenceEndDate, `recurrence.ongoing: true`. The next 8 weeks are created now and a nightly job (02:00) keeps topping it up. Services matching a programme template get a DRAFT programme with no notifications; send `autoProgramme: false` to skip that. Each occurrence's `recurringEventId` is the series id used by /events/series."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "[\n  {\n    \"id\": \"d4e5f6a7-3b4c-5d6e-7f8a-9b0c1d2e3f4a\",\n    \"name\": \"Sunday Service\",\n    \"recurringEventId\": \"{{seriesId}}\",\n    \"seriesOccurrenceDate\": \"2026-10-11\"\n  }\n]"
+            }
+          ]
+        },
+        {
           "name": "Create Event (Recurring Weekly)",
           "request": {
             "method": "POST",
@@ -5249,7 +5298,7 @@
                 "events"
               ]
             },
-            "description": "Creates one event record per recurrence date up to recurrenceEndDate (max 1 year ahead). serviceSlots are required (at least one) and must include a configId. The same slot template is stamped on every occurrence \u2014 all share the same config. Delete future occurrences in bulk via DELETE /events/recurring/:recurringEventId."
+            "description": "Creates an event series with one event per recurrence date up to recurrenceEndDate (max 1 year ahead). For an open-ended series use recurrence.ongoing instead. serviceSlots are required (at least one) and must include a configId. The same slot template is stamped on every occurrence \u2014 all share the same config. Delete future occurrences in bulk via DELETE /events/recurring/:recurringEventId."
           },
           "response": [
             {
@@ -5487,7 +5536,7 @@
                 }
               ]
             },
-            "description": "ADMIN only. Deletes all future events in a recurring series (today and after)."
+            "description": "ADMIN only. Deletes all future events in a recurring series (today and after) and deactivates the series. To stop from a later date, use POST /events/series/:id/stop."
           },
           "response": [
             {
@@ -5501,6 +5550,309 @@
               "status": "Not Found",
               "code": 404,
               "body": "{\n  \"statusCode\": 404,\n  \"message\": \"Recurring event not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Event Series",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events/series",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "series"
+              ]
+            },
+            "description": "ADMIN (EVENTS_READ). Active repeating events with their next date and how many are scheduled ahead."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"{{seriesId}}\",\n    \"name\": \"Sunday Service\",\n    \"description\": null,\n    \"onlineAttendanceEnabled\": false,\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"startDate\": \"2026-10-11\",\n    \"endDate\": null,\n    \"isActive\": true,\n    \"autoProgramme\": true,\n    \"slotBlueprint\": [\n      {\n        \"name\": \"First Service\",\n        \"startTime\": \"08:00\",\n        \"durationMinutes\": 120,\n        \"dayOffset\": 0,\n        \"configId\": \"{{configId}}\"\n      },\n      {\n        \"name\": \"Second Service\",\n        \"startTime\": \"10:30\",\n        \"durationMinutes\": 120,\n        \"dayOffset\": 0,\n        \"configId\": \"{{configId}}\"\n      }\n    ],\n    \"nextOccurrence\": \"2026-10-11T07:00:00.000Z\",\n    \"upcomingCount\": 8\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Get Event Series",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events/series/{{seriesId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "series",
+                "{{seriesId}}"
+              ]
+            },
+            "description": "ADMIN (EVENTS_READ). One series. 404 for recurring groups created before series existed."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{seriesId}}\",\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"recurrencePattern\": \"weekly\",\n  \"recurrenceInterval\": 1,\n  \"startDate\": \"2026-10-11\",\n  \"endDate\": null,\n  \"isActive\": true,\n  \"autoProgramme\": true,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"nextOccurrence\": \"2026-10-11T07:00:00.000Z\",\n  \"upcomingCount\": 8\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Event Series",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"09:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"11:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"effectiveFrom\": \"2026-11-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/series/{{seriesId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "series",
+                "{{seriesId}}"
+              ]
+            },
+            "description": "ADMIN (EVENTS_WRITE). Changes the series and every upcoming date on or after `effectiveFrom` that hasn't started and has no check-ins. Same service names \u2192 slots updated in place (programmes stay). Services added/removed \u2192 409 `SERIES_RECREATE_REQUIRED` until resent with `confirmRecreate: true`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"updated\": 6,\n  \"recreated\": 0,\n  \"skippedWithHistory\": 0\n}"
+            },
+            {
+              "name": "409 Recreate Required",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"statusCode\": 409,\n  \"message\": \"3 upcoming service(s) will be recreated because services were added or removed \\u2014 their draft programmes will be rebuilt from templates.\",\n  \"code\": \"SERIES_RECREATE_REQUIRED\",\n  \"affected\": 3\n}"
+            }
+          ]
+        },
+        {
+          "name": "Stop Event Series",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"from\": \"2026-12-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/series/{{seriesId}}/stop",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "series",
+                "{{seriesId}}",
+                "stop"
+              ]
+            },
+            "description": "ADMIN (EVENTS_WRITE). Stops repeating: the series ends the day before `from`, and upcoming dates from `from` without check-ins are removed."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"removed\": 4\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Service Types",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events/templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "templates"
+              ]
+            },
+            "description": "ADMIN (EVENTS_READ). Saved service types (event templates), ordered by name. Not paginated."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"{{eventTemplateId}}\",\n    \"name\": \"Sunday Service\",\n    \"description\": null,\n    \"onlineAttendanceEnabled\": false,\n    \"slotBlueprint\": [\n      {\n        \"name\": \"First Service\",\n        \"startTime\": \"08:00\",\n        \"durationMinutes\": 120,\n        \"dayOffset\": 0,\n        \"configId\": \"{{configId}}\"\n      },\n      {\n        \"name\": \"Second Service\",\n        \"startTime\": \"10:30\",\n        \"durationMinutes\": 120,\n        \"dayOffset\": 0,\n        \"configId\": \"{{configId}}\"\n      }\n    ],\n    \"defaultRecurrence\": {\n      \"recurrencePattern\": \"weekly\",\n      \"recurrenceInterval\": 1,\n      \"ongoing\": true,\n      \"weekday\": 0\n    },\n    \"autoProgramme\": true\n  }\n]"
+            }
+          ]
+        },
+        {
+          "name": "Create Service Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "templates"
+              ]
+            },
+            "description": "ADMIN (EVENTS_WRITE). Saves a reusable setup. `defaultRecurrence.weekday` (0 = Sunday) lets the admin pre-fill the next matching date. 409 if the name exists (case-insensitive)."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"id\": \"{{eventTemplateId}}\",\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}"
+            },
+            {
+              "name": "409 Conflict",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"statusCode\": 409,\n  \"message\": \"A service type called \\\"Sunday Service\\\" already exists\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Service Type",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/templates/{{eventTemplateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "templates",
+                "{{eventTemplateId}}"
+              ]
+            },
+            "description": "ADMIN (EVENTS_WRITE). Replaces a service type (same body as create)."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"id\": \"{{eventTemplateId}}\",\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete Service Type",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/events/templates/{{eventTemplateId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "templates",
+                "{{eventTemplateId}}"
+              ]
+            },
+            "description": "ADMIN (EVENTS_WRITE). Deletes a service type. Events already created from it are unaffected."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": ""
+            }
+          ]
+        },
+        {
+          "name": "List Audience Groups",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/events/audience-groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "audience-groups"
+              ]
+            },
+            "description": "ADMIN (EVENTS_WRITE). Groups an event can be for (audience GROUP), ordered by name."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "[\n  {\n    \"id\": \"{{groupId}}\",\n    \"name\": \"Teenagers\"\n  }\n]"
             }
           ]
         }
@@ -5522,7 +5874,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"defaultVenueId\": \"{{venueId}}\",\n  \"defaultFormat\": \"IN_PERSON\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"allowedDistanceInMeters\": 150,\n  \"autoStartSession\": false,\n  \"enforceMemberLocation\": false\n}",
+              "raw": "{\n  \"name\": \"Default Sunday Config\",\n  \"description\": \"Standard check-in config for Sunday services\",\n  \"defaultVenueId\": \"{{venueId}}\",\n  \"defaultFormat\": \"IN_PERSON\",\n  \"workerCheckinStartOffsetSeconds\": -5400,\n  \"workerLateOffsetSeconds\": 0,\n  \"memberCheckinStartOffsetSeconds\": -1800,\n  \"checkinStopOffsetSeconds\": 3600,\n  \"checkinCloseMode\": \"SERVICE_END\",\n  \"allowedDistanceInMeters\": 150,\n  \"autoStartSession\": false,\n  \"enforceMemberLocation\": false\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5538,7 +5890,7 @@
                 "event-config"
               ]
             },
-            "description": "Offsets are in seconds relative to slot startTime. Negative = before slot starts. Constraint: workerLateOffset > workerCheckinStartOffset and checkinStopOffset > workerLateOffset. defaultVenueId is required \u2014 create a Venue first and reference it here."
+            "description": "Offsets are in seconds relative to slot startTime. Negative = before slot starts. checkinCloseMode: SERVICE_END keeps check-in open until each service ends (checkinStopOffsetSeconds is then unused); AFTER_START (default) closes at checkinStopOffsetSeconds after start, never after the service ends. Constraint (AFTER_START): workerLateOffset > workerCheckinStartOffset and checkinStopOffset > workerLateOffset. defaultVenueId is required \u2014 create a Venue first and reference it here."
           },
           "event": [
             {

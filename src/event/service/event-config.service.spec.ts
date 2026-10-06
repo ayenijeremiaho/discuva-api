@@ -1,3 +1,4 @@
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -103,6 +104,24 @@ describe('EventConfigService', () => {
           workerLateOffsetSeconds: -200,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('saves "close when the service ends" without checking the unused stop offset', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+      mockRepo.create.mockImplementation((v) => v);
+      mockRepo.save.mockImplementation((v) =>
+        Promise.resolve({ id: 'c1', ...v }),
+      );
+
+      const saved = await service.create({
+        ...validDto,
+        workerLateOffsetSeconds: 600,
+        checkinStopOffsetSeconds: 0,
+        checkinCloseMode: CheckinCloseModeEnum.SERVICE_END,
+      });
+
+      expect(saved.checkinCloseMode).toBe(CheckinCloseModeEnum.SERVICE_END);
     });
 
     it('should throw BadRequestException if checkinStopOffset <= workerLateOffset', async () => {

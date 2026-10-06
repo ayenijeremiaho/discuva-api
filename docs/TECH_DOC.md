@@ -524,10 +524,10 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
 
 ### Event Module
 
-Manages events and service slots. Events can be single or recurring (daily/weekly/monthly). At least one `serviceSlot`
-is required at creation — each slot carries an optional `configId` pointing to an `EventConfig`. For recurring events
-the same slot template (including `configId`) is stamped onto every generated occurrence; updating the config later
-propagates to all check-ins that reference it.
+Manages events and service slots. Events can be single or repeating (daily/weekly/monthly, with an end date or
+ongoing). At least one `serviceSlot` is required at creation — each slot carries an optional `configId` pointing to an
+`EventConfig`. A repeating event is stored as an `EventSeries` (see **Event series** below) whose slot blueprint is
+stamped onto every generated occurrence; updating the config later propagates to all check-ins that reference it.
 
 `CreateEventDto` takes no `eventDate`/`endDate`/`startTime`/`endTime` fields — all four are always derived from the
 supplied `serviceSlots` (`eventDate`/`endDate` = earliest `startTime`/latest `endTime`, UTC-date-truncated so the
@@ -546,17 +546,30 @@ filter on `endTime`, not `endDate`, for this reason, and both frontends' "Past" 
 
 Each slot can have multiple reminder schedules via sub-resource `/events/slots/:slotId/reminders` (admin-only). See EventReminder model.
 
-**Admin frontend UX (`discuva-admin`, `app/events/page.tsx`):** since the event's date range is entirely derived from its slots' times (no manual override, per above), the create/edit form's `SlotRow` sets `min` on the datetime-local inputs (a slot's End Time can't be earlier than its own Start Time; each slot after the first has its Start Time's `min` set to the previous slot's End Time, since slots run in sequence) — but `min` on `type="datetime-local"` only reliably restricts the browser's *calendar* date view; the time-of-day spinner on an already-valid date isn't blocked interactively in Chrome/most browsers, only flagged `:invalid` on blur/submit, which read as "not working" for the time portion. `updateSlot()` therefore also clamps values in JS the instant they change: a slot's End Time snaps forward to match its Start Time if set earlier, a slot's Start Time snaps forward to the previous slot's End Time if set earlier (pulling its own End Time along if that would now precede it), and moving a slot's End Time later pulls the next slot's Start Time forward with it if it would otherwise fall behind. `min` is kept alongside this for the calendar-level hint; the JS clamp is what actually prevents an invalid time-of-day from sticking. Neither replaces backend validation, which still governs what's actually accepted on submit.
+**Admin frontend UX (`discuva-admin`, `app/events/page.tsx`, `components/events/event-form.tsx`, `utils/event-schedule.ts`):** the form asks for the **date once** and each service as a start time (`<input type="time">`) plus a length (30m/1h/1h30/2h chips, or separate hours and minutes fields — minutes over 59 carry into hours), with the end time shown read-only. "Add another service" starts the new row when the previous one ends and copies its config, venue and format (`chainRow`; "First Service" → "Second Service"). `rowsToSlots` converts the rows to the unchanged `serviceSlots[].startTime/endTime` ISO payload in the browser's local time, and `slotsToSchedule` loads an existing event back into date + rows. `scheduleIssues` mirrors the API's checks inline — overlap with the previous service, a missing config, and (on create) a time that has passed — and the Create button stays disabled with the first problem shown under it. A **Runs over several days** switch under the date (off by default; on automatically when any service has a `dayOffset`) adds a Day 1 / Day 2… picker to each service, shown with real dates; turning it off puts every service back on the event date. Rarely used settings (description, online attendance, per-service format and venue overrides) sit together in a **More options** card (per-service settings grouped by service inside it), opened automatically when any is already set; while closed it lists what's set as chips. A **Save as a service type** card explains the benefit (offered under Schedule Event next time) and saves inline. Smart defaults: the config is pre-selected when there's only one, otherwise the last one used in this browser (`utils/last-used.ts`, `localStorage` wrapped in try/catch); a blank event name becomes "{Weekday} Service" and blank service names become the event name (single service) or "First/Second… Service". **Repeats** offers Doesn't repeat / Weekly / Every 2 weeks / Monthly / Custom, with **Ends** Never (sends `recurrence.ongoing: true`) or On date. **Schedule Event** opens a chooser of saved service types (see below) or Blank; picking a type pre-fills the form with the next date on its saved weekday.
 
-**Reusing a past event (`components/events/reuse-event-dialog.tsx`, `utils/event-reuse.ts`):** "Reuse" opens a small dialog instead of the full form. It suggests the next date on the same weekday as the original's first slot (`nextSameWeekday` — today if it's that weekday and the start time hasn't passed, otherwise the coming one), with one-tap "Week after" / "Today" (when today's times are still ahead) and a date picker. `shiftSlotsToDate` moves every slot to the chosen date keeping its local time and the day gaps between slots (day arithmetic in UTC, so DST doesn't shift times); configs, venues and format overrides are kept. "Create event" posts straight to `POST /events` (recurring events ask only for "Repeats until"); "Edit details…" opens the usual form pre-filled with the shifted slots. A date whose times have already passed can't be submitted — the same rule the API enforces.
+**Reusing a past event (`components/events/reuse-event-dialog.tsx`, `utils/event-reuse.ts`):** "Reuse" opens a small dialog instead of the full form. It suggests the next date on the same weekday as the original's first slot (`nextSameWeekday` — today if it's that weekday and the start time hasn't passed, otherwise the coming one), with one-tap "Week after" / "Today" (when today's times are still ahead) and a date picker. `shiftSlotsToDate` moves every slot to the chosen date keeping its local time and the day gaps between slots (day arithmetic in UTC, so DST doesn't shift times); configs, venues and format overrides are kept. "Create event" posts straight to `POST /events` as a one-off (a regular service should use Repeats instead); "Edit details…" opens the usual form pre-filled with the shifted slots. A date whose times have already passed can't be submitted — the same rule the API enforces.
 
-For new events, the first service slot's `min` is set to the next selectable minute and every later slot is constrained to start no earlier than the previous slot's end. The API independently rejects creation if any slot starts before the current instant; this rule applies to `POST /events` and does not prevent editing an existing event.
+The API independently rejects creation if any slot starts before the current instant; this rule applies to `POST /events` and does not prevent editing an existing event (the form's past-time check likewise runs only on create).
 
 **Reminder dispatch (cron `*/15 * * * *`):** Queries `EventReminder` rows where `enabled = true`, `lastSentAt IS NULL`, `fireAt <= now`, and `slot.startTime > now`. The filter runs entirely in SQL — `fireAt` is pre-computed at reminder creation (and recalculated if `intervalPreset` is updated). When a slot is deleted or recreated (e.g., event update), its reminders are cascade-deleted. On `create`, `fireAt = slot.startTime − preset_minutes`. On `update` with a new `intervalPreset`, `fireAt` is recalculated from the existing slot's `startTime`.
 
 **Service slot ordering:** `EventService.getAll()`, `getById()`, and `getUpcomingEvents()` all explicitly order the `serviceSlots` relation by `startTime` ASC (query-builder `.addOrderBy('serviceSlots.startTime', 'ASC')` for `getAll`; TypeORM's relation `order` option for the other two, e.g. `order: { serviceSlots: { startTime: 'ASC' } }`). Without this, a joined one-to-many relation has no guaranteed order — First/Second Service could come back in either order depending on DB/join internals, which showed up as the admin portal's event list not consistently showing slots in the order they begin.
 
 **Editing an event's slots is blocked once the event has any recorded history.** `EventService.update()`'s slot-replacement path (`slotRepository.delete` + recreate) previously ran unconditionally — `ServiceProgramme`/`ServiceSession`/session-slots/action-log all cascade off `ServiceSlot`, and `Attendance.serviceSlot` is `ON DELETE SET NULL`, so replacing the slots on an event that had already run would silently destroy its programme/session history and detach any recorded attendance from the slot it was for. `hasRecordedHistory(eventId)` now checks (via two raw `dataSource` queries, matching `attachMyAttendance`'s existing pattern rather than adding new repository injections) whether any `attendances` row or any `service_sessions` row (joined through `service_programmes`/`service_slots`) exists for the event; if either does, the whole `PATCH` is rejected with a 400 before touching any slot. Cosmetic fields (`name`/`description`) remain editable regardless — only `serviceSlots` replacement is gated. This is a one-way door: once an event has history, its schedule can never be edited again, only replaced by creating a new event (a deliberate, safer default over a more capable diff-based in-place slot update, which was considered and explicitly deferred).
+
+**Slot blueprint (`src/event/types/slot-blueprint.ts`):** series and service types store services as times of day, not instants: `{ name, startTime: "HH:mm", durationMinutes, dayOffset, configId?, venueOverrideId?, formatOverride? }` (`SlotBlueprintDto`: `HH:mm` regex, duration 1–1440, dayOffset 0–13). `blueprintToSlotDtos(blueprint, date, tz)` builds each slot on `date + dayOffset` with `fromZonedTime` in the church timezone, so a 09:00 service stays 09:00 across DST changes; `slotDtosToBlueprint` is the inverse (via `formatInTimeZone`). The timezone is the tenant's `timezone` column, falling back to env `TIMEZONE` (`ChurchTimezoneService`, 10-minute in-memory cache per tenant).
+
+**Event series (`EventSeriesService`, `event_series` table):** every `POST /events` with `isRecurring: true` now creates a series row (pattern, interval, `startDate`, `endDate` — `null` when `recurrence.ongoing` — the slot blueprint, `autoProgramme`, `generatedThrough`, `isActive`) and its occurrences are ordinary `events` rows with `recurringEventId = series.id` and `seriesOccurrenceDate` (the church-local date they stand for; unique per series via `UQ_events_series_occurrence`). A fixed end date must be within a year of the start; an ongoing series has none.
+- **Generation:** `generate(series, tz, now, until?)` walks occurrence dates (k × interval days/weeks; monthly via calendar months) after `generatedThrough` up to `min(until ?? today + 56 days, endDate)`, skips dates whose first service has already started or that already exist, builds each via `EventService.buildOccurrence`, and advances `generatedThrough`. Because it never revisits dates at or before `generatedThrough`, **cancelling one date (`DELETE /events/:id`) sticks** — it is not recreated.
+- **Top-up (`EventSeriesScheduler`):** `@Cron('0 2 * * *')`, Redis lock `lock:event-series-top-up` (1800 s), `forEachActiveTenant`; tops every active series up to 8 weeks ahead in that tenant's timezone, one series' failure logged without stopping the rest. It only loads series that can still gain a date (`generated_through` is null or before the horizon, and before `end_date` for a fixed series), served by the partial index `IDX_event_series_active`, so finished series aren't reloaded every night.
+- **Editing (`PATCH /events/series/:id`):** updates the series fields/blueprint, then applies them to upcoming occurrences with `seriesOccurrenceDate >= effectiveFrom` that haven't started and have no recorded history (`hasRecordedHistory`). If the service names are unchanged, each occurrence's `service_slots` rows are **updated in place** (times, config, venue, format) so programmes, sessions and reminders stay attached. Unsent reminders on a moved service get their `fireAt` recalculated (`EventService.retimeReminders`, saved through the repository so `SchedulerGateSubscriber` wakes the `event-reminders` job); without this they would fire at the old time. If services were added or removed, those occurrences must be recreated — the first call returns **409** `{ code: "SERIES_RECREATE_REQUIRED", affected }` and the client resends with `confirmRecreate: true`. A name-only change also renames occurrences with history. Returns `{ updated, recreated, skippedWithHistory }`; audit `EVENT_SERIES_UPDATED`.
+- **Stopping (`POST /events/series/:id/stop` `{ from }`):** sets `endDate = from − 1 day`, deactivates the series and removes upcoming occurrences on/after `from` without history; returns `{ removed }`; audit `EVENT_SERIES_STOPPED`. `DELETE /events/recurring/:id` also deactivates the series.
+- Older recurring groups created before series existed have no series row; they keep working as plain events but can't be edited as a series (`GET /events/series/:id` → 404).
+
+**Programmes prepared on creation:** after a single event is created, and after each series occurrence is generated, `EventService.prepareProgrammes` calls `ServiceProgrammeService.createDraftsFromTemplates(slots)`: each new service slot whose name matches a programme template's `serviceSlotName` (trimmed, case-insensitive) gets a DRAFT programme with the template's items, including department assignments, and `createdByAdmin = null`. **No notifications are sent at creation** — assignees see it in My Assignments and the usual day-before reminder still goes. Slots that already have a programme are skipped; failures are logged and never block event creation. Opt out per event with `autoProgramme: false` on `POST /events`, or per series with `autoProgramme` on the series. The admin form lists the matching services with an opt-out checkbox.
+
+**Service types (`EventTemplateService`, `event_templates` table):** a saved setup — `name` (unique, case-insensitive; 409 on clash), `description`, `onlineAttendanceEnabled`, `slotBlueprint`, `defaultRecurrence` (`{ recurrencePattern, recurrenceInterval, ongoing, weekday? }` or `null`; `weekday` 0 = Sunday lets the admin pre-fill the next matching date) and `autoProgramme`. Reference data, so `GET /events/templates` returns the full list ordered by name. Audit `EVENT_TEMPLATE_SAVED` / `EVENT_TEMPLATE_DELETED`. The admin "Save as service type…" link on the event form updates the type with the same name if one exists.
 
 **`deleteEvent`/`deleteFutureRecurring`/`getAll`'s `upcoming` filter now use precise `startTime`/`endTime`, not the date-only `eventDate`/`endDate`** — same class of fix as `findEventsReadyForAbsenceMarking`/`getUpcomingEvents` above, just not originally carried through to these three call sites. Concretely: `deleteEvent` previously compared `eventDate` (start date) to today, so a same-day event that had already fully ended hours ago was still deletable; now blocks on `endTime < now`. `deleteFutureRecurring` previously selected occurrences via `eventDate >= today`, so an already-started (or already-ended) same-day occurrence still counted as "future"; now uses `startTime >= now`, and — previously entirely missing — also filters `attendanceMarked = false`, matching `deleteEvent`'s own guard (this bulk path bypasses `deleteEvent` entirely, so it needs the same safety check independently). `getAll`'s `upcoming` filter now matches `getUpcomingEvents`' own semantics (`endTime >= now`) instead of showing an already-ended-today event as still upcoming.
 
@@ -635,17 +648,50 @@ toggle is only checked (for the clearer "not enabled" vs. "window has not opened
 never opened at all. Also now compares against `this.dateService.now()` instead of a bare `new Date()`, matching
 the rest of the module's convention.
 
-**`checkinStopOffsetSeconds` cannot leave check-in open past a slot's own end time.** Enforced in
-`EventService.buildSlotFromDto` (not `EventConfigService`, since the same config can be reused across slots of
-different durations — only at slot-save time, once a specific `startTime`/`endTime` is known, can "does this offset
-exceed the slot's own length" be judged): the effective value (`serviceSlot.checkinStopOverride ?? config.checkinStopOffsetSeconds`)
-must be `<= (endTime - startTime)` in seconds, else `BadRequestException`. discuva-member's home hero card previously
-kept showing "Live Now" for as long as this window stayed open, which — before this constraint existed — could
-outlive the admin side's own "ended" determination by however long a positive offset was configured, since the
-offset is relative to `startTime`, not `endTime`. Tenant migration `CapCheckinStopOffsetAtSlotEnd` clamps any
-existing `service_slots.checkin_stop_override` (setting one explicitly, capped to that slot's own duration, only for
-the offending slot — the shared `event_configs` row is left untouched so other slots using the same config are
-unaffected) for rows where the effective offset already exceeded their own slot's length.
+**Event audience (`events.audience`, `audience_group_id`; also on `event_series` and `event_templates`).** Who an
+event is for is set on the **event**, never on a service slot: attendance is one row per member per event, so a
+per-slot audience could not be tracked or marked separately. Different audiences (a workers' meeting, a teens class)
+are separate events. `EVERYONE` (default) behaves as before. `WORKERS` / `GROUP` (a `groups` row, via
+`audienceGroupId`) narrow, through `src/event/utility/event-audience.ts`:
+- **Check-in** — `AttendanceService.assertInAudience` returns 403 "{event} is for workers only." / "…is for {group} only.".
+- **Admin / front-desk marking** — `adminMarkAttendance` applies the same check before creating a new record
+  (correcting an existing record is still allowed).
+- **Streaks, leaderboard, rank and attendance %** are computed only from a person's own attendance rows, so with no
+  row ever created for people outside the audience (above), an event for others can't break their streak or change
+  their score.
+- **Absence marking** — `MemberService.getMembersNotCheckedInForEvent` / `getWorkersNotCheckedInForEvent` take the
+  event and apply `scopeToAudience`, so people outside the audience are never marked absent (previously every event
+  marked the whole congregation).
+- **Member app visibility** — `GET /events` and `GET /events/:id` from the member surface filter with
+  `eventVisibleToViewerSql` (404 for an event not meant for the caller); the admin surface sees everything.
+- **Slot reminders** — recipients are intersected with the audience, and the in-app announcement is narrowed
+  (`WORKERS_ONLY`, or `GROUP` with the event's group).
+`resolveAudience` validates the group (400 if missing) and drops a group id for any other audience. Series pass the
+audience to each generated occurrence, and a series edit applies it to upcoming dates. A `GROUP` event whose group is
+later deleted (`ON DELETE SET NULL`) falls back to everyone. Admin: "Who is it for?" (Everyone / Workers only / A
+contact list — `groups` are labelled Contact Lists in the admin UI) at the top of the event form, carried by service types; list and detail show "Workers only" / "{group} only".
+
+**Check-in close rule (`EventConfig.checkinCloseMode`, per-slot `checkinCloseModeOverride`).** `SERVICE_END` keeps
+check-in open for members and workers until each service's own `endTime` — no offset to tune, so one config fits services
+of any length. `AFTER_START` closes at `startTime + checkinStopOffsetSeconds` (or the slot override), capped at the
+service's end. Resolution: `slot.checkinCloseModeOverride ?? config.checkinCloseMode`
+(`EventService.resolveSlotConfig`); applied by `AttendanceService.checkinCloseTime` and mirrored by discuva-member's
+`resolveSlot().checkinWindowEnd`. Neither mode changes attendance status — workers are still LATE from
+`workerLateOffsetSeconds`, and absences are still marked after the event's `endTime`. Existing configs default to
+`AFTER_START` (migration `AddCheckinCloseMode`); new configs from the admin form default to `SERVICE_END`.
+`EventConfigService.validateOffsets` skips the stop-offset ordering checks for `SERVICE_END`. Admin: Event Config has a
+"Check-In Closes" choice with live examples; the event form's More options has a per-service "Check-in closes"
+(Config default / When the service ends / A set time after it starts).
+
+**The config's stop offset is a ceiling.** Check-in closes at
+`min(startTime + checkinStopOffsetSeconds, endTime)` (`AttendanceService.validateCheckinWindow`, mirrored by
+discuva-member's `resolveSlot().checkinWindowEnd`). One config therefore fits services of any length: a 60-minute
+stop offset on a 30-minute service simply closes check-in when that service ends. Earlier, `EventService.buildSlotFromDto`
+rejected any slot shorter than its config's offset ("would leave check-in open past its own end time"), which forced
+admins to create per-length configs and could also fail a series' nightly generation; that rejection now applies
+only to a per-service `checkinStopOverride` longer than that service (an explicit, contradictory value). Tenant
+migration `CapCheckinStopOffsetAtSlotEnd` had already clamped existing over-long overrides; with the runtime cap
+it is no longer needed for correctness but is left in place (migrations are immutable).
 
 **Attendance Distance Check Setting — two layers, per-tenant override on top of a platform-admin default.**
 Previously `ENFORCE_DISTANCE_CHECK` was a single global env var — one on/off switch shared by every tenant, no
@@ -6811,12 +6857,21 @@ outside the requested `?months=` window).
 | POST   | /small-groups/:id/join                                     | JwtAuthGuard + Module: small_groups                              | Self-join (upsert — re-joining after leaving works)                                                             |
 | DELETE | /small-groups/:id/leave                                    | JwtAuthGuard + Module: small_groups                              | Self-leave                                                                                                      |
 | POST   | /small-groups/:id/attendance                               | JwtAuthGuard + Module: small_groups                              | Record attendance — body: `{ meetingDate, records: [{memberId, status}] }`. 403 unless the caller is this group's leader. |
-| POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
+| POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring). `recurrence.ongoing: true` makes an open-ended series (no `recurrenceEndDate`); `autoProgramme: false` skips draft programmes from templates |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
 | GET    | /events                                                    | Any                                                           | List events. Query: `page`, `limit`, `orderBy`, `order`, `from` (YYYY-MM-DD), `to` (YYYY-MM-DD), `upcoming=true`, `search` (case-insensitive match on event name — powers searchable event pickers in the admin frontend) |
 | DELETE | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Delete single event — blocked if `attendanceMarked = true` or event is in the past                           |
-| DELETE | /events/recurring/:recurringEventId                        | AdminGuard (EVENTS_WRITE)                                     | Delete future recurring events                                                                                |
+| DELETE | /events/recurring/:recurringEventId                        | AdminGuard (EVENTS_WRITE)                                     | Delete future recurring events (also deactivates the series)                                                  |
+| GET    | /events/series                                             | AdminGuard (EVENTS_READ)                                      | Active series with `nextOccurrence` and `upcomingCount`                                                       |
+| GET    | /events/series/:id                                         | AdminGuard (EVENTS_READ)                                      | One series (404 for pre-series recurring groups)                                                              |
+| PATCH  | /events/series/:id                                         | AdminGuard (EVENTS_WRITE)                                     | Edit from `effectiveFrom` — body: name?, description?, onlineAttendanceEnabled?, autoProgramme?, slotBlueprint?, effectiveFrom, confirmRecreate?. 409 `SERIES_RECREATE_REQUIRED` when services are added/removed |
+| POST   | /events/series/:id/stop                                    | AdminGuard (EVENTS_WRITE)                                     | Stop repeating — body `{ from }`; removes upcoming dates without history, returns `{ removed }`               |
+| GET    | /events/templates                                          | AdminGuard (EVENTS_READ)                                      | Saved service types, by name (with `audienceGroup`)                                                           |
+| GET    | /events/audience-groups                                    | AdminGuard (EVENTS_WRITE)                                     | Groups an event can be for — `[{ id, name }]`, by name                                                        |
+| POST   | /events/templates                                          | AdminGuard (EVENTS_WRITE)                                     | Save a service type — body: name, description?, onlineAttendanceEnabled?, slotBlueprint, defaultRecurrence?, autoProgramme? |
+| PATCH  | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Replace a service type (same body as POST)                                                                    |
+| DELETE | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Delete a service type                                                                                         |
 | POST   | /event-config                                              | AdminGuard (EVENTS_WRITE)                                     | Create timing config — body gains `defaultFormat?` (`IN_PERSON`\|`ONLINE`), `onlineMeetingUrl?`; `defaultVenueId` is now optional (required only when `defaultFormat` is `IN_PERSON`) |
 | PATCH  | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Update timing config — `defaultVenueId: null` explicitly clears the venue (needed when switching to `ONLINE`) |
 | GET    | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Get config by ID                                                                                              |
@@ -8306,9 +8361,45 @@ A church gathering on a specific date.
 | onlineAttendanceEnabled    | boolean          | Default `false`. When `true`, absent members receive an online-confirm email after the event ends.      |
 | onlineNotificationSentAt   | timestamptz \| null | Set when the online-confirm emails are dispatched. Used to calculate the confirmation window.        |
 | thankYouSentAt             | timestamptz \| null | Set after thank-you emails are queued for the event; guards against resending on re-trigger.        |
-| recurringEventId           | UUID             | Groups events in a recurring series                                                                     |
+| recurringEventId           | UUID             | Groups events in a recurring series; for series created since `EventSeries` exists, this is `event_series.id` |
+| seriesOccurrenceDate       | date \| null     | Church-local date this occurrence stands for in its series; unique per series (`UQ_events_series_occurrence`) |
+| audience                   | string           | `EVERYONE` (default) \| `WORKERS` \| `GROUP` — who the event is for (see **Event audience**)            |
+| audienceGroupId            | UUID \| null     | FK `groups` (`SET NULL`), `GROUP` only; a deleted group makes the event open to everyone                 |
 | serviceSlots      | ServiceSlot[]    | OneToMany — at least one slot is required at creation                                                   |
 | attendances       | Attendance[]     | OneToMany                                                                                               |
+
+### EventSeries
+
+The repeat rule behind a recurring event (tenant table `event_series`).
+
+| Field                   | Type                 | Notes                                                                                  |
+|-------------------------|----------------------|----------------------------------------------------------------------------------------|
+| id                      | UUID                 | PK; occurrences carry it as `events.recurring_event_id`                                |
+| name / description      | string               | Copied onto each new occurrence                                                        |
+| onlineAttendanceEnabled | boolean              |                                                                                        |
+| recurrencePattern       | string               | `daily` \| `weekly` \| `monthly`                                                       |
+| recurrenceInterval      | int                  | Every N units                                                                          |
+| startDate               | date                 | First occurrence (church-local)                                                        |
+| endDate                 | date \| null         | `null` = ongoing                                                                       |
+| slotBlueprint           | jsonb                | `SlotBlueprint[]` (times of day + durations)                                           |
+| autoProgramme           | boolean              | Default `true`; prepare draft programmes from templates                                |
+| generatedThrough        | date \| null         | Last occurrence date created; generation never goes back behind it                     |
+| isActive                | boolean              | Partial index `IDX_event_series_active` on `generated_through WHERE is_active`         |
+| createdBy               | Member \| null       | `SET NULL` on delete                                                                   |
+
+### EventTemplate
+
+A saved service type (tenant table `event_templates`).
+
+| Field                   | Type          | Notes                                                                                  |
+|-------------------------|---------------|----------------------------------------------------------------------------------------|
+| id                      | UUID          | PK                                                                                     |
+| name                    | string        | Unique case-insensitively (`LOWER(name)` unique index)                                 |
+| description             | string \| null |                                                                                      |
+| onlineAttendanceEnabled | boolean       |                                                                                        |
+| slotBlueprint           | jsonb         | `SlotBlueprint[]`                                                                      |
+| defaultRecurrence       | jsonb \| null | `{ recurrencePattern, recurrenceInterval, ongoing, weekday? }`                         |
+| autoProgramme           | boolean       | Default `true`                                                                         |
 
 ### Venue
 
@@ -8343,7 +8434,7 @@ The actual check-in target within an event. One event can have multiple slots.
 | *Override columns | int         | Per-slot overrides that take priority over EventConfig            |
 
 Override columns: `workerCheckinStartOverride`, `workerLateOverride`, `memberCheckinStartOverride`,
-`checkinStopOverride`, `allowedDistanceOverride`
+`checkinStopOverride`, `allowedDistanceOverride`; plus `checkinCloseModeOverride` (string \| null — `SERVICE_END` \| `AFTER_START`, overrides `config.checkinCloseMode` for this slot)
 
 **Resolution (`EventService.resolveSlotConfig`):** `format = slot.formatOverride ?? config.defaultFormat`;
 `venue = slot.venueOverride ?? config.defaultVenue`. Throws 400 only when the resolved `format` is `IN_PERSON` and
@@ -8364,7 +8455,8 @@ A reusable timing template assigned to service slots. Venue is a first-class rel
 | workerCheckinStartOffsetSeconds | int    | Seconds relative to `startTime` when workers can start checking in. Negative = before start |
 | workerLateOffsetSeconds         | int    | Seconds after `startTime` after which workers are LATE                                      |
 | memberCheckinStartOffsetSeconds | int    | When members can start checking in                                                          |
-| checkinStopOffsetSeconds        | int    | When check-in closes for everyone                                                           |
+| checkinStopOffsetSeconds        | int    | When check-in closes for everyone (`AFTER_START` only; never after the service's end)       |
+| checkinCloseMode                | string | `SERVICE_END` (closes when each service ends) \| `AFTER_START` (default for existing rows)  |
 | allowedDistanceInMeters         | int    | Max distance from the resolved venue for location validation (ignored for `ONLINE`)          |
 | autoStartSession                | bool   | Default `false`. See `ProgrammeAutoStartScheduler` (Service Programme section) below         |
 
@@ -8802,7 +8894,7 @@ that was actually attempted through a tenant's own BYOK provider — fixed by th
 `PRAYER_REQUEST_SUBMITTED` · `PRAYER_REQUEST_STATUS_UPDATED` · `TESTIMONY_SUBMITTED` · `DEVICE_PURGED` ·
 `DEVICE_RESET_REQUESTED` · `DEVICE_RESET_COMPLETED` ·
 `ANNOUNCEMENT_CREATED` · `ANNOUNCEMENT_UPDATED` · `ANNOUNCEMENT_DELETED` · `EVENT_CREATED` · `EVENT_UPDATED` ·
-`EVENT_DELETED` · `NOTE_CREATED` · `NOTE_UPDATED` · `NOTE_DELETED` · `LEAVE_APPROVED` · `LEAVE_REJECTED` ·
+`EVENT_DELETED` · `EVENT_SERIES_UPDATED` · `EVENT_SERIES_STOPPED` · `EVENT_TEMPLATE_SAVED` · `EVENT_TEMPLATE_DELETED` · `NOTE_CREATED` · `NOTE_UPDATED` · `NOTE_DELETED` · `LEAVE_APPROVED` · `LEAVE_REJECTED` ·
 `DEPARTMENT_CREATED` · `DEPARTMENT_UPDATED` · `DEPARTMENT_DELETED` · `DEPARTMENT_LEAD_ASSIGNED` ·
 `DEPARTMENT_LEAD_REMOVED` · `WORKER_PROFILE_UPDATED` · `ADMIN_ROLE_CREATED` · `ADMIN_ROLE_UPDATED` ·
 `ADMIN_ROLE_DELETED` · `ADMIN_USER_CREATED` · `ADMIN_USER_UPDATED` · `ADMIN_USER_DEACTIVATED`
@@ -10702,9 +10794,45 @@ A church gathering on a specific date.
 | onlineAttendanceEnabled    | boolean          | Default `false`. When `true`, absent members receive an online-confirm email after the event ends.      |
 | onlineNotificationSentAt   | timestamptz \| null | Set when the online-confirm emails are dispatched. Used to calculate the confirmation window.        |
 | thankYouSentAt             | timestamptz \| null | Set after thank-you emails are queued for the event; guards against resending on re-trigger.        |
-| recurringEventId           | UUID             | Groups events in a recurring series                                                                     |
+| recurringEventId           | UUID             | Groups events in a recurring series; for series created since `EventSeries` exists, this is `event_series.id` |
+| seriesOccurrenceDate       | date \| null     | Church-local date this occurrence stands for in its series; unique per series (`UQ_events_series_occurrence`) |
+| audience                   | string           | `EVERYONE` (default) \| `WORKERS` \| `GROUP` — who the event is for (see **Event audience**)            |
+| audienceGroupId            | UUID \| null     | FK `groups` (`SET NULL`), `GROUP` only; a deleted group makes the event open to everyone                 |
 | serviceSlots      | ServiceSlot[]    | OneToMany — at least one slot is required at creation                                                   |
 | attendances       | Attendance[]     | OneToMany                                                                                               |
+
+### EventSeries
+
+The repeat rule behind a recurring event (tenant table `event_series`).
+
+| Field                   | Type                 | Notes                                                                                  |
+|-------------------------|----------------------|----------------------------------------------------------------------------------------|
+| id                      | UUID                 | PK; occurrences carry it as `events.recurring_event_id`                                |
+| name / description      | string               | Copied onto each new occurrence                                                        |
+| onlineAttendanceEnabled | boolean              |                                                                                        |
+| recurrencePattern       | string               | `daily` \| `weekly` \| `monthly`                                                       |
+| recurrenceInterval      | int                  | Every N units                                                                          |
+| startDate               | date                 | First occurrence (church-local)                                                        |
+| endDate                 | date \| null         | `null` = ongoing                                                                       |
+| slotBlueprint           | jsonb                | `SlotBlueprint[]` (times of day + durations)                                           |
+| autoProgramme           | boolean              | Default `true`; prepare draft programmes from templates                                |
+| generatedThrough        | date \| null         | Last occurrence date created; generation never goes back behind it                     |
+| isActive                | boolean              | Partial index `IDX_event_series_active` on `generated_through WHERE is_active`         |
+| createdBy               | Member \| null       | `SET NULL` on delete                                                                   |
+
+### EventTemplate
+
+A saved service type (tenant table `event_templates`).
+
+| Field                   | Type          | Notes                                                                                  |
+|-------------------------|---------------|----------------------------------------------------------------------------------------|
+| id                      | UUID          | PK                                                                                     |
+| name                    | string        | Unique case-insensitively (`LOWER(name)` unique index)                                 |
+| description             | string \| null |                                                                                      |
+| onlineAttendanceEnabled | boolean       |                                                                                        |
+| slotBlueprint           | jsonb         | `SlotBlueprint[]`                                                                      |
+| defaultRecurrence       | jsonb \| null | `{ recurrencePattern, recurrenceInterval, ongoing, weekday? }`                         |
+| autoProgramme           | boolean       | Default `true`                                                                         |
 
 ### Venue
 
@@ -10739,7 +10867,7 @@ The actual check-in target within an event. One event can have multiple slots.
 | *Override columns | int         | Per-slot overrides that take priority over EventConfig            |
 
 Override columns: `workerCheckinStartOverride`, `workerLateOverride`, `memberCheckinStartOverride`,
-`checkinStopOverride`, `allowedDistanceOverride`
+`checkinStopOverride`, `allowedDistanceOverride`; plus `checkinCloseModeOverride` (string \| null — `SERVICE_END` \| `AFTER_START`, overrides `config.checkinCloseMode` for this slot)
 
 **Resolution (`EventService.resolveSlotConfig`):** `format = slot.formatOverride ?? config.defaultFormat`;
 `venue = slot.venueOverride ?? config.defaultVenue`. Throws 400 only when the resolved `format` is `IN_PERSON` and
@@ -10760,7 +10888,8 @@ A reusable timing template assigned to service slots. Venue is a first-class rel
 | workerCheckinStartOffsetSeconds | int    | Seconds relative to `startTime` when workers can start checking in. Negative = before start |
 | workerLateOffsetSeconds         | int    | Seconds after `startTime` after which workers are LATE                                      |
 | memberCheckinStartOffsetSeconds | int    | When members can start checking in                                                          |
-| checkinStopOffsetSeconds        | int    | When check-in closes for everyone                                                           |
+| checkinStopOffsetSeconds        | int    | When check-in closes for everyone (`AFTER_START` only; never after the service's end)       |
+| checkinCloseMode                | string | `SERVICE_END` (closes when each service ends) \| `AFTER_START` (default for existing rows)  |
 | allowedDistanceInMeters         | int    | Max distance from the resolved venue for location validation (ignored for `ONLINE`)          |
 | autoStartSession                | bool   | Default `false`. See `ProgrammeAutoStartScheduler` (Service Programme section) below         |
 
@@ -11198,7 +11327,7 @@ that was actually attempted through a tenant's own BYOK provider — fixed by th
 `PRAYER_REQUEST_SUBMITTED` · `PRAYER_REQUEST_STATUS_UPDATED` · `TESTIMONY_SUBMITTED` · `DEVICE_PURGED` ·
 `DEVICE_RESET_REQUESTED` · `DEVICE_RESET_COMPLETED` ·
 `ANNOUNCEMENT_CREATED` · `ANNOUNCEMENT_UPDATED` · `ANNOUNCEMENT_DELETED` · `EVENT_CREATED` · `EVENT_UPDATED` ·
-`EVENT_DELETED` · `NOTE_CREATED` · `NOTE_UPDATED` · `NOTE_DELETED` · `LEAVE_APPROVED` · `LEAVE_REJECTED` ·
+`EVENT_DELETED` · `EVENT_SERIES_UPDATED` · `EVENT_SERIES_STOPPED` · `EVENT_TEMPLATE_SAVED` · `EVENT_TEMPLATE_DELETED` · `NOTE_CREATED` · `NOTE_UPDATED` · `NOTE_DELETED` · `LEAVE_APPROVED` · `LEAVE_REJECTED` ·
 `DEPARTMENT_CREATED` · `DEPARTMENT_UPDATED` · `DEPARTMENT_DELETED` · `DEPARTMENT_LEAD_ASSIGNED` ·
 `DEPARTMENT_LEAD_REMOVED` · `WORKER_PROFILE_UPDATED` · `ADMIN_ROLE_CREATED` · `ADMIN_ROLE_UPDATED` ·
 `ADMIN_ROLE_DELETED` · `ADMIN_USER_CREATED` · `ADMIN_USER_UPDATED` · `ADMIN_USER_DEACTIVATED`
@@ -13354,10 +13483,10 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
 
 ### Event Module
 
-Manages events and service slots. Events can be single or recurring (daily/weekly/monthly). At least one `serviceSlot`
-is required at creation — each slot carries an optional `configId` pointing to an `EventConfig`. For recurring events
-the same slot template (including `configId`) is stamped onto every generated occurrence; updating the config later
-propagates to all check-ins that reference it.
+Manages events and service slots. Events can be single or repeating (daily/weekly/monthly, with an end date or
+ongoing). At least one `serviceSlot` is required at creation — each slot carries an optional `configId` pointing to an
+`EventConfig`. A repeating event is stored as an `EventSeries` (see **Event series** below) whose slot blueprint is
+stamped onto every generated occurrence; updating the config later propagates to all check-ins that reference it.
 
 `CreateEventDto` takes no `eventDate`/`endDate`/`startTime`/`endTime` fields — all four are always derived from the
 supplied `serviceSlots` (`eventDate`/`endDate` = earliest `startTime`/latest `endTime`, UTC-date-truncated so the
@@ -13376,15 +13505,28 @@ filter on `endTime`, not `endDate`, for this reason, and both frontends' "Past" 
 
 Each slot can have multiple reminder schedules via sub-resource `/events/slots/:slotId/reminders` (admin-only). See EventReminder model.
 
-**Admin frontend UX (`discuva-admin`, `app/events/page.tsx`):** since the event's date range is entirely derived from its slots' times (no manual override, per above), the create/edit form's `SlotRow` sets `min` on the datetime-local inputs (a slot's End Time can't be earlier than its own Start Time; each slot after the first has its Start Time's `min` set to the previous slot's End Time, since slots run in sequence) — but `min` on `type="datetime-local"` only reliably restricts the browser's *calendar* date view; the time-of-day spinner on an already-valid date isn't blocked interactively in Chrome/most browsers, only flagged `:invalid` on blur/submit, which read as "not working" for the time portion. `updateSlot()` therefore also clamps values in JS the instant they change: a slot's End Time snaps forward to match its Start Time if set earlier, a slot's Start Time snaps forward to the previous slot's End Time if set earlier (pulling its own End Time along if that would now precede it), and moving a slot's End Time later pulls the next slot's Start Time forward with it if it would otherwise fall behind. `min` is kept alongside this for the calendar-level hint; the JS clamp is what actually prevents an invalid time-of-day from sticking. Neither replaces backend validation, which still governs what's actually accepted on submit.
+**Admin frontend UX (`discuva-admin`, `app/events/page.tsx`, `components/events/event-form.tsx`, `utils/event-schedule.ts`):** the form asks for the **date once** and each service as a start time (`<input type="time">`) plus a length (30m/1h/1h30/2h chips, or separate hours and minutes fields — minutes over 59 carry into hours), with the end time shown read-only. "Add another service" starts the new row when the previous one ends and copies its config, venue and format (`chainRow`; "First Service" → "Second Service"). `rowsToSlots` converts the rows to the unchanged `serviceSlots[].startTime/endTime` ISO payload in the browser's local time, and `slotsToSchedule` loads an existing event back into date + rows. `scheduleIssues` mirrors the API's checks inline — overlap with the previous service, a missing config, and (on create) a time that has passed — and the Create button stays disabled with the first problem shown under it. A **Runs over several days** switch under the date (off by default; on automatically when any service has a `dayOffset`) adds a Day 1 / Day 2… picker to each service, shown with real dates; turning it off puts every service back on the event date. Rarely used settings (description, online attendance, per-service format and venue overrides) sit together in a **More options** card (per-service settings grouped by service inside it), opened automatically when any is already set; while closed it lists what's set as chips. A **Save as a service type** card explains the benefit (offered under Schedule Event next time) and saves inline. Smart defaults: the config is pre-selected when there's only one, otherwise the last one used in this browser (`utils/last-used.ts`, `localStorage` wrapped in try/catch); a blank event name becomes "{Weekday} Service" and blank service names become the event name (single service) or "First/Second… Service". **Repeats** offers Doesn't repeat / Weekly / Every 2 weeks / Monthly / Custom, with **Ends** Never (sends `recurrence.ongoing: true`) or On date. **Schedule Event** opens a chooser of saved service types (see below) or Blank; picking a type pre-fills the form with the next date on its saved weekday.
 
-**Reusing a past event (`components/events/reuse-event-dialog.tsx`, `utils/event-reuse.ts`):** "Reuse" opens a small dialog instead of the full form. It suggests the next date on the same weekday as the original's first slot (`nextSameWeekday` — today if it's that weekday and the start time hasn't passed, otherwise the coming one), with one-tap "Week after" / "Today" (when today's times are still ahead) and a date picker. `shiftSlotsToDate` moves every slot to the chosen date keeping its local time and the day gaps between slots (day arithmetic in UTC, so DST doesn't shift times); configs, venues and format overrides are kept. "Create event" posts straight to `POST /events` (recurring events ask only for "Repeats until"); "Edit details…" opens the usual form pre-filled with the shifted slots. A date whose times have already passed can't be submitted — the same rule the API enforces.
+**Reusing a past event (`components/events/reuse-event-dialog.tsx`, `utils/event-reuse.ts`):** "Reuse" opens a small dialog instead of the full form. It suggests the next date on the same weekday as the original's first slot (`nextSameWeekday` — today if it's that weekday and the start time hasn't passed, otherwise the coming one), with one-tap "Week after" / "Today" (when today's times are still ahead) and a date picker. `shiftSlotsToDate` moves every slot to the chosen date keeping its local time and the day gaps between slots (day arithmetic in UTC, so DST doesn't shift times); configs, venues and format overrides are kept. "Create event" posts straight to `POST /events` as a one-off (a regular service should use Repeats instead); "Edit details…" opens the usual form pre-filled with the shifted slots. A date whose times have already passed can't be submitted — the same rule the API enforces.
 
 **Reminder dispatch (cron `*/15 * * * *`):** Queries `EventReminder` rows where `enabled = true`, `lastSentAt IS NULL`, `fireAt <= now`, and `slot.startTime > now`. The filter runs entirely in SQL — `fireAt` is pre-computed at reminder creation (and recalculated if `intervalPreset` is updated). When a slot is deleted or recreated (e.g., event update), its reminders are cascade-deleted. On `create`, `fireAt = slot.startTime − preset_minutes`. On `update` with a new `intervalPreset`, `fireAt` is recalculated from the existing slot's `startTime`.
 
 **Service slot ordering:** `EventService.getAll()`, `getById()`, and `getUpcomingEvents()` all explicitly order the `serviceSlots` relation by `startTime` ASC (query-builder `.addOrderBy('serviceSlots.startTime', 'ASC')` for `getAll`; TypeORM's relation `order` option for the other two, e.g. `order: { serviceSlots: { startTime: 'ASC' } }`). Without this, a joined one-to-many relation has no guaranteed order — First/Second Service could come back in either order depending on DB/join internals, which showed up as the admin portal's event list not consistently showing slots in the order they begin.
 
 **Editing an event's slots is blocked once the event has any recorded history.** `EventService.update()`'s slot-replacement path (`slotRepository.delete` + recreate) previously ran unconditionally — `ServiceProgramme`/`ServiceSession`/session-slots/action-log all cascade off `ServiceSlot`, and `Attendance.serviceSlot` is `ON DELETE SET NULL`, so replacing the slots on an event that had already run would silently destroy its programme/session history and detach any recorded attendance from the slot it was for. `hasRecordedHistory(eventId)` now checks (via two raw `dataSource` queries, matching `attachMyAttendance`'s existing pattern rather than adding new repository injections) whether any `attendances` row or any `service_sessions` row (joined through `service_programmes`/`service_slots`) exists for the event; if either does, the whole `PATCH` is rejected with a 400 before touching any slot. Cosmetic fields (`name`/`description`) remain editable regardless — only `serviceSlots` replacement is gated. This is a one-way door: once an event has history, its schedule can never be edited again, only replaced by creating a new event (a deliberate, safer default over a more capable diff-based in-place slot update, which was considered and explicitly deferred).
+
+**Slot blueprint (`src/event/types/slot-blueprint.ts`):** series and service types store services as times of day, not instants: `{ name, startTime: "HH:mm", durationMinutes, dayOffset, configId?, venueOverrideId?, formatOverride? }` (`SlotBlueprintDto`: `HH:mm` regex, duration 1–1440, dayOffset 0–13). `blueprintToSlotDtos(blueprint, date, tz)` builds each slot on `date + dayOffset` with `fromZonedTime` in the church timezone, so a 09:00 service stays 09:00 across DST changes; `slotDtosToBlueprint` is the inverse (via `formatInTimeZone`). The timezone is the tenant's `timezone` column, falling back to env `TIMEZONE` (`ChurchTimezoneService`, 10-minute in-memory cache per tenant).
+
+**Event series (`EventSeriesService`, `event_series` table):** every `POST /events` with `isRecurring: true` now creates a series row (pattern, interval, `startDate`, `endDate` — `null` when `recurrence.ongoing` — the slot blueprint, `autoProgramme`, `generatedThrough`, `isActive`) and its occurrences are ordinary `events` rows with `recurringEventId = series.id` and `seriesOccurrenceDate` (the church-local date they stand for; unique per series via `UQ_events_series_occurrence`). A fixed end date must be within a year of the start; an ongoing series has none.
+- **Generation:** `generate(series, tz, now, until?)` walks occurrence dates (k × interval days/weeks; monthly via calendar months) after `generatedThrough` up to `min(until ?? today + 56 days, endDate)`, skips dates whose first service has already started or that already exist, builds each via `EventService.buildOccurrence`, and advances `generatedThrough`. Because it never revisits dates at or before `generatedThrough`, **cancelling one date (`DELETE /events/:id`) sticks** — it is not recreated.
+- **Top-up (`EventSeriesScheduler`):** `@Cron('0 2 * * *')`, Redis lock `lock:event-series-top-up` (1800 s), `forEachActiveTenant`; tops every active series up to 8 weeks ahead in that tenant's timezone, one series' failure logged without stopping the rest. It only loads series that can still gain a date (`generated_through` is null or before the horizon, and before `end_date` for a fixed series), served by the partial index `IDX_event_series_active`, so finished series aren't reloaded every night.
+- **Editing (`PATCH /events/series/:id`):** updates the series fields/blueprint, then applies them to upcoming occurrences with `seriesOccurrenceDate >= effectiveFrom` that haven't started and have no recorded history (`hasRecordedHistory`). If the service names are unchanged, each occurrence's `service_slots` rows are **updated in place** (times, config, venue, format) so programmes, sessions and reminders stay attached. Unsent reminders on a moved service get their `fireAt` recalculated (`EventService.retimeReminders`, saved through the repository so `SchedulerGateSubscriber` wakes the `event-reminders` job); without this they would fire at the old time. If services were added or removed, those occurrences must be recreated — the first call returns **409** `{ code: "SERIES_RECREATE_REQUIRED", affected }` and the client resends with `confirmRecreate: true`. A name-only change also renames occurrences with history. Returns `{ updated, recreated, skippedWithHistory }`; audit `EVENT_SERIES_UPDATED`.
+- **Stopping (`POST /events/series/:id/stop` `{ from }`):** sets `endDate = from − 1 day`, deactivates the series and removes upcoming occurrences on/after `from` without history; returns `{ removed }`; audit `EVENT_SERIES_STOPPED`. `DELETE /events/recurring/:id` also deactivates the series.
+- Older recurring groups created before series existed have no series row; they keep working as plain events but can't be edited as a series (`GET /events/series/:id` → 404).
+
+**Programmes prepared on creation:** after a single event is created, and after each series occurrence is generated, `EventService.prepareProgrammes` calls `ServiceProgrammeService.createDraftsFromTemplates(slots)`: each new service slot whose name matches a programme template's `serviceSlotName` (trimmed, case-insensitive) gets a DRAFT programme with the template's items, including department assignments, and `createdByAdmin = null`. **No notifications are sent at creation** — assignees see it in My Assignments and the usual day-before reminder still goes. Slots that already have a programme are skipped; failures are logged and never block event creation. Opt out per event with `autoProgramme: false` on `POST /events`, or per series with `autoProgramme` on the series. The admin form lists the matching services with an opt-out checkbox.
+
+**Service types (`EventTemplateService`, `event_templates` table):** a saved setup — `name` (unique, case-insensitive; 409 on clash), `description`, `onlineAttendanceEnabled`, `slotBlueprint`, `defaultRecurrence` (`{ recurrencePattern, recurrenceInterval, ongoing, weekday? }` or `null`; `weekday` 0 = Sunday lets the admin pre-fill the next matching date) and `autoProgramme`. Reference data, so `GET /events/templates` returns the full list ordered by name. Audit `EVENT_TEMPLATE_SAVED` / `EVENT_TEMPLATE_DELETED`. The admin "Save as service type…" link on the event form updates the type with the same name if one exists.
 
 **`deleteEvent`/`deleteFutureRecurring`/`getAll`'s `upcoming` filter now use precise `startTime`/`endTime`, not the date-only `eventDate`/`endDate`** — same class of fix as `findEventsReadyForAbsenceMarking`/`getUpcomingEvents` above, just not originally carried through to these three call sites. Concretely: `deleteEvent` previously compared `eventDate` (start date) to today, so a same-day event that had already fully ended hours ago was still deletable; now blocks on `endTime < now`. `deleteFutureRecurring` previously selected occurrences via `eventDate >= today`, so an already-started (or already-ended) same-day occurrence still counted as "future"; now uses `startTime >= now`, and — previously entirely missing — also filters `attendanceMarked = false`, matching `deleteEvent`'s own guard (this bulk path bypasses `deleteEvent` entirely, so it needs the same safety check independently). `getAll`'s `upcoming` filter now matches `getUpcomingEvents`' own semantics (`endTime >= now`) instead of showing an already-ended-today event as still upcoming.
 
@@ -13463,17 +13605,50 @@ toggle is only checked (for the clearer "not enabled" vs. "window has not opened
 never opened at all. Also now compares against `this.dateService.now()` instead of a bare `new Date()`, matching
 the rest of the module's convention.
 
-**`checkinStopOffsetSeconds` cannot leave check-in open past a slot's own end time.** Enforced in
-`EventService.buildSlotFromDto` (not `EventConfigService`, since the same config can be reused across slots of
-different durations — only at slot-save time, once a specific `startTime`/`endTime` is known, can "does this offset
-exceed the slot's own length" be judged): the effective value (`serviceSlot.checkinStopOverride ?? config.checkinStopOffsetSeconds`)
-must be `<= (endTime - startTime)` in seconds, else `BadRequestException`. discuva-member's home hero card previously
-kept showing "Live Now" for as long as this window stayed open, which — before this constraint existed — could
-outlive the admin side's own "ended" determination by however long a positive offset was configured, since the
-offset is relative to `startTime`, not `endTime`. Tenant migration `CapCheckinStopOffsetAtSlotEnd` clamps any
-existing `service_slots.checkin_stop_override` (setting one explicitly, capped to that slot's own duration, only for
-the offending slot — the shared `event_configs` row is left untouched so other slots using the same config are
-unaffected) for rows where the effective offset already exceeded their own slot's length.
+**Event audience (`events.audience`, `audience_group_id`; also on `event_series` and `event_templates`).** Who an
+event is for is set on the **event**, never on a service slot: attendance is one row per member per event, so a
+per-slot audience could not be tracked or marked separately. Different audiences (a workers' meeting, a teens class)
+are separate events. `EVERYONE` (default) behaves as before. `WORKERS` / `GROUP` (a `groups` row, via
+`audienceGroupId`) narrow, through `src/event/utility/event-audience.ts`:
+- **Check-in** — `AttendanceService.assertInAudience` returns 403 "{event} is for workers only." / "…is for {group} only.".
+- **Admin / front-desk marking** — `adminMarkAttendance` applies the same check before creating a new record
+  (correcting an existing record is still allowed).
+- **Streaks, leaderboard, rank and attendance %** are computed only from a person's own attendance rows, so with no
+  row ever created for people outside the audience (above), an event for others can't break their streak or change
+  their score.
+- **Absence marking** — `MemberService.getMembersNotCheckedInForEvent` / `getWorkersNotCheckedInForEvent` take the
+  event and apply `scopeToAudience`, so people outside the audience are never marked absent (previously every event
+  marked the whole congregation).
+- **Member app visibility** — `GET /events` and `GET /events/:id` from the member surface filter with
+  `eventVisibleToViewerSql` (404 for an event not meant for the caller); the admin surface sees everything.
+- **Slot reminders** — recipients are intersected with the audience, and the in-app announcement is narrowed
+  (`WORKERS_ONLY`, or `GROUP` with the event's group).
+`resolveAudience` validates the group (400 if missing) and drops a group id for any other audience. Series pass the
+audience to each generated occurrence, and a series edit applies it to upcoming dates. A `GROUP` event whose group is
+later deleted (`ON DELETE SET NULL`) falls back to everyone. Admin: "Who is it for?" (Everyone / Workers only / A
+contact list — `groups` are labelled Contact Lists in the admin UI) at the top of the event form, carried by service types; list and detail show "Workers only" / "{group} only".
+
+**Check-in close rule (`EventConfig.checkinCloseMode`, per-slot `checkinCloseModeOverride`).** `SERVICE_END` keeps
+check-in open for members and workers until each service's own `endTime` — no offset to tune, so one config fits services
+of any length. `AFTER_START` closes at `startTime + checkinStopOffsetSeconds` (or the slot override), capped at the
+service's end. Resolution: `slot.checkinCloseModeOverride ?? config.checkinCloseMode`
+(`EventService.resolveSlotConfig`); applied by `AttendanceService.checkinCloseTime` and mirrored by discuva-member's
+`resolveSlot().checkinWindowEnd`. Neither mode changes attendance status — workers are still LATE from
+`workerLateOffsetSeconds`, and absences are still marked after the event's `endTime`. Existing configs default to
+`AFTER_START` (migration `AddCheckinCloseMode`); new configs from the admin form default to `SERVICE_END`.
+`EventConfigService.validateOffsets` skips the stop-offset ordering checks for `SERVICE_END`. Admin: Event Config has a
+"Check-In Closes" choice with live examples; the event form's More options has a per-service "Check-in closes"
+(Config default / When the service ends / A set time after it starts).
+
+**The config's stop offset is a ceiling.** Check-in closes at
+`min(startTime + checkinStopOffsetSeconds, endTime)` (`AttendanceService.validateCheckinWindow`, mirrored by
+discuva-member's `resolveSlot().checkinWindowEnd`). One config therefore fits services of any length: a 60-minute
+stop offset on a 30-minute service simply closes check-in when that service ends. Earlier, `EventService.buildSlotFromDto`
+rejected any slot shorter than its config's offset ("would leave check-in open past its own end time"), which forced
+admins to create per-length configs and could also fail a series' nightly generation; that rejection now applies
+only to a per-service `checkinStopOverride` longer than that service (an explicit, contradictory value). Tenant
+migration `CapCheckinStopOffsetAtSlotEnd` had already clamped existing over-long overrides; with the runtime cap
+it is no longer needed for correctness but is left in place (migrations are immutable).
 
 **Attendance Distance Check Setting — two layers, per-tenant override on top of a platform-admin default.**
 Previously `ENFORCE_DISTANCE_CHECK` was a single global env var — one on/off switch shared by every tenant, no
@@ -19592,12 +19767,21 @@ outside the requested `?months=` window).
 | POST   | /small-groups/:id/join                                     | JwtAuthGuard + Module: small_groups                              | Self-join (upsert — re-joining after leaving works)                                                             |
 | DELETE | /small-groups/:id/leave                                    | JwtAuthGuard + Module: small_groups                              | Self-leave                                                                                                      |
 | POST   | /small-groups/:id/attendance                               | JwtAuthGuard + Module: small_groups                              | Record attendance — body: `{ meetingDate, records: [{memberId, status}] }`. 403 unless the caller is this group's leader. |
-| POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring)                                                                            |
+| POST   | /events                                                    | AdminGuard (EVENTS_WRITE)                                     | Create event (single or recurring). `recurrence.ongoing: true` makes an open-ended series (no `recurrenceEndDate`); `autoProgramme: false` skips draft programmes from templates |
 | PATCH  | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Update event                                                                                                  |
 | GET    | /events/:id                                                | Any                                                           | Get event by ID                                                                                               |
 | GET    | /events                                                    | Any                                                           | List events. Query: `page`, `limit`, `orderBy`, `order`, `from` (YYYY-MM-DD), `to` (YYYY-MM-DD), `upcoming=true`, `search` (case-insensitive match on event name — powers searchable event pickers in the admin frontend) |
 | DELETE | /events/:id                                                | AdminGuard (EVENTS_WRITE)                                     | Delete single event — blocked if `attendanceMarked = true` or event is in the past                           |
-| DELETE | /events/recurring/:recurringEventId                        | AdminGuard (EVENTS_WRITE)                                     | Delete future recurring events                                                                                |
+| DELETE | /events/recurring/:recurringEventId                        | AdminGuard (EVENTS_WRITE)                                     | Delete future recurring events (also deactivates the series)                                                  |
+| GET    | /events/series                                             | AdminGuard (EVENTS_READ)                                      | Active series with `nextOccurrence` and `upcomingCount`                                                       |
+| GET    | /events/series/:id                                         | AdminGuard (EVENTS_READ)                                      | One series (404 for pre-series recurring groups)                                                              |
+| PATCH  | /events/series/:id                                         | AdminGuard (EVENTS_WRITE)                                     | Edit from `effectiveFrom` — body: name?, description?, onlineAttendanceEnabled?, autoProgramme?, slotBlueprint?, effectiveFrom, confirmRecreate?. 409 `SERIES_RECREATE_REQUIRED` when services are added/removed |
+| POST   | /events/series/:id/stop                                    | AdminGuard (EVENTS_WRITE)                                     | Stop repeating — body `{ from }`; removes upcoming dates without history, returns `{ removed }`               |
+| GET    | /events/templates                                          | AdminGuard (EVENTS_READ)                                      | Saved service types, by name (with `audienceGroup`)                                                           |
+| GET    | /events/audience-groups                                    | AdminGuard (EVENTS_WRITE)                                     | Groups an event can be for — `[{ id, name }]`, by name                                                        |
+| POST   | /events/templates                                          | AdminGuard (EVENTS_WRITE)                                     | Save a service type — body: name, description?, onlineAttendanceEnabled?, slotBlueprint, defaultRecurrence?, autoProgramme? |
+| PATCH  | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Replace a service type (same body as POST)                                                                    |
+| DELETE | /events/templates/:id                                      | AdminGuard (EVENTS_WRITE)                                     | Delete a service type                                                                                         |
 | POST   | /event-config                                              | AdminGuard (EVENTS_WRITE)                                     | Create timing config — body gains `defaultFormat?` (`IN_PERSON`\|`ONLINE`), `onlineMeetingUrl?`; `defaultVenueId` is now optional (required only when `defaultFormat` is `IN_PERSON`) |
 | PATCH  | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Update timing config — `defaultVenueId: null` explicitly clears the venue (needed when switching to `ONLINE`) |
 | GET    | /event-config/:id                                          | AdminGuard (EVENTS_WRITE)                                     | Get config by ID                                                                                              |

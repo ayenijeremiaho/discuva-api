@@ -1,7 +1,11 @@
+import { EventAudienceEnum } from '../enums/event-audience.enum';
+import { Group } from '../../group/entity/group.entity';
 import {
   Column,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -55,6 +59,21 @@ export class Event extends BaseEntity {
   @Column({ nullable: true })
   @Index()
   recurringEventId: string;
+
+  // The church-local date this occurrence stands for in its series.
+  @Column({ name: 'series_occurrence_date', type: 'date', nullable: true })
+  seriesOccurrenceDate: string | null;
+
+  @Column({ type: 'varchar', default: EventAudienceEnum.EVERYONE })
+  audience: EventAudienceEnum;
+
+  // GROUP only; if the group is deleted the event falls back to everyone.
+  @Column({ name: 'audience_group_id', type: 'uuid', nullable: true })
+  audienceGroupId: string | null;
+
+  @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'audience_group_id' })
+  audienceGroup?: Group | null;
 
   @OneToMany(() => ServiceSlot, (slot) => slot.event, { cascade: true })
   serviceSlots: ServiceSlot[];

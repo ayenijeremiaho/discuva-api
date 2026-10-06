@@ -1,3 +1,4 @@
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
   IsBoolean,
   IsDateString,
@@ -46,6 +47,11 @@ export class CreateServiceSlotDto {
   @IsInt()
   @Min(0)
   checkinStopOverride?: number;
+
+  // Overrides the config's close rule for this one service.
+  @IsOptional()
+  @IsEnum(CheckinCloseModeEnum)
+  checkinCloseModeOverride?: CheckinCloseModeEnum;
 
   @IsOptional()
   @IsInt()

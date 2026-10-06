@@ -1,3 +1,4 @@
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
   Column,
   Entity,
@@ -61,9 +62,16 @@ export class EventConfig extends BaseEntity {
   @Column({ name: 'member_checkin_start_offset_seconds' })
   memberCheckinStartOffsetSeconds: number;
 
-  /** Seconds after slot startTime when check-in closes for everyone. */
+  /** Seconds after slot startTime when check-in closes for everyone (AFTER_START only; never past the slot's end). */
   @Column({ name: 'checkin_stop_offset_seconds' })
   checkinStopOffsetSeconds: number;
+
+  @Column({
+    name: 'checkin_close_mode',
+    type: 'varchar',
+    default: CheckinCloseModeEnum.AFTER_START,
+  })
+  checkinCloseMode: CheckinCloseModeEnum;
 
   @Column({ name: 'allowed_distance_in_meters' })
   allowedDistanceInMeters: number;

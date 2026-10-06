@@ -1,3 +1,7 @@
+import { EventReminder } from '../entity/event-reminder.entity';
+import { EventAudienceEnum } from '../enums/event-audience.enum';
+import { Group } from '../../group/entity/group.entity';
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -39,6 +43,13 @@ const mockVenueService = {
 };
 
 const mockAuditLogService = { log: jest.fn() };
+const mockSeriesService = {
+  createFromEvent: jest.fn(),
+  deactivate: jest.fn().mockResolvedValue(undefined),
+};
+const mockProgrammeService = {
+  createDraftsFromTemplates: jest.fn().mockResolvedValue([]),
+};
 
 function makeQb(rawOneResult: unknown = undefined) {
   return {
@@ -54,6 +65,12 @@ function makeQb(rawOneResult: unknown = undefined) {
   };
 }
 
+const mockReminderRepo = {
+  find: jest.fn().mockResolvedValue([]),
+  save: jest.fn((v) => Promise.resolve(v)),
+};
+const mockGroupRepo = { existsBy: jest.fn().mockResolvedValue(true) };
+
 const mockDataSource = {
   // Default: a fresh, empty query builder for every call — safe "nothing
   // found" behavior for tests that don't specifically exercise
@@ -68,6 +85,8 @@ const defaultVenue = {
   longitude: 3.3792,
 };
 
+import { EventSeriesService } from './event-series.service';
+import { ServiceProgrammeService } from '../../service-programme/service/service-programme.service';
 describe('EventService', () => {
   let service: EventService;
 
@@ -80,9 +99,16 @@ describe('EventService', () => {
         { provide: DataSource, useValue: mockDataSource },
         { provide: getRepositoryToken(Event), useValue: mockEventRepo },
         { provide: getRepositoryToken(ServiceSlot), useValue: mockSlotRepo },
+        { provide: getRepositoryToken(Group), useValue: mockGroupRepo },
+        {
+          provide: getRepositoryToken(EventReminder),
+          useValue: mockReminderRepo,
+        },
         { provide: EventConfigService, useValue: mockEventConfigService },
         { provide: VenueService, useValue: mockVenueService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: EventSeriesService, useValue: mockSeriesService },
+        { provide: ServiceProgrammeService, useValue: mockProgrammeService },
       ],
     }).compile();
 
@@ -132,31 +158,6 @@ describe('EventService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it("should throw BadRequestException if the config's checkinStopOffsetSeconds would leave check-in open past this slot's own end", async () => {
-      mockEventConfigService.get.mockResolvedValue({
-        id: 'config-1',
-        defaultFormat: MeetingFormatEnum.ONLINE,
-        checkinStopOffsetSeconds: 3600, // closes 1 hour after start
-      });
-
-      await expect(
-        service.create(
-          {
-            name: 'Test',
-            isRecurring: false,
-            serviceSlots: [
-              {
-                startTime: '2025-06-01T09:00:00.000Z',
-                endTime: '2025-06-01T09:30:00.000Z', // only a 30-minute slot
-                configId: 'config-1',
-              },
-            ],
-          } as any,
-          'actor-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
-    });
-
     it("should throw BadRequestException if checkinStopOverride would leave check-in open past this slot's own end", async () => {
       await expect(
         service.create(
@@ -176,11 +177,11 @@ describe('EventService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('accepts a checkinStopOffsetSeconds that does not exceed the slot duration', async () => {
+    it('accepts a config whose check-in stop is longer than the service — check-in just closes when it ends', async () => {
       mockEventConfigService.get.mockResolvedValue({
         id: 'config-1',
         defaultFormat: MeetingFormatEnum.ONLINE,
-        checkinStopOffsetSeconds: 1800,
+        checkinStopOffsetSeconds: 3600,
       });
       const slotObj = {
         name: 'Service',
@@ -274,126 +275,40 @@ describe('EventService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should create recurring events correctly when valid recurrence is provided', async () => {
-      mockSlotRepo.create.mockImplementation((d: any) => ({
-        ...d,
-        startTime: new Date(d.startTime),
-        endTime: new Date(d.endTime),
-      }));
-      mockEventRepo.create.mockImplementation((data) => ({
-        ...data,
-        serviceSlots: [],
-      }));
-      mockEventRepo.save.mockImplementation((events) =>
-        Promise.resolve(
-          Array.isArray(events)
-            ? events.map((e, i) => ({ ...e, id: `event-${i}` }))
-            : {
-                ...events,
-                id: 'event-0',
-              },
-        ),
-      );
-
-      const result = await service.create(
-        {
-          name: 'Weekly Service',
-          isRecurring: true,
-          recurrence: {
-            recurrenceEndDate: '2025-06-22',
-            recurrencePattern: 'weekly',
-            recurrenceInterval: 1,
-          },
-          serviceSlots: [
-            {
-              startTime: '2025-06-01T09:00:00.000Z',
-              endTime: '2025-06-01T11:00:00.000Z',
-            },
-          ],
-        } as any,
-        'actor-1',
-      );
-
-      expect(Array.isArray(result)).toBe(true);
-      expect((result as Event[]).length).toBeGreaterThanOrEqual(1);
-    });
-
-    // Regression test: advanceDate used to use date-fns' addDays/addWeeks/
-    // addMonths, which advance by the *runtime's local* calendar — a DST
-    // transition between occurrences would skew the millisecond delta
-    // applied to each slot's absolute startTime/endTime by up to an hour.
-    // Every weekly occurrence's slot must land exactly 7 days apart,
-    // regardless of what timezone the test (or production) process runs in.
-    it('advances recurring occurrences by exact UTC calendar days, immune to runtime-local DST drift', async () => {
-      mockSlotRepo.create.mockImplementation((d: any) => ({
-        ...d,
-        startTime: new Date(d.startTime),
-        endTime: new Date(d.endTime),
-      }));
-      mockEventRepo.create.mockImplementation((data) => ({
-        ...data,
-        serviceSlots: [{ startTime: data.startTime, endTime: data.endTime }],
-      }));
-      mockEventRepo.save.mockImplementation((events) =>
-        Promise.resolve(events),
-      );
-
-      const result = (await service.create(
-        {
-          name: 'Weekly Service',
-          isRecurring: true,
-          recurrence: {
-            recurrenceEndDate: '2025-06-29',
-            recurrencePattern: 'weekly',
-            recurrenceInterval: 1,
-          },
-          serviceSlots: [
-            {
-              startTime: '2025-06-01T09:00:00.000Z',
-              endTime: '2025-06-01T11:00:00.000Z',
-            },
-          ],
-        } as any,
-        'actor-1',
-      )) as Event[];
-
-      expect(result.length).toBeGreaterThanOrEqual(2);
-      const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-      for (let i = 1; i < result.length; i++) {
-        expect(
-          result[i].serviceSlots[0].startTime.getTime() -
-            result[i - 1].serviceSlots[0].startTime.getTime(),
-        ).toBe(ONE_WEEK_MS);
-      }
-    });
-
-    it('should throw BadRequestException when recurrence end date is more than 1 year away', async () => {
-      mockSlotRepo.create.mockImplementation((d: any) => ({
-        ...d,
-        startTime: new Date(d.startTime),
-        endTime: new Date(d.endTime),
-      }));
-
-      await expect(
-        service.create(
+    it('hands recurring events to the series service', async () => {
+      mockSeriesService.createFromEvent.mockResolvedValue([
+        { id: 'event-0' },
+        { id: 'event-1' },
+      ]);
+      const dto = {
+        name: 'Weekly Service',
+        isRecurring: true,
+        recurrence: {
+          recurrencePattern: 'weekly',
+          recurrenceInterval: 1,
+          ongoing: true,
+        },
+        serviceSlots: [
           {
-            name: 'Long Recurring Service',
-            isRecurring: true,
-            recurrence: {
-              recurrenceEndDate: '2027-06-01',
-              recurrencePattern: 'weekly',
-              recurrenceInterval: 1,
-            },
-            serviceSlots: [
-              {
-                startTime: '2025-06-01T09:00:00.000Z',
-                endTime: '2025-06-01T11:00:00.000Z',
-              },
-            ],
-          } as any,
-          'actor-1',
-        ),
-      ).rejects.toThrow(BadRequestException);
+            startTime: new Date(Date.now() + 86_400_000).toISOString(),
+            endTime: new Date(Date.now() + 90_000_000).toISOString(),
+          },
+        ],
+      } as any;
+
+      const result = await service.create(dto, 'actor-1');
+
+      expect(mockSeriesService.createFromEvent).toHaveBeenCalledWith(
+        { ...dto, audience: 'EVERYONE', audienceGroupId: null },
+        'actor-1',
+      );
+      expect(result).toHaveLength(2);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'EVENT_CREATED',
+        expect.objectContaining({
+          metadata: expect.objectContaining({ ongoing: true, count: 2 }),
+        }),
+      );
     });
 
     it('should throw BadRequestException when slots overlap', async () => {
@@ -594,6 +509,7 @@ describe('EventService', () => {
       expect(mockEventRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'event-1' },
         relations: [
+          'audienceGroup',
           'serviceSlots',
           'serviceSlots.config',
           'serviceSlots.config.defaultVenue',
@@ -661,6 +577,44 @@ describe('EventService', () => {
     });
   });
 
+  describe('audience', () => {
+    it('keeps no group unless the event is for a group', async () => {
+      await expect(
+        service.resolveAudience({
+          audience: EventAudienceEnum.WORKERS,
+          audienceGroupId: 'g1',
+        }),
+      ).resolves.toEqual({
+        audience: EventAudienceEnum.WORKERS,
+        audienceGroupId: null,
+      });
+    });
+
+    it('rejects a group audience without an existing group', async () => {
+      mockGroupRepo.existsBy.mockResolvedValueOnce(false);
+      await expect(
+        service.resolveAudience({
+          audience: EventAudienceEnum.GROUP,
+          audienceGroupId: 'missing',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('hides a workers-only event from a member in the member app', async () => {
+      mockEventRepo.findOne.mockResolvedValue({
+        id: 'e1',
+        audience: EventAudienceEnum.WORKERS,
+        serviceSlots: [],
+      });
+      await expect(
+        service.getById('e1', undefined, { id: 'm1', isWorker: false }),
+      ).rejects.toThrow(NotFoundException);
+      await expect(
+        service.getById('e1', undefined, { id: 'w1', isWorker: true }),
+      ).resolves.toEqual(expect.objectContaining({ id: 'e1' }));
+    });
+  });
+
   describe('resolveSlotConfig', () => {
     it('should throw BadRequestException if slot has no config', () => {
       const slot = {
@@ -707,6 +661,30 @@ describe('EventService', () => {
       expect(() => service.resolveSlotConfig(slot)).toThrow(
         BadRequestException,
       );
+    });
+
+    it("uses a service's own close rule over its config's", () => {
+      const slot = {
+        id: 'slot-1',
+        name: 'Service',
+        config: {
+          defaultFormat: MeetingFormatEnum.ONLINE,
+          checkinStopOffsetSeconds: 3600,
+          checkinCloseMode: CheckinCloseModeEnum.AFTER_START,
+        },
+        venueOverride: null,
+        formatOverride: null,
+        checkinStopOverride: null,
+        checkinCloseModeOverride: CheckinCloseModeEnum.SERVICE_END,
+      } as any;
+
+      expect(service.resolveSlotConfig(slot).checkinCloseMode).toBe(
+        CheckinCloseModeEnum.SERVICE_END,
+      );
+      expect(
+        service.resolveSlotConfig({ ...slot, checkinCloseModeOverride: null })
+          .checkinCloseMode,
+      ).toBe(CheckinCloseModeEnum.AFTER_START);
     });
 
     it('should not require a venue when the resolved format is ONLINE', () => {
@@ -1022,6 +1000,7 @@ describe('EventService', () => {
 
       await service.deleteFutureRecurring('recurring-1', 'actor-1');
 
+      expect(mockSeriesService.deactivate).toHaveBeenCalledWith('recurring-1');
       expect(qb.andWhere).toHaveBeenCalledWith('event.startTime >= :now', {
         now: expect.any(Date),
       });
@@ -1041,6 +1020,143 @@ describe('EventService', () => {
       await expect(
         service.deleteFutureRecurring('recurring-1', 'actor-1'),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('programmes from templates', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2025-01-01T00:00:00.000Z'));
+      mockSlotRepo.create.mockImplementation((d: any) => ({
+        ...d,
+        startTime: new Date(d.startTime),
+        endTime: new Date(d.endTime),
+      }));
+      mockEventRepo.create.mockImplementation((data) => ({ ...data }));
+      mockEventRepo.save.mockImplementation((e) =>
+        Promise.resolve({ ...e, id: 'event-1' }),
+      );
+    });
+
+    afterEach(() => jest.useRealTimers());
+
+    const dto = {
+      name: 'Sunday Service',
+      isRecurring: false,
+      serviceSlots: [
+        {
+          name: 'First Service',
+          startTime: '2025-06-01T07:00:00.000Z',
+          endTime: '2025-06-01T09:00:00.000Z',
+        },
+      ],
+    } as any;
+
+    it('prepares draft programmes for a new event by default', async () => {
+      await service.create(dto, 'actor-1');
+
+      expect(
+        mockProgrammeService.createDraftsFromTemplates,
+      ).toHaveBeenCalledWith([
+        expect.objectContaining({ name: 'First Service' }),
+      ]);
+    });
+
+    it('skips them when the admin opts out', async () => {
+      await service.create({ ...dto, autoProgramme: false }, 'actor-1');
+
+      expect(
+        mockProgrammeService.createDraftsFromTemplates,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('still creates the event when preparing programmes fails', async () => {
+      mockProgrammeService.createDraftsFromTemplates.mockRejectedValueOnce(
+        new Error('boom'),
+      );
+
+      await expect(service.create(dto, 'actor-1')).resolves.toMatchObject({
+        id: 'event-1',
+      });
+    });
+  });
+
+  describe('updateOccurrenceInPlace', () => {
+    it('moves existing services by name so their programmes stay attached', async () => {
+      mockSlotRepo.create.mockImplementation((d: any) => ({
+        ...d,
+        startTime: new Date(d.startTime),
+        endTime: new Date(d.endTime),
+      }));
+      mockSlotRepo.save.mockImplementation((v) => Promise.resolve(v));
+      mockEventRepo.save.mockImplementation((v) => Promise.resolve(v));
+      const existing = {
+        id: 'slot-1',
+        name: 'First Service',
+        startTime: new Date('2025-06-01T07:00:00.000Z'),
+      };
+      const event = {
+        id: 'event-1',
+        name: 'Sunday',
+        serviceSlots: [existing],
+      } as any;
+      const reminder = {
+        serviceSlot: { id: 'slot-1' },
+        intervalPreset: '1h',
+        fireAt: new Date('2025-06-01T06:00:00.000Z'),
+      };
+      mockReminderRepo.find.mockResolvedValueOnce([reminder]);
+
+      const saved = await service.updateOccurrenceInPlace(event, [
+        {
+          name: 'First Service',
+          startTime: '2025-06-01T08:00:00.000Z',
+          endTime: '2025-06-01T10:00:00.000Z',
+        },
+      ]);
+
+      expect(saved.serviceSlots[0]).toBe(existing);
+      expect(existing).toEqual(
+        expect.objectContaining({
+          id: 'slot-1',
+          startTime: new Date('2025-06-01T08:00:00.000Z'),
+        }),
+      );
+      expect(saved.startTime).toEqual(new Date('2025-06-01T08:00:00.000Z'));
+      expect(mockReminderRepo.save).toHaveBeenCalledWith([
+        expect.objectContaining({
+          fireAt: new Date('2025-06-01T07:00:00.000Z'),
+        }),
+      ]);
+    });
+
+    it('refuses a service the occurrence does not have', async () => {
+      mockSlotRepo.create.mockImplementation((d: any) => ({
+        ...d,
+        startTime: new Date(d.startTime),
+        endTime: new Date(d.endTime),
+      }));
+      await expect(
+        service.updateOccurrenceInPlace(
+          {
+            id: 'e',
+            name: 'Sunday',
+            serviceSlots: [
+              {
+                name: 'First Service',
+                startTime: new Date('2025-06-01T07:00:00.000Z'),
+              },
+            ],
+          } as any,
+          [
+            {
+              name: 'Second Service',
+              startTime: '2025-06-01T08:00:00.000Z',
+              endTime: '2025-06-01T10:00:00.000Z',
+            },
+          ],
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
   });
 });

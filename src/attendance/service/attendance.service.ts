@@ -1,6 +1,10 @@
+import { EventAudienceEnum } from '../../event/enums/event-audience.enum';
+import { effectiveAudience } from '../../event/utility/event-audience';
+import { CheckinCloseModeEnum } from '../../event/enums/checkin-close-mode.enum';
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -139,6 +143,7 @@ export class AttendanceService {
     ]);
 
     this.assertMemberActive(member);
+    await this.assertInAudience(member, slot.event);
 
     const isWorker = member.role === MemberRoleEnum.WORKER;
     const cfg = this.eventService.resolveSlotConfig(slot);
@@ -303,8 +308,8 @@ export class AttendanceService {
       this.logger.log(`Processing event: ${event.name} (${event.id})`);
 
       const [absentMembers, absentWorkers] = await Promise.all([
-        this.memberService.getMembersNotCheckedInForEvent(event.id),
-        this.memberService.getWorkersNotCheckedInForEvent(event.id),
+        this.memberService.getMembersNotCheckedInForEvent(event.id, event),
+        this.memberService.getWorkersNotCheckedInForEvent(event.id, event),
       ]);
 
       const records: Partial<Attendance>[] = [];
@@ -1237,6 +1242,8 @@ export class AttendanceService {
       record.serviceSlot = slot;
       record.checkinTime = record.checkinTime ?? this.dateService.now();
     } else {
+      // A new record outside the event's audience would count against that person's streak and rank.
+      await this.assertInAudience(member, slot.event);
       record = this.attendanceRepository.create({
         member,
         event: slot.event,
@@ -1294,10 +1301,37 @@ export class AttendanceService {
   private async getSlotOrThrow(slotId: string): Promise<ServiceSlot> {
     const slot = await this.slotRepository.findOne({
       where: { id: slotId },
-      relations: ['event', 'config', 'config.defaultVenue', 'venueOverride'],
+      relations: [
+        'event',
+        'event.audienceGroup',
+        'config',
+        'config.defaultVenue',
+        'venueOverride',
+      ],
     });
     if (!slot) throw new NotFoundException('Service slot not found');
     return slot;
+  }
+
+  private async assertInAudience(member: Member, event: Event): Promise<void> {
+    const audience = effectiveAudience(event);
+    if (
+      audience === EventAudienceEnum.WORKERS &&
+      member.role !== MemberRoleEnum.WORKER
+    ) {
+      throw new ForbiddenException(`${event.name} is for workers only.`);
+    }
+    if (audience === EventAudienceEnum.GROUP) {
+      const rows: unknown[] = await this.dataSource.query(
+        'SELECT 1 FROM group_members WHERE group_id = $1 AND member_id = $2 LIMIT 1',
+        [event.audienceGroupId, member.id],
+      );
+      if (!rows.length) {
+        throw new ForbiddenException(
+          `${event.name} is for ${event.audienceGroup?.name ?? 'a specific group'} only.`,
+        );
+      }
+    }
   }
 
   private assertMemberActive(member: Member): void {
@@ -1325,10 +1359,7 @@ export class AttendanceService {
       : cfg.memberCheckinStartOffsetSeconds;
 
     const openTime = this.dateService.addSeconds(slot.startTime, startOffset);
-    const closeTime = this.dateService.addSeconds(
-      slot.startTime,
-      cfg.checkinStopOffsetSeconds,
-    );
+    const closeTime = this.checkinCloseTime(slot, cfg);
 
     if (this.dateService.isBefore(now, openTime)) {
       throw new BadRequestException('Check-in has not opened yet.');
@@ -1336,6 +1367,23 @@ export class AttendanceService {
     if (this.dateService.isAfter(now, closeTime)) {
       throw new BadRequestException('Check-in is closed.');
     }
+  }
+
+  // SERVICE_END closes when the service ends; AFTER_START closes at the offset, but never after the end.
+  private checkinCloseTime(
+    slot: ServiceSlot,
+    cfg: ReturnType<EventService['resolveSlotConfig']>,
+  ): Date {
+    if (cfg.checkinCloseMode === CheckinCloseModeEnum.SERVICE_END) {
+      return slot.endTime;
+    }
+    const offsetClose = this.dateService.addSeconds(
+      slot.startTime,
+      cfg.checkinStopOffsetSeconds,
+    );
+    return this.dateService.isAfter(offsetClose, slot.endTime)
+      ? slot.endTime
+      : offsetClose;
   }
 
   private async validateLocation(

@@ -1,4 +1,8 @@
 import {
+  AudienceTarget,
+  scopeToAudience,
+} from '../../event/utility/event-audience';
+import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -1282,8 +1286,11 @@ export class MemberService {
 
   // Batch-only: used exclusively by the attendance scheduler to build push-notification lists.
   // Never call from a request-scoped context — no take/limit is intentional.
-  async getMembersNotCheckedInForEvent(eventId: string): Promise<Member[]> {
-    return this.memberRepository
+  async getMembersNotCheckedInForEvent(
+    eventId: string,
+    audience: AudienceTarget = {},
+  ): Promise<Member[]> {
+    const qb = this.memberRepository
       .createQueryBuilder('member')
       .leftJoin(
         'attendances',
@@ -1293,14 +1300,17 @@ export class MemberService {
       )
       .where('attendance.id IS NULL')
       .andWhere('member.status = :status', { status: MemberStatusEnum.ACTIVE })
-      .andWhere('member.role = :role', { role: MemberRoleEnum.MEMBER })
-      .getMany();
+      .andWhere('member.role = :role', { role: MemberRoleEnum.MEMBER });
+    return scopeToAudience(qb, 'member', audience).getMany();
   }
 
   // Batch-only: used exclusively by the attendance scheduler to build push-notification lists.
   // Never call from a request-scoped context — no take/limit is intentional.
-  async getWorkersNotCheckedInForEvent(eventId: string): Promise<Member[]> {
-    return this.memberRepository
+  async getWorkersNotCheckedInForEvent(
+    eventId: string,
+    audience: AudienceTarget = {},
+  ): Promise<Member[]> {
+    const qb = this.memberRepository
       .createQueryBuilder('member')
       .innerJoin('member.workerProfile', 'profile')
       .leftJoin(
@@ -1311,8 +1321,10 @@ export class MemberService {
       )
       .where('attendance.id IS NULL')
       .andWhere('member.role = :role', { role: MemberRoleEnum.WORKER })
-      .andWhere('profile.status = :status', { status: WorkerStatusEnum.ACTIVE })
-      .getMany();
+      .andWhere('profile.status = :status', {
+        status: WorkerStatusEnum.ACTIVE,
+      });
+    return scopeToAudience(qb, 'member', audience).getMany();
   }
 
   async count(options?: FindManyOptions<Member>): Promise<number> {

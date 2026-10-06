@@ -1,16 +1,26 @@
+import { EventReminder } from '../entity/event-reminder.entity';
+import { PRESET_MINUTES } from '../enum/reminder-interval-preset.enum';
+import { EventAudienceEnum } from '../enums/event-audience.enum';
+import { Group } from '../../group/entity/group.entity';
+import {
+  effectiveAudience,
+  eventVisibleToViewerSql,
+} from '../utility/event-audience';
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, MoreThanOrEqual, Repository } from 'typeorm';
+import { DataSource, In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
 import { Event } from '../entity/event.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { EventConfig } from '../entity/event-config.entity';
 import { Venue } from '../../venue/entity/venue.entity';
-import { v4 as uuidv4 } from 'uuid';
 import { CreateEventDto } from '../dto/create-event.dto';
 import { CreateServiceSlotDto } from '../dto/create-service-slot.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -21,13 +31,21 @@ import { EventConfigService } from './event-config.service';
 import { VenueService } from '../../venue/service/venue.service';
 import { OrderBy } from '../types/order-by.type';
 import { Order } from '../types/order.type';
+import { EventSeriesService } from './event-series.service';
+import { ServiceProgrammeService } from '../../service-programme/service/service-programme.service';
 
 const SLOT_RELATIONS = [
+  'audienceGroup',
   'serviceSlots',
   'serviceSlots.config',
   'serviceSlots.config.defaultVenue',
   'serviceSlots.venueOverride',
 ];
+
+export interface EventViewer {
+  id: string;
+  isWorker: boolean;
+}
 
 @Injectable()
 export class EventService {
@@ -42,26 +60,42 @@ export class EventService {
     private readonly eventRepository: Repository<Event>,
     @InjectRepository(ServiceSlot)
     private readonly slotRepository: Repository<ServiceSlot>,
+    @InjectRepository(Group)
+    private readonly groupRepository: Repository<Group>,
+    @InjectRepository(EventReminder)
+    private readonly reminderRepository: Repository<EventReminder>,
+    @Inject(forwardRef(() => EventSeriesService))
+    private readonly seriesService: EventSeriesService,
+    private readonly programmeService: ServiceProgrammeService,
   ) {}
 
   async create(dto: CreateEventDto, actorId: string): Promise<Event | Event[]> {
+    dto = { ...dto, ...(await this.resolveAudience(dto)) };
     if (dto.isRecurring) {
       if (!dto.recurrence)
         throw new BadRequestException(
           'Recurrence details required for recurring events',
         );
       this.validateFutureSlots(dto.serviceSlots);
-      const result = await this.createRecurring(dto);
+      const result = await this.seriesService.createFromEvent(dto, actorId);
       this.auditLogService.log('EVENT_CREATED', {
         actorId,
         targetName: dto.name,
-        metadata: { name: dto.name, isRecurring: true, count: result.length },
+        metadata: {
+          name: dto.name,
+          isRecurring: true,
+          ongoing: !!dto.recurrence.ongoing,
+          count: result.length,
+        },
       });
       return result;
     }
 
     this.validateFutureSlots(dto.serviceSlots);
     const result = await this.createSingle(dto);
+    if (dto.autoProgramme !== false) {
+      await this.prepareProgrammes(result.serviceSlots);
+    }
     this.auditLogService.log('EVENT_CREATED', {
       actorId,
       targetId: result.id,
@@ -108,6 +142,11 @@ export class EventService {
     if (dto.onlineAttendanceEnabled !== undefined)
       event.onlineAttendanceEnabled = dto.onlineAttendanceEnabled;
 
+    if (dto.audience !== undefined) {
+      Object.assign(event, await this.resolveAudience(dto));
+      event.audienceGroup = undefined;
+    }
+
     const saved = await this.eventRepository.save(event);
     this.auditLogService.log('EVENT_UPDATED', {
       actorId,
@@ -118,13 +157,18 @@ export class EventService {
     return saved;
   }
 
-  async getById(id: string, memberId?: string): Promise<Event> {
+  async getById(
+    id: string,
+    memberId?: string,
+    viewer?: EventViewer,
+  ): Promise<Event> {
     const event = await this.eventRepository.findOne({
       where: { id },
       relations: SLOT_RELATIONS,
       order: { serviceSlots: { startTime: 'ASC' } },
     });
-    if (!event) throw new NotFoundException('Event not found');
+    if (!event || (viewer && !(await this.isForViewer(event, viewer))))
+      throw new NotFoundException('Event not found');
     if (memberId) await this.attachMyAttendance([event], memberId);
     return event;
   }
@@ -140,12 +184,15 @@ export class EventService {
       to?: Date;
       upcoming?: boolean;
       search?: string;
+      // Set for the member app: only events meant for this person.
+      viewer?: EventViewer;
     } = {},
   ): Promise<PaginationResponseDto<Event>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
     const qb = this.eventRepository
       .createQueryBuilder('event')
+      .leftJoinAndSelect('event.audienceGroup', 'audienceGroup')
       .leftJoinAndSelect('event.serviceSlots', 'serviceSlots')
       .leftJoinAndSelect('serviceSlots.config', 'config')
       .leftJoinAndSelect('config.defaultVenue', 'defaultVenue')
@@ -165,6 +212,11 @@ export class EventService {
     if (filter.to) qb.andWhere('event.eventDate <= :to', { to: filter.to });
     if (filter.search)
       qb.andWhere('event.name ILIKE :search', { search: `%${filter.search}%` });
+    if (filter.viewer)
+      qb.andWhere(eventVisibleToViewerSql('event'), {
+        viewerId: filter.viewer.id,
+        viewerIsWorker: filter.viewer.isWorker,
+      });
 
     const [events, total] = await qb.getManyAndCount();
 
@@ -229,6 +281,7 @@ export class EventService {
 
     const name = events[0]?.name;
     await this.eventRepository.remove(events);
+    await this.seriesService.deactivate(recurringEventId);
     this.auditLogService.log('EVENT_DELETED', {
       actorId,
       targetId: recurringEventId,
@@ -287,6 +340,7 @@ export class EventService {
     workerLateOffsetSeconds: number;
     memberCheckinStartOffsetSeconds: number;
     checkinStopOffsetSeconds: number;
+    checkinCloseMode: CheckinCloseModeEnum;
     venue: Venue | null;
     allowedDistanceInMeters: number;
     format: MeetingFormatEnum;
@@ -315,6 +369,10 @@ export class EventService {
         slot.memberCheckinStartOverride ?? c.memberCheckinStartOffsetSeconds,
       checkinStopOffsetSeconds:
         slot.checkinStopOverride ?? c.checkinStopOffsetSeconds,
+      checkinCloseMode:
+        slot.checkinCloseModeOverride ??
+        c.checkinCloseMode ??
+        CheckinCloseModeEnum.AFTER_START,
       venue,
       allowedDistanceInMeters:
         slot.allowedDistanceOverride ?? c.allowedDistanceInMeters,
@@ -344,67 +402,148 @@ export class EventService {
       startTime,
       endTime,
       onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
+      audience: dto.audience ?? EventAudienceEnum.EVERYONE,
+      audienceGroupId: dto.audienceGroupId ?? null,
     });
     event.serviceSlots = slots;
     return this.eventRepository.save(event);
   }
 
-  private async createRecurring(dto: CreateEventDto): Promise<Event[]> {
-    const recurrenceEndDate = new Date(dto.recurrence.recurrenceEndDate);
-    if (Number.isNaN(recurrenceEndDate.getTime()))
-      throw new BadRequestException('Invalid recurrenceEndDate');
+  // Groups an event can be for — reference data, so the full list.
+  listAudienceGroups(): Promise<Pick<Group, 'id' | 'name'>[]> {
+    return this.groupRepository.find({
+      select: ['id', 'name'],
+      order: { name: 'ASC' },
+    });
+  }
 
-    const baseSlots = await this.buildSlots(dto.serviceSlots);
-    const firstDate = this.truncateToUtcDate(
-      new Date(Math.min(...baseSlots.map((s) => s.startTime.getTime()))),
+  // Validates the group for a GROUP audience; any other audience carries no group.
+  async resolveAudience(dto: {
+    audience?: EventAudienceEnum;
+    audienceGroupId?: string | null;
+  }): Promise<{ audience: EventAudienceEnum; audienceGroupId: string | null }> {
+    const audience = dto.audience ?? EventAudienceEnum.EVERYONE;
+    if (audience !== EventAudienceEnum.GROUP) {
+      return { audience, audienceGroupId: null };
+    }
+    if (
+      !dto.audienceGroupId ||
+      !(await this.groupRepository.existsBy({ id: dto.audienceGroupId }))
+    ) {
+      throw new BadRequestException('Choose an existing group for this event');
+    }
+    return { audience, audienceGroupId: dto.audienceGroupId };
+  }
+
+  private async isForViewer(
+    event: Event,
+    viewer: EventViewer,
+  ): Promise<boolean> {
+    const audience = effectiveAudience(event);
+    if (audience === EventAudienceEnum.WORKERS) return viewer.isWorker;
+    if (audience !== EventAudienceEnum.GROUP) return true;
+    const rows: unknown[] = await this.dataSource.query(
+      'SELECT 1 FROM group_members WHERE group_id = $1 AND member_id = $2 LIMIT 1',
+      [event.audienceGroupId, viewer.id],
     );
+    return rows.length > 0;
+  }
 
-    const oneYearLater = new Date(firstDate);
-    oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
-    if (recurrenceEndDate > oneYearLater) {
-      throw new BadRequestException(
-        'Recurrence end date must be within one year of event start',
-      );
-    }
+  // An unsaved event built from absolute slots — used by the series service for each occurrence.
+  async buildOccurrence(
+    fields: Pick<Event, 'name' | 'onlineAttendanceEnabled'> &
+      Partial<
+        Pick<
+          Event,
+          | 'description'
+          | 'recurringEventId'
+          | 'seriesOccurrenceDate'
+          | 'audience'
+          | 'audienceGroupId'
+        >
+      >,
+    slotDtos: CreateServiceSlotDto[],
+  ): Promise<Event> {
+    const slots = await this.buildSlots(slotDtos);
+    const event = this.eventRepository.create({
+      ...fields,
+      ...this.deriveDateRange(slots),
+    });
+    event.serviceSlots = slots;
+    return event;
+  }
 
-    const recurringEventId = uuidv4();
-    const events: Event[] = [];
-    let currentDate = firstDate;
-
-    while (currentDate <= recurrenceEndDate) {
-      const dateOffsetMs = currentDate.getTime() - firstDate.getTime();
-      const adjustedSlotDtos = dto.serviceSlots.map((s) => ({
-        ...s,
-        startTime: new Date(
-          new Date(s.startTime).getTime() + dateOffsetMs,
-        ).toISOString(),
-        endTime: new Date(
-          new Date(s.endTime).getTime() + dateOffsetMs,
-        ).toISOString(),
-      }));
-      const slots = await this.buildSlots(adjustedSlotDtos);
-      const { eventDate, endDate, startTime, endTime } =
-        this.deriveDateRange(slots);
-      const event = this.eventRepository.create({
-        name: dto.name,
-        description: dto.description,
-        eventDate,
-        endDate,
-        startTime,
-        endTime,
-        recurringEventId,
-        onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
+  // Moves an upcoming occurrence's services to new times/settings without recreating them, so programmes stay attached.
+  async updateOccurrenceInPlace(
+    event: Event,
+    slotDtos: CreateServiceSlotDto[],
+  ): Promise<Event> {
+    const rebuilt = await this.buildSlots(slotDtos);
+    const byName = new Map(event.serviceSlots.map((s) => [s.name, s]));
+    const previousStart = new Map(
+      event.serviceSlots.map((s) => [s.id, s.startTime.getTime()]),
+    );
+    const updated = rebuilt.map((next) => {
+      const slot = byName.get(next.name);
+      if (!slot) {
+        throw new BadRequestException(
+          `Service "${next.name}" doesn't exist on ${event.name}`,
+        );
+      }
+      return Object.assign(slot, {
+        startTime: next.startTime,
+        endTime: next.endTime,
+        config: next.config,
+        workerCheckinStartOverride: next.workerCheckinStartOverride,
+        workerLateOverride: next.workerLateOverride,
+        memberCheckinStartOverride: next.memberCheckinStartOverride,
+        checkinStopOverride: next.checkinStopOverride,
+        checkinCloseModeOverride: next.checkinCloseModeOverride,
+        allowedDistanceOverride: next.allowedDistanceOverride,
+        enforceMemberLocationOverride: next.enforceMemberLocationOverride,
+        venueOverride: next.venueOverride,
+        formatOverride: next.formatOverride,
       });
-      event.serviceSlots = slots;
-      events.push(event);
-      currentDate = this.advanceDate(
-        currentDate,
-        dto.recurrence.recurrencePattern,
-        dto.recurrence.recurrenceInterval,
+    });
+    await this.slotRepository.save(updated);
+    await this.retimeReminders(
+      updated.filter((s) => previousStart.get(s.id) !== s.startTime.getTime()),
+    );
+    Object.assign(event, this.deriveDateRange(updated));
+    event.serviceSlots = updated;
+    return this.eventRepository.save(event);
+  }
+
+  // Reminders fire at a precomputed time, so a service moved in place needs its unsent reminders moved with it.
+  private async retimeReminders(moved: ServiceSlot[]): Promise<void> {
+    if (!moved.length) return;
+    const startById = new Map(moved.map((s) => [s.id, s.startTime]));
+    const reminders = await this.reminderRepository.find({
+      where: {
+        serviceSlot: { id: In([...startById.keys()]) },
+        lastSentAt: IsNull(),
+      },
+      relations: ['serviceSlot'],
+    });
+    for (const r of reminders) {
+      const start = startById.get(r.serviceSlot.id)!;
+      r.fireAt = new Date(
+        start.getTime() - PRESET_MINUTES[r.intervalPreset] * 60_000,
       );
     }
+    // Saved through the repository so the scheduler gate wakes the reminder job.
+    if (reminders.length) await this.reminderRepository.save(reminders);
+  }
 
-    return this.eventRepository.save(events);
+  // Non-fatal: a template problem must never stop the event itself being created.
+  async prepareProgrammes(slots: ServiceSlot[]): Promise<void> {
+    try {
+      await this.programmeService.createDraftsFromTemplates(slots ?? []);
+    } catch (err) {
+      this.logger.warn(
+        `Could not prepare programmes from templates: ${(err as Error).message}`,
+      );
+    }
   }
 
   /** Event.eventDate/endDate/startTime/endTime are all derived from the slots, not entered independently. */
@@ -500,18 +639,17 @@ export class EventService {
       );
     }
 
-    // checkinStopOffsetSeconds is relative to the slot's own startTime (see
-    // AttendanceService.validateCheckinWindow), so whether it leaves
-    // check-in open past the slot's actual end depends on this specific
-    // slot's duration — a config shared across slots of different lengths
-    // can't be validated for this at config-save time, only here.
-    const effectiveCheckinStopOffsetSeconds =
-      dto.checkinStopOverride ?? config?.checkinStopOffsetSeconds;
-    if (effectiveCheckinStopOffsetSeconds !== undefined) {
+    // A config's stop offset is a ceiling — check-in also closes when the service ends
+    // (AttendanceService.validateCheckinWindow), so one config fits services of any length.
+    // An override is set for this one service, so one longer than it is a mistake.
+    if (
+      dto.checkinStopOverride !== undefined &&
+      dto.checkinCloseModeOverride !== CheckinCloseModeEnum.SERVICE_END
+    ) {
       const durationSeconds = (end.getTime() - start.getTime()) / 1000;
-      if (effectiveCheckinStopOffsetSeconds > durationSeconds) {
+      if (dto.checkinStopOverride > durationSeconds) {
         throw new BadRequestException(
-          `Slot "${dto.name ?? 'Service'}" would leave check-in open past its own end time (closes ${effectiveCheckinStopOffsetSeconds}s after start, but the slot is only ${durationSeconds}s long) — reduce the check-in stop offset for this slot or its config`,
+          `Slot "${dto.name ?? 'Service'}" closes check-in ${Math.round(dto.checkinStopOverride / 60)} min after it starts, but it only runs ${Math.round(durationSeconds / 60)} min — shorten its check-in override`,
         );
       }
     }
@@ -525,6 +663,7 @@ export class EventService {
       workerLateOverride: dto.workerLateOverride ?? null,
       memberCheckinStartOverride: dto.memberCheckinStartOverride ?? null,
       checkinStopOverride: dto.checkinStopOverride ?? null,
+      checkinCloseModeOverride: dto.checkinCloseModeOverride ?? null,
       allowedDistanceOverride: dto.allowedDistanceOverride ?? null,
       enforceMemberLocationOverride: dto.enforceMemberLocationOverride ?? null,
       venueOverride,
@@ -533,7 +672,7 @@ export class EventService {
   }
 
   /** True if this event has any recorded attendance or any service session (LIVE or COMPLETED) ever started for one of its slots. */
-  private async hasRecordedHistory(eventId: string): Promise<boolean> {
+  async hasRecordedHistory(eventId: string): Promise<boolean> {
     const [attendance, session] = await Promise.all([
       this.dataSource
         .createQueryBuilder()
@@ -600,30 +739,6 @@ export class EventService {
             checkinTime: rec.checkinTime,
           }
         : null;
-    }
-  }
-
-  // Advances by whole calendar days/months in UTC specifically (not
-  // date-fns' addDays/addWeeks/addMonths, which use the *runtime's local*
-  // calendar) — the resulting date-to-date millisecond delta gets applied
-  // directly to each slot's absolute startTime/endTime below, so a DST
-  // transition in the runtime's local timezone would otherwise skew every
-  // subsequent occurrence's actual time by up to an hour. Same reasoning
-  // as truncateToUtcDate: this must not depend on the server's timezone.
-  private advanceDate(date: Date, pattern: string, interval: number): Date {
-    const d = new Date(date);
-    switch (pattern) {
-      case 'daily':
-        d.setUTCDate(d.getUTCDate() + interval);
-        return d;
-      case 'weekly':
-        d.setUTCDate(d.getUTCDate() + interval * 7);
-        return d;
-      case 'monthly':
-        d.setUTCMonth(d.getUTCMonth() + interval);
-        return d;
-      default:
-        throw new BadRequestException(`Unknown recurrence pattern: ${pattern}`);
     }
   }
 }

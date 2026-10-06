@@ -1340,6 +1340,73 @@ export class ServiceProgrammeService {
     return result;
   }
 
+  // A draft programme for each new service whose name matches a saved template; quiet, the day-before reminder notifies.
+  async createDraftsFromTemplates(
+    serviceSlots: ServiceSlot[],
+  ): Promise<ServiceProgramme[]> {
+    if (!serviceSlots.length) return [];
+    const templates = await this.templateRepo.find();
+    const templateByName = new Map(
+      templates.map((t) => [t.serviceSlotName.trim().toLowerCase(), t]),
+    );
+    const matches = serviceSlots
+      .map((slot) => ({
+        slot,
+        template: templateByName.get(slot.name.trim().toLowerCase()),
+      }))
+      .filter(
+        (m): m is { slot: ServiceSlot; template: ServiceProgrammeTemplate } =>
+          !!m.template && m.template.slots.length > 0,
+      );
+    if (!matches.length) return [];
+
+    const existing = await this.programmeRepo.find({
+      where: { serviceSlot: { id: In(matches.map((m) => m.slot.id)) } },
+      relations: ['serviceSlot'],
+    });
+    const taken = new Set(existing.map((p) => p.serviceSlot.id));
+    const todo = matches.filter((m) => !taken.has(m.slot.id));
+    if (!todo.length) return [];
+
+    const departmentIds = [
+      ...new Set(
+        todo.flatMap((m) =>
+          m.template.slots
+            .map((s) => s.departmentId)
+            .filter((id): id is string => !!id),
+        ),
+      ),
+    ];
+    const departments = departmentIds.length
+      ? await this.departmentRepo.find({ where: { id: In(departmentIds) } })
+      : [];
+    const departmentById = new Map(departments.map((d) => [d.id, d]));
+
+    const programmes = todo.map(({ slot, template }) =>
+      this.programmeRepo.create({
+        serviceSlot: slot,
+        saveAsTemplate: false,
+        createdByAdmin: null,
+        slots: template.slots.map((t) =>
+          this.slotRepo.create({
+            position: t.position,
+            type: t.type,
+            topic: t.topic,
+            allocatedMinutes: t.allocatedMinutes,
+            department: t.departmentId
+              ? (departmentById.get(t.departmentId) ?? null)
+              : null,
+          }),
+        ),
+      }),
+    );
+    const saved = await this.programmeRepo.save(programmes);
+    this.logger.log(
+      `Draft programme(s) prepared from templates for ${saved.length} service(s)`,
+    );
+    return saved;
+  }
+
   async findAllTemplates(): Promise<ServiceProgrammeTemplate[]> {
     return this.templateRepo.find({ order: { name: 'ASC' } });
   }

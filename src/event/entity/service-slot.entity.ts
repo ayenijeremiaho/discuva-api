@@ -1,3 +1,4 @@
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
   Column,
   Entity,
@@ -64,6 +65,13 @@ export class ServiceSlot extends BaseEntity {
 
   @Column({ name: 'checkin_stop_override', nullable: true, type: 'int' })
   checkinStopOverride: number | null;
+
+  @Column({
+    name: 'checkin_close_mode_override',
+    nullable: true,
+    type: 'varchar',
+  })
+  checkinCloseModeOverride: CheckinCloseModeEnum | null;
 
   @Column({ name: 'allowed_distance_override', nullable: true, type: 'int' })
   allowedDistanceOverride: number | null;

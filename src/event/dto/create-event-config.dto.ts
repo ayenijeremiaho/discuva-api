@@ -1,3 +1,4 @@
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
   IsBoolean,
   IsEnum,
@@ -56,6 +57,11 @@ export class CreateEventConfigDto {
   @IsInt()
   @Min(0)
   checkinStopOffsetSeconds: number;
+
+  // SERVICE_END ignores checkinStopOffsetSeconds; defaults to AFTER_START.
+  @IsOptional()
+  @IsEnum(CheckinCloseModeEnum)
+  checkinCloseMode?: CheckinCloseModeEnum;
 
   @IsNumber()
   @Min(5)

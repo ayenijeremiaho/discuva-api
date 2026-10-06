@@ -1,3 +1,5 @@
+import { EventAudienceEnum } from '../../event/enums/event-audience.enum';
+import { CheckinCloseModeEnum } from '../../event/enums/checkin-close-mode.enum';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -275,6 +277,95 @@ describe('AttendanceService', () => {
 
       await expect(service.checkin(user, dto as any)).rejects.toThrow(
         BadRequestException,
+      );
+    });
+
+    it("won't let an admin mark someone at an event that isn't for them", async () => {
+      const slot = makeSlot(addHours(new Date(), 1));
+      slot.event = {
+        ...slot.event,
+        audience: EventAudienceEnum.WORKERS,
+        name: 'Workers Meeting',
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+      });
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.adminMarkAttendance(
+          'member-1',
+          'slot-1',
+          AttendanceStatusEnum.ABSENT,
+          'admin-1',
+        ),
+      ).rejects.toThrow('Workers Meeting is for workers only.');
+      expect(mockAttendanceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses a member checking in to a workers-only event', async () => {
+      const slot = makeSlot(addHours(new Date(), 1));
+      slot.event = {
+        ...slot.event,
+        audience: EventAudienceEnum.WORKERS,
+        name: 'Workers Meeting',
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Workers Meeting is for workers only.',
+      );
+    });
+
+    it("refuses someone outside the event's group", async () => {
+      const slot = makeSlot(addHours(new Date(), 1));
+      slot.event = {
+        ...slot.event,
+        name: 'Teens Class',
+        audience: EventAudienceEnum.GROUP,
+        audienceGroupId: 'g1',
+        audienceGroup: { id: 'g1', name: 'Teenagers' },
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockDataSource.query.mockResolvedValueOnce([]);
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Teens Class is for Teenagers only.',
+      );
+    });
+
+    it('closes check-in when a short service ends, even if the config allows longer', async () => {
+      const now = new Date();
+      const slot = {
+        ...makeSlot(subHours(now, 0.5 + 10 / 60)),
+        endTime: subHours(now, 10 / 60),
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Check-in is closed.',
       );
     });
 
@@ -621,6 +712,107 @@ describe('AttendanceService', () => {
       );
 
       expect(result).toEqual({ message: 'Check-in successful' });
+      expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ status: AttendanceStatusEnum.LATE }),
+      );
+    });
+
+    it('keeps check-in open until the service ends when the config closes at the end', async () => {
+      const now = new Date();
+      const startTime = subHours(now, 2);
+      const slot = { ...makeSlot(startTime), endTime: addHours(now, 1) };
+      const cfg = {
+        ...defaultConfig,
+        workerLateOffsetSeconds: 600,
+        checkinStopOffsetSeconds: 3600,
+        checkinCloseMode: CheckinCloseModeEnum.SERVICE_END,
+      };
+
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'worker-1',
+        role: MemberRoleEnum.WORKER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: { id: 'wp-1', status: WorkerStatusEnum.ACTIVE },
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(cfg);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.create.mockImplementation((v) => v);
+      mockAttendanceRepo.save.mockResolvedValue({ id: 'att-1' });
+
+      await service.checkin(
+        {
+          id: 'worker-1',
+          role: MemberRoleEnum.WORKER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        { serviceSlotId: 'slot-1', location: defaultLocation } as any,
+      );
+
+      expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ status: AttendanceStatusEnum.LATE }),
+      );
+    });
+
+    it('still closes check-in at the end of the service when the config closes at the end', async () => {
+      const now = new Date();
+      const slot = {
+        ...makeSlot(subHours(now, 2)),
+        endTime: subHours(now, 10 / 60),
+      };
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue({
+        ...defaultConfig,
+        checkinCloseMode: CheckinCloseModeEnum.SERVICE_END,
+      });
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Check-in is closed.',
+      );
+    });
+
+    it('still marks a worker LATE on a short service whose check-in is capped at its end', async () => {
+      const now = new Date();
+      const startTime = subHours(now, 20 / 60);
+      const slot = {
+        ...makeSlot(startTime),
+        endTime: addHours(startTime, 0.5),
+      };
+      const cfg = {
+        ...defaultConfig,
+        workerLateOffsetSeconds: 600,
+        checkinStopOffsetSeconds: 3600,
+      };
+
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'worker-1',
+        role: MemberRoleEnum.WORKER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: { id: 'wp-1', status: WorkerStatusEnum.ACTIVE },
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(cfg);
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.create.mockImplementation((v) => v);
+      mockAttendanceRepo.save.mockResolvedValue({ id: 'att-1' });
+
+      await service.checkin(
+        {
+          id: 'worker-1',
+          role: MemberRoleEnum.WORKER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        { serviceSlotId: 'slot-1', location: defaultLocation } as any,
+      );
+
       expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ status: AttendanceStatusEnum.LATE }),
       );

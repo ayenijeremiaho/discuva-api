@@ -1,3 +1,6 @@
+import { EventViewer } from '../service/event.service';
+import { SessionSurface } from '../../auth/enum/session-surface.enum';
+import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import {
   Body,
   Controller,
@@ -32,6 +35,12 @@ interface GetEventsQuery {
   search?: string;
 }
 
+// The member app only sees events meant for the caller; the admin portal sees all.
+const viewerOf = (user: MemberAuth): EventViewer | undefined =>
+  user.surface === SessionSurface.MEMBER
+    ? { id: user.id, isWorker: user.role === MemberRoleEnum.WORKER }
+    : undefined;
+
 @Controller('events')
 export class EventController {
   constructor(private readonly eventService: EventService) {}
@@ -60,7 +69,7 @@ export class EventController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: MemberAuth,
   ) {
-    return this.eventService.getById(id, user.id);
+    return this.eventService.getById(id, user.id, viewerOf(user));
   }
 
   @UseGuards(JwtAuthGuard)
@@ -80,6 +89,7 @@ export class EventController {
         to: query.to ? new Date(query.to) : undefined,
         upcoming: query.upcoming === 'true',
         search: query.search,
+        viewer: viewerOf(user),
       },
     );
   }

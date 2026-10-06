@@ -1,3 +1,4 @@
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
   BadRequestException,
   Injectable,
@@ -54,6 +55,8 @@ export class EventConfigService {
       workerLateOffsetSeconds: dto.workerLateOffsetSeconds,
       memberCheckinStartOffsetSeconds: dto.memberCheckinStartOffsetSeconds,
       checkinStopOffsetSeconds: dto.checkinStopOffsetSeconds,
+      checkinCloseMode:
+        dto.checkinCloseMode ?? CheckinCloseModeEnum.AFTER_START,
       allowedDistanceInMeters: dto.allowedDistanceInMeters,
       autoStartSession: dto.autoStartSession ?? false,
       enforceMemberLocation: dto.enforceMemberLocation ?? false,
@@ -164,6 +167,7 @@ export class EventConfigService {
     workerLateOffsetSeconds: number;
     memberCheckinStartOffsetSeconds: number;
     checkinStopOffsetSeconds: number;
+    checkinCloseMode?: CheckinCloseModeEnum;
   }): void {
     if (cfg.workerCheckinStartOffsetSeconds >= 0) {
       throw new BadRequestException(
@@ -180,6 +184,8 @@ export class EventConfigService {
         'Workers cannot be marked late before check-in has even opened',
       );
     }
+    // Closing at the service's end has no offset to compare.
+    if (cfg.checkinCloseMode === CheckinCloseModeEnum.SERVICE_END) return;
     if (cfg.checkinStopOffsetSeconds <= cfg.workerLateOffsetSeconds) {
       throw new BadRequestException(
         'Check-in must close after the late threshold',

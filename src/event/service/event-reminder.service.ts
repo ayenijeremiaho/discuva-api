@@ -1,3 +1,6 @@
+import { EventAudienceEnum } from '../enums/event-audience.enum';
+import { Group } from '../../group/entity/group.entity';
+import { effectiveAudience, scopeToAudience } from '../utility/event-audience';
 import {
   BadRequestException,
   Injectable,
@@ -178,6 +181,7 @@ export class EventReminderService {
     const toFire = await this.reminderRepo
       .createQueryBuilder('r')
       .innerJoinAndSelect('r.serviceSlot', 'slot')
+      .leftJoinAndSelect('slot.event', 'event')
       .leftJoinAndSelect('r.department', 'dept')
       .where('r.enabled = true')
       .andWhere('r.lastSentAt IS NULL')
@@ -221,12 +225,17 @@ export class EventReminderService {
     const title = `Service Reminder: ${slot.name}`;
     const body = `This is a reminder that <strong>${slot.name}</strong> begins in ${label}. Please make your way and check in on time. God bless you!`;
 
+    const eventAudience = effectiveAudience(slot.event ?? {});
     const announcement = this.announcementRepo.create({
       title,
       body,
-      audience: reminder.audience,
+      audience: this.announcementAudience(reminder, eventAudience),
       author: null,
       department: reminder.department,
+      group:
+        eventAudience === EventAudienceEnum.GROUP
+          ? ({ id: slot.event.audienceGroupId } as Group)
+          : null,
       targetMember: null,
       publishedAt: now,
       expiresAt: slot.startTime,
@@ -308,8 +317,26 @@ export class EventReminderService {
         });
     }
 
+    scopeToAudience(qb, 'm', reminder.serviceSlot.event ?? {});
     const members = await qb.getMany();
     return members.map((m) => ({ id: m.id, email: m.email }));
+  }
+
+  // A reminder never reaches beyond the event's own audience, in-app either.
+  private announcementAudience(
+    reminder: EventReminder,
+    eventAudience: EventAudienceEnum,
+  ): AnnouncementAudienceEnum {
+    if (eventAudience === EventAudienceEnum.GROUP) {
+      return AnnouncementAudienceEnum.GROUP;
+    }
+    if (
+      eventAudience === EventAudienceEnum.WORKERS &&
+      reminder.audience !== AnnouncementAudienceEnum.DEPARTMENT
+    ) {
+      return AnnouncementAudienceEnum.WORKERS_ONLY;
+    }
+    return reminder.audience;
   }
 
   private async getOrThrow(id: string): Promise<EventReminder> {

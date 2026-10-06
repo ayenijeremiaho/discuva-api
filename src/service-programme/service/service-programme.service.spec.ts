@@ -1930,4 +1930,85 @@ describe('ServiceProgrammeService', () => {
       );
     });
   });
+
+  describe('createDraftsFromTemplates', () => {
+    const choir = { id: 'dept-choir', name: 'Choir' };
+
+    it('builds a quiet draft for each service with a matching template, keeping department slots', async () => {
+      mockTemplateRepo.find.mockResolvedValue([
+        {
+          serviceSlotName: 'First Service',
+          slots: [
+            {
+              position: 0,
+              type: ServiceSlotTypeEnum.WORSHIP,
+              topic: 'Praise & Worship',
+              allocatedMinutes: 20,
+              departmentId: 'dept-choir',
+            },
+            {
+              position: 1,
+              type: ServiceSlotTypeEnum.SPEAKER,
+              topic: 'Sermon',
+              allocatedMinutes: 40,
+            },
+          ],
+        },
+      ]);
+      mockProgrammeRepo.find.mockResolvedValue([]);
+      mockDepartmentRepo.find.mockResolvedValue([choir]);
+      mockProgrammeRepo.create.mockImplementation((v) => v);
+      mockSlotRepo.create.mockImplementation((v) => v);
+      mockProgrammeRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      const result = await service.createDraftsFromTemplates([
+        { id: 'ss-1', name: 'first service ' },
+        { id: 'ss-2', name: 'Youth Service' },
+      ] as never);
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          serviceSlot: expect.objectContaining({ id: 'ss-1' }),
+          createdByAdmin: null,
+          slots: [
+            expect.objectContaining({
+              topic: 'Praise & Worship',
+              department: choir,
+            }),
+            expect.objectContaining({ topic: 'Sermon', department: null }),
+          ],
+        }),
+      );
+      expect(
+        mockNotificationDispatchService.notifyMember,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('leaves services that already have a programme alone', async () => {
+      mockTemplateRepo.find.mockResolvedValue([
+        {
+          serviceSlotName: 'First Service',
+          slots: [
+            {
+              position: 0,
+              type: ServiceSlotTypeEnum.SPEAKER,
+              topic: null,
+              allocatedMinutes: 30,
+            },
+          ],
+        },
+      ]);
+      mockProgrammeRepo.find.mockResolvedValue([
+        { serviceSlot: { id: 'ss-1' } },
+      ]);
+
+      const result = await service.createDraftsFromTemplates([
+        { id: 'ss-1', name: 'First Service' },
+      ] as never);
+
+      expect(result).toEqual([]);
+      expect(mockProgrammeRepo.save).not.toHaveBeenCalled();
+    });
+  });
 });
