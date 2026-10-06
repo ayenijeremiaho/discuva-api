@@ -1,3 +1,4 @@
+import { TransactionHost } from '@nestjs-cls/transactional';
 import { EventReminder } from '../entity/event-reminder.entity';
 import { EventAudienceEnum } from '../enums/event-audience.enum';
 import { Group } from '../../group/entity/group.entity';
@@ -71,6 +72,14 @@ const mockReminderRepo = {
 };
 const mockGroupRepo = { existsBy: jest.fn().mockResolvedValue(true) };
 
+// The request's tenant transaction; by default it answers like the DataSource mock.
+const mockTenantTx = {
+  query: jest.fn().mockResolvedValue([]),
+  createQueryBuilder: jest.fn((...args: unknown[]) =>
+    mockDataSource.createQueryBuilder(...args),
+  ),
+};
+
 const mockDataSource = {
   // Default: a fresh, empty query builder for every call — safe "nothing
   // found" behavior for tests that don't specifically exercise
@@ -97,6 +106,8 @@ describe('EventService', () => {
       providers: [
         EventService,
         { provide: DataSource, useValue: mockDataSource },
+        // Tenant queries run on the request's transaction, which the old DataSource mock stands in for.
+        { provide: TransactionHost, useValue: { tx: mockTenantTx } },
         { provide: getRepositoryToken(Event), useValue: mockEventRepo },
         { provide: getRepositoryToken(ServiceSlot), useValue: mockSlotRepo },
         { provide: getRepositoryToken(Group), useValue: mockGroupRepo },
@@ -575,6 +586,33 @@ describe('EventService', () => {
 
       expect(mockEventRepo.remove).toHaveBeenCalledWith(event);
     });
+  });
+
+  it("reads the member's check-in from the church's schema, not public", async () => {
+    mockEventRepo.findOne.mockResolvedValue({
+      id: 'e1',
+      serviceSlots: [{ id: 's1', name: 'First Service' }],
+    });
+    const rowsQb = {
+      select: jest.fn().mockReturnThis(),
+      addSelect: jest.fn().mockReturnThis(),
+      from: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getRawMany: jest
+        .fn()
+        .mockResolvedValue([
+          { eventId: 'e1', slotId: 's1', status: 'PRESENT', checkinTime: null },
+        ]),
+    };
+    mockTenantTx.createQueryBuilder.mockReturnValueOnce(rowsQb);
+    (mockDataSource.createQueryBuilder as jest.Mock).mockClear();
+
+    const event = await service.getById('e1', 'member-1');
+
+    expect(event.checkedIn).toBe(true);
+    expect(event.myCheckin?.slotName).toBe('First Service');
+    expect(mockDataSource.createQueryBuilder).not.toHaveBeenCalled();
   });
 
   describe('audience', () => {

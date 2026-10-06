@@ -116,7 +116,16 @@ const mockDataSource = {
   getRepository: jest.fn().mockReturnValue(mockEventRepoForDataSource),
 };
 
-const mockTxManager = { save: jest.fn(), update: jest.fn() };
+// The request's transaction: writes plus the tenant read queries.
+const mockTxManager = {
+  save: jest.fn(),
+  update: jest.fn(),
+  // Looked up per call: some tests replace mockDataSource's functions outright.
+  query: (...args: unknown[]) => mockDataSource.query(...args),
+  createQueryBuilder: (...args: unknown[]) =>
+    mockDataSource.createQueryBuilder(...args),
+  getRepository: (...args: unknown[]) => mockDataSource.getRepository(...args),
+};
 const mockTxHost = { tx: mockTxManager };
 
 const mockDepartmentService = {
@@ -433,10 +442,20 @@ describe('AttendanceService', () => {
         id: 'att-1',
         status: AttendanceStatusEnum.PRESENT,
         checkinTime: new Date(),
+        serviceSlot: { id: 'slot-0', name: 'First Service' },
       });
 
-      await expect(service.checkin(user, dto as any)).rejects.toThrow(
-        BadRequestException,
+      const error = await service
+        .checkin(user, dto as any)
+        .catch((e: BadRequestException) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      // Lets the app show "Checked in" rather than an error.
+      expect((error as BadRequestException).getResponse()).toEqual(
+        expect.objectContaining({
+          code: 'ALREADY_CHECKED_IN',
+          slotId: 'slot-0',
+          slotName: 'First Service',
+        }),
       );
     });
 

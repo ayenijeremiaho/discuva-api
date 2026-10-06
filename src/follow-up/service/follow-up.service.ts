@@ -634,7 +634,7 @@ export class FollowUpService {
     ] = await Promise.all([
       // Total first-timers + wants-to-join counts
       (() => {
-        const qb = this.dataSource
+        const qb = this.txHost.tx
           .createQueryBuilder()
           .select('COUNT(*)', 'total')
           .addSelect(
@@ -657,7 +657,7 @@ export class FollowUpService {
 
       // By source
       (() => {
-        const qb = this.dataSource
+        const qb = this.txHost.tx
           .createQueryBuilder()
           .select('ft.source', 'source')
           .addSelect('COUNT(*)', 'count')
@@ -670,7 +670,7 @@ export class FollowUpService {
 
       // Task status breakdown (tasks in period)
       (() => {
-        const qb = this.dataSource
+        const qb = this.txHost.tx
           .createQueryBuilder()
           .select('task.status', 'status')
           .addSelect('COUNT(*)', 'count')
@@ -683,7 +683,7 @@ export class FollowUpService {
 
       // Outcome breakdown
       (() => {
-        const qb = this.dataSource
+        const qb = this.txHost.tx
           .createQueryBuilder()
           .select('task.outcome', 'outcome')
           .addSelect('COUNT(*)', 'count')
@@ -696,7 +696,7 @@ export class FollowUpService {
       })(),
 
       // Overdue count (always current snapshot, no date filter)
-      this.dataSource
+      this.txHost.tx
         .createQueryBuilder()
         .select('COUNT(*)', 'count')
         .from('follow_up_tasks', 'task')
@@ -707,7 +707,7 @@ export class FollowUpService {
 
       // By worker
       (() => {
-        const qb = this.dataSource
+        const qb = this.txHost.tx
           .createQueryBuilder()
           .select("m.firstname || ' ' || m.lastname", 'workerName')
           .addSelect('COUNT(task.id)', 'assigned')
@@ -736,7 +736,7 @@ export class FollowUpService {
 
       // By event
       (() => {
-        const qb = this.dataSource
+        const qb = this.txHost.tx
           .createQueryBuilder()
           .select('e.name', 'eventName')
           .addSelect('COUNT(ft.id)', 'firstTimers')
@@ -804,7 +804,7 @@ export class FollowUpService {
   }
 
   async pickRoundRobinAssignee(): Promise<WorkerProfile | null> {
-    const rows = await this.dataSource
+    const rows = await this.txHost.tx
       .createQueryBuilder()
       .select('wp.id', 'id')
       .addSelect(
@@ -1181,7 +1181,7 @@ export class FollowUpService {
     converted: number;
   }> {
     const params: (string | null)[] = [from ?? null, to ?? null];
-    const [row] = await this.dataSource.query<
+    const [row] = await this.txHost.tx.query<
       {
         total: string;
         untouched: string;

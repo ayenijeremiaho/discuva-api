@@ -185,9 +185,14 @@ export class AttendanceService {
       const time = existing.checkinTime
         ? ` at ${this.dateService.format(existing.checkinTime, DateService.PATTERNS.EMAIL_TIME)}`
         : '';
-      throw new BadRequestException(
-        `You have already checked in for this service${time}.`,
-      );
+      // The code and details let the app show "Checked in" instead of an error.
+      throw new BadRequestException({
+        message: `You have already checked in for this service${time}.`,
+        code: 'ALREADY_CHECKED_IN',
+        slotId: existing.serviceSlot?.id ?? null,
+        slotName: existing.serviceSlot?.name ?? null,
+        checkinTime: existing.checkinTime,
+      });
     }
 
     const now = this.dateService.now();
@@ -231,9 +236,10 @@ export class AttendanceService {
         err instanceof QueryFailedError &&
         (err as any).driverError?.code === '23505'
       ) {
-        throw new ConflictException(
-          'You have already checked in for this event.',
-        );
+        throw new ConflictException({
+          message: 'You have already checked in for this event.',
+          code: 'ALREADY_CHECKED_IN',
+        });
       }
       throw err;
     }
@@ -644,7 +650,7 @@ export class AttendanceService {
     memberId: string,
     eventId: string,
   ): Promise<{ message: string }> {
-    const event = await this.dataSource
+    const event = await this.txHost.tx
       .getRepository(Event)
       .findOne({ where: { id: eventId } });
     if (!event) throw new NotFoundException('Event not found');
@@ -851,7 +857,7 @@ export class AttendanceService {
   ): Promise<DepartmentAttendanceSummary[]> {
     const since = this.dateService.daysAgo(daysAgo);
 
-    const rows = await this.dataSource
+    const rows = await this.txHost.tx
       .createQueryBuilder()
       .select('dept.id', 'departmentId')
       .addSelect('dept.name', 'departmentName')
@@ -902,7 +908,7 @@ export class AttendanceService {
   ): Promise<{ week: string; newMembers: number; newWorkers: number }[]> {
     const since = this.dateService.daysAgo(daysAgo);
 
-    const rows = await this.dataSource
+    const rows = await this.txHost.tx
       .createQueryBuilder()
       .select("TO_CHAR(DATE_TRUNC('week', m.created_at), 'YYYY-MM-DD')", 'week')
       .addSelect(
@@ -1056,7 +1062,7 @@ export class AttendanceService {
     const ownScore = Number.parseInt(ownRow?.score ?? '0', 10);
 
     // Count members who outscored this one — wraps a GROUP BY/HAVING in a subquery COUNT
-    const [{ count }] = await this.dataSource.query<{ count: string }[]>(
+    const [{ count }] = await this.txHost.tx.query<{ count: string }[]>(
       `SELECT COUNT(*) AS count
              FROM (
                  SELECT member_id
@@ -1110,7 +1116,7 @@ export class AttendanceService {
     { id: string; name: string; email: string; lastSeen: Date | null }[]
   > {
     const since = this.dateService.daysAgo(daysAgo);
-    const rows = await this.dataSource
+    const rows = await this.txHost.tx
       .createQueryBuilder()
       .select('m.id', 'id')
       .addSelect('m.firstname', 'firstname')
@@ -1324,7 +1330,7 @@ export class AttendanceService {
       throw new ForbiddenException(`${event.name} is for workers only.`);
     }
     if (audience === EventAudienceEnum.GROUP) {
-      const rows: unknown[] = await this.dataSource.query(
+      const rows: unknown[] = await this.txHost.tx.query(
         'SELECT 1 FROM group_members WHERE group_id = $1 AND member_id = $2 LIMIT 1',
         [event.audienceGroupId, member.id],
       );
@@ -1453,7 +1459,13 @@ export class AttendanceService {
   ): Promise<Attendance | null> {
     return this.attendanceRepository.findOne({
       where: { member: { id: memberId }, event: { id: eventId } },
-      select: { id: true, status: true, checkinTime: true },
+      relations: { serviceSlot: true },
+      select: {
+        id: true,
+        status: true,
+        checkinTime: true,
+        serviceSlot: { id: true, name: true },
+      },
     });
   }
 
@@ -1462,7 +1474,7 @@ export class AttendanceService {
     event: Event,
   ): Promise<Set<string>> {
     if (!memberIds.length) return new Set();
-    const rows = await this.dataSource
+    const rows = await this.txHost.tx
       .createQueryBuilder()
       .select('profile.member_id', 'memberId')
       .from('request_leave', 'leave')
@@ -1530,7 +1542,7 @@ export class AttendanceService {
       absence_count: string;
       last_seen_at: Date | null;
       has_open_task: boolean;
-    }[] = await this.dataSource.query(
+    }[] = await this.txHost.tx.query(
       `SELECT
          m.id,
          m.firstname,
@@ -1556,7 +1568,7 @@ export class AttendanceService {
       params,
     );
 
-    const countRows: { total: string }[] = await this.dataSource.query(
+    const countRows: { total: string }[] = await this.txHost.tx.query(
       `SELECT COUNT(*) AS total
        FROM (
          SELECT m.id

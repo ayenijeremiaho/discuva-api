@@ -144,8 +144,13 @@ const mockDataSource = {
   query: jest.fn(),
 };
 
+// The request's transaction. Report/pipeline reads now run on it too, so they fall through to
+// mockDataSource unless a test stubs the manager directly.
 const mockManager = {
-  query: jest.fn(),
+  query: jest.fn((...args: unknown[]) => mockDataSource.query(...args)),
+  createQueryBuilder: jest.fn((...args: unknown[]) =>
+    mockDataSource.createQueryBuilder(...args),
+  ),
   findOne: jest.fn(),
   create: jest.fn(),
   save: jest.fn(),
@@ -1348,7 +1353,7 @@ describe('FollowUpService', () => {
 
   describe('getFirstTimerPipeline', () => {
     it('returns zeroed counts when no first-timers exist', async () => {
-      mockDataSource.query = jest.fn().mockResolvedValue([
+      mockManager.query = jest.fn().mockResolvedValue([
         {
           total: '0',
           converted: '0',
@@ -1372,7 +1377,7 @@ describe('FollowUpService', () => {
     });
 
     it('maps string counts to numbers correctly', async () => {
-      mockDataSource.query = jest.fn().mockResolvedValue([
+      mockManager.query = jest.fn().mockResolvedValue([
         {
           total: '20',
           converted: '5',
@@ -1401,7 +1406,7 @@ describe('FollowUpService', () => {
           untouched: '0',
         },
       ]);
-      mockDataSource.query = queryFn;
+      mockManager.query = queryFn;
 
       await service.getFirstTimerPipeline('2026-01-01', '2026-06-30');
 

@@ -1,3 +1,5 @@
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { EventReminder } from '../entity/event-reminder.entity';
 import { PRESET_MINUTES } from '../enum/reminder-interval-preset.enum';
 import { EventAudienceEnum } from '../enums/event-audience.enum';
@@ -64,6 +66,8 @@ export class EventService {
     private readonly groupRepository: Repository<Group>,
     @InjectRepository(EventReminder)
     private readonly reminderRepository: Repository<EventReminder>,
+    // Tenant-scoped queries go through the request's transaction; a bare DataSource reads `public`.
+    private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     @Inject(forwardRef(() => EventSeriesService))
     private readonly seriesService: EventSeriesService,
     private readonly programmeService: ServiceProgrammeService,
@@ -442,7 +446,7 @@ export class EventService {
     const audience = effectiveAudience(event);
     if (audience === EventAudienceEnum.WORKERS) return viewer.isWorker;
     if (audience !== EventAudienceEnum.GROUP) return true;
-    const rows: unknown[] = await this.dataSource.query(
+    const rows: unknown[] = await this.txHost.tx.query(
       'SELECT 1 FROM group_members WHERE group_id = $1 AND member_id = $2 LIMIT 1',
       [event.audienceGroupId, viewer.id],
     );
@@ -674,14 +678,14 @@ export class EventService {
   /** True if this event has any recorded attendance or any service session (LIVE or COMPLETED) ever started for one of its slots. */
   async hasRecordedHistory(eventId: string): Promise<boolean> {
     const [attendance, session] = await Promise.all([
-      this.dataSource
+      this.txHost.tx
         .createQueryBuilder()
         .select('1')
         .from('attendances', 'a')
         .where('a.event_id = :eventId', { eventId })
         .limit(1)
         .getRawOne(),
-      this.dataSource
+      this.txHost.tx
         .createQueryBuilder()
         .select('1')
         .from('service_sessions', 'ss')
@@ -701,7 +705,7 @@ export class EventService {
     const eventIds = events.map((e) => e.id);
     if (!eventIds.length) return;
 
-    const rows = await this.dataSource
+    const rows = await this.txHost.tx
       .createQueryBuilder()
       .select('a.event_id', 'eventId')
       .addSelect('a.service_slot_id', 'slotId')
