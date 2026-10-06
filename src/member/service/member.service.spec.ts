@@ -1234,6 +1234,54 @@ describe('MemberService', () => {
       expect(mockMemberRepo.save).toHaveBeenCalled();
     });
 
+    it('lets a worker add the profession and year joined skipped at promotion', async () => {
+      const profile = {
+        id: 'wp-1',
+        profession: null,
+        yearJoinedWorkforce: null,
+      };
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        workerProfile: profile,
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+      mockWorkerProfileRepo.save.mockImplementation((p) => Promise.resolve(p));
+
+      await service.updateMyProfile('member-1', {
+        profession: ' Nurse ',
+        yearJoinedWorkforce: '2019',
+      });
+
+      expect(mockWorkerProfileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profession: 'Nurse',
+          yearJoinedWorkforce: new Date('2019-01-01'),
+        }),
+      );
+    });
+
+    it('ignores worker details for a member who is not a worker', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1' });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      await service.updateMyProfile('member-1', { profession: 'Nurse' });
+
+      expect(mockWorkerProfileRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects a year joined in the future', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        workerProfile: { id: 'wp-1' },
+      });
+
+      await expect(
+        service.updateMyProfile('member-1', {
+          yearJoinedWorkforce: String(new Date().getFullYear() + 1),
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
     it('clears the phone number when null is sent', async () => {
       mockMemberRepo.findOne.mockResolvedValue({
         id: 'member-1',

@@ -43,11 +43,11 @@ export class WorkerProfile extends BaseEntity {
   @Column({ default: WorkerStatusEnum.ACTIVE })
   status: WorkerStatusEnum;
 
-  @Column({ nullable: true })
-  profession: string;
+  @Column({ type: 'varchar', nullable: true })
+  profession: string | null;
 
   @Column({ nullable: true, type: 'date' })
-  yearJoinedWorkforce: Date;
+  yearJoinedWorkforce: Date | null;
 
   @Column({ default: false })
   completedSOD: boolean;

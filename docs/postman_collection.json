@@ -1427,7 +1427,7 @@
                 "me"
               ]
             },
-            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional; excludes email (use /auth/email-change/*). Church journey: dateJoinedChurch (YYYY-MM-DD), yearBornAgain / yearBaptized (YYYY, null clears), baptizedWithHolyGhost. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged."
+            "description": "Self-service profile edit for the authenticated member/worker (JwtAuthGuard only, no admin). All fields optional; excludes email (use /auth/email-change/*). Church journey: dateJoinedChurch (YYYY-MM-DD), yearBornAgain / yearBaptized (YYYY, null clears), baptizedWithHolyGhost. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged. Workers may also send profession and yearJoinedWorkforce (4-digit, not in the future); ignored for non-workers."
           },
           "response": [
             {
@@ -1884,7 +1884,7 @@
                 }
               ]
             },
-            "description": "Creates a WorkerProfile for the member, assigns them to a department, and sets role to WORKER. departmentId is required; profession and yearJoinedWorkforce are optional. If the member has a prior INACTIVE WorkerProfile (from a previous revoke-worker or demote-trainee), it's reactivated instead of creating a new one \u2014 department/status are updated from this call, profession/yearJoinedWorkforce only if supplied, and completedSOD/completedBibleCollege/isTrainee carry over untouched. Audit-logged as WORKER_REINSTATED in that case (WORKER_PROMOTED for a genuinely new profile)."
+            "description": "Creates a WorkerProfile for the member, assigns them to a department, and sets role to WORKER. departmentId is required; profession and yearJoinedWorkforce are optional. If the member has a prior INACTIVE WorkerProfile (from a previous revoke-worker or demote-trainee), it's reactivated instead of creating a new one \u2014 department/status are updated from this call, profession/yearJoinedWorkforce only if supplied, and completedSOD/completedBibleCollege/isTrainee carry over untouched. Audit-logged as WORKER_REINSTATED in that case (WORKER_PROMOTED for a genuinely new profile). Only departmentId is required; profession and yearJoinedWorkforce are optional (omit them rather than sending empty strings), and the worker is prompted in the member app to add them."
           },
           "response": [
             {

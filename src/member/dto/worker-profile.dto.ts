@@ -21,10 +21,10 @@ export class WorkerProfileDto {
   status: WorkerStatusEnum;
 
   @Expose()
-  profession: string;
+  profession: string | null;
 
   @Expose()
-  yearJoinedWorkforce: Date;
+  yearJoinedWorkforce: Date | null;
 
   @Expose()
   completedSOD: boolean;

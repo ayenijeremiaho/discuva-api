@@ -727,6 +727,7 @@ export class MemberService {
         : null;
     if (dto.baptizedWithHolyGhost !== undefined)
       member.baptizedWithHolyGhost = dto.baptizedWithHolyGhost;
+    await this.applyOwnWorkerDetails(member, dto);
 
     const saved = await this.memberRepository.save(member);
     this.auditLogService.log('MEMBER_UPDATED', {
@@ -1008,6 +1009,35 @@ export class MemberService {
     );
 
     return 'Password reset successfully';
+  }
+
+  // A worker filling in the details an admin may have skipped at promotion.
+  private async applyOwnWorkerDetails(
+    member: Member,
+    dto: UpdateMyProfileDto,
+  ): Promise<void> {
+    const profile = member.workerProfile;
+    if (!profile) return;
+    if (
+      dto.yearJoinedWorkforce &&
+      Number(dto.yearJoinedWorkforce) > new Date().getFullYear()
+    ) {
+      throw new BadRequestException(
+        'The year you joined the workforce can’t be in the future.',
+      );
+    }
+    let changed = false;
+    if (dto.profession !== undefined) {
+      profile.profession = dto.profession?.trim() || null;
+      changed = true;
+    }
+    if (dto.yearJoinedWorkforce !== undefined) {
+      profile.yearJoinedWorkforce = dto.yearJoinedWorkforce
+        ? new Date(`${dto.yearJoinedWorkforce}-01-01`)
+        : null;
+      changed = true;
+    }
+    if (changed) await this.workerProfileRepository.save(profile);
   }
 
   async changePassword(

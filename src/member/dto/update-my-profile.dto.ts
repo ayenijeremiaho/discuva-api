@@ -79,4 +79,14 @@ export class UpdateMyProfileDto {
   @IsOptional()
   @IsBoolean()
   baptizedWithHolyGhost?: boolean;
+
+  // Workers only; ignored for members without a worker profile.
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  profession?: string | null;
+
+  @IsOptional()
+  @Matches(/^\d{4}$/, { message: 'yearJoinedWorkforce must be a 4-digit year' })
+  yearJoinedWorkforce?: string | null;
 }
