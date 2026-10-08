@@ -7,8 +7,9 @@ Every code change is **not complete** until all three are done:
 1. **Code** — implementation + tests pass (`npm test`)
 2. **Tech doc** — `docs/TECH_DOC.md` updated for any API, entity, env var, or behaviour change
 3. **Postman** — `docs/postman_collection.json` updated for any endpoint change (new route, removed param, added query param, changed method)
+4. **Release notes** — for any change admins or members will notice, add a plain-language entry to `discuva-admin/data/release-notes.ts` (admin changes, plus `forMembers` for member-app changes) and `discuva-member/data/release-notes.ts`. Newest first; tag items with a module key when they belong to an optional module.
 
-Do not report a task as done without completing all three. Use `/sync-docs` if unsure what needs updating.
+Do not report a task as done without completing all four. Use `/sync-docs` if unsure what needs updating.
 
 ---
 
