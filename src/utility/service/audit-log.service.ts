@@ -241,6 +241,12 @@ export type AuditAction =
   | 'GAME_QUESTIONS_REORDERED'
   | 'GAME_SESSION_STARTED'
   | 'GAME_SESSION_ENDED'
+  // Bible games
+  | 'BIBLE_GAME_QUESTION_HIDDEN'
+  | 'BIBLE_GAME_QUESTION_UNHIDDEN'
+  | 'BIBLE_GAME_QUESTION_CREATED'
+  | 'BIBLE_GAME_QUESTION_UPDATED'
+  | 'BIBLE_GAME_QUESTION_DELETED'
   // Reporting
   | 'REPORT_EXPORTED'
   // Rites of passage / membership anniversary

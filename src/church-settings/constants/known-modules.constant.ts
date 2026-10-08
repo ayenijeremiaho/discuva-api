@@ -32,7 +32,9 @@ export const KNOWN_MODULES = [
   { key: 'announcements', moduleName: 'Announcements', required: false },
   { key: 'sermons', moduleName: 'Sermon Archive', required: false },
   { key: 'notes', moduleName: 'Notes', required: false },
-  { key: 'games', moduleName: 'Games', required: false },
+  // Both appear under one "Games" area in the apps; the names make that clear in Module Settings.
+  { key: 'bible_games', moduleName: 'Games: Bible Challenge', required: false },
+  { key: 'games', moduleName: 'Games: Live quizzes', required: false },
   { key: 'service_ratings', moduleName: 'Service Ratings', required: false },
   { key: 'volunteering', moduleName: 'Volunteering', required: false },
   { key: 'small_groups', moduleName: 'Fellowships', required: false },

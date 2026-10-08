@@ -5542,6 +5542,63 @@ Settings). Members can opt out themselves with `PUT notes/preferences { nudges: 
 `{ notesLast30Days, membersLast30Days, scriptureTaps: [{ version, count }] }` (taps over 90 days). Shown as a card
 on the admin Sermons page.
 
+### Bible Games Module (`src/bible-games/`)
+
+Bible Challenge: self-paced Bible games for members with one church-wide scoreboard. Module key `bible_games`
+("Games: Bible Challenge" in `KNOWN_MODULES`; added to every plan by the root migration `AddBibleGamesToPlans`). It is
+switched separately from the live, host-run quizzes (`games`, "Games: Live quizzes"), but both apps show them as one
+Games area: the member app's Games tile (shown when either is on) leads to a page with a Bible Challenge card and Join a
+live quiz, with Bible Challenge at `/games/bible`; the admin sidebar has one Games entry with a tab for each, Bible
+Challenge at `/games/bible`. KJV only for now.
+
+**Questions are generated, not stored as a bank.** `scripts/build-bible-data.mjs` builds `src/bible-games/data/`
+(shipped via `nest-cli.json` assets): `kjv.json` (KJV text, psalm titles stripped from verse 1), `popular.json` (the
+4,000 verses most often cross-referenced, best known first) and `related.json` (strongest cross-references for those
+verses). Cross references © OpenBible.info, CC-BY. `engine/questions.ts` builds ten kinds of question from that data
+(Old or New?, book order, finish the verse, missing word, which book, which reference, which chapter, linked verses);
+wrong options are plausible (same testament or genre, nearby chapters) and every question has exactly one right
+answer. For missing-word questions, `engine/corpus.ts` indexes every KJV word position once (typed arrays, about
+1 MB): wrong words are ranked by how often they follow the word before the blank and precede the word after it in the
+KJV, names are never offered for ordinary words, and any word that forms a real KJV phrase in that spot is rejected
+(it could pass as right). Function words, divine names, Amen and Selah are never blanked. Verses that appear word for
+word elsewhere (Psalm 14/53, Kings/Isaiah) are not used for which-book/reference/chapter questions. `engine/levels.ts` maps levels 1–20 to question kinds and how well-known the verses are
+(starters use familiar books and short famous verses; levels 19–20 use any verse), with time limits from 20 s down to
+12 s. A round never has more than 4 of one kind.
+
+**Rounds:** `POST bible-games/rounds { mode, level? }` builds and stores a round (with answers) and returns the first
+question without its answer. Modes:
+- `level` — 10 questions; 7 right unlocks the next level. Each member gets a fresh random set, avoiding questions from
+  their last 8 rounds. Replays only add the points that beat the member's best on that level.
+- `mastery` — after level 20: endless level-20 rounds, full points.
+- `daily` — 5 questions, seeded by church and date so everyone gets the same set; once a day (`UQ_bible_game_rounds_period`).
+- `weekly` — "This week's verses": up to 10 finish/missing-word questions on verses at least 3 members put in Notes in
+  the past 7 days (needs 3 such verses); same set for everyone; once a week.
+
+Starting a round abandons the member's other active round, and is refused with `409 SERVICE_IN_PROGRESS` while the
+member is checked in (`PRESENT`/`LATE`) to a service that is happening right now (`GET bible-games` returns `inService`). `POST rounds/:id/answer { index, choice }` (choice `null`
+when time ran out) checks the answer on the server against the time since the question was shown (`asked_at`, plus a
+3 s grace) and returns the right answer and the full verse; `POST rounds/:id/next` shows the next question and restarts
+its timer. Points: 10 at level 1 up to 105 at level 20 per right answer, plus up to half again for speed; daily and
+weekly questions score as level 8.
+
+**Scoreboard:** every award adds a row to the `bible_game_points` ledger and, in the same step, adds to the running
+totals `bible_game_progress.points_total` and `bible_game_monthly (member_id, month)` (month in the church's timezone).
+`GET bible-games/scoreboard?period=month|all` reads only those totals (one row per player, `IDX_bible_game_monthly_board`),
+never the ledger, with full names and current level; ties go to whoever got there first; last month's top 3 (from
+`bible_game_monthly`) are marked champions; it returns the member's rank and points behind the next person. Cached 30 s;
+cleared when points are added. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
+Rounds older than 60 days are deleted when the member next starts one (points stay in the ledger and totals).
+
+**Managing questions (admin):** `GET admin/bible-games/questions/preview?level=&seed=` returns a sample of 12 generated
+questions for a level with answers, marking hidden ones and what hides them (`hiddenBy`). `POST/DELETE
+admin/bible-games/questions/hidden` hides or shows again a question key or `verse:REF` (every question on that verse);
+hidden entries are skipped when building rounds. Church-written questions (`bible_game_custom_questions`: prompt,
+2–4 options, answer, optional explanation, level range, active) are CRUD at `admin/bible-games/questions/custom`; up to
+two are mixed into each level round within their range. Both are cached 5 min and cleared on change.
+`GET admin/bible-games/stats` returns players and points this month, players all time, Daily players today and how many
+players are at each level, from the totals tables and indexed lookups only. `GET bible-games` returns the member's levels, Daily status and
+streak, weekly availability, points, ranks and achievements. Admins: `GET admin/bible-games/scoreboard` (`GAMES_READ`).
+
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
 Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when a tenant's configured
@@ -7024,6 +7081,21 @@ outside the requested `?months=` window).
 | POST   | /notes                                                     | JwtAuthGuard + Module: notes                                  | Create a note (`kind?`, `title?`, `content`, `sermonId?`, `serviceSlotId?`); returns the existing note for a service |
 | PATCH  | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Update `title`, `content`, `pinned`, `sermonId`, `serviceSlotId` (null unlinks; 409 `NOTE_SERVICE_TAKEN`); `baseUpdatedAt` guards edits made elsewhere |
 | DELETE | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Delete one of the member's own notes                                                                             |
+| GET    | /bible-games                                               | JwtAuthGuard + Module: bible_games                            | The member's levels, Daily status and streak, weekly round, points, ranks and achievements                       |
+| GET    | /bible-games/scoreboard                                    | JwtAuthGuard + Module: bible_games                            | Church scoreboard (`period` month\|all, `limit`), full names, champions, and the member's rank and gap           |
+| POST   | /bible-games/rounds                                        | JwtAuthGuard + Module: bible_games                            | Start a round (`mode` level\|mastery\|daily\|weekly, `level`); returns the first question without its answer    |
+| POST   | /bible-games/rounds/:id/answer                             | JwtAuthGuard + Module: bible_games                            | Answer the current question (`index`, `choice` or null); server-timed; returns the right answer and points       |
+| POST   | /bible-games/rounds/:id/next                               | JwtAuthGuard + Module: bible_games                            | Show the next question and start its timer                                                                       |
+| GET    | /admin/bible-games/scoreboard                              | AdminGuard + GAMES_READ + Module: bible_games                 | Church scoreboard for admins                                                                                     |
+| GET    | /admin/bible-games/stats                                   | AdminGuard + GAMES_READ + Module: bible_games                 | Players and points this month, players all time, Daily players today, players per level                          |
+| GET    | /admin/bible-games/questions/preview                       | AdminGuard + GAMES_READ + Module: bible_games                 | Sample of 12 generated questions for `level` (`seed` for another sample), with answers and hidden state          |
+| GET    | /admin/bible-games/questions/hidden                        | AdminGuard + GAMES_READ + Module: bible_games                 | Hidden questions and verses                                                                                      |
+| POST   | /admin/bible-games/questions/hidden                        | AdminGuard + GAMES_WRITE + Module: bible_games                | Hide a question key or `verse:REF` (`{ key, label? }`)                                                           |
+| DELETE | /admin/bible-games/questions/hidden                        | AdminGuard + GAMES_WRITE + Module: bible_games                | Show a hidden entry again (`?key=`), 204                                                                         |
+| GET    | /admin/bible-games/questions/custom                        | AdminGuard + GAMES_READ + Module: bible_games                 | The church's own questions                                                                                       |
+| POST   | /admin/bible-games/questions/custom                        | AdminGuard + GAMES_WRITE + Module: bible_games                | Add a question (`prompt`, `options` 2–4, `answer`, `explain?`, `levelMin?`, `levelMax?`, `active?`)              |
+| PATCH  | /admin/bible-games/questions/custom/:id                    | AdminGuard + GAMES_WRITE + Module: bible_games                | Edit a question                                                                                                  |
+| DELETE | /admin/bible-games/questions/custom/:id                    | AdminGuard + GAMES_WRITE + Module: bible_games                | Delete a question, 204                                                                                           |
 | GET    | /admin/notes/insights                                      | AdminGuard + SERMON_READ + Module: notes                      | Totals only: notes and members in the last 30 days, bible.com version taps over 90 days                          |
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
@@ -9611,6 +9683,24 @@ A member's private note (`notes`, tenant schema). See Notes Module.
 | serviceSlotId  | UUID \| null          | FK service_slots, SET NULL; unique with memberId when set |
 | pinned         | boolean               | Default false |
 
+### BibleGameProgress / BibleGameRound / BibleGamePoints
+
+Tenant schema. See Bible Games Module.
+- `bible_game_progress` — one row per member: `highest_passed`, `best` (jsonb, per level `{ correct, points }`),
+  `daily_streak`, `last_daily_date`, `perfect_rounds`.
+- `bible_game_rounds` — `mode` (`level` \| `mastery` \| `daily` \| `weekly`), `level`, `period_key` (date or week;
+  unique per member and mode when set), `time_limit`, `questions` (jsonb, includes answers), `answers`, `current_index`,
+  `asked_at`, `correct`, `points`, `awarded`, `status` (`active` \| `finished` \| `abandoned`).
+- `bible_game_points` — the points ledger: `member_id`, `mode`, `points`, `round_id` (SET NULL), `created_at`.
+- `bible_game_progress.points_total` and `bible_game_monthly (member_id, month, points)` — running totals the
+  scoreboards read; back-filled from the ledger by `BibleGamesTotalsAndQuestions`.
+- `bible_game_custom_questions` — `prompt`, `options` (jsonb), `answer`, `explain`, `level_min`, `level_max`, `active`,
+  `created_by_admin_id` (SET NULL).
+- `bible_game_hidden` — `key` (PK: a question key or `verse:REF`), `label`, `hidden_by_admin_id` (SET NULL).
+- Indexes: `IDX_bible_game_monthly_board (month, points DESC)`, `IDX_notes_created_at`,
+  `IDX_bible_game_rounds_active (member_id) WHERE status = 'active'`,
+  `IDX_bible_game_rounds_period (mode, period_key) WHERE period_key IS NOT NULL`.
+
 ### ScriptureLinkTap
 
 Daily totals of taps on copyrighted Bible versions that open on bible.com (`scripture_link_taps`, tenant schema).
@@ -12073,6 +12163,24 @@ A member's private note (`notes`, tenant schema). See Notes Module.
 | eventId        | UUID \| null          | FK events, SET NULL; indexed |
 | serviceSlotId  | UUID \| null          | FK service_slots, SET NULL; unique with memberId when set |
 | pinned         | boolean               | Default false |
+
+### BibleGameProgress / BibleGameRound / BibleGamePoints
+
+Tenant schema. See Bible Games Module.
+- `bible_game_progress` — one row per member: `highest_passed`, `best` (jsonb, per level `{ correct, points }`),
+  `daily_streak`, `last_daily_date`, `perfect_rounds`.
+- `bible_game_rounds` — `mode` (`level` \| `mastery` \| `daily` \| `weekly`), `level`, `period_key` (date or week;
+  unique per member and mode when set), `time_limit`, `questions` (jsonb, includes answers), `answers`, `current_index`,
+  `asked_at`, `correct`, `points`, `awarded`, `status` (`active` \| `finished` \| `abandoned`).
+- `bible_game_points` — the points ledger: `member_id`, `mode`, `points`, `round_id` (SET NULL), `created_at`.
+- `bible_game_progress.points_total` and `bible_game_monthly (member_id, month, points)` — running totals the
+  scoreboards read; back-filled from the ledger by `BibleGamesTotalsAndQuestions`.
+- `bible_game_custom_questions` — `prompt`, `options` (jsonb), `answer`, `explain`, `level_min`, `level_max`, `active`,
+  `created_by_admin_id` (SET NULL).
+- `bible_game_hidden` — `key` (PK: a question key or `verse:REF`), `label`, `hidden_by_admin_id` (SET NULL).
+- Indexes: `IDX_bible_game_monthly_board (month, points DESC)`, `IDX_notes_created_at`,
+  `IDX_bible_game_rounds_active (member_id) WHERE status = 'active'`,
+  `IDX_bible_game_rounds_period (mode, period_key) WHERE period_key IS NOT NULL`.
 
 ### ScriptureLinkTap
 
@@ -18734,6 +18842,63 @@ Settings). Members can opt out themselves with `PUT notes/preferences { nudges: 
 `{ notesLast30Days, membersLast30Days, scriptureTaps: [{ version, count }] }` (taps over 90 days). Shown as a card
 on the admin Sermons page.
 
+### Bible Games Module (`src/bible-games/`)
+
+Bible Challenge: self-paced Bible games for members with one church-wide scoreboard. Module key `bible_games`
+("Games: Bible Challenge" in `KNOWN_MODULES`; added to every plan by the root migration `AddBibleGamesToPlans`). It is
+switched separately from the live, host-run quizzes (`games`, "Games: Live quizzes"), but both apps show them as one
+Games area: the member app's Games tile (shown when either is on) leads to a page with a Bible Challenge card and Join a
+live quiz, with Bible Challenge at `/games/bible`; the admin sidebar has one Games entry with a tab for each, Bible
+Challenge at `/games/bible`. KJV only for now.
+
+**Questions are generated, not stored as a bank.** `scripts/build-bible-data.mjs` builds `src/bible-games/data/`
+(shipped via `nest-cli.json` assets): `kjv.json` (KJV text, psalm titles stripped from verse 1), `popular.json` (the
+4,000 verses most often cross-referenced, best known first) and `related.json` (strongest cross-references for those
+verses). Cross references © OpenBible.info, CC-BY. `engine/questions.ts` builds ten kinds of question from that data
+(Old or New?, book order, finish the verse, missing word, which book, which reference, which chapter, linked verses);
+wrong options are plausible (same testament or genre, nearby chapters) and every question has exactly one right
+answer. For missing-word questions, `engine/corpus.ts` indexes every KJV word position once (typed arrays, about
+1 MB): wrong words are ranked by how often they follow the word before the blank and precede the word after it in the
+KJV, names are never offered for ordinary words, and any word that forms a real KJV phrase in that spot is rejected
+(it could pass as right). Function words, divine names, Amen and Selah are never blanked. Verses that appear word for
+word elsewhere (Psalm 14/53, Kings/Isaiah) are not used for which-book/reference/chapter questions. `engine/levels.ts` maps levels 1–20 to question kinds and how well-known the verses are
+(starters use familiar books and short famous verses; levels 19–20 use any verse), with time limits from 20 s down to
+12 s. A round never has more than 4 of one kind.
+
+**Rounds:** `POST bible-games/rounds { mode, level? }` builds and stores a round (with answers) and returns the first
+question without its answer. Modes:
+- `level` — 10 questions; 7 right unlocks the next level. Each member gets a fresh random set, avoiding questions from
+  their last 8 rounds. Replays only add the points that beat the member's best on that level.
+- `mastery` — after level 20: endless level-20 rounds, full points.
+- `daily` — 5 questions, seeded by church and date so everyone gets the same set; once a day (`UQ_bible_game_rounds_period`).
+- `weekly` — "This week's verses": up to 10 finish/missing-word questions on verses at least 3 members put in Notes in
+  the past 7 days (needs 3 such verses); same set for everyone; once a week.
+
+Starting a round abandons the member's other active round, and is refused with `409 SERVICE_IN_PROGRESS` while the
+member is checked in (`PRESENT`/`LATE`) to a service that is happening right now (`GET bible-games` returns `inService`). `POST rounds/:id/answer { index, choice }` (choice `null`
+when time ran out) checks the answer on the server against the time since the question was shown (`asked_at`, plus a
+3 s grace) and returns the right answer and the full verse; `POST rounds/:id/next` shows the next question and restarts
+its timer. Points: 10 at level 1 up to 105 at level 20 per right answer, plus up to half again for speed; daily and
+weekly questions score as level 8.
+
+**Scoreboard:** every award adds a row to the `bible_game_points` ledger and, in the same step, adds to the running
+totals `bible_game_progress.points_total` and `bible_game_monthly (member_id, month)` (month in the church's timezone).
+`GET bible-games/scoreboard?period=month|all` reads only those totals (one row per player, `IDX_bible_game_monthly_board`),
+never the ledger, with full names and current level; ties go to whoever got there first; last month's top 3 (from
+`bible_game_monthly`) are marked champions; it returns the member's rank and points behind the next person. Cached 30 s;
+cleared when points are added. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
+Rounds older than 60 days are deleted when the member next starts one (points stay in the ledger and totals).
+
+**Managing questions (admin):** `GET admin/bible-games/questions/preview?level=&seed=` returns a sample of 12 generated
+questions for a level with answers, marking hidden ones and what hides them (`hiddenBy`). `POST/DELETE
+admin/bible-games/questions/hidden` hides or shows again a question key or `verse:REF` (every question on that verse);
+hidden entries are skipped when building rounds. Church-written questions (`bible_game_custom_questions`: prompt,
+2–4 options, answer, optional explanation, level range, active) are CRUD at `admin/bible-games/questions/custom`; up to
+two are mixed into each level round within their range. Both are cached 5 min and cleared on change.
+`GET admin/bible-games/stats` returns players and points this month, players all time, Daily players today and how many
+players are at each level, from the totals tables and indexed lookups only. `GET bible-games` returns the member's levels, Daily status and
+streak, weekly availability, points, ranks and achievements. Admins: `GET admin/bible-games/scoreboard` (`GAMES_READ`).
+
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
 Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when a tenant's configured
@@ -20216,6 +20381,21 @@ outside the requested `?months=` window).
 | POST   | /notes                                                     | JwtAuthGuard + Module: notes                                  | Create a note (`kind?`, `title?`, `content`, `sermonId?`, `serviceSlotId?`); returns the existing note for a service |
 | PATCH  | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Update `title`, `content`, `pinned`, `sermonId`, `serviceSlotId` (null unlinks; 409 `NOTE_SERVICE_TAKEN`); `baseUpdatedAt` guards edits made elsewhere |
 | DELETE | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Delete one of the member's own notes                                                                             |
+| GET    | /bible-games                                               | JwtAuthGuard + Module: bible_games                            | The member's levels, Daily status and streak, weekly round, points, ranks and achievements                       |
+| GET    | /bible-games/scoreboard                                    | JwtAuthGuard + Module: bible_games                            | Church scoreboard (`period` month\|all, `limit`), full names, champions, and the member's rank and gap           |
+| POST   | /bible-games/rounds                                        | JwtAuthGuard + Module: bible_games                            | Start a round (`mode` level\|mastery\|daily\|weekly, `level`); returns the first question without its answer    |
+| POST   | /bible-games/rounds/:id/answer                             | JwtAuthGuard + Module: bible_games                            | Answer the current question (`index`, `choice` or null); server-timed; returns the right answer and points       |
+| POST   | /bible-games/rounds/:id/next                               | JwtAuthGuard + Module: bible_games                            | Show the next question and start its timer                                                                       |
+| GET    | /admin/bible-games/scoreboard                              | AdminGuard + GAMES_READ + Module: bible_games                 | Church scoreboard for admins                                                                                     |
+| GET    | /admin/bible-games/stats                                   | AdminGuard + GAMES_READ + Module: bible_games                 | Players and points this month, players all time, Daily players today, players per level                          |
+| GET    | /admin/bible-games/questions/preview                       | AdminGuard + GAMES_READ + Module: bible_games                 | Sample of 12 generated questions for `level` (`seed` for another sample), with answers and hidden state          |
+| GET    | /admin/bible-games/questions/hidden                        | AdminGuard + GAMES_READ + Module: bible_games                 | Hidden questions and verses                                                                                      |
+| POST   | /admin/bible-games/questions/hidden                        | AdminGuard + GAMES_WRITE + Module: bible_games                | Hide a question key or `verse:REF` (`{ key, label? }`)                                                           |
+| DELETE | /admin/bible-games/questions/hidden                        | AdminGuard + GAMES_WRITE + Module: bible_games                | Show a hidden entry again (`?key=`), 204                                                                         |
+| GET    | /admin/bible-games/questions/custom                        | AdminGuard + GAMES_READ + Module: bible_games                 | The church's own questions                                                                                       |
+| POST   | /admin/bible-games/questions/custom                        | AdminGuard + GAMES_WRITE + Module: bible_games                | Add a question (`prompt`, `options` 2–4, `answer`, `explain?`, `levelMin?`, `levelMax?`, `active?`)              |
+| PATCH  | /admin/bible-games/questions/custom/:id                    | AdminGuard + GAMES_WRITE + Module: bible_games                | Edit a question                                                                                                  |
+| DELETE | /admin/bible-games/questions/custom/:id                    | AdminGuard + GAMES_WRITE + Module: bible_games                | Delete a question, 204                                                                                           |
 | GET    | /admin/notes/insights                                      | AdminGuard + SERMON_READ + Module: notes                      | Totals only: notes and members in the last 30 days, bible.com version taps over 90 days                          |
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |

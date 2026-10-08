@@ -7,6 +7,9 @@
     "assets": [
       {
         "include": "utility/templates/**/*"
+      },
+      {
+        "include": "bible-games/data/**/*"
       }
     ]
   }
