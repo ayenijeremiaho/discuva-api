@@ -15,10 +15,10 @@ jest.mock('../../utility/service/sanitization.service', () => ({
 
 import { SermonService } from './sermon.service';
 import { Sermon } from '../entity/sermon.entity';
-import { SermonNote } from '../entity/sermon-note.entity';
 import { LivePlatformEnum } from '../enum/live-platform.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { AnnouncementService } from '../../announcement/service/announcement.service';
+import { NotesService } from '../../notes/service/notes.service';
 
 const mockAdmin = { id: 'admin-1' } as any;
 
@@ -30,11 +30,10 @@ const mockSermonRepo = {
   findAndCount: jest.fn(),
 };
 
-const mockSermonNoteRepo = {
-  create: jest.fn(),
-  save: jest.fn(),
-  findOne: jest.fn(),
-  delete: jest.fn(),
+const mockNotesService = {
+  legacySermonNote: jest.fn(),
+  upsertLegacySermonNote: jest.fn(),
+  deleteLegacySermonNote: jest.fn(),
 };
 
 const mockAuditLogService = {
@@ -54,10 +53,7 @@ describe('SermonService', () => {
       providers: [
         SermonService,
         { provide: getRepositoryToken(Sermon), useValue: mockSermonRepo },
-        {
-          provide: getRepositoryToken(SermonNote),
-          useValue: mockSermonNoteRepo,
-        },
+        { provide: NotesService, useValue: mockNotesService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: AnnouncementService, useValue: mockAnnouncementService },
       ],
@@ -224,56 +220,47 @@ describe('SermonService', () => {
       );
     });
 
-    it('returns null when the member has no note for this sermon', async () => {
-      mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
-      mockSermonNoteRepo.findOne.mockResolvedValue(null);
-
-      const result = await service.getMyNote('sermon-1', 'member-1');
-      expect(result).toBeNull();
-    });
-
-    it('returns the existing note when one exists', async () => {
+    it("returns the member's note for the sermon from Notes", async () => {
       mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
       const note = { id: 'note-1', note: 'Great message' };
-      mockSermonNoteRepo.findOne.mockResolvedValue(note);
+      mockNotesService.legacySermonNote.mockResolvedValue(note);
 
-      const result = await service.getMyNote('sermon-1', 'member-1');
-      expect(result).toBe(note);
+      await expect(service.getMyNote('sermon-1', 'member-1')).resolves.toBe(
+        note,
+      );
+      expect(mockNotesService.legacySermonNote).toHaveBeenCalledWith(
+        'sermon-1',
+        'member-1',
+      );
     });
   });
 
   describe('upsertMyNote', () => {
-    it('creates a new note when none exists yet', async () => {
-      mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
-      mockSermonNoteRepo.findOne.mockResolvedValue(null);
-      const created = { note: 'My thoughts' };
-      mockSermonNoteRepo.create.mockReturnValue(created);
-      mockSermonNoteRepo.save.mockResolvedValue({ id: 'note-1', ...created });
-
-      const result = await service.upsertMyNote('sermon-1', 'member-1', {
-        note: 'My thoughts',
-      });
-
-      expect(mockSermonNoteRepo.create).toHaveBeenCalledWith({
-        sermon: { id: 'sermon-1' },
-        member: { id: 'member-1' },
-        note: 'My thoughts',
-      });
-      expect(result).toEqual({ id: 'note-1', note: 'My thoughts' });
+    it('throws NotFoundException when the sermon does not exist', async () => {
+      mockSermonRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.upsertMyNote('missing', 'member-1', { note: 'x' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockNotesService.upsertLegacySermonNote).not.toHaveBeenCalled();
     });
 
-    it('edits the existing note in place instead of creating a duplicate', async () => {
+    it('saves the plain-text note through Notes', async () => {
       mockSermonRepo.findOne.mockResolvedValue({ id: 'sermon-1' });
-      const existing = { id: 'note-1', note: 'Old note' };
-      mockSermonNoteRepo.findOne.mockResolvedValue(existing);
-      mockSermonNoteRepo.save.mockImplementation((n) => Promise.resolve(n));
-
-      const result = await service.upsertMyNote('sermon-1', 'member-1', {
-        note: 'Updated note',
+      mockNotesService.upsertLegacySermonNote.mockResolvedValue({
+        id: 'note-1',
+        note: 'My thoughts',
       });
 
-      expect(mockSermonNoteRepo.create).not.toHaveBeenCalled();
-      expect(result.note).toBe('Updated note');
+      const result = await service.upsertMyNote('sermon-1', 'member-1', {
+        note: 'My thoughts',
+      });
+
+      expect(mockNotesService.upsertLegacySermonNote).toHaveBeenCalledWith(
+        'sermon-1',
+        'member-1',
+        'My thoughts',
+      );
+      expect(result).toEqual({ id: 'note-1', note: 'My thoughts' });
     });
   });
 
@@ -281,10 +268,10 @@ describe('SermonService', () => {
     it('deletes the note scoped to the sermon and member', async () => {
       await service.deleteMyNote('sermon-1', 'member-1');
 
-      expect(mockSermonNoteRepo.delete).toHaveBeenCalledWith({
-        sermon: { id: 'sermon-1' },
-        member: { id: 'member-1' },
-      });
+      expect(mockNotesService.deleteLegacySermonNote).toHaveBeenCalledWith(
+        'sermon-1',
+        'member-1',
+      );
     });
   });
 });

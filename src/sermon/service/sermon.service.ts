@@ -6,8 +6,6 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Sermon } from '../entity/sermon.entity';
-import { SermonNote } from '../entity/sermon-note.entity';
-import { Member } from '../../member/entity/member.entity';
 import { CreateSermonDto, UpdateSermonDto } from '../dto/sermon.dto';
 import { UpsertSermonNoteDto } from '../dto/sermon-note.dto';
 import { AnnounceLiveDto } from '../dto/announce-live.dto';
@@ -17,6 +15,10 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { AnnouncementService } from '../../announcement/service/announcement.service';
 import { Admin } from '../../admin/entity/admin.entity';
+import {
+  LegacySermonNote,
+  NotesService,
+} from '../../notes/service/notes.service';
 
 const PLATFORM_LABEL: Record<LivePlatformEnum, string> = {
   [LivePlatformEnum.YOUTUBE]: 'YouTube',
@@ -28,10 +30,9 @@ export class SermonService {
   constructor(
     @InjectRepository(Sermon)
     private readonly sermonRepo: Repository<Sermon>,
-    @InjectRepository(SermonNote)
-    private readonly sermonNoteRepo: Repository<SermonNote>,
     private readonly auditLogService: AuditLogService,
     private readonly announcementService: AnnouncementService,
+    private readonly notesService: NotesService,
   ) {}
 
   async create(dto: CreateSermonDto, admin: Admin): Promise<Sermon> {
@@ -136,42 +137,26 @@ export class SermonService {
   async getMyNote(
     sermonId: string,
     memberId: string,
-  ): Promise<SermonNote | null> {
+  ): Promise<LegacySermonNote | null> {
     await this.getOrThrow(sermonId);
-    return this.sermonNoteRepo.findOne({
-      where: { sermon: { id: sermonId }, member: { id: memberId } },
-    });
+    return this.notesService.legacySermonNote(sermonId, memberId);
   }
 
   async upsertMyNote(
     sermonId: string,
     memberId: string,
     dto: UpsertSermonNoteDto,
-  ): Promise<SermonNote> {
+  ): Promise<LegacySermonNote> {
     await this.getOrThrow(sermonId);
-
-    const existing = await this.sermonNoteRepo.findOne({
-      where: { sermon: { id: sermonId }, member: { id: memberId } },
-    });
-
-    if (existing) {
-      existing.note = dto.note;
-      return this.sermonNoteRepo.save(existing);
-    }
-
-    const note = this.sermonNoteRepo.create({
-      sermon: { id: sermonId } as Sermon,
-      member: { id: memberId } as Member,
-      note: dto.note,
-    });
-    return this.sermonNoteRepo.save(note);
+    return this.notesService.upsertLegacySermonNote(
+      sermonId,
+      memberId,
+      dto.note,
+    );
   }
 
   async deleteMyNote(sermonId: string, memberId: string): Promise<void> {
-    await this.sermonNoteRepo.delete({
-      sermon: { id: sermonId },
-      member: { id: memberId },
-    });
+    await this.notesService.deleteLegacySermonNote(sermonId, memberId);
   }
 
   private async getOrThrow(id: string): Promise<Sermon> {

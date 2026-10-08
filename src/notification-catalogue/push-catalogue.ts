@@ -31,6 +31,8 @@ export enum PushNotificationKey {
   CONVERT_ASSIGNED = 'CONVERT_ASSIGNED',
   CONVERTS_BULK_ASSIGNED = 'CONVERTS_BULK_ASSIGNED',
   CONVERT_VISITED_CHURCH = 'CONVERT_VISITED_CHURCH',
+  NOTE_EVENING_NUDGE = 'NOTE_EVENING_NUDGE',
+  NOTE_COMMITMENT_REMINDER = 'NOTE_COMMITMENT_REMINDER',
 }
 
 export interface PushTemplate {
@@ -358,6 +360,26 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: 'The Follow-Up team is now following them up.',
     url: '/evangelism',
     placeholders: { convert_name: 'John Smith' },
+  },
+  [PushNotificationKey.NOTE_EVENING_NUDGE]: {
+    category: EmailCategory.NOTES,
+    label: 'Notes after a service',
+    description:
+      "Sent the evening after a service to members who attended but haven't written notes for it.",
+    title: 'Before you forget',
+    body: 'What stood out to you at {{service_name}} today? Capture three things in your notes.',
+    url: '/notes',
+    placeholders: { service_name: 'Sunday Service' },
+  },
+  [PushNotificationKey.NOTE_COMMITMENT_REMINDER]: {
+    category: EmailCategory.NOTES,
+    label: 'Weekly step reminder',
+    description:
+      'Sent on Monday morning to members who wrote "One thing I\'ll do this week" in last week\'s notes.',
+    title: 'Your step this week',
+    body: 'You wrote: "{{commitment}}". How is it going?',
+    url: '/notes',
+    placeholders: { commitment: 'Call my mum every evening' },
   },
 };
 

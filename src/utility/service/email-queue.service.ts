@@ -188,6 +188,7 @@ export class EmailQueueService {
       [EmailCategory.DEPARTMENT_GOAL_ACTIVITY]:
         'EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED',
       [EmailCategory.EVANGELISM]: 'EMAIL_EVANGELISM_ENABLED',
+      [EmailCategory.NOTES]: 'EMAIL_NOTES_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);

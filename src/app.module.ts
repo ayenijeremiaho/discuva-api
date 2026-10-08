@@ -50,6 +50,7 @@ import { EmailCategorySettingsModule } from './email-category-settings/email-cat
 import { NotificationCatalogueModule } from './notification-catalogue/notification-catalogue.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
+import { NotesModule } from './notes/notes.module';
 import { YoutubeModule } from './integrations/youtube/youtube.module';
 import { GamesModule } from './games/games.module';
 import { AssetManagementModule } from './asset-management/asset-management.module';
@@ -267,6 +268,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     NotificationCatalogueModule,
     IncidentReportModule,
     SermonModule,
+    NotesModule,
     YoutubeModule,
     GamesModule,
     AssetManagementModule,

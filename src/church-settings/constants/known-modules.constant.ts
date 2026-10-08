@@ -31,6 +31,7 @@ export const KNOWN_MODULES = [
   { key: 'classes', moduleName: 'Training Classes', required: false },
   { key: 'announcements', moduleName: 'Announcements', required: false },
   { key: 'sermons', moduleName: 'Sermon Archive', required: false },
+  { key: 'notes', moduleName: 'Notes', required: false },
   { key: 'games', moduleName: 'Games', required: false },
   { key: 'service_ratings', moduleName: 'Service Ratings', required: false },
   { key: 'volunteering', moduleName: 'Volunteering', required: false },

@@ -114,4 +114,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Push to workers when they are added to an outreach team or a convert is assigned to them for follow-up.',
     },
+    [EmailCategory.NOTES]: {
+      label: 'Notes Reminders',
+      description:
+        'Push to members the evening after a service they attended, and on Monday morning about what they planned to do that week. Members can also turn these off themselves.',
+    },
   };

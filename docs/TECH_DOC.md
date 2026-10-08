@@ -4371,6 +4371,7 @@ dedicated host).
 | `SUNDAY_SCHOOL_ATTENDANCE` | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` (push-only: check-in open, weekly absentees) |
 | `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
 | `EVANGELISM` | `EMAIL_EVANGELISM_ENABLED` | `true` (push-only: added to an outreach team, convert(s) assigned) |
+| `NOTES` | `EMAIL_NOTES_ENABLED` | `true` (push-only: evening after a service, Monday weekly step; members can also opt out) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -5455,11 +5456,91 @@ automated detection misses a stream or a platform's API is unavailable).
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('sermons')`):** `GET sermons?page=&limit=&series=`,
 `GET sermons/:id` — any authenticated member/worker, no department or class gating (sermons are for everyone).
 
-**Sermon notes (`SermonNote` entity, same module):** a private per-member journal entry on a sermon — `sermon` (CASCADE),
-`member` (CASCADE), `note` (text), unique on `(sermon, member)` so a member has exactly one editable note per sermon
-(upsert, not a multi-entry thread — matches "notes on this sermon" rather than a running journal). No admin-facing
-surface and no separate permission: `GET/PUT/DELETE sermons/:id/note` are gated only by `JwtAuthGuard` and the
-module's existing `@RequiresModule('sermons')` check, since a note is the requesting member's own data.
+**Sermon notes:** now stored in the Notes Module (`notes` table). The original `GET/PUT/DELETE sermons/:id/note`
+routes still work for older app versions and are backed by `NotesService` (plain text in, plain text out; the latest
+note linked to that sermon). The `sermon_notes` table was copied into `notes` by the tenant migration `CreateNotes`
+and then dropped by `DropSermonNotes`, which refuses to drop (failing the deploy, nothing lost) if any old note is
+missing from `notes`, and only touches the church's own schema (the legacy `public` copy is left alone). Its `down()`
+recreates the table from each member's latest sermon note.
+
+### Notes Module (`src/notes/`)
+
+Private notes members write in the member app: sermon notes taken during a service, personal notes and Bible-study
+notes. Module key `notes` (in `KNOWN_MODULES`, and added to every plan's `features` by the root migration
+`AddNotesToPlans`), so `ModuleEnabledGuard` checks both the church toggle and the plan.
+
+**Privacy:** a note is only ever returned to the member who wrote it — every query is scoped by `member_id` and a
+note owned by someone else is a `404`. No admin route returns note content; `GET admin/notes/insights` returns totals only.
+
+**Content:** the editor's (Tiptap/ProseMirror) JSON document, validated as `{ type: 'doc' }` and capped at 200 KB.
+On every save the server derives, never trusting the client:
+- `plain_text` — for search and list excerpts;
+- `scripture_refs` — canonical refs (`JHN.3.16`, `JHN.3.16-18`, `PSA.23`; USFM book codes) from `scripture` nodes;
+- `commitment` — the text under the guided template's heading with `attrs.promptId = 'action'`
+  ("One thing I'll do this week"), up to 200 characters, used for the Monday reminder;
+- `word_count` — words outside headings, so an untouched template is 0. The streak, the evening reminder and the
+  admin totals only count notes with `word_count > 0`. Added by `AddNoteWordCount`, which also back-fills existing
+  notes (with its own frozen copy of the counting rule).
+
+The member app keeps a new note on the phone until something is written in it, so empty notes aren't created.
+
+**Notes for a service:** `POST notes` with `serviceSlotId` links the note to that slot and its event, titles it after
+the event and defaults `kind` to `sermon`. A partial unique index (`UQ_notes_member_service_slot`) allows one note
+per member per service, so starting notes again (or two taps at once) returns the existing note instead of a second.
+
+**Linking a service:** `PATCH notes/:id { serviceSlotId }` links a note to a service (sets `service_slot_id` and
+`event_id`); `null` unlinks. Linking a service that already has another of the member's notes fails with
+`409 { code: 'NOTE_SERVICE_TAKEN', noteId }`. `GET notes/services` lists services from the last 35 days
+(`LINKABLE_SERVICE_DAYS`) the member can link to — `EVERYONE` events plus any they attended — with `attended` and
+the member's existing `noteId` for each. `GET notes/:id` and `PATCH notes/:id` return the note with
+`service: { serviceSlotId, serviceName, eventId, eventName, startTime } | null` and
+`sermon: { id, title, speakerName, date } | null`.
+
+**Linking a sermon (optional, by the member):** `PATCH notes/:id { sermonId }` (`null` unlinks). It doesn't change
+the note's `kind`, and nothing links a sermon automatically — the member app suggests sermons dated the same day as
+the note's service first. Linked notes are listed on the sermon's page (`GET notes?sermonId=`).
+
+**Edit conflicts:** `PATCH notes/:id` accepts `baseUpdatedAt` (the `updatedAt` the client last saw). If the stored
+note is newer and the request changes the title or content, it fails with `409 { code: 'NOTE_CONFLICT', note }` so
+the app can keep both versions (it saves the phone's copy as a separate note). Pinning skips the check.
+
+**Context (`GET notes/context`):** the service slot happening now, or the most recent one today
+(start ≤ now + 30 min and end ≥ now − 12 h), preferring the slot the member checked in to, then a live slot. Events
+with a non-`EVERYONE` audience only count if the member has an attendance record. Includes the programme's first
+`SPEAKER` slot (member name or guest name, and topic), a sermon dated the same local day, and the member's existing
+note for that slot. `null` when nothing matches.
+
+**Streak (`GET notes/streak`):** consecutive weeks (Monday-start, church timezone) with at least one `sermon` note.
+This week counts as pending, so a streak only breaks after a full missed week. Returns `{ current, best, thisWeek }`.
+Weeks are cached per member (1 h) and cleared on create/delete. Not shown on any leaderboard.
+
+**Most noted (`GET notes/top-scriptures?eventId=`):** up to 5 refs noted by the most members for that event, only
+when at least 3 different members noted a ref (`TOP_SCRIPTURE_MIN_MEMBERS`), so it never points at one person.
+Cached 10 min.
+
+**Bible version taps (`POST notes/scripture-taps`):** the member app shows KJV and BSB (public domain, bundled in the
+app) and opens copyrighted versions on bible.com. It batches taps on those links as `{ taps: [{ version, count }] }`;
+they are summed per day and version in `scripture_link_taps` to help a church judge whether a licence is worth it.
+
+**Reminders (`NoteNudgeScheduler`):** `@Cron('5 * * * *')`, Redis lock `lock:note-nudges` (900 s). Uses
+`SchedulerGateService.activeTenants()` (cached, now including `timezone`) and only opens a tenant transaction when
+that church's local hour matches, and only if the Notes module is on for the church and its plan:
+- **19:00 local:** members who attended (`PRESENT`, `LATE`, `ATTENDED_ONLINE`) an event that ended in the last 14 h
+  and have no note for it get `NOTE_EVENING_NUDGE`, one push per service, linking to `/notes/new?slot=…`
+  (idempotency key `note-evening:{eventId}`).
+- **Monday 08:00 local:** each member's latest `commitment` from the past 8 days, as `NOTE_COMMITMENT_REMINDER`
+  (shortened to 90 characters), linking to the note (idempotency key `note-commitment:{noteId}`).
+
+Both are in the `NOTES` push category (`EMAIL_NOTES_ENABLED`, default `true`; per-church switch in Notification
+Settings). Members can opt out themselves with `PUT notes/preferences { nudges: false }` (`members.note_nudges`).
+
+**Routes (member, `JwtAuthGuard` + `@RequiresModule('notes')`):** `GET notes?page=&limit=&kind=&q=&sermonId=`
+(paginated summaries, pinned first then newest), `GET notes/context`, `GET notes/streak`,
+`GET notes/top-scriptures?eventId=`, `POST notes/scripture-taps`, `GET/PUT notes/preferences`, `GET notes/services`, `GET notes/:id`,
+`POST notes`, `PATCH notes/:id`, `DELETE notes/:id`.
+**Routes (admin, `AdminGuard` + `@RequiresModule('notes')`):** `GET admin/notes/insights` — `SERMON_READ`; returns
+`{ notesLast30Days, membersLast30Days, scriptureTaps: [{ version, count }] }` (taps over 90 days). Shown as a card
+on the admin Sermons page.
 
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
@@ -6931,6 +7012,19 @@ outside the requested `?months=` window).
 | GET    | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Get the requesting member's own private note for this sermon (`null` if none) — own data, no admin visibility  |
 | PUT    | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Create or update the requesting member's note for this sermon (body: `{ note }`, upsert)                        |
 | DELETE | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Delete the requesting member's note for this sermon                                                             |
+| GET    | /notes                                                     | JwtAuthGuard + Module: notes                                  | The member's own notes, paginated (`page`, `limit` ≤ 50, `kind`, `q`, `sermonId`); pinned first, then newest     |
+| GET    | /notes/context                                             | JwtAuthGuard + Module: notes                                  | The service on now or earlier today, with speaker, same-day sermon and the member's note for it (`null` if none) |
+| GET    | /notes/streak                                              | JwtAuthGuard + Module: notes                                  | Weekly sermon-notes streak: `{ current, best, thisWeek }`                                                        |
+| GET    | /notes/top-scriptures                                      | JwtAuthGuard + Module: notes                                  | Most-noted refs for an event (`eventId`), only refs noted by 3+ members                                          |
+| POST   | /notes/scripture-taps                                      | JwtAuthGuard + Module: notes                                  | Add batched taps on bible.com version links (`{ taps: [{ version, count }] }`), 204                              |
+| GET    | /notes/preferences                                         | JwtAuthGuard + Module: notes                                  | `{ nudges }` — whether the member gets Notes reminders                                                           |
+| PUT    | /notes/preferences                                         | JwtAuthGuard + Module: notes                                  | Turn the member's Notes reminders on or off (`{ nudges }`)                                                       |
+| GET    | /notes/services                                            | JwtAuthGuard + Module: notes                                  | Services from the last 35 days the member can link a note to, with `attended` and their existing `noteId`        |
+| GET    | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | One of the member's own notes, with its linked `service` (404 for anyone else's)                                 |
+| POST   | /notes                                                     | JwtAuthGuard + Module: notes                                  | Create a note (`kind?`, `title?`, `content`, `sermonId?`, `serviceSlotId?`); returns the existing note for a service |
+| PATCH  | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Update `title`, `content`, `pinned`, `sermonId`, `serviceSlotId` (null unlinks; 409 `NOTE_SERVICE_TAKEN`); `baseUpdatedAt` guards edits made elsewhere |
+| DELETE | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Delete one of the member's own notes                                                                             |
+| GET    | /admin/notes/insights                                      | AdminGuard + SERMON_READ + Module: notes                      | Totals only: notes and members in the last 30 days, bible.com version taps over 90 days                          |
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
 | POST   | /admin/games                                               | AdminGuard (GAMES_WRITE)                                       | Create a game (DRAFT)                                                                                          |
@@ -7761,6 +7855,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` | Sunday School check-in-open and weekly absentee pushes |
 | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
 | `EMAIL_EVANGELISM_ENABLED` | `true` | Evangelism outreach-team and convert-assignment pushes |
+| `EMAIL_NOTES_ENABLED` | `true` | Notes reminder pushes (evening after a service, Monday weekly step) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
@@ -9493,6 +9588,35 @@ Link-based sermon archive entry — no file uploads. See Sermon Module for the "
 | mixlrUrl    | varchar \| null | At least one of youtubeUrl/mixlrUrl required                   |
 | series      | varchar \| null | Indexed; plain string tag, filterable, not its own entity       |
 | createdBy   | Admin \| null   | ManyToOne, SET NULL on delete                                   |
+
+---
+
+### Note
+
+A member's private note (`notes`, tenant schema). See Notes Module.
+
+| Field          | Type                  | Notes |
+|----------------|-----------------------|-------|
+| id             | UUID                  | PK |
+| memberId       | UUID                  | FK members, CASCADE; index `(member_id, updated_at)` |
+| kind           | varchar               | `sermon` \| `personal` \| `study` (default `personal`) |
+| title          | varchar(200)          | Default `''` |
+| content        | jsonb                 | Editor document (`{ type: 'doc', content: [...] }`), max 200 KB |
+| plainText      | text                  | Derived on save; search and excerpts |
+| scriptureRefs  | jsonb (string[])      | Derived canonical refs, e.g. `ROM.8.28` |
+| commitment     | varchar(200) \| null  | Derived from the "One thing I'll do this week" prompt |
+| wordCount      | int                   | Derived; words outside headings (0 = untouched template) |
+| sermonId       | UUID \| null          | FK sermons, SET NULL; indexed |
+| eventId        | UUID \| null          | FK events, SET NULL; indexed |
+| serviceSlotId  | UUID \| null          | FK service_slots, SET NULL; unique with memberId when set |
+| pinned         | boolean               | Default false |
+
+### ScriptureLinkTap
+
+Daily totals of taps on copyrighted Bible versions that open on bible.com (`scripture_link_taps`, tenant schema).
+PK `(day, version)`; `count` int.
+
+`members.note_nudges` (boolean, default `true`) — the member's own switch for Notes reminders.
 
 ---
 
@@ -11927,6 +12051,35 @@ Link-based sermon archive entry — no file uploads. See Sermon Module for the "
 | mixlrUrl    | varchar \| null | At least one of youtubeUrl/mixlrUrl required                   |
 | series      | varchar \| null | Indexed; plain string tag, filterable, not its own entity       |
 | createdBy   | Admin \| null   | ManyToOne, SET NULL on delete                                   |
+
+---
+
+### Note
+
+A member's private note (`notes`, tenant schema). See Notes Module.
+
+| Field          | Type                  | Notes |
+|----------------|-----------------------|-------|
+| id             | UUID                  | PK |
+| memberId       | UUID                  | FK members, CASCADE; index `(member_id, updated_at)` |
+| kind           | varchar               | `sermon` \| `personal` \| `study` (default `personal`) |
+| title          | varchar(200)          | Default `''` |
+| content        | jsonb                 | Editor document (`{ type: 'doc', content: [...] }`), max 200 KB |
+| plainText      | text                  | Derived on save; search and excerpts |
+| scriptureRefs  | jsonb (string[])      | Derived canonical refs, e.g. `ROM.8.28` |
+| commitment     | varchar(200) \| null  | Derived from the "One thing I'll do this week" prompt |
+| wordCount      | int                   | Derived; words outside headings (0 = untouched template) |
+| sermonId       | UUID \| null          | FK sermons, SET NULL; indexed |
+| eventId        | UUID \| null          | FK events, SET NULL; indexed |
+| serviceSlotId  | UUID \| null          | FK service_slots, SET NULL; unique with memberId when set |
+| pinned         | boolean               | Default false |
+
+### ScriptureLinkTap
+
+Daily totals of taps on copyrighted Bible versions that open on bible.com (`scripture_link_taps`, tenant schema).
+PK `(day, version)`; `count` int.
+
+`members.note_nudges` (boolean, default `true`) — the member's own switch for Notes reminders.
 
 ---
 
@@ -17410,6 +17563,7 @@ dedicated host).
 | `SUNDAY_SCHOOL_ATTENDANCE` | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` (push-only: check-in open, weekly absentees) |
 | `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
 | `EVANGELISM` | `EMAIL_EVANGELISM_ENABLED` | `true` (push-only: added to an outreach team, convert(s) assigned) |
+| `NOTES` | `EMAIL_NOTES_ENABLED` | `true` (push-only: evening after a service, Monday weekly step; members can also opt out) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -18494,11 +18648,91 @@ automated detection misses a stream or a platform's API is unavailable).
 **Routes (member, `JwtAuthGuard` + `@RequiresModule('sermons')`):** `GET sermons?page=&limit=&series=`,
 `GET sermons/:id` — any authenticated member/worker, no department or class gating (sermons are for everyone).
 
-**Sermon notes (`SermonNote` entity, same module):** a private per-member journal entry on a sermon — `sermon` (CASCADE),
-`member` (CASCADE), `note` (text), unique on `(sermon, member)` so a member has exactly one editable note per sermon
-(upsert, not a multi-entry thread — matches "notes on this sermon" rather than a running journal). No admin-facing
-surface and no separate permission: `GET/PUT/DELETE sermons/:id/note` are gated only by `JwtAuthGuard` and the
-module's existing `@RequiresModule('sermons')` check, since a note is the requesting member's own data.
+**Sermon notes:** now stored in the Notes Module (`notes` table). The original `GET/PUT/DELETE sermons/:id/note`
+routes still work for older app versions and are backed by `NotesService` (plain text in, plain text out; the latest
+note linked to that sermon). The `sermon_notes` table was copied into `notes` by the tenant migration `CreateNotes`
+and then dropped by `DropSermonNotes`, which refuses to drop (failing the deploy, nothing lost) if any old note is
+missing from `notes`, and only touches the church's own schema (the legacy `public` copy is left alone). Its `down()`
+recreates the table from each member's latest sermon note.
+
+### Notes Module (`src/notes/`)
+
+Private notes members write in the member app: sermon notes taken during a service, personal notes and Bible-study
+notes. Module key `notes` (in `KNOWN_MODULES`, and added to every plan's `features` by the root migration
+`AddNotesToPlans`), so `ModuleEnabledGuard` checks both the church toggle and the plan.
+
+**Privacy:** a note is only ever returned to the member who wrote it — every query is scoped by `member_id` and a
+note owned by someone else is a `404`. No admin route returns note content; `GET admin/notes/insights` returns totals only.
+
+**Content:** the editor's (Tiptap/ProseMirror) JSON document, validated as `{ type: 'doc' }` and capped at 200 KB.
+On every save the server derives, never trusting the client:
+- `plain_text` — for search and list excerpts;
+- `scripture_refs` — canonical refs (`JHN.3.16`, `JHN.3.16-18`, `PSA.23`; USFM book codes) from `scripture` nodes;
+- `commitment` — the text under the guided template's heading with `attrs.promptId = 'action'`
+  ("One thing I'll do this week"), up to 200 characters, used for the Monday reminder;
+- `word_count` — words outside headings, so an untouched template is 0. The streak, the evening reminder and the
+  admin totals only count notes with `word_count > 0`. Added by `AddNoteWordCount`, which also back-fills existing
+  notes (with its own frozen copy of the counting rule).
+
+The member app keeps a new note on the phone until something is written in it, so empty notes aren't created.
+
+**Notes for a service:** `POST notes` with `serviceSlotId` links the note to that slot and its event, titles it after
+the event and defaults `kind` to `sermon`. A partial unique index (`UQ_notes_member_service_slot`) allows one note
+per member per service, so starting notes again (or two taps at once) returns the existing note instead of a second.
+
+**Linking a service:** `PATCH notes/:id { serviceSlotId }` links a note to a service (sets `service_slot_id` and
+`event_id`); `null` unlinks. Linking a service that already has another of the member's notes fails with
+`409 { code: 'NOTE_SERVICE_TAKEN', noteId }`. `GET notes/services` lists services from the last 35 days
+(`LINKABLE_SERVICE_DAYS`) the member can link to — `EVERYONE` events plus any they attended — with `attended` and
+the member's existing `noteId` for each. `GET notes/:id` and `PATCH notes/:id` return the note with
+`service: { serviceSlotId, serviceName, eventId, eventName, startTime } | null` and
+`sermon: { id, title, speakerName, date } | null`.
+
+**Linking a sermon (optional, by the member):** `PATCH notes/:id { sermonId }` (`null` unlinks). It doesn't change
+the note's `kind`, and nothing links a sermon automatically — the member app suggests sermons dated the same day as
+the note's service first. Linked notes are listed on the sermon's page (`GET notes?sermonId=`).
+
+**Edit conflicts:** `PATCH notes/:id` accepts `baseUpdatedAt` (the `updatedAt` the client last saw). If the stored
+note is newer and the request changes the title or content, it fails with `409 { code: 'NOTE_CONFLICT', note }` so
+the app can keep both versions (it saves the phone's copy as a separate note). Pinning skips the check.
+
+**Context (`GET notes/context`):** the service slot happening now, or the most recent one today
+(start ≤ now + 30 min and end ≥ now − 12 h), preferring the slot the member checked in to, then a live slot. Events
+with a non-`EVERYONE` audience only count if the member has an attendance record. Includes the programme's first
+`SPEAKER` slot (member name or guest name, and topic), a sermon dated the same local day, and the member's existing
+note for that slot. `null` when nothing matches.
+
+**Streak (`GET notes/streak`):** consecutive weeks (Monday-start, church timezone) with at least one `sermon` note.
+This week counts as pending, so a streak only breaks after a full missed week. Returns `{ current, best, thisWeek }`.
+Weeks are cached per member (1 h) and cleared on create/delete. Not shown on any leaderboard.
+
+**Most noted (`GET notes/top-scriptures?eventId=`):** up to 5 refs noted by the most members for that event, only
+when at least 3 different members noted a ref (`TOP_SCRIPTURE_MIN_MEMBERS`), so it never points at one person.
+Cached 10 min.
+
+**Bible version taps (`POST notes/scripture-taps`):** the member app shows KJV and BSB (public domain, bundled in the
+app) and opens copyrighted versions on bible.com. It batches taps on those links as `{ taps: [{ version, count }] }`;
+they are summed per day and version in `scripture_link_taps` to help a church judge whether a licence is worth it.
+
+**Reminders (`NoteNudgeScheduler`):** `@Cron('5 * * * *')`, Redis lock `lock:note-nudges` (900 s). Uses
+`SchedulerGateService.activeTenants()` (cached, now including `timezone`) and only opens a tenant transaction when
+that church's local hour matches, and only if the Notes module is on for the church and its plan:
+- **19:00 local:** members who attended (`PRESENT`, `LATE`, `ATTENDED_ONLINE`) an event that ended in the last 14 h
+  and have no note for it get `NOTE_EVENING_NUDGE`, one push per service, linking to `/notes/new?slot=…`
+  (idempotency key `note-evening:{eventId}`).
+- **Monday 08:00 local:** each member's latest `commitment` from the past 8 days, as `NOTE_COMMITMENT_REMINDER`
+  (shortened to 90 characters), linking to the note (idempotency key `note-commitment:{noteId}`).
+
+Both are in the `NOTES` push category (`EMAIL_NOTES_ENABLED`, default `true`; per-church switch in Notification
+Settings). Members can opt out themselves with `PUT notes/preferences { nudges: false }` (`members.note_nudges`).
+
+**Routes (member, `JwtAuthGuard` + `@RequiresModule('notes')`):** `GET notes?page=&limit=&kind=&q=&sermonId=`
+(paginated summaries, pinned first then newest), `GET notes/context`, `GET notes/streak`,
+`GET notes/top-scriptures?eventId=`, `POST notes/scripture-taps`, `GET/PUT notes/preferences`, `GET notes/services`, `GET notes/:id`,
+`POST notes`, `PATCH notes/:id`, `DELETE notes/:id`.
+**Routes (admin, `AdminGuard` + `@RequiresModule('notes')`):** `GET admin/notes/insights` — `SERMON_READ`; returns
+`{ notesLast30Days, membersLast30Days, scriptureTaps: [{ version, count }] }` (taps over 90 days). Shown as a card
+on the admin Sermons page.
 
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
@@ -19970,6 +20204,19 @@ outside the requested `?months=` window).
 | GET    | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Get the requesting member's own private note for this sermon (`null` if none) — own data, no admin visibility  |
 | PUT    | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Create or update the requesting member's note for this sermon (body: `{ note }`, upsert)                        |
 | DELETE | /sermons/:id/note                                          | JwtAuthGuard + Module: sermons                                | Delete the requesting member's note for this sermon                                                             |
+| GET    | /notes                                                     | JwtAuthGuard + Module: notes                                  | The member's own notes, paginated (`page`, `limit` ≤ 50, `kind`, `q`, `sermonId`); pinned first, then newest     |
+| GET    | /notes/context                                             | JwtAuthGuard + Module: notes                                  | The service on now or earlier today, with speaker, same-day sermon and the member's note for it (`null` if none) |
+| GET    | /notes/streak                                              | JwtAuthGuard + Module: notes                                  | Weekly sermon-notes streak: `{ current, best, thisWeek }`                                                        |
+| GET    | /notes/top-scriptures                                      | JwtAuthGuard + Module: notes                                  | Most-noted refs for an event (`eventId`), only refs noted by 3+ members                                          |
+| POST   | /notes/scripture-taps                                      | JwtAuthGuard + Module: notes                                  | Add batched taps on bible.com version links (`{ taps: [{ version, count }] }`), 204                              |
+| GET    | /notes/preferences                                         | JwtAuthGuard + Module: notes                                  | `{ nudges }` — whether the member gets Notes reminders                                                           |
+| PUT    | /notes/preferences                                         | JwtAuthGuard + Module: notes                                  | Turn the member's Notes reminders on or off (`{ nudges }`)                                                       |
+| GET    | /notes/services                                            | JwtAuthGuard + Module: notes                                  | Services from the last 35 days the member can link a note to, with `attended` and their existing `noteId`        |
+| GET    | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | One of the member's own notes, with its linked `service` (404 for anyone else's)                                 |
+| POST   | /notes                                                     | JwtAuthGuard + Module: notes                                  | Create a note (`kind?`, `title?`, `content`, `sermonId?`, `serviceSlotId?`); returns the existing note for a service |
+| PATCH  | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Update `title`, `content`, `pinned`, `sermonId`, `serviceSlotId` (null unlinks; 409 `NOTE_SERVICE_TAKEN`); `baseUpdatedAt` guards edits made elsewhere |
+| DELETE | /notes/:id                                                 | JwtAuthGuard + Module: notes                                  | Delete one of the member's own notes                                                                             |
+| GET    | /admin/notes/insights                                      | AdminGuard + SERMON_READ + Module: notes                      | Totals only: notes and members in the last 30 days, bible.com version taps over 90 days                          |
 | GET    | /integrations/youtube/callback                             | No guard — WebSub verification handshake                      | Echoes `hub.challenge` for subscribe/unsubscribe modes; 404 otherwise. Called by Google's PubSubHubbub hub, not a client. |
 | POST   | /integrations/youtube/callback                             | No guard — WebSub notification                                | Receives the "video published" Atom feed ping; always 204. Triggers YouTube Data API check + auto-announcement if actually live. Called by the hub, not a client. |
 | POST   | /admin/games                                               | AdminGuard (GAMES_WRITE)                                       | Create a game (DRAFT)                                                                                          |
@@ -20800,6 +21047,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_SUNDAY_SCHOOL_ATTENDANCE_ENABLED` | `true` | Sunday School check-in-open and weekly absentee pushes |
 | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
 | `EMAIL_EVANGELISM_ENABLED` | `true` | Evangelism outreach-team and convert-assignment pushes |
+| `EMAIL_NOTES_ENABLED` | `true` | Notes reminder pushes (evening after a service, Monday weekly step) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP

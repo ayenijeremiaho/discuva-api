@@ -25,7 +25,10 @@ export const ALL_GATED_JOBS: GatedJob[] = [
   'class-session-reminders',
 ];
 
-type ActiveTenant = Pick<Tenant, 'id' | 'schemaName' | 'subdomain'>;
+export type ActiveTenant = Pick<
+  Tenant,
+  'id' | 'schemaName' | 'subdomain' | 'timezone'
+>;
 
 const TENANTS_KEY = 'scheduler:active-tenants';
 const TENANTS_TTL_SECONDS = 600;
@@ -68,12 +71,13 @@ export class SchedulerGateService {
     }
     const tenants = await this.tenantRepo.find({
       where: { isActive: true },
-      select: { id: true, schemaName: true, subdomain: true },
+      select: { id: true, schemaName: true, subdomain: true, timezone: true },
     });
-    const list = tenants.map(({ id, schemaName, subdomain }) => ({
+    const list = tenants.map(({ id, schemaName, subdomain, timezone }) => ({
       id,
       schemaName,
       subdomain,
+      timezone,
     }));
     this.cacheService
       .setGlobal(TENANTS_KEY, list, TENANTS_TTL_SECONDS)

@@ -62,6 +62,9 @@ export class Member extends BaseEntity {
   @Column({ default: true })
   useChurchTheme: boolean;
 
+  @Column({ default: true })
+  noteNudges: boolean;
+
   @Column({ nullable: true })
   gender: GenderEnum;
 

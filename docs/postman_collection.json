@@ -5,6 +5,7 @@
     "description": "# Discovery Hub API\n\n**Discovery Hub** is a full-featured church management backend built for modern, growing congregations. It handles everything from Sunday check-ins and live service programme running to tithe statements, first-timer follow-up pipelines, finance requests, and children's church pickup codes \u2014 all through a single, secure REST API.\n\nDeployable anywhere. Configurable for any congregation \u2014 church name, address, logo, currency, and timezone are all driven by environment variables.\n\nBase URL: `http://localhost:3000/v1`\n\n---\n\n## Actor Types\n\n| Actor | How they access | Token variable |\n|-------|----------------|---------------|\n| **Member** | Mobile app \u2014 regular church member | `{{accessToken}}` |\n| **Worker** | Mobile app \u2014 serves in a department (role: WORKER) | `{{accessToken}}` |\n| **Admin** | Web portal \u2014 separate Admin entity linked to a member | `{{admin_token}}` |\n\nA member becomes a Worker via `POST /members/:id/promote`. Admin access is granted separately via `POST /admin/users`.\n\n---\n\n## Authentication Flow\n\n### Members and Workers\n1. **Sign Up** \u2014 `POST /auth/signup` (no password in body; server generates one and emails it)\n2. **Login** \u2014 `POST /auth/login` with `email`, `password`, and `deviceId`\n   - Auto-captures `{{accessToken}}` and `{{refreshToken}}` via the test script\n   - If `requires_password_change: true`, call `POST /auth/change-password` before anything else\n3. **Refresh** \u2014 `POST /auth/refresh` (pass `{{refreshToken}}` as Bearer header) when access token expires\n4. **Logout** \u2014 `POST /auth/logout` to invalidate the session\n\n### Admin\n1. **Admin Portal Login** \u2014 `POST /auth/admin-login` with `email` and `password`\n   - Returns tokens; capture `admin_token` manually or add a test script\n   - No device lock \u2014 web-first route\n\n---\n\n## Token Lifecycle\n\n- **Access token** expires in **1 hour** (`expires_in: 3600`)\n- **Refresh token** is long-lived; use it once to get a new pair\n- Logging out invalidates both tokens server-side (Redis blocklist)\n\n---\n\n## Device Binding\n\nThe first login from a device registers `deviceId` against the member record. All subsequent logins from a **different** `deviceId` return **403**. To switch devices:\n- Self-service: `POST /auth/device-reset/request` \u2192 OTP email \u2192 `POST /auth/device-reset/verify`\n- Admin override: `DELETE /members/:id/device` (clears lock, member may log in from any device)\n\n---\n\n## Collection Variables\n\n| Variable | Stores |\n|----------|--------|\n| `baseUrl` | `http://localhost:3000/v1` |\n| `accessToken` | Member/Worker JWT (auto-set by Login test script) |\n| `refreshToken` | Refresh token (auto-set by Login test script) |\n| `memberId` | Primary member UUID under test |\n| `memberId2` | Secondary member UUID (e.g. bulk operations) |\n| `departmentId` | Department UUID |\n| `eventId` | Event UUID |\n| `slotId` | ServiceSlot UUID |\n| `configId` | EventConfig UUID |\n| `classId` | Church class UUID |\n| `enrollmentId` | Enrollment UUID |\n| `leaveId` | Leave request UUID |\n| `venueId` | Venue UUID (auto-set by Create Venue test script) |\n| `ssClassId` | Sunday School class UUID |\n| `ssSessionId` | Sunday School session UUID |\n| `ageGroupId` | Children Church age group UUID |\n| `classGroupId` | Children Church class group UUID |\n| `childId` | Child profile UUID |\n| `guardianId` | Guardian UUID |\n| `checkinId` | Children Church check-in UUID (auto-set by Check In Child) |\n| `pickupCode` | 6-char pickup code (auto-set by Check In Child) |\n| `reminderId` | Event reminder UUID (auto-set by Create Reminder) |\n| `wishRecipientId` | Target member UUID for birthday wishes |\n| `adminRoleId` | Admin role UUID |\n| `adminUserId` | Admin user record UUID |\n| `admin_token` | Admin JWT (set manually after admin login) |\n\n---\n\n## Common Patterns\n\n**Pagination** \u2014 pass `?page=1&limit=20` on list endpoints. Response shape:\n```json\n{ \"data\": [...], \"page\": 1, \"limit\": 20, \"totalCount\": 150, \"totalPages\": 8 }\n```\n\n**Error shape:**\n```json\n{ \"statusCode\": 400, \"message\": \"Descriptive error message\" }\n```\n\n**Enum values** \u2014 call `GET /enums` (mobile) or `GET /admin/enums` (portal) on app launch to populate all dropdowns without hardcoding.\n\n**UUIDs** \u2014 all IDs are UUID v4, e.g. `a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b`\n\n---\n\n## Quick-Start (Mobile App)\n\n1. `POST /auth/signup` \u2014 register a new member (password arrives by email)\n2. `POST /auth/login` \u2014 log in; `accessToken` and `refreshToken` are auto-saved\n3. `GET /auth/me` \u2014 fetch profile; save the `id` as `{{memberId}}`\n4. `GET /enums` \u2014 load all dropdown values\n5. `GET /events?upcoming=true` \u2014 list upcoming services\n6. `POST /attendances/checkin` with `serviceSlotId` \u2014 check in to a service"
   },
   "variable": [
+    { "key": "noteId", "value": "" },
     {
       "key": "baseUrl",
       "value": "http://localhost:3000/v1",
@@ -27380,7 +27381,7 @@
                 "note"
               ]
             },
-            "description": "Get the requesting member's own private note for this sermon. Returns null if none exists yet. Own data only \u2014 no admin visibility."
+            "description": "Get the requesting member's own private note for this sermon. Returns null if none exists yet. Own data only \u2014 no admin visibility. Kept for older app versions: now backed by Notes (the latest note linked to this sermon, as plain text). New clients should use the Notes routes."
           },
           "response": [
             {
@@ -27420,7 +27421,7 @@
               "mode": "raw",
               "raw": "{\n  \"note\": \"Great message on faith and patience.\"\n}"
             },
-            "description": "Create or update the requesting member's note for this sermon. Upsert \u2014 one editable note per member per sermon, not a multi-entry thread."
+            "description": "Create or update the requesting member's note for this sermon. Upsert \u2014 one editable note per member per sermon, not a multi-entry thread. Kept for older app versions: now backed by Notes (the latest note linked to this sermon, as plain text). New clients should use the Notes routes."
           },
           "response": [
             {
@@ -27452,7 +27453,7 @@
                 "note"
               ]
             },
-            "description": "Delete the requesting member's note for this sermon."
+            "description": "Delete the requesting member's note for this sermon. Kept for older app versions: now backed by Notes (the latest note linked to this sermon, as plain text). New clients should use the Notes routes."
           },
           "response": [
             {
@@ -27711,6 +27712,559 @@
             }
           },
           "name": "Announce live"
+        }
+      ]
+    },
+    {
+      "name": "Notes (Member)",
+      "description": "A member's private notes. Every route is scoped to the signed-in member; module key `notes`.",
+      "item": [
+        {
+          "name": "List my notes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "kind",
+                  "value": "sermon",
+                  "disabled": true
+                },
+                {
+                  "key": "q",
+                  "value": "grace",
+                  "disabled": true
+                },
+                {
+                  "key": "sermonId",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "The member's own notes, pinned first then newest. Filters: `kind` (sermon|personal|study), `q` (title/text search), `sermonId`."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"data\": [\n      {\n        \"id\": \"{{noteId}}\",\n        \"kind\": \"sermon\",\n        \"title\": \"Sunday Service\",\n        \"excerpt\": \"Main scripture\\nRomans 8:28…\",\n        \"pinned\": false,\n        \"scriptureRefs\": [\n          \"ROM.8.28\"\n        ],\n        \"createdAt\": \"2026-10-11T09:40:00.000Z\",\n        \"updatedAt\": \"2026-10-11T09:52:00.000Z\",\n        \"sermon\": null,\n        \"event\": {\n          \"id\": \"{{eventId}}\",\n          \"name\": \"Sunday Service\"\n        },\n        \"serviceSlot\": {\n          \"id\": \"{{slotId}}\",\n          \"name\": \"First Service\",\n          \"startTime\": \"2026-10-11T08:00:00.000Z\"\n        }\n      }\n    ],\n    \"page\": 1,\n    \"limit\": 20,\n    \"totalCount\": 1,\n    \"totalPages\": 1\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Service context",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/context",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "context"
+              ]
+            },
+            "description": "The service on now or earlier today (preferring the one the member checked in to), with the programme's speaker, a same-day sermon, and the member's existing note for it. `null` when there's none."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"serviceSlot\": {\n      \"id\": \"{{slotId}}\",\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-10-11T08:00:00.000Z\",\n      \"endTime\": \"2026-10-11T10:00:00.000Z\"\n    },\n    \"event\": {\n      \"id\": \"{{eventId}}\",\n      \"name\": \"Sunday Service\"\n    },\n    \"isLive\": true,\n    \"checkedIn\": true,\n    \"speaker\": {\n      \"name\": \"Guest Minister\",\n      \"topic\": \"Faith that works\"\n    },\n    \"sermon\": null,\n    \"noteId\": null\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Start notes for a service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"content\": {\n    \"type\": \"doc\",\n    \"content\": [\n      {\n        \"type\": \"heading\",\n        \"attrs\": {\n          \"level\": 3,\n          \"promptId\": \"scripture\"\n        },\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"Main scripture\"\n          }\n        ]\n      },\n      {\n        \"type\": \"paragraph\",\n        \"content\": [\n          {\n            \"type\": \"scripture\",\n            \"attrs\": {\n              \"ref\": \"ROM.8.28\",\n              \"label\": \"Romans 8:28\",\n              \"version\": \"KJV\"\n            }\n          }\n        ]\n      },\n      {\n        \"type\": \"heading\",\n        \"attrs\": {\n          \"level\": 3,\n          \"promptId\": \"action\"\n        },\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"One thing I'll do this week\"\n          }\n        ]\n      },\n      {\n        \"type\": \"paragraph\",\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"Thank someone who helped me\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes"
+              ]
+            },
+            "description": "Creates the member's note for a service, or returns the existing one (one note per member per service). `kind` defaults to `sermon` and the title to the event name."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"data\": {\n    \"id\": \"{{noteId}}\",\n    \"kind\": \"sermon\",\n    \"title\": \"Sunday Service\",\n    \"content\": {\n      \"type\": \"doc\",\n      \"content\": [\n        {\n          \"type\": \"heading\",\n          \"attrs\": {\n            \"level\": 3,\n            \"promptId\": \"scripture\"\n          },\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"Main scripture\"\n            }\n          ]\n        },\n        {\n          \"type\": \"paragraph\",\n          \"content\": [\n            {\n              \"type\": \"scripture\",\n              \"attrs\": {\n                \"ref\": \"ROM.8.28\",\n                \"label\": \"Romans 8:28\",\n                \"version\": \"KJV\"\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"heading\",\n          \"attrs\": {\n            \"level\": 3,\n            \"promptId\": \"action\"\n          },\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"One thing I'll do this week\"\n            }\n          ]\n        },\n        {\n          \"type\": \"paragraph\",\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"Thank someone who helped me\"\n            }\n          ]\n        }\n      ]\n    },\n    \"plainText\": \"Main scripture\\nRomans 8:28\\nOne thing I'll do this week\\nThank someone who helped me\",\n    \"scriptureRefs\": [\n      \"ROM.8.28\"\n    ],\n    \"commitment\": \"Thank someone who helped me\",\n    \"sermonId\": null,\n    \"eventId\": \"{{eventId}}\",\n    \"serviceSlotId\": \"{{slotId}}\",\n    \"pinned\": false,\n    \"createdAt\": \"2026-10-11T09:40:00.000Z\",\n    \"updatedAt\": \"2026-10-11T09:52:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create a personal note",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"study\",\n  \"title\": \"Romans 8\",\n  \"content\": {\n    \"type\": \"doc\",\n    \"content\": [\n      {\n        \"type\": \"heading\",\n        \"attrs\": {\n          \"level\": 3,\n          \"promptId\": \"scripture\"\n        },\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"Main scripture\"\n          }\n        ]\n      },\n      {\n        \"type\": \"paragraph\",\n        \"content\": [\n          {\n            \"type\": \"scripture\",\n            \"attrs\": {\n              \"ref\": \"ROM.8.28\",\n              \"label\": \"Romans 8:28\",\n              \"version\": \"KJV\"\n            }\n          }\n        ]\n      },\n      {\n        \"type\": \"heading\",\n        \"attrs\": {\n          \"level\": 3,\n          \"promptId\": \"action\"\n        },\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"One thing I'll do this week\"\n          }\n        ]\n      },\n      {\n        \"type\": \"paragraph\",\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"Thank someone who helped me\"\n          }\n        ]\n      }\n    ]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes"
+              ]
+            },
+            "description": "Personal or Bible-study note. `content` must be an editor document (`{ type: 'doc' }`, max 200 KB); the server derives plain text, scripture refs and the weekly step."
+          },
+          "response": []
+        },
+        {
+          "name": "Get a note",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "One of the member's own notes. Another member's note returns 404."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"id\": \"{{noteId}}\",\n    \"kind\": \"sermon\",\n    \"title\": \"Sunday Service\",\n    \"content\": {\n      \"type\": \"doc\",\n      \"content\": [\n        {\n          \"type\": \"heading\",\n          \"attrs\": {\n            \"level\": 3,\n            \"promptId\": \"scripture\"\n          },\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"Main scripture\"\n            }\n          ]\n        },\n        {\n          \"type\": \"paragraph\",\n          \"content\": [\n            {\n              \"type\": \"scripture\",\n              \"attrs\": {\n                \"ref\": \"ROM.8.28\",\n                \"label\": \"Romans 8:28\",\n                \"version\": \"KJV\"\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"heading\",\n          \"attrs\": {\n            \"level\": 3,\n            \"promptId\": \"action\"\n          },\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"One thing I'll do this week\"\n            }\n          ]\n        },\n        {\n          \"type\": \"paragraph\",\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"Thank someone who helped me\"\n            }\n          ]\n        }\n      ]\n    },\n    \"plainText\": \"Main scripture\\nRomans 8:28\\nOne thing I'll do this week\\nThank someone who helped me\",\n    \"scriptureRefs\": [\n      \"ROM.8.28\"\n    ],\n    \"commitment\": \"Thank someone who helped me\",\n    \"sermonId\": null,\n    \"eventId\": \"{{eventId}}\",\n    \"serviceSlotId\": \"{{slotId}}\",\n    \"pinned\": false,\n    \"createdAt\": \"2026-10-11T09:40:00.000Z\",\n    \"updatedAt\": \"2026-10-11T09:52:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update a note",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Sunday Service\",\n  \"content\": {\n    \"type\": \"doc\",\n    \"content\": [\n      {\n        \"type\": \"heading\",\n        \"attrs\": {\n          \"level\": 3,\n          \"promptId\": \"scripture\"\n        },\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"Main scripture\"\n          }\n        ]\n      },\n      {\n        \"type\": \"paragraph\",\n        \"content\": [\n          {\n            \"type\": \"scripture\",\n            \"attrs\": {\n              \"ref\": \"ROM.8.28\",\n              \"label\": \"Romans 8:28\",\n              \"version\": \"KJV\"\n            }\n          }\n        ]\n      },\n      {\n        \"type\": \"heading\",\n        \"attrs\": {\n          \"level\": 3,\n          \"promptId\": \"action\"\n        },\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"One thing I'll do this week\"\n          }\n        ]\n      },\n      {\n        \"type\": \"paragraph\",\n        \"content\": [\n          {\n            \"type\": \"text\",\n            \"text\": \"Thank someone who helped me\"\n          }\n        ]\n      }\n    ]\n  },\n  \"baseUpdatedAt\": \"2026-10-11T09:52:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Update `title`, `content`, `pinned` or `sermonId`. Send `baseUpdatedAt` (the `updatedAt` you last saw); if the note changed since, the title/content update fails with 409 `NOTE_CONFLICT` and the latest note."
+          },
+          "response": [
+            {
+              "name": "409 Conflict",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"code\": \"NOTE_CONFLICT\",\n  \"message\": \"This note was changed on another device.\",\n  \"note\": {\n    \"id\": \"{{noteId}}\",\n    \"kind\": \"sermon\",\n    \"title\": \"Sunday Service\",\n    \"content\": {\n      \"type\": \"doc\",\n      \"content\": [\n        {\n          \"type\": \"heading\",\n          \"attrs\": {\n            \"level\": 3,\n            \"promptId\": \"scripture\"\n          },\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"Main scripture\"\n            }\n          ]\n        },\n        {\n          \"type\": \"paragraph\",\n          \"content\": [\n            {\n              \"type\": \"scripture\",\n              \"attrs\": {\n                \"ref\": \"ROM.8.28\",\n                \"label\": \"Romans 8:28\",\n                \"version\": \"KJV\"\n              }\n            }\n          ]\n        },\n        {\n          \"type\": \"heading\",\n          \"attrs\": {\n            \"level\": 3,\n            \"promptId\": \"action\"\n          },\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"One thing I'll do this week\"\n            }\n          ]\n        },\n        {\n          \"type\": \"paragraph\",\n          \"content\": [\n            {\n              \"type\": \"text\",\n              \"text\": \"Thank someone who helped me\"\n            }\n          ]\n        }\n      ]\n    },\n    \"plainText\": \"Main scripture\\nRomans 8:28\\nOne thing I'll do this week\\nThank someone who helped me\",\n    \"scriptureRefs\": [\n      \"ROM.8.28\"\n    ],\n    \"commitment\": \"Thank someone who helped me\",\n    \"sermonId\": null,\n    \"eventId\": \"{{eventId}}\",\n    \"serviceSlotId\": \"{{slotId}}\",\n    \"pinned\": false,\n    \"createdAt\": \"2026-10-11T09:40:00.000Z\",\n    \"updatedAt\": \"2026-10-11T09:52:00.000Z\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Pin a note",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pinned\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Pinning never conflicts."
+          },
+          "response": []
+        },
+        {
+          "name": "Link a service",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceSlotId\": \"{{slotId}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Link the note to a service (`null` unlinks). 409 `NOTE_SERVICE_TAKEN` with `noteId` if the member already has another note for that service. Returns the note with `service`."
+          },
+          "response": [
+            {
+              "name": "409 Conflict",
+              "status": "Conflict",
+              "code": 409,
+              "body": "{\n  \"code\": \"NOTE_SERVICE_TAKEN\",\n  \"message\": \"You already have a note for this service.\",\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"noteId\": \"7d1c9a1e-2b3f-4c5d-8e9f-0a1b2c3d4e5f\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Services to link",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "services"
+              ]
+            },
+            "description": "Services from the last 35 days the member can link a note to: events for everyone plus any they attended, newest first."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"serviceSlotId\": \"{{slotId}}\",\n      \"serviceName\": \"First Service\",\n      \"eventId\": \"{{eventId}}\",\n      \"eventName\": \"Sunday Service\",\n      \"startTime\": \"2026-10-04T08:00:00.000Z\",\n      \"attended\": true,\n      \"noteId\": null\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Delete a note",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/{{noteId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "{{noteId}}"
+              ]
+            },
+            "description": "Deletes one of the member's own notes. 204."
+          },
+          "response": []
+        },
+        {
+          "name": "My notes streak",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/streak",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "streak"
+              ]
+            },
+            "description": "Weeks in a row (Monday-start, church timezone) with a sermon note. This week counts as pending until it ends."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"current\": 3,\n    \"best\": 5,\n    \"thisWeek\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Most noted scriptures",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/top-scriptures?eventId={{eventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "top-scriptures"
+              ],
+              "query": [
+                {
+                  "key": "eventId",
+                  "value": "{{eventId}}"
+                }
+              ]
+            },
+            "description": "Up to 5 refs noted by the most members for this event. A ref only appears once 3+ members noted it."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": [\n    {\n      \"ref\": \"ROM.8.28\",\n      \"count\": 14\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Record Bible version taps",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"taps\": [\n    {\n      \"version\": \"NIV\",\n      \"count\": 3\n    },\n    {\n      \"version\": \"NKJV\",\n      \"count\": 1\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/scripture-taps",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "scripture-taps"
+              ]
+            },
+            "description": "Batched counts of taps on copyrighted versions opened on bible.com. 204."
+          },
+          "response": []
+        },
+        {
+          "name": "Get notes preferences",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notes/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "preferences"
+              ]
+            },
+            "description": "Whether the member gets Notes reminders."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"nudges\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Set notes preferences",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nudges\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notes/preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notes",
+                "preferences"
+              ]
+            },
+            "description": "Turn the member's Notes reminders (evening after a service, Monday weekly step) on or off."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Notes (Admin)",
+      "description": "Totals only — admins never see note content.",
+      "item": [
+        {
+          "name": "Notes insights",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/notes/insights",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "notes",
+                "insights"
+              ]
+            },
+            "description": "Requires SERMON_READ and the `notes` module. Notes and members in the last 30 days, and bible.com version taps over 90 days. Shown on the admin Sermons page."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"data\": {\n    \"notesLast30Days\": 128,\n    \"membersLast30Days\": 47,\n    \"scriptureTaps\": [\n      {\n        \"version\": \"NIV\",\n        \"count\": 31\n      },\n      {\n        \"version\": \"NKJV\",\n        \"count\": 9\n      }\n    ]\n  }\n}"
+            }
+          ]
         }
       ]
     },
