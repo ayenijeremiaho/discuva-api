@@ -68,6 +68,7 @@ describe('BibleGamesService', () => {
   };
   const roundRepo = {
     findOne: jest.fn(),
+    findOneOrFail: jest.fn(),
     update: jest.fn(),
     create: jest.fn((v) => ({ ...v })),
     save: jest.fn(async (v) => ({ id: 'r1', ...v })),
@@ -159,10 +160,91 @@ describe('BibleGamesService', () => {
     });
 
     it('only lets a member play the Daily Challenge once a day', async () => {
-      roundRepo.findOne.mockResolvedValueOnce({ id: 'earlier', correct: 4 });
+      roundRepo.findOne.mockResolvedValueOnce({
+        id: 'earlier',
+        correct: 4,
+        status: BibleGameRoundStatusEnum.FINISHED,
+      });
       await expect(
         service.start('m1', { mode: BibleGameModeEnum.DAILY }),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('lets a member start the Daily again after leaving before answering', async () => {
+      roundRepo.findOne.mockResolvedValueOnce({
+        id: 'opened',
+        correct: 0,
+        status: BibleGameRoundStatusEnum.ACTIVE,
+      });
+      roundRepo.findOneOrFail.mockResolvedValueOnce(
+        round({
+          id: 'opened',
+          mode: BibleGameModeEnum.DAILY,
+          level: null,
+          questions: Array.from({ length: 5 }, (_, i) => question(i)),
+        }),
+      );
+
+      const res = await service.start('m1', { mode: BibleGameModeEnum.DAILY });
+
+      expect(res.roundId).toBe('opened');
+      expect(res.question.index).toBe(0);
+      expect(res.outcomes).toEqual([]);
+    });
+
+    it('picks up the same Daily when two starts arrive at once', async () => {
+      roundRepo.save.mockRejectedValueOnce({ code: '23505' });
+      roundRepo.findOne.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        id: 'first',
+        correct: 0,
+        status: BibleGameRoundStatusEnum.ACTIVE,
+      });
+      roundRepo.findOneOrFail.mockResolvedValueOnce(
+        round({
+          id: 'first',
+          mode: BibleGameModeEnum.DAILY,
+          level: null,
+          questions: Array.from({ length: 5 }, (_, i) => question(i)),
+        }),
+      );
+
+      const res = await service.start('m1', { mode: BibleGameModeEnum.DAILY });
+
+      expect(res.roundId).toBe('first');
+    });
+
+    it("resumes today's Daily Challenge if it was left part-way", async () => {
+      roundRepo.findOne.mockResolvedValueOnce({
+        id: 'earlier',
+        correct: 1,
+        status: BibleGameRoundStatusEnum.ABANDONED,
+      });
+      roundRepo.findOneOrFail.mockResolvedValueOnce(
+        round({
+          id: 'earlier',
+          mode: BibleGameModeEnum.DAILY,
+          level: null,
+          status: BibleGameRoundStatusEnum.ABANDONED,
+          questions: Array.from({ length: 5 }, (_, i) => question(i)),
+          answers: [{ choice: 0, correct: true, points: 20, seconds: 2 }],
+          currentIndex: 0,
+          correct: 1,
+          points: 20,
+        }),
+      );
+
+      const res = await service.start('m1', { mode: BibleGameModeEnum.DAILY });
+
+      expect(res.roundId).toBe('earlier');
+      expect(res.question.index).toBe(1);
+      expect(res.outcomes).toEqual([true]);
+      expect(res.roundPoints).toBe(20);
+      expect(roundRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: BibleGameRoundStatusEnum.ACTIVE,
+          currentIndex: 1,
+        }),
+      );
     });
 
     it('opens the weekly round only when enough verses were noted', async () => {
@@ -357,6 +439,78 @@ describe('BibleGamesService', () => {
       const res = await service.answer('m1', 'r1', { index: 9, choice: 0 });
       expect(res.result!.awarded).toBe(0);
       expect(pointsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('scores nothing and stays on the level when a round is failed', async () => {
+      progressRepo.findOne.mockResolvedValue({
+        memberId: 'm1',
+        highestPassed: 2,
+        best: {},
+        dailyStreak: 0,
+        lastDailyDate: null,
+        perfectRounds: 0,
+        pointsTotal: 500,
+      });
+      roundRepo.findOne.mockResolvedValueOnce(
+        almostDone({ level: 3, correct: 5, points: 60 }),
+      );
+
+      const res = await service.answer('m1', 'r1', { index: 9, choice: 0 });
+
+      expect(res.result).toMatchObject({
+        level: 3,
+        correct: 6,
+        passed: false,
+        awarded: 0,
+        unlockedLevel: null,
+      });
+      expect(pointsRepo.save).not.toHaveBeenCalled();
+      expect(progressRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          highestPassed: 2,
+          pointsTotal: 500,
+          best: { 3: { correct: 6, points: 0 } },
+        }),
+      );
+    });
+
+    it('scores a pass in full after earlier failed attempts', async () => {
+      progressRepo.findOne.mockResolvedValue({
+        memberId: 'm1',
+        highestPassed: 2,
+        best: { 3: { correct: 6, points: 0 } },
+        dailyStreak: 0,
+        lastDailyDate: null,
+        perfectRounds: 0,
+        pointsTotal: 0,
+      });
+      roundRepo.findOne.mockResolvedValueOnce(almostDone({ level: 3 }));
+
+      const res = await service.answer('m1', 'r1', { index: 9, choice: 0 });
+
+      expect(res.result!.passed).toBe(true);
+      expect(res.result!.awarded).toBe(res.result!.points);
+      expect(res.result!.unlockedLevel).toBe(4);
+    });
+
+    it('never moves a member up for passing an earlier level again', async () => {
+      progressRepo.findOne.mockResolvedValue({
+        memberId: 'm1',
+        highestPassed: 5,
+        best: {},
+        dailyStreak: 0,
+        lastDailyDate: null,
+        perfectRounds: 0,
+        pointsTotal: 0,
+      });
+      roundRepo.findOne.mockResolvedValueOnce(almostDone({ level: 2 }));
+
+      const res = await service.answer('m1', 'r1', { index: 9, choice: 0 });
+
+      expect(res.result!.unlockedLevel).toBeNull();
+      expect(progressRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ highestPassed: 5 }),
+      );
     });
 
     it('continues the daily streak from yesterday', async () => {

@@ -77,6 +77,7 @@ export interface PublicQuestion {
 }
 
 export interface RoundResult {
+  level: number | null;
   correct: number;
   total: number;
   passed: boolean | null;
@@ -156,14 +157,16 @@ export class BibleGamesService {
       mastery: { unlocked: progress.highestPassed >= LEVEL_COUNT },
       inService: await this.inService(memberId),
       daily: {
-        played: !!daily,
-        correct: daily?.correct ?? null,
+        played: this.isFinished(daily),
+        inProgress: !!daily && !this.isFinished(daily),
+        correct: this.isFinished(daily) ? (daily?.correct ?? null) : null,
         total: DAILY_QUESTIONS,
         streak,
       },
       weekly: {
         available: weeklyRefs.length >= WEEKLY_MIN_VERSES,
-        played: !!weekly,
+        played: this.isFinished(weekly),
+        inProgress: !!weekly && !this.isFinished(weekly),
         questions: Math.min(weeklyRefs.length, WEEKLY_MAX_VERSES),
       },
       points: {
@@ -279,11 +282,16 @@ export class BibleGamesService {
         'Could not build a round. Please try again.',
       );
 
-    if (periodKey && (await this.periodRound(memberId, dto.mode, periodKey))) {
-      throw new ConflictException({
-        code: 'ALREADY_PLAYED',
-        message: 'You have already played this one.',
-      });
+    if (periodKey) {
+      const existing = await this.periodRound(memberId, dto.mode, periodKey);
+      if (this.isFinished(existing)) {
+        throw new ConflictException({
+          code: 'ALREADY_PLAYED',
+          message: 'You have already played this one.',
+        });
+      }
+      // Left part-way (or another round replaced it): carry on rather than lock them out for the day.
+      if (existing) return this.resume(memberId, existing.id);
     }
 
     await this.roundRepo.update(
@@ -295,7 +303,8 @@ export class BibleGamesService {
       [memberId, ROUND_RETENTION_DAYS],
     );
 
-    const round = await this.saveNewRound(
+    return this.saveNewRound(
+      memberId,
       this.roundRepo.create({
         memberId,
         mode: dto.mode,
@@ -309,14 +318,44 @@ export class BibleGamesService {
         status: BibleGameRoundStatusEnum.ACTIVE,
       }),
     );
+  }
+
+  private async resume(memberId: string, roundId: string) {
+    const round = await this.roundRepo.findOneOrFail({
+      where: { id: roundId, memberId },
+    });
+    if (round.answers.length >= round.questions.length) {
+      throw new ConflictException({
+        code: 'ALREADY_PLAYED',
+        message: 'You have already played this one.',
+      });
+    }
+    await this.roundRepo.update(
+      { memberId, status: BibleGameRoundStatusEnum.ACTIVE },
+      { status: BibleGameRoundStatusEnum.ABANDONED },
+    );
+    round.currentIndex = round.answers.length;
+    round.askedAt = new Date();
+    round.status = BibleGameRoundStatusEnum.ACTIVE;
+    await this.roundRepo.save(round);
+    return this.roundStart(round);
+  }
+
+  private roundStart(round: BibleGameRound) {
     return {
       roundId: round.id,
       mode: round.mode,
       level: round.level,
-      total: questions.length,
-      timeLimit,
-      question: this.publicQuestion(round, 0),
+      total: round.questions.length,
+      timeLimit: round.timeLimit,
+      outcomes: round.answers.map((a) => a.correct),
+      roundPoints: round.points,
+      question: this.publicQuestion(round, round.currentIndex),
     };
+  }
+
+  private isFinished(round: { status: BibleGameRoundStatusEnum } | null) {
+    return round?.status === BibleGameRoundStatusEnum.FINISHED;
   }
 
   async answer(memberId: string, roundId: string, dto: AnswerDto) {
@@ -469,16 +508,17 @@ export class BibleGamesService {
     if (round.mode === BibleGameModeEnum.LEVEL && round.level) {
       passed = round.correct >= PASS_MARK;
       const best = progress.best[round.level] ?? { correct: 0, points: 0 };
-      // Replaying a level only adds what beats your best on it, so climbing is the way up the scoreboard.
-      awarded = Math.max(0, round.points - best.points);
+      // A failed round scores nothing; replaying a passed level only adds what beats your best on it.
+      awarded = passed ? Math.max(0, round.points - best.points) : 0;
       progress.best = {
         ...progress.best,
         [round.level]: {
           correct: Math.max(best.correct, round.correct),
-          points: Math.max(best.points, round.points),
+          points: passed ? Math.max(best.points, round.points) : best.points,
         },
       };
-      if (passed && round.level > progress.highestPassed) {
+      // Only a pass of the very next level moves the member up, so a retry can never skip ahead.
+      if (passed && round.level === progress.highestPassed + 1) {
         progress.highestPassed = round.level;
         unlockedLevel = round.level < LEVEL_COUNT ? round.level + 1 : null;
       }
@@ -527,6 +567,7 @@ export class BibleGamesService {
 
     const month = await this.standing(round.memberId, 'month', timezone, true);
     return {
+      level: round.level,
       correct: round.correct,
       total: round.questions.length,
       passed,
@@ -537,12 +578,21 @@ export class BibleGamesService {
     };
   }
 
-  private async saveNewRound(round: BibleGameRound): Promise<BibleGameRound> {
+  private async saveNewRound(memberId: string, round: BibleGameRound) {
     try {
-      return await this.roundRepo.save(round);
+      return this.roundStart(await this.roundRepo.save(round));
     } catch (err) {
-      // Two taps on "Play" at once: the second hits the one-per-day/week index.
-      if ((err as { code?: string }).code === '23505') {
+      // Two starts at once (double tap, or the page loading twice): the second hits the
+      // one-per-day/week index, so it picks up the round the first one just made.
+      if ((err as { code?: string }).code === '23505' && round.periodKey) {
+        const existing = await this.periodRound(
+          memberId,
+          round.mode,
+          round.periodKey,
+        );
+        if (existing && !this.isFinished(existing)) {
+          return this.resume(memberId, existing.id);
+        }
         throw new ConflictException({
           code: 'ALREADY_PLAYED',
           message: 'You have already played this one.',
@@ -617,7 +667,7 @@ export class BibleGamesService {
   ) {
     return this.roundRepo.findOne({
       where: { memberId, mode, periodKey },
-      select: { id: true, correct: true },
+      select: { id: true, correct: true, status: true },
     });
   }
 

@@ -5572,9 +5572,15 @@ word elsewhere (Psalm 14/53, Kings/Isaiah) are not used for which-book/reference
 **Rounds:** `POST bible-games/rounds { mode, level? }` builds and stores a round (with answers) and returns the first
 question without its answer. Modes:
 - `level` — 10 questions; 7 right unlocks the next level. Each member gets a fresh random set, avoiding questions from
-  their last 8 rounds. Replays only add the points that beat the member's best on that level.
+  their last 8 rounds. A failed round (under 7 right) scores nothing and leaves the member on that level; only passing
+  level `highestPassed + 1` moves them up, so a retry or a replay of an earlier level can never skip ahead. Replays of a
+  passed level only add the points that beat the member's best pass on it. Round results include `level`.
 - `mastery` — after level 20: endless level-20 rounds, full points.
 - `daily` — 5 questions, seeded by church and date so everyone gets the same set; once a day (`UQ_bible_game_rounds_period`).
+  A Daily (or weekly) round left part-way (even before the first answer), abandoned by starting another round, or
+  created by a second start racing the first (`UQ_bible_game_rounds_period` collision), is resumed by the start at the
+  first unanswered question (the response carries `outcomes` and `roundPoints` so far); only a finished one returns
+  `409 ALREADY_PLAYED`. `GET bible-games` reports `daily.played`/`weekly.played` only once finished, plus `inProgress`.
 - `weekly` — "This week's verses": up to 10 finish/missing-word questions on verses at least 3 members put in Notes in
   the past 7 days (needs 3 such verses); same set for everyone; once a week.
 
@@ -6959,9 +6965,9 @@ outside the requested `?months=` window).
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
 | DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
-| GET    | /members?page=&limit=&role=&search=&wantsToServe=          | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
+| GET    | /members?page=&limit=&role=&status=&search=&wantsToServe=  | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role and account `status` (ACTIVE\|INACTIVE); `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
 | POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |
-| GET    | /members/workers?page=&limit=&status=&departmentId=&search=&isTrainee= | AdminGuard (MEMBERS_READ) | List workers — `departmentId` matches primary OR secondary department; `search` matches firstname, lastname, full name, email or phone (case-insensitive); `isTrainee` is `true`/`false` |
+| GET    | /members/workers?page=&limit=&status=&departmentId=&search=&isTrainee= | AdminGuard (MEMBERS_READ) | List workers — current workers (`role=WORKER`) by default; `status=INACTIVE` instead returns former workers (revoked or demoted, profile INACTIVE) and workers whose account is deactivated, and any other `status` also requires an active account; `departmentId` matches primary OR secondary department; `search` matches firstname, lastname, full name, email or phone (case-insensitive); `isTrainee` is `true`/`false` |
 | GET    | /members/:id                                               | AdminGuard (MEMBERS_READ)                                     | Get member by ID                                                                                              |
 | PATCH  | /members/:id                                               | AdminGuard (MEMBERS_WRITE)                                    | Update member details                                                                                         |
 | POST   | /members/bulk-promote                                      | AdminGuard (MEMBERS_WRITE)                                    | Bulk promote members to workers; returns `{ promoted, skipped, failures: [{ memberId, reason }] }`            |
@@ -18874,9 +18880,15 @@ word elsewhere (Psalm 14/53, Kings/Isaiah) are not used for which-book/reference
 **Rounds:** `POST bible-games/rounds { mode, level? }` builds and stores a round (with answers) and returns the first
 question without its answer. Modes:
 - `level` — 10 questions; 7 right unlocks the next level. Each member gets a fresh random set, avoiding questions from
-  their last 8 rounds. Replays only add the points that beat the member's best on that level.
+  their last 8 rounds. A failed round (under 7 right) scores nothing and leaves the member on that level; only passing
+  level `highestPassed + 1` moves them up, so a retry or a replay of an earlier level can never skip ahead. Replays of a
+  passed level only add the points that beat the member's best pass on it. Round results include `level`.
 - `mastery` — after level 20: endless level-20 rounds, full points.
 - `daily` — 5 questions, seeded by church and date so everyone gets the same set; once a day (`UQ_bible_game_rounds_period`).
+  A Daily (or weekly) round left part-way (even before the first answer), abandoned by starting another round, or
+  created by a second start racing the first (`UQ_bible_game_rounds_period` collision), is resumed by the start at the
+  first unanswered question (the response carries `outcomes` and `roundPoints` so far); only a finished one returns
+  `409 ALREADY_PLAYED`. `GET bible-games` reports `daily.played`/`weekly.played` only once finished, plus `inProgress`.
 - `weekly` — "This week's verses": up to 10 finish/missing-word questions on verses at least 3 members put in Notes in
   the past 7 days (needs 3 such verses); same set for everyone; once a week.
 
@@ -20261,9 +20273,9 @@ outside the requested `?months=` window).
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
 | DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
-| GET    | /members?page=&limit=&role=&search=&wantsToServe=          | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role; `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
+| GET    | /members?page=&limit=&role=&status=&search=&wantsToServe=  | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role and account `status` (ACTIVE\|INACTIVE); `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
 | POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |
-| GET    | /members/workers?page=&limit=&status=&departmentId=&search=&isTrainee= | AdminGuard (MEMBERS_READ) | List workers — `departmentId` matches primary OR secondary department; `search` matches firstname, lastname, full name, email or phone (case-insensitive); `isTrainee` is `true`/`false` |
+| GET    | /members/workers?page=&limit=&status=&departmentId=&search=&isTrainee= | AdminGuard (MEMBERS_READ) | List workers — current workers (`role=WORKER`) by default; `status=INACTIVE` instead returns former workers (revoked or demoted, profile INACTIVE) and workers whose account is deactivated, and any other `status` also requires an active account; `departmentId` matches primary OR secondary department; `search` matches firstname, lastname, full name, email or phone (case-insensitive); `isTrainee` is `true`/`false` |
 | GET    | /members/:id                                               | AdminGuard (MEMBERS_READ)                                     | Get member by ID                                                                                              |
 | PATCH  | /members/:id                                               | AdminGuard (MEMBERS_WRITE)                                    | Update member details                                                                                         |
 | POST   | /members/bulk-promote                                      | AdminGuard (MEMBERS_WRITE)                                    | Bulk promote members to workers; returns `{ promoted, skipped, failures: [{ memberId, reason }] }`            |
