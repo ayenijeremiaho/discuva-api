@@ -1268,7 +1268,7 @@ export class SundaySchoolService {
     const size = Math.min(Math.max(limit, 1), 100);
     const qb = this.memberRepo
       .createQueryBuilder('m')
-      .select(['m.id', 'm.firstname', 'm.lastname', 'm.email'])
+      .select(['m.id', 'm.firstname', 'm.lastname', 'm.email', 'm.photoUrl'])
       .where(
         `NOT EXISTS (SELECT 1 FROM sunday_school_members x WHERE x.member_id = m.id AND x.sunday_school_class_id = :classId)`,
         { classId },
@@ -1317,6 +1317,7 @@ export class SundaySchoolService {
           firstname: m.firstname,
           lastname: m.lastname,
           email: m.email,
+          photoUrl: m.photoUrl,
           otherClasses,
           blocked: oneClassPerMember && otherClasses.length > 0,
         };

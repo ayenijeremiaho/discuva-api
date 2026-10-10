@@ -810,8 +810,9 @@ as `ATTENDANCE_ADMIN_MARKED`.
 
 **Mobile member picker for admin-assisted check-in (`GET /attendances/department/search-members?q=`):**
 deliberately narrow — gated by the same `assertIsAdminDeptWorker()` check, bounded to 10 results
-(`MemberService.searchActiveMembersLite`), and returns only `id`/`firstname`/`lastname`/`role` (no email or
+(`MemberService.searchActiveMembersLite`), and returns only `id`/`firstname`/`lastname`/`photoUrl`/`role` (no email or
 phone) since this is a lookup for "which person is standing in front of me," not a general member directory.
+The member app shows the profile picture when `photoUrl` is present, otherwise the person's initials.
 This is the one exception in the codebase to "no non-admin member-search endpoint" — justified because the
 whole point of this flow is finding one named person on the spot; it's scoped tightly enough (Admin-department
 workers only, minimal fields, capped results) that it doesn't reopen a general member-picker surface.
@@ -5419,6 +5420,9 @@ switch in notification settings), never sent to the actor:
 `CONVERT_OUTREACH_CHANGED`, `CONVERT_LINKED_TO_MEMBER`, `OUTREACH_CREATED`, `OUTREACH_TEAM_UPDATED`,
 `EVANGELISM_SETTINGS_UPDATED`, plus `CONVERT_LINKED_TO_FIRST_TIMER`/`CONVERT_UNLINKED_FROM_FIRST_TIMER` from
 Follow-Up. Admin actions log the admin's member id as the actor.
+
+Worker search in both apps includes nullable `photoUrl` alongside names, capability and assignment counts;
+search results display the picture when present and initials otherwise.
 
 **Routes (member app, workers):** `POST evangelism/converts`, `POST evangelism/converts/:id/met-again`,
 `GET evangelism/converts?scope=&status=&assignedTo=&overdue=&outreachId=&search=&from=&to=&page=&limit=`,
@@ -17928,6 +17932,8 @@ lastname, email, phoneNumber, missedInARow, lastAttended }`, longest streak firs
 `sunday_school_members(sunday_school_class_id)` indexes; assistants have a composite PK plus `member_id` index. The
 candidates search ILIKEs `firstname`/`lastname`/`email` word by word so each branch uses the members trigram indexes, and
 bulk add by email uses `IDX_members_email_lower` (`LOWER(email)`, migration `1799737200000-AddMembersLowerEmailIndex`).
+Both admin and teacher class-candidate endpoints include nullable `photoUrl` in each row. Both apps render
+the member's profile picture when present and initials otherwise, alongside the existing selection controls.
 
 **Teacher marking window (added 2026-10-01):** teachers (worker routes) can mark attendance, open check-in and check in
 first-timers for a session only until `sessionDate + teacherMarkingDays` (church timezone; 0 = the session day only,

@@ -1635,13 +1635,21 @@ describe('MemberService', () => {
       expect(mockMemberRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
 
-    it('searches active members by first/last name and returns minimal fields only', async () => {
+    it('searches active members by first/last name and includes photos without contact fields', async () => {
       const found = [
         {
           id: 'm1',
           firstname: 'Ada',
           lastname: 'Lovelace',
+          photoUrl: 'https://example.com/ada.jpg',
           role: MemberRoleEnum.MEMBER,
+        },
+        {
+          id: 'm2',
+          firstname: 'Ada',
+          lastname: 'Smith',
+          photoUrl: null,
+          role: MemberRoleEnum.WORKER,
         },
       ];
       const qb = {
@@ -1659,6 +1667,7 @@ describe('MemberService', () => {
         'member.id',
         'member.firstname',
         'member.lastname',
+        'member.photoUrl',
         'member.role',
       ]);
       expect(qb.where).toHaveBeenCalledWith('member.status = :status', {

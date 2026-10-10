@@ -205,6 +205,7 @@ describe('OutreachService', () => {
           workerProfileId: 'wp-2',
           firstname: 'Grace',
           lastname: 'Hopper',
+          photoUrl: 'https://example.com/grace.jpg',
           isEvangelism: true,
           openAssigned: '3',
         },
@@ -213,6 +214,7 @@ describe('OutreachService', () => {
 
       const result = await service.searchWorkers(' gra ', 'm-1');
 
+      expect(qb.addSelect).toHaveBeenCalledWith('m.photoUrl', 'photoUrl');
       expect(qb.andWhere).toHaveBeenCalledWith(
         expect.stringContaining('ILIKE'),
         {
@@ -223,7 +225,11 @@ describe('OutreachService', () => {
         exclude: 'm-1',
       });
       expect(result).toEqual([
-        expect.objectContaining({ isEvangelism: true, openAssigned: 3 }),
+        expect.objectContaining({
+          photoUrl: 'https://example.com/grace.jpg',
+          isEvangelism: true,
+          openAssigned: 3,
+        }),
       ]);
     });
   });

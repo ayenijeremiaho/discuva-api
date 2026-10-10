@@ -1899,12 +1899,19 @@ describe('SundaySchoolService', () => {
       mockClassRepo.findOne.mockResolvedValue({ id: 'class-1' });
       qb.getManyAndCount.mockResolvedValue([
         [
-          { id: 'm1', firstname: 'Ada', lastname: 'Obi', email: 'ada@x.org' },
+          {
+            id: 'm1',
+            firstname: 'Ada',
+            lastname: 'Obi',
+            email: 'ada@x.org',
+            photoUrl: 'https://example.com/ada.jpg',
+          },
           {
             id: 'm2',
             firstname: 'Tunde',
             lastname: 'Bello',
             email: 'tunde@x.org',
+            photoUrl: null,
           },
         ],
         2,
@@ -1918,7 +1925,16 @@ describe('SundaySchoolService', () => {
     });
 
     it('leaves out members already in the class and searches by name or email', async () => {
-      await service.adminClassCandidates('class-1', ' Ada ');
+      const result = await service.adminClassCandidates('class-1', ' Ada ');
+      expect(qb.select).toHaveBeenCalledWith([
+        'm.id',
+        'm.firstname',
+        'm.lastname',
+        'm.email',
+        'm.photoUrl',
+      ]);
+      expect(result.data[0].photoUrl).toBe('https://example.com/ada.jpg');
+      expect(result.data[1].photoUrl).toBeNull();
       expect(qb.where.mock.calls[0][0]).toContain('NOT EXISTS');
       expect(qb.where.mock.calls[0][1]).toEqual({ classId: 'class-1' });
       expect(qb.andWhere).toHaveBeenCalledWith(

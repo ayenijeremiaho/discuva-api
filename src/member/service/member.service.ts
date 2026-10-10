@@ -1266,7 +1266,9 @@ export class MemberService {
   async searchActiveMembersLite(
     query: string,
     limit = 10,
-  ): Promise<Pick<Member, 'id' | 'firstname' | 'lastname' | 'role'>[]> {
+  ): Promise<
+    Pick<Member, 'id' | 'firstname' | 'lastname' | 'photoUrl' | 'role'>[]
+  > {
     if (!query.trim()) return [];
     return this.memberRepository
       .createQueryBuilder('member')
@@ -1274,6 +1276,7 @@ export class MemberService {
         'member.id',
         'member.firstname',
         'member.lastname',
+        'member.photoUrl',
         'member.role',
       ])
       .where('member.status = :status', { status: MemberStatusEnum.ACTIVE })

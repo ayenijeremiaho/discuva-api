@@ -36,6 +36,7 @@ export interface EvangelismWorkerOption {
   workerProfileId: string;
   firstname: string;
   lastname: string;
+  photoUrl: string | null;
   isEvangelism: boolean;
   openAssigned: number;
 }
@@ -202,6 +203,7 @@ export class OutreachService {
       .addSelect('wp.id', 'workerProfileId')
       .addSelect('m.firstname', 'firstname')
       .addSelect('m.lastname', 'lastname')
+      .addSelect('m.photoUrl', 'photoUrl')
       .addSelect(
         'COALESCE(:cap = ANY(d.capabilities), false) OR COALESCE(:cap = ANY(sd.capabilities), false)',
         'isEvangelism',
@@ -235,6 +237,7 @@ export class OutreachService {
       workerProfileId: string;
       firstname: string;
       lastname: string;
+      photoUrl: string | null;
       isEvangelism: boolean;
       openAssigned: string;
     }>();

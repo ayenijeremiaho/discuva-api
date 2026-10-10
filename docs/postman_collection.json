@@ -4937,14 +4937,14 @@
                 }
               ]
             },
-            "description": "JwtAuthGuard only, gated the same way as Mark Attendance (Mobile). Narrow member lookup backing the mobile check-in picker \u2014 capped at 10 results, returns only id/firstname/lastname/role (no email or phone). Not a general member-search endpoint."
+            "description": "JwtAuthGuard only, gated the same way as Mark Attendance (Mobile). Narrow member lookup backing the mobile check-in picker \u2014 capped at 10 results, returns only id/firstname/lastname/photoUrl/role (no email or phone). photoUrl is null when no picture is present. Not a general member-search endpoint."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "[\n  { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"firstname\": \"Ada\", \"lastname\": \"Lovelace\", \"role\": \"MEMBER\" }\n]"
+              "body": "[\n  { \"id\": \"a3f2e1b4-9c7d-4e5f-8a6b-1c2d3e4f5a6b\", \"firstname\": \"Ada\", \"lastname\": \"Lovelace\", \"photoUrl\": null, \"role\": \"MEMBER\" }\n]"
             }
           ]
         },
@@ -15309,7 +15309,7 @@
                 }
               ]
             },
-            "description": "WORKER — Sunday School staff or this class's teacher. Members who can be added to the class (not already in it, not inactive); same response as the admin candidates endpoint, including otherClasses and blocked per row."
+            "description": "WORKER — Sunday School staff or this class's teacher. Members who can be added to the class (not already in it, not inactive); same response as the admin candidates endpoint, including nullable photoUrl, otherClasses and blocked per row."
           },
           "response": []
         },
@@ -16663,7 +16663,7 @@
                 }
               ]
             },
-            "description": "SUNDAY_SCHOOL_READ. Members who can be added to this class: excludes members already in it and inactive members. search matches first/last/full name or email; limit max 100. otherClasses lists other classes the member is in; blocked is true when one-class-per-member is on and they are already in another class."
+            "description": "SUNDAY_SCHOOL_READ. Members who can be added to this class: excludes members already in it and inactive members. search matches first/last/full name or email; limit max 100. photoUrl is null when no picture is present. otherClasses lists other classes the member is in; blocked is true when one-class-per-member is on and they are already in another class."
           },
           "response": [
             {
@@ -16671,7 +16671,7 @@
               "status": "OK",
               "code": 200,
               "_postman_previewlanguage": "json",
-              "body": "{\n  \"data\": {\n    \"data\": [\n      {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"Ada\",\n        \"lastname\": \"Obi\",\n        \"email\": \"ada@example.com\",\n        \"otherClasses\": [\"Juniors\"],\n        \"blocked\": false\n      }\n    ],\n    \"page\": 1,\n    \"limit\": 50,\n    \"totalCount\": 1,\n    \"totalPages\": 1,\n    \"oneClassPerMember\": false\n  }\n}"
+              "body": "{\n  \"data\": {\n    \"data\": [\n      {\n        \"id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n        \"firstname\": \"Ada\",\n        \"lastname\": \"Obi\",\n        \"email\": \"ada@example.com\",\n        \"photoUrl\": null,\n        \"otherClasses\": [\"Juniors\"],\n        \"blocked\": false\n      }\n    ],\n    \"page\": 1,\n    \"limit\": 50,\n    \"totalCount\": 1,\n    \"totalPages\": 1,\n    \"oneClassPerMember\": false\n  }\n}"
             }
           ]
         },
@@ -22844,7 +22844,7 @@
                 }
               ]
             },
-            "description": "Workers only. Up to 20 ACTIVE workers other than the caller, matched on name, Evangelism workers first: { memberId, workerProfileId, firstname, lastname, isEvangelism, openAssigned }[]. Backs the team picker."
+            "description": "Workers only. Up to 20 ACTIVE workers other than the caller, matched on name, Evangelism workers first: { memberId, workerProfileId, firstname, lastname, photoUrl, isEvangelism, openAssigned }[]. photoUrl is null when no picture is present. Backs the team picker."
           },
           "response": []
         },
@@ -23203,7 +23203,7 @@
                 }
               ]
             },
-            "description": "Admin only (EVANGELISM_READ). Up to 20 ACTIVE workers with isEvangelism and openAssigned, Evangelism workers first. Backs the assignee and team pickers."
+            "description": "Admin only (EVANGELISM_READ). Up to 20 ACTIVE workers with nullable photoUrl, isEvangelism and openAssigned, Evangelism workers first. Backs the assignee and team pickers."
           },
           "response": []
         },
