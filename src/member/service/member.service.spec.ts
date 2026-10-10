@@ -1473,6 +1473,63 @@ describe('MemberService', () => {
     });
   });
 
+  describe('getWorkers filters', () => {
+    function workersQb() {
+      const qb = {
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+      };
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    }
+
+    it('matches the department as primary or secondary', async () => {
+      const qb = workersQb();
+
+      await service.getWorkers(1, 10, { departmentId: 'dept-1' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(department.id = :departmentId OR secondaryDepartment.id = :departmentId)',
+        { departmentId: 'dept-1' },
+      );
+    });
+
+    it('applies status, trainee and search filters', async () => {
+      const qb = workersQb();
+
+      await service.getWorkers(1, 10, {
+        status: WorkerStatusEnum.ACTIVE,
+        isTrainee: false,
+        search: 'ada',
+      });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('profile.status = :status', {
+        status: WorkerStatusEnum.ACTIVE,
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'profile.isTrainee = :isTrainee',
+        { isTrainee: false },
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(expect.any(String), {
+        s: '%ada%',
+      });
+    });
+
+    it('adds no filters by default', async () => {
+      const qb = workersQb();
+
+      await service.getWorkers(1, 10);
+
+      expect(qb.andWhere).not.toHaveBeenCalled();
+    });
+  });
+
   describe('dismissServeInterest', () => {
     it('clears the request and audits the admin', async () => {
       mockMemberRepo.findOne.mockResolvedValue({

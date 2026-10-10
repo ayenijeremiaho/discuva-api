@@ -96,8 +96,17 @@ export class MemberController {
     @Query('page') page = 1,
     @Query('limit') limit = 10,
     @Query('status') status?: WorkerStatusEnum,
+    @Query('departmentId', new ParseUUIDPipe({ optional: true }))
+    departmentId?: string,
+    @Query('search') search?: string,
+    @Query('isTrainee') isTrainee?: string,
   ) {
-    const result = await this.memberService.getWorkers(+page, +limit, status);
+    const result = await this.memberService.getWorkers(+page, +limit, {
+      status,
+      departmentId,
+      search: search?.trim() || undefined,
+      isTrainee: isTrainee === undefined ? undefined : isTrainee === 'true',
+    });
     return UtilityService.getPaginationResponseDto(result, MemberDto);
   }
 

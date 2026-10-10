@@ -1305,9 +1305,9 @@
           "name": "Get All Workers",
           "request": {
             "method": "GET",
-            "description": "Admin only (MEMBERS_READ). Returns paginated list of all members with role=WORKER. Each entry includes workerProfile with department. Optional `status` filter: ACTIVE | INACTIVE.",
+            "description": "Admin only (MEMBERS_READ). Returns paginated list of all members with role=WORKER. Each entry includes workerProfile with primary and secondary department. Optional filters: `status` (ACTIVE | INACTIVE | SUSPENDED | ON_LEAVE), `departmentId` (matches primary OR secondary department), `search` (name, email or phone, case-insensitive), `isTrainee` (true | false).",
             "url": {
-              "raw": "{{baseUrl}}/members/workers?page=1&limit=10&status=ACTIVE",
+              "raw": "{{baseUrl}}/members/workers?page=1&limit=10&status=ACTIVE&departmentId={{departmentId}}",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1327,7 +1327,24 @@
                 {
                   "key": "status",
                   "value": "ACTIVE",
-                  "description": "Filter by worker status: ACTIVE | INACTIVE (optional)"
+                  "description": "Filter by worker status: ACTIVE | INACTIVE | SUSPENDED | ON_LEAVE (optional)"
+                },
+                {
+                  "key": "departmentId",
+                  "value": "{{departmentId}}",
+                  "description": "Department UUID; matches workers whose primary or secondary department is this one (optional)"
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Name, email or phone substring (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "isTrainee",
+                  "value": "true",
+                  "description": "true | false (optional)",
+                  "disabled": true
                 }
               ]
             }

@@ -1291,8 +1291,14 @@ export class MemberService {
   async getWorkers(
     page = 1,
     limit = 10,
-    status?: WorkerStatusEnum,
+    filters: {
+      status?: WorkerStatusEnum;
+      departmentId?: string;
+      search?: string;
+      isTrainee?: boolean;
+    } = {},
   ): Promise<PaginationResponseDto<Member>> {
+    const { status, departmentId, search, isTrainee } = filters;
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
     const qb = this.memberRepository
@@ -1306,6 +1312,21 @@ export class MemberService {
 
     if (status) {
       qb.andWhere('profile.status = :status', { status });
+    }
+    if (departmentId) {
+      qb.andWhere(
+        '(department.id = :departmentId OR secondaryDepartment.id = :departmentId)',
+        { departmentId },
+      );
+    }
+    if (isTrainee !== undefined) {
+      qb.andWhere('profile.isTrainee = :isTrainee', { isTrainee });
+    }
+    if (search) {
+      qb.andWhere(
+        "(LOWER(member.firstname) LIKE LOWER(:s) OR LOWER(member.lastname) LIKE LOWER(:s) OR LOWER(CONCAT(member.firstname, ' ', member.lastname)) LIKE LOWER(:s) OR LOWER(member.email) LIKE LOWER(:s) OR member.phoneNumber LIKE :s)",
+        { s: `%${search}%` },
+      );
     }
 
     const [members, total] = await qb
