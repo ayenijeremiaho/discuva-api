@@ -1464,6 +1464,23 @@ describe('MemberService', () => {
       );
     });
 
+    it('filters by account status', async () => {
+      const qb = listQb();
+
+      await service.getAll(
+        1,
+        10,
+        undefined,
+        undefined,
+        false,
+        MemberStatusEnum.INACTIVE,
+      );
+
+      expect(qb.andWhere).toHaveBeenCalledWith('member.status = :status', {
+        status: MemberStatusEnum.INACTIVE,
+      });
+    });
+
     it('adds no serve filter by default', async () => {
       const qb = listQb();
 
@@ -1509,6 +1526,9 @@ describe('MemberService', () => {
         search: 'ada',
       });
 
+      expect(qb.where).toHaveBeenCalledWith('member.role = :role', {
+        role: MemberRoleEnum.WORKER,
+      });
       expect(qb.andWhere).toHaveBeenCalledWith('profile.status = :status', {
         status: WorkerStatusEnum.ACTIVE,
       });
@@ -1519,6 +1539,24 @@ describe('MemberService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith(expect.any(String), {
         s: '%ada%',
       });
+    });
+
+    it('INACTIVE includes former workers and deactivated accounts', async () => {
+      const qb = workersQb();
+
+      await service.getWorkers(1, 10, { status: WorkerStatusEnum.INACTIVE });
+
+      expect(qb.where).toHaveBeenCalledWith(
+        '(profile.status = :inactive OR member.status = :inactiveAccount)',
+        {
+          inactive: WorkerStatusEnum.INACTIVE,
+          inactiveAccount: MemberStatusEnum.INACTIVE,
+        },
+      );
+      expect(qb.where).not.toHaveBeenCalledWith(
+        'member.role = :role',
+        expect.anything(),
+      );
     });
 
     it('adds no filters by default', async () => {

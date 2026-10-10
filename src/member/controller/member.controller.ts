@@ -61,6 +61,7 @@ export class MemberController {
     @Query('role') role?: MemberRoleEnum,
     @Query('search') search?: string,
     @Query('wantsToServe') wantsToServe?: string,
+    @Query('status') status?: MemberStatusEnum,
   ) {
     const result = await this.memberService.getAll(
       +page,
@@ -68,6 +69,7 @@ export class MemberController {
       role,
       search,
       wantsToServe === 'true',
+      status,
     );
     return UtilityService.getPaginationResponseDto(result, MemberDto);
   }

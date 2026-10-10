@@ -1219,7 +1219,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/members?page=1&limit=10&role=MEMBER&search=&wantsToServe=",
+              "raw": "{{baseUrl}}/members?page=1&limit=10&role=MEMBER&status=&search=&wantsToServe=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -1238,6 +1238,12 @@
                 {
                   "key": "role",
                   "value": "MEMBER"
+                },
+                {
+                  "key": "status",
+                  "value": "INACTIVE",
+                  "description": "Account status: ACTIVE | INACTIVE (optional)",
+                  "disabled": true
                 },
                 {
                   "key": "search",
@@ -1327,7 +1333,7 @@
                 {
                   "key": "status",
                   "value": "ACTIVE",
-                  "description": "Filter by worker status: ACTIVE | INACTIVE | SUSPENDED | ON_LEAVE (optional)"
+                  "description": "Filter by worker status: ACTIVE | INACTIVE | SUSPENDED | ON_LEAVE (optional). INACTIVE returns former workers and deactivated accounts; without it only current workers are listed"
                 },
                 {
                   "key": "departmentId",

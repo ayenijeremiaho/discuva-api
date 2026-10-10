@@ -1223,6 +1223,7 @@ export class MemberService {
     role?: MemberRoleEnum,
     search?: string,
     wantsToServe?: boolean,
+    status?: MemberStatusEnum,
   ): Promise<PaginationResponseDto<Member>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
@@ -1241,6 +1242,7 @@ export class MemberService {
       .take(limit);
 
     if (role) qb.andWhere('member.role = :role', { role });
+    if (status) qb.andWhere('member.status = :status', { status });
     if (wantsToServe) {
       qb.andWhere('member.serveInterestAt IS NOT NULL').andWhere(
         'member.status = :activeStatus',
@@ -1307,11 +1309,27 @@ export class MemberService {
       .innerJoinAndSelect('profile.department', 'department')
       .leftJoinAndSelect('profile.secondaryDepartment', 'secondaryDepartment')
       .leftJoinAndSelect('member.clergy', 'clergy')
-      .leftJoinAndSelect('clergy.title', 'clergyTitle')
-      .where('member.role = :role', { role: MemberRoleEnum.WORKER });
+      .leftJoinAndSelect('clergy.title', 'clergyTitle');
 
-    if (status) {
-      qb.andWhere('profile.status = :status', { status });
+    // Revoking a worker resets their role to MEMBER and keeps the profile as
+    // INACTIVE, so former workers (and deactivated accounts) are only
+    // reachable through the INACTIVE filter.
+    if (status === WorkerStatusEnum.INACTIVE) {
+      qb.where(
+        '(profile.status = :inactive OR member.status = :inactiveAccount)',
+        {
+          inactive: WorkerStatusEnum.INACTIVE,
+          inactiveAccount: MemberStatusEnum.INACTIVE,
+        },
+      );
+    } else {
+      qb.where('member.role = :role', { role: MemberRoleEnum.WORKER });
+      if (status) {
+        qb.andWhere('profile.status = :status', { status }).andWhere(
+          'member.status = :activeAccount',
+          { activeAccount: MemberStatusEnum.ACTIVE },
+        );
+      }
     }
     if (departmentId) {
       qb.andWhere(
