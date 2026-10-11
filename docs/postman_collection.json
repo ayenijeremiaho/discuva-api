@@ -5237,7 +5237,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -24759,6 +24759,50 @@
               ]
             },
             {
+              "name": "Add Live Section",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{workerToken}}"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"PRAYER\",\n  \"topic\": \"Prayer for the sick\",\n  \"guestName\": \"Guest minister\",\n  \"allocatedMinutes\": 5,\n  \"position\": 3\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/slots",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "service-session",
+                    ":sessionCode",
+                    "slots"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Adds a section to a running service. position defaults to the end and must be after the current slot. Also added to the programme so reports include it. Access: admins with SERVICE_PROGRAMME_WRITE or front-desk workers."
+              }
+            },
+            {
               "name": "End Session",
               "request": {
                 "method": "POST",
@@ -26134,6 +26178,57 @@
                   "body": "{\"data\": {\"position\": 2, \"overriddenTopic\": \"Updated Topic\"}}"
                 }
               ]
+            },
+            {
+              "name": "PM Add Live Section (Public)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"type\": \"PRAYER\",\n  \"topic\": \"Prayer for the sick\",\n  \"guestName\": \"Guest minister\",\n  \"allocatedMinutes\": 5,\n  \"position\": 3\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "url": {
+                  "raw": "{{baseUrl}}/v1/service-session/:sessionCode/pm/slots?token={{shareToken}}&grantToken={{grantToken}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "v1",
+                    "service-session",
+                    ":sessionCode",
+                    "pm",
+                    "slots"
+                  ],
+                  "query": [
+                    {
+                      "key": "token",
+                      "value": "{{shareToken}}"
+                    },
+                    {
+                      "key": "grantToken",
+                      "value": "{{grantToken}}"
+                    }
+                  ],
+                  "variable": [
+                    {
+                      "key": "sessionCode",
+                      "value": "{{sessionCode}}"
+                    }
+                  ]
+                },
+                "description": "Same as Add Live Section, from the Programme Manager link."
+              }
             },
             {
               "name": "PM End Session (Public)",

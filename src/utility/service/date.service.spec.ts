@@ -22,6 +22,34 @@ describe('DateService', () => {
     });
   });
 
+  describe('format', () => {
+    it('renders in the configured timezone, not the server process timezone', () => {
+      // 08:15 UTC is 09:15 in Africa/Lagos — emails showed the UTC hour.
+      const instant = new Date('2026-07-16T08:15:00.000Z');
+      expect(service.format(instant, DateService.PATTERNS.EMAIL_TIME)).toBe(
+        '9:15 AM',
+      );
+    });
+
+    it('renders in an explicit tenant timezone when one is given', () => {
+      const instant = new Date('2026-07-16T08:15:00.000Z');
+      expect(
+        service.format(
+          instant,
+          DateService.PATTERNS.EMAIL_TIME,
+          'Europe/London',
+        ),
+      ).toBe('9:15 AM');
+      expect(
+        service.format(
+          instant,
+          DateService.PATTERNS.EMAIL_TIME,
+          'America/New_York',
+        ),
+      ).toBe('4:15 AM');
+    });
+  });
+
   describe('endOfDay', () => {
     it('uses the configured timezone, not the server process timezone', () => {
       const instant = new Date('2026-07-16T23:30:00.000Z');

@@ -19,6 +19,7 @@ import {
 import { AnnouncementAudienceEnum } from '../../announcement/enum/announcement-audience.enum';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { realGateProvider } from '../../tenant/scheduler-gate/scheduler-gate.testing';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const SLOT_START = new Date('2026-07-01T09:00:00.000Z');
 
@@ -122,6 +123,13 @@ describe('EventReminderService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         EventReminderService,
         {
           provide: getRepositoryToken(EventReminder),

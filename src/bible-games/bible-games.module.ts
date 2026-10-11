@@ -12,7 +12,7 @@ import { BibleGamesAdminService } from './service/bible-games-admin.service';
 import { BibleGamesService } from './service/bible-games.service';
 import { BibleGamesController } from './controller/bible-games.controller';
 import { AdminBibleGamesController } from './controller/admin-bible-games.controller';
-import { ChurchTimezoneService } from '../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../utility/service/church-timezone.service';
 
 @Module({
   imports: [

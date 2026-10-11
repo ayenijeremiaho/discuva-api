@@ -19,6 +19,7 @@ import { DepartmentCapability } from '../../department/enums/department-capabili
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockAgeGroupRepo = {
   create: jest.fn(),
@@ -131,6 +132,13 @@ describe('ChildrenChurchService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         ChildrenChurchService,
         {
           provide: getRepositoryToken(ChildAgeGroup),

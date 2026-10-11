@@ -22,6 +22,7 @@ import { AuditLogProcessor } from './processor/audit-log.processor';
 import { CloudinaryService } from './service/cloudinary.service';
 import { PdfService } from './service/pdf.service';
 import { TenantCurrencyService } from './service/tenant-currency.service';
+import { ChurchTimezoneService } from './service/church-timezone.service';
 import { ExcelService } from './service/excel.service';
 import { EncryptionService } from './service/encryption.service';
 import { EMAIL_PROVIDER_TOKEN } from './email-provider/email-provider.token';
@@ -90,6 +91,7 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     CloudinaryService,
     PdfService,
     TenantCurrencyService,
+    ChurchTimezoneService,
     ExcelService,
     EncryptionService,
     NotificationDispatchService,
@@ -105,6 +107,7 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     CloudinaryService,
     PdfService,
     TenantCurrencyService,
+    ChurchTimezoneService,
     ExcelService,
     EncryptionService,
     NotificationDispatchService,

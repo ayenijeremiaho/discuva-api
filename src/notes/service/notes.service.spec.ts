@@ -10,7 +10,7 @@ import { NotesService, TOP_SCRIPTURE_MIN_MEMBERS } from './notes.service';
 import { Note } from '../entity/note.entity';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Sermon } from '../../sermon/entity/sermon.entity';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { NoteKindEnum } from '../enum/note-kind.enum';
 import { NoteNode } from '../util/note-content';

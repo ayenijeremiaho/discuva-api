@@ -39,6 +39,7 @@ import { PauseSessionDto } from '../dto/pause-session.dto';
 import { RuntimeOverrideDto } from '../dto/runtime-override.dto';
 import { AdjustSessionTimeDto } from '../dto/adjust-session-time.dto';
 import { ReorderLiveSlotsDto } from '../dto/reorder-live-slots.dto';
+import { AddLiveSlotDto } from '../dto/add-live-slot.dto';
 import { CreateAccessGrantDto } from '../dto/create-access-grant.dto';
 import { VerifyAccessGrantDto } from '../dto/verify-access-grant.dto';
 
@@ -189,9 +190,24 @@ export class ServiceSessionController {
     return slots;
   }
 
+  @Post(':sessionCode/slots')
+  @UseGuards(JwtAuthGuard)
+  async addLiveSlot(
+    @Param('sessionCode') sessionCode: string,
+    @Body() dto: AddLiveSlotDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    const slot = await this.sessionSvc.addLiveSlot(sessionCode, dto, user.id);
+    this.gateway.broadcastState(
+      sessionCode,
+      await this.sessionSvc.getState(sessionCode),
+    );
+    return slot;
+  }
+
+  // Same access as the other live controls — assertCanControlSession covers admins and front-desk workers.
   @Post(':sessionCode/slots/:position/override')
-  @UseGuards(RolesGuard)
-  @Roles(MemberRoleEnum.WORKER)
+  @UseGuards(JwtAuthGuard)
   async overrideSlot(
     @Param('sessionCode') sessionCode: string,
     @Param('position', ParseIntPipe) position: number,
@@ -345,6 +361,27 @@ export class ServiceSessionController {
       await this.sessionSvc.getState(sessionCode),
     );
     return slots;
+  }
+
+  @Post(':sessionCode/pm/slots')
+  @Public()
+  @UseGuards(ShareTokenGuard, NamedAccessGuard)
+  async pmAddLiveSlot(
+    @Param('sessionCode') sessionCode: string,
+    @Body() dto: AddLiveSlotDto,
+    @ActorLabel() actorLabel: string | null,
+  ) {
+    const slot = await this.sessionSvc.addLiveSlot(
+      sessionCode,
+      dto,
+      null,
+      actorLabel,
+    );
+    this.gateway.broadcastState(
+      sessionCode,
+      await this.sessionSvc.getState(sessionCode),
+    );
+    return slot;
   }
 
   @Post(':sessionCode/pm/end')

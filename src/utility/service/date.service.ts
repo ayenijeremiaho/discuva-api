@@ -16,7 +16,7 @@ import {
   subMinutes,
   subSeconds,
 } from 'date-fns';
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime, toZonedTime } from 'date-fns-tz';
 
 /**
  * Date utility service that provides a clean interface for date operations.
@@ -154,8 +154,13 @@ export class DateService {
    * @param date - The date to format
    * @param pattern - The format pattern (e.g., 'yyyy-MM-dd', 'EEE, MMMM do, yyyy')
    */
-  format(date: Date, pattern: string): string {
-    return format(date, pattern);
+  // Always renders in a church timezone, never the server's own (UTC in prod).
+  format(
+    date: Date,
+    pattern: string,
+    timeZone: string = this.timezone,
+  ): string {
+    return formatInTimeZone(date, timeZone, pattern);
   }
 
   // Today's date, as a plain 'yyyy-MM-dd' string, in the church's configured

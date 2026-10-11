@@ -36,11 +36,12 @@ import {
   PASS_MARK,
   QUESTIONS_PER_ROUND,
   levelSpec,
-  pointsFor,
+  pointsBreakdown,
+  scoringFor,
 } from '../engine/levels';
 import { buildRound, buildVerseRound } from '../engine/round';
 import { randomRng, seededRng } from '../engine/rng';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { currentWeekStart } from '../../notes/util/note-streak';
@@ -74,6 +75,8 @@ export interface PublicQuestion {
   ref?: string;
   options: string[];
   timeLimit: number;
+  // A right answer is worth base + maxBonus × (seconds left / timeLimit), rounded down.
+  scoring: { base: number; maxBonus: number };
 }
 
 export interface RoundResult {
@@ -83,6 +86,12 @@ export interface RoundResult {
   passed: boolean | null;
   points: number;
   awarded: number;
+  // From the round's right answers.
+  speedBonus: number;
+  fastestSeconds: number | null;
+  averageSeconds: number | null;
+  // Level rounds: the best score on this level before this round (what a replay has to beat).
+  previousBest: number | null;
   unlockedLevel: number | null;
   rankThisMonth: number | null;
 }
@@ -148,6 +157,7 @@ export class BibleGamesService {
         level: l.level,
         tier: l.tier,
         timeLimit: l.timeLimit,
+        scoring: scoringFor(l.level),
         unlocked: l.level <= progress.highestPassed + 1,
         passed: l.level <= progress.highestPassed,
         bestCorrect: progress.best[l.level]?.correct ?? null,
@@ -180,6 +190,11 @@ export class BibleGamesService {
         questionsPerRound: QUESTIONS_PER_ROUND,
         passMark: PASS_MARK,
         levels: LEVEL_COUNT,
+        answerGraceSeconds: ANSWER_GRACE_SECONDS,
+        shared: {
+          timeLimit: DAILY_SPEC.timeLimit,
+          scoring: scoringFor(SHARED_ROUND_LEVEL),
+        },
       },
     };
   }
@@ -375,13 +390,14 @@ export class BibleGamesService {
       : round.timeLimit;
     const inTime = seconds <= round.timeLimit + ANSWER_GRACE_SECONDS;
     const correct = inTime && dto.choice === q.answer;
-    const points = correct
-      ? pointsFor(
+    const breakdown = correct
+      ? pointsBreakdown(
           this.pointsLevel(round),
           round.timeLimit - seconds,
           round.timeLimit,
         )
-      : 0;
+      : { base: 0, bonus: 0, total: 0 };
+    const points = breakdown.total;
 
     round.answers = [
       ...round.answers,
@@ -405,6 +421,9 @@ export class BibleGamesService {
       answer: q.answer,
       explain: q.explain,
       points,
+      basePoints: breakdown.base,
+      speedBonus: breakdown.bonus,
+      seconds: Math.round(seconds * 10) / 10,
       roundPoints: round.points,
       finished,
       result,
@@ -504,10 +523,12 @@ export class BibleGamesService {
     let awarded = round.points;
     let passed: boolean | null = null;
     let unlockedLevel: number | null = null;
+    let previousBest: number | null = null;
 
     if (round.mode === BibleGameModeEnum.LEVEL && round.level) {
       passed = round.correct >= PASS_MARK;
       const best = progress.best[round.level] ?? { correct: 0, points: 0 };
+      previousBest = best.points || null;
       // A failed round scores nothing; replaying a passed level only adds what beats your best on it.
       awarded = passed ? Math.max(0, round.points - best.points) : 0;
       progress.best = {
@@ -573,8 +594,30 @@ export class BibleGamesService {
       passed,
       points: round.points,
       awarded,
+      ...this.speedSummary(round),
+      previousBest,
       unlockedLevel,
       rankThisMonth: month.rank,
+    };
+  }
+
+  private speedSummary(
+    round: BibleGameRound,
+  ): Pick<RoundResult, 'speedBonus' | 'fastestSeconds' | 'averageSeconds'> {
+    const right = round.answers.filter((a) => a.correct);
+    if (!right.length) {
+      return { speedBonus: 0, fastestSeconds: null, averageSeconds: null };
+    }
+    const { base } = scoringFor(this.pointsLevel(round));
+    const times = right.map((a) => a.seconds);
+    return {
+      speedBonus: right.reduce(
+        (sum, a) => sum + Math.max(0, a.points - base),
+        0,
+      ),
+      fastestSeconds: Math.min(...times),
+      averageSeconds:
+        Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10,
     };
   }
 
@@ -614,6 +657,7 @@ export class BibleGamesService {
       ...(q.ref ? { ref: q.ref } : {}),
       options: q.options,
       timeLimit: round.timeLimit,
+      scoring: scoringFor(this.pointsLevel(round)),
     };
   }
 

@@ -1,6 +1,10 @@
 import { EventAudienceEnum } from '../enums/event-audience.enum';
 import { Group } from '../../group/entity/group.entity';
-import { effectiveAudience, scopeToAudience } from '../utility/event-audience';
+import {
+  AudienceTarget,
+  effectiveAudience,
+  scopeToAudience,
+} from '../utility/event-audience';
 import {
   BadRequestException,
   Injectable,
@@ -36,6 +40,7 @@ import {
 } from '../../utility/service/notification-dispatch.service';
 import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 @Injectable()
 export class EventReminderService {
@@ -57,6 +62,7 @@ export class EventReminderService {
     private readonly config: ConfigService,
     private readonly gate: SchedulerGateService,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {
     this.currencyLocale = this.config.get<string>('CURRENCY_LOCALE');
   }
@@ -225,7 +231,9 @@ export class EventReminderService {
     const title = `Service Reminder: ${slot.name}`;
     const body = `This is a reminder that <strong>${slot.name}</strong> begins in ${label}. Please make your way and check in on time. God bless you!`;
 
-    const eventAudience = effectiveAudience(slot.event ?? {});
+    // An announcement has one audience, so a slot with its own (narrower) audience takes precedence.
+    const target: AudienceTarget = slot.audience ? slot : (slot.event ?? {});
+    const eventAudience = effectiveAudience(target);
     const announcement = this.announcementRepo.create({
       title,
       body,
@@ -234,7 +242,7 @@ export class EventReminderService {
       department: reminder.department,
       group:
         eventAudience === EventAudienceEnum.GROUP
-          ? ({ id: slot.event.audienceGroupId } as Group)
+          ? ({ id: target.audienceGroupId } as Group)
           : null,
       targetMember: null,
       publishedAt: now,
@@ -243,6 +251,7 @@ export class EventReminderService {
     await this.announcementRepo.save(announcement);
 
     const audience = await this.getRecipients(reminder);
+    const timeZone = await this.churchTimezone.get();
     const withEmail = audience.filter((m) => !!m.email);
     const recipients = withEmail.map((m) => m.email);
     const recipientIds = audience.map((m) => m.id);
@@ -259,7 +268,7 @@ export class EventReminderService {
               time_label: label,
               start_time: slot.startTime.toLocaleTimeString(
                 this.currencyLocale,
-                { hour: '2-digit', minute: '2-digit' },
+                { hour: '2-digit', minute: '2-digit', timeZone },
               ),
             },
           }
@@ -318,6 +327,7 @@ export class EventReminderService {
     }
 
     scopeToAudience(qb, 'm', reminder.serviceSlot.event ?? {});
+    scopeToAudience(qb, 'm', reminder.serviceSlot, 'slotAudience');
     const members = await qb.getMany();
     return members.map((m) => ({ id: m.id, email: m.email }));
   }

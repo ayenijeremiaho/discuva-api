@@ -16,6 +16,7 @@ import {
 import { ServiceProgrammeService } from './service-programme.service';
 import { ServiceSession } from '../entity/service-session.entity';
 import { ServiceSessionSlot } from '../entity/service-session-slot.entity';
+import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import { ServicePauseEntry } from '../entity/service-pause-entry.entity';
 import { ServiceActionEntry } from '../entity/service-action-entry.entity';
 import { ServiceSessionAccessGrant } from '../entity/service-session-access-grant.entity';
@@ -35,6 +36,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { PdfService } from '../../utility/service/pdf.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -228,6 +230,13 @@ describe('ServiceSessionService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         ServiceSessionService,
         { provide: TransactionHost, useValue: mockTxHost },
         { provide: CacheService, useValue: mockCacheService },
@@ -1791,6 +1800,93 @@ describe('ServiceSessionService', () => {
         service.reorderLiveSlots(
           'SVC-ABC123',
           ['sss-0', 'sss-1', 'sss-2'],
+          'member-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('addLiveSlot', () => {
+    const programmeSlots = [
+      { id: 'ps-0', position: 0 },
+      { id: 'ps-1', position: 1 },
+      { id: 'ps-2', position: 2 },
+    ];
+    const liveSession = () => ({
+      ...mockSession,
+      programme: { id: 'prog-1', slots: programmeSlots.map((p) => ({ ...p })) },
+      sessionSlots: programmeSlots.map((p, i) => ({
+        id: `sss-${i}`,
+        position: i,
+        programmeSlot: { ...p },
+      })),
+    });
+
+    beforeEach(() => {
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      mockCacheService.get.mockResolvedValue(liveAnchor); // currentSlotPosition: 0
+      mockSessionRepo.findOne.mockResolvedValue(liveSession());
+    });
+
+    it('inserts the section at the requested position and shifts later slots', async () => {
+      const result = await service.addLiveSlot(
+        'SVC-ABC123',
+        { type: ServiceSlotTypeEnum.PRAYER, allocatedMinutes: 5, position: 1 },
+        'member-1',
+      );
+
+      expect(result).toEqual(
+        expect.objectContaining({ position: 1, status: 'PENDING' }),
+      );
+      const savedSessionShift = mockManager.save.mock.calls.find(
+        ([entity, data]) =>
+          entity === ServiceSessionSlot && Array.isArray(data),
+      )[1] as any[];
+      expect(savedSessionShift.map((s: any) => [s.id, s.position])).toEqual([
+        ['sss-1', 2],
+        ['sss-2', 3],
+      ]);
+      const newProgrammeSlot = mockManager.create.mock.calls.find(
+        ([entity]) => entity === ServiceProgrammeSlot,
+      )[1] as unknown;
+      expect(newProgrammeSlot).toEqual(
+        expect.objectContaining({
+          position: 1,
+          type: 'PRAYER',
+          allocatedMinutes: 5,
+        }),
+      );
+    });
+
+    it('appends to the end when no position is given', async () => {
+      const result = await service.addLiveSlot(
+        'SVC-ABC123',
+        { type: ServiceSlotTypeEnum.OTHER, allocatedMinutes: 3 },
+        'member-1',
+      );
+      expect(result.position).toBe(3);
+    });
+
+    it('rejects a position at or before the current slot', async () => {
+      await expect(
+        service.addLiveSlot(
+          'SVC-ABC123',
+          { type: ServiceSlotTypeEnum.OTHER, allocatedMinutes: 3, position: 0 },
+          'member-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects both a member and a guest name', async () => {
+      await expect(
+        service.addLiveSlot(
+          'SVC-ABC123',
+          {
+            type: ServiceSlotTypeEnum.SPEAKER,
+            allocatedMinutes: 10,
+            memberId: '00000000-0000-0000-0000-000000000001',
+            guestName: 'Guest',
+          },
           'member-1',
         ),
       ).rejects.toThrow(BadRequestException);

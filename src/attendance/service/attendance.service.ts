@@ -1,5 +1,8 @@
 import { EventAudienceEnum } from '../../event/enums/event-audience.enum';
-import { effectiveAudience } from '../../event/utility/event-audience';
+import {
+  AudienceTarget,
+  effectiveAudience,
+} from '../../event/utility/event-audience';
 import { CheckinCloseModeEnum } from '../../event/enums/checkin-close-mode.enum';
 import {
   BadRequestException,
@@ -40,6 +43,7 @@ import { DepartmentService } from '../../department/service/department.service';
 import { DepartmentAccessService } from '../../department/service/department-access.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { DateService } from '../../utility/service/date.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
@@ -125,6 +129,7 @@ export class AttendanceService {
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly attendanceSettingsService: AttendanceSettingsService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -143,7 +148,7 @@ export class AttendanceService {
     ]);
 
     this.assertMemberActive(member);
-    await this.assertInAudience(member, slot.event);
+    await this.assertInAudience(member, slot);
 
     const isWorker = member.role === MemberRoleEnum.WORKER;
     const cfg = this.eventService.resolveSlotConfig(slot);
@@ -183,7 +188,7 @@ export class AttendanceService {
     const existing = await this.alreadyCheckedIn(user.id, slot.event.id);
     if (existing && GENUINELY_ATTENDED_STATUSES.has(existing.status)) {
       const time = existing.checkinTime
-        ? ` at ${this.dateService.format(existing.checkinTime, DateService.PATTERNS.EMAIL_TIME)}`
+        ? ` at ${this.dateService.format(existing.checkinTime, DateService.PATTERNS.EMAIL_TIME, await this.churchTimezone.get())}`
         : '';
       // The code and details let the app show "Checked in" instead of an error.
       throw new BadRequestException({
@@ -245,17 +250,21 @@ export class AttendanceService {
     }
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
+    const timeZone = await this.churchTimezone.get();
     const formattedStartTime = this.dateService.format(
       slot.startTime,
       DateService.PATTERNS.EMAIL_DATE,
+      timeZone,
     );
     const formattedSlotTime = this.dateService.format(
       slot.startTime,
       DateService.PATTERNS.EMAIL_TIME,
+      timeZone,
     );
     const formattedCheckinTime = this.dateService.format(
       now,
       DateService.PATTERNS.EMAIL_TIME,
+      timeZone,
     );
 
     const churchName = await this.utilityService.resolveChurchName();
@@ -499,12 +508,19 @@ export class AttendanceService {
       .take(MAX_EXPORT_ROWS)
       .getMany();
 
+    const timeZone = await this.churchTimezone.get();
     const rows = records.map((r) => ({
       member: `${r.member?.firstname ?? ''} ${r.member?.lastname ?? ''}`.trim(),
       department: r.member?.workerProfile?.department?.name ?? '',
       service: r.serviceSlot?.name ?? '',
       status: r.status,
-      checkinTime: r.checkinTime ? r.checkinTime.toISOString() : '',
+      checkinTime: r.checkinTime
+        ? this.dateService.format(
+            r.checkinTime,
+            DateService.PATTERNS.DATETIME,
+            timeZone,
+          )
+        : '',
     }));
 
     const buffer = await this.excelService.buildWorkbook(
@@ -533,7 +549,11 @@ export class AttendanceService {
       'report-export',
       {
         reportTitle: 'Attendance History',
-        generatedAt: new Date().toLocaleString(),
+        generatedAt: this.dateService.format(
+          new Date(),
+          DateService.PATTERNS.DATETIME_MEDIUM,
+          timeZone,
+        ),
         filterSummary: filterSummary || null,
       },
       [{ filename: 'attendance-history.xlsx', content: buffer }],
@@ -1251,7 +1271,7 @@ export class AttendanceService {
       record.checkinTime = record.checkinTime ?? this.dateService.now();
     } else {
       // A new record outside the event's audience would count against that person's streak and rank.
-      await this.assertInAudience(member, slot.event);
+      await this.assertInAudience(member, slot);
       record = this.attendanceRepository.create({
         member,
         event: slot.event,
@@ -1312,6 +1332,7 @@ export class AttendanceService {
       relations: [
         'event',
         'event.audienceGroup',
+        'audienceGroup',
         'config',
         'config.defaultVenue',
         'venueOverride',
@@ -1321,22 +1342,48 @@ export class AttendanceService {
     return slot;
   }
 
-  private async assertInAudience(member: Member, event: Event): Promise<void> {
-    const audience = effectiveAudience(event);
+  // The event's audience, then the slot's own narrower one (e.g. a workers-only meeting).
+  private async assertInAudience(
+    member: Member,
+    slot: ServiceSlot,
+  ): Promise<void> {
+    await this.assertInTarget(
+      member,
+      slot.event,
+      slot.event.name,
+      slot.event.audienceGroup?.name,
+    );
+    if (slot.audience) {
+      await this.assertInTarget(
+        member,
+        slot,
+        slot.name,
+        slot.audienceGroup?.name,
+      );
+    }
+  }
+
+  private async assertInTarget(
+    member: Member,
+    target: AudienceTarget,
+    name: string,
+    groupName?: string,
+  ): Promise<void> {
+    const audience = effectiveAudience(target);
     if (
       audience === EventAudienceEnum.WORKERS &&
       member.role !== MemberRoleEnum.WORKER
     ) {
-      throw new ForbiddenException(`${event.name} is for workers only.`);
+      throw new ForbiddenException(`${name} is for workers only.`);
     }
     if (audience === EventAudienceEnum.GROUP) {
       const rows: unknown[] = await this.txHost.tx.query(
         'SELECT 1 FROM group_members WHERE group_id = $1 AND member_id = $2 LIMIT 1',
-        [event.audienceGroupId, member.id],
+        [target.audienceGroupId, member.id],
       );
       if (!rows.length) {
         throw new ForbiddenException(
-          `${event.name} is for ${event.audienceGroup?.name ?? 'a specific group'} only.`,
+          `${name} is for ${groupName ?? 'a specific group'} only.`,
         );
       }
     }

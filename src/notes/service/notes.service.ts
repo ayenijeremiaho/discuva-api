@@ -35,7 +35,7 @@ import {
 } from '../util/note-streak';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Sermon } from '../../sermon/entity/sermon.entity';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';

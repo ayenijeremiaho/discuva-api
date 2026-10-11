@@ -8,6 +8,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { ExcelService } from '../../utility/service/excel.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -88,6 +89,13 @@ describe('ServiceHeadcountService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         ServiceHeadcountService,
         { provide: CacheService, useValue: mockCacheService },
         { provide: ExcelService, useValue: mockExcelService },

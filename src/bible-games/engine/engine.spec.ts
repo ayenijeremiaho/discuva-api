@@ -5,6 +5,8 @@ import {
   LEVELS,
   LEVEL_COUNT,
   pointsFor,
+  pointsBreakdown,
+  scoringFor,
 } from './levels';
 import { seededRng } from './rng';
 import { label, verse } from './bible';
@@ -166,6 +168,17 @@ describe('Bible questions', () => {
     expect(pointsFor(20, 0, 12)).toBe(105);
     expect(pointsFor(20, 12, 12)).toBe(157);
     expect(pointsFor(5, 30, 20)).toBe(pointsFor(5, 20, 20));
+    expect(pointsBreakdown(10, 9, 18)).toEqual({
+      base: 55,
+      bonus: 13,
+      total: 68,
+    });
+    expect(pointsBreakdown(10, -2, 18)).toEqual({
+      base: 55,
+      bonus: 0,
+      total: 55,
+    });
+    expect(scoringFor(20)).toEqual({ base: 105, maxBonus: 52 });
   });
 
   describe('wrong options', () => {

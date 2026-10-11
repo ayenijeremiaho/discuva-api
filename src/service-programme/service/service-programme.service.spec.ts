@@ -22,6 +22,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { PdfService } from '../../utility/service/pdf.service';
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockProgrammeQueryBuilder = {
   innerJoinAndSelect: jest.fn().mockReturnThis(),
@@ -154,6 +155,13 @@ describe('ServiceProgrammeService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         ServiceProgrammeService,
         { provide: TransactionHost, useValue: mockTxHost },
         {
@@ -1297,6 +1305,7 @@ describe('ServiceProgrammeService', () => {
       await service.updateSlot('prog-1', 'slot-1', {
         backupMemberId: 'member-2',
       });
+      await new Promise(setImmediate);
 
       expect(mockNotificationDispatchService.notifyMember).toHaveBeenCalledWith(
         expect.objectContaining({

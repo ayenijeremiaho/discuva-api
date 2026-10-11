@@ -7,6 +7,7 @@ import { Group } from '../../group/entity/group.entity';
 import {
   effectiveAudience,
   eventVisibleToViewerSql,
+  slotIsForViewer,
 } from '../utility/event-audience';
 import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
@@ -42,6 +43,7 @@ const SLOT_RELATIONS = [
   'serviceSlots.config',
   'serviceSlots.config.defaultVenue',
   'serviceSlots.venueOverride',
+  'serviceSlots.audienceGroup',
 ];
 
 export interface EventViewer {
@@ -173,6 +175,7 @@ export class EventService {
     });
     if (!event || (viewer && !(await this.isForViewer(event, viewer))))
       throw new NotFoundException('Event not found');
+    if (viewer) await this.hideSlotsNotForViewer([event], viewer);
     if (memberId) await this.attachMyAttendance([event], memberId);
     return event;
   }
@@ -201,6 +204,7 @@ export class EventService {
       .leftJoinAndSelect('serviceSlots.config', 'config')
       .leftJoinAndSelect('config.defaultVenue', 'defaultVenue')
       .leftJoinAndSelect('serviceSlots.venueOverride', 'venueOverride')
+      .leftJoinAndSelect('serviceSlots.audienceGroup', 'slotAudienceGroup')
       .orderBy(`event.${orderBy}`, order)
       .addOrderBy('serviceSlots.startTime', 'ASC')
       .skip((page - 1) * limit)
@@ -224,6 +228,8 @@ export class EventService {
 
     const [events, total] = await qb.getManyAndCount();
 
+    if (filter.viewer && events.length)
+      await this.hideSlotsNotForViewer(events, filter.viewer);
     if (filter.memberId && events.length)
       await this.attachMyAttendance(events, filter.memberId);
 
@@ -439,6 +445,27 @@ export class EventService {
     return { audience, audienceGroupId: dto.audienceGroupId };
   }
 
+  // Members only see the services in an event they can attend (e.g. not a workers-only meeting).
+  private async hideSlotsNotForViewer(
+    events: Event[],
+    viewer: EventViewer,
+  ): Promise<void> {
+    const restricted = events.some((e) =>
+      e.serviceSlots?.some((s) => s.audience),
+    );
+    if (!restricted) return;
+    const rows: { group_id: string }[] = await this.txHost.tx.query(
+      'SELECT group_id FROM group_members WHERE member_id = $1',
+      [viewer.id],
+    );
+    const groupIds = new Set(rows.map((r) => r.group_id));
+    for (const event of events) {
+      event.serviceSlots = (event.serviceSlots ?? []).filter((slot) =>
+        slotIsForViewer(slot, { isWorker: viewer.isWorker, groupIds }),
+      );
+    }
+  }
+
   private async isForViewer(
     event: Event,
     viewer: EventViewer,
@@ -507,6 +534,9 @@ export class EventService {
         enforceMemberLocationOverride: next.enforceMemberLocationOverride,
         venueOverride: next.venueOverride,
         formatOverride: next.formatOverride,
+        audience: next.audience,
+        audienceGroupId: next.audienceGroupId,
+        audienceGroup: undefined,
       });
     });
     await this.slotRepository.save(updated);
@@ -672,7 +702,26 @@ export class EventService {
       enforceMemberLocationOverride: dto.enforceMemberLocationOverride ?? null,
       venueOverride,
       formatOverride,
+      ...(await this.resolveSlotAudience(dto)),
     });
+  }
+
+  private async resolveSlotAudience(
+    dto: CreateServiceSlotDto,
+  ): Promise<Pick<ServiceSlot, 'audience' | 'audienceGroupId'>> {
+    if (!dto.audience) return { audience: null, audienceGroupId: null };
+    if (dto.audience === EventAudienceEnum.WORKERS) {
+      return { audience: dto.audience, audienceGroupId: null };
+    }
+    if (
+      !dto.audienceGroupId ||
+      !(await this.groupRepository.existsBy({ id: dto.audienceGroupId }))
+    ) {
+      throw new BadRequestException(
+        `Choose an existing group for "${dto.name ?? 'Service'}"`,
+      );
+    }
+    return { audience: dto.audience, audienceGroupId: dto.audienceGroupId };
   }
 
   /** True if this event has any recorded attendance or any service session (LIVE or COMPLETED) ever started for one of its slots. */

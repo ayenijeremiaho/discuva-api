@@ -1,7 +1,7 @@
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Event } from '../event/entity/event.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
-import { ChurchTimezoneService } from '../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../utility/service/church-timezone.service';
 import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { ChurchCalendar } from './entity/church-calendar.entity';

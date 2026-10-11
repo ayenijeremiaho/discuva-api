@@ -14,8 +14,8 @@ import { PdfService } from '../../utility/service/pdf.service';
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
-import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const PREFIX = 'CERT';
 const format = (year: number, n: number) =>
@@ -32,6 +32,7 @@ export class ClassCertificateService {
     private readonly pdfService: PdfService,
     private readonly notifications: NotificationDispatchService,
     private readonly auditLogService: AuditLogService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   // Issues (or re-issues) a certificate; without a number the next CERT-YYYY-NNNN is used.
@@ -167,7 +168,7 @@ export class ClassCertificateService {
         day: 'numeric',
         month: 'long',
         year: 'numeric',
-        timeZone: CHURCH_TIMEZONE,
+        timeZone: await this.churchTimezone.get(),
       }),
       certificateNumber: e.certificateNumber,
       signatories,

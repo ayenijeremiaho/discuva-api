@@ -41,8 +41,8 @@ import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
-import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { addDays, todayInChurchTz } from '../util/church-date';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 export interface SessionRosterEntry {
   memberId: string;
@@ -114,6 +114,7 @@ export class SundaySchoolService {
     private readonly notificationDispatchService: NotificationDispatchService,
     private readonly followUpService: FollowUpService,
     private readonly settings: SundaySchoolSettingsService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   // With "one class per member" on: memberId → name of another class they're already in.
@@ -464,7 +465,7 @@ export class SundaySchoolService {
           vars: {
             class_name: cls.name,
             closes_at: closesAt.toLocaleTimeString('en-GB', {
-              timeZone: CHURCH_TIMEZONE,
+              timeZone: await this.churchTimezone.get(),
               hour: '2-digit',
               minute: '2-digit',
             }),

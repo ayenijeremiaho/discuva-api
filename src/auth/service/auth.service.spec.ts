@@ -30,6 +30,7 @@ import refreshJwtConfig from '../../config/refresh.jwt.config';
 import { SessionSurface } from '../enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { WebauthnService } from './webauthn.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockUtilityService = {
   sendEmailWithTemplate: jest.fn(),
@@ -163,6 +164,13 @@ describe('AuthService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         AuthService,
         { provide: MemberService, useValue: mockMemberService },
         { provide: MemberSessionService, useValue: mockSessionService },

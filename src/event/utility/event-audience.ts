@@ -15,24 +15,37 @@ export function effectiveAudience(target: AudienceTarget): EventAudienceEnum {
     : audience;
 }
 
-// Narrows a member query to the people an event is for.
+// Narrows a member query to the people an event is for. `key` keeps params distinct when stacking (event + slot).
 export function scopeToAudience<T extends ObjectLiteral>(
   qb: SelectQueryBuilder<T>,
   memberAlias: string,
   target: AudienceTarget,
+  key = 'audience',
 ): SelectQueryBuilder<T> {
   const audience = effectiveAudience(target);
   if (audience === EventAudienceEnum.WORKERS) {
-    qb.andWhere(`${memberAlias}.role = :audienceRole`, {
-      audienceRole: MemberRoleEnum.WORKER,
+    qb.andWhere(`${memberAlias}.role = :${key}Role`, {
+      [`${key}Role`]: MemberRoleEnum.WORKER,
     });
   } else if (audience === EventAudienceEnum.GROUP) {
     qb.andWhere(
-      `EXISTS (SELECT 1 FROM group_members audience_gm WHERE audience_gm.member_id = ${memberAlias}.id AND audience_gm.group_id = :audienceGroupId)`,
-      { audienceGroupId: target.audienceGroupId },
+      `EXISTS (SELECT 1 FROM group_members ${key}_gm WHERE ${key}_gm.member_id = ${memberAlias}.id AND ${key}_gm.group_id = :${key}GroupId)`,
+      { [`${key}GroupId`]: target.audienceGroupId },
     );
   }
   return qb;
+}
+
+// Whether a viewer may attend a slot with its own audience; `groupIds` are the viewer's groups.
+export function slotIsForViewer(
+  slot: AudienceTarget,
+  viewer: { isWorker: boolean; groupIds: ReadonlySet<string> },
+): boolean {
+  const audience = effectiveAudience(slot);
+  if (audience === EventAudienceEnum.WORKERS) return viewer.isWorker;
+  if (audience === EventAudienceEnum.GROUP)
+    return viewer.groupIds.has(slot.audienceGroupId!);
+  return true;
 }
 
 // SQL condition for "this event is for the viewer"; needs :viewerId and :viewerIsWorker.

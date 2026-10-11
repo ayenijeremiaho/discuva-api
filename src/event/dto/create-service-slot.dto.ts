@@ -3,13 +3,16 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsOptional,
   IsString,
   IsUUID,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
+import { EventAudienceEnum } from '../enums/event-audience.enum';
 
 export class CreateServiceSlotDto {
   @IsOptional()
@@ -72,4 +75,13 @@ export class CreateServiceSlotDto {
   @IsOptional()
   @IsEnum(MeetingFormatEnum)
   formatOverride?: MeetingFormatEnum;
+
+  // Only narrows the event's audience for this service — omit for "whoever the event is for".
+  @IsOptional()
+  @IsIn([EventAudienceEnum.WORKERS, EventAudienceEnum.GROUP])
+  audience?: EventAudienceEnum.WORKERS | EventAudienceEnum.GROUP;
+
+  @ValidateIf((o) => o.audience === EventAudienceEnum.GROUP)
+  @IsUUID()
+  audienceGroupId?: string;
 }

@@ -241,14 +241,28 @@ export const DAILY_SPEC: LevelSpec = {
 };
 
 // Points for a right answer: 10 at level 1 up to 105 at level 20, plus up to half again for speed.
+export function scoringFor(level: number): { base: number; maxBonus: number } {
+  const base = 10 + (Math.max(level, 1) - 1) * 5;
+  return { base, maxBonus: Math.floor(base / 2) };
+}
+
+// The speed bonus shrinks evenly with the clock, so members can see what an answer is worth right now.
+export function pointsBreakdown(
+  level: number,
+  secondsLeft: number,
+  timeLimit: number,
+): { base: number; bonus: number; total: number } {
+  const { base, maxBonus } = scoringFor(level);
+  const bonus = Math.floor(
+    (maxBonus * Math.max(0, Math.min(secondsLeft, timeLimit))) / timeLimit,
+  );
+  return { base, bonus, total: base + bonus };
+}
+
 export function pointsFor(
   level: number,
   secondsLeft: number,
   timeLimit: number,
 ): number {
-  const base = 10 + (Math.max(level, 1) - 1) * 5;
-  const bonus = Math.floor(
-    ((base / 2) * Math.max(0, Math.min(secondsLeft, timeLimit))) / timeLimit,
-  );
-  return base + bonus;
+  return pointsBreakdown(level, secondsLeft, timeLimit).total;
 }

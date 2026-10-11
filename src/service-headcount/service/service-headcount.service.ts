@@ -16,6 +16,7 @@ import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto
 import { ExcelService } from '../../utility/service/excel.service';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const TRENDS_TTL = 1800;
 const MAX_EXPORT_ROWS = 5000;
@@ -78,6 +79,7 @@ export class ServiceHeadcountService {
     private readonly headcountRepo: Repository<ServiceHeadcount>,
     @InjectRepository(ServiceSlot)
     private readonly serviceSlotRepo: Repository<ServiceSlot>,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   private readonly logger = new Logger(ServiceHeadcountService.name);
@@ -219,7 +221,11 @@ export class ServiceHeadcountService {
       'report-export',
       {
         reportTitle: 'Service Headcount',
-        generatedAt: new Date().toLocaleString(),
+        generatedAt: new Date().toLocaleString('en-GB', {
+          timeZone: await this.churchTimezone.get(),
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }),
         filterSummary: filterSummary || null,
       },
       [{ filename: 'service-headcount.xlsx', content: buffer }],

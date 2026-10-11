@@ -42,6 +42,8 @@ interface PdfBranding {
   // e.g. SVG) — every report already renders correctly without a logo,
   // so this only ever adds to the header, never blocks it.
   logoImage: { dataUrl: string; format: 'PNG' | 'JPEG' } | null;
+  // IANA zone for rendering times — the server runs in UTC.
+  timezone: string;
 }
 
 // The HOD's own department, at the visibility rules already applied by
@@ -127,6 +129,7 @@ export class PdfService {
       currencyCode: this.config.get<string>('CURRENCY_CODE'),
       currencyLocale: this.config.get<string>('CURRENCY_LOCALE'),
       logoImage: null,
+      timezone: this.config.get<string>('TIMEZONE') ?? 'Africa/Lagos',
     };
 
     const tenantId = this.cls.get('tenantId');
@@ -150,6 +153,7 @@ export class PdfService {
       currencyCode: tenant.currency || fallback.currencyCode,
       currencyLocale: fallback.currencyLocale,
       logoImage,
+      timezone: tenant.timezone || fallback.timezone,
     };
   }
 
@@ -385,13 +389,16 @@ export class PdfService {
       doc,
       y,
       report.programme.serviceSlotName ?? 'Session',
-      this.fmtDate(report.startedAt),
+      this.fmtDate(report.startedAt, branding.timezone),
     );
 
     y = this.drawLabelValueGrid(doc, y + 4, [
       ['Session Code', report.sessionCode],
-      ['Started', this.fmtTime(report.startedAt)],
-      ['Ended', report.endedAt ? this.fmtTime(report.endedAt) : '—'],
+      ['Started', this.fmtTime(report.startedAt, branding.timezone)],
+      [
+        'Ended',
+        report.endedAt ? this.fmtTime(report.endedAt, branding.timezone) : '—',
+      ],
       [
         'Duration',
         report.totalDurationMinutes == null
@@ -431,7 +438,7 @@ export class PdfService {
           String(slot.position + 1),
           this.slotTopicLabel(slot),
           slot.speakerName ?? '—',
-          this.fmtSlotTimeRange(slot),
+          this.fmtSlotTimeRange(slot, branding.timezone),
           slot.allocatedMinutes == null ? '—' : `${slot.allocatedMinutes} min`,
           slot.actualSeconds == null
             ? '—'
@@ -586,7 +593,7 @@ export class PdfService {
     const money = (n: number) =>
       n.toLocaleString(branding.currencyLocale, { minimumFractionDigits: 2 });
 
-    const generatedText = `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' })}`;
+    const generatedText = `Generated: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric', timeZone: branding.timezone })}`;
 
     let periodLabel: string | undefined;
     let periodValue: string | undefined;
@@ -781,7 +788,7 @@ export class PdfService {
 
     // ── Per-session sections ──────────────────────────────────────────────
     for (const entry of report.sessions) {
-      const slotTime = `${this.fmtTime(entry.slotStartTime)} – ${this.fmtTime(entry.slotEndTime)}`;
+      const slotTime = `${this.fmtTime(entry.slotStartTime, branding.timezone)} – ${this.fmtTime(entry.slotEndTime, branding.timezone)}`;
       const r = entry.report;
 
       if (y > 220) {
@@ -831,7 +838,7 @@ export class PdfService {
             String(slot.position + 1),
             this.slotTopicLabel(slot),
             slot.speakerName ?? '—',
-            this.fmtSlotTimeRange(slot),
+            this.fmtSlotTimeRange(slot, branding.timezone),
             slot.allocatedMinutes == null
               ? '—'
               : `${slot.allocatedMinutes} min`,
@@ -962,6 +969,7 @@ export class PdfService {
         align: 'center',
       });
     const generatedAt = new Date().toLocaleString('en-GB', {
+      timeZone: branding.timezone,
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -1204,6 +1212,7 @@ export class PdfService {
       slot?.name ?? 'Service',
       slot?.startTime ?? null,
       sorted,
+      branding.timezone,
     );
     this.drawPageFooter(doc, branding);
   }
@@ -1234,7 +1243,7 @@ export class PdfService {
       }
 
       if (!programme) {
-        y = this.drawNoProgammePlaceholder(doc, y, slot);
+        y = this.drawNoProgammePlaceholder(doc, y, slot, branding.timezone);
         continue;
       }
 
@@ -1247,6 +1256,7 @@ export class PdfService {
         slot.name,
         slot.startTime ?? null,
         sorted,
+        branding.timezone,
       );
       y += 6;
     }
@@ -1298,6 +1308,7 @@ export class PdfService {
     serviceName: string,
     serviceStart: Date | null,
     slots: ServiceProgrammeSlot[],
+    timeZone: string,
   ): number {
     const hasBackup = slots.some(
       (s) => s.backupMember || s.backupGuestName || s.backupDepartment,
@@ -1332,9 +1343,9 @@ export class PdfService {
     for (let i = 0; i < slots.length; i++) {
       const s = slots[i];
       const mins = s.allocatedMinutes ?? 0;
-      const rowStart = cursor ? this.fmtTime(cursor) : '—';
+      const rowStart = cursor ? this.fmtTime(cursor, timeZone) : '—';
       const rowEnd = cursor
-        ? this.fmtTime(new Date(cursor.getTime() + mins * 60_000))
+        ? this.fmtTime(new Date(cursor.getTime() + mins * 60_000), timeZone)
         : '—';
       if (cursor) cursor = new Date(cursor.getTime() + mins * 60_000);
       totalMinutes += mins;
@@ -1367,7 +1378,7 @@ export class PdfService {
     }
 
     const totalLabel = this.fmtTotalDuration(totalMinutes);
-    const finalTime = cursor ? this.fmtTime(cursor) : '—';
+    const finalTime = cursor ? this.fmtTime(cursor, timeZone) : '—';
     const footRow = [
       '',
       '',
@@ -1445,10 +1456,11 @@ export class PdfService {
     doc: jsPDF,
     y: number,
     slot: ServiceSlot,
+    timeZone: string,
   ): number {
     const timeLabel =
       slot.startTime && slot.endTime
-        ? `${this.fmtTime(slot.startTime)} – ${this.fmtTime(slot.endTime)}`
+        ? `${this.fmtTime(slot.startTime, timeZone)} – ${this.fmtTime(slot.endTime, timeZone)}`
         : '';
 
     autoTable(doc, {
@@ -1834,27 +1846,29 @@ export class PdfService {
     }
   }
 
-  private fmtDate(date: Date): string {
+  private fmtDate(date: Date, timeZone: string): string {
     return new Date(date).toLocaleDateString('en-GB', {
       day: '2-digit',
       month: 'long',
       year: 'numeric',
+      timeZone,
     });
   }
 
-  private fmtTime(date: Date): string {
+  private fmtTime(date: Date, timeZone: string): string {
     return new Date(date).toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
+      timeZone,
     });
   }
 
-  private fmtSlotTimeRange(slot: SessionSlotReport): string {
+  private fmtSlotTimeRange(slot: SessionSlotReport, timeZone: string): string {
     if (!slot.startedAt) return '—';
-    const start = this.fmtTime(slot.startedAt);
+    const start = this.fmtTime(slot.startedAt, timeZone);
     if (!slot.completedAt) return `${start} –`;
-    return `${start} – ${this.fmtTime(slot.completedAt)}`;
+    return `${start} – ${this.fmtTime(slot.completedAt, timeZone)}`;
   }
 
   private fmtMonthShort(ym: string): string {

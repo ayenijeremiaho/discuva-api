@@ -1,5 +1,5 @@
 import { Event } from '../../event/entity/event.entity';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';

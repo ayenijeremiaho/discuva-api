@@ -10,7 +10,7 @@ import { NotesService } from './service/notes.service';
 import { NotesController } from './controller/notes.controller';
 import { AdminNotesController } from './controller/admin-notes.controller';
 import { NoteNudgeScheduler } from './scheduler/note-nudge.scheduler';
-import { ChurchTimezoneService } from '../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../utility/service/church-timezone.service';
 
 @Module({
   imports: [

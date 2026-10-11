@@ -36,6 +36,7 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { randomBytes } from 'node:crypto';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const PICKUP_CODE_CHARSET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const PICKUP_CODE_LENGTH = 6;
@@ -57,6 +58,7 @@ export class ChildrenChurchService {
     private readonly checkInRepo: Repository<ChildCheckIn>,
     private readonly utilityService: UtilityService,
     private readonly departmentAccessService: DepartmentAccessService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   // ─── Age Groups ───────────────────────────────────────────────────────────
@@ -775,6 +777,7 @@ export class ChildrenChurchService {
     const classGroupName = child.classGroup?.name ?? 'Children Church';
     const checkoutTimeStr = checkIn.checkoutTime
       ? new Intl.DateTimeFormat('en-GB', {
+          timeZone: await this.churchTimezone.get(),
           day: '2-digit',
           month: 'long',
           year: 'numeric',

@@ -22,6 +22,8 @@ import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { ServiceProgrammeService } from './service-programme.service';
 import { PauseSessionDto } from '../dto/pause-session.dto';
 import { RuntimeOverrideDto } from '../dto/runtime-override.dto';
+import { AddLiveSlotDto } from '../dto/add-live-slot.dto';
+import { ServiceProgrammeSlot } from '../entity/service-programme-slot.entity';
 import { ServiceSessionStatusEnum } from '../enum/service-session-status.enum';
 import { ServiceSessionSlotStatusEnum } from '../enum/service-session-slot-status.enum';
 import { ServiceActionRoleEnum } from '../enum/service-action-role.enum';
@@ -43,6 +45,7 @@ import {
   withEffectiveSessionSlots,
   EffectiveSessionSlot,
 } from '../util/slot-display';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 export interface SessionAnchor {
   currentSlotPosition: number;
@@ -245,6 +248,7 @@ export class ServiceSessionService {
     private readonly workerProfileRepo: Repository<WorkerProfile>,
     private readonly configService: ConfigService,
     private readonly departmentAccessService: DepartmentAccessService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   private readonly logger = new Logger(ServiceSessionService.name);
@@ -1018,6 +1022,107 @@ export class ServiceSessionService {
         : ServiceActionRoleEnum.PUBLIC_LINK,
       'SLOT_OVERRIDE',
       `position:${position}`,
+      memberId,
+      actorLabel,
+    );
+
+    return saved;
+  }
+
+  // Inserts a new section into a running service. It is also added to the
+  // programme itself so reports and the programme PDF include it.
+  async addLiveSlot(
+    sessionCode: string,
+    dto: AddLiveSlotDto,
+    memberId: string | null,
+    actorLabel: string | null = null,
+  ): Promise<ServiceSessionSlot> {
+    if (memberId) await this.assertCanControlSession(memberId);
+    if (dto.memberId && dto.guestName) {
+      throw new BadRequestException(
+        'Choose a member or a guest name, not both',
+      );
+    }
+
+    const anchor = await this.getAnchorOrThrow(sessionCode);
+    const session = await this.getSessionOrThrow(sessionCode, [
+      'programme',
+      'programme.slots',
+      'sessionSlots',
+      'sessionSlots.programmeSlot',
+    ]);
+    const manager = this.txHost.tx;
+
+    const sessionSlots = [...session.sessionSlots].sort(
+      (a, b) => a.position - b.position,
+    );
+    const insertAt = dto.position ?? sessionSlots.length;
+    if (
+      insertAt <= anchor.currentSlotPosition ||
+      insertAt > sessionSlots.length
+    ) {
+      throw new BadRequestException(
+        'A new section can only be added after the current slot',
+      );
+    }
+
+    const member = dto.memberId
+      ? await this.memberRepo.findOne({ where: { id: dto.memberId } })
+      : null;
+    if (dto.memberId && !member) {
+      throw new NotFoundException('Member not found');
+    }
+
+    const programmeSlots = session.programme.slots ?? [];
+    const before = sessionSlots[insertAt - 1]?.programmeSlot;
+    const programmePosition = before
+      ? before.position + 1
+      : programmeSlots.length;
+    const shiftedProgrammeSlots = programmeSlots
+      .filter((s) => s.position >= programmePosition)
+      .map((s) => ({ ...s, position: s.position + 1 }));
+    if (shiftedProgrammeSlots.length) {
+      await manager.save(ServiceProgrammeSlot, shiftedProgrammeSlots);
+    }
+    const programmeSlot = await manager.save(
+      ServiceProgrammeSlot,
+      manager.create(ServiceProgrammeSlot, {
+        programme: { id: session.programme.id },
+        position: programmePosition,
+        type: dto.type,
+        topic: dto.topic?.trim() || null,
+        member,
+        guestName: dto.guestName?.trim() || null,
+        allocatedMinutes: dto.allocatedMinutes,
+      }),
+    );
+
+    const shiftedSessionSlots = sessionSlots
+      .filter((s) => s.position >= insertAt)
+      .map((s) => {
+        s.position += 1;
+        return s;
+      });
+    if (shiftedSessionSlots.length) {
+      await manager.save(ServiceSessionSlot, shiftedSessionSlots);
+    }
+    const saved = await manager.save(
+      ServiceSessionSlot,
+      manager.create(ServiceSessionSlot, {
+        session: { id: session.id },
+        programmeSlot,
+        position: insertAt,
+        status: ServiceSessionSlotStatusEnum.PENDING,
+      }),
+    );
+
+    await this.logAction(
+      session.id,
+      memberId
+        ? ServiceActionRoleEnum.WORKER
+        : ServiceActionRoleEnum.PUBLIC_LINK,
+      'SLOT_ADDED',
+      `position:${insertAt}:type:${dto.type}`,
       memberId,
       actorLabel,
     );
@@ -2276,13 +2381,15 @@ export class ServiceSessionService {
   ): void {
     Promise.all([
       this.findAdminWorkerEmails(),
+      this.churchTimezone.get(),
       this.getFormattedReport(sessionCode).then((r) =>
         this.pdfService.generateSessionReport(r),
       ),
     ])
-      .then(([emails, pdfBuffer]) => {
+      .then(([emails, timeZone, pdfBuffer]) => {
         if (emails.length === 0) return;
         const date = new Date().toLocaleDateString('en-GB', {
+          timeZone,
           day: '2-digit',
           month: 'long',
           year: 'numeric',

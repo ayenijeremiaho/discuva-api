@@ -17,7 +17,7 @@ import { CreateEventDto } from '../dto/create-event.dto';
 import { UpdateEventSeriesDto } from '../dto/event-series.dto';
 import { EventRecurrencePatternEnum } from '../enums/event-recurrence-patterns.enums';
 import { EventService } from './event.service';
-import { ChurchTimezoneService } from './church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import {
   SlotBlueprint,

@@ -525,6 +525,7 @@ describe('EventService', () => {
           'serviceSlots.config',
           'serviceSlots.config.defaultVenue',
           'serviceSlots.venueOverride',
+          'serviceSlots.audienceGroup',
         ],
         order: { serviceSlots: { startTime: 'ASC' } },
       });
@@ -650,6 +651,50 @@ describe('EventService', () => {
       await expect(
         service.getById('e1', undefined, { id: 'w1', isWorker: true }),
       ).resolves.toEqual(expect.objectContaining({ id: 'e1' }));
+    });
+  });
+
+  describe('slot audience', () => {
+    const event = () => ({
+      id: 'e1',
+      audience: EventAudienceEnum.EVERYONE,
+      serviceSlots: [
+        { id: 's-workers', audience: EventAudienceEnum.WORKERS },
+        {
+          id: 's-teens',
+          audience: EventAudienceEnum.GROUP,
+          audienceGroupId: 'g1',
+        },
+        { id: 's-main', audience: null },
+      ],
+    });
+
+    it('only shows a member the services in an event they can attend', async () => {
+      mockEventRepo.findOne.mockResolvedValue(event());
+      mockTenantTx.query.mockResolvedValueOnce([]);
+      const forMember = await service.getById('e1', undefined, {
+        id: 'm1',
+        isWorker: false,
+      });
+      expect(forMember.serviceSlots.map((s) => s.id)).toEqual(['s-main']);
+
+      mockEventRepo.findOne.mockResolvedValue(event());
+      mockTenantTx.query.mockResolvedValueOnce([{ group_id: 'g1' }]);
+      const forWorker = await service.getById('e1', undefined, {
+        id: 'w1',
+        isWorker: true,
+      });
+      expect(forWorker.serviceSlots.map((s) => s.id)).toEqual([
+        's-workers',
+        's-teens',
+        's-main',
+      ]);
+    });
+
+    it('shows admins every service', async () => {
+      mockEventRepo.findOne.mockResolvedValue(event());
+      const forAdmin = await service.getById('e1');
+      expect(forAdmin.serviceSlots).toHaveLength(3);
     });
   });
 

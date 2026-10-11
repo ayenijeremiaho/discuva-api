@@ -35,6 +35,7 @@ import { getQueueToken } from '@nestjs/bull';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { FOLLOW_UP_QUEUE } from '../../follow-up/processor/post-event.processor';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockFollowUpQueue = {
   add: jest.fn().mockResolvedValue({ id: 'job-1' }),
@@ -210,6 +211,13 @@ describe('AttendanceService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         AttendanceService,
         {
           provide: getRepositoryToken(Attendance),
@@ -336,6 +344,48 @@ describe('AttendanceService', () => {
       await expect(service.checkin(user, dto as any)).rejects.toThrow(
         'Workers Meeting is for workers only.',
       );
+    });
+
+    it('refuses a member checking in to a workers-only service within an open event', async () => {
+      const slot = makeSlot(addHours(new Date(), 1));
+      Object.assign(slot, {
+        name: 'Workers Meeting',
+        audience: EventAudienceEnum.WORKERS,
+      });
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Workers Meeting is for workers only.',
+      );
+    });
+
+    it('lets an admin mark a worker on a workers-only service', async () => {
+      const slot = makeSlot(addHours(new Date(), 1));
+      Object.assign(slot, { audience: EventAudienceEnum.WORKERS });
+      mockSlotRepo.findOne.mockResolvedValue(slot);
+      mockMemberService.getById.mockResolvedValue({
+        id: 'worker-1',
+        role: MemberRoleEnum.WORKER,
+        status: MemberStatusEnum.ACTIVE,
+      });
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      mockAttendanceRepo.save.mockImplementation((r) => Promise.resolve(r));
+
+      await expect(
+        service.adminMarkAttendance(
+          'worker-1',
+          'slot-1',
+          AttendanceStatusEnum.PRESENT,
+          'admin-1',
+        ),
+      ).resolves.not.toThrow();
+      expect(mockAttendanceRepo.save).toHaveBeenCalled();
     });
 
     it("refuses someone outside the event's group", async () => {

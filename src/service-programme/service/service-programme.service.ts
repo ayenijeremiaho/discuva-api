@@ -46,6 +46,7 @@ import {
   ServiceProgrammeSlotWithNames,
 } from '../util/slot-display';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 export type ServiceProgrammeWithSummary = ServiceProgramme & {
   serviceSlotId?: string;
@@ -203,6 +204,7 @@ export class ServiceProgrammeService {
     private readonly pdfService: PdfService,
     private readonly notificationDispatchService: NotificationDispatchService,
     private readonly departmentAccessService: DepartmentAccessService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   private readonly logger = new Logger(ServiceProgrammeService.name);
@@ -913,21 +915,27 @@ export class ServiceProgrammeService {
     return `${member.firstname} ${member.lastname} is already assigned to an overlapping service${suffix}.`;
   }
 
-  private fmtAssignmentDate(date: Date): string {
+  private fmtAssignmentDate(date: Date, timeZone: string): string {
     return new Date(date).toLocaleDateString('en-GB', {
       weekday: 'long',
       day: '2-digit',
       month: 'long',
       year: 'numeric',
+      timeZone,
     });
   }
 
-  private fmtAssignmentTime(date: Date): string {
+  private fmtAssignmentTime(date: Date, timeZone: string): string {
     return new Date(date).toLocaleTimeString('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
       hour12: true,
+      timeZone,
     });
+  }
+
+  private resolveTimezone(): Promise<string> {
+    return this.churchTimezone.get().catch(() => this.churchTimezone.fallback);
   }
 
   // Pure data shape for one slot assignment — shared by notifySlotAssignment
@@ -939,6 +947,7 @@ export class ServiceProgrammeService {
     programme: ServiceProgramme,
     slot: ServiceProgrammeSlot,
     isBackup: boolean,
+    timeZone: string,
   ): {
     serviceSlotName: string;
     slotType: string;
@@ -954,11 +963,11 @@ export class ServiceProgrammeService {
           .join(' — ')
       : 'the service';
     const serviceDate = programme.serviceSlot?.startTime
-      ? this.fmtAssignmentDate(programme.serviceSlot.startTime)
+      ? this.fmtAssignmentDate(programme.serviceSlot.startTime, timeZone)
       : '';
     const serviceTime =
       programme.serviceSlot?.startTime && programme.serviceSlot?.endTime
-        ? `${this.fmtAssignmentTime(programme.serviceSlot.startTime)} – ${this.fmtAssignmentTime(programme.serviceSlot.endTime)}`
+        ? `${this.fmtAssignmentTime(programme.serviceSlot.startTime, timeZone)} – ${this.fmtAssignmentTime(programme.serviceSlot.endTime, timeZone)}`
         : '';
     return {
       serviceSlotName,
@@ -976,13 +985,14 @@ export class ServiceProgrammeService {
   // push notification, since a member may have one channel but not the other
   // (no email on file, or never granted push permission) and neither should
   // block the other.
-  private notifySlotAssignment(
+  private async notifySlotAssignment(
     member: Member,
     programme: ServiceProgramme,
     slot: ServiceProgrammeSlot,
     isBackup = false,
-  ): void {
-    const line = this.buildAssignmentLine(programme, slot, isBackup);
+  ): Promise<void> {
+    const timeZone = await this.resolveTimezone();
+    const line = this.buildAssignmentLine(programme, slot, isBackup, timeZone);
     const { serviceSlotName, slotType, serviceDate, serviceTime } = line;
 
     const subject = isBackup
@@ -1071,7 +1081,12 @@ export class ServiceProgrammeService {
       if (hod) recipients.add(hod.id);
       if (!recipients.size) return;
 
-      const line = this.buildAssignmentLine(programme, slot, isBackup);
+      const line = this.buildAssignmentLine(
+        programme,
+        slot,
+        isBackup,
+        await this.resolveTimezone(),
+      );
       const { serviceSlotName, slotType, serviceDate, serviceTime } = line;
       let when = '';
       if (serviceDate) when += ` on ${serviceDate}`;
@@ -1129,14 +1144,15 @@ export class ServiceProgrammeService {
   // one slot at a time across separate requests, so they keep using
   // notifySlotAssignment unchanged; batching those would need a
   // delayed/debounced send, which is a different problem from this one.
-  private notifyBulkSlotAssignments(
+  private async notifyBulkSlotAssignments(
     items: {
       programme: ServiceProgramme;
       slot: ServiceProgrammeSlot;
       member: Member;
       isBackup: boolean;
     }[],
-  ): void {
+  ): Promise<void> {
+    const timeZone = await this.resolveTimezone();
     const byMember = new Map<string, { member: Member; items: typeof items }>();
     for (const item of items) {
       const existing = byMember.get(item.member.id);
@@ -1146,7 +1162,12 @@ export class ServiceProgrammeService {
 
     for (const { member, items: memberItems } of byMember.values()) {
       for (const { programme, slot, isBackup } of memberItems) {
-        const line = this.buildAssignmentLine(programme, slot, isBackup);
+        const line = this.buildAssignmentLine(
+          programme,
+          slot,
+          isBackup,
+          timeZone,
+        );
         this.notificationDispatchService.notifyMember({
           category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
           push: {
@@ -1165,7 +1186,7 @@ export class ServiceProgrammeService {
       // numbering has to come from the data, not the template.
       const assignments = memberItems.map(
         ({ programme, slot, isBackup }, i) => ({
-          ...this.buildAssignmentLine(programme, slot, isBackup),
+          ...this.buildAssignmentLine(programme, slot, isBackup, timeZone),
           partNumber: i + 1,
         }),
       );

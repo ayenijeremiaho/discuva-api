@@ -22,6 +22,7 @@ describe('ClassCertificateService', () => {
     pdfService as any,
     notifications as any,
     auditLog as any,
+    { get: jest.fn().mockResolvedValue('Africa/Lagos') } as any,
   );
 
   const issued = {

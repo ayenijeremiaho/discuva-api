@@ -5,7 +5,7 @@ import { EventSeriesService } from './event-series.service';
 import { EventSeries } from '../entity/event-series.entity';
 import { Event } from '../entity/event.entity';
 import { EventService } from './event.service';
-import { ChurchTimezoneService } from './church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { EventRecurrencePatternEnum } from '../enums/event-recurrence-patterns.enums';
 

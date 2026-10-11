@@ -14,6 +14,8 @@ import { Venue } from '../../venue/entity/venue.entity';
 import { Attendance } from '../../attendance/entity/attendance.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
+import { EventAudienceEnum } from '../enums/event-audience.enum';
+import { Group } from '../../group/entity/group.entity';
 
 @Entity({ name: 'service_slots' })
 export class ServiceSlot extends BaseEntity {
@@ -100,6 +102,17 @@ export class ServiceSlot extends BaseEntity {
   })
   @JoinColumn({ name: 'venue_override_id' })
   venueOverride: Venue | null;
+
+  // Narrows this one service (e.g. a workers' meeting) to workers or a group, on top of the event's audience. Null = the event's audience.
+  @Column({ type: 'varchar', nullable: true })
+  audience: EventAudienceEnum | null;
+
+  @Column({ name: 'audience_group_id', type: 'uuid', nullable: true })
+  audienceGroupId: string | null;
+
+  @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'audience_group_id' })
+  audienceGroup?: Group | null;
 
   @OneToMany(() => Attendance, (attendance) => attendance.serviceSlot)
   attendances: Attendance[];

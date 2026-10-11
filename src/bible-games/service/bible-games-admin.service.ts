@@ -22,7 +22,7 @@ import { buildRound } from '../engine/round';
 import { seededRng } from '../engine/rng';
 import { label } from '../engine/bible';
 import { BibleGamesService, CONTENT_CACHE } from './bible-games.service';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 

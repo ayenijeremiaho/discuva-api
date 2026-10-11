@@ -23,6 +23,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { FollowUpService } from '../../follow-up/service/follow-up.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockClassRepo = {
   create: jest.fn(),
@@ -179,6 +180,13 @@ describe('SundaySchoolService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ChurchTimezoneService,
+          useValue: {
+            get: jest.fn().mockResolvedValue('Africa/Lagos'),
+            fallback: 'Africa/Lagos',
+          },
+        },
         SundaySchoolService,
         {
           provide: getRepositoryToken(SundaySchoolClass),

@@ -6,7 +6,7 @@ import { BibleGamesAdminService } from './bible-games-admin.service';
 import { BibleGamesService } from './bible-games.service';
 import { BibleGameCustomQuestion } from '../entity/bible-game-custom-question.entity';
 import { BibleGameHidden } from '../entity/bible-game-hidden.entity';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { refsInKey } from '../engine/questions';

@@ -19,7 +19,7 @@ import {
   BibleGameModeEnum,
   BibleGameRoundStatusEnum,
 } from '../enum/bible-game-mode.enum';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { CacheService } from '../../utility/service/cache.service';
 import type { Question } from '../engine/questions';
 
@@ -332,6 +332,26 @@ describe('BibleGamesService', () => {
       expect(res.points).toBeGreaterThan(10);
     });
 
+    it('splits a right answer into base points and speed bonus', async () => {
+      roundRepo.findOne.mockResolvedValueOnce(
+        round({ askedAt: new Date(Date.now() - 10_000) }),
+      );
+      const res = await service.answer('m1', 'r1', { index: 0, choice: 0 });
+      // Level 1: base 10, up to 5 for speed; 10 of 20 seconds left.
+      expect(res).toMatchObject({ basePoints: 10, speedBonus: 2, points: 12 });
+      expect(res.seconds).toBeCloseTo(10, 0);
+    });
+
+    it('tells the app what each question can be worth', async () => {
+      roundRepo.findOne.mockResolvedValueOnce(
+        round({
+          answers: [{ choice: 0, correct: true, points: 10, seconds: 1 }],
+        }),
+      );
+      const q = await service.next('m1', 'r1');
+      expect(q.scoring).toEqual({ base: 10, maxBonus: 5 });
+    });
+
     it('scores nothing for a right answer after the time runs out', async () => {
       roundRepo.findOne.mockResolvedValueOnce(
         round({ askedAt: new Date(Date.now() - 60_000) }),
@@ -409,6 +429,17 @@ describe('BibleGamesService', () => {
       );
     });
 
+    it('sums the speed bonus and answer times for the round summary', async () => {
+      roundRepo.findOne.mockResolvedValueOnce(
+        almostDone({ askedAt: new Date(Date.now() - 1000) }),
+      );
+      const res = await service.answer('m1', 'r1', { index: 9, choice: 0 });
+      // Nine earlier answers at 12 (2 bonus each) plus this quick one.
+      expect(res.result!.speedBonus).toBe(18 + res.speedBonus);
+      expect(res.result!.fastestSeconds).toBeCloseTo(1, 0);
+      expect(res.result!.averageSeconds).toBeGreaterThan(2);
+    });
+
     it('only adds the improvement when replaying a level', async () => {
       progressRepo.findOne.mockResolvedValue({
         memberId: 'm1',
@@ -438,6 +469,7 @@ describe('BibleGamesService', () => {
       roundRepo.findOne.mockResolvedValueOnce(almostDone({}));
       const res = await service.answer('m1', 'r1', { index: 9, choice: 0 });
       expect(res.result!.awarded).toBe(0);
+      expect(res.result!.previousBest).toBe(150);
       expect(pointsRepo.save).not.toHaveBeenCalled();
     });
 

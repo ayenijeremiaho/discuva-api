@@ -22,7 +22,7 @@ import { EventSeries } from './entity/event-series.entity';
 import { EventTemplate } from './entity/event-template.entity';
 import { EventSeriesService } from './service/event-series.service';
 import { EventTemplateService } from './service/event-template.service';
-import { ChurchTimezoneService } from './service/church-timezone.service';
+import { ChurchTimezoneService } from '../utility/service/church-timezone.service';
 import { EventSeriesScheduler } from './scheduler/event-series.scheduler';
 import {
   EventSeriesController,

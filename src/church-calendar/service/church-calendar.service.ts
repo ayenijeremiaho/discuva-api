@@ -2,7 +2,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { Event } from '../../event/entity/event.entity';
 import { EventAudienceEnum } from '../../event/enums/event-audience.enum';
 import { eventVisibleToViewerSql } from '../../event/utility/event-audience';
-import { ChurchTimezoneService } from '../../event/service/church-timezone.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import type { EventViewer } from '../../event/service/event.service';
 import { CalendarRepeatDisplay } from '../entity/church-calendar.entity';
 import {

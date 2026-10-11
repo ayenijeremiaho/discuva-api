@@ -49,6 +49,7 @@ import { WebauthnService } from './webauthn.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 interface RotatedRefreshEntry {
   hash: string;
@@ -71,7 +72,6 @@ export class AuthService {
   private readonly deviceResetMaxAttempts: number;
   private readonly deviceResetWindowSeconds: number;
   private readonly otpVerifyMaxAttempts: number;
-  private readonly timezone: string;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -98,6 +98,7 @@ export class AuthService {
     private readonly webauthnService: WebauthnService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {
     this.otpTtlSeconds = this.configService.get<number>('OTP_TTL_SECONDS');
     this.otpMaxAttempts = this.configService.get<number>(
@@ -120,7 +121,6 @@ export class AuthService {
     this.otpVerifyMaxAttempts = this.configService.get<number>(
       'OTP_VERIFY_MAX_ATTEMPTS',
     );
-    this.timezone = this.configService.get<string>('TIMEZONE');
   }
 
   async validateMember(email: string, password: string): Promise<MemberAuth> {
@@ -242,7 +242,7 @@ export class AuthService {
     if (isNewDeviceRegistration) {
       const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
       const loginTime = new Date().toLocaleString('en-GB', {
-        timeZone: this.timezone,
+        timeZone: await this.churchTimezone.get(),
       });
       const churchName = await this.utilityService.resolveChurchName();
       this.utilityService.sendEmailWithTemplate(
