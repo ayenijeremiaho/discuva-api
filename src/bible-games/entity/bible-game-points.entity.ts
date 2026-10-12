@@ -26,8 +26,9 @@ export class BibleGamePoints extends BaseEntity {
   @Column({ name: 'member_id', type: 'uuid' })
   memberId: string;
 
+  // A Bible Challenge mode, or 'characters' for Guess the Bible Character.
   @Column({ type: 'varchar' })
-  mode: BibleGameModeEnum;
+  mode: BibleGameModeEnum | 'characters';
 
   @Column({ type: 'int' })
   points: number;

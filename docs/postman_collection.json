@@ -28649,6 +28649,452 @@
       ]
     },
     {
+      "name": "Guess the Bible Character (Member)",
+      "description": "Solo play. Module key `bible_characters`. Menu questions are answered by the server from the character data; points go to the shared Bible games points (Characters board).",
+      "item": [
+        {
+          "name": "Overview",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters"
+              ]
+            },
+            "description": "Question groups and menu, names to guess from, playable counts per difficulty, the active round, inService, today { scored, limit }, points and rank, and the scoring rules."
+          }
+        },
+        {
+          "name": "Start Round",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/rounds",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "rounds"
+              ]
+            },
+            "description": "Picks a character at this difficulty (avoiding the member's last 20) and abandons any active round. 409 SERVICE_IN_PROGRESS while checked in to a live service; 409 NO_CHARACTERS when none are playable.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"difficulty\": \"easy\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get Round",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/rounds/{{characterRoundId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "rounds",
+                "{{characterRoundId}}"
+              ]
+            },
+            "description": "The round view: asked, hints, hintsLeft, wrongGuesses, guessesLeft, stillPossible, worth; result once finished."
+          }
+        },
+        {
+          "name": "Ask Question",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/rounds/{{characterRoundId}}/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "rounds",
+                "{{characterRoundId}}",
+                "ask"
+              ]
+            },
+            "description": "Ask one menu question; the server answers yes or no. 409 ALREADY_ASKED.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"questionId\": \"ot\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Take Hint",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/rounds/{{characterRoundId}}/hint",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "rounds",
+                "{{characterRoundId}}",
+                "hint"
+              ]
+            },
+            "description": "Shows the next clue verse with the name blanked; costs 15% of the start. 409 NO_HINTS_LEFT."
+          }
+        },
+        {
+          "name": "Guess",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/rounds/{{characterRoundId}}/guess",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "rounds",
+                "{{characterRoundId}}",
+                "guess"
+              ]
+            },
+            "description": "Guess a character id. Right ends the round as won; the third wrong guess ends it as lost. 409 ALREADY_GUESSED.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"characterId\": \"david\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Give Up",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/rounds/{{characterRoundId}}/give-up",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "rounds",
+                "{{characterRoundId}}",
+                "give-up"
+              ]
+            },
+            "description": "Ends the round with no points and reveals the character."
+          }
+        },
+        {
+          "name": "Characters Scoreboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/scoreboard?period=month&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "scoreboard"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "month"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "The Characters board with the member's own rank; entries add `found`."
+          }
+        },
+        {
+          "name": "Charades Deck",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/charades?difficulty=easy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "charades"
+              ],
+              "query": [
+                {
+                  "key": "difficulty",
+                  "value": "easy"
+                }
+              ]
+            },
+            "description": "Bible Charades: up to 80 shuffled playable characters (name, the church's summary, testament, difficulty). Optional difficulty. Nothing is stored or scored."
+          }
+        },
+        {
+          "name": "List Duels",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels"
+              ]
+            },
+            "description": "Your open duels and the last 10 finished, with openCount, maxOpen (10) and the church's turnHours. Overdue invites and turns are settled first."
+          }
+        },
+        {
+          "name": "Find Opponents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/opponents?search=grace",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "opponents"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "grace"
+                }
+              ]
+            },
+            "description": "Active members other than you; each word of search (2-60 chars) must match a first or last name. 20 at most."
+          }
+        },
+        {
+          "name": "Challenge",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels"
+              ]
+            },
+            "description": "Invites a member. 409 DUEL_EXISTS (one open duel per pair), TOO_MANY_DUELS, OPPONENT_BUSY, NO_CHARACTERS. Pushes BIBLE_DUEL_INVITE.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"opponentId\": \"{{memberId}}\",\n  \"difficulty\": \"medium\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get Duel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}"
+              ]
+            },
+            "description": "The duel from your side: you, opponent, yourTurn, finalTurn, turnDeadline, me, them, result."
+          }
+        },
+        {
+          "name": "Accept Duel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}",
+                "accept"
+              ]
+            },
+            "description": "The person invited accepts; each player gets a different character and the person invited moves first. 409 NOT_AN_INVITE, SERVICE_IN_PROGRESS."
+          }
+        },
+        {
+          "name": "Decline Duel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}",
+                "decline"
+              ]
+            },
+            "description": "The person invited declines; the challenger cancels. Only before it's accepted."
+          }
+        },
+        {
+          "name": "Duel: Ask",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}/ask",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}",
+                "ask"
+              ]
+            },
+            "description": "Your turn: one menu question. 409 NOT_YOUR_TURN, LAST_GUESS_ONLY, ALREADY_ASKED. Pushes BIBLE_DUEL_YOUR_TURN to the other player.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"questionId\": \"ot\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Duel: Hint",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}/hint",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}",
+                "hint"
+              ]
+            },
+            "description": "Your turn: the next clue verse with the name hidden. 409 NO_HINTS_LEFT, LAST_GUESS_ONLY."
+          }
+        },
+        {
+          "name": "Duel: Guess",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}/guess",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}",
+                "guess"
+              ]
+            },
+            "description": "Your turn: guess your character. Right as the first mover gives the other player one last guess; right as the second mover wins (a draw on the last guess). Third wrong guess loses.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"characterId\": \"david\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Duel: Resign",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bible-characters/duels/{{duelId}}/resign",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "bible-characters",
+                "duels",
+                "{{duelId}}",
+                "resign"
+              ]
+            },
+            "description": "Ends the duel; the other player wins. Pushes BIBLE_DUEL_FINISHED to both."
+          }
+        }
+      ]
+    },
+    {
       "name": "Bible Games (Admin)",
       "item": [
         {
@@ -28681,6 +29127,133 @@
             "description": "Requires GAMES_READ and the `bible_games` module."
           },
           "response": []
+        },
+        {
+          "name": "Bible Characters (review list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bible-games/characters",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bible-games",
+                "characters"
+              ]
+            },
+            "description": "GAMES_READ. Every Guess the Bible Character character merged with this church's review: status, reviewer, summary, clue verses with text, family, books and the questions the game answers yes to. Also total/reviewed/hidden counts and the onlyReviewed setting."
+          }
+        },
+        {
+          "name": "Update Bible Character",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bible-games/characters/ruth",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bible-games",
+                "characters",
+                "ruth"
+              ]
+            },
+            "description": "GAMES_WRITE. Any of reviewed, hidden, summary (1–160 chars) and clues (2–3, written like \"Ruth 1:16\" or RUT.1.16, each naming the character). null resets summary or clues to the original.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewed\": true,\n  \"hidden\": false,\n  \"summary\": \"A Moabite widow who stayed with Naomi.\",\n  \"clues\": [\n    \"Ruth 1:16\",\n    \"Ruth 4:13\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Bible Characters Settings",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bible-games/characters/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bible-games",
+                "characters",
+                "settings"
+              ]
+            },
+            "description": "GAMES_WRITE. Either or both: onlyReviewed (true keeps unreviewed characters out of the game) and turnHours (6, 12, 24, 48 or 72; time to accept a duel and to take each turn).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"onlyReviewed\": true,\n  \"turnHours\": 24\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Bible Characters Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bible-games/characters/stats",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bible-games",
+                "characters",
+                "stats"
+              ]
+            },
+            "description": "GAMES_READ, module `bible_characters`. Solo games, players and characters found this month, the 5 hardest characters (played 3+ times, lowest found rate), and duels { finishedThisMonth, inPlay, turnHours }."
+          }
+        },
+        {
+          "name": "Bible Characters Scoreboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/bible-games/characters/scoreboard?period=month&limit=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "bible-games",
+                "characters",
+                "scoreboard"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "month"
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "GAMES_READ, module `bible_characters`. The Characters board: ranked by Guess the Bible Character points; entries add `found`."
+          }
         },
         {
           "name": "Stats",

@@ -152,3 +152,21 @@ export function label(ref: string): string {
     ? `${name} ${v.verse}`
     : `${name} ${v.chapter}:${v.verse}`;
 }
+
+// "Genesis 12:1", "psalm 23:1", "Jude 14" or "GEN.12.1" -> "GEN.12.1"; null when it isn't a reference.
+export function parseRef(input: string): string | null {
+  const text = input.trim().replace(/\s+/g, ' ');
+  if (/^[1-3A-Z]{3}\.\d+\.\d+$/.test(text)) return text;
+  const m = /^(.+?) (\d+)(?::(\d+))?$/.exec(text);
+  if (!m) return null;
+  const name = m[1].toLowerCase();
+  const book = BOOKS.find(
+    (b) =>
+      b.name.toLowerCase() === name || (b.code === 'PSA' && name === 'psalm'),
+  );
+  if (!book) return null;
+  if (m[3]) return `${book.code}.${Number(m[2])}.${Number(m[3])}`;
+  return chapterCount(book.code) === 1
+    ? `${book.code}.1.${Number(m[2])}`
+    : null;
+}

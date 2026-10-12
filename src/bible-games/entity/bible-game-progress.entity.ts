@@ -18,6 +18,9 @@ export type LevelBests = Record<string, { correct: number; points: number }>;
 @Index('IDX_bible_game_progress_points_daily', ['pointsDaily'], {
   where: 'points_daily > 0',
 })
+@Index('IDX_bible_game_progress_points_characters', ['pointsCharacters'], {
+  where: 'points_characters > 0',
+})
 @Index('IDX_bible_game_progress_levels', ['highestPassed', 'pointsLevels'], {
   where: '(points_levels > 0 OR highest_passed > 0)',
 })
@@ -55,4 +58,11 @@ export class BibleGameProgress extends BaseEntity {
 
   @Column({ name: 'points_daily', type: 'int', default: 0 })
   pointsDaily: number;
+
+  // Guess the Bible Character.
+  @Column({ name: 'points_characters', type: 'int', default: 0 })
+  pointsCharacters: number;
+
+  @Column({ name: 'characters_found', type: 'int', default: 0 })
+  charactersFound: number;
 }

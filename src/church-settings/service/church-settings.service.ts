@@ -54,8 +54,7 @@ export class ChurchSettingsService {
     const module = KNOWN_MODULES.find((m) => m.key === key)!;
     const row = await this.settingRepo.findOne({ where: { key } });
     const value = row?.value as
-      | { enabled: boolean; displayName?: string }
-      | undefined;
+      { enabled: boolean; displayName?: string } | undefined;
     return {
       key,
       moduleName: module.moduleName,
