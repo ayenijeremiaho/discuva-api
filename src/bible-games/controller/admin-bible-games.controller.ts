@@ -45,6 +45,7 @@ export class AdminBibleGamesController {
       null,
       query.period ?? 'month',
       query.limit ?? 100,
+      query.board ?? 'all',
     );
   }
 

@@ -36,6 +36,7 @@ export class BibleGamesController {
       req.user.id,
       query.period ?? 'month',
       query.limit ?? 50,
+      query.board ?? 'all',
     );
   }
 

@@ -28610,7 +28610,7 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/bible-games/scoreboard?period=month",
+              "raw": "{{baseUrl}}/bible-games/scoreboard?period=month&board=all",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -28624,20 +28624,25 @@
                   "value": "month"
                 },
                 {
+                  "key": "board",
+                  "value": "all",
+                  "description": "all (total points, default) | levels (highest level passed, then level points) | daily (Daily & weekly points)"
+                },
+                {
                   "key": "limit",
                   "value": "50",
                   "disabled": true
                 }
               ]
             },
-            "description": "Church scoreboard with full names. `period` month (default) or all; `limit` 5–100."
+            "description": "Church scoreboard with full names. `period` month (default) or all; `board` all | levels | daily; `limit` 5–100. Entries include highestPassed, streak and (Levels, this month) levelsPassed."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"data\": {\n    \"period\": \"month\",\n    \"entries\": [\n      {\n        \"rank\": 1,\n        \"memberId\": \"\\u2026\",\n        \"name\": \"Grace Adebayo\",\n        \"level\": 9,\n        \"points\": 1240,\n        \"champion\": 1\n      }\n    ],\n    \"me\": {\n      \"rank\": 4,\n      \"points\": 320,\n      \"behind\": 395,\n      \"nextRank\": 3\n    },\n    \"championMonth\": \"September\"\n  }\n}"
+              "body": "{\n  \"data\": {\n    \"period\": \"month\",\n    \"board\": \"all\",\n    \"entries\": [\n      {\n        \"rank\": 1,\n        \"memberId\": \"\\u2026\",\n        \"name\": \"Grace Adebayo\",\n        \"level\": 9,\n        \"highestPassed\": 9,\n        \"streak\": 12,\n        \"levelsPassed\": null,\n        \"points\": 1240,\n        \"champion\": 1\n      }\n    ],\n    \"me\": {\n      \"rank\": 4,\n      \"points\": 320,\n      \"behind\": 395,\n      \"nextRank\": 3\n    },\n    \"championMonth\": \"September\"\n  }\n}"
             }
           ]
         }
@@ -28652,7 +28657,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/admin/bible-games/scoreboard?period=month",
+              "raw": "{{baseUrl}}/admin/bible-games/scoreboard?period=month&board=all",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -28665,6 +28670,11 @@
                 {
                   "key": "period",
                   "value": "month"
+                },
+                {
+                  "key": "board",
+                  "value": "all",
+                  "description": "all | levels | daily"
                 }
               ]
             },

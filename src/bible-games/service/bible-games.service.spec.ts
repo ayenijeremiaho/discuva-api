@@ -425,7 +425,22 @@ describe('BibleGamesService', () => {
         ['m1', expect.stringMatching(/^\d{4}-\d{2}-01$/), res.result!.awarded],
       );
       expect(progressRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ pointsTotal: res.result!.awarded }),
+        expect.objectContaining({
+          pointsTotal: res.result!.awarded,
+          pointsLevels: res.result!.awarded,
+          pointsDaily: 0,
+        }),
+      );
+      // Levels tab: the points, and one more level passed this month.
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO bible_game_board_monthly'),
+        [
+          'm1',
+          expect.stringMatching(/^\d{4}-\d{2}-01$/),
+          'levels',
+          res.result!.awarded,
+          1,
+        ],
       );
     });
 
@@ -579,6 +594,84 @@ describe('BibleGamesService', () => {
           perfectRounds: 1,
         }),
       );
+    });
+  });
+
+  describe('scoreboard tabs', () => {
+    const row = (over: object) => ({
+      highestPassed: 0,
+      dailyStreak: 0,
+      lastDailyDate: null,
+      levelsPassed: null,
+      ...over,
+    });
+
+    it('ranks the Levels tab by how far people have climbed, without "points behind"', async () => {
+      query
+        .mockResolvedValueOnce([
+          row({
+            memberId: 'a',
+            name: 'Ada',
+            highestPassed: 12,
+            points: 2700,
+            levelsPassed: 4,
+          }),
+          row({
+            memberId: 'm1',
+            name: 'Tunde',
+            highestPassed: 8,
+            points: 3150,
+            levelsPassed: 2,
+          }),
+        ])
+        .mockResolvedValueOnce([]);
+      const board = await service.scoreboard('m1', 'month', 50, 'levels');
+      expect(query.mock.calls[0][0]).toContain('FROM bible_game_board_monthly');
+      expect(query.mock.calls[0][0]).toContain(
+        'ORDER BY b.levels_passed DESC, b.points DESC',
+      );
+      expect(query.mock.calls[0][0]).toContain("b.board = 'levels'");
+      expect(board).toMatchObject({ board: 'levels' });
+      expect(board.entries[0]).toMatchObject({
+        highestPassed: 12,
+        levelsPassed: 4,
+      });
+      expect(board.me).toMatchObject({ rank: 2, behind: null });
+    });
+
+    it('ranks all-time Levels by highest level, then level points', async () => {
+      query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      await service.scoreboard(null, 'all', 50, 'levels');
+      expect(query.mock.calls[0][0]).toContain(
+        'ORDER BY g.highest_passed DESC, g.points_levels DESC',
+      );
+    });
+
+    it('shows a live Daily streak and drops one that has lapsed', async () => {
+      const today = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Lagos',
+      }).format(new Date());
+      query
+        .mockResolvedValueOnce([
+          row({
+            memberId: 'a',
+            name: 'Ada',
+            points: 300,
+            dailyStreak: 5,
+            lastDailyDate: today,
+          }),
+          row({
+            memberId: 'b',
+            name: 'Ben',
+            points: 200,
+            dailyStreak: 9,
+            lastDailyDate: '2020-01-01',
+          }),
+        ])
+        .mockResolvedValueOnce([]);
+      const board = await service.scoreboard(null, 'month', 50, 'daily');
+      expect(board.entries.map((e) => e.streak)).toEqual([5, 0]);
+      expect(board.entries[0].levelsPassed).toBeNull();
     });
   });
 

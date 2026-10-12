@@ -50,6 +50,11 @@ export class ScoreboardQueryDto {
   @IsIn(['month', 'all'])
   period?: 'month' | 'all' = 'month';
 
+  // All games, Levels (how far people have climbed) or Daily & weekly.
+  @IsOptional()
+  @IsIn(['all', 'levels', 'daily'])
+  board?: 'all' | 'levels' | 'daily' = 'all';
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

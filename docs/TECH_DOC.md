@@ -5625,7 +5625,28 @@ totals `bible_game_progress.points_total` and `bible_game_monthly (member_id, mo
 `GET bible-games/scoreboard?period=month|all` reads only those totals (one row per player, `IDX_bible_game_monthly_board`),
 never the ledger, with full names and current level; ties go to whoever got there first; last month's top 3 (from
 `bible_game_monthly`) are marked champions; it returns the member's rank and points behind the next person. Cached 30 s;
-cleared when points are added. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
+cleared when points are added.
+
+**Scoreboard tabs (`?board=all|levels|daily`, default `all`; migration `AddBibleGameBoards`, tenant).** A Daily-only
+player used to show "level 0" (displayed as Level 1) beside rising points, because one points board was labelled with
+a level. Now: **All games** ranks total points (unchanged, `bible_game_monthly` / `points_total`, and still decides
+the monthly champions); **Levels** (level + mastery rounds) ranks by levels first passed this month then level points
+(`bible_game_board_monthly.levels_passed`, `points`), or all-time by `highest_passed` then
+`bible_game_progress.points_levels`; **Daily & weekly** (daily + weekly rounds) ranks by points
+(`bible_game_board_monthly` with `board = 'daily'` / `points_daily`). `finish()` upserts the round's tab row (points,
+plus `levels_passed + 1` when a level is passed for the first time) alongside the existing totals; the migration
+backfills both from `bible_game_points` and first passing rounds (`bible_game_rounds`, kept 60 days — longer than
+Bible Games has existed). Entries add `highestPassed`, `streak` (live Daily streak, 0 once lapsed) and, on Levels/this
+month, `levelsPassed`; `level` stays as `highestPassed` for older app versions. `me.behind` is null on Levels (not
+ranked by points). Cached 30 s per board and period; all six keys are cleared when points are added. The member app's
+end-of-round board shows the tab for the mode just played.
+
+**Indexes (migration `AddBibleGameBoardIndexes`):** every tab reads in its sort order —
+`bible_game_board_monthly (month, board, points DESC)`, a Levels partial index
+`(month, levels_passed DESC, points DESC) WHERE board = 'levels'` (the query inlines the board literal so the planner
+can use it), and partial indexes on `bible_game_progress` for the all-time tabs: `(points_total DESC) WHERE
+points_total > 0`, `(points_daily DESC) WHERE points_daily > 0`, `(highest_passed DESC, points_levels DESC) WHERE
+(points_levels > 0 OR highest_passed > 0)`. The All games monthly board keeps `IDX_bible_game_monthly_board`. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
 Rounds older than 60 days are deleted when the member next starts one (points stay in the ledger and totals).
 
 **Managing questions (admin):** `GET admin/bible-games/questions/preview?level=&seed=` returns a sample of 12 generated
@@ -18971,7 +18992,28 @@ totals `bible_game_progress.points_total` and `bible_game_monthly (member_id, mo
 `GET bible-games/scoreboard?period=month|all` reads only those totals (one row per player, `IDX_bible_game_monthly_board`),
 never the ledger, with full names and current level; ties go to whoever got there first; last month's top 3 (from
 `bible_game_monthly`) are marked champions; it returns the member's rank and points behind the next person. Cached 30 s;
-cleared when points are added. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
+cleared when points are added.
+
+**Scoreboard tabs (`?board=all|levels|daily`, default `all`; migration `AddBibleGameBoards`, tenant).** A Daily-only
+player used to show "level 0" (displayed as Level 1) beside rising points, because one points board was labelled with
+a level. Now: **All games** ranks total points (unchanged, `bible_game_monthly` / `points_total`, and still decides
+the monthly champions); **Levels** (level + mastery rounds) ranks by levels first passed this month then level points
+(`bible_game_board_monthly.levels_passed`, `points`), or all-time by `highest_passed` then
+`bible_game_progress.points_levels`; **Daily & weekly** (daily + weekly rounds) ranks by points
+(`bible_game_board_monthly` with `board = 'daily'` / `points_daily`). `finish()` upserts the round's tab row (points,
+plus `levels_passed + 1` when a level is passed for the first time) alongside the existing totals; the migration
+backfills both from `bible_game_points` and first passing rounds (`bible_game_rounds`, kept 60 days — longer than
+Bible Games has existed). Entries add `highestPassed`, `streak` (live Daily streak, 0 once lapsed) and, on Levels/this
+month, `levelsPassed`; `level` stays as `highestPassed` for older app versions. `me.behind` is null on Levels (not
+ranked by points). Cached 30 s per board and period; all six keys are cleared when points are added. The member app's
+end-of-round board shows the tab for the mode just played.
+
+**Indexes (migration `AddBibleGameBoardIndexes`):** every tab reads in its sort order —
+`bible_game_board_monthly (month, board, points DESC)`, a Levels partial index
+`(month, levels_passed DESC, points DESC) WHERE board = 'levels'` (the query inlines the board literal so the planner
+can use it), and partial indexes on `bible_game_progress` for the all-time tabs: `(points_total DESC) WHERE
+points_total > 0`, `(points_daily DESC) WHERE points_daily > 0`, `(highest_passed DESC, points_levels DESC) WHERE
+(points_levels > 0 OR highest_passed > 0)`. The All games monthly board keeps `IDX_bible_game_monthly_board`. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
 Rounds older than 60 days are deleted when the member next starts one (points stay in the ledger and totals).
 
 **Managing questions (admin):** `GET admin/bible-games/questions/preview?level=&seed=` returns a sample of 12 generated

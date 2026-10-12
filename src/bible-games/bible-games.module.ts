@@ -5,6 +5,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
 import { BibleGameProgress } from './entity/bible-game-progress.entity';
 import { BibleGameRound } from './entity/bible-game-round.entity';
 import { BibleGamePoints } from './entity/bible-game-points.entity';
+import { BibleGameBoardMonthly } from './entity/bible-game-board-monthly.entity';
 import { BibleGameMonthly } from './entity/bible-game-monthly.entity';
 import { BibleGameCustomQuestion } from './entity/bible-game-custom-question.entity';
 import { BibleGameHidden } from './entity/bible-game-hidden.entity';
@@ -21,6 +22,7 @@ import { ChurchTimezoneService } from '../utility/service/church-timezone.servic
       BibleGameRound,
       BibleGamePoints,
       BibleGameMonthly,
+      BibleGameBoardMonthly,
       BibleGameCustomQuestion,
       BibleGameHidden,
     ]),

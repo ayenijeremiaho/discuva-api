@@ -64,6 +64,8 @@ export const CONTENT_CACHE = 'bible-content';
 const MASTERY_TIME_LIMIT = levelSpec(LEVEL_COUNT).timeLimit;
 
 export type Period = 'month' | 'all';
+// All games ranks total points; Levels ranks how far people have climbed; Daily ranks Daily + weekly points.
+export type Board = 'all' | 'levels' | 'daily';
 
 export interface PublicQuestion {
   index: number;
@@ -100,7 +102,13 @@ export interface ScoreboardEntry {
   rank: number;
   memberId: string;
   name: string;
+  // Highest level passed (0 = none yet); kept as `level` for older app versions.
   level: number;
+  highestPassed: number;
+  // Current Daily streak (0 if it has lapsed).
+  streak: number;
+  // Levels tab, this month: levels first passed this month.
+  levelsPassed: number | null;
   points: number;
   // Top 3 last month.
   champion: 1 | 2 | 3 | null;
@@ -108,6 +116,7 @@ export interface ScoreboardEntry {
 
 export interface Scoreboard {
   period: Period;
+  board: Board;
   entries: ScoreboardEntry[];
   me: {
     rank: number | null;
@@ -116,6 +125,24 @@ export interface Scoreboard {
     nextRank: number | null;
   };
   championMonth: string;
+}
+
+const BOARDS: Board[] = ['all', 'levels', 'daily'];
+
+interface BoardRow {
+  memberId: string;
+  name: string;
+  highestPassed: number;
+  dailyStreak: number;
+  lastDailyDate: string | null;
+  points: number;
+  levelsPassed: number | null;
+}
+
+export function boardOf(mode: BibleGameModeEnum): 'levels' | 'daily' {
+  return mode === BibleGameModeEnum.LEVEL || mode === BibleGameModeEnum.MASTERY
+    ? 'levels'
+    : 'daily';
 }
 
 @Injectable()
@@ -448,46 +475,17 @@ export class BibleGamesService {
     memberId: string | null,
     period: Period,
     limit = 50,
+    board: Board = 'all',
   ): Promise<Scoreboard> {
     const timezone = await this.churchTimezone.get();
-    const key = this.scoreboardKey(period, timezone);
-    let totals =
-      await this.cacheService.get<
-        { memberId: string; name: string; level: number; points: number }[]
-      >(key);
+    const key = this.scoreboardKey(period, timezone, board);
+    let totals = await this.cacheService.get<BoardRow[]>(key);
     if (!totals) {
-      // Reads the running totals (one row per player), never the full ledger. Ties go to whoever got there first.
-      totals = (await (period === 'month'
-        ? this.txHost.tx.query(
-            `SELECT mo.member_id AS "memberId",
-                    trim(concat_ws(' ', m.firstname, m.lastname)) AS name,
-                    COALESCE(g.highest_passed, 0) AS level,
-                    mo.points
-             FROM bible_game_monthly mo
-             JOIN members m ON m.id = mo.member_id
-             LEFT JOIN bible_game_progress g ON g.member_id = mo.member_id
-             WHERE mo.month = $1 AND mo.points > 0
-             ORDER BY mo.points DESC, mo.updated_at ASC`,
-            [this.monthKey(timezone)],
-          )
-        : this.txHost.tx.query(
-            `SELECT g.member_id AS "memberId",
-                    trim(concat_ws(' ', m.firstname, m.lastname)) AS name,
-                    g.highest_passed AS level,
-                    g.points_total AS points
-             FROM bible_game_progress g
-             JOIN members m ON m.id = g.member_id
-             WHERE g.points_total > 0
-             ORDER BY g.points_total DESC, g.updated_at ASC`,
-          ))) as {
-        memberId: string;
-        name: string;
-        level: number;
-        points: number;
-      }[];
+      totals = await this.boardRows(period, board, timezone);
       this.cacheService.set(key, totals, SCOREBOARD_TTL_SECONDS);
     }
 
+    const today = this.localDate(timezone);
     const champions = await this.lastMonthChampions(timezone);
     const ranked = totals.map((t, i) => ({ ...t, rank: i + 1 }));
     const mine = memberId
@@ -496,18 +494,30 @@ export class BibleGamesService {
     const ahead = mine ? ranked[mine.rank - 2] : undefined;
     return {
       period,
+      board,
       entries: ranked.slice(0, limit).map((t) => ({
         rank: t.rank,
         memberId: t.memberId,
         name: t.name,
-        level: t.level,
+        level: t.highestPassed,
+        highestPassed: t.highestPassed,
+        streak: this.liveStreak(
+          { lastDailyDate: t.lastDailyDate, dailyStreak: t.dailyStreak },
+          today,
+        ),
+        levelsPassed:
+          board === 'levels' && period === 'month' ? t.levelsPassed : null,
         points: t.points,
         champion: (champions.get(t.memberId) ?? null) as 1 | 2 | 3 | null,
       })),
       me: {
         rank: mine?.rank ?? null,
         points: mine?.points ?? 0,
-        behind: mine && ahead ? ahead.points - mine.points : null,
+        // The Levels tab isn't ranked by points, so "points behind" would mislead there.
+        behind:
+          board !== 'levels' && mine && ahead
+            ? ahead.points - mine.points
+            : null,
         nextRank: ahead?.rank ?? null,
       },
       championMonth: format(
@@ -517,6 +527,67 @@ export class BibleGamesService {
     };
   }
 
+  // Reads running totals (one row per player), never the full ledger. Ties go to whoever got there first.
+  private async boardRows(
+    period: Period,
+    board: Board,
+    timezone: string,
+  ): Promise<BoardRow[]> {
+    const player = (alias: string) => `${alias}.member_id AS "memberId",
+      trim(concat_ws(' ', m.firstname, m.lastname)) AS name,
+      COALESCE(g.highest_passed, 0)::int AS "highestPassed",
+      COALESCE(g.daily_streak, 0)::int AS "dailyStreak",
+      to_char(g.last_daily_date, 'YYYY-MM-DD') AS "lastDailyDate"`;
+    const month = this.monthKey(timezone);
+    if (period === 'month' && board === 'all') {
+      return this.txHost.tx.query(
+        `SELECT ${player('mo')}, mo.points, NULL::int AS "levelsPassed"
+         FROM bible_game_monthly mo
+         JOIN members m ON m.id = mo.member_id
+         LEFT JOIN bible_game_progress g ON g.member_id = mo.member_id
+         WHERE mo.month = $1 AND mo.points > 0
+         ORDER BY mo.points DESC, mo.updated_at ASC`,
+        [month],
+      );
+    }
+    if (period === 'month') {
+      // board is a literal (not a parameter) so the planner can use the Levels partial index.
+      const tab = board === 'levels' ? 'levels' : 'daily';
+      const order =
+        tab === 'levels'
+          ? 'b.levels_passed DESC, b.points DESC, b.updated_at ASC'
+          : 'b.points DESC, b.updated_at ASC';
+      return this.txHost.tx.query(
+        `SELECT ${player('b')}, b.points, b.levels_passed AS "levelsPassed"
+         FROM bible_game_board_monthly b
+         JOIN members m ON m.id = b.member_id
+         LEFT JOIN bible_game_progress g ON g.member_id = b.member_id
+         WHERE b.month = $1 AND b.board = '${tab}' AND (b.points > 0 OR b.levels_passed > 0)
+         ORDER BY ${order}`,
+        [month],
+      );
+    }
+    const [points, order] = {
+      all: ['g.points_total', 'g.points_total DESC'],
+      levels: [
+        'g.points_levels',
+        'g.highest_passed DESC, g.points_levels DESC',
+      ],
+      daily: ['g.points_daily', 'g.points_daily DESC'],
+    }[board];
+    const where =
+      board === 'levels'
+        ? `(${points} > 0 OR g.highest_passed > 0)`
+        : `${points} > 0`;
+    return this.txHost.tx.query(
+      `SELECT ${player('g')}, ${points} AS points, NULL::int AS "levelsPassed"
+       FROM bible_game_progress g
+       JOIN members m ON m.id = g.member_id
+       WHERE ${where}
+       ORDER BY ${order}, g.updated_at ASC`,
+    );
+  }
+
   private async finish(round: BibleGameRound): Promise<RoundResult> {
     const progress = await this.progress(round.memberId);
     const timezone = await this.churchTimezone.get();
@@ -524,6 +595,7 @@ export class BibleGamesService {
     let passed: boolean | null = null;
     let unlockedLevel: number | null = null;
     let previousBest: number | null = null;
+    let newlyPassed = false;
 
     if (round.mode === BibleGameModeEnum.LEVEL && round.level) {
       passed = round.correct >= PASS_MARK;
@@ -540,6 +612,7 @@ export class BibleGamesService {
       };
       // Only a pass of the very next level moves the member up, so a retry can never skip ahead.
       if (passed && round.level === progress.highestPassed + 1) {
+        newlyPassed = true;
         progress.highestPassed = round.level;
         unlockedLevel = round.level < LEVEL_COUNT ? round.level + 1 : null;
       }
@@ -566,8 +639,11 @@ export class BibleGamesService {
     round.status = BibleGameRoundStatusEnum.FINISHED;
     round.finishedAt = new Date();
     await this.roundRepo.save(round);
+    const board = boardOf(round.mode);
     if (awarded > 0) {
       progress.pointsTotal += awarded;
+      if (board === 'levels') progress.pointsLevels += awarded;
+      else progress.pointsDaily += awarded;
       await this.pointsRepo.save(
         this.pointsRepo.create({
           memberId: round.memberId,
@@ -581,6 +657,22 @@ export class BibleGamesService {
          ON CONFLICT (member_id, month)
          DO UPDATE SET points = bible_game_monthly.points + EXCLUDED.points, updated_at = now()`,
         [round.memberId, this.monthKey(timezone), awarded],
+      );
+    }
+    if (awarded > 0 || newlyPassed) {
+      await this.txHost.tx.query(
+        `INSERT INTO bible_game_board_monthly (member_id, month, board, points, levels_passed) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (member_id, month, board)
+         DO UPDATE SET points = bible_game_board_monthly.points + EXCLUDED.points,
+                       levels_passed = bible_game_board_monthly.levels_passed + EXCLUDED.levels_passed,
+                       updated_at = now()`,
+        [
+          round.memberId,
+          this.monthKey(timezone),
+          board,
+          awarded,
+          newlyPassed ? 1 : 0,
+        ],
       );
       this.forgetScoreboards(timezone);
     }
@@ -700,6 +792,8 @@ export class BibleGamesService {
         lastDailyDate: null,
         perfectRounds: 0,
         pointsTotal: 0,
+        pointsLevels: 0,
+        pointsDaily: 0,
       })
     );
   }
@@ -790,16 +884,23 @@ export class BibleGamesService {
     return new Map(rows.map((r, i) => [r.memberId, i + 1]));
   }
 
-  private scoreboardKey(period: Period, timezone: string): string {
+  private scoreboardKey(
+    period: Period,
+    timezone: string,
+    board: Board = 'all',
+  ): string {
     return this.cacheService.key(
       'bible-scoreboard',
+      board,
       period === 'month' ? `month:${this.monthKey(timezone)}` : 'all',
     );
   }
 
   private forgetScoreboards(timezone: string): void {
-    this.cacheService.del(this.scoreboardKey('month', timezone));
-    this.cacheService.del(this.scoreboardKey('all', timezone));
+    for (const board of BOARDS) {
+      this.cacheService.del(this.scoreboardKey('month', timezone, board));
+      this.cacheService.del(this.scoreboardKey('all', timezone, board));
+    }
   }
 
   // Hidden questions and church-written ones, cached briefly; admin changes clear it.
@@ -830,7 +931,10 @@ export class BibleGamesService {
     );
   }
 
-  private liveStreak(progress: BibleGameProgress, today: string): number {
+  private liveStreak(
+    progress: Pick<BibleGameProgress, 'lastDailyDate' | 'dailyStreak'>,
+    today: string,
+  ): number {
     if (!progress.lastDailyDate) return 0;
     const yesterday = format(
       subDays(new Date(`${today}T12:00:00`), 1),
