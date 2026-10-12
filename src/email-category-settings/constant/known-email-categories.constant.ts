@@ -119,4 +119,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Push to members the evening after a service they attended, and on Monday morning about what they planned to do that week. Members can also turn these off themselves.',
     },
+    [EmailCategory.BIBLE_GAMES]: {
+      label: 'Bible Games',
+      description:
+        'Push to members when someone challenges them to a Guess the Bible Character duel, when it is their turn, and when a duel ends.',
+    },
   };

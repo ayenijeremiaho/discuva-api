@@ -1,3 +1,4 @@
+import { TURN_HOURS_OPTIONS } from '../engine/duel';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -9,6 +10,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -50,10 +52,23 @@ export class ScoreboardQueryDto {
   @IsIn(['month', 'all'])
   period?: 'month' | 'all' = 'month';
 
-  // All games, Levels (how far people have climbed) or Daily & weekly.
+  // All games, Levels (how far people have climbed) or Daily & weekly; Characters has its own route.
   @IsOptional()
   @IsIn(['all', 'levels', 'daily'])
   board?: 'all' | 'levels' | 'daily' = 'all';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(100)
+  limit?: number = 50;
+}
+
+export class CharacterScoreboardQueryDto {
+  @IsOptional()
+  @IsIn(['month', 'all'])
+  period?: 'month' | 'all' = 'month';
 
   @IsOptional()
   @Type(() => Number)
@@ -131,3 +146,77 @@ export class CustomQuestionDto {
 }
 
 export class UpdateCustomQuestionDto extends PartialType(CustomQuestionDto) {}
+
+export class UpdateBibleCharacterDto {
+  @IsOptional()
+  @IsBoolean()
+  reviewed?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  hidden?: boolean;
+
+  // null restores the original summary.
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(160)
+  summary?: string | null;
+
+  // 2–3 verses, as "Genesis 12:1" or "GEN.12.1"; null restores the original clues.
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(3)
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  clues?: string[] | null;
+}
+
+export class BibleCharacterSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  onlyReviewed?: boolean;
+
+  @IsOptional()
+  @IsIn([...TURN_HOURS_OPTIONS])
+  turnHours?: number;
+}
+
+export class StartCharacterRoundDto {
+  @IsIn(['easy', 'medium', 'hard'])
+  difficulty: 'easy' | 'medium' | 'hard';
+}
+
+export class AskCharacterQuestionDto {
+  @IsString()
+  @Matches(/^[a-z_]{2,30}$/)
+  questionId: string;
+}
+
+export class GuessCharacterDto {
+  @IsString()
+  @Matches(/^[a-z0-9_]{1,40}$/)
+  characterId: string;
+}
+
+export class InviteDuelDto {
+  @IsUUID()
+  opponentId: string;
+
+  @IsIn(['easy', 'medium', 'hard'])
+  difficulty: 'easy' | 'medium' | 'hard';
+}
+
+export class DuelOpponentsQueryDto {
+  @IsString()
+  @Length(2, 60)
+  search: string;
+}
+
+export class CharadesQueryDto {
+  @IsOptional()
+  @IsIn(['easy', 'medium', 'hard'])
+  difficulty?: 'easy' | 'medium' | 'hard';
+}

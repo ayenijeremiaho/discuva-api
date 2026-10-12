@@ -33,6 +33,9 @@ export enum PushNotificationKey {
   CONVERT_VISITED_CHURCH = 'CONVERT_VISITED_CHURCH',
   NOTE_EVENING_NUDGE = 'NOTE_EVENING_NUDGE',
   NOTE_COMMITMENT_REMINDER = 'NOTE_COMMITMENT_REMINDER',
+  BIBLE_DUEL_INVITE = 'BIBLE_DUEL_INVITE',
+  BIBLE_DUEL_YOUR_TURN = 'BIBLE_DUEL_YOUR_TURN',
+  BIBLE_DUEL_FINISHED = 'BIBLE_DUEL_FINISHED',
 }
 
 export interface PushTemplate {
@@ -380,6 +383,40 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: 'You wrote: "{{commitment}}". How is it going?',
     url: '/notes',
     placeholders: { commitment: 'Call my mum every evening' },
+  },
+  [PushNotificationKey.BIBLE_DUEL_INVITE]: {
+    category: EmailCategory.BIBLE_GAMES,
+    label: 'Duel invite',
+    description:
+      'Sent when another member challenges someone to a Guess the Bible Character duel.',
+    title: '{{player_name}} challenged you',
+    body: 'Play Guess the Bible Character ({{level}}). Accept within {{hours}} hours.',
+    url: '/games/characters/duels',
+    placeholders: {
+      player_name: 'Grace Adebayo',
+      level: 'Medium',
+      hours: '24',
+    },
+  },
+  [PushNotificationKey.BIBLE_DUEL_YOUR_TURN]: {
+    category: EmailCategory.BIBLE_GAMES,
+    label: 'Duel: your turn',
+    description:
+      'Sent when the other player has moved in a Guess the Bible Character duel.',
+    title: 'Your turn',
+    body: "{{player_name}} has played. It's your move; you have {{hours}} hours.",
+    url: '/games/characters/duels',
+    placeholders: { player_name: 'Grace Adebayo', hours: '24' },
+  },
+  [PushNotificationKey.BIBLE_DUEL_FINISHED]: {
+    category: EmailCategory.BIBLE_GAMES,
+    label: 'Duel finished',
+    description:
+      'Sent to both players when a Guess the Bible Character duel ends.',
+    title: 'Duel over',
+    body: 'Your duel with {{player_name}}: {{outcome}}',
+    url: '/games/characters/duels',
+    placeholders: { player_name: 'Grace Adebayo', outcome: 'you won!' },
   },
 };
 

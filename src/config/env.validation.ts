@@ -194,6 +194,7 @@ export const envValidationSchema = Joi.object({
   EMAIL_TRAINING_CLASSES_ENABLED: Joi.boolean().default(true),
   EMAIL_EVANGELISM_ENABLED: Joi.boolean().default(true),
   EMAIL_NOTES_ENABLED: Joi.boolean().default(true),
+  EMAIL_BIBLE_GAMES_ENABLED: Joi.boolean().default(true),
 
   BULL_BOARD_USER: Joi.string().allow('').optional(),
   BULL_BOARD_PASSWORD: Joi.string().allow('').optional(),

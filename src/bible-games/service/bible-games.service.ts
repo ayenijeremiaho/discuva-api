@@ -65,7 +65,7 @@ const MASTERY_TIME_LIMIT = levelSpec(LEVEL_COUNT).timeLimit;
 
 export type Period = 'month' | 'all';
 // All games ranks total points; Levels ranks how far people have climbed; Daily ranks Daily + weekly points.
-export type Board = 'all' | 'levels' | 'daily';
+export type Board = 'all' | 'levels' | 'daily' | 'characters';
 
 export interface PublicQuestion {
   index: number;
@@ -109,6 +109,8 @@ export interface ScoreboardEntry {
   streak: number;
   // Levels tab, this month: levels first passed this month.
   levelsPassed: number | null;
+  // Characters tab: characters found (this month, or all time).
+  found: number | null;
   points: number;
   // Top 3 last month.
   champion: 1 | 2 | 3 | null;
@@ -127,7 +129,7 @@ export interface Scoreboard {
   championMonth: string;
 }
 
-const BOARDS: Board[] = ['all', 'levels', 'daily'];
+const BOARDS: Board[] = ['all', 'levels', 'daily', 'characters'];
 
 interface BoardRow {
   memberId: string;
@@ -137,6 +139,7 @@ interface BoardRow {
   lastDailyDate: string | null;
   points: number;
   levelsPassed: number | null;
+  found: number | null;
 }
 
 export function boardOf(mode: BibleGameModeEnum): 'levels' | 'daily' {
@@ -507,6 +510,7 @@ export class BibleGamesService {
         ),
         levelsPassed:
           board === 'levels' && period === 'month' ? t.levelsPassed : null,
+        found: board === 'characters' ? (t.found ?? 0) : null,
         points: t.points,
         champion: (champions.get(t.memberId) ?? null) as 1 | 2 | 3 | null,
       })),
@@ -541,7 +545,7 @@ export class BibleGamesService {
     const month = this.monthKey(timezone);
     if (period === 'month' && board === 'all') {
       return this.txHost.tx.query(
-        `SELECT ${player('mo')}, mo.points, NULL::int AS "levelsPassed"
+        `SELECT ${player('mo')}, mo.points, NULL::int AS "levelsPassed", NULL::int AS found
          FROM bible_game_monthly mo
          JOIN members m ON m.id = mo.member_id
          LEFT JOIN bible_game_progress g ON g.member_id = mo.member_id
@@ -552,17 +556,17 @@ export class BibleGamesService {
     }
     if (period === 'month') {
       // board is a literal (not a parameter) so the planner can use the Levels partial index.
-      const tab = board === 'levels' ? 'levels' : 'daily';
+      const tab = board;
       const order =
         tab === 'levels'
           ? 'b.levels_passed DESC, b.points DESC, b.updated_at ASC'
           : 'b.points DESC, b.updated_at ASC';
       return this.txHost.tx.query(
-        `SELECT ${player('b')}, b.points, b.levels_passed AS "levelsPassed"
+        `SELECT ${player('b')}, b.points, b.levels_passed AS "levelsPassed", b.found
          FROM bible_game_board_monthly b
          JOIN members m ON m.id = b.member_id
          LEFT JOIN bible_game_progress g ON g.member_id = b.member_id
-         WHERE b.month = $1 AND b.board = '${tab}' AND (b.points > 0 OR b.levels_passed > 0)
+         WHERE b.month = $1 AND b.board = '${tab}' AND (b.points > 0 OR b.levels_passed > 0 OR b.found > 0)
          ORDER BY ${order}`,
         [month],
       );
@@ -574,13 +578,14 @@ export class BibleGamesService {
         'g.highest_passed DESC, g.points_levels DESC',
       ],
       daily: ['g.points_daily', 'g.points_daily DESC'],
+      characters: ['g.points_characters', 'g.points_characters DESC'],
     }[board];
     const where =
       board === 'levels'
         ? `(${points} > 0 OR g.highest_passed > 0)`
         : `${points} > 0`;
     return this.txHost.tx.query(
-      `SELECT ${player('g')}, ${points} AS points, NULL::int AS "levelsPassed"
+      `SELECT ${player('g')}, ${points} AS points, NULL::int AS "levelsPassed", g.characters_found AS found
        FROM bible_game_progress g
        JOIN members m ON m.id = g.member_id
        WHERE ${where}
@@ -693,6 +698,49 @@ export class BibleGamesService {
     };
   }
 
+  // Points from another Bible game (Guess the Bible Character): the shared ledger, the All games totals and
+  // the game's own scoreboard tab, in the church's month.
+  async awardPoints(
+    memberId: string,
+    board: 'characters',
+    points: number,
+    found: number,
+  ): Promise<void> {
+    if (points <= 0 && found <= 0) return;
+    const timezone = await this.churchTimezone.get();
+    const month = this.monthKey(timezone);
+    const progress = await this.progress(memberId);
+    progress.pointsTotal += points;
+    progress.pointsCharacters += points;
+    progress.charactersFound += found;
+    if (points > 0) {
+      await this.pointsRepo.save(
+        this.pointsRepo.create({
+          memberId,
+          mode: board,
+          points,
+          roundId: null,
+        }),
+      );
+      await this.txHost.tx.query(
+        `INSERT INTO bible_game_monthly (member_id, month, points) VALUES ($1, $2, $3)
+         ON CONFLICT (member_id, month)
+         DO UPDATE SET points = bible_game_monthly.points + EXCLUDED.points, updated_at = now()`,
+        [memberId, month, points],
+      );
+    }
+    await this.txHost.tx.query(
+      `INSERT INTO bible_game_board_monthly (member_id, month, board, points, found) VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (member_id, month, board)
+       DO UPDATE SET points = bible_game_board_monthly.points + EXCLUDED.points,
+                     found = bible_game_board_monthly.found + EXCLUDED.found,
+                     updated_at = now()`,
+      [memberId, month, board, points, found],
+    );
+    await this.progressRepo.save(progress);
+    this.forgetScoreboards(timezone);
+  }
+
   private speedSummary(
     round: BibleGameRound,
   ): Pick<RoundResult, 'speedBonus' | 'fastestSeconds' | 'averageSeconds'> {
@@ -794,6 +842,8 @@ export class BibleGamesService {
         pointsTotal: 0,
         pointsLevels: 0,
         pointsDaily: 0,
+        pointsCharacters: 0,
+        charactersFound: 0,
       })
     );
   }
@@ -810,7 +860,8 @@ export class BibleGamesService {
   }
 
   // Checked in to a service that is happening right now: no games during the service.
-  private async inService(memberId: string): Promise<boolean> {
+  // Games pause while a member is checked in to a service that's happening.
+  async inService(memberId: string): Promise<boolean> {
     const rows = (await this.txHost.tx.query(
       `SELECT 1 FROM attendances a
        JOIN service_slots ss ON ss.event_id = a.event_id

@@ -4393,6 +4393,7 @@ dedicated host).
 | `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
 | `EVANGELISM` | `EMAIL_EVANGELISM_ENABLED` | `true` (push-only: added to an outreach team, convert(s) assigned) |
 | `NOTES` | `EMAIL_NOTES_ENABLED` | `true` (push-only: evening after a service, Monday weekly step; members can also opt out) |
+| `BIBLE_GAMES` | `EMAIL_BIBLE_GAMES_ENABLED` | `true` (push-only: Guess the Bible Character duel invite, your turn, duel over) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -5647,8 +5648,121 @@ end-of-round board shows the tab for the mode just played.
 `(month, levels_passed DESC, points DESC) WHERE board = 'levels'` (the query inlines the board literal so the planner
 can use it), and partial indexes on `bible_game_progress` for the all-time tabs: `(points_total DESC) WHERE
 points_total > 0`, `(points_daily DESC) WHERE points_daily > 0`, `(highest_passed DESC, points_levels DESC) WHERE
-(points_levels > 0 OR highest_passed > 0)`. The All games monthly board keeps `IDX_bible_game_monthly_board`. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
+(points_levels > 0 OR highest_passed > 0)`. The All games monthly board keeps `IDX_bible_game_monthly_board`.
+
+**Guess the Bible Character: character list (Phase 2).** The game and its Bible Charades party mode play from
+`src/bible-games/data/characters.json`, a hand-curated list shipped with the build (177 characters: 125 OT, 52 NT;
+34 easy, 78 medium, 65 hard). Each character has `testament`, `gender`, `people` (`early` = before Abraham, `hebrew`
+= Israelite/Jew, anything else = another nation), optional `tribe`, `roles`, family links (`father`, `mother`,
+`spouses`, `children`, `siblings`, all ids in the list) plus `married` / `parent` when the Bible mentions a spouse or
+children who aren't characters, `events`, `books` (where their story is told), `bookNamed`, `namedInNT` (OT only),
+`difficulty`, a one-line `summary` and 2–3 `clues` (KJV refs). `term` / `otherNames` / `spellings` are the words
+matched in verses (`otherNames` are genuine other names such as Abram or Cephas; `spellings` are KJV forms such as
+Elias or Esaias). `engine/characters.ts` defines 68 yes/no questions in five groups (Testament, Role, Family,
+Events, Books); each is a pure function of the data, so the game answers menu questions itself.
+`validateCharacters` (run by `engine/characters.spec.ts`) enforces: every clue is a real verse that names the
+character (so hints can blank the name with `maskNames`); every listed book contains one of their names;
+`namedInNT` is backed by NT text; family links resolve and run both ways; OT characters carry no NT-only events;
+no two characters give identical answers to every question; and every question has at least two yes and two no.
+
+**Character review (per church; migration `AddBibleCharacterReviews`, tenant).** `bible_character_reviews`
+(`character_id` PK, `hidden`, `reviewed_by_admin_id` → admins SET NULL, `reviewed_at`, `summary_override`,
+`clues_override` jsonb, `updated_by_admin_id`). Rows exist only for characters a church has touched; the table is
+read whole and cached (`bible-characters:reviews`, 5 min, cleared on change), so it needs no index beyond the PK.
+The two FK columns have partial indexes for ON DELETE SET NULL. Characters are live by default. The "Only use
+reviewed characters" switch is the `ChurchSetting` key `bible_characters:settings` (`{ onlyReviewed }`, cached as
+`bible-characters:settings`). `BibleCharactersService.playable()` is the pool the game will draw from (not hidden,
+and reviewed when the switch is on, with the church's summary/clues). Clue edits accept "Genesis 12:1" or
+`GEN.12.1` (`engine/bible.ts#parseRef`), must be different and must name the character; an edit equal to the
+original stores no override. Admin endpoints (module `bible_characters`): `GET admin/bible-games/characters`
+(GAMES_READ; every character merged with the church's review, clue verse text, family names and the questions the
+game answers yes to), `PATCH admin/bible-games/characters/:id` (GAMES_WRITE; `{ reviewed?, hidden?, summary?, clues? }`,
+null resets summary/clues), `PUT admin/bible-games/characters/settings` (GAMES_WRITE; `{ onlyReviewed?, turnHours? }`, either alone; `turnHours` is one of 6, 12, 24 (default), 48, 72). Audit:
+`BIBLE_CHARACTER_UPDATED`, `BIBLE_CHARACTER_SETTINGS_UPDATED`. Admin UI: Games → Bible characters
+(`/games/characters`). "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
 Rounds older than 60 days are deleted when the member next starts one (points stay in the ledger and totals).
+
+**Guess the Bible Character: Solo (Phase 3; migration `AddGuessTheBibleCharacter`, tenant).** Module key
+`bible_characters` ("Games: Guess the Bible Character"; added to every plan by the root migration
+`AddBibleCharactersToPlans`), separate from `bible_games`; all of its member and admin
+routes (including the character review above) need it on. The server picks a character at the chosen difficulty from
+`playable()`, avoiding the member's last 20; the member asks menu questions, which the server answers from the data.
+Member endpoints (`JwtAuthGuard`): `GET bible-characters` (question groups and menu, names to guess from, playable
+counts per difficulty, the active round, `inService`, `today { scored, limit }`, points this month / all time / rank,
+and the scoring `rules`); `POST bible-characters/rounds { difficulty }` (abandons any active round; `409
+SERVICE_IN_PROGRESS` while checked in to a live service, `409 NO_CHARACTERS` when none are playable);
+`GET bible-characters/rounds/:id`; `POST rounds/:id/ask { questionId }` (`409 ALREADY_ASKED`); `POST rounds/:id/hint`
+(next clue verse with the name blanked; `409 NO_HINTS_LEFT`); `POST rounds/:id/guess { characterId }` (`409
+ALREADY_GUESSED`; the third wrong guess ends the round as `lost`); `POST rounds/:id/give-up`;
+`GET bible-characters/scoreboard?period=month|all&limit=` (the Characters board). The round view carries `asked`,
+`hints`, `hintsLeft`, `wrongGuesses`, `guessesLeft`, `stillPossible` (characters at that difficulty that fit every
+answer and weren't wrongly guessed) and `worth`; a finished round adds `result` (name, other names, the church's
+summary, clue verses unmasked, books, points, `scored`, rank this month).
+
+Scoring (`engine/character-game.ts`, whole percentages so there is no rounding drift): start 60 / 100 / 150 for easy /
+medium / hard; the first 3 questions are free, then −5% each; −15% per hint; −10% per wrong guess; never below 20%.
+Losing or giving up scores 0. Only the first 5 rounds a member wins each church day are `scored`; later wins are for
+fun. A scored win goes through `BibleGamesService.awardPoints(member, 'characters', points, 1)`: the shared ledger
+(`mode = 'characters'`), the All games totals, `bible_game_board_monthly (board = 'characters', points, found)` and
+`bible_game_progress.points_characters` / `characters_found`. The Characters board ranks by points (month:
+`bible_game_board_monthly`; all time: `points_characters`) and each entry adds `found`. It has its own routes so it
+follows `bible_characters`; `?board=` on the Bible Challenge scoreboards accepts only `all|levels|daily`.
+
+`bible_character_rounds`: `member_id` (CASCADE), `character_id`, `difficulty`, `status` (`active` | `won` | `lost` |
+`gave_up` | `abandoned`), `asked` jsonb (`[{ q, a }]`), `hints`, `wrong_guesses` jsonb, `points`, `scored`,
+`finished_at`. Indexes: `UQ_bible_character_rounds_active (member_id) WHERE status = 'active'` (one live round per
+member), `IDX_bible_character_rounds_member_created (member_id, created_at DESC)` (recent characters and the daily
+count), `IDX_bible_character_rounds_finished (finished_at, character_id) WHERE finished_at IS NOT NULL` (admin
+stats), and a partial index on `bible_game_progress (points_characters DESC) WHERE points_characters > 0` for the
+all-time board. Admin (GAMES_READ): `GET admin/bible-games/characters/stats` (games, players and finds this month,
+plus the 5 hardest characters played 3+ times, by found rate) and `GET admin/bible-games/characters/scoreboard`.
+Admin UI: Games → Bible characters has Scoreboard and Characters (review) tabs; the Bible Challenge scoreboard also
+shows a Characters tab when the module is on.
+
+**Guess the Bible Character: Duel (Phase 4; migration `AddBibleCharacterDuels`, tenant).** Two members of the same
+church (the tenant schema guarantees it) each get their own character at the same level and take turns; a turn is one
+question, one hint or one guess. The person invited moves first, since the challenger picked the level. If the first
+mover finds theirs, the other player gets one last turn, which must be a guess (`409 LAST_GUESS_ONLY` otherwise):
+finding theirs then is a draw, anything else loses. Finding yours as the second mover wins at once. Three wrong guesses
+lose; resigning (any time) loses. The rules are pure functions in `engine/duel.ts` (`afterMove`, `duelPoints`).
+Points: a player who finds their character earns `worthNow` as in Solo (both do in a draw); winning without finding it
+(the other ran out of guesses, ran out of time or resigned) earns `MIN_PERCENT` of the level's start. Wins count
+against the same 5-a-day limit as Solo (`BibleCharacterGameService.scoredToday` now sums both tables) and go through
+`awardPoints` onto the Characters board. Time limit: the church setting `turnHours` (in `bible_characters:settings`,
+default 24) applies to accepting an invite and to every turn. Running out is checked when either player opens their
+duels and by `BibleCharacterDuelScheduler` (hourly at :20, every active church, `FOR UPDATE SKIP LOCKED`, at most
+200 per run): an unaccepted invite becomes `expired`; a missed turn loses (`timeout`), and a missed last guess leaves
+the first mover's find standing. Moves lock the duel row (`pessimistic_write`) so double taps can't play twice.
+Limits: 10 open (invited + active) duels per member (`409 TOO_MANY_DUELS` / `OPPONENT_BUSY`), one open duel per pair
+(`409 DUEL_EXISTS`, backed by a unique index). Moves are refused while checked in to a live service
+(`409 SERVICE_IN_PROGRESS`). Pushes (category `BIBLE_GAMES`): `BIBLE_DUEL_INVITE`, `BIBLE_DUEL_YOUR_TURN`,
+`BIBLE_DUEL_FINISHED`, linking to `/games/characters/duels/:id`.
+
+Member endpoints (`bible-characters`, module `bible_characters`): `GET duels` (open duels plus the last 10 finished,
+`openCount`, `maxOpen`, `turnHours`); `GET duels/opponents?search=` (2–60 chars; active members other than you, each
+word matching a first or last name, 20 at most); `POST duels { opponentId, difficulty }`; `GET duels/:id`;
+`POST duels/:id/accept` (picks two different characters); `POST duels/:id/decline` (the person invited declines, the
+challenger cancels); `POST duels/:id/ask { questionId }`, `/hint`, `/guess { characterId }`, `/resign`. The duel view
+has `you`, `opponent { id, name }`, `yourTurn`, `finalTurn`, `turnDeadline`, `me` (your questions, masked hints,
+guesses, `stillPossible`, `worth`), `them` (their questions about their own character and progress) and, when
+finished, `result { outcome, reason, points, scored, yours, theirs }`. Admin: `GET admin/bible-games/characters/stats`
+adds `duels { finishedThisMonth, inPlay, turnHours }`.
+
+`bible_character_duels`: `challenger_id`, `opponent_id` (members, CASCADE; CHECK they differ), `difficulty`, `status`
+(`invited` | `active` | `finished` | `declined` | `cancelled` | `expired`), `challenger_character`,
+`opponent_character`, `challenger_state` / `opponent_state` jsonb (`{ asked, hints, wrong }`), `turn`, `turn_number`,
+`turn_deadline`, `final_turn`, `winner` (`challenger` | `opponent` | `draw`), `reason`, `*_points`, `*_scored`,
+`finished_at`. Indexes: `(challenger_id, created_at DESC)` and `(opponent_id, created_at DESC)` (each player's list;
+also the FK cascades); unique `(LEAST(challenger_id, opponent_id), GREATEST(...)) WHERE status IN ('invited',
+'active')`; `(turn_deadline) WHERE status IN ('invited', 'active')` (the sweep); `(challenger_id, finished_at) WHERE
+challenger_scored` and `(opponent_id, finished_at) WHERE opponent_scored` (the daily limit); `(finished_at) WHERE
+status = 'finished'` (admin stats). Opponent search uses the existing trigram indexes on `members.firstname` /
+`lastname`.
+
+**Bible Charades (Phase 5, no table).** A party mode on one phone: `GET bible-characters/charades?difficulty=` returns
+up to 80 shuffled playable characters (`id`, `name`, the church's `summary`, `testament`, `difficulty`); everything
+else happens in the member app (1, 1½ or 2 minute rounds, Got it / Pass, optional tilt via `DeviceOrientationEvent`,
+screen kept awake with the Wake Lock API). Nothing is stored and nothing scores.
 
 **Managing questions (admin):** `GET admin/bible-games/questions/preview?level=&seed=` returns a sample of 12 generated
 questions for a level with answers, marking hidden ones and what hides them (`hiddenBy`). `POST/DELETE
@@ -7996,6 +8110,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
 | `EMAIL_EVANGELISM_ENABLED` | `true` | Evangelism outreach-team and convert-assignment pushes |
 | `EMAIL_NOTES_ENABLED` | `true` | Notes reminder pushes (evening after a service, Monday weekly step) |
+| `EMAIL_BIBLE_GAMES_ENABLED` | `true` | Bible Games pushes (duel invite, your turn, duel over) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
@@ -9764,6 +9879,8 @@ Tenant schema. See Bible Games Module.
 - `bible_game_points` — the points ledger: `member_id`, `mode`, `points`, `round_id` (SET NULL), `created_at`.
 - `bible_game_progress.points_total` and `bible_game_monthly (member_id, month, points)` — running totals the
   scoreboards read; back-filled from the ledger by `BibleGamesTotalsAndQuestions`.
+- `bible_game_progress.points_characters`, `characters_found` and `bible_game_board_monthly.found` — Guess the Bible
+  Character totals. `bible_character_rounds` and `bible_character_reviews` are described under Bible Games Module.
 - `bible_game_custom_questions` — `prompt`, `options` (jsonb), `answer`, `explain`, `level_min`, `level_max`, `active`,
   `created_by_admin_id` (SET NULL).
 - `bible_game_hidden` — `key` (PK: a question key or `verse:REF`), `label`, `hidden_by_admin_id` (SET NULL).
@@ -12247,6 +12364,8 @@ Tenant schema. See Bible Games Module.
 - `bible_game_points` — the points ledger: `member_id`, `mode`, `points`, `round_id` (SET NULL), `created_at`.
 - `bible_game_progress.points_total` and `bible_game_monthly (member_id, month, points)` — running totals the
   scoreboards read; back-filled from the ledger by `BibleGamesTotalsAndQuestions`.
+- `bible_game_progress.points_characters`, `characters_found` and `bible_game_board_monthly.found` — Guess the Bible
+  Character totals. `bible_character_rounds` and `bible_character_reviews` are described under Bible Games Module.
 - `bible_game_custom_questions` — `prompt`, `options` (jsonb), `answer`, `explain`, `level_min`, `level_max`, `active`,
   `created_by_admin_id` (SET NULL).
 - `bible_game_hidden` — `key` (PK: a question key or `verse:REF`), `label`, `hidden_by_admin_id` (SET NULL).
@@ -17764,6 +17883,7 @@ dedicated host).
 | `TRAINING_CLASSES` | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` (push-only: join request approved/declined, certificate ready) |
 | `EVANGELISM` | `EMAIL_EVANGELISM_ENABLED` | `true` (push-only: added to an outreach team, convert(s) assigned) |
 | `NOTES` | `EMAIL_NOTES_ENABLED` | `true` (push-only: evening after a service, Monday weekly step; members can also opt out) |
+| `BIBLE_GAMES` | `EMAIL_BIBLE_GAMES_ENABLED` | `true` (push-only: Guess the Bible Character duel invite, your turn, duel over) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 Template files live in `src/utility/templates/*.html` and use `{{variable}}` for simple substitution, `{{#if}}` for
@@ -19017,8 +19137,121 @@ end-of-round board shows the tab for the mode just played.
 `(month, levels_passed DESC, points DESC) WHERE board = 'levels'` (the query inlines the board literal so the planner
 can use it), and partial indexes on `bible_game_progress` for the all-time tabs: `(points_total DESC) WHERE
 points_total > 0`, `(points_daily DESC) WHERE points_daily > 0`, `(highest_passed DESC, points_levels DESC) WHERE
-(points_levels > 0 OR highest_passed > 0)`. The All games monthly board keeps `IDX_bible_game_monthly_board`. "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
+(points_levels > 0 OR highest_passed > 0)`. The All games monthly board keeps `IDX_bible_game_monthly_board`.
+
+**Guess the Bible Character: character list (Phase 2).** The game and its Bible Charades party mode play from
+`src/bible-games/data/characters.json`, a hand-curated list shipped with the build (177 characters: 125 OT, 52 NT;
+34 easy, 78 medium, 65 hard). Each character has `testament`, `gender`, `people` (`early` = before Abraham, `hebrew`
+= Israelite/Jew, anything else = another nation), optional `tribe`, `roles`, family links (`father`, `mother`,
+`spouses`, `children`, `siblings`, all ids in the list) plus `married` / `parent` when the Bible mentions a spouse or
+children who aren't characters, `events`, `books` (where their story is told), `bookNamed`, `namedInNT` (OT only),
+`difficulty`, a one-line `summary` and 2–3 `clues` (KJV refs). `term` / `otherNames` / `spellings` are the words
+matched in verses (`otherNames` are genuine other names such as Abram or Cephas; `spellings` are KJV forms such as
+Elias or Esaias). `engine/characters.ts` defines 68 yes/no questions in five groups (Testament, Role, Family,
+Events, Books); each is a pure function of the data, so the game answers menu questions itself.
+`validateCharacters` (run by `engine/characters.spec.ts`) enforces: every clue is a real verse that names the
+character (so hints can blank the name with `maskNames`); every listed book contains one of their names;
+`namedInNT` is backed by NT text; family links resolve and run both ways; OT characters carry no NT-only events;
+no two characters give identical answers to every question; and every question has at least two yes and two no.
+
+**Character review (per church; migration `AddBibleCharacterReviews`, tenant).** `bible_character_reviews`
+(`character_id` PK, `hidden`, `reviewed_by_admin_id` → admins SET NULL, `reviewed_at`, `summary_override`,
+`clues_override` jsonb, `updated_by_admin_id`). Rows exist only for characters a church has touched; the table is
+read whole and cached (`bible-characters:reviews`, 5 min, cleared on change), so it needs no index beyond the PK.
+The two FK columns have partial indexes for ON DELETE SET NULL. Characters are live by default. The "Only use
+reviewed characters" switch is the `ChurchSetting` key `bible_characters:settings` (`{ onlyReviewed }`, cached as
+`bible-characters:settings`). `BibleCharactersService.playable()` is the pool the game will draw from (not hidden,
+and reviewed when the switch is on, with the church's summary/clues). Clue edits accept "Genesis 12:1" or
+`GEN.12.1` (`engine/bible.ts#parseRef`), must be different and must name the character; an edit equal to the
+original stores no override. Admin endpoints (module `bible_characters`): `GET admin/bible-games/characters`
+(GAMES_READ; every character merged with the church's review, clue verse text, family names and the questions the
+game answers yes to), `PATCH admin/bible-games/characters/:id` (GAMES_WRITE; `{ reviewed?, hidden?, summary?, clues? }`,
+null resets summary/clues), `PUT admin/bible-games/characters/settings` (GAMES_WRITE; `{ onlyReviewed?, turnHours? }`, either alone; `turnHours` is one of 6, 12, 24 (default), 48, 72). Audit:
+`BIBLE_CHARACTER_UPDATED`, `BIBLE_CHARACTER_SETTINGS_UPDATED`. Admin UI: Games → Bible characters
+(`/games/characters`). "This week's verses" refs are cached 10 min and read via `IDX_notes_created_at`.
 Rounds older than 60 days are deleted when the member next starts one (points stay in the ledger and totals).
+
+**Guess the Bible Character: Solo (Phase 3; migration `AddGuessTheBibleCharacter`, tenant).** Module key
+`bible_characters` ("Games: Guess the Bible Character"; added to every plan by the root migration
+`AddBibleCharactersToPlans`), separate from `bible_games`; all of its member and admin
+routes (including the character review above) need it on. The server picks a character at the chosen difficulty from
+`playable()`, avoiding the member's last 20; the member asks menu questions, which the server answers from the data.
+Member endpoints (`JwtAuthGuard`): `GET bible-characters` (question groups and menu, names to guess from, playable
+counts per difficulty, the active round, `inService`, `today { scored, limit }`, points this month / all time / rank,
+and the scoring `rules`); `POST bible-characters/rounds { difficulty }` (abandons any active round; `409
+SERVICE_IN_PROGRESS` while checked in to a live service, `409 NO_CHARACTERS` when none are playable);
+`GET bible-characters/rounds/:id`; `POST rounds/:id/ask { questionId }` (`409 ALREADY_ASKED`); `POST rounds/:id/hint`
+(next clue verse with the name blanked; `409 NO_HINTS_LEFT`); `POST rounds/:id/guess { characterId }` (`409
+ALREADY_GUESSED`; the third wrong guess ends the round as `lost`); `POST rounds/:id/give-up`;
+`GET bible-characters/scoreboard?period=month|all&limit=` (the Characters board). The round view carries `asked`,
+`hints`, `hintsLeft`, `wrongGuesses`, `guessesLeft`, `stillPossible` (characters at that difficulty that fit every
+answer and weren't wrongly guessed) and `worth`; a finished round adds `result` (name, other names, the church's
+summary, clue verses unmasked, books, points, `scored`, rank this month).
+
+Scoring (`engine/character-game.ts`, whole percentages so there is no rounding drift): start 60 / 100 / 150 for easy /
+medium / hard; the first 3 questions are free, then −5% each; −15% per hint; −10% per wrong guess; never below 20%.
+Losing or giving up scores 0. Only the first 5 rounds a member wins each church day are `scored`; later wins are for
+fun. A scored win goes through `BibleGamesService.awardPoints(member, 'characters', points, 1)`: the shared ledger
+(`mode = 'characters'`), the All games totals, `bible_game_board_monthly (board = 'characters', points, found)` and
+`bible_game_progress.points_characters` / `characters_found`. The Characters board ranks by points (month:
+`bible_game_board_monthly`; all time: `points_characters`) and each entry adds `found`. It has its own routes so it
+follows `bible_characters`; `?board=` on the Bible Challenge scoreboards accepts only `all|levels|daily`.
+
+`bible_character_rounds`: `member_id` (CASCADE), `character_id`, `difficulty`, `status` (`active` | `won` | `lost` |
+`gave_up` | `abandoned`), `asked` jsonb (`[{ q, a }]`), `hints`, `wrong_guesses` jsonb, `points`, `scored`,
+`finished_at`. Indexes: `UQ_bible_character_rounds_active (member_id) WHERE status = 'active'` (one live round per
+member), `IDX_bible_character_rounds_member_created (member_id, created_at DESC)` (recent characters and the daily
+count), `IDX_bible_character_rounds_finished (finished_at, character_id) WHERE finished_at IS NOT NULL` (admin
+stats), and a partial index on `bible_game_progress (points_characters DESC) WHERE points_characters > 0` for the
+all-time board. Admin (GAMES_READ): `GET admin/bible-games/characters/stats` (games, players and finds this month,
+plus the 5 hardest characters played 3+ times, by found rate) and `GET admin/bible-games/characters/scoreboard`.
+Admin UI: Games → Bible characters has Scoreboard and Characters (review) tabs; the Bible Challenge scoreboard also
+shows a Characters tab when the module is on.
+
+**Guess the Bible Character: Duel (Phase 4; migration `AddBibleCharacterDuels`, tenant).** Two members of the same
+church (the tenant schema guarantees it) each get their own character at the same level and take turns; a turn is one
+question, one hint or one guess. The person invited moves first, since the challenger picked the level. If the first
+mover finds theirs, the other player gets one last turn, which must be a guess (`409 LAST_GUESS_ONLY` otherwise):
+finding theirs then is a draw, anything else loses. Finding yours as the second mover wins at once. Three wrong guesses
+lose; resigning (any time) loses. The rules are pure functions in `engine/duel.ts` (`afterMove`, `duelPoints`).
+Points: a player who finds their character earns `worthNow` as in Solo (both do in a draw); winning without finding it
+(the other ran out of guesses, ran out of time or resigned) earns `MIN_PERCENT` of the level's start. Wins count
+against the same 5-a-day limit as Solo (`BibleCharacterGameService.scoredToday` now sums both tables) and go through
+`awardPoints` onto the Characters board. Time limit: the church setting `turnHours` (in `bible_characters:settings`,
+default 24) applies to accepting an invite and to every turn. Running out is checked when either player opens their
+duels and by `BibleCharacterDuelScheduler` (hourly at :20, every active church, `FOR UPDATE SKIP LOCKED`, at most
+200 per run): an unaccepted invite becomes `expired`; a missed turn loses (`timeout`), and a missed last guess leaves
+the first mover's find standing. Moves lock the duel row (`pessimistic_write`) so double taps can't play twice.
+Limits: 10 open (invited + active) duels per member (`409 TOO_MANY_DUELS` / `OPPONENT_BUSY`), one open duel per pair
+(`409 DUEL_EXISTS`, backed by a unique index). Moves are refused while checked in to a live service
+(`409 SERVICE_IN_PROGRESS`). Pushes (category `BIBLE_GAMES`): `BIBLE_DUEL_INVITE`, `BIBLE_DUEL_YOUR_TURN`,
+`BIBLE_DUEL_FINISHED`, linking to `/games/characters/duels/:id`.
+
+Member endpoints (`bible-characters`, module `bible_characters`): `GET duels` (open duels plus the last 10 finished,
+`openCount`, `maxOpen`, `turnHours`); `GET duels/opponents?search=` (2–60 chars; active members other than you, each
+word matching a first or last name, 20 at most); `POST duels { opponentId, difficulty }`; `GET duels/:id`;
+`POST duels/:id/accept` (picks two different characters); `POST duels/:id/decline` (the person invited declines, the
+challenger cancels); `POST duels/:id/ask { questionId }`, `/hint`, `/guess { characterId }`, `/resign`. The duel view
+has `you`, `opponent { id, name }`, `yourTurn`, `finalTurn`, `turnDeadline`, `me` (your questions, masked hints,
+guesses, `stillPossible`, `worth`), `them` (their questions about their own character and progress) and, when
+finished, `result { outcome, reason, points, scored, yours, theirs }`. Admin: `GET admin/bible-games/characters/stats`
+adds `duels { finishedThisMonth, inPlay, turnHours }`.
+
+`bible_character_duels`: `challenger_id`, `opponent_id` (members, CASCADE; CHECK they differ), `difficulty`, `status`
+(`invited` | `active` | `finished` | `declined` | `cancelled` | `expired`), `challenger_character`,
+`opponent_character`, `challenger_state` / `opponent_state` jsonb (`{ asked, hints, wrong }`), `turn`, `turn_number`,
+`turn_deadline`, `final_turn`, `winner` (`challenger` | `opponent` | `draw`), `reason`, `*_points`, `*_scored`,
+`finished_at`. Indexes: `(challenger_id, created_at DESC)` and `(opponent_id, created_at DESC)` (each player's list;
+also the FK cascades); unique `(LEAST(challenger_id, opponent_id), GREATEST(...)) WHERE status IN ('invited',
+'active')`; `(turn_deadline) WHERE status IN ('invited', 'active')` (the sweep); `(challenger_id, finished_at) WHERE
+challenger_scored` and `(opponent_id, finished_at) WHERE opponent_scored` (the daily limit); `(finished_at) WHERE
+status = 'finished'` (admin stats). Opponent search uses the existing trigram indexes on `members.firstname` /
+`lastname`.
+
+**Bible Charades (Phase 5, no table).** A party mode on one phone: `GET bible-characters/charades?difficulty=` returns
+up to 80 shuffled playable characters (`id`, `name`, the church's `summary`, `testament`, `difficulty`); everything
+else happens in the member app (1, 1½ or 2 minute rounds, Got it / Pass, optional tilt via `DeviceOrientationEvent`,
+screen kept awake with the Wake Lock API). Nothing is stored and nothing scores.
 
 **Managing questions (admin):** `GET admin/bible-games/questions/preview?level=&seed=` returns a sample of 12 generated
 questions for a level with answers, marking hidden ones and what hides them (`hiddenBy`). `POST/DELETE
@@ -21363,6 +21596,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_TRAINING_CLASSES_ENABLED` | `true` | Training class join-request decisions and certificate-ready pushes |
 | `EMAIL_EVANGELISM_ENABLED` | `true` | Evangelism outreach-team and convert-assignment pushes |
 | `EMAIL_NOTES_ENABLED` | `true` | Notes reminder pushes (evening after a service, Monday weekly step) |
+| `EMAIL_BIBLE_GAMES_ENABLED` | `true` | Bible Games pushes (duel invite, your turn, duel over) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP
