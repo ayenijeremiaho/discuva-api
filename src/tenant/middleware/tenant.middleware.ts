@@ -21,6 +21,7 @@ import { extractSubdomain } from '../utility/extract-subdomain';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { JwtPayload } from '../../auth/interface/auth.interface';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
+import { flushAfterCommit } from '../utility/after-commit';
 
 const VALID_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
 const REFRESH_COOKIE_NAME = 'refresh_token';
@@ -122,6 +123,7 @@ export class TenantMiddleware implements NestMiddleware {
     this.cls.set('tenantId', tenant.id);
     this.cls.set('schemaName', tenant.schemaName);
     this.cls.set('clusterId', tenant.clusterId);
+    this.cls.set('afterCommit', []);
 
     try {
       await this.txHost.withTransaction(async () => {
@@ -145,6 +147,7 @@ export class TenantMiddleware implements NestMiddleware {
           next();
         });
       });
+      await flushAfterCommit(this.cls);
     } catch (err) {
       // The response has already been fully sent by the time either of
       // these fire (res.on('finish')/('close') only fire post-response) —

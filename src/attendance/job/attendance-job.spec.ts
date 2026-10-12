@@ -19,6 +19,8 @@ const mockCacheService = {
 const mockTenantRepo = { find: jest.fn() };
 const mockCls = {
   runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+  get: jest.fn(),
+  set: jest.fn(),
 };
 const mockTxHost = {
   tx: { query: jest.fn() },

@@ -3,6 +3,7 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { TenantJobEnvelope } from './job-envelope';
+import { flushAfterCommit } from './after-commit';
 
 const VALID_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
 
@@ -34,13 +35,17 @@ export async function runInTenantContext<T>(
     {
       tenantId: envelope.tenantId,
       schemaName: envelope.schemaName,
+      afterCommit: [],
     } as AppClsStore,
-    () =>
-      txHost.withTransaction(async () => {
+    async () => {
+      const result = await txHost.withTransaction(async () => {
         await txHost.tx.query(
           `SET LOCAL search_path TO "${envelope.schemaName}", public`,
         );
         return fn();
-      }),
+      });
+      await flushAfterCommit(cls);
+      return result;
+    },
   );
 }

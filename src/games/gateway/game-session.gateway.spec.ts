@@ -10,6 +10,7 @@ describe('GameSessionGateway', () => {
   const mockTenantRepo = { findOneBy: jest.fn() };
   const mockCls = {
     runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+    set: jest.fn(),
     get: jest.fn(),
   };
   const mockTxHost = {
@@ -133,7 +134,10 @@ describe('GameSessionGateway', () => {
       // The whole point of this gateway existing: the lookup must run
       // inside the resolved tenant's context, not the default connection.
       expect(mockCls.runWith).toHaveBeenCalledWith(
-        { tenantId: 'tenant-1', schemaName: 'schema_1' },
+        expect.objectContaining({
+          tenantId: 'tenant-1',
+          schemaName: 'schema_1',
+        }),
         expect.any(Function),
       );
     });

@@ -8,7 +8,7 @@ const at = (iso: string) => new Date(iso);
 describe('SchedulerGateService', () => {
   let cache: ReturnType<typeof memoryGateCache>;
   let tenantRepo: { find: jest.Mock };
-  let cls: { get: jest.Mock; runWith: jest.Mock };
+  let cls: { get: jest.Mock; set: jest.Mock; runWith: jest.Mock };
   let txHost: { tx: { query: jest.Mock }; withTransaction: jest.Mock };
   let gate: SchedulerGateService;
   const logger = { warn: jest.fn() } as unknown as Logger;
@@ -23,6 +23,7 @@ describe('SchedulerGateService', () => {
     };
     cls = {
       get: jest.fn().mockReturnValue('t1'),
+      set: jest.fn(),
       runWith: jest.fn((_s: unknown, fn: () => unknown) => fn()),
     };
     txHost = {

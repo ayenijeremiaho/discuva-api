@@ -8,6 +8,9 @@ import {
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { QueryFailedError } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { ClsService } from 'nestjs-cls';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import {
   ServiceSessionService,
@@ -42,11 +45,18 @@ const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(1),
+  incr: jest.fn().mockResolvedValue(1),
   key: jest.fn().mockReturnValue('cache-key'),
   getOrSet: jest
     .fn()
     .mockImplementation((_key: string, fn: () => Promise<unknown>) => fn()),
   flushNamespace: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockAuditLog = { log: jest.fn() };
+
+const mockTenantRepo = {
+  findOne: jest.fn().mockResolvedValue({ id: 'tenant-1', subdomain: 'grace' }),
 };
 
 const mockConfigService = {
@@ -270,6 +280,17 @@ describe('ServiceSessionService', () => {
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         { provide: getRepositoryToken(Admin), useValue: mockAdminRepo },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
+        {
+          provide: ClsService,
+          useValue: {
+            get: jest.fn((k: string) =>
+              k === 'tenantId' ? 'tenant-1' : undefined,
+            ),
+            isActive: () => true,
+          },
+        },
+        { provide: AuditLogService, useValue: mockAuditLog },
         {
           provide: DepartmentAccessService,
           useValue: mockDepartmentAccessService,
@@ -588,7 +609,30 @@ describe('ServiceSessionService', () => {
       expect(result).toEqual({
         sessionCode: 'SVC-ABC123',
         shareToken: 'token-abc',
+        presentationUrl: null,
+        audienceUrl: null,
       });
+    });
+
+    it("adds the church's presentation and audience links on the admin app", async () => {
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      mockCacheService.get
+        .mockResolvedValueOnce(liveAnchor)
+        .mockResolvedValueOnce('token-abc');
+      mockConfigService.get.mockImplementation((key: string, d?: unknown) =>
+        key === 'ADMIN_LOGIN_URL' ? 'https://admin.example.com/login' : d,
+      );
+
+      const result = await service.getShareLinks('SVC-ABC123', 'member-1');
+      expect(result.presentationUrl).toBe(
+        'https://admin.example.com/live/SVC-ABC123/presentation?t=grace',
+      );
+      expect(result.audienceUrl).toBe(
+        'https://admin.example.com/live/SVC-ABC123/audience?t=grace',
+      );
+      mockConfigService.get.mockImplementation(
+        (_key: string, d?: unknown) => d,
+      );
     });
 
     it('throws NotFoundException when the session itself is not live', async () => {
@@ -1061,6 +1105,101 @@ describe('ServiceSessionService', () => {
   // ── advance ───────────────────────────────────────────────────────────────
 
   describe('getState', () => {
+    // A small in-memory Redis so the cache tests exercise real keys and versions.
+    const useRealisticCache = () => {
+      const store = new Map<string, unknown>();
+      store.set('session:SVC-ABC123:anchor', liveAnchor);
+      mockCacheService.key.mockImplementation(
+        (ns: string, id: string, suffix?: string) =>
+          [ns, id, suffix].filter(Boolean).join(':'),
+      );
+      mockCacheService.get.mockImplementation(async (k: string) =>
+        store.get(k),
+      );
+      mockCacheService.set.mockImplementation(async (k: string, v: unknown) => {
+        store.set(k, JSON.parse(JSON.stringify(v)));
+      });
+      mockCacheService.del.mockImplementation(async (k: string) => {
+        store.delete(k);
+        return 1;
+      });
+      mockCacheService.incr.mockImplementation(async (k: string) => {
+        const n = ((store.get(k) as number) ?? 0) + 1;
+        store.set(k, n);
+        return n;
+      });
+      return store;
+    };
+    afterEach(() => restoreCache());
+    const restoreCache = () => {
+      mockCacheService.key.mockReturnValue('cache-key');
+      mockCacheService.get.mockResolvedValue(undefined);
+      mockCacheService.set.mockResolvedValue(undefined);
+      mockCacheService.del.mockResolvedValue(1);
+      mockCacheService.incr.mockResolvedValue(1);
+    };
+
+    it('serves the running order from cache while nothing has changed', async () => {
+      useRealisticCache();
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      await service.getState('SVC-ABC123');
+      await service.getState('SVC-ABC123');
+      await service.getState('SVC-ABC123');
+      expect(mockSessionRepo.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('rebuilds after any change, so every view gets the new order', async () => {
+      useRealisticCache();
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      await service.getState('SVC-ABC123');
+      await service.adjustTime('SVC-ABC123', 60, 'member-1');
+      mockSessionRepo.findOne.mockClear();
+      await service.getState('SVC-ABC123');
+      expect(mockSessionRepo.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('never lets a poll that read before a change put the old order back', async () => {
+      const store = useRealisticCache();
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      // The poll reads version 0, then the change lands while it is still querying.
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      mockSessionRepo.findOne.mockImplementationOnce(async () => {
+        await gate;
+        return mockSession;
+      });
+      const slowPoll = service.getState('SVC-ABC123');
+      await new Promise((r) => setImmediate(r));
+      await service.adjustTime('SVC-ABC123', 60, 'member-1');
+      release();
+      await slowPoll;
+      expect(
+        (store.get('session:SVC-ABC123:state') as { version: number }).version,
+      ).toBe(0);
+      // Bumped once during the change and again once it commits.
+      expect(store.get('session:SVC-ABC123:state-version')).toBe(2);
+
+      mockSessionRepo.findOne.mockClear();
+      await service.getState('SVC-ABC123');
+      expect(mockSessionRepo.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('always loads fresh when there is no live timer to pair it with', async () => {
+      mockCacheService.get.mockResolvedValue(undefined);
+      mockSessionRepo.findOne.mockResolvedValue(mockSession);
+      await service.getState('SVC-ABC123');
+      expect(mockSessionRepo.findOne).toHaveBeenCalled();
+      expect(mockCacheService.set).toHaveBeenCalledWith(
+        'cache-key',
+        expect.objectContaining({ effectiveSlots: expect.any(Array) }),
+        10,
+      );
+    });
+
     it('includes the caution threshold ratio from config, defaulting to 0.25', async () => {
       mockSessionRepo.findOne.mockResolvedValue(mockSession);
       mockCacheService.get.mockResolvedValue(liveAnchor);
@@ -1707,6 +1846,95 @@ describe('ServiceSessionService', () => {
   });
 
   // ── overrideSlot ─────────────────────────────────────────────────────────
+
+  describe('audit trail for live controls', () => {
+    beforeEach(() => {
+      mockSessionRepo.findOne.mockResolvedValue({
+        ...mockSession,
+        programme: { serviceSlot: { name: 'First Service' } },
+      });
+      mockCacheService.get.mockResolvedValue(liveAnchor);
+      mockMemberRepo.findOne.mockResolvedValue(mockMember);
+      mockActionEntryRepo.create.mockImplementation((v: unknown) => v);
+    });
+
+    it('records an admin change as admin in the action log and the audit log', async () => {
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      await service.adjustTime('SVC-ABC123', 300, 'member-1');
+      expect(mockActionEntryRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorRole: 'ADMIN',
+          action: 'TIME_ADJUSTED',
+        }),
+      );
+      expect(mockAuditLog.log).toHaveBeenCalledWith(
+        'LIVE_SESSION_TIME_ADJUSTED',
+        expect.objectContaining({
+          actorId: 'member-1',
+          targetName: 'First Service',
+          metadata: expect.objectContaining({
+            via: 'admin',
+            detail: 'position:0:delta:300',
+          }),
+        }),
+      );
+    });
+
+    it('records a Front Desk worker as front desk', async () => {
+      mockAdminRepo.findOne.mockResolvedValue(null);
+      mockDepartmentAccessService.hasCapability.mockResolvedValue(true);
+      await service.adjustTime('SVC-ABC123', 60, 'member-1');
+      expect(mockActionEntryRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ actorRole: 'WORKER' }),
+      );
+      expect(mockAuditLog.log).toHaveBeenCalledWith(
+        'LIVE_SESSION_TIME_ADJUSTED',
+        expect.objectContaining({
+          metadata: expect.objectContaining({ via: 'front_desk' }),
+        }),
+      );
+    });
+
+    it('records a Programme Manager link holder by the name on their access', async () => {
+      await service.adjustTime('SVC-ABC123', 60, null, 'Tunde (media)');
+      expect(mockAuditLog.log).toHaveBeenCalledWith(
+        'LIVE_SESSION_TIME_ADJUSTED',
+        expect.objectContaining({
+          actorId: undefined,
+          metadata: expect.objectContaining({
+            via: 'programme_manager_link',
+            actorLabel: 'Tunde (media)',
+          }),
+        }),
+      );
+    });
+
+    it('records what an edit changed, including a backup swap', async () => {
+      mockAdminRepo.findOne.mockResolvedValue(validAdmin);
+      mockSessionSlotRepo.findOne.mockResolvedValue({
+        id: 'sss-0',
+        position: 2,
+      });
+      mockSessionSlotRepo.save.mockImplementation(async (v: unknown) => ({
+        ...(v as object),
+        overriddenMember: { firstname: 'Pastor', lastname: 'Sam' },
+      }));
+      await service.overrideSlot(
+        'SVC-ABC123',
+        2,
+        { overriddenMemberId: 'm9', adjustedAllocatedMinutes: 30 },
+        'member-1',
+      );
+      expect(mockAuditLog.log).toHaveBeenCalledWith(
+        'LIVE_SESSION_ITEM_UPDATED',
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            detail: 'position:2:member:Pastor Sam:minutes:30',
+          }),
+        }),
+      );
+    });
+  });
 
   describe('overrideSlot', () => {
     const mockSessionSlot = {

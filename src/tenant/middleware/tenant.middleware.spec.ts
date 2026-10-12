@@ -15,7 +15,13 @@ import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
 
 const mockTenantRepo = { findOneBy: jest.fn() };
-const mockCls = { set: jest.fn() };
+const clsStore: Record<string, unknown> = {};
+const mockCls = {
+  set: jest.fn((k: string, v: unknown) => {
+    clsStore[k] = v;
+  }),
+  get: jest.fn((k: string) => clsStore[k]),
+};
 const mockConfigService = { get: jest.fn().mockReturnValue('localhost') };
 const mockTx = { query: jest.fn() };
 const mockTxHost = {
@@ -177,6 +183,44 @@ describe('TenantMiddleware', () => {
     expect(mockTx.query).toHaveBeenCalledWith(
       'SET LOCAL search_path TO "church_a", public',
     );
+  });
+
+  describe('after-commit tasks', () => {
+    const activeTenant = {
+      id: 't1',
+      subdomain: 'church-a',
+      schemaName: 'church_a',
+      clusterId: 'default',
+      isActive: true,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+    };
+
+    it('runs them once the request has committed', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+      const task = jest.fn();
+      const res = makeRes(200);
+      const next = jest.fn(() => {
+        (clsStore.afterCommit as Array<() => unknown>).push(task);
+        res.fire('finish');
+      });
+      await middleware.use(makeReq('church-a.localhost'), res, next);
+      expect(task).toHaveBeenCalledTimes(1);
+    });
+
+    it('drops them when the request fails and rolls back', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+      mockTxHost.withTransaction.mockImplementationOnce(
+        async (fn: () => Promise<unknown>) => fn(),
+      );
+      const task = jest.fn();
+      const res = makeRes(500);
+      const next = jest.fn(() => {
+        (clsStore.afterCommit as Array<() => unknown>).push(task);
+        res.fire('finish');
+      });
+      await middleware.use(makeReq('church-a.localhost'), res, next);
+      expect(task).not.toHaveBeenCalled();
+    });
   });
 
   describe('fallback resolution for a Host header with no subdomain', () => {

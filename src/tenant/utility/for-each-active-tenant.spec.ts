@@ -3,6 +3,8 @@ import { forEachActiveTenant } from './for-each-active-tenant';
 
 const mockTenantRepo = { find: jest.fn() };
 const mockCls = {
+  get: jest.fn(),
+  set: jest.fn(),
   runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
 };
 const mockTxHost = {

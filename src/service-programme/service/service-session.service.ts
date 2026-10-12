@@ -46,6 +46,15 @@ import {
   EffectiveSessionSlot,
 } from '../util/slot-display';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { ClsService } from 'nestjs-cls';
+import {
+  AuditAction,
+  AuditLogService,
+} from '../../utility/service/audit-log.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { buildAdminUrl } from '../../tenant/utility/tenant-url';
+import { afterCommit } from '../../tenant/utility/after-commit';
 
 export interface SessionAnchor {
   currentSlotPosition: number;
@@ -222,6 +231,37 @@ const SESSION_TTL_LIVE = 86400 * 2;
 const SESSION_TTL_COMPLETED = 86400 * 2;
 const ANALYTICS_TTL = 1800;
 
+// Live controls mirrored into the church-wide audit log (session action names → audit actions).
+const LIVE_AUDIT_ACTIONS: Record<string, AuditAction> = {
+  SESSION_STARTED: 'LIVE_SESSION_STARTED',
+  SESSION_ENDED: 'LIVE_SESSION_ENDED',
+  ADVANCE_SLOT: 'LIVE_SESSION_ADVANCED',
+  REWIND_SLOT: 'LIVE_SESSION_REWOUND',
+  PAUSE: 'LIVE_SESSION_PAUSED',
+  RESUME: 'LIVE_SESSION_RESUMED',
+  TIME_ADJUSTED: 'LIVE_SESSION_TIME_ADJUSTED',
+  SLOT_ADDED: 'LIVE_SESSION_SECTION_ADDED',
+  SLOTS_REORDERED: 'LIVE_SESSION_REORDERED',
+  SLOT_OVERRIDE: 'LIVE_SESSION_ITEM_UPDATED',
+  SHARE_TOKEN_ROTATED: 'LIVE_SESSION_LINK_ROTATED',
+  ACCESS_GRANT_CREATED: 'LIVE_SESSION_ACCESS_GRANTED',
+  ACCESS_GRANT_REPLACED: 'LIVE_SESSION_ACCESS_GRANTED',
+  ACCESS_GRANT_REVOKED: 'LIVE_SESSION_ACCESS_REVOKED',
+};
+
+// Every live change invalidates it, so this only bounds staleness from anything outside logAction.
+const STATE_CACHE_TTL_SECONDS = 10;
+
+type CachedState = Pick<SessionStatePayload, 'session' | 'effectiveSlots'> & {
+  version: number;
+};
+
+const LIVE_ACTION_VIA: Record<ServiceActionRoleEnum, string> = {
+  [ServiceActionRoleEnum.ADMIN]: 'admin',
+  [ServiceActionRoleEnum.WORKER]: 'front_desk',
+  [ServiceActionRoleEnum.PUBLIC_LINK]: 'programme_manager_link',
+};
+
 @Injectable()
 export class ServiceSessionService {
   constructor(
@@ -249,6 +289,10 @@ export class ServiceSessionService {
     private readonly configService: ConfigService,
     private readonly departmentAccessService: DepartmentAccessService,
     private readonly churchTimezone: ChurchTimezoneService,
+    @InjectRepository(Tenant)
+    private readonly tenantRepo: Repository<Tenant>,
+    private readonly cls: ClsService<AppClsStore>,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   private readonly logger = new Logger(ServiceSessionService.name);
@@ -416,7 +460,12 @@ export class ServiceSessionService {
   async getShareLinks(
     sessionCode: string,
     memberId: string,
-  ): Promise<{ sessionCode: string; shareToken: string }> {
+  ): Promise<{
+    sessionCode: string;
+    shareToken: string;
+    presentationUrl: string | null;
+    audienceUrl: string | null;
+  }> {
     await this.assertCanControlSession(memberId);
     await this.getAnchorOrThrow(sessionCode);
 
@@ -436,7 +485,36 @@ export class ServiceSessionService {
       );
     }
 
-    return { sessionCode, shareToken };
+    return {
+      sessionCode,
+      shareToken,
+      ...(await this.viewerLinks(sessionCode)),
+    };
+  }
+
+  // The admin app's presentation and audience screens for this church, so the member app's Front Desk
+  // can hand them to the media team. The admin app is one host for every church; `t` picks the church.
+  private async viewerLinks(
+    sessionCode: string,
+  ): Promise<{ presentationUrl: string | null; audienceUrl: string | null }> {
+    const base = this.configService.get<string>('ADMIN_LOGIN_URL');
+    const tenantId = this.cls.get('tenantId');
+    const tenant = tenantId
+      ? await this.tenantRepo.findOne({
+          where: { id: tenantId },
+          select: { id: true, subdomain: true },
+        })
+      : null;
+    if (!base || !tenant?.subdomain)
+      return { presentationUrl: null, audienceUrl: null };
+    const link = (view: string) =>
+      buildAdminUrl(base, `/live/${encodeURIComponent(sessionCode)}/${view}`, {
+        t: tenant.subdomain,
+      });
+    return {
+      presentationUrl: link('presentation'),
+      audienceUrl: link('audience'),
+    };
   }
 
   async rotateShareToken(
@@ -1015,13 +1093,26 @@ export class ServiceSessionService {
     }
 
     const saved = await this.sessionSlotRepo.save(sessionSlot);
+    const changes = [
+      dto.overriddenTopic !== undefined && `topic:${dto.overriddenTopic}`,
+      dto.overriddenSpeakerName !== undefined &&
+        `speaker:${dto.overriddenSpeakerName}`,
+      dto.overriddenMemberId !== undefined &&
+        `member:${
+          saved.overriddenMember
+            ? `${saved.overriddenMember.firstname} ${saved.overriddenMember.lastname}`
+            : 'none'
+        }`,
+      dto.adjustedAllocatedMinutes !== undefined &&
+        `minutes:${dto.adjustedAllocatedMinutes}`,
+    ].filter(Boolean);
     await this.logAction(
       session.id,
       memberId
         ? ServiceActionRoleEnum.WORKER
         : ServiceActionRoleEnum.PUBLIC_LINK,
       'SLOT_OVERRIDE',
-      `position:${position}`,
+      [`position:${position}`, ...changes].join(':'),
       memberId,
       actorLabel,
     );
@@ -1122,7 +1213,15 @@ export class ServiceSessionService {
         ? ServiceActionRoleEnum.WORKER
         : ServiceActionRoleEnum.PUBLIC_LINK,
       'SLOT_ADDED',
-      `position:${insertAt}:type:${dto.type}`,
+      [
+        `position:${insertAt}`,
+        `type:${dto.type}`,
+        dto.topic && `topic:${dto.topic}`,
+        dto.guestName && `speaker:${dto.guestName}`,
+        `minutes:${dto.allocatedMinutes}`,
+      ]
+        .filter(Boolean)
+        .join(':'),
       memberId,
       actorLabel,
     );
@@ -1277,6 +1376,34 @@ export class ServiceSessionService {
   }
 
   async getState(sessionCode: string): Promise<SessionStatePayload> {
+    const cautionThresholdRatio = this.configService.get<number>(
+      'SERVICE_SLOT_CAUTION_THRESHOLD_RATIO',
+      0.25,
+    );
+    // Every screen polls this. The running order is cached, stamped with the session's change
+    // counter (bumped by logAction on every change), and only used while the stamp still matches,
+    // so a poll that read the database just before a change can never put the old order back.
+    // The anchor (timer) is always read fresh.
+    const [cachedAnchor, version, cached] = await Promise.all([
+      this.cacheService.get<SessionAnchor>(this.anchorKey(sessionCode)),
+      this.cacheService.get<number>(this.versionKey(sessionCode)),
+      this.cacheService.get<CachedState>(this.stateKey(sessionCode)),
+    ]);
+    let anchor = cachedAnchor;
+    if (
+      anchor &&
+      cached?.session &&
+      Array.isArray(cached.effectiveSlots) &&
+      cached.version === (version ?? 0)
+    ) {
+      return {
+        anchor,
+        session: cached.session,
+        effectiveSlots: cached.effectiveSlots,
+        cautionThresholdRatio,
+      };
+    }
+
     const session = await this.getSessionOrThrow(sessionCode, [
       'programme',
       'programme.slots',
@@ -1293,9 +1420,6 @@ export class ServiceSessionService {
       'sessionSlots.overriddenMember',
     ]);
 
-    let anchor = await this.cacheService.get<SessionAnchor>(
-      this.anchorKey(sessionCode),
-    );
     if (!anchor) {
       anchor = await this.reconstructAnchorFromDb(session);
     }
@@ -1304,17 +1428,15 @@ export class ServiceSessionService {
       session.programme.slots = withMemberNamesList(session.programme.slots);
     }
 
-    return {
-      anchor,
-      session,
-      effectiveSlots: session.sessionSlots
-        ? withEffectiveSessionSlots(session.sessionSlots)
-        : [],
-      cautionThresholdRatio: this.configService.get<number>(
-        'SERVICE_SLOT_CAUTION_THRESHOLD_RATIO',
-        0.25,
-      ),
-    };
+    const effectiveSlots = session.sessionSlots
+      ? withEffectiveSessionSlots(session.sessionSlots)
+      : [];
+    this.cacheService.set(
+      this.stateKey(sessionCode),
+      { version: version ?? 0, session, effectiveSlots },
+      STATE_CACHE_TTL_SECONDS,
+    );
+    return { anchor, session, effectiveSlots, cautionThresholdRatio };
   }
 
   // Personalized view for a member/worker with a slot in this session — "am I
@@ -2168,18 +2290,18 @@ export class ServiceSessionService {
   // session, not just via the public Programme Manager link + PIN — that
   // link stays the path for anyone else, e.g. an external production
   // collaborator with no Discuva account at all).
-  private async assertCanControlSession(memberId: string): Promise<void> {
+  private async isProgrammeAdmin(memberId: string): Promise<boolean> {
     const admin = await this.adminRepo.findOne({
       where: { member: { id: memberId }, isActive: true },
       relations: ['adminRole'],
     });
-    if (
-      admin?.adminRole.permissions.includes(
-        AdminPermission.SERVICE_PROGRAMME_WRITE,
-      )
-    ) {
-      return;
-    }
+    return !!admin?.adminRole.permissions.includes(
+      AdminPermission.SERVICE_PROGRAMME_WRITE,
+    );
+  }
+
+  private async assertCanControlSession(memberId: string): Promise<void> {
+    if (await this.isProgrammeAdmin(memberId)) return;
 
     if (
       await this.departmentAccessService.hasCapability(
@@ -2258,6 +2380,14 @@ export class ServiceSessionService {
     return Math.max(0, base);
   }
 
+  private stateKey(sessionCode: string): string {
+    return this.cacheService.key('session', sessionCode, 'state');
+  }
+
+  private versionKey(sessionCode: string): string {
+    return this.cacheService.key('session', sessionCode, 'state-version');
+  }
+
   private anchorKey(sessionCode: string): string {
     return this.cacheService.key('session', sessionCode, 'anchor');
   }
@@ -2290,15 +2420,74 @@ export class ServiceSessionService {
     const member = memberId
       ? await this.memberRepo.findOne({ where: { id: memberId } })
       : null;
+    // Signed-in controllers are either programme admins or Front Desk workers; record which.
+    const actorRole =
+      member &&
+      role === ServiceActionRoleEnum.WORKER &&
+      (await this.isProgrammeAdmin(member.id))
+        ? ServiceActionRoleEnum.ADMIN
+        : role;
     const entry = this.actionEntryRepo.create({
       session: { id: sessionId } as ServiceSession,
-      actorRole: role,
+      actorRole,
       action,
       detail,
       performedByMember: member,
       actorLabel,
     });
     await this.actionEntryRepo.save(entry);
+    // One lookup serves both clearing the cached running order and the audit entry.
+    const session = await this.sessionRepo.findOne({
+      where: { id: sessionId },
+      relations: ['programme', 'programme.serviceSlot'],
+    });
+    if (session) {
+      // Now, so this request's own broadcast rebuilds; and again after commit, so a poll that cached
+      // the order before this change was visible to it can't be served.
+      const invalidate = () => {
+        this.cacheService.incr(
+          this.versionKey(session.sessionCode),
+          SESSION_TTL_LIVE,
+        );
+        this.cacheService.del(this.stateKey(session.sessionCode));
+      };
+      invalidate();
+      afterCommit(this.cls, invalidate);
+    }
+    this.audit(
+      session,
+      sessionId,
+      action,
+      actorRole,
+      detail,
+      memberId,
+      actorLabel,
+    );
+  }
+
+  // Mirrors each live action into the church-wide audit log, with where it came from.
+  private audit(
+    session: ServiceSession | null,
+    sessionId: string,
+    action: string,
+    actorRole: ServiceActionRoleEnum,
+    detail: string | null,
+    memberId: string | null,
+    actorLabel: string | null,
+  ): void {
+    const auditAction = LIVE_AUDIT_ACTIONS[action];
+    if (!auditAction) return;
+    this.auditLogService.log(auditAction, {
+      actorId: memberId ?? undefined,
+      targetId: sessionId,
+      targetName: session?.programme?.serviceSlot?.name ?? session?.sessionCode,
+      metadata: {
+        sessionCode: session?.sessionCode,
+        detail,
+        via: LIVE_ACTION_VIA[actorRole],
+        ...(actorLabel ? { actorLabel } : {}),
+      },
+    });
   }
 
   private accumulateSlotStats(

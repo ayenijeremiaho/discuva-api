@@ -7,4 +7,6 @@ export interface AppClsStore extends ClsStore {
   tenantId: string;
   schemaName: string;
   clusterId: string;
+  // Tasks to run once the tenant transaction commits (see utility/after-commit.ts).
+  afterCommit?: Array<() => unknown>;
 }

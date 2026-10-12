@@ -25513,14 +25513,14 @@
                     }
                   ]
                 },
-                "description": "Returns the session's shareToken for building the public Programme Manager link (?token=). JwtAuthGuard \u2014 caller must be able to control the session."
+                "description": "Returns the session's shareToken for building the public Programme Manager link (?token=), plus presentationUrl and audienceUrl: the admin app's presentation and audience screens for this church, ready to share with the media team (null if ADMIN_LOGIN_URL or the church subdomain is missing). JwtAuthGuard \u2014 caller must be able to control the session (admins with programme write, or Front Desk workers)."
               },
               "response": [
                 {
                   "name": "200 OK",
                   "status": "OK",
                   "code": 200,
-                  "body": "{\"data\": {\"sessionCode\": \"SVC-ABC123\", \"shareToken\": \"3f9c1a2b-...uuid\"}}"
+                  "body": "{\"data\": {\"sessionCode\": \"SVC-ABC123\", \"shareToken\": \"3f9c1a2b-...uuid\", \"presentationUrl\": \"https://admin.example.com/live/SVC-ABC123/presentation?t=grace\", \"audienceUrl\": \"https://admin.example.com/live/SVC-ABC123/audience?t=grace\"}}"
                 }
               ]
             },

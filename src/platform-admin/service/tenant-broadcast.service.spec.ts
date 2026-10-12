@@ -7,7 +7,11 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { EmailQueueService } from '../../utility/service/email-queue.service';
 
 const mockTenantRepo = { find: jest.fn() };
-const mockCls = { runWith: jest.fn((_store, fn) => fn()) };
+const mockCls = {
+  runWith: jest.fn((_store, fn) => fn()),
+  get: jest.fn(),
+  set: jest.fn(),
+};
 const mockTx = { query: jest.fn(), findOne: jest.fn() };
 const mockTxHost = {
   tx: mockTx,

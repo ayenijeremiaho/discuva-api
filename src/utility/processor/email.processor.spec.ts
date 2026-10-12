@@ -49,6 +49,8 @@ const mockResolver = { resolveConfig: jest.fn() };
 // detection spec's identical mock).
 const mockCls = {
   runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+  get: jest.fn(),
+  set: jest.fn(),
 };
 const mockTxHost = {
   tx: { query: jest.fn() },
