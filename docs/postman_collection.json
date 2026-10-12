@@ -5537,7 +5537,7 @@
                 {
                   "key": "orderBy",
                   "value": "eventDate",
-                  "description": "eventDate | createdAt | updatedAt"
+                  "description": "eventDate | createdAt | updatedAt (anything else is ignored)"
                 },
                 {
                   "key": "order",
@@ -5565,7 +5565,7 @@
                 {
                   "key": "search",
                   "value": "",
-                  "description": "Case-insensitive match on event name"
+                  "description": "Case-insensitive match on event name (trimmed; % and _ match literally)"
                 }
               ]
             }
@@ -5742,7 +5742,7 @@
                 "{{seriesId}}"
               ]
             },
-            "description": "ADMIN (EVENTS_WRITE). Changes the series and every upcoming date on or after `effectiveFrom` that hasn't started and has no check-ins. Same service names \u2192 slots updated in place (programmes stay). Services added/removed \u2192 409 `SERIES_RECREATE_REQUIRED` until resent with `confirmRecreate: true`."
+            "description": "ADMIN (EVENTS_WRITE). Changes the series and every upcoming date on or after `effectiveFrom` that hasn't started and has no check-ins. Same service names \u2192 slots updated in place (programmes stay). Services added/removed \u2192 409 `SERIES_RECREATE_REQUIRED` until resent with `confirmRecreate: true`. Optional `moveTo` (YYYY-MM-DD) moves the series to repeat from a new date: upcoming dates without check-ins from the earlier of moveTo and effectiveFrom are recreated on the new schedule (409 until confirmRecreate), and the result adds `movedTo`."
           },
           "response": [
             {

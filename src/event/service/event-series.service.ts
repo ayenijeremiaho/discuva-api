@@ -49,6 +49,8 @@ export interface SeriesUpdateResult {
   updated: number;
   recreated: number;
   skippedWithHistory: number;
+  // Set when the series moved to a new date: where it now repeats from.
+  movedTo?: string;
 }
 
 const slotNames = (names: string[]) =>
@@ -262,6 +264,10 @@ export class EventSeriesService {
     const blueprint = dto.slotBlueprint as SlotBlueprint[] | undefined;
     if (blueprint) series.slotBlueprint = blueprint;
 
+    if (dto.moveTo && dto.moveTo !== series.startDate) {
+      return this.move(series, dto, dto.moveTo, timezone, actorId);
+    }
+
     const upcoming = await this.eventRepo.find({
       where: {
         recurringEventId: id,
@@ -352,6 +358,71 @@ export class EventSeriesService {
       metadata: {
         effectiveFrom: dto.effectiveFrom,
         changes: Object.keys(dto).filter((k) => k !== 'effectiveFrom'),
+        ...result,
+      },
+    });
+    return result;
+  }
+
+  // Re-anchors the series on `moveTo`: upcoming services from the earlier of moveTo and effectiveFrom are
+  // replaced by ones on the new schedule; services with recorded attendance or a session stay where they are.
+  private async move(
+    series: EventSeries,
+    dto: UpdateEventSeriesDto,
+    moveTo: string,
+    timezone: string,
+    actorId: string,
+  ): Promise<SeriesUpdateResult> {
+    const today = localDate(new Date(), timezone);
+    if (moveTo < today)
+      throw new BadRequestException('Pick a date from today onwards');
+    if (series.endDate && moveTo > series.endDate)
+      throw new BadRequestException('The new date is after this series ends');
+    const from = moveTo < dto.effectiveFrom ? moveTo : dto.effectiveFrom;
+    const upcoming = await this.eventRepo.find({
+      where: {
+        recurringEventId: series.id,
+        seriesOccurrenceDate: MoreThanOrEqual(from),
+        startTime: MoreThan(new Date()),
+      },
+      order: { startTime: 'ASC' },
+    });
+    const replace: Event[] = [];
+    for (const occ of upcoming) {
+      if (!(await this.eventService.hasRecordedHistory(occ.id)))
+        replace.push(occ);
+    }
+    if (replace.length && !dto.confirmRecreate) {
+      throw new ConflictException({
+        message: `${replace.length} upcoming date(s) will move to the new schedule — their draft programmes will be rebuilt from templates.`,
+        code: 'SERIES_RECREATE_REQUIRED',
+        affected: replace.length,
+      });
+    }
+
+    if (replace.length) await this.eventRepo.remove(replace);
+    series.startDate = moveTo;
+    series.generatedThrough = null;
+    const created = await this.generate(
+      series,
+      timezone,
+      new Date(),
+      series.endDate ?? undefined,
+    );
+    const result: SeriesUpdateResult = {
+      updated: 0,
+      recreated: created.length,
+      skippedWithHistory: upcoming.length - replace.length,
+      movedTo: moveTo,
+    };
+    this.auditLogService.log('EVENT_SERIES_UPDATED', {
+      actorId,
+      targetId: series.id,
+      targetName: series.name,
+      metadata: {
+        effectiveFrom: dto.effectiveFrom,
+        changes: Object.keys(dto).filter((k) => k !== 'effectiveFrom'),
+        removed: replace.length,
         ...result,
       },
     });

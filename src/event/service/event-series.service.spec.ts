@@ -281,6 +281,102 @@ describe('EventSeriesService', () => {
       );
     });
 
+    describe('moving the series to a new date', () => {
+      const at = (id: string, date: string) => ({
+        id,
+        name: 'Sunday Service',
+        seriesOccurrenceDate: date,
+        serviceSlots: [{ name: 'First Service' }],
+      });
+
+      beforeEach(() => {
+        jest.useFakeTimers({ now: new Date('2026-10-12T10:00:00Z') });
+        mockSeriesRepo.findOne.mockResolvedValue(
+          sunday({ startDate: '2026-11-15', generatedThrough: '2027-01-03' }),
+        );
+      });
+      afterEach(() => jest.useRealTimers());
+
+      it('replaces the upcoming dates with ones on the new schedule, after confirming', async () => {
+        mockEventRepo.find.mockResolvedValue([
+          at('a', '2026-11-15'),
+          at('b', '2026-11-22'),
+          at('c', '2026-11-29'),
+        ]);
+        mockEventService.hasRecordedHistory.mockImplementation((id) =>
+          Promise.resolve(id === 'c'),
+        );
+        const dto = { effectiveFrom: '2026-11-15', moveTo: '2026-10-18' };
+
+        await expect(
+          service.update('series-1', dto, 'm'),
+        ).rejects.toMatchObject({
+          response: { code: 'SERIES_RECREATE_REQUIRED', affected: 2 },
+        });
+        expect(mockEventRepo.remove).not.toHaveBeenCalled();
+
+        const result = await service.update(
+          'series-1',
+          { ...dto, confirmRecreate: true },
+          'm',
+        );
+        expect(mockEventRepo.find).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: expect.objectContaining({ recurringEventId: 'series-1' }),
+          }),
+        );
+        expect(mockEventRepo.remove).toHaveBeenCalledWith([
+          expect.objectContaining({ id: 'a' }),
+          expect.objectContaining({ id: 'b' }),
+        ]);
+        expect(mockSeriesRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ startDate: '2026-10-18' }),
+        );
+        const dates = mockEventService.buildOccurrence.mock.calls.map(
+          ([f]) => f.seriesOccurrenceDate,
+        );
+        expect(dates[0]).toBe('2026-10-18');
+        expect(dates).toContain('2026-10-25');
+        expect(dates.every((d: string) => d <= '2026-12-07')).toBe(true);
+        expect(result).toMatchObject({
+          movedTo: '2026-10-18',
+          skippedWithHistory: 1,
+          recreated: dates.length,
+        });
+      });
+
+      it('refuses a date in the past or after the series ends', async () => {
+        await expect(
+          service.update(
+            'series-1',
+            { effectiveFrom: '2026-11-15', moveTo: '2026-10-01' },
+            'm',
+          ),
+        ).rejects.toThrow('from today onwards');
+        mockSeriesRepo.findOne.mockResolvedValue(
+          sunday({ startDate: '2026-11-15', endDate: '2026-12-31' }),
+        );
+        await expect(
+          service.update(
+            'series-1',
+            { effectiveFrom: '2026-11-15', moveTo: '2027-01-10' },
+            'm',
+          ),
+        ).rejects.toThrow('after this series ends');
+      });
+
+      it('treats the current start date as no move', async () => {
+        mockSeriesRepo.findOne.mockResolvedValue(sunday());
+        mockEventRepo.find.mockResolvedValue([]);
+        const result = await service.update(
+          'series-1',
+          { effectiveFrom: '2026-10-11', moveTo: '2026-10-04' },
+          'm',
+        );
+        expect(result.movedTo).toBeUndefined();
+      });
+    });
+
     it('asks for confirmation before recreating services when one is added', async () => {
       mockEventRepo.find.mockResolvedValue([occurrence('a')]);
       const blueprint = [

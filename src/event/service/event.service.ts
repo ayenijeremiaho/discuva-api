@@ -211,15 +211,27 @@ export class EventService {
       .take(limit);
 
     if (filter.upcoming) {
-      qb.andWhere('event.endTime >= :upcomingFrom', {
-        upcomingFrom: new Date(),
-      });
+      const now = new Date();
+      qb.andWhere('event.endTime >= :upcomingFrom', { upcomingFrom: now });
+      // Left alone, the planner walks event_date from the church's oldest event; start at the earliest upcoming one.
+      const [{ floor } = { floor: null }] = (await this.txHost.tx.query(
+        `WITH up AS MATERIALIZED (SELECT event_date FROM events WHERE end_time >= $1)
+         SELECT MIN(event_date)::text AS floor FROM up`,
+        [now],
+      )) as { floor: string | null }[];
+      if (floor)
+        qb.andWhere('event.eventDate >= :upcomingFloor', {
+          upcomingFloor: floor,
+        });
     }
     if (filter.from)
       qb.andWhere('event.eventDate >= :from', { from: filter.from });
     if (filter.to) qb.andWhere('event.eventDate <= :to', { to: filter.to });
-    if (filter.search)
-      qb.andWhere('event.name ILIKE :search', { search: `%${filter.search}%` });
+    const search = filter.search?.trim();
+    if (search)
+      qb.andWhere("event.name ILIKE :search ESCAPE '\\'", {
+        search: `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+      });
     if (filter.viewer)
       qb.andWhere(eventVisibleToViewerSql('event'), {
         viewerId: filter.viewer.id,

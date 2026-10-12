@@ -1000,11 +1000,24 @@ describe('EventService', () => {
       const qb = makeQb();
       mockEventRepo.createQueryBuilder.mockReturnValue(qb);
 
-      await service.getAll(1, 10, 'eventDate', 'DESC', { search: 'Picnic' });
+      await service.getAll(1, 10, 'eventDate', 'DESC', { search: ' Picnic ' });
 
-      expect(qb.andWhere).toHaveBeenCalledWith('event.name ILIKE :search', {
-        search: '%Picnic%',
-      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        "event.name ILIKE :search ESCAPE '\\'",
+        { search: '%Picnic%' },
+      );
+    });
+
+    it('matches % and _ literally in a search', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', { search: '100%_x' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('ILIKE'),
+        { search: '%100\\%\\_x%' },
+      );
     });
 
     it('does not apply a search filter when omitted', async () => {
@@ -1032,6 +1045,36 @@ describe('EventService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith(
         'event.endTime >= :upcomingFrom',
         { upcomingFrom: expect.any(Date) },
+      );
+    });
+
+    it('starts the upcoming list at the earliest upcoming event, so past ones are never scanned', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+      mockTenantTx.query.mockResolvedValueOnce([{ floor: '2026-10-18' }]);
+
+      await service.getAll(1, 10, 'eventDate', 'ASC', { upcoming: true });
+
+      expect(mockTenantTx.query).toHaveBeenCalledWith(
+        expect.stringContaining('MATERIALIZED'),
+        [expect.any(Date)],
+      );
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'event.eventDate >= :upcomingFloor',
+        { upcomingFloor: '2026-10-18' },
+      );
+    });
+
+    it('adds no floor when nothing is upcoming', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+      mockTenantTx.query.mockResolvedValueOnce([{ floor: null }]);
+
+      await service.getAll(1, 10, 'eventDate', 'ASC', { upcoming: true });
+
+      expect(qb.andWhere).not.toHaveBeenCalledWith(
+        'event.eventDate >= :upcomingFloor',
+        expect.anything(),
       );
     });
 

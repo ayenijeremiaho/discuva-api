@@ -78,7 +78,12 @@ export class UpdateEventSeriesDto {
   @Matches(DATE, { message: 'effectiveFrom must be YYYY-MM-DD' })
   effectiveFrom: string;
 
-  // Needed when services are added or removed: those upcoming dates are recreated.
+  // Moves the series so it repeats from this church-local date (e.g. it was set up on the wrong day).
+  @IsOptional()
+  @Matches(DATE, { message: 'moveTo must be YYYY-MM-DD' })
+  moveTo?: string;
+
+  // Needed when services are added or removed, or the series moves: those upcoming dates are recreated.
   @IsOptional()
   @IsBoolean()
   confirmRecreate?: boolean;

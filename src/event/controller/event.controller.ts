@@ -35,6 +35,9 @@ interface GetEventsQuery {
   search?: string;
 }
 
+// orderBy is placed into the SQL ORDER BY, so only known columns get through.
+const ORDER_BY: OrderBy[] = ['eventDate', 'createdAt', 'updatedAt'];
+
 // The member app only sees events meant for the caller; the admin portal sees all.
 const viewerOf = (user: MemberAuth): EventViewer | undefined =>
   user.surface === SessionSurface.MEMBER
@@ -81,8 +84,8 @@ export class EventController {
     return this.eventService.getAll(
       +(query.page ?? 1),
       +(query.limit ?? 10),
-      query.orderBy,
-      query.order,
+      ORDER_BY.includes(query.orderBy as OrderBy) ? query.orderBy : undefined,
+      query.order === 'ASC' || query.order === 'DESC' ? query.order : undefined,
       {
         memberId: user.id,
         from: query.from ? new Date(query.from) : undefined,
