@@ -10343,6 +10343,7 @@ There is no `ADMIN` role in the JWT. Admin portal access is determined at the ro
 
 ### Guards
 
+- **Request logs show what rate limits key on** — each request line (`serializeRequest`, `src/utility/request-log.ts`) records `rate-limit-key` (Express `req.ip`, which the throttler counts by; `trust proxy` is off, so this is the connecting address), plus `fly-client-ip` and `x-forwarded-for` as Fly sends them. Logging only. If `rate-limit-key` is a Fly-internal address while `fly-client-ip` varies, visitors are sharing allowances. No credentials, cookies or bodies are logged.
 - **ThrottlerGuard** — applied globally via `APP_GUARD`. Rate-limits every endpoint to `THROTTLE_LIMIT` requests per
   `THROTTLE_TTL_MS`-millisecond window per IP (defaults: 100 req / 60 s). Returns HTTP 429 when the limit is exceeded.
   The `GET /health` endpoint is exempt via `@SkipThrottle()`. `GET /service-session/:code/state` and
@@ -12828,6 +12829,7 @@ There is no `ADMIN` role in the JWT. Admin portal access is determined at the ro
 
 ### Guards
 
+- **Request logs show what rate limits key on** — each request line (`serializeRequest`, `src/utility/request-log.ts`) records `rate-limit-key` (Express `req.ip`, which the throttler counts by; `trust proxy` is off, so this is the connecting address), plus `fly-client-ip` and `x-forwarded-for` as Fly sends them. Logging only. If `rate-limit-key` is a Fly-internal address while `fly-client-ip` varies, visitors are sharing allowances. No credentials, cookies or bodies are logged.
 - **ThrottlerGuard** — applied globally via `APP_GUARD`. Rate-limits every endpoint to `THROTTLE_LIMIT` requests per
   `THROTTLE_TTL_MS`-millisecond window per IP (defaults: 100 req / 60 s). Returns HTTP 429 when the limit is exceeded.
   The `GET /health` endpoint is exempt via `@SkipThrottle()`. `GET /service-session/:code/state` and
