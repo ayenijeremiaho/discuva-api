@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   ArrayMinSize,
   IsArray,
   IsOptional,
@@ -23,4 +24,8 @@ export class BulkPromoteToWorkerDto {
   @IsOptional()
   @Matches(/^\d{4}$/)
   yearJoinedWorkforce?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isTrainee?: boolean;
 }

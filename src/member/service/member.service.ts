@@ -31,6 +31,7 @@ import { SignupDto } from '../dto/signup.dto';
 import { UpdateMemberDto } from '../dto/update-member.dto';
 import { PromoteToWorkerDto } from '../dto/promote-to-worker.dto';
 import { BulkPromoteToWorkerDto } from '../dto/bulk-promote-to-worker.dto';
+import { BulkUpdateTraineeDto } from '../dto/bulk-update-trainee.dto';
 import { UpdateWorkerProfileDto } from '../dto/update-worker-profile.dto';
 import { UpdateMyProfileDto } from '../dto/update-my-profile.dto';
 import { AppearanceMode } from '../enums/appearance-mode.enum';
@@ -150,13 +151,21 @@ export class MemberService {
   // revokeWorker()/demoteTraineeToMember() never delete the WorkerProfile row
   // (only deactivate it) so a member who is later re-promoted resumes their
   // prior progress — department/profession are only overwritten when this
-  // call explicitly supplies them; completedSOD/completedBibleCollege/isTrainee
-  // are left untouched either way, since they're never part of this dto.
+  // call explicitly supplies them; completedSOD/completedBibleCollege are
+  // left untouched, and isTrainee only changes when the dto sets it.
   private buildOrReactivateWorkerProfile(
     member: Member,
     department: Department,
-    dto: { profession?: string; yearJoinedWorkforce?: string },
-  ): { profile: WorkerProfile; isReinstatement: boolean } {
+    dto: {
+      profession?: string;
+      yearJoinedWorkforce?: string;
+      isTrainee?: boolean;
+    },
+  ): {
+    profile: WorkerProfile;
+    isReinstatement: boolean;
+    traineeChanged: boolean;
+  } {
     const isReinstatement = !!member.workerProfile;
     const profile =
       member.workerProfile ?? this.workerProfileRepository.create();
@@ -178,7 +187,25 @@ export class MemberService {
         ? new Date(`${dto.yearJoinedWorkforce}-01-01`)
         : null;
     }
-    return { profile, isReinstatement };
+    const traineeChanged =
+      dto.isTrainee !== undefined && dto.isTrainee !== !!profile.isTrainee;
+    if (dto.isTrainee !== undefined) profile.isTrainee = dto.isTrainee;
+    return { profile, isReinstatement, traineeChanged };
+  }
+
+  private logTraineeChange(
+    member: Member,
+    isTrainee: boolean,
+    departmentId: string | undefined,
+    actorId: string,
+  ): void {
+    this.auditLogService.log('WORKER_TRAINEE_STATUS_CHANGED', {
+      actorId,
+      targetId: member.id,
+      targetName: `${member.firstname} ${member.lastname}`,
+      targetEmail: member.email,
+      metadata: { isTrainee, departmentId },
+    });
   }
 
   async promoteToWorker(
@@ -202,11 +229,8 @@ export class MemberService {
     });
     if (!department) throw new NotFoundException('Department not found');
 
-    const { profile, isReinstatement } = this.buildOrReactivateWorkerProfile(
-      member,
-      department,
-      dto,
-    );
+    const { profile, isReinstatement, traineeChanged } =
+      this.buildOrReactivateWorkerProfile(member, department, dto);
 
     await this.memberRepository.manager.transaction(
       async (transactionalEntityManager) => {
@@ -231,6 +255,13 @@ export class MemberService {
         metadata: { departmentId: dto.departmentId },
       },
     );
+    if (traineeChanged)
+      this.logTraineeChange(
+        member,
+        profile.isTrainee,
+        dto.departmentId,
+        actorId,
+      );
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
     const churchName = await this.utilityService.resolveChurchName();
@@ -336,6 +367,16 @@ export class MemberService {
         },
       );
 
+      built.forEach(({ profile, traineeChanged }, i) => {
+        if (traineeChanged)
+          this.logTraineeChange(
+            eligible[i],
+            profile.isTrainee,
+            dto.departmentId,
+            actorId,
+          );
+      });
+
       const churchName = await this.utilityService.resolveChurchName();
       for (const member of eligible) {
         this.logger.log(
@@ -371,7 +412,12 @@ export class MemberService {
 
     this.auditLogService.log('BULK_WORKER_PROMOTED', {
       actorId,
-      metadata: { promoted, skipped, departmentId: dto.departmentId },
+      metadata: {
+        promoted,
+        skipped,
+        departmentId: dto.departmentId,
+        ...(dto.isTrainee !== undefined && { isTrainee: dto.isTrainee }),
+      },
     });
 
     return { promoted, skipped, failures };
@@ -910,18 +956,59 @@ export class MemberService {
     });
     // Logged separately so the timeline can show a clean milestone.
     if (dto.isTrainee !== undefined && dto.isTrainee !== wasTrainee) {
-      this.auditLogService.log('WORKER_TRAINEE_STATUS_CHANGED', {
+      this.logTraineeChange(
+        member,
+        dto.isTrainee,
+        profile.department?.id,
         actorId,
-        targetId: memberId,
-        targetName: `${member.firstname} ${member.lastname}`,
-        targetEmail: member.email,
-        metadata: {
-          isTrainee: dto.isTrainee,
-          departmentId: profile.department?.id,
-        },
-      });
+      );
     }
     return saved;
+  }
+
+  // Only active workers change; one bulk UPDATE, plus a timeline entry for each worker whose status flipped.
+  async bulkUpdateTrainee(
+    dto: BulkUpdateTraineeDto,
+    actorId: string,
+  ): Promise<{ updated: number; unchanged: number; skipped: number }> {
+    const uniqueIds = Array.from(new Set(dto.memberIds));
+    const workers = await this.memberRepository
+      .createQueryBuilder('member')
+      .innerJoinAndSelect('member.workerProfile', 'profile')
+      .leftJoinAndSelect('profile.department', 'department')
+      .where('member.id IN (:...ids)', { ids: uniqueIds })
+      .andWhere('member.role = :role', { role: MemberRoleEnum.WORKER })
+      .getMany();
+
+    const toChange = workers.filter(
+      (w) => !!w.workerProfile.isTrainee !== dto.isTrainee,
+    );
+    if (toChange.length > 0) {
+      await this.workerProfileRepository
+        .createQueryBuilder()
+        .update(WorkerProfile)
+        .set({ isTrainee: dto.isTrainee })
+        .whereInIds(toChange.map((w) => w.workerProfile.id))
+        .execute();
+      for (const w of toChange)
+        this.logTraineeChange(
+          w,
+          dto.isTrainee,
+          w.workerProfile.department?.id,
+          actorId,
+        );
+    }
+
+    const result = {
+      updated: toChange.length,
+      unchanged: workers.length - toChange.length,
+      skipped: uniqueIds.length - workers.length,
+    };
+    this.auditLogService.log('BULK_WORKER_TRAINEE_UPDATED', {
+      actorId,
+      metadata: { ...result, isTrainee: dto.isTrainee },
+    });
+    return result;
   }
 
   async changeStatus(

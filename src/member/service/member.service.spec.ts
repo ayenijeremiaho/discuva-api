@@ -41,6 +41,7 @@ const mockMemberRepo = {
 };
 
 const mockWorkerProfileRepo = {
+  createQueryBuilder: jest.fn(),
   save: jest.fn(),
   create: jest.fn(),
   remove: jest.fn(),
@@ -413,6 +414,41 @@ describe('MemberService', () => {
       );
     });
 
+    it('makes the new worker a trainee when asked, and records the start of training', async () => {
+      const member = {
+        id: 'member-1',
+        email: 'jane@test.com',
+        firstname: 'jane',
+        lastname: 'doe',
+        role: MemberRoleEnum.MEMBER,
+        workerProfile: null,
+      };
+      const workerProfile: Record<string, unknown> = {};
+      mockMemberRepo.findOne
+        .mockResolvedValueOnce(member)
+        .mockResolvedValueOnce(member);
+      mockDepartmentRepo.findOneBy.mockResolvedValue({ id: 'dept-1' });
+      mockWorkerProfileRepo.create.mockReturnValue(workerProfile);
+      mockMemberRepo.manager.transaction.mockImplementation(async (cb) =>
+        cb({ save: jest.fn(), update: jest.fn() }),
+      );
+
+      await service.promoteToWorker(
+        'member-1',
+        { departmentId: 'dept-1', isTrainee: true },
+        'actor-1',
+      );
+
+      expect(workerProfile.isTrainee).toBe(true);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'WORKER_TRAINEE_STATUS_CHANGED',
+        expect.objectContaining({
+          targetId: 'member-1',
+          metadata: { isTrainee: true, departmentId: 'dept-1' },
+        }),
+      );
+    });
+
     it('reactivates a previously revoked WorkerProfile instead of creating a new one, preserving prior progress', async () => {
       const existingProfile = {
         id: 'wp-1',
@@ -618,6 +654,134 @@ describe('MemberService', () => {
         failures: [{ memberId: 'm1', reason: 'Member not found' }],
       });
       expect(mockMemberRepo.manager.transaction).not.toHaveBeenCalled();
+    });
+    it('marks the promoted members as trainees and starts their training on the timeline', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue(department);
+      mockMemberRepo.find.mockResolvedValue([
+        {
+          id: 'm1',
+          email: 'm1@test.com',
+          firstname: 'Jane',
+          lastname: 'Doe',
+          workerProfile: null,
+        },
+        {
+          id: 'm2',
+          email: 'm2@test.com',
+          firstname: 'John',
+          lastname: 'Smith',
+          workerProfile: {
+            id: 'wp-2',
+            status: WorkerStatusEnum.INACTIVE,
+            isTrainee: true,
+          },
+        },
+      ]);
+      mockWorkerProfileRepo.create.mockImplementation(() => ({}));
+      jest
+        .spyOn(UtilityService, 'capitalizeFirstLetter')
+        .mockImplementation((s: string) => s);
+
+      await service.bulkPromoteToWorker(
+        {
+          memberIds: ['m1', 'm2'],
+          departmentId: 'dept-1',
+          isTrainee: true,
+        } as any,
+        'actor-1',
+      );
+
+      expect(mockTxManager.save).toHaveBeenCalledWith([
+        expect.objectContaining({ isTrainee: true }),
+        expect.objectContaining({ isTrainee: true }),
+      ]);
+      const traineeLogs = mockAuditLogService.log.mock.calls.filter(
+        ([action]) => action === 'WORKER_TRAINEE_STATUS_CHANGED',
+      );
+      expect(traineeLogs).toEqual([
+        [
+          'WORKER_TRAINEE_STATUS_CHANGED',
+          expect.objectContaining({
+            targetId: 'm1',
+            metadata: { isTrainee: true, departmentId: 'dept-1' },
+          }),
+        ],
+      ]);
+    });
+  });
+
+  describe('bulkUpdateTrainee', () => {
+    const workerQb = (workers: object[]) => {
+      const qb = {
+        innerJoinAndSelect: jest.fn().mockReturnThis(),
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue(workers),
+      };
+      mockMemberRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    };
+    const updateQb = () => {
+      const qb = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        whereInIds: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 1 }),
+      };
+      mockWorkerProfileRepo.createQueryBuilder.mockReturnValue(qb);
+      return qb;
+    };
+    const worker = (id: string, isTrainee: boolean) => ({
+      id,
+      email: `${id}@test.com`,
+      firstname: 'A',
+      lastname: id,
+      workerProfile: { id: `wp-${id}`, isTrainee, department: { id: 'd1' } },
+    });
+
+    it('flips only the workers that need it, in one update, and logs each change', async () => {
+      const qb = workerQb([worker('w1', false), worker('w2', true)]);
+      const update = updateQb();
+
+      const result = await service.bulkUpdateTrainee(
+        { memberIds: ['w1', 'w2', 'w1', 'not-a-worker'], isTrainee: true },
+        'actor-1',
+      );
+
+      expect(result).toEqual({ updated: 1, unchanged: 1, skipped: 1 });
+      expect(qb.andWhere).toHaveBeenCalledWith('member.role = :role', {
+        role: MemberRoleEnum.WORKER,
+      });
+      expect(update.set).toHaveBeenCalledWith({ isTrainee: true });
+      expect(update.whereInIds).toHaveBeenCalledWith(['wp-w1']);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'WORKER_TRAINEE_STATUS_CHANGED',
+        expect.objectContaining({
+          targetId: 'w1',
+          metadata: { isTrainee: true, departmentId: 'd1' },
+        }),
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'BULK_WORKER_TRAINEE_UPDATED',
+        {
+          actorId: 'actor-1',
+          metadata: { updated: 1, unchanged: 1, skipped: 1, isTrainee: true },
+        },
+      );
+    });
+
+    it('writes nothing when every worker already has that status', async () => {
+      workerQb([worker('w1', false)]);
+      updateQb();
+
+      const result = await service.bulkUpdateTrainee(
+        { memberIds: ['w1'], isTrainee: false },
+        'actor-1',
+      );
+
+      expect(result).toEqual({ updated: 0, unchanged: 1, skipped: 0 });
+      expect(mockWorkerProfileRepo.createQueryBuilder).not.toHaveBeenCalled();
     });
   });
 

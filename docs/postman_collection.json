@@ -1886,7 +1886,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"profession\": \"Software Engineer\",\n  \"yearJoinedWorkforce\": \"2020\"\n}",
+              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"profession\": \"Software Engineer\",\n  \"yearJoinedWorkforce\": \"2020\",\n  \"isTrainee\": true\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1910,7 +1910,7 @@
                 }
               ]
             },
-            "description": "Creates a WorkerProfile for the member, assigns them to a department, and sets role to WORKER. departmentId is required; profession and yearJoinedWorkforce are optional. If the member has a prior INACTIVE WorkerProfile (from a previous revoke-worker or demote-trainee), it's reactivated instead of creating a new one \u2014 department/status are updated from this call, profession/yearJoinedWorkforce only if supplied, and completedSOD/completedBibleCollege/isTrainee carry over untouched. Audit-logged as WORKER_REINSTATED in that case (WORKER_PROMOTED for a genuinely new profile). Only departmentId is required; profession and yearJoinedWorkforce are optional (omit them rather than sending empty strings), and the worker is prompted in the member app to add them."
+            "description": "Creates a WorkerProfile for the member, assigns them to a department, and sets role to WORKER. departmentId is required; profession and yearJoinedWorkforce are optional. If the member has a prior INACTIVE WorkerProfile (from a previous revoke-worker or demote-trainee), it's reactivated instead of creating a new one \u2014 department/status are updated from this call, profession/yearJoinedWorkforce only if supplied, and completedSOD/completedBibleCollege carry over untouched; isTrainee carries over unless sent (true makes them a trainee and logs WORKER_TRAINEE_STATUS_CHANGED). Audit-logged as WORKER_REINSTATED in that case (WORKER_PROMOTED for a genuinely new profile). Only departmentId is required; profession and yearJoinedWorkforce are optional (omit them rather than sending empty strings), and the worker is prompted in the member app to add them."
           },
           "response": [
             {
@@ -1939,7 +1939,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"memberIds\": [\n    \"{{memberId}}\",\n    \"{{memberId2}}\"\n  ],\n  \"departmentId\": \"{{departmentId}}\",\n  \"profession\": \"Sound Engineer\",\n  \"yearJoinedWorkforce\": \"2020\"\n}"
+              "raw": "{\n  \"memberIds\": [\n    \"{{memberId}}\",\n    \"{{memberId2}}\"\n  ],\n  \"departmentId\": \"{{departmentId}}\",\n  \"profession\": \"Sound Engineer\",\n  \"yearJoinedWorkforce\": \"2020\",\n  \"isTrainee\": true\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/members/bulk-promote",
@@ -1950,7 +1950,8 @@
                 "members",
                 "bulk-promote"
               ]
-            }
+            },
+            "description": "Promote many members to one department. Optional isTrainee: true makes every promoted member a trainee. Returns { promoted, skipped, failures: [{ memberId, reason }] }."
           },
           "response": [
             {
@@ -1990,6 +1991,47 @@
               "status": "No Content",
               "code": 204,
               "body": ""
+            }
+          ]
+        },
+        {
+          "name": "Bulk Update Trainee Status",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberIds\": [\n    \"{{memberId}}\",\n    \"{{memberId2}}\"\n  ],\n  \"isTrainee\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/members/workers/bulk-trainee",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "members",
+                "workers",
+                "bulk-trainee"
+              ]
+            },
+            "description": "Mark (isTrainee: true) or clear (false) trainee status on many workers at once. Only current workers (role WORKER) change, in one UPDATE. Each real change logs WORKER_TRAINEE_STATUS_CHANGED for the timeline; the batch logs BULK_WORKER_TRAINEE_UPDATED. Requires MEMBERS_WRITE."
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"updated\": 2,\n  \"unchanged\": 0,\n  \"skipped\": 0\n}"
             }
           ]
         },

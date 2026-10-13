@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsUUID, Matches } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+} from 'class-validator';
 
 export class PromoteToWorkerDto {
   @IsUUID()
@@ -11,4 +17,8 @@ export class PromoteToWorkerDto {
   @IsOptional()
   @Matches(/^\d{4}$/, { message: 'yearJoinedWorkforce must be a 4-digit year' })
   yearJoinedWorkforce?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isTrainee?: boolean;
 }
