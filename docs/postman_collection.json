@@ -5563,6 +5563,32 @@
           ]
         },
         {
+          "name": "Public Event View (shared link)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{tenantSubdomain}}",
+                "description": "Needed when calling via a host with no tenant subdomain of its own."
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/public/{{eventId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "public",
+                "{{eventId}}"
+              ]
+            },
+            "description": "No login. What a shared event link shows someone who isn't signed in: name, date, description and the services open to everyone with their times and venue. Worker-only and group events, and an event with no public services, return 404. No attendance, members, groups or meeting links. Throttled to 60 requests a minute."
+          },
+          "response": []
+        },
+        {
           "name": "Get All Events",
           "request": {
             "method": "GET",

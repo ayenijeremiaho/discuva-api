@@ -927,6 +927,97 @@ describe('EventService', () => {
     });
   });
 
+  describe('getPublicView', () => {
+    const venue = {
+      name: 'Main Hall',
+      address: '12 Church Road',
+      latitude: 6.6,
+      longitude: 3.35,
+    };
+    const slot = (
+      id: string,
+      start: string,
+      over: Record<string, unknown> = {},
+    ) => ({
+      id,
+      name: id,
+      startTime: new Date(start),
+      endTime: new Date(new Date(start).getTime() + 2 * 3600_000),
+      audience: null,
+      formatOverride: null,
+      venueOverride: null,
+      config: {
+        defaultFormat: 'IN_PERSON',
+        defaultVenue: venue,
+        onlineMeetingUrl: 'https://meet.example/secret',
+      },
+      ...over,
+    });
+    const event = (over: Record<string, unknown> = {}) => ({
+      id: 'e1',
+      name: 'Sunday Service',
+      description: 'All welcome',
+      eventDate: '2026-10-18',
+      audience: 'EVERYONE',
+      serviceSlots: [
+        slot('Second Service', '2026-10-18T10:30:00Z'),
+        slot('First Service', '2026-10-18T08:00:00Z'),
+        slot('Workers Prayer', '2026-10-18T07:00:00Z', { audience: 'WORKERS' }),
+        slot('Livestream', '2026-10-18T08:00:00Z', {
+          formatOverride: 'ONLINE',
+        }),
+      ],
+      ...over,
+    });
+
+    it('shows an everyone event with only its public services, in order, and no private details', async () => {
+      mockEventRepo.findOne.mockResolvedValue(event());
+
+      const view = await service.getPublicView('e1');
+
+      expect(view.services.map((s) => s.name)).toEqual([
+        'First Service',
+        'Livestream',
+        'Second Service',
+      ]);
+      expect(view.services[0].venue).toEqual(venue);
+      expect(view.services[1]).toMatchObject({ online: true, venue: null });
+      expect(view.eventDate).toBe('2026-10-18');
+      expect(view.startTime).toEqual(new Date('2026-10-18T08:00:00Z'));
+      expect(JSON.stringify(view)).not.toContain('meet.example');
+      expect(JSON.stringify(view)).not.toContain('Workers Prayer');
+    });
+
+    it.each([['WORKERS'], ['GROUP']])(
+      'hides a %s event as if it did not exist',
+      async (audience) => {
+        mockEventRepo.findOne.mockResolvedValue(event({ audience }));
+        await expect(service.getPublicView('e1')).rejects.toThrow(
+          NotFoundException,
+        );
+      },
+    );
+
+    it('hides an event whose services are all private, and a missing one', async () => {
+      mockEventRepo.findOne.mockResolvedValueOnce(
+        event({
+          serviceSlots: [
+            slot('Workers Prayer', '2026-10-18T07:00:00Z', {
+              audience: 'WORKERS',
+            }),
+          ],
+        }),
+      );
+      await expect(service.getPublicView('e1')).rejects.toThrow(
+        NotFoundException,
+      );
+      mockEventRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.getPublicView('nope')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('getUpcomingEvents', () => {
     it('queries by event.endTime >= now, ordered by startTime, limited', async () => {
       mockEventRepo.find.mockResolvedValue([]);

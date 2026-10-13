@@ -1,3 +1,4 @@
+import { EventPublicController } from './controller/event-public.controller';
 import { Group } from '../group/entity/group.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -53,6 +54,7 @@ import { ServiceProgrammeModule } from '../service-programme/service-programme.m
   ],
   // Series/template controllers first so `events/series` isn't matched as `events/:id`.
   controllers: [
+    EventPublicController,
     EventAudienceController,
     EventSeriesController,
     EventTemplateController,

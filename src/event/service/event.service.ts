@@ -46,6 +46,29 @@ const SLOT_RELATIONS = [
   'serviceSlots.audienceGroup',
 ];
 
+// What a shared event link shows someone who isn't signed in: no attendance, members, groups or meeting links.
+export interface PublicEventView {
+  id: string;
+  name: string;
+  description: string | null;
+  eventDate: string;
+  startTime: Date;
+  endTime: Date;
+  services: {
+    id: string;
+    name: string;
+    startTime: Date;
+    endTime: Date;
+    online: boolean;
+    venue: {
+      name: string;
+      address: string | null;
+      latitude: number | null;
+      longitude: number | null;
+    } | null;
+  }[];
+}
+
 export interface EventViewer {
   id: string;
   isWorker: boolean;
@@ -341,6 +364,62 @@ export class EventService {
       )
       .getRawOne<{ next: Date | string | null }>();
     return row?.next ? new Date(row.next) : null;
+  }
+
+  // Only events open to everyone, and only their services open to everyone; anything else 404s like a missing id.
+  async getPublicView(id: string): Promise<PublicEventView> {
+    const event = await this.eventRepository.findOne({
+      where: { id },
+      relations: [
+        'serviceSlots',
+        'serviceSlots.config',
+        'serviceSlots.config.defaultVenue',
+        'serviceSlots.venueOverride',
+      ],
+    });
+    if (!event || event.audience !== EventAudienceEnum.EVERYONE)
+      throw new NotFoundException('Event not found');
+
+    const services = (event.serviceSlots ?? [])
+      .filter((s) => !s.audience || s.audience === EventAudienceEnum.EVERYONE)
+      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
+      .map((s) => {
+        const online =
+          (s.formatOverride ?? s.config?.defaultFormat) ===
+          MeetingFormatEnum.ONLINE;
+        const venue = s.venueOverride ?? s.config?.defaultVenue ?? null;
+        return {
+          id: s.id,
+          name: s.name,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          online,
+          venue:
+            online || !venue
+              ? null
+              : {
+                  name: venue.name,
+                  address: venue.address ?? null,
+                  latitude: venue.latitude ?? null,
+                  longitude: venue.longitude ?? null,
+                },
+        };
+      });
+    if (services.length === 0) throw new NotFoundException('Event not found');
+
+    return {
+      id: event.id,
+      name: event.name,
+      description: event.description ?? null,
+      // A date column usually arrives as 'YYYY-MM-DD'; guard against a Date too.
+      eventDate:
+        typeof event.eventDate === 'string'
+          ? event.eventDate
+          : new Date(event.eventDate).toISOString().slice(0, 10),
+      startTime: services[0].startTime,
+      endTime: services[services.length - 1].endTime,
+      services,
+    };
   }
 
   // With a viewer (member/worker dashboards) only events meant for them; without one (admin) every event.
