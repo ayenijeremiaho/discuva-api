@@ -4554,23 +4554,31 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/attendances/my-summary",
+              "raw": "{{baseUrl}}/attendances/my-summary?days=30",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "attendances",
                 "my-summary"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "30",
+                  "description": "Optional, 1-366. Leave out for the whole history.",
+                  "disabled": false
+                }
               ]
             },
-            "description": "Lifetime attendance rate and check-in streak for the calling member, computed in SQL over their full history (not just a page of records). Returns { totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak }. ON_LEAVE records are excluded from the rate; PRESENT/LATE/ATTENDED_ONLINE all count as attended."
+            "description": "Attendance rate and check-in streak for the calling member, computed in SQL over their full history, or the last `days` days. Returns { totalCount, presentCount, attendanceRatePercentage, lastCheckedInDate, attendanceStreak, lateCount, absentCount, onLeaveCount, periodDays }. ON_LEAVE records are excluded from the rate; PRESENT/LATE/ATTENDED_ONLINE all count as attended. The streak is always current."
           },
           "response": [
             {
               "name": "200 OK",
               "status": "OK",
               "code": 200,
-              "body": "{\n  \"totalCount\": 120,\n  \"presentCount\": 108,\n  \"attendanceRatePercentage\": 90,\n  \"lastCheckedInDate\": \"2026-07-13T09:02:00.000Z\",\n  \"attendanceStreak\": 6\n}"
+              "body": "{\n  \"totalCount\": 4,\n  \"presentCount\": 3,\n  \"attendanceRatePercentage\": 75,\n  \"lastCheckedInDate\": \"2026-07-13T09:02:00.000Z\",\n  \"attendanceStreak\": 6,\n  \"lateCount\": 1,\n  \"absentCount\": 1,\n  \"onLeaveCount\": 0,\n  \"periodDays\": 30\n}"
             }
           ]
         },

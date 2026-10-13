@@ -71,15 +71,30 @@ describe('AttendanceController', () => {
       };
       mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(summary);
 
-      const result = await controller.getMySummary({
-        user: { id: 'member-1', role: 'MEMBER' },
-      } as any);
+      const result = await controller.getMySummary(
+        { user: { id: 'member-1', role: 'MEMBER' } } as any,
+        {},
+      );
 
       expect(mockAttendanceService.getMyAttendanceSummary).toHaveBeenCalledWith(
         'member-1',
         'MEMBER',
+        undefined,
       );
       expect(result).toEqual(summary);
+    });
+
+    it('passes a days window through', async () => {
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue({});
+      await controller.getMySummary(
+        { user: { id: 'member-1', role: 'MEMBER' } } as any,
+        { days: 30 },
+      );
+      expect(mockAttendanceService.getMyAttendanceSummary).toHaveBeenCalledWith(
+        'member-1',
+        'MEMBER',
+        30,
+      );
     });
   });
 

@@ -265,6 +265,27 @@ describe('DepartmentService', () => {
     });
   });
 
+  describe('getLedDepartments', () => {
+    it('lists each department the member leads once, by name', async () => {
+      mockLeadRepo.find.mockResolvedValue([
+        { department: { id: 'd2', name: 'Ushering' } },
+        { department: { id: 'd1', name: 'Choir' } },
+        { department: { id: 'd1', name: 'Choir' } },
+      ]);
+
+      const result = await service.getLedDepartments('member-1');
+
+      expect(mockLeadRepo.find).toHaveBeenCalledWith({
+        where: { workerProfile: { member: { id: 'member-1' } } },
+        relations: ['department'],
+      });
+      expect(result).toEqual([
+        { id: 'd1', name: 'Choir' },
+        { id: 'd2', name: 'Ushering' },
+      ]);
+    });
+  });
+
   describe('isMemberDepartmentLead', () => {
     it('should return true when member is a lead', async () => {
       mockLeadRepo.exists.mockResolvedValue(true);

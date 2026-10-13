@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import { MemberService } from '../../member/service/member.service';
-import { AttendanceService } from '../../attendance/service/attendance.service';
+import {
+  AttendanceService,
+  MyAttendanceSummary,
+} from '../../attendance/service/attendance.service';
 import { EventService } from '../../event/service/event.service';
 import { DepartmentService } from '../../department/service/department.service';
 import { RequestLeaveService } from '../../request-leave/service/request-leave.service';
@@ -14,6 +17,22 @@ import { WorkerDashboardDataDto } from '../dto/worker-dashboard-data.dto';
 import { MemberDashboardDataDto } from '../dto/member-dashboard-data.dto';
 
 const ADMIN_DASHBOARD_TTL = 300;
+
+// My Stats reads the same summary as the Attendance tab, so both pages always show the same rate and counts.
+function dashboardAttendance(summary: MyAttendanceSummary) {
+  return {
+    personalAttendancePercentage: summary.attendanceRatePercentage,
+    attendanceStreak: summary.attendanceStreak,
+    periodStats: {
+      // Present = on time, in person or online; late is counted on its own.
+      present: summary.presentCount - summary.lateCount,
+      late: summary.lateCount,
+      absent: summary.absentCount,
+      onLeave: summary.onLeaveCount,
+      total: summary.totalCount + summary.onLeaveCount,
+    },
+  };
+}
 
 @Injectable()
 export class DashboardService {
@@ -38,37 +57,32 @@ export class DashboardService {
 
     const [
       profile,
-      personalAttendancePercentage,
-      attendanceStreak,
+      summary,
       rank,
-      periodStats,
       recentAttendance,
       upcomingEvents,
       enrollments,
     ] = await Promise.all([
       this.memberService.getById(user.id),
-      this.attendanceService.getPersonalAttendancePercentage(user.id, daysAgo),
-      this.attendanceService.getAttendanceStreak(
+      this.attendanceService.getMyAttendanceSummary(
         user.id,
         MemberRoleEnum.MEMBER,
+        daysAgo,
       ),
       this.attendanceService.getMemberRank(
         user.id,
         daysAgo,
         MemberRoleEnum.MEMBER,
       ),
-      this.attendanceService.getPeriodStats(user.id, daysAgo),
       this.attendanceService.getMyHistory(user, 1, 5),
-      this.eventService.getUpcomingEvents(5),
+      this.eventService.getUpcomingEvents(5, { id: user.id, isWorker: false }),
       this.classesService.getMyEnrollments(user.id),
     ]);
 
     return {
       profile,
-      personalAttendancePercentage,
-      attendanceStreak,
+      ...dashboardAttendance(summary),
       rank,
-      periodStats,
       recentAttendance: recentAttendance.data,
       upcomingEvents,
       enrollments,
@@ -83,33 +97,31 @@ export class DashboardService {
 
     const [
       profile,
-      personalAttendancePercentage,
-      attendanceStreak,
+      summary,
       rank,
-      periodStats,
       recentAttendance,
       upcomingEvents,
-      isDepartmentLead,
+      ledDepartments,
     ] = await Promise.all([
       this.memberService.getById(user.id, [
         'workerProfile',
         'workerProfile.department',
       ]),
-      this.attendanceService.getPersonalAttendancePercentage(user.id, daysAgo),
-      this.attendanceService.getAttendanceStreak(
+      this.attendanceService.getMyAttendanceSummary(
         user.id,
         MemberRoleEnum.WORKER,
+        daysAgo,
       ),
       this.attendanceService.getMemberRank(
         user.id,
         daysAgo,
         MemberRoleEnum.WORKER,
       ),
-      this.attendanceService.getPeriodStats(user.id, daysAgo),
       this.attendanceService.getMyHistory(user, 1, 5),
-      this.eventService.getUpcomingEvents(5),
-      this.departmentService.isMemberDepartmentLead(user.id),
+      this.eventService.getUpcomingEvents(5, { id: user.id, isWorker: true }),
+      this.departmentService.getLedDepartments(user.id),
     ]);
+    const isDepartmentLead = ledDepartments.length > 0;
 
     const workerProfileId = profile.workerProfile?.id ?? null;
     const totalPendingLeaveRequests = workerProfileId
@@ -119,31 +131,32 @@ export class DashboardService {
     const result: WorkerDashboardDataDto = {
       profile,
       isDepartmentLead,
-      personalAttendancePercentage,
-      attendanceStreak,
+      ...dashboardAttendance(summary),
       rank,
-      periodStats,
       recentAttendance: recentAttendance.data,
       upcomingEvents,
       totalPendingLeaveRequests,
     };
 
     if (isDepartmentLead) {
-      const departmentId = profile.workerProfile?.department?.id;
-      if (departmentId) {
-        result.departmentLeadDetails = {
-          departmentAttendancePercentage:
-            await this.attendanceService.getWorkerAttendancePercentage(
-              daysAgo,
-              departmentId,
-            ),
-          totalDepartmentPendingLeaveRequests:
-            await this.requestLeaveService.countPendingLeave(
-              undefined,
-              departmentId,
-            ),
-        };
-      }
+      const ids = ledDepartments.map((d) => d.id);
+      const [rates, pending] = await Promise.all([
+        this.attendanceService.getDepartmentAttendanceRates(ids, daysAgo),
+        this.requestLeaveService.countPendingLeaveByDepartments(ids),
+      ]);
+      result.ledDepartments = ledDepartments.map((d) => ({
+        departmentId: d.id,
+        name: d.name,
+        attendanceRate: rates.get(d.id)?.rate ?? 0,
+        workerCount: rates.get(d.id)?.workerCount ?? 0,
+        pendingLeaveRequests: pending.get(d.id) ?? 0,
+      }));
+      // Older app versions read this single summary; it's now the first led department, on the same rule.
+      const first = result.ledDepartments[0];
+      result.departmentLeadDetails = {
+        departmentAttendancePercentage: first.attendanceRate,
+        totalDepartmentPendingLeaveRequests: first.pendingLeaveRequests,
+      };
     }
 
     return result;

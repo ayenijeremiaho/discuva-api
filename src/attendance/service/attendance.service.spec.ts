@@ -1338,6 +1338,9 @@ describe('AttendanceService', () => {
       aggregateQb.getRawOne.mockResolvedValue({
         total: '120',
         attended: '108',
+        late: '6',
+        absent: '12',
+        onLeave: '3',
         lastCheckin: '2026-07-10T09:00:00.000Z',
       });
       const streakQb = makeQb();
@@ -1360,14 +1363,67 @@ describe('AttendanceService', () => {
         attendanceRatePercentage: 90,
         lastCheckedInDate: new Date('2026-07-10T09:00:00.000Z'),
         attendanceStreak: 2,
+        lateCount: 6,
+        absentCount: 12,
+        onLeaveCount: 3,
+        periodDays: null,
       });
+      expect(aggregateQb.andWhere).not.toHaveBeenCalledWith(
+        'attendance.createdAt >= :since',
+        expect.anything(),
+      );
+    });
+
+    it('limits the counts to the last N days when asked, keeping the streak current', async () => {
+      const aggregateQb = makeQb();
+      aggregateQb.getRawOne.mockResolvedValue({
+        total: '4',
+        attended: '3',
+        late: '1',
+        absent: '1',
+        onLeave: '1',
+        lastCheckin: '2026-07-10T09:00:00.000Z',
+      });
+      const streakQb = makeQb();
+      streakQb.getRawMany.mockResolvedValue([
+        { status: AttendanceStatusEnum.PRESENT },
+      ]);
+      mockAttendanceRepo.createQueryBuilder
+        .mockReturnValueOnce(aggregateQb)
+        .mockReturnValueOnce(streakQb);
+
+      const result = await service.getMyAttendanceSummary(
+        'member-1',
+        MemberRoleEnum.MEMBER,
+        30,
+      );
+
+      expect(aggregateQb.andWhere).toHaveBeenCalledWith(
+        'attendance.createdAt >= :since',
+        { since: expect.any(Date) },
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          totalCount: 4,
+          presentCount: 3,
+          attendanceRatePercentage: 75,
+          lateCount: 1,
+          absentCount: 1,
+          onLeaveCount: 1,
+          periodDays: 30,
+          attendanceStreak: 1,
+        }),
+      );
     });
 
     it('returns a zero rate and null last-checked-in date with no attendance history', async () => {
       const aggregateQb = makeQb();
       aggregateQb.getRawOne.mockResolvedValue({
-        total: '0',
-        attended: '0',
+        total: null,
+        attended: null,
+        late: null,
+        absent: null,
+        onLeave: null,
         lastCheckin: null,
       });
       const streakQb = makeQb();
@@ -1387,11 +1443,62 @@ describe('AttendanceService', () => {
         attendanceRatePercentage: 0,
         lastCheckedInDate: null,
         attendanceStreak: 0,
+        lateCount: 0,
+        absentCount: 0,
+        onLeaveCount: 0,
+        periodDays: null,
       });
     });
   });
 
+  describe('getDepartmentAttendanceRates', () => {
+    it('rates every department in one query on the shared rule', async () => {
+      mockDataSource.query.mockResolvedValueOnce([
+        { departmentId: 'd1', workers: '12', attended: '39', expected: '50' },
+        { departmentId: 'd2', workers: '3', attended: null, expected: null },
+      ]);
+
+      const rates = await service.getDepartmentAttendanceRates(
+        ['d1', 'd2'],
+        30,
+      );
+
+      expect(mockDataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = mockDataSource.query.mock.calls[0];
+      expect(sql).toContain("'PRESENT','LATE','ATTENDED_ONLINE'");
+      expect(sql).toContain("a.status != 'ON_LEAVE'");
+      expect(sql).toContain('wp.secondary_department_id = d.id');
+      expect(params[0]).toEqual(['d1', 'd2']);
+      expect(rates.get('d1')).toEqual({ rate: 78, workerCount: 12 });
+      expect(rates.get('d2')).toEqual({ rate: 0, workerCount: 3 });
+    });
+
+    it('skips the query when there are no departments', async () => {
+      const rates = await service.getDepartmentAttendanceRates([], 30);
+      expect(rates.size).toBe(0);
+      expect(mockDataSource.query).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getMemberRank', () => {
+    it('counts online attendance as attended, the same rule as the Attendance tab', async () => {
+      const qb = makeQb();
+      qb.getRawOne.mockResolvedValue({ score: '2' });
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+      mockDataSource.query.mockResolvedValue([{ count: '0' }]);
+
+      await service.getMemberRank('member-1', 30, MemberRoleEnum.MEMBER);
+
+      expect(qb.select).toHaveBeenCalledWith(
+        expect.stringContaining("'PRESENT','LATE','ATTENDED_ONLINE'"),
+        'score',
+      );
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining("'PRESENT','LATE','ATTENDED_ONLINE'"),
+        expect.any(Array),
+      );
+    });
+
     it('returns 1 when no other member scored higher', async () => {
       const qb = makeQb();
       qb.getRawOne.mockResolvedValue({ score: '5' });
@@ -1987,34 +2094,6 @@ describe('AttendanceService', () => {
       const result = await service.getWorkerAttendancePercentage(30);
 
       expect(result).toBe(100);
-    });
-  });
-
-  describe('getPersonalAttendancePercentage', () => {
-    it('should return 0 if member has no attendance records in the period', async () => {
-      const qb = makeQb();
-      qb.getRawOne.mockResolvedValue({ total: '0', attended: '0' });
-      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
-
-      const result = await service.getPersonalAttendancePercentage(
-        'member-1',
-        30,
-      );
-
-      expect(result).toBe(0);
-    });
-
-    it('should calculate ratio of present/late records to total', async () => {
-      const qb = makeQb();
-      qb.getRawOne.mockResolvedValue({ total: '10', attended: '8' });
-      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
-
-      const result = await service.getPersonalAttendancePercentage(
-        'member-1',
-        30,
-      );
-
-      expect(result).toBe(80);
     });
   });
 

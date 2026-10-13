@@ -99,6 +99,11 @@ export interface MyAttendanceSummary {
   attendanceRatePercentage: number;
   lastCheckedInDate: Date | null;
   attendanceStreak: number;
+  lateCount: number;
+  absentCount: number;
+  onLeaveCount: number;
+  // null = whole history; otherwise the last N days the counts cover. The streak is always current.
+  periodDays: number | null;
 }
 
 @Injectable()
@@ -793,28 +798,6 @@ export class AttendanceService {
     return result;
   }
 
-  async getPersonalAttendancePercentage(
-    memberId: string,
-    daysAgo = 30,
-  ): Promise<number> {
-    const since = this.dateService.daysAgo(daysAgo);
-
-    const { total, attended } = await this.attendanceRepository
-      .createQueryBuilder('attendance')
-      .select('COUNT(*)', 'total')
-      .addSelect(
-        `SUM(CASE WHEN attendance.status IN ('PRESENT','LATE') THEN 1 ELSE 0 END)`,
-        'attended',
-      )
-      .where('attendance.member_id = :memberId', { memberId })
-      .andWhere('attendance.createdAt >= :since', { since })
-      .getRawOne<{ total: string; attended: string }>();
-
-    const t = Number.parseInt(total ?? '0', 10);
-    const a = Number.parseInt(attended ?? '0', 10);
-    return t === 0 ? 0 : Math.min(Number(((a / t) * 100).toFixed(2)), 100);
-  }
-
   async getWorkerAttendancePercentage(
     daysAgo = 30,
     departmentId?: string,
@@ -870,6 +853,47 @@ export class AttendanceService {
 
     const attended = Number.parseInt(count ?? '0', 10);
     return Math.min(Number(((attended / totalActive) * 100).toFixed(2)), 100);
+  }
+
+  // Same rule as a member's own summary: PRESENT/LATE/ATTENDED_ONLINE attended, ON_LEAVE left out.
+  // A worker belongs to a department as primary or secondary, matching the lead's department attendance page.
+  async getDepartmentAttendanceRates(
+    departmentIds: string[],
+    daysAgo = 30,
+  ): Promise<Map<string, { rate: number; workerCount: number }>> {
+    const result = new Map<string, { rate: number; workerCount: number }>();
+    if (departmentIds.length === 0) return result;
+    const rows = await this.txHost.tx.query<
+      {
+        departmentId: string;
+        workers: string;
+        attended: string | null;
+        expected: string | null;
+      }[]
+    >(
+      `SELECT d.id AS "departmentId",
+              COUNT(DISTINCT wp.member_id) AS workers,
+              SUM(CASE WHEN a.status IN ('PRESENT','LATE','ATTENDED_ONLINE') THEN 1 ELSE 0 END) AS attended,
+              SUM(CASE WHEN a.status IS NOT NULL AND a.status != 'ON_LEAVE' THEN 1 ELSE 0 END) AS expected
+         FROM departments d
+         JOIN worker_profiles wp
+           ON (wp.department_id = d.id OR wp.secondary_department_id = d.id) AND wp.status = 'ACTIVE'
+         JOIN members m ON m.id = wp.member_id AND m.role = 'WORKER'
+         LEFT JOIN attendances a
+           ON a.member_id = wp.member_id AND a.role_at_checkin = 'WORKER' AND a.created_at >= $2
+        WHERE d.id = ANY($1)
+        GROUP BY d.id`,
+      [departmentIds, this.dateService.daysAgo(daysAgo)],
+    );
+    for (const r of rows) {
+      const expected = Number.parseInt(r.expected ?? '0', 10) || 0;
+      const attended = Number.parseInt(r.attended ?? '0', 10) || 0;
+      result.set(r.departmentId, {
+        rate: expected === 0 ? 0 : Math.round((attended / expected) * 100),
+        workerCount: Number.parseInt(r.workers, 10) || 0,
+      });
+    }
+    return result;
   }
 
   async getDepartmentAttendanceSummary(
@@ -996,26 +1020,52 @@ export class AttendanceService {
   async getMyAttendanceSummary(
     memberId: string,
     role: MemberRoleEnum,
+    days?: number,
   ): Promise<MyAttendanceSummary> {
-    const { total, attended, lastCheckin } = await this.attendanceRepository
+    // ON_LEAVE stays out of the rate on both sides; it's only counted on its own.
+    const qb = this.attendanceRepository
       .createQueryBuilder('attendance')
-      .select('COUNT(*)', 'total')
+      .select(
+        `SUM(CASE WHEN attendance.status != 'ON_LEAVE' THEN 1 ELSE 0 END)`,
+        'total',
+      )
       .addSelect(
         `SUM(CASE WHEN attendance.status IN ('PRESENT','LATE','ATTENDED_ONLINE') THEN 1 ELSE 0 END)`,
         'attended',
       )
+      .addSelect(
+        `SUM(CASE WHEN attendance.status = 'LATE' THEN 1 ELSE 0 END)`,
+        'late',
+      )
+      .addSelect(
+        `SUM(CASE WHEN attendance.status = 'ABSENT' THEN 1 ELSE 0 END)`,
+        'absent',
+      )
+      .addSelect(
+        `SUM(CASE WHEN attendance.status = 'ON_LEAVE' THEN 1 ELSE 0 END)`,
+        'onLeave',
+      )
       .addSelect('MAX(attendance.checkinTime)', 'lastCheckin')
       .where('attendance.member_id = :memberId', { memberId })
-      .andWhere('attendance.roleAtCheckin = :role', { role })
-      .andWhere(`attendance.status != 'ON_LEAVE'`)
-      .getRawOne<{
-        total: string;
-        attended: string;
+      .andWhere('attendance.roleAtCheckin = :role', { role });
+    if (days)
+      qb.andWhere('attendance.createdAt >= :since', {
+        since: this.dateService.daysAgo(days),
+      });
+    const { total, attended, late, absent, onLeave, lastCheckin } =
+      (await qb.getRawOne<{
+        total: string | null;
+        attended: string | null;
+        late: string | null;
+        absent: string | null;
+        onLeave: string | null;
         lastCheckin: string | null;
-      }>();
+      }>()) ?? ({} as Record<string, null>);
 
-    const totalCount = Number.parseInt(total ?? '0', 10);
-    const presentCount = Number.parseInt(attended ?? '0', 10);
+    const count = (v: string | null | undefined) =>
+      Number.parseInt(v ?? '0', 10) || 0;
+    const totalCount = count(total);
+    const presentCount = count(attended);
     const attendanceRatePercentage =
       totalCount === 0 ? 0 : Math.round((presentCount / totalCount) * 100);
     const attendanceStreak = await this.getAttendanceStreak(memberId, role);
@@ -1026,39 +1076,11 @@ export class AttendanceService {
       attendanceRatePercentage,
       lastCheckedInDate: lastCheckin ? new Date(lastCheckin) : null,
       attendanceStreak,
+      lateCount: count(late),
+      absentCount: count(absent),
+      onLeaveCount: count(onLeave),
+      periodDays: days ?? null,
     };
-  }
-
-  async getPeriodStats(
-    memberId: string,
-    daysAgo: number,
-  ): Promise<{
-    present: number;
-    late: number;
-    absent: number;
-    onLeave: number;
-    total: number;
-  }> {
-    const since = this.dateService.daysAgo(daysAgo);
-    const rows = await this.attendanceRepository
-      .createQueryBuilder('attendance')
-      .select('attendance.status', 'status')
-      .addSelect('COUNT(*)', 'count')
-      .where('attendance.member_id = :memberId', { memberId })
-      .andWhere('attendance.createdAt >= :since', { since })
-      .groupBy('attendance.status')
-      .getRawMany<{ status: AttendanceStatusEnum; count: string }>();
-
-    const stats = { present: 0, late: 0, absent: 0, onLeave: 0, total: 0 };
-    for (const row of rows) {
-      const n = Number.parseInt(row.count, 10);
-      stats.total += n;
-      if (row.status === AttendanceStatusEnum.PRESENT) stats.present = n;
-      if (row.status === AttendanceStatusEnum.LATE) stats.late = n;
-      if (row.status === AttendanceStatusEnum.ABSENT) stats.absent = n;
-      if (row.status === AttendanceStatusEnum.ON_LEAVE) stats.onLeave = n;
-    }
-    return stats;
   }
 
   async getMemberRank(
@@ -1071,7 +1093,7 @@ export class AttendanceService {
     const ownRow = await this.attendanceRepository
       .createQueryBuilder('a')
       .select(
-        `COALESCE(SUM(CASE WHEN a.status IN ('PRESENT','LATE') THEN 1 ELSE 0 END), 0)`,
+        `COALESCE(SUM(CASE WHEN a.status IN ('PRESENT','LATE','ATTENDED_ONLINE') THEN 1 ELSE 0 END), 0)`,
         'score',
       )
       .where('a.member_id = :memberId', { memberId })
@@ -1091,7 +1113,7 @@ export class AttendanceService {
                    AND created_at >= $2
                    AND member_id != $3
                  GROUP BY member_id
-                 HAVING SUM(CASE WHEN status IN ('PRESENT','LATE') THEN 1 ELSE 0 END) > $4
+                 HAVING SUM(CASE WHEN status IN ('PRESENT','LATE','ATTENDED_ONLINE') THEN 1 ELSE 0 END) > $4
              ) ranked`,
       [role, since, memberId, ownScore],
     );

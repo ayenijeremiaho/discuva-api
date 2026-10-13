@@ -942,6 +942,30 @@ describe('EventService', () => {
       );
     });
 
+    it('only returns events meant for the viewer on member and worker dashboards', async () => {
+      const qb = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      };
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getUpcomingEvents(5, { id: 'member-1', isWorker: false });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "audience = 'WORKERS' AND :viewerIsWorker = true",
+        ),
+        { viewerId: 'member-1', viewerIsWorker: false },
+      );
+      expect(qb.take).toHaveBeenCalledWith(5);
+      expect(mockEventRepo.find).not.toHaveBeenCalled();
+    });
+
     it('returns whatever events the repository resolves, defaulting the limit to 5', async () => {
       const events = [{ id: 'event-future' }];
       mockEventRepo.find.mockResolvedValue(events);

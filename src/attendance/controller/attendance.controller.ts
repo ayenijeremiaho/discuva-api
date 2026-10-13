@@ -22,6 +22,7 @@ import {
   UpdateOnlineWindowDto,
 } from '../dto/attendance.dto';
 import { OnlineConfirmDto } from '../../follow-up/dto/online-confirm.dto';
+import { MySummaryQueryDto } from '../dto/my-summary-query.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { Roles } from '../../auth/decorator/roles.decorator';
@@ -78,10 +79,11 @@ export class AttendanceController {
 
   @UseGuards(JwtAuthGuard)
   @Get('my-summary')
-  async getMySummary(@Request() req: any) {
+  async getMySummary(@Request() req: any, @Query() query: MySummaryQueryDto) {
     return this.attendanceService.getMyAttendanceSummary(
       req.user.id,
       req.user.role,
+      query.days,
     );
   }
 

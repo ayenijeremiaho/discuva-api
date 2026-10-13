@@ -24,26 +24,31 @@ const mockMemberService = {
 };
 
 const mockAttendanceService = {
-  getPersonalAttendancePercentage: jest.fn(),
+  getMyAttendanceSummary: jest.fn(),
   getWorkerAttendancePercentage: jest.fn(),
+  getDepartmentAttendanceRates: jest.fn(),
   getCongregationAttendancePercentage: jest.fn(),
   getDepartmentAttendanceSummary: jest.fn(),
   getNewMemberRegistrationsTrend: jest.fn(),
   getMyHistory: jest.fn(),
-  getAttendanceStreak: jest.fn().mockResolvedValue(3),
   getMemberRank: jest.fn().mockResolvedValue(1),
-  getPeriodStats: jest.fn().mockResolvedValue({
-    present: 5,
-    late: 1,
-    absent: 1,
-    onLeave: 0,
-    total: 7,
-  }),
   getWeeklyAttendanceTrend: jest.fn().mockResolvedValue([]),
   getTopAbsentMembers: jest.fn().mockResolvedValue([]),
   getMembersNotSeenSince: jest.fn().mockResolvedValue([]),
   getTotalCheckInsToday: jest.fn().mockResolvedValue(0),
 };
+
+const summaryWithRate = (rate: number) => ({
+  totalCount: 10,
+  presentCount: 9,
+  attendanceRatePercentage: rate,
+  lastCheckedInDate: null,
+  attendanceStreak: 3,
+  lateCount: 1,
+  absentCount: 1,
+  onLeaveCount: 1,
+  periodDays: 30,
+});
 
 const mockEventService = {
   getUpcomingEvents: jest.fn(),
@@ -51,10 +56,12 @@ const mockEventService = {
 
 const mockDepartmentService = {
   isMemberDepartmentLead: jest.fn(),
+  getLedDepartments: jest.fn().mockResolvedValue([]),
 };
 
 const mockRequestLeaveService = {
   countPendingLeave: jest.fn(),
+  countPendingLeaveByDepartments: jest.fn(),
 };
 
 const mockClassesService = {
@@ -244,10 +251,10 @@ describe('DashboardService', () => {
   });
 
   describe('getMemberDashboard', () => {
-    it('should call attendanceService.getPersonalAttendancePercentage with memberId', async () => {
+    it('reads rate, streak and the 30-day counts from the shared attendance summary', async () => {
       mockMemberService.getById.mockResolvedValue(mockMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        90,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(90),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
@@ -261,15 +268,28 @@ describe('DashboardService', () => {
 
       await service.getMemberDashboard(mockUser);
 
-      expect(
-        mockAttendanceService.getPersonalAttendancePercentage,
-      ).toHaveBeenCalledWith(mockUser.id, 30);
+      const result = await service.getMemberDashboard(mockUser);
+      expect(mockAttendanceService.getMyAttendanceSummary).toHaveBeenCalledWith(
+        mockUser.id,
+        MemberRoleEnum.MEMBER,
+        30,
+      );
+      expect(result.personalAttendancePercentage).toBe(90);
+      expect(result.attendanceStreak).toBe(3);
+      // 9 attended of which 1 late, plus 1 absent and 1 on leave
+      expect(result.periodStats).toEqual({
+        present: 8,
+        late: 1,
+        absent: 1,
+        onLeave: 1,
+        total: 11,
+      });
     });
 
     it('should call eventService.getUpcomingEvents', async () => {
       mockMemberService.getById.mockResolvedValue(mockMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        50,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(50),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
@@ -286,14 +306,17 @@ describe('DashboardService', () => {
 
       const result = await service.getMemberDashboard(mockUser);
 
-      expect(mockEventService.getUpcomingEvents).toHaveBeenCalledWith(5);
+      expect(mockEventService.getUpcomingEvents).toHaveBeenCalledWith(5, {
+        id: mockUser.id,
+        isWorker: false,
+      });
       expect(result.upcomingEvents).toHaveLength(2);
     });
 
     it('should call classesService.getMyEnrollments with user id', async () => {
       mockMemberService.getById.mockResolvedValue(mockMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        50,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(50),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
@@ -317,8 +340,8 @@ describe('DashboardService', () => {
 
     it('should return full member dashboard data', async () => {
       mockMemberService.getById.mockResolvedValue(mockMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        88,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(88),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [{ id: 'att-1' }],
@@ -345,8 +368,8 @@ describe('DashboardService', () => {
   describe('getWorkerDashboard', () => {
     it('should include isDepartmentLead in the result', async () => {
       mockMemberService.getById.mockResolvedValue(mockWorkerMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        70,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(70),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
@@ -357,7 +380,7 @@ describe('DashboardService', () => {
       });
       mockEventService.getUpcomingEvents.mockResolvedValue([]);
       mockRequestLeaveService.countPendingLeave.mockResolvedValue(0);
-      mockDepartmentService.isMemberDepartmentLead.mockResolvedValue(false);
+      mockDepartmentService.getLedDepartments.mockResolvedValue([]);
 
       const result = await service.getWorkerDashboard(mockWorkerUser);
 
@@ -366,8 +389,8 @@ describe('DashboardService', () => {
 
     it('should include pending leave count', async () => {
       mockMemberService.getById.mockResolvedValue(mockWorkerMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        70,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(70),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
@@ -378,19 +401,18 @@ describe('DashboardService', () => {
       });
       mockEventService.getUpcomingEvents.mockResolvedValue([]);
       mockRequestLeaveService.countPendingLeave.mockResolvedValue(2);
-      mockDepartmentService.isMemberDepartmentLead.mockResolvedValue(false);
+      mockDepartmentService.getLedDepartments.mockResolvedValue([]);
 
       const result = await service.getWorkerDashboard(mockWorkerUser);
 
       expect(result.totalPendingLeaveRequests).toBe(2);
     });
 
-    it('should include departmentLeadDetails when isDepartmentLead is true', async () => {
+    it('shows each department the worker leads, rated on the shared attendance rule', async () => {
       mockMemberService.getById.mockResolvedValue(mockWorkerMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        70,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(70),
       );
-      mockAttendanceService.getWorkerAttendancePercentage.mockResolvedValue(85);
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
         page: 1,
@@ -399,27 +421,56 @@ describe('DashboardService', () => {
         totalPages: 1,
       });
       mockEventService.getUpcomingEvents.mockResolvedValue([]);
-      mockRequestLeaveService.countPendingLeave
-        .mockResolvedValueOnce(1) // worker's own pending
-        .mockResolvedValueOnce(4); // department's pending
-      mockDepartmentService.isMemberDepartmentLead.mockResolvedValue(true);
+      mockRequestLeaveService.countPendingLeave.mockResolvedValueOnce(1);
+      mockDepartmentService.getLedDepartments.mockResolvedValue([
+        { id: 'd-choir', name: 'Choir' },
+        { id: 'd-ushers', name: 'Ushering' },
+      ]);
+      mockAttendanceService.getDepartmentAttendanceRates.mockResolvedValue(
+        new Map([
+          ['d-choir', { rate: 78, workerCount: 12 }],
+          ['d-ushers', { rate: 64, workerCount: 9 }],
+        ]),
+      );
+      mockRequestLeaveService.countPendingLeaveByDepartments.mockResolvedValue(
+        new Map([['d-choir', 4]]),
+      );
 
       const result = await service.getWorkerDashboard(mockWorkerUser);
 
       expect(result.isDepartmentLead).toBe(true);
-      expect(result.departmentLeadDetails).toBeDefined();
-      expect(result.departmentLeadDetails.departmentAttendancePercentage).toBe(
-        85,
-      );
       expect(
-        result.departmentLeadDetails.totalDepartmentPendingLeaveRequests,
-      ).toBe(4);
+        mockAttendanceService.getDepartmentAttendanceRates,
+      ).toHaveBeenCalledWith(['d-choir', 'd-ushers'], 30);
+      expect(result.ledDepartments).toEqual([
+        {
+          departmentId: 'd-choir',
+          name: 'Choir',
+          attendanceRate: 78,
+          workerCount: 12,
+          pendingLeaveRequests: 4,
+        },
+        {
+          departmentId: 'd-ushers',
+          name: 'Ushering',
+          attendanceRate: 64,
+          workerCount: 9,
+          pendingLeaveRequests: 0,
+        },
+      ]);
+      expect(result.departmentLeadDetails).toEqual({
+        departmentAttendancePercentage: 78,
+        totalDepartmentPendingLeaveRequests: 4,
+      });
+      expect(
+        mockAttendanceService.getWorkerAttendancePercentage,
+      ).not.toHaveBeenCalled();
     });
 
     it('should NOT include departmentLeadDetails when isDepartmentLead is false', async () => {
       mockMemberService.getById.mockResolvedValue(mockWorkerMember);
-      mockAttendanceService.getPersonalAttendancePercentage.mockResolvedValue(
-        60,
+      mockAttendanceService.getMyAttendanceSummary.mockResolvedValue(
+        summaryWithRate(60),
       );
       mockAttendanceService.getMyHistory.mockResolvedValue({
         data: [],
@@ -430,7 +481,7 @@ describe('DashboardService', () => {
       });
       mockEventService.getUpcomingEvents.mockResolvedValue([]);
       mockRequestLeaveService.countPendingLeave.mockResolvedValue(0);
-      mockDepartmentService.isMemberDepartmentLead.mockResolvedValue(false);
+      mockDepartmentService.getLedDepartments.mockResolvedValue([]);
 
       const result = await service.getWorkerDashboard(mockWorkerUser);
 

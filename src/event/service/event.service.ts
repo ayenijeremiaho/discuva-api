@@ -343,7 +343,25 @@ export class EventService {
     return row?.next ? new Date(row.next) : null;
   }
 
-  async getUpcomingEvents(limit = 5): Promise<Event[]> {
+  // With a viewer (member/worker dashboards) only events meant for them; without one (admin) every event.
+  async getUpcomingEvents(limit = 5, viewer?: EventViewer): Promise<Event[]> {
+    if (viewer) {
+      return this.eventRepository
+        .createQueryBuilder('event')
+        .leftJoinAndSelect('event.serviceSlots', 'serviceSlots')
+        .leftJoinAndSelect('serviceSlots.config', 'config')
+        .leftJoinAndSelect('config.defaultVenue', 'defaultVenue')
+        .leftJoinAndSelect('serviceSlots.venueOverride', 'venueOverride')
+        .where('event.endTime >= :now', { now: new Date() })
+        .andWhere(eventVisibleToViewerSql('event'), {
+          viewerId: viewer.id,
+          viewerIsWorker: viewer.isWorker,
+        })
+        .orderBy('event.startTime', 'ASC')
+        .addOrderBy('serviceSlots.startTime', 'ASC')
+        .take(limit)
+        .getMany();
+    }
     return this.eventRepository.find({
       where: { endTime: MoreThanOrEqual(new Date()) },
       order: { startTime: 'ASC', serviceSlots: { startTime: 'ASC' } },

@@ -271,6 +271,26 @@ export class RequestLeaveService {
     return UtilityService.createPaginationResponse(leaves, page, limit, total);
   }
 
+  // Pending requests per department (by the requester's primary department), for several departments at once.
+  async countPendingLeaveByDepartments(
+    departmentIds: string[],
+  ): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (departmentIds.length === 0) return counts;
+    const rows = await this.repo
+      .createQueryBuilder('leave')
+      .innerJoin('leave.workerProfile', 'wp')
+      .select('wp.department_id', 'departmentId')
+      .addSelect('COUNT(*)', 'count')
+      .where('leave.status = :status', { status: LeaveStatusEnum.PENDING })
+      .andWhere('wp.department_id IN (:...departmentIds)', { departmentIds })
+      .groupBy('wp.department_id')
+      .getRawMany<{ departmentId: string; count: string }>();
+    for (const r of rows)
+      counts.set(r.departmentId, Number.parseInt(r.count, 10) || 0);
+    return counts;
+  }
+
   async countPendingLeave(
     workerProfileId?: string,
     departmentId?: string,

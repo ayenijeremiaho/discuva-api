@@ -285,6 +285,20 @@ export class DepartmentService {
     });
   }
 
+  // Every department the member leads (HOD or assistant), by name; one query.
+  async getLedDepartments(
+    memberId: string,
+  ): Promise<{ id: string; name: string }[]> {
+    const leads = await this.leadRepository.find({
+      where: { workerProfile: { member: { id: memberId } } },
+      relations: ['department'],
+    });
+    const byId = new Map(leads.map((l) => [l.department.id, l.department]));
+    return [...byId.values()]
+      .map((d) => ({ id: d.id, name: d.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   async isMemberDepartmentLead(memberId: string): Promise<boolean> {
     return this.leadRepository.exists({
       where: { workerProfile: { member: { id: memberId } } },
