@@ -324,6 +324,16 @@ export class TenantProvisioningService {
   // Public: also called directly by migrate-all-tenants.ts (§4.9) — a
   // schema already provisioned just needs pending migrations applied, not
   // the rest of provision()'s work re-run.
+  // Every fully set-up church, suspended ones included: a church suspended during a deploy would otherwise miss that
+  // deploy's migrations and fail on the new columns once reactivated.
+  findMigratableTenants(): Promise<Pick<Tenant, 'subdomain' | 'schemaName'>[]> {
+    return this.tenantRepo.find({
+      select: { subdomain: true, schemaName: true },
+      where: { onboardingStatus: TenantOnboardingStatus.ACTIVE },
+      order: { createdAt: 'ASC' },
+    });
+  }
+
   async runTenantMigrations(schemaName: string): Promise<void> {
     const baseConfig = dbConfig();
     const tenantDataSource = new DataSource({

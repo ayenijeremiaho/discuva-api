@@ -40,6 +40,7 @@ const mockOnboardingEventRepo = { find: jest.fn() };
 const mockDataSource = { query: jest.fn() };
 const mockProvisioningService = {
   ensurePendingTenant: jest.fn(),
+  runTenantMigrations: jest.fn().mockResolvedValue(undefined),
   recordEvent: jest.fn(),
   provision: jest.fn(),
   enqueueProvisioning: jest.fn(),
@@ -357,6 +358,45 @@ describe('PlatformTenantService', () => {
       );
       expect(result.isActive).toBe(false);
       expect(result).not.toHaveProperty('schemaName');
+      expect(
+        mockProvisioningService.runTenantMigrations,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('brings a reactivated tenant up to date before letting it back in', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        isActive: false,
+      });
+      mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
+      mockDataSource.query.mockResolvedValue([{ c: 0 }]);
+
+      const result = await service.suspendTenant('tenant-1', {
+        suspend: false,
+      });
+
+      expect(mockProvisioningService.runTenantMigrations).toHaveBeenCalledWith(
+        'church_test_church',
+      );
+      expect(
+        mockProvisioningService.runTenantMigrations.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockTenantRepo.save.mock.invocationCallOrder[0]);
+      expect(result.isActive).toBe(true);
+    });
+
+    it('stays suspended when catching up on migrations fails', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        isActive: false,
+      });
+      mockProvisioningService.runTenantMigrations.mockRejectedValueOnce(
+        new Error('column already exists'),
+      );
+
+      await expect(
+        service.suspendTenant('tenant-1', { suspend: false }),
+      ).rejects.toThrow('column already exists');
+      expect(mockTenantRepo.save).not.toHaveBeenCalled();
     });
   });
 

@@ -1,5 +1,4 @@
 import { NestFactory } from '@nestjs/core';
-import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { TenantProvisioningService } from './tenant/service/tenant-provisioning.service';
 
@@ -32,15 +31,10 @@ async function bootstrap() {
   // process even though tenant migrations already succeeded. This script's
   // job is done once migrations finish, so skip the graceful shutdown
   // entirely and hard-exit instead of calling app.close().
-  const dataSource = app.get(DataSource);
   const provisioningService = app.get(TenantProvisioningService);
+  const tenants = await provisioningService.findMigratableTenants();
 
-  const tenants: { subdomain: string; schema_name: string }[] =
-    await dataSource.query(
-      `SELECT subdomain, schema_name FROM tenants WHERE is_active = true ORDER BY created_at`,
-    );
-
-  console.log(`Migrating ${tenants.length} active tenant schema(s)...`);
+  console.log(`Migrating ${tenants.length} tenant schema(s)...`);
 
   let cursor = 0;
   const failures: { subdomain: string; error: unknown }[] = [];
@@ -49,7 +43,7 @@ async function bootstrap() {
     while (cursor < tenants.length) {
       const tenant = tenants[cursor++];
       try {
-        await provisioningService.runTenantMigrations(tenant.schema_name);
+        await provisioningService.runTenantMigrations(tenant.schemaName);
         console.log(`  ✓ ${tenant.subdomain}`);
       } catch (error) {
         console.error(`  ✗ ${tenant.subdomain}:`, error);

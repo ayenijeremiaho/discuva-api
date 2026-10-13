@@ -20,6 +20,7 @@ import { PlatformAdmin } from '../../platform-admin/entity/platform-admin.entity
 import { PlatformAdminPermission } from '../../platform-admin/enum/platform-admin-permission.enum';
 
 const mockTenantRepo = {
+  find: jest.fn(),
   findOneBy: jest.fn(),
   save: jest.fn(),
   update: jest.fn(),
@@ -304,6 +305,18 @@ describe('TenantProvisioningService', () => {
         }),
       );
       expect(result.subdomain).toBe('test-church');
+    });
+  });
+
+  describe('findMigratableTenants', () => {
+    it('includes suspended churches, so they never fall behind on migrations', async () => {
+      mockTenantRepo.find.mockResolvedValue([]);
+      await service.findMigratableTenants();
+      expect(mockTenantRepo.find).toHaveBeenCalledWith({
+        select: { subdomain: true, schemaName: true },
+        where: { onboardingStatus: TenantOnboardingStatus.ACTIVE },
+        order: { createdAt: 'ASC' },
+      });
     });
   });
 

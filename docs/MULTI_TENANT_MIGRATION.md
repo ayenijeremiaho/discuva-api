@@ -376,7 +376,7 @@ A script to run pending migrations against every active tenant schema:
 npm run migration:run:all-tenants
 ```
 
-This iterates `public.tenants`, sets `search_path` to each schema, and applies pending migrations. Run this during every production deployment.
+This iterates `public.tenants` with `onboarding_status = 'ACTIVE'` (suspended tenants included, so a tenant suspended during a deploy doesn't miss its migrations), sets `search_path` to each schema, and applies pending migrations. Run this during every production deployment. Reactivating a suspended tenant (`PATCH /platform/tenants/:id/suspend` with `{ suspend: false }`) also runs its pending migrations first.
 
 **Wired in via `fly.toml`'s `release_command`** (`node dist/migrate-all-tenants.js`) — Fly runs it automatically on a
 fresh machine using the newly-built image, before promoting that release to receive traffic. A non-zero exit (this

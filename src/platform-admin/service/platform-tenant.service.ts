@@ -215,6 +215,14 @@ export class PlatformTenantService {
     dto: SuspendTenantDto,
   ): Promise<TenantWithHealth> {
     const tenant = await this.findTenantOrThrow(id);
+    const reactivating = !tenant.isActive && dto.suspend === false;
+    // Catch up on anything deployed while it was off, before its admins and members are let back in.
+    if (
+      reactivating &&
+      tenant.onboardingStatus === TenantOnboardingStatus.ACTIVE
+    ) {
+      await this.provisioningService.runTenantMigrations(tenant.schemaName);
+    }
     tenant.isActive = dto.suspend === false;
     const saved = await this.tenantRepo.save(tenant);
     return this.toHealthShape(saved);
