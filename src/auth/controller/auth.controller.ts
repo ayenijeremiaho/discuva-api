@@ -42,17 +42,13 @@ import { plainToInstance } from 'class-transformer';
 import { MemberDto } from '../../member/dto/member.dto';
 
 const REFRESH_COOKIE_NAME = 'refresh_token';
-// Scoped to the whole API, not just /v1/auth/refresh — TenantMiddleware's
-// fallback identity chain (see resolveTenantIdFromRefreshCookie) reads this
-// same cookie on EVERY route to resolve the tenant for hosts with no
-// subdomain (e.g. discuva-admin), not only on the refresh endpoint itself.
-// Scoping it to the refresh path alone made that fallback silently dead
-// everywhere else — an expired access token combined with an unreadable
-// cookie fell through to a 404 "Tenant not found" thrown by the middleware
-// itself (before any guard runs), which the frontend's 401-only refresh
-// interceptor never sees, hanging the session until a hard reload forced a
-// fresh call to /v1/auth/refresh (the one path where the cookie was valid).
-const REFRESH_COOKIE_PATH = '/v1';
+// Scoped to the auth routes (refresh, logout). It used to cover all of /v1 so TenantMiddleware could resolve the
+// church on admin requests whose access token had expired; the middleware now reads the church from the expired
+// (still signed) token instead. Covering all of /v1 sent an admin's cookie with every request a member app in the
+// same browser made to the shared API host, mixing churches and sessions.
+const REFRESH_COOKIE_PATH = '/v1/auth';
+// Where the cookie used to live; cleared whenever the cookie is set or cleared, so old browsers drop it.
+const LEGACY_REFRESH_COOKIE_PATH = '/v1';
 
 @Controller('auth')
 export class AuthController {
@@ -325,6 +321,12 @@ export class AuthController {
       ? Number.parseInt(match[1], 10) * (units[match[2].toLowerCase()] ?? 0)
       : 7 * 86_400_000;
 
+    res.clearCookie(REFRESH_COOKIE_NAME, {
+      httpOnly: true,
+      secure,
+      sameSite: secure ? 'none' : 'lax',
+      path: LEGACY_REFRESH_COOKIE_PATH,
+    });
     res.cookie(REFRESH_COOKIE_NAME, token, {
       httpOnly: true,
       secure,
@@ -336,11 +338,13 @@ export class AuthController {
 
   private clearRefreshCookie(res: Response): void {
     const secure = this.isSecureEnv();
-    res.clearCookie(REFRESH_COOKIE_NAME, {
-      httpOnly: true,
-      secure,
-      sameSite: secure ? 'none' : 'lax',
-      path: REFRESH_COOKIE_PATH,
-    });
+    for (const path of [REFRESH_COOKIE_PATH, LEGACY_REFRESH_COOKIE_PATH]) {
+      res.clearCookie(REFRESH_COOKIE_NAME, {
+        httpOnly: true,
+        secure,
+        sameSite: secure ? 'none' : 'lax',
+        path,
+      });
+    }
   }
 }

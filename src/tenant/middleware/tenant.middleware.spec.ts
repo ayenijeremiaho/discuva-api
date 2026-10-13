@@ -246,10 +246,9 @@ describe('TenantMiddleware', () => {
         next,
       );
 
-      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
-        'valid-token',
-        undefined,
-      );
+      expect(mockJwtService.verifyAsync).toHaveBeenCalledWith('valid-token', {
+        ignoreExpiration: true,
+      });
       expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({ id: 't1' });
       expect(mockCls.set).toHaveBeenCalledWith('tenantId', 't1');
       expect(next).toHaveBeenCalled();
@@ -285,14 +284,51 @@ describe('TenantMiddleware', () => {
 
       expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
         'refresh-token-not-access-token',
-        undefined,
+        { ignoreExpiration: true },
       );
       expect(mockJwtService.verifyAsync).toHaveBeenCalledWith(
         'refresh-token-not-access-token',
-        { secret: 'refresh-secret' },
+        { secret: 'refresh-secret', ignoreExpiration: true },
       );
       expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({ id: 't1' });
       expect(next).toHaveBeenCalled();
+    });
+
+    it("uses the church a member app names over an admin's refresh cookie from the same browser", async () => {
+      mockJwtService.verifyAsync.mockResolvedValue({
+        sub: 'admin-1',
+        tenantId: 'admin-church',
+      });
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 't2',
+        subdomain: 'church-b',
+        schemaName: 'church_b',
+        clusterId: 'default',
+        isActive: true,
+        onboardingStatus: TenantOnboardingStatus.ACTIVE,
+      });
+      const res = makeRes(200);
+      const next = jest.fn(() => res.fire('finish'));
+
+      await middleware.use(
+        makeReq('api.localhost', {
+          refreshCookie: 'admin-refresh-jwt',
+          tenantSubdomainHeader: 'church-b',
+        }),
+        res,
+        next,
+      );
+
+      expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({
+        subdomain: 'church-b',
+      });
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalledWith({
+        id: 'admin-church',
+      });
+      expect(mockJwtService.verifyAsync).not.toHaveBeenCalledWith(
+        'admin-refresh-jwt',
+        expect.anything(),
+      );
     });
 
     it('falls through to the refresh-token cookie, verified with the refresh secret, when no access token resolves anything', async () => {
@@ -323,6 +359,7 @@ describe('TenantMiddleware', () => {
 
       expect(mockJwtService.verifyAsync).toHaveBeenCalledWith('refresh-jwt', {
         secret: 'refresh-secret',
+        ignoreExpiration: false,
       });
       expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({ id: 't1' });
       expect(next).toHaveBeenCalled();

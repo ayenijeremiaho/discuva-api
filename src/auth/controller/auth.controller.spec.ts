@@ -9,6 +9,7 @@ import { WebauthnService } from '../service/webauthn.service';
 // change's concern.
 const mockAuthService = {
   loginWithWebauthn: jest.fn(),
+  refreshToken: jest.fn(),
 };
 const mockWebauthnService = {
   generateRegistrationOptions: jest.fn(),
@@ -138,5 +139,27 @@ describe('AuthController (WebAuthn routes)', () => {
       'member-1',
       'row-1',
     );
+  });
+
+  describe('admin refresh cookie', () => {
+    const res = () => ({ cookie: jest.fn(), clearCookie: jest.fn() }) as any;
+
+    it('is set only on the auth routes, and clears the old cookie that covered all of /v1', async () => {
+      mockAuthService.refreshToken.mockResolvedValue({
+        access_token: 'a',
+        refresh_token: 'r',
+      });
+      const r = res();
+      await controller.refresh({ user: { surface: 'ADMIN' } } as any, r);
+      expect(r.cookie).toHaveBeenCalledWith(
+        'refresh_token',
+        'r',
+        expect.objectContaining({ path: '/v1/auth', httpOnly: true }),
+      );
+      expect(r.clearCookie).toHaveBeenCalledWith(
+        'refresh_token',
+        expect.objectContaining({ path: '/v1' }),
+      );
+    });
   });
 });

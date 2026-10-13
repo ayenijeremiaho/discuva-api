@@ -181,16 +181,18 @@ export class TenantMiddleware implements NestMiddleware {
       return { subdomain: null, tenantId: tenantIdFromAccessToken };
     }
 
-    const tenantIdFromRefreshToken =
-      await this.resolveTenantIdFromRefreshCookie(req);
-    if (tenantIdFromRefreshToken) {
-      return { subdomain: null, tenantId: tenantIdFromRefreshToken };
-    }
-
+    // A request that names its church wins over an admin's refresh cookie: the cookie lives on the shared API host,
+    // so a member app open in the same browser as the admin app would otherwise be treated as the admin's church.
     const header = req.headers['x-tenant-subdomain'];
     const headerValue = (Array.isArray(header) ? header[0] : header)?.trim();
     if (headerValue) {
       return { subdomain: headerValue.toLowerCase(), tenantId: null };
+    }
+
+    const tenantIdFromRefreshToken =
+      await this.resolveTenantIdFromRefreshCookie(req);
+    if (tenantIdFromRefreshToken) {
+      return { subdomain: null, tenantId: tenantIdFromRefreshToken };
     }
 
     throw new NotFoundException('Tenant not found');
@@ -209,9 +211,11 @@ export class TenantMiddleware implements NestMiddleware {
     const header = req.headers.authorization;
     if (!header?.startsWith('Bearer ')) return null;
     const token = header.slice('Bearer '.length);
+    // An expired but correctly signed token still says which church it's for. Resolving the church from it lets the
+    // auth guard answer 401 (which the apps refresh on) instead of a 404 here; the guard still rejects the token.
     return (
-      (await this.verifyTenantClaim(token)) ??
-      (await this.verifyTenantClaim(token, this.jwtRefreshConfig.secret))
+      (await this.verifyTenantClaim(token, undefined, true)) ??
+      (await this.verifyTenantClaim(token, this.jwtRefreshConfig.secret, true))
     );
   }
 
@@ -229,12 +233,13 @@ export class TenantMiddleware implements NestMiddleware {
   private async verifyTenantClaim(
     token: string,
     secret?: string | Buffer,
+    ignoreExpiration = false,
   ): Promise<string | null> {
     try {
-      const payload = await this.jwtService.verifyAsync<JwtPayload>(
-        token,
-        secret ? { secret } : undefined,
-      );
+      const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
+        ...(secret ? { secret } : {}),
+        ignoreExpiration,
+      });
       return payload.tenantId ?? null;
     } catch {
       return null;

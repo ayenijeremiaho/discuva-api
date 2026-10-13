@@ -10807,6 +10807,7 @@ fallbacks, in order, before giving up with the same `404 Tenant not found` as be
    spoofing: the claim only exists inside a JWT whose signature already proves it came from this server, at a
    moment CLS already held the correct tenant — there's no way for a client to write an arbitrary `tenantId` into a
    token it can't forge the signature for.
+   **Order and the admin cookie (updated):** the Bearer claim is read even from an *expired* (still correctly signed) token, so an admin request whose access token has lapsed resolves its church and the guard answers 401, which the app refreshes on. Then `X-Tenant-Subdomain` (step 2), and only then the `refresh_token` cookie. The cookie is now scoped to `/v1/auth` (it was `/v1`, which made browsers send an admin's cookie with every member-app request to the shared API host, so a member app open in the same browser as the admin app was treated as the admin's church, and its refresh rotated the admin's session). Setting or clearing the cookie also clears the old `/v1` one. `RefreshJwtStrategy` uses the request's own Bearer token before the cookie.
 2. **`X-Tenant-Subdomain` header.** discuva-admin sends it on every pre-auth request where no token exists yet:
    `POST /v1/auth/admin-login` (needs to know which tenant's `Member`/`Admin` tables to check credentials against
    before it can issue anything), and `POST /v1/auth/forgot-password`/`reset-password` (same reasoning —
@@ -13294,6 +13295,7 @@ fallbacks, in order, before giving up with the same `404 Tenant not found` as be
    spoofing: the claim only exists inside a JWT whose signature already proves it came from this server, at a
    moment CLS already held the correct tenant — there's no way for a client to write an arbitrary `tenantId` into a
    token it can't forge the signature for.
+   **Order and the admin cookie (updated):** the Bearer claim is read even from an *expired* (still correctly signed) token, so an admin request whose access token has lapsed resolves its church and the guard answers 401, which the app refreshes on. Then `X-Tenant-Subdomain` (step 2), and only then the `refresh_token` cookie. The cookie is now scoped to `/v1/auth` (it was `/v1`, which made browsers send an admin's cookie with every member-app request to the shared API host, so a member app open in the same browser as the admin app was treated as the admin's church, and its refresh rotated the admin's session). Setting or clearing the cookie also clears the old `/v1` one. `RefreshJwtStrategy` uses the request's own Bearer token before the cookie.
 2. **`X-Tenant-Subdomain` header.** discuva-admin sends it on every pre-auth request where no token exists yet:
    `POST /v1/auth/admin-login` (needs to know which tenant's `Member`/`Admin` tables to check credentials against
    before it can issue anything), and `POST /v1/auth/forgot-password`/`reset-password` (same reasoning —
