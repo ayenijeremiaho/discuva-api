@@ -99,10 +99,10 @@ export class AuthController {
   }
 
   // Pre-login (no email typed) — the browser/OS resolves which registered
-  // credential to use. Throttled by IP rather than by-account like password
-  // login's rate limiter, since there's no account to key off yet.
+  // credential to use. Throttled by address, since there's no account to key off yet; it only issues a
+  // challenge, and a whole church on one Wi-Fi may sign in with biometrics at once, hence 120.
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('webauthn/login/options')
   async webauthnLoginOptions() {

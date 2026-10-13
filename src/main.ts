@@ -16,9 +16,12 @@ import { getQueueToken } from '@nestjs/bull';
 import { Queue } from 'bull';
 import { Request, Response, NextFunction } from 'express';
 import { createCorsOriginValidator } from './tenant/utility/cors-origin-validator';
+import { trustProxyHops } from './utility/client-ip';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  // Lets req.ip be the visitor rather than the proxy in front of the API (see client-ip.ts).
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops());
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   mountBullBoard(app);
   app.use(

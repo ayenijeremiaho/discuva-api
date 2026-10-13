@@ -20,6 +20,7 @@ import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { GameService } from '../service/game.service';
 import { GameSessionGateway } from '../gateway/game-session.gateway';
 import { GameQueryDto, SubmitAnswerDto } from '../dto/game.dto';
+import { LIVE_SCREEN_LIMIT } from '../../utility/rate-limits';
 
 // Open to any authenticated member/worker with the join code — no
 // department/class access-control check by product decision. A game's
@@ -48,7 +49,7 @@ export class GameParticipantController {
   // Never leaks correctOptionIndex (see getSessionState's own comment).
   @Get('sessions/:code/state')
   @Public()
-  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  @Throttle({ default: { limit: LIVE_SCREEN_LIMIT, ttl: 60_000 } })
   getState(@Param('code') code: string) {
     return this.gameService.getSessionState(code);
   }

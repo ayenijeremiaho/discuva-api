@@ -83,6 +83,10 @@ export const envValidationSchema = Joi.object({
 
   THROTTLE_TTL_MS: Joi.number().default(60_000),
   THROTTLE_LIMIT: Joi.number().default(100),
+  // Reverse-proxy hops in front of the API; defaults to 1 on Fly (FLY_APP_NAME set), else 0.
+  TRUST_PROXY_HOPS: Joi.number().integer().min(0).optional(),
+  // Shared with the member app's server so it can forward the visitor's address for rate limits (X-Visitor-IP).
+  INTERNAL_API_KEY: Joi.string().min(32).optional(),
 
   LOGIN_MAX_ATTEMPTS: Joi.number().default(5),
   LOGIN_WINDOW_SECONDS: Joi.number().default(900),

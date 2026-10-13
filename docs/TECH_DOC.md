@@ -8138,6 +8138,8 @@ Applied to every endpoint via `ThrottlerGuard` as a global `APP_GUARD`. Returns 
 |-------------------|---------|----------------------------------------|
 | `THROTTLE_TTL_MS` | `60000` | Sliding window in milliseconds (1 min) |
 | `THROTTLE_LIMIT`  | `100`   | Max requests per window per IP         |
+| `TRUST_PROXY_HOPS` | `2` on Fly, else `0` | Reverse-proxy hops in front of the API, passed to Express `trust proxy` so `req.ip` is the visitor. Fly is two hops: its edge, then its internal proxy (production logs show `X-Forwarded-For: <visitor>, <edge>` over a `172.16.x.x` socket) |
+| `INTERNAL_API_KEY` | — | Shared with the member app (same value, min 32 chars). Its server sends `X-Visitor-IP` + `X-Internal-Key` on calls it makes for visitors (church details, public pages, forms, shared events), and rate limits then count that visitor. Unset = those calls share the member server's allowance |
 
 ### Redis
 
@@ -10343,11 +10345,12 @@ There is no `ADMIN` role in the JWT. Admin portal access is determined at the ro
 
 ### Guards
 
-- **Request logs show what rate limits key on** — each request line (`serializeRequest`, `src/utility/request-log.ts`) records `rate-limit-key` (Express `req.ip`, which the throttler counts by; `trust proxy` is off, so this is the connecting address), plus `fly-client-ip` and `x-forwarded-for` as Fly sends them. Logging only. If `rate-limit-key` is a Fly-internal address while `fly-client-ip` varies, visitors are sharing allowances. No credentials, cookies or bodies are logged.
+- **What request logs record (and don't)** — `serializeRequest`/`serializeResponse` (`src/utility/request-log.ts`): method, the URL **path** only and the *names* of query parameters (never values: Programme Manager and page-preview links carry tokens in the query, searches carry names), content type, user agent, `rate-limit-key` (who the limiter counted the request against: `member:<hash>`, `ip:<masked>:email:<hash>`, `ip:<masked>:credential:<hash>` or `ip:<masked>`), and `fly-client-ip` / `x-forwarded-for` with addresses masked (`102.212.253.x`). Responses log only the status and `content-type`, `content-length`, `x-ratelimit-*` and `retry-after` — never `Set-Cookie`, which carries refresh tokens. Bodies, `Authorization`, cookies and `X-Internal-Key` are never logged. Hashes are keyed with the server secret (`hashId`, `src/utility/log-safety.ts`), so they can't be reversed or matched against a list of emails; the rate limiter itself also holds only hashes of emails and credentials.
+- **Who a rate limit counts against** — `AppThrottlerGuard.getTracker` uses `rateLimitKey()` (`src/utility/rate-limit-key.ts`): a signed-in member (verified access or refresh token → `member:<tenant>:<id>`) whatever network they're on; a request with an `email` in the body (sign-in, sign-up, password and device resets, public forms) → that email at that address; biometric sign-in → the credential at that address; anything else → the address. The address is `clientIp()`: the member app server's `X-Visitor-IP` when `X-Internal-Key` matches `INTERNAL_API_KEY`, else Fly's `Fly-Client-IP` on Fly, else `req.ip`. This exists because production logs showed every request keyed on Fly's internal proxy (`::ffff:172.16.x.x`), so visitors shared allowances, and because a congregation on one church Wi-Fi shares an address. Public live screens (service-session state/slots, game screen state) allow `LIVE_SCREEN_LIMIT` = 3000/min per address; `webauthn/login/options` (only issues a challenge) 120/min.
 - **ThrottlerGuard** — applied globally via `APP_GUARD`. Rate-limits every endpoint to `THROTTLE_LIMIT` requests per
   `THROTTLE_TTL_MS`-millisecond window per IP (defaults: 100 req / 60 s). Returns HTTP 429 when the limit is exceeded.
   The `GET /health` endpoint is exempt via `@SkipThrottle()`. `GET /service-session/:code/state` and
-  `GET /service-session/:code/slots/:position` are overridden to 300 req/60s via `@Throttle()` — these are public,
+  `GET /service-session/:code/slots/:position` are overridden to `LIVE_SCREEN_LIMIT` (3000) req/60s via `@Throttle()` — these are public,
   read-only routes; the override exists for the initial page-load fetch and the (now much less frequent) safety-net
   poll each live-session view keeps as a fallback — see the Socket.IO section below for why per-IP throttling was
   never the real scaling lever for this module, since a per-IP cap does nothing to bound *aggregate* load across the
@@ -12829,11 +12832,12 @@ There is no `ADMIN` role in the JWT. Admin portal access is determined at the ro
 
 ### Guards
 
-- **Request logs show what rate limits key on** — each request line (`serializeRequest`, `src/utility/request-log.ts`) records `rate-limit-key` (Express `req.ip`, which the throttler counts by; `trust proxy` is off, so this is the connecting address), plus `fly-client-ip` and `x-forwarded-for` as Fly sends them. Logging only. If `rate-limit-key` is a Fly-internal address while `fly-client-ip` varies, visitors are sharing allowances. No credentials, cookies or bodies are logged.
+- **What request logs record (and don't)** — `serializeRequest`/`serializeResponse` (`src/utility/request-log.ts`): method, the URL **path** only and the *names* of query parameters (never values: Programme Manager and page-preview links carry tokens in the query, searches carry names), content type, user agent, `rate-limit-key` (who the limiter counted the request against: `member:<hash>`, `ip:<masked>:email:<hash>`, `ip:<masked>:credential:<hash>` or `ip:<masked>`), and `fly-client-ip` / `x-forwarded-for` with addresses masked (`102.212.253.x`). Responses log only the status and `content-type`, `content-length`, `x-ratelimit-*` and `retry-after` — never `Set-Cookie`, which carries refresh tokens. Bodies, `Authorization`, cookies and `X-Internal-Key` are never logged. Hashes are keyed with the server secret (`hashId`, `src/utility/log-safety.ts`), so they can't be reversed or matched against a list of emails; the rate limiter itself also holds only hashes of emails and credentials.
+- **Who a rate limit counts against** — `AppThrottlerGuard.getTracker` uses `rateLimitKey()` (`src/utility/rate-limit-key.ts`): a signed-in member (verified access or refresh token → `member:<tenant>:<id>`) whatever network they're on; a request with an `email` in the body (sign-in, sign-up, password and device resets, public forms) → that email at that address; biometric sign-in → the credential at that address; anything else → the address. The address is `clientIp()`: the member app server's `X-Visitor-IP` when `X-Internal-Key` matches `INTERNAL_API_KEY`, else Fly's `Fly-Client-IP` on Fly, else `req.ip`. This exists because production logs showed every request keyed on Fly's internal proxy (`::ffff:172.16.x.x`), so visitors shared allowances, and because a congregation on one church Wi-Fi shares an address. Public live screens (service-session state/slots, game screen state) allow `LIVE_SCREEN_LIMIT` = 3000/min per address; `webauthn/login/options` (only issues a challenge) 120/min.
 - **ThrottlerGuard** — applied globally via `APP_GUARD`. Rate-limits every endpoint to `THROTTLE_LIMIT` requests per
   `THROTTLE_TTL_MS`-millisecond window per IP (defaults: 100 req / 60 s). Returns HTTP 429 when the limit is exceeded.
   The `GET /health` endpoint is exempt via `@SkipThrottle()`. `GET /service-session/:code/state` and
-  `GET /service-session/:code/slots/:position` are overridden to 300 req/60s via `@Throttle()` — these are public,
+  `GET /service-session/:code/slots/:position` are overridden to `LIVE_SCREEN_LIMIT` (3000) req/60s via `@Throttle()` — these are public,
   read-only routes; the override exists for the initial page-load fetch and the (now much less frequent) safety-net
   poll each live-session view keeps as a fallback — see the Socket.IO section below for why per-IP throttling was
   never the real scaling lever for this module, since a per-IP cap does nothing to bound *aggregate* load across the
@@ -21629,6 +21633,8 @@ Applied to every endpoint via `ThrottlerGuard` as a global `APP_GUARD`. Returns 
 |-------------------|---------|----------------------------------------|
 | `THROTTLE_TTL_MS` | `60000` | Sliding window in milliseconds (1 min) |
 | `THROTTLE_LIMIT`  | `100`   | Max requests per window per IP         |
+| `TRUST_PROXY_HOPS` | `2` on Fly, else `0` | Reverse-proxy hops in front of the API, passed to Express `trust proxy` so `req.ip` is the visitor. Fly is two hops: its edge, then its internal proxy (production logs show `X-Forwarded-For: <visitor>, <edge>` over a `172.16.x.x` socket) |
+| `INTERNAL_API_KEY` | — | Shared with the member app (same value, min 32 chars). Its server sends `X-Visitor-IP` + `X-Internal-Key` on calls it makes for visitors (church details, public pages, forms, shared events), and rate limits then count that visitor. Unset = those calls share the member server's allowance |
 
 ### Redis
 

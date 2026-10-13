@@ -14,7 +14,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bull';
 import { AppThrottlerGuard } from './app-throttler.guard';
-import { serializeRequest } from './utility/request-log';
+import { serializeRequest, serializeResponse } from './utility/request-log';
 import dbConfig from './config/db.config';
 import { envValidationSchema } from './config/env.validation';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -146,6 +146,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
             },
             serializers: {
               req: serializeRequest,
+              res: serializeResponse,
             },
             autoLogging: {
               ignore: (req: { url?: string }) =>

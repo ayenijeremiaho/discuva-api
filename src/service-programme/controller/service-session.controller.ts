@@ -42,6 +42,7 @@ import { ReorderLiveSlotsDto } from '../dto/reorder-live-slots.dto';
 import { AddLiveSlotDto } from '../dto/add-live-slot.dto';
 import { CreateAccessGrantDto } from '../dto/create-access-grant.dto';
 import { VerifyAccessGrantDto } from '../dto/verify-access-grant.dto';
+import { LIVE_SCREEN_LIMIT } from '../../utility/rate-limits';
 
 // Same class-level PlanGuard/ModuleEnabledGuard stacking as
 // ServiceProgrammeController — covers every route here, including the
@@ -465,14 +466,14 @@ export class ServiceSessionController {
 
   @Get(':sessionCode/state')
   @Public()
-  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  @Throttle({ default: { limit: LIVE_SCREEN_LIMIT, ttl: 60_000 } })
   getState(@Param('sessionCode') sessionCode: string) {
     return this.sessionSvc.getState(sessionCode);
   }
 
   @Get(':sessionCode/slots/:position')
   @Public()
-  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  @Throttle({ default: { limit: LIVE_SCREEN_LIMIT, ttl: 60_000 } })
   getSlotForSpeaker(
     @Param('sessionCode') sessionCode: string,
     @Param('position', ParseIntPipe) position: number,
@@ -482,7 +483,7 @@ export class ServiceSessionController {
 
   @Get(':sessionCode/my-status')
   @UseGuards(JwtAuthGuard)
-  @Throttle({ default: { limit: 300, ttl: 60_000 } })
+  @Throttle({ default: { limit: LIVE_SCREEN_LIMIT, ttl: 60_000 } })
   getMyLiveStatus(
     @Param('sessionCode') sessionCode: string,
     @CurrentUser() user: MemberAuth,
