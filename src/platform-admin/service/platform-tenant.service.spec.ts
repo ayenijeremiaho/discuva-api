@@ -109,9 +109,31 @@ describe('PlatformTenantService', () => {
     it('includes branding fields (logoUrl/tagline/address/supportEmail) alongside health stats', async () => {
       mockTenantRepo.find.mockResolvedValue([baseTenant]);
       mockSubscriptionRepo.find.mockResolvedValue([
-        { tenantId: 'tenant-1', planId: 'pro', status: 'active' },
+        {
+          tenantId: 'tenant-1',
+          planId: 'pro',
+          status: 'active',
+          planStartedAt: new Date('2026-09-17T10:00:00Z'),
+          currentPeriodEnd: new Date('2026-10-17T10:00:00Z'),
+          cancelAtPeriodEnd: false,
+          billingProviderSubscriptionId: 'SUB_123',
+        },
       ]);
-      mockDataSource.query.mockResolvedValue([{ c: 5 }]);
+      mockDataSource.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('member_sessions')
+            ? [
+                {
+                  admin_count: 2,
+                  last_admin: new Date('2026-10-12T08:00:00Z'),
+                  last_member: new Date('2026-10-13T09:00:00Z'),
+                  active_30d: 4,
+                  last_event: '2026-10-11',
+                },
+              ]
+            : [{ c: 5 }],
+        ),
+      );
 
       const result = await service.listTenants();
 
@@ -131,14 +153,57 @@ describe('PlatformTenantService', () => {
           createdAt: baseTenant.createdAt,
           planId: 'pro',
           subscriptionStatus: 'active',
+          planStartedAt: new Date('2026-09-17T10:00:00Z'),
+          currentPeriodEnd: new Date('2026-10-17T10:00:00Z'),
+          cancelAtPeriodEnd: false,
+          autoRenews: true,
           discountType: null,
           discountValue: null,
           discountReason: null,
           discountExpiresAt: null,
           memberCount: 5,
           eventCount: 5,
+          adminCount: 2,
+          lastAdminSignInAt: new Date('2026-10-12T08:00:00Z'),
+          lastMemberSignInAt: new Date('2026-10-13T09:00:00Z'),
+          membersActiveLast30Days: 4,
+          lastEventOn: '2026-10-11',
         },
       ]);
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('"church_test_church".member_sessions'),
+        ['ADMIN', 'MEMBER'],
+      );
+    });
+
+    it('shows a church nobody has signed into yet as never, not as an error', async () => {
+      mockTenantRepo.find.mockResolvedValue([baseTenant]);
+      mockSubscriptionRepo.find.mockResolvedValue([]);
+      mockDataSource.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('member_sessions')
+            ? [
+                {
+                  admin_count: 1,
+                  last_admin: null,
+                  last_member: null,
+                  active_30d: 0,
+                  last_event: null,
+                },
+              ]
+            : [{ c: 0 }],
+        ),
+      );
+
+      const [row] = await service.listTenants();
+
+      expect(row).toMatchObject({
+        adminCount: 1,
+        lastAdminSignInAt: null,
+        lastMemberSignInAt: null,
+        membersActiveLast30Days: 0,
+        lastEventOn: null,
+      });
     });
 
     it('returns null counts when the schema query fails rather than throwing', async () => {
@@ -152,7 +217,63 @@ describe('PlatformTenantService', () => {
 
       expect(result[0].memberCount).toBeNull();
       expect(result[0].eventCount).toBeNull();
+      expect(result[0].lastAdminSignInAt).toBeNull();
+      expect(result[0].membersActiveLast30Days).toBeNull();
       expect(result[0].planId).toBeNull();
+    });
+  });
+
+  describe('getTenantAdminContacts', () => {
+    it("lists the church's active admins with their contact details, most recently signed in first", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
+      mockDataSource.query.mockResolvedValue([
+        {
+          firstname: 'Ada',
+          lastname: 'Obi',
+          email: 'ada@test-church.org',
+          phone_number: '+2348000000000',
+          role: 'Super Admin',
+          last_login: new Date('2026-10-12T08:00:00Z'),
+        },
+        {
+          firstname: 'Ben',
+          lastname: 'Eze',
+          email: 'ben@test-church.org',
+          phone_number: null,
+          role: null,
+          last_login: null,
+        },
+      ]);
+
+      const result = await service.getTenantAdminContacts('tenant-1');
+
+      expect(result).toEqual([
+        {
+          name: 'Ada Obi',
+          email: 'ada@test-church.org',
+          phoneNumber: '+2348000000000',
+          role: 'Super Admin',
+          lastSignInAt: new Date('2026-10-12T08:00:00Z'),
+        },
+        {
+          name: 'Ben Eze',
+          email: 'ben@test-church.org',
+          phoneNumber: null,
+          role: null,
+          lastSignInAt: null,
+        },
+      ]);
+      const [sql, params] = mockDataSource.query.mock.calls[0];
+      expect(sql).toContain('"church_test_church".admins');
+      expect(sql).toContain('WHERE a.is_active');
+      expect(params).toEqual(['ADMIN']);
+    });
+
+    it('404s for an unknown church', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(null);
+      await expect(service.getTenantAdminContacts('nope')).rejects.toThrow(
+        'Tenant not found',
+      );
     });
   });
 

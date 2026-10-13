@@ -235,6 +235,13 @@ export class PlatformAdminController {
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('tenants/:id/admins')
+  async getTenantAdminContacts(@Param('id') id: string) {
+    return this.tenantService.getTenantAdminContacts(id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
   @Patch('tenants/:id')
   async updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {

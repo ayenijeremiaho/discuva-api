@@ -36,6 +36,14 @@ import { SetModuleRolloutDto } from '../dto/set-module-rollout.dto';
 import { DiscountType } from '../../billing/enum/discount-type.enum';
 import { KNOWN_MODULES } from '../../church-settings/constants/known-modules.constant';
 
+export interface TenantAdminContact {
+  name: string;
+  email: string;
+  phoneNumber: string | null;
+  role: string | null;
+  lastSignInAt: Date | null;
+}
+
 export interface TenantWithHealth {
   id: string;
   subdomain: string;
@@ -52,12 +60,21 @@ export interface TenantWithHealth {
   createdAt: Date;
   planId: string | null;
   subscriptionStatus: string | null;
+  planStartedAt: Date | null;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  autoRenews: boolean;
   discountType: DiscountType | null;
   discountValue: number | null;
   discountReason: string | null;
   discountExpiresAt: Date | null;
   memberCount: number | null;
   eventCount: number | null;
+  adminCount: number | null;
+  lastAdminSignInAt: Date | null;
+  lastMemberSignInAt: Date | null;
+  membersActiveLast30Days: number | null;
+  lastEventOn: string | null;
   moduleOverrides: Record<string, boolean> | null;
 }
 
@@ -194,6 +211,39 @@ export class PlatformTenantService {
       where: { tenant: { id: tenantId } },
       order: { createdAt: 'ASC' },
     });
+  }
+
+  // Who to call or email at a church: its active admins, most recently signed in first.
+  async getTenantAdminContacts(
+    tenantId: string,
+  ): Promise<TenantAdminContact[]> {
+    const tenant = await this.findTenantOrThrow(tenantId);
+    if (!/^[a-z_][a-z0-9_]*$/.test(tenant.schemaName)) return [];
+    const s = tenant.schemaName;
+    const rows: {
+      firstname: string;
+      lastname: string;
+      email: string;
+      phone_number: string | null;
+      role: string | null;
+      last_login: Date | null;
+    }[] = await this.dataSource.query(
+      `SELECT m.firstname, m.lastname, m.email, m.phone_number, r.name AS role, ms.last_login
+         FROM "${s}".admins a
+         JOIN "${s}".members m ON m.id = a.member_id
+         LEFT JOIN "${s}".admin_roles r ON r.id = a.admin_role_id
+         LEFT JOIN "${s}".member_sessions ms ON ms.member_id = m.id AND ms.surface = $1
+        WHERE a.is_active
+        ORDER BY ms.last_login DESC NULLS LAST, m.firstname`,
+      [SessionSurface.ADMIN],
+    );
+    return rows.map((r) => ({
+      name: `${r.firstname} ${r.lastname}`.trim(),
+      email: r.email,
+      phoneNumber: r.phone_number,
+      role: r.role,
+      lastSignInAt: r.last_login,
+    }));
   }
 
   async updateTenant(
@@ -663,9 +713,10 @@ export class PlatformTenantService {
     const sub =
       subscription ??
       (await this.subscriptionRepo.findOneBy({ tenantId: tenant.id }));
-    const [memberCount, eventCount] = await Promise.all([
+    const [memberCount, eventCount, activity] = await Promise.all([
       this.safeSchemaCount(tenant.schemaName, 'members'),
       this.safeSchemaCount(tenant.schemaName, 'events'),
+      this.safeActivity(tenant.schemaName),
     ]);
     return {
       id: tenant.id,
@@ -683,12 +734,18 @@ export class PlatformTenantService {
       createdAt: tenant.createdAt,
       planId: sub?.planId ?? null,
       subscriptionStatus: sub?.status ?? null,
+      planStartedAt: sub?.planStartedAt ?? null,
+      currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
+      autoRenews:
+        !!sub?.billingProviderSubscriptionId && !sub?.cancelAtPeriodEnd,
       discountType: sub?.discountType ?? null,
       discountValue: sub?.discountValue ?? null,
       discountReason: sub?.discountReason ?? null,
       discountExpiresAt: sub?.discountExpiresAt ?? null,
       memberCount,
       eventCount,
+      ...activity,
       moduleOverrides: tenant.moduleOverrides,
     };
   }
@@ -697,6 +754,48 @@ export class PlatformTenantService {
     const tenant = await this.tenantRepo.findOneBy({ id });
     if (!tenant) throw new NotFoundException('Tenant not found');
     return tenant;
+  }
+
+  // Sign-ins come from member_sessions, which every sign-in and token refresh already updates (one row per person per app).
+  private async safeActivity(
+    schemaName: string,
+  ): Promise<
+    Pick<
+      TenantWithHealth,
+      | 'adminCount'
+      | 'lastAdminSignInAt'
+      | 'lastMemberSignInAt'
+      | 'membersActiveLast30Days'
+      | 'lastEventOn'
+    >
+  > {
+    try {
+      const [row] = await this.dataSource.query(
+        `SELECT
+           (SELECT count(*)::int FROM "${schemaName}".admins WHERE is_active) AS admin_count,
+           (SELECT max(last_login) FROM "${schemaName}".member_sessions WHERE surface = $1) AS last_admin,
+           (SELECT max(last_login) FROM "${schemaName}".member_sessions WHERE surface = $2) AS last_member,
+           (SELECT count(*)::int FROM "${schemaName}".member_sessions
+             WHERE surface = $2 AND last_login > now() - interval '30 days') AS active_30d,
+           (SELECT max(event_date)::text FROM "${schemaName}".events WHERE event_date <= current_date) AS last_event`,
+        [SessionSurface.ADMIN, SessionSurface.MEMBER],
+      );
+      return {
+        adminCount: row?.admin_count ?? null,
+        lastAdminSignInAt: row?.last_admin ?? null,
+        lastMemberSignInAt: row?.last_member ?? null,
+        membersActiveLast30Days: row?.active_30d ?? null,
+        lastEventOn: row?.last_event ?? null,
+      };
+    } catch {
+      return {
+        adminCount: null,
+        lastAdminSignInAt: null,
+        lastMemberSignInAt: null,
+        membersActiveLast30Days: null,
+        lastEventOn: null,
+      };
+    }
   }
 
   private async safeSchemaCount(

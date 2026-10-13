@@ -45,6 +45,10 @@ export class Subscription extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   currentPeriodEnd: Date | null;
 
+  // Maintained by a database trigger (AddSubscriptionPlanStartedAt migration), never written from code.
+  @Column({ type: 'timestamptz', insert: false, update: false, nullable: true })
+  planStartedAt: Date | null;
+
   // Set exactly once, by CheckoutService.applySubscriptionCanceled — see
   // the migration comment for why this can't just be `updatedAt`.
   @Column({ type: 'timestamptz', nullable: true })

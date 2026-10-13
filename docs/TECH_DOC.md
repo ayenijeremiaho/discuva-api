@@ -6829,8 +6829,14 @@ enum addition, to actually reach an already-seeded `SuperAdmin` role — `Platfo
 the enum on later boots), so adding a new permission value does nothing for a platform admin whose role already
 existed. See `1792371600000-GrantSuperAdminBroadcastPermission.ts`.
 
-**Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant via
-schema-qualified reads — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
+**Plan dates** (`GET /platform/tenants`): `planStartedAt` is when the current plan began — `subscriptions.plan_started_at`, maintained by the `trg_subscriptions_plan_started_at` trigger (set on insert, reset when `plan_id` changes or `status` returns to `active`; a same-plan renewal keeps it), backfilled from the latest completed subscription checkout for that plan, else the row's `created_at`. `currentPeriodEnd` is when the paid period ends; `autoRenews` is true when a provider subscription is on file and the church hasn't asked to cancel, so the console reads it as "Renews", "Ends" (`cancelAtPeriodEnd`) or "Expires".
+
+**Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant, plus activity:
+`adminCount` (active admins), `lastAdminSignInAt`/`lastMemberSignInAt` (latest `member_sessions.last_login` per
+surface — every sign-in and token refresh updates it, so it reads as "last used", within the access-token lifetime),
+`membersActiveLast30Days` (member-app sessions used in the last 30 days) and `lastEventOn` (latest `event_date` on or
+before today). Indexed by `IDX_member_sessions_surface_lastLogin` (`surface, last_login DESC`). All via
+schema-qualified reads, each falling back to `null` if a schema can't be read — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
 that scales to thousands of tenants without revisiting. **`impersonate`** issues a short-lived, access-token-only
 JWT (no refresh token, no session record) signed directly rather than through the normal admin-login path — see
 the code comment on `PlatformTenantService.impersonateTenant` for why. `TenantMiddleware` is wired into the live
@@ -6848,9 +6854,10 @@ being visible outside this service. All four routes now return the identical cur
 | POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken, requiresPasswordChange }` and sets the httpOnly `platform_refresh_token` cookie. |
 | POST | `/platform/auth/refresh` | `PlatformAdminRefreshJwtAuthGuard` (validates the refresh cookie, a separate check from `PlatformAdminGuard`). Returns a fresh `{ accessToken }` and re-sets the refresh cookie. |
 | POST | `/platform/auth/logout` | Clears the refresh cookie. `204`. |
-| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), `onboardingStatus`, plan/subscription status, and live member/event counts. |
+| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), `onboardingStatus`, plan/subscription status, plan dates (`planStartedAt`, `currentPeriodEnd`, `cancelAtPeriodEnd`, `autoRenews`), live member/event counts, and activity (`adminCount`, `lastAdminSignInAt`, `lastMemberSignInAt`, `membersActiveLast30Days`, `lastEventOn`). |
 | POST | `/platform/tenants` | Provisions a new tenant inline (`TenantProvisioningService.provision()`, not the queue self-serve `/signup` uses — see "Async Tenant Provisioning + Onboarding State Machine" above). Body has no password field, same as `/signup`'s `SignupDto` — the new admin gets a welcome email with a set-password link instead (see "Tenant Welcome / Set Password Flow" above). Returns the tenant already `onboardingStatus: ACTIVE`, same shape as `GET /platform/tenants`' rows. |
 | GET | `/platform/tenants/:id/onboarding-events` | The platform-level onboarding audit trail for one tenant, oldest first — see "Async Tenant Provisioning + Onboarding State Machine" above. |
+| GET | `/platform/tenants/:id/admins` | `TENANTS_READ`. The church's active admins for reaching out — `name`, `email`, `phoneNumber`, `role`, `lastSignInAt` (admin app), most recently signed in first. Loaded per church, never on the list. |
 | PATCH | `/platform/tenants/:id` | Update name, logo, tagline, address, support email, currency, timezone. Returns the same shape as `GET /platform/tenants`' rows. |
 | PATCH | `/platform/tenants/:id/suspend` | `{ suspend?: boolean }`, default `true` — same route handles reactivation via `{ suspend: false }`. Reactivating a fully set-up tenant first runs its pending tenant migrations, so it never comes back on a schema behind the code. Returns the same shape as `GET /platform/tenants`' rows. |
 | PATCH | `/platform/tenants/:id/plan` | Manually change a tenant's plan — comps, support fixes. Sets `Subscription.status` to `active` regardless of its prior value, so a `canceled`/`past_due` tenant regains access immediately rather than waiting on the next billing-provider webhook. Invalidates `PlanGuard`'s cached feature list. |
@@ -20326,8 +20333,14 @@ enum addition, to actually reach an already-seeded `SuperAdmin` role — `Platfo
 the enum on later boots), so adding a new permission value does nothing for a platform admin whose role already
 existed. See `1792371600000-GrantSuperAdminBroadcastPermission.ts`.
 
-**Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant via
-schema-qualified reads — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
+**Plan dates** (`GET /platform/tenants`): `planStartedAt` is when the current plan began — `subscriptions.plan_started_at`, maintained by the `trg_subscriptions_plan_started_at` trigger (set on insert, reset when `plan_id` changes or `status` returns to `active`; a same-plan renewal keeps it), backfilled from the latest completed subscription checkout for that plan, else the row's `created_at`. `currentPeriodEnd` is when the paid period ends; `autoRenews` is true when a provider subscription is on file and the church hasn't asked to cancel, so the console reads it as "Renews", "Ends" (`cancelAtPeriodEnd`) or "Expires".
+
+**Tenant health stats** (`GET /platform/tenants`) include live `memberCount`/`eventCount` per tenant, plus activity:
+`adminCount` (active admins), `lastAdminSignInAt`/`lastMemberSignInAt` (latest `member_sessions.last_login` per
+surface — every sign-in and token refresh updates it, so it reads as "last used", within the access-token lifetime),
+`membersActiveLast30Days` (member-app sessions used in the last 30 days) and `lastEventOn` (latest `event_date` on or
+before today). Indexed by `IDX_member_sessions_surface_lastLogin` (`surface, last_login DESC`). All via
+schema-qualified reads, each falling back to `null` if a schema can't be read — cheap at the tens-to-low-hundreds tenant scale this product targets today, not a design
 that scales to thousands of tenants without revisiting. **`impersonate`** issues a short-lived, access-token-only
 JWT (no refresh token, no session record) signed directly rather than through the normal admin-login path — see
 the code comment on `PlatformTenantService.impersonateTenant` for why. `TenantMiddleware` is wired into the live
@@ -20345,9 +20358,10 @@ being visible outside this service. All four routes now return the identical cur
 | POST | `/platform/auth/login` | Platform admin login — `{ email, password }`, returns `{ accessToken, requiresPasswordChange }` and sets the httpOnly `platform_refresh_token` cookie. |
 | POST | `/platform/auth/refresh` | `PlatformAdminRefreshJwtAuthGuard` (validates the refresh cookie, a separate check from `PlatformAdminGuard`). Returns a fresh `{ accessToken }` and re-sets the refresh cookie. |
 | POST | `/platform/auth/logout` | Clears the refresh cookie. `204`. |
-| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), `onboardingStatus`, plan/subscription status, and live member/event counts. |
+| GET | `/platform/tenants` | List all tenants — profile fields (`logoUrl`/`tagline`/`address`/`supportEmail`/`currency`/`timezone`), `onboardingStatus`, plan/subscription status, plan dates (`planStartedAt`, `currentPeriodEnd`, `cancelAtPeriodEnd`, `autoRenews`), live member/event counts, and activity (`adminCount`, `lastAdminSignInAt`, `lastMemberSignInAt`, `membersActiveLast30Days`, `lastEventOn`). |
 | POST | `/platform/tenants` | Provisions a new tenant inline (`TenantProvisioningService.provision()`, not the queue self-serve `/signup` uses — see "Async Tenant Provisioning + Onboarding State Machine" above). Body has no password field, same as `/signup`'s `SignupDto` — the new admin gets a welcome email with a set-password link instead (see "Tenant Welcome / Set Password Flow" above). Returns the tenant already `onboardingStatus: ACTIVE`, same shape as `GET /platform/tenants`' rows. |
 | GET | `/platform/tenants/:id/onboarding-events` | The platform-level onboarding audit trail for one tenant, oldest first — see "Async Tenant Provisioning + Onboarding State Machine" above. |
+| GET | `/platform/tenants/:id/admins` | `TENANTS_READ`. The church's active admins for reaching out — `name`, `email`, `phoneNumber`, `role`, `lastSignInAt` (admin app), most recently signed in first. Loaded per church, never on the list. |
 | PATCH | `/platform/tenants/:id` | Update name, logo, tagline, address, support email, currency, timezone. Returns the same shape as `GET /platform/tenants`' rows. |
 | PATCH | `/platform/tenants/:id/suspend` | `{ suspend?: boolean }`, default `true` — same route handles reactivation via `{ suspend: false }`. Reactivating a fully set-up tenant first runs its pending tenant migrations, so it never comes back on a schema behind the code. Returns the same shape as `GET /platform/tenants`' rows. |
 | PATCH | `/platform/tenants/:id/plan` | Manually change a tenant's plan — comps, support fixes. Sets `Subscription.status` to `active` regardless of its prior value, so a `canceled`/`past_due` tenant regains access immediately rather than waiting on the next billing-provider webhook. Invalidates `PlanGuard`'s cached feature list. |

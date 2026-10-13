@@ -38787,7 +38787,38 @@
                 "tenants"
               ]
             },
-            "description": "List all tenants with plan/subscription status and live member/event counts (schema-qualified reads)."
+            "description": "List all tenants with plan/subscription status, live member/event counts and activity (adminCount, lastAdminSignInAt, lastMemberSignInAt, membersActiveLast30Days, lastEventOn)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tenant Admin Contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/platform/tenants/{{platformTenantId}}/admins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "tenants",
+                "{{platformTenantId}}",
+                "admins"
+              ]
+            },
+            "description": "Active admins of one church with contact details (name, email, phoneNumber, role, lastSignInAt), most recently signed in first. Requires TENANTS_READ."
           },
           "response": []
         },
