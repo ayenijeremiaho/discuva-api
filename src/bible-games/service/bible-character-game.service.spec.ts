@@ -1,7 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { BibleCharacterGameService } from './bible-character-game.service';
 import { CharacterRoundStatus } from '../entity/bible-character-round.entity';
-import { characterData } from '../engine/characters';
+import { CHARACTER_QUESTIONS, characterData } from '../engine/characters';
 
 describe('BibleCharacterGameService', () => {
   const { list } = characterData();
@@ -115,6 +115,19 @@ describe('BibleCharacterGameService', () => {
     const view = await service.ask('m1', 'r1', 'king');
     expect(view.stillPossible).toBeGreaterThan(0);
     expect(view.possibleNames!.map((n) => n.id)).toContain('david');
+  });
+
+  it('allows twenty questions, then only a guess', async () => {
+    await startOn('david');
+    const ids = CHARACTER_QUESTIONS.slice(0, 20).map((q) => q.id);
+    let view = await service.ask('m1', 'r1', ids[0]);
+    expect(view.questionsLeft).toBe(19);
+    for (const id of ids.slice(1)) view = await service.ask('m1', 'r1', id);
+    expect(view.questionsLeft).toBe(0);
+    expect(view.suggestions).toEqual([]);
+    await expect(
+      service.ask('m1', 'r1', CHARACTER_QUESTIONS[20].id),
+    ).rejects.toMatchObject({ response: { code: 'QUESTION_LIMIT' } });
   });
 
   it('gives clue verses with the name blanked out', async () => {

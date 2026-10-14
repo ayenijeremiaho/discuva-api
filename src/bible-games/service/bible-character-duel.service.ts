@@ -31,6 +31,8 @@ import {
   stillPossible,
   SUGGESTED_QUESTIONS,
   candidates,
+  questionLimitReached,
+  MAX_QUESTIONS,
   withOwn,
   possibleNames,
   usefulQuestions,
@@ -67,6 +69,7 @@ const OPPONENT_RESULTS = 20;
 export interface Player {
   id: string;
   name: string;
+  photoUrl?: string | null;
 }
 
 export interface DuelAsked {
@@ -92,6 +95,7 @@ export interface DuelView {
     wrongGuesses: { id: string; name: string }[];
     guessesLeft: number;
     stillPossible: number;
+    questionsLeft: number;
     suggestions: string[];
     usefulQuestions: string[];
     possibleNames: { id: string; name: string }[] | null;
@@ -192,13 +196,22 @@ export class BibleCharacterDuelService {
       return `(m.firstname ILIKE ${p} OR m.lastname ILIKE ${p})`;
     });
     const rows = (await this.txHost.tx.query(
-      `SELECT m.id, m.firstname, m.lastname FROM members m
+      `SELECT m.id, m.firstname, m.lastname, m.photo_url FROM members m
        WHERE m.status = 'ACTIVE' AND m.id <> $1 AND ${conditions.join(' AND ')}
        ORDER BY m.firstname, m.lastname
        LIMIT ${OPPONENT_RESULTS}`,
       params,
-    )) as { id: string; firstname: string; lastname: string }[];
-    return rows.map((r) => ({ id: r.id, name: fullName(r) }));
+    )) as {
+      id: string;
+      firstname: string;
+      lastname: string;
+      photo_url: string | null;
+    }[];
+    return rows.map((r) => ({
+      id: r.id,
+      name: fullName(r),
+      photoUrl: r.photo_url,
+    }));
   }
 
   async invite(
@@ -340,6 +353,8 @@ export class BibleCharacterDuelService {
           code: 'ALREADY_ASKED',
           message: 'You have already asked that.',
         });
+      if (state.asked.length >= MAX_QUESTIONS)
+        throw new ConflictException(questionLimitReached());
       state.asked = [
         ...state.asked,
         { q: questionId, a: answer(questionId, character) },
@@ -597,7 +612,11 @@ export class BibleCharacterDuelService {
       );
       // Only needed on your own turn; the waiting player's app polls without them.
       const helping = duel.status === DuelStatus.ACTIVE && duel.turn === you;
-      const useful = helping ? usefulQuestions(fits, mine.asked, byId) : [];
+      const questionsLeft = Math.max(0, MAX_QUESTIONS - mine.asked.length);
+      const useful =
+        helping && questionsLeft > 0
+          ? usefulQuestions(fits, mine.asked, byId)
+          : [];
       me = {
         asked: asked(mine),
         hints: clues.slice(0, mine.hints).map((ref) => ({
@@ -611,6 +630,7 @@ export class BibleCharacterDuelService {
         })),
         guessesLeft: MAX_WRONG_GUESSES - mine.wrong.length,
         stillPossible: fits.length,
+        questionsLeft,
         suggestions: useful.slice(0, SUGGESTED_QUESTIONS),
         usefulQuestions: useful,
         possibleNames: helping ? possibleNames(duel.difficulty, fits) : null,

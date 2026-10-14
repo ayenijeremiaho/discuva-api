@@ -1,3 +1,4 @@
+import { CHARACTER_QUESTIONS } from '../engine/characters';
 import { ConflictException } from '@nestjs/common';
 import { BibleCharacterDuelService } from './bible-character-duel.service';
 import { DuelStatus } from '../entity/bible-character-duel.entity';
@@ -77,7 +78,14 @@ describe('BibleCharacterDuelService', () => {
             { id: YOU, firstname: 'Grace', lastname: 'Adebayo' },
           ];
         if (sql.includes('FROM members m'))
-          return [{ id: YOU, firstname: 'Grace', lastname: 'Adebayo' }];
+          return [
+            {
+              id: YOU,
+              firstname: 'Grace',
+              lastname: 'Adebayo',
+              photo_url: 'https://cdn.example.com/grace.jpg',
+            },
+          ];
         return [];
       }),
       getRepository: () => ({
@@ -248,6 +256,21 @@ describe('BibleCharacterDuelService', () => {
     expect(view.result?.outcome).toBe('lost');
   });
 
+  it('stops asking at twenty questions a side, leaving only a guess', async () => {
+    const { id } = await started();
+    const ids = CHARACTER_QUESTIONS.map((q) => q.id);
+    for (let i = 0; i < 20; i++) {
+      await service.ask(YOU, id, ids[i]);
+      await service.ask(ME, id, ids[i]);
+    }
+    const view = await service.get(YOU, id);
+    expect(view.me?.questionsLeft).toBe(0);
+    expect(view.me?.suggestions).toEqual([]);
+    await expect(service.ask(YOU, id, ids[20])).rejects.toMatchObject({
+      response: { code: 'QUESTION_LIMIT' },
+    });
+  });
+
   it('lets an unanswered invite expire', async () => {
     const duel = await service.invite(ME, YOU, 'easy');
     duels[0].turnDeadline = new Date(Date.now() - 1000);
@@ -302,7 +325,13 @@ describe('BibleCharacterDuelService', () => {
 
   it('searches active members by each word of their name', async () => {
     const found = await service.opponents(ME, 'gra 50%');
-    expect(found).toEqual([{ id: YOU, name: 'Grace Adebayo' }]);
+    expect(found).toEqual([
+      {
+        id: YOU,
+        name: 'Grace Adebayo',
+        photoUrl: 'https://cdn.example.com/grace.jpg',
+      },
+    ]);
     const [sql, params] = txHost.tx.query.mock.calls.at(-1)!;
     expect(sql).toContain("m.status = 'ACTIVE' AND m.id <> $1");
     expect(params).toEqual([ME, '%gra%', '%50\\%%']);

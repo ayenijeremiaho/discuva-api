@@ -29,6 +29,7 @@ import {
   DAILY_SCORED_GAMES,
   FREE_QUESTIONS,
   HINT_COST_PERCENT,
+  MAX_QUESTIONS,
   MAX_WRONG_GUESSES,
   MIN_PERCENT,
   QUESTION_COST_PERCENT,
@@ -36,6 +37,7 @@ import {
   WRONG_GUESS_COST_PERCENT,
   SUGGESTED_QUESTIONS,
   candidates,
+  questionLimitReached,
   withOwn,
   possibleNames,
   usefulQuestions,
@@ -61,6 +63,7 @@ export interface CharacterRoundView {
   wrongGuesses: { id: string; name: string }[];
   guessesLeft: number;
   stillPossible: number;
+  questionsLeft: number;
   // Best next questions, every question that can still narrow it down, and (Easy, or Medium near the end) who's left.
   suggestions: string[];
   usefulQuestions: string[];
@@ -135,6 +138,7 @@ export class BibleCharacterGameService {
         wrongGuessCostPercent: WRONG_GUESS_COST_PERCENT,
         minPercent: MIN_PERCENT,
         maxWrongGuesses: MAX_WRONG_GUESSES,
+        maxQuestions: MAX_QUESTIONS,
       },
     };
   }
@@ -208,6 +212,8 @@ export class BibleCharacterGameService {
         code: 'ALREADY_ASKED',
         message: 'You have already asked that.',
       });
+    if (round.asked.length >= MAX_QUESTIONS)
+      throw new ConflictException(questionLimitReached());
     round.asked = [
       ...round.asked,
       { q: questionId, a: answer(questionId, this.characterOf(round)) },
@@ -392,7 +398,11 @@ export class BibleCharacterGameService {
       round.wrongGuesses,
       byId,
     );
-    const useful = done ? [] : usefulQuestions(fits, round.asked, byId);
+    const questionsLeft = Math.max(0, MAX_QUESTIONS - round.asked.length);
+    const useful =
+      done || questionsLeft === 0
+        ? []
+        : usefulQuestions(fits, round.asked, byId);
     return {
       id: round.id,
       difficulty: round.difficulty,
@@ -413,6 +423,7 @@ export class BibleCharacterGameService {
       })),
       guessesLeft: MAX_WRONG_GUESSES - round.wrongGuesses.length,
       stillPossible: fits.length,
+      questionsLeft,
       suggestions: useful.slice(0, SUGGESTED_QUESTIONS),
       usefulQuestions: useful,
       possibleNames: done ? null : possibleNames(round.difficulty, fits),

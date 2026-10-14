@@ -19,6 +19,13 @@ export const WRONG_GUESS_COST_PERCENT = 10;
 // Finding the character always earns at least a fifth of the start.
 export const MIN_PERCENT = 20;
 export const MAX_WRONG_GUESSES = 3;
+// "Twenty questions": after this many, the only move left is to guess. Points already bottom out just before it.
+export const MAX_QUESTIONS = 20;
+
+export const questionLimitReached = () => ({
+  code: 'QUESTION_LIMIT',
+  message: `You've asked all ${MAX_QUESTIONS} questions. Make your guess.`,
+});
 // Games won after this many in a day are for fun and add no points.
 export const DAILY_SCORED_GAMES = 5;
 
