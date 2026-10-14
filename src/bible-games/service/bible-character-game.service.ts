@@ -34,7 +34,10 @@ import {
   QUESTION_COST_PERCENT,
   START_POINTS,
   WRONG_GUESS_COST_PERCENT,
-  stillPossible,
+  SUGGESTED_QUESTIONS,
+  candidates,
+  possibleNames,
+  usefulQuestions,
   worthNow,
 } from '../engine/character-game';
 import { label, verse } from '../engine/bible';
@@ -57,6 +60,10 @@ export interface CharacterRoundView {
   wrongGuesses: { id: string; name: string }[];
   guessesLeft: number;
   stillPossible: number;
+  // Best next questions, every question that can still narrow it down, and (Easy, or Medium near the end) who's left.
+  suggestions: string[];
+  usefulQuestions: string[];
+  possibleNames: { id: string; name: string }[] | null;
   worth: number;
   result: CharacterResult | null;
 }
@@ -375,6 +382,13 @@ export class BibleCharacterGameService {
     const character = this.characterOf(round);
     const terms = matchTerms(character);
     const done = round.status !== CharacterRoundStatus.ACTIVE;
+    const fits = candidates(
+      pool.filter((c) => c.difficulty === round.difficulty),
+      round.asked,
+      round.wrongGuesses,
+      byId,
+    );
+    const useful = done ? [] : usefulQuestions(fits, round.asked, byId);
     return {
       id: round.id,
       difficulty: round.difficulty,
@@ -394,12 +408,10 @@ export class BibleCharacterGameService {
         name: byId.get(id)?.name ?? id,
       })),
       guessesLeft: MAX_WRONG_GUESSES - round.wrongGuesses.length,
-      stillPossible: stillPossible(
-        pool.filter((c) => c.difficulty === round.difficulty),
-        round.asked,
-        round.wrongGuesses,
-        byId,
-      ),
+      stillPossible: fits.length,
+      suggestions: useful.slice(0, SUGGESTED_QUESTIONS),
+      usefulQuestions: useful,
+      possibleNames: done ? null : possibleNames(round.difficulty, fits),
       worth: worthNow(
         round.difficulty,
         round.asked.length,

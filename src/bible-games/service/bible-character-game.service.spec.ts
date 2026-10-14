@@ -97,6 +97,16 @@ describe('BibleCharacterGameService', () => {
     );
   });
 
+  it('suggests the next questions and, on Easy, lists who still fits', async () => {
+    await startOn('david');
+    const view = await service.ask('m1', 'r1', 'king');
+    expect(view.suggestions).toHaveLength(3);
+    expect(view.suggestions).not.toContain('king');
+    expect(view.usefulQuestions.slice(0, 3)).toEqual(view.suggestions);
+    expect(view.possibleNames).toHaveLength(view.stillPossible);
+    expect(view.possibleNames!.map((n) => n.id)).toContain('david');
+  });
+
   it('gives clue verses with the name blanked out', async () => {
     await startOn('david');
     const view = await service.hint('m1', 'r1');

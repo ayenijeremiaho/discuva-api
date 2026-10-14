@@ -177,6 +177,11 @@ describe('BibleCharacterDuelService', () => {
       [ME],
       expect.objectContaining({ key: 'BIBLE_DUEL_YOUR_TURN' }),
     );
+    expect(afterAsk.me?.suggestions).toEqual([]);
+    expect(afterAsk.me?.possibleNames).toBeNull();
+    const myTurn = await service.get(ME, id);
+    expect(myTurn.me?.suggestions.length).toBeGreaterThan(0);
+    expect(myTurn.me?.possibleNames).not.toBeNull();
     const mine = await service.ask(ME, id, 'ot');
     expect(mine.them?.asked).toHaveLength(1);
 

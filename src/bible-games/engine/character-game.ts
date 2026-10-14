@@ -1,4 +1,9 @@
-import { BibleCharacter, Difficulty, answer } from './characters';
+import {
+  BibleCharacter,
+  CHARACTER_QUESTIONS,
+  Difficulty,
+  answer,
+} from './characters';
 
 // Points for finding the character, before costs; harder characters are worth more.
 export const START_POINTS: Record<Difficulty, number> = {
@@ -38,17 +43,59 @@ export function worthNow(
   );
 }
 
-// How many characters still fit every answer so far (and haven't been wrongly guessed); pass the
+// The characters that still fit every answer so far (and haven't been wrongly guessed); pass the
 // characters at the game's difficulty, since the player chose it.
+export function candidates(
+  pool: BibleCharacter[],
+  asked: AskedQuestion[],
+  wrongGuesses: string[],
+  all: ReadonlyMap<string, BibleCharacter>,
+): BibleCharacter[] {
+  return pool.filter(
+    (c) =>
+      !wrongGuesses.includes(c.id) &&
+      asked.every((x) => answer(x.q, c, all) === x.a),
+  );
+}
+
 export function stillPossible(
   pool: BibleCharacter[],
   asked: AskedQuestion[],
   wrongGuesses: string[],
   all: ReadonlyMap<string, BibleCharacter>,
 ): number {
-  return pool.filter(
-    (c) =>
-      !wrongGuesses.includes(c.id) &&
-      asked.every((x) => answer(x.q, c, all) === x.a),
-  ).length;
+  return candidates(pool, asked, wrongGuesses, all).length;
+}
+
+export const SUGGESTED_QUESTIONS = 3;
+// Medium shows the names that still fit once this few remain; Easy always does, Hard never.
+export const MEDIUM_NAMES_AT = 6;
+
+// Unasked questions that would split the characters still in play, best split first (closest to half yes,
+// half no). Built only from the player's own answers, so it never reveals anything about the hidden character.
+export function usefulQuestions(
+  fits: BibleCharacter[],
+  asked: AskedQuestion[],
+  all: ReadonlyMap<string, BibleCharacter>,
+): string[] {
+  const done = new Set(asked.map((a) => a.q));
+  return CHARACTER_QUESTIONS.filter((q) => !done.has(q.id))
+    .map((q, order) => {
+      const yes = fits.filter((c) => answer(q.id, c, all)).length;
+      return { id: q.id, order, split: Math.min(yes, fits.length - yes) };
+    })
+    .filter((q) => q.split > 0)
+    .sort((a, b) => b.split - a.split || a.order - b.order)
+    .map((q) => q.id);
+}
+
+export function possibleNames(
+  difficulty: Difficulty,
+  fits: BibleCharacter[],
+): { id: string; name: string }[] | null {
+  if (difficulty === 'hard') return null;
+  if (difficulty === 'medium' && fits.length > MEDIUM_NAMES_AT) return null;
+  return fits
+    .map((c) => ({ id: c.id, name: c.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

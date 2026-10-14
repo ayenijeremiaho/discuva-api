@@ -5697,7 +5697,11 @@ SERVICE_IN_PROGRESS` while checked in to a live service, `409 NO_CHARACTERS` whe
 ALREADY_GUESSED`; the third wrong guess ends the round as `lost`); `POST rounds/:id/give-up`;
 `GET bible-characters/scoreboard?period=month|all&limit=` (the Characters board). The round view carries `asked`,
 `hints`, `hintsLeft`, `wrongGuesses`, `guessesLeft`, `stillPossible` (characters at that difficulty that fit every
-answer and weren't wrongly guessed) and `worth`; a finished round adds `result` (name, other names, the church's
+answer and weren't wrongly guessed), `worth`, and turn help built only from the player's own answers:
+`suggestions` (the 3 best next question ids, closest to a half-yes/half-no split of the characters still in play),
+`usefulQuestions` (every unasked question that can still split them, best first; the app's menu hides the rest) and
+`possibleNames` (`{ id, name }[]` of who still fits — always on Easy, on Medium once `MEDIUM_NAMES_AT` = 6 or fewer
+remain, never on Hard; `null` otherwise). A finished round adds `result` (name, other names, the church's
 summary, clue verses unmasked, books, points, `scored`, rank this month).
 
 Scoring (`engine/character-game.ts`, whole percentages so there is no rounding drift): start 60 / 100 / 150 for easy /
@@ -5745,7 +5749,7 @@ word matching a first or last name, 20 at most); `POST duels { opponentId, diffi
 `POST duels/:id/accept` (picks two different characters); `POST duels/:id/decline` (the person invited declines, the
 challenger cancels); `POST duels/:id/ask { questionId }`, `/hint`, `/guess { characterId }`, `/resign`. The duel view
 has `you`, `opponent { id, name }`, `yourTurn`, `finalTurn`, `turnDeadline`, `me` (your questions, masked hints,
-guesses, `stillPossible`, `worth`), `them` (their questions about their own character and progress) and, when
+guesses, `stillPossible`, `suggestions`, `usefulQuestions`, `possibleNames`, `worth` — same rules as Solo), `them` (their questions about their own character and progress) and, when
 finished, `result { outcome, reason, points, scored, yours, theirs }`. Admin: `GET admin/bible-games/characters/stats`
 adds `duels { finishedThisMonth, inPlay, turnHours }`.
 
@@ -19204,7 +19208,11 @@ SERVICE_IN_PROGRESS` while checked in to a live service, `409 NO_CHARACTERS` whe
 ALREADY_GUESSED`; the third wrong guess ends the round as `lost`); `POST rounds/:id/give-up`;
 `GET bible-characters/scoreboard?period=month|all&limit=` (the Characters board). The round view carries `asked`,
 `hints`, `hintsLeft`, `wrongGuesses`, `guessesLeft`, `stillPossible` (characters at that difficulty that fit every
-answer and weren't wrongly guessed) and `worth`; a finished round adds `result` (name, other names, the church's
+answer and weren't wrongly guessed), `worth`, and turn help built only from the player's own answers:
+`suggestions` (the 3 best next question ids, closest to a half-yes/half-no split of the characters still in play),
+`usefulQuestions` (every unasked question that can still split them, best first; the app's menu hides the rest) and
+`possibleNames` (`{ id, name }[]` of who still fits — always on Easy, on Medium once `MEDIUM_NAMES_AT` = 6 or fewer
+remain, never on Hard; `null` otherwise). A finished round adds `result` (name, other names, the church's
 summary, clue verses unmasked, books, points, `scored`, rank this month).
 
 Scoring (`engine/character-game.ts`, whole percentages so there is no rounding drift): start 60 / 100 / 150 for easy /
@@ -19252,7 +19260,7 @@ word matching a first or last name, 20 at most); `POST duels { opponentId, diffi
 `POST duels/:id/accept` (picks two different characters); `POST duels/:id/decline` (the person invited declines, the
 challenger cancels); `POST duels/:id/ask { questionId }`, `/hint`, `/guess { characterId }`, `/resign`. The duel view
 has `you`, `opponent { id, name }`, `yourTurn`, `finalTurn`, `turnDeadline`, `me` (your questions, masked hints,
-guesses, `stillPossible`, `worth`), `them` (their questions about their own character and progress) and, when
+guesses, `stillPossible`, `suggestions`, `usefulQuestions`, `possibleNames`, `worth` — same rules as Solo), `them` (their questions about their own character and progress) and, when
 finished, `result { outcome, reason, points, scored, yours, theirs }`. Admin: `GET admin/bible-games/characters/stats`
 adds `duels { finishedThisMonth, inPlay, turnHours }`.
 

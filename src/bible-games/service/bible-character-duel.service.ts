@@ -29,6 +29,10 @@ import {
   DAILY_SCORED_GAMES,
   MAX_WRONG_GUESSES,
   stillPossible,
+  SUGGESTED_QUESTIONS,
+  candidates,
+  possibleNames,
+  usefulQuestions,
   worthNow,
 } from '../engine/character-game';
 import {
@@ -87,6 +91,9 @@ export interface DuelView {
     wrongGuesses: { id: string; name: string }[];
     guessesLeft: number;
     stillPossible: number;
+    suggestions: string[];
+    usefulQuestions: string[];
+    possibleNames: { id: string; name: string }[] | null;
     worth: number;
   } | null;
   // The other player's questions are about their own character, so they give nothing of yours away.
@@ -581,6 +588,10 @@ export class BibleCharacterDuelService {
       const character = this.characterOf(duel, you);
       const clues = cluesFor(character, playable);
       const terms = matchTerms(character);
+      const fits = candidates(atLevel, mine.asked, mine.wrong, byId);
+      // Only needed on your own turn; the waiting player's app polls without them.
+      const helping = duel.status === DuelStatus.ACTIVE && duel.turn === you;
+      const useful = helping ? usefulQuestions(fits, mine.asked, byId) : [];
       me = {
         asked: asked(mine),
         hints: clues.slice(0, mine.hints).map((ref) => ({
@@ -593,7 +604,10 @@ export class BibleCharacterDuelService {
           name: byId.get(id)?.name ?? id,
         })),
         guessesLeft: MAX_WRONG_GUESSES - mine.wrong.length,
-        stillPossible: stillPossible(atLevel, mine.asked, mine.wrong, byId),
+        stillPossible: fits.length,
+        suggestions: useful.slice(0, SUGGESTED_QUESTIONS),
+        usefulQuestions: useful,
+        possibleNames: helping ? possibleNames(duel.difficulty, fits) : null,
         worth: worthNow(
           duel.difficulty,
           mine.asked.length,
