@@ -124,8 +124,9 @@ export class OutreachService {
     const qb = this.outreachRepo
       .createQueryBuilder('o')
       .leftJoinAndSelect('o.team', 'tm')
-      .orderBy('o.outreach_date', 'DESC')
-      .addOrderBy('o.created_at', 'DESC')
+      // Property names, not columns: with a join, take() orders a distinct-id subquery TypeORM can only map by property.
+      .orderBy('o.outreachDate', 'DESC')
+      .addOrderBy('o.createdAt', 'DESC')
       .take(200);
     if (from) qb.andWhere('o.outreach_date >= :from', { from });
     if (to) qb.andWhere('o.outreach_date <= :to', { to });

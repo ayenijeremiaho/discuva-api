@@ -71,7 +71,8 @@ export class FirstTimerConvertService {
           });
         }),
       )
-      .orderBy('c.created_at', 'DESC')
+      // Property names, not columns: with a join, take() orders a distinct-id subquery TypeORM can only map by property.
+      .orderBy('c.createdAt', 'DESC')
       .take(MATCH_LIMIT);
     if (ft.dismissedConvertIds?.length) {
       qb.andWhere('c.id NOT IN (:...dismissed)', {
