@@ -36,6 +36,7 @@ import {
   WRONG_GUESS_COST_PERCENT,
   SUGGESTED_QUESTIONS,
   candidates,
+  withOwn,
   possibleNames,
   usefulQuestions,
   worthNow,
@@ -107,7 +108,7 @@ export class BibleCharacterGameService {
         text: q.text,
       })),
       // Every name in play, for the guess search; nothing here gives an answer away.
-      names: pool
+      names: (active ? withOwn(pool, this.characterOf(active)) : pool)
         .map((c) => ({ id: c.id, name: c.name }))
         .sort((a, b) => a.name.localeCompare(b.name)),
       counts: {
@@ -383,7 +384,10 @@ export class BibleCharacterGameService {
     const terms = matchTerms(character);
     const done = round.status !== CharacterRoundStatus.ACTIVE;
     const fits = candidates(
-      pool.filter((c) => c.difficulty === round.difficulty),
+      withOwn(
+        pool.filter((c) => c.difficulty === round.difficulty),
+        character,
+      ),
       round.asked,
       round.wrongGuesses,
       byId,

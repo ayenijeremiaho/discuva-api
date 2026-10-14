@@ -31,6 +31,7 @@ import {
   stillPossible,
   SUGGESTED_QUESTIONS,
   candidates,
+  withOwn,
   possibleNames,
   usefulQuestions,
   worthNow,
@@ -588,7 +589,12 @@ export class BibleCharacterDuelService {
       const character = this.characterOf(duel, you);
       const clues = cluesFor(character, playable);
       const terms = matchTerms(character);
-      const fits = candidates(atLevel, mine.asked, mine.wrong, byId);
+      const fits = candidates(
+        withOwn(atLevel, character),
+        mine.asked,
+        mine.wrong,
+        byId,
+      );
       // Only needed on your own turn; the waiting player's app polls without them.
       const helping = duel.status === DuelStatus.ACTIVE && duel.turn === you;
       const useful = helping ? usefulQuestions(fits, mine.asked, byId) : [];
@@ -637,7 +643,7 @@ export class BibleCharacterDuelService {
             wrongGuesses: theirs.wrong.length,
             guessesLeft: MAX_WRONG_GUESSES - theirs.wrong.length,
             stillPossible: stillPossible(
-              atLevel,
+              withOwn(atLevel, this.characterOf(duel, them)),
               theirs.asked,
               theirs.wrong,
               byId,

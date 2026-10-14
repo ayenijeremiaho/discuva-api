@@ -58,6 +58,14 @@ export function candidates(
   );
 }
 
+// A round's own character stays in its pool even if an admin hides it mid-game, or the round could never be won.
+export function withOwn(
+  pool: BibleCharacter[],
+  own: BibleCharacter,
+): BibleCharacter[] {
+  return pool.some((c) => c.id === own.id) ? pool : [...pool, own];
+}
+
 export function stillPossible(
   pool: BibleCharacter[],
   asked: AskedQuestion[],

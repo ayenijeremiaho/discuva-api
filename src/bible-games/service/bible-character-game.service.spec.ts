@@ -107,6 +107,16 @@ describe('BibleCharacterGameService', () => {
     expect(view.possibleNames!.map((n) => n.id)).toContain('david');
   });
 
+  it('keeps the round winnable when its character is hidden mid-game', async () => {
+    await startOn('david');
+    characters.playable.mockResolvedValueOnce(
+      list.filter((c) => c.id !== 'david'),
+    );
+    const view = await service.ask('m1', 'r1', 'king');
+    expect(view.stillPossible).toBeGreaterThan(0);
+    expect(view.possibleNames!.map((n) => n.id)).toContain('david');
+  });
+
   it('gives clue verses with the name blanked out', async () => {
     await startOn('david');
     const view = await service.hint('m1', 'r1');

@@ -191,7 +191,8 @@ export class StartCharacterRoundDto {
 
 export class AskCharacterQuestionDto {
   @IsString()
-  @Matches(/^[a-z_]{2,30}$/)
+  // Digits too: ids like over_100. Every question id must pass (see bible-game.dto.spec.ts).
+  @Matches(/^[a-z][a-z0-9_]{1,29}$/)
   questionId: string;
 }
 

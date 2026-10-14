@@ -8,6 +8,7 @@ import {
   possibleNames,
   stillPossible,
   usefulQuestions,
+  withOwn,
   worthNow,
 } from './character-game';
 
@@ -90,5 +91,14 @@ describe('Guess the Bible Character help', () => {
     expect(possibleNames('hard', few)).toBeNull();
     const names = possibleNames('easy', many)!.map((n) => n.name);
     expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b)));
+  });
+});
+
+describe('withOwn', () => {
+  const { list } = characterData();
+  it("adds the round's own character only when it's missing", () => {
+    const [own, ...rest] = list;
+    expect(withOwn(rest, own)).toContain(own);
+    expect(withOwn(list, own)).toBe(list);
   });
 });
