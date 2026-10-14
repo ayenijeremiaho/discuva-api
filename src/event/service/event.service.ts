@@ -1,3 +1,4 @@
+import { parseDateSearch } from '../utility/date-search';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { EventReminder } from '../entity/event-reminder.entity';
@@ -251,10 +252,31 @@ export class EventService {
       qb.andWhere('event.eventDate >= :from', { from: filter.from });
     if (filter.to) qb.andWhere('event.eventDate <= :to', { to: filter.to });
     const search = filter.search?.trim();
-    if (search)
-      qb.andWhere("event.name ILIKE :search ESCAPE '\\'", {
+    if (search) {
+      const byName = "event.name ILIKE :search ESCAPE '\\'";
+      const params = {
         search: `%${search.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
-      });
+      };
+      // "11", "11 Oct", "11/10/2026" also find events on that date; the name still matches as before.
+      const date = parseDateSearch(search);
+      const onDate = [
+        date?.day !== undefined &&
+          'EXTRACT(DAY FROM event.eventDate) = :searchDay',
+        date?.month !== undefined &&
+          'EXTRACT(MONTH FROM event.eventDate) = :searchMonth',
+        date?.year !== undefined &&
+          'EXTRACT(YEAR FROM event.eventDate) = :searchYear',
+      ].filter(Boolean);
+      qb.andWhere(
+        onDate.length ? `(${byName} OR (${onDate.join(' AND ')}))` : byName,
+        {
+          ...params,
+          searchDay: date?.day,
+          searchMonth: date?.month,
+          searchYear: date?.year,
+        },
+      );
+    }
     if (filter.viewer)
       qb.andWhere(eventVisibleToViewerSql('event'), {
         viewerId: filter.viewer.id,

@@ -5641,7 +5641,7 @@
                 {
                   "key": "search",
                   "value": "",
-                  "description": "Case-insensitive match on event name (trimmed; % and _ match literally)"
+                  "description": "Case-insensitive match on event name (trimmed; % and _ match literally). A date also matches events on it: 11, 11th, 11 Oct, Oct 11, 11/10, 11/10/2026, 2026-10-11, October, 2026 (day before month)."
                 }
               ]
             }

@@ -1123,6 +1123,36 @@ describe('EventService', () => {
       );
     });
 
+    it('also finds events on a date typed as the search, alongside name matches', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', { search: '11th Oct' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        "(event.name ILIKE :search ESCAPE '\\' OR (EXTRACT(DAY FROM event.eventDate) = :searchDay AND EXTRACT(MONTH FROM event.eventDate) = :searchMonth))",
+        expect.objectContaining({
+          search: '%11th Oct%',
+          searchDay: 11,
+          searchMonth: 10,
+        }),
+      );
+    });
+
+    it('reads a bare number as a day of the month', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', { search: '11' });
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'EXTRACT(DAY FROM event.eventDate) = :searchDay',
+        ),
+        expect.objectContaining({ searchDay: 11 }),
+      );
+    });
+
     it('matches % and _ literally in a search', async () => {
       const qb = makeQb();
       mockEventRepo.createQueryBuilder.mockReturnValue(qb);
