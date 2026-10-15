@@ -202,7 +202,14 @@ export class AttendanceService {
     this.validateCheckinWindow(now, slot, cfg, isWorker);
 
     if (checkDistance && dto.location && cfg.venue) {
-      this.validateLocation(dto.location, cfg.venue, cfg, user.id, slot);
+      this.validateLocation(
+        dto.location,
+        cfg.venue,
+        cfg,
+        user.id,
+        slot,
+        dto.retryable === true,
+      );
     }
 
     const status = this.resolveStatus(now, slot, cfg, isWorker);
@@ -1528,6 +1535,7 @@ export class AttendanceService {
     cfg: ReturnType<EventService['resolveSlotConfig']>,
     memberId: string,
     slot: ServiceSlot,
+    retryable = false,
   ): void {
     const distance = UtilityService.calculateDistanceInMeters(
       location.latitude,
@@ -1557,8 +1565,12 @@ export class AttendanceService {
       reason,
       at: this.dateService.now(),
     };
-    // This request's transaction rolls back with the rejection, so the record is written just after it.
-    afterRollback(this.cls, () => this.blockedCheckinService.record(attempt));
+    // This request's transaction rolls back with the rejection, so the record is written just after it. A first,
+    // too-far attempt the app will retry with a sharper reading isn't recorded; its retry is. The app never retries
+    // an approximate-location rejection, so those are always recorded.
+    if (!(retryable && reason === BlockedCheckinReasonEnum.TOO_FAR)) {
+      afterRollback(this.cls, () => this.blockedCheckinService.record(attempt));
+    }
     throw new BadRequestException({
       message: imprecise
         ? 'Your phone is only sharing an approximate location. Turn on Precise Location for this app and try again.'

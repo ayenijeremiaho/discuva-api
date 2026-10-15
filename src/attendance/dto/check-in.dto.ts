@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsLatitude,
   IsLongitude,
   IsNumber,
@@ -31,4 +32,10 @@ export class CheckInDto {
   @ValidateNested()
   @Type(() => CheckinLocationDto)
   location?: CheckinLocationDto;
+
+  // Set by the member app on a first attempt sent with a rough reading: if it's too far, the app listens for a sharper
+  // reading and retries once, so this rejection isn't recorded as a blocked check-in. Still rejected as normal.
+  @IsOptional()
+  @IsBoolean()
+  retryable?: boolean;
 }
