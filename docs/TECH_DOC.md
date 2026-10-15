@@ -801,16 +801,29 @@ by the global exception filter (`HttpExceptionFilter`, same mechanism `PlanGuard
 already uses). `distanceMeters` is the member's actual computed distance (rounded), included so the frontend can
 show it even when the failure came from the server rather than the client's own pre-check.
 
+**Distance is measured exactly, horizontally.** `UtilityService.calculateDistanceInMeters()` (check-in and nearby
+venues) uses GeographicLib's WGS84 geodesic (`geographiclib-geodesic` 2.2.0, MIT), accurate to well under a millimetre.
+Only the server measures distance. The earlier sphere (haversine) formula drifted by up to ~0.5%, about 1 m at a
+200 m limit. Verified against GeographicLib's Python reference: 241 distances in five cities agree to ~1e-8 %, and the
+backend's `validateLocation()` decides correctly 1 cm either side of every limit (960 cases).
+`src/utility/service/distance.spec.ts` pins reference values. Height is deliberately ignored: people on an upper floor
+are no further away horizontally, and phone altitude is too unreliable to use; multi-storey venues are handled by the
+accuracy credit, the best-of-5s reading, and a radius that reaches the building's far corners.
+
 **GPS accuracy is credited, capped at the radius.** `CheckInDto.location` takes an optional `accuracy` (meters,
 `>= 0`, the device's `GeolocationCoordinates.accuracy`), stored with the rest of `Attendance.location` (jsonb, no
 migration). `validateLocation()` rejects only when `distance - min(accuracy, allowedDistanceInMeters) >
 allowedDistanceInMeters`, so a vague fix can at most double the radius; without `accuracy` the check is unchanged.
 Indoor phone fixes are routinely 30–100m off, which made tight radii (e.g. 50m) reject people inside the building.
-The member app (`useEvents`, `getBestPosition()`) watches position with `maximumAge: 0` for up to 5s, keeping the
-most precise reading; it stops early on a fix within 20m or one that already passes the radius by the same rule
-(`utils/distance.ts` `passesRadius()`, timing only — the server still decides), and sends its `accuracy`. It no longer pre-checks distance itself
-(so it no longer calls `GET attendances/me/distance-check`, kept for older app versions): every attempt reaches the
-server so rejections can be recorded (below), and it builds its "within Xm of <venue>" message from the `TOO_FAR`
+The member app (`useEvents`, `startLocationSession()`) does no distance maths; the rule lives only on the server. It
+sends the **first** location reading at once (with its `accuracy`), so people inside pass instantly. If that reading was
+rough (> 20 m) and the service's distance is checked, it is sent with `retryable: true` while location keeps listening
+in the background; on a `TOO_FAR` reply the app retries once with the sharpest reading, sent as soon as one is within
+20 m or 5 s after the first reading. Location (`watchPosition`) and its timer are stopped as soon as the outcome is
+known: on acceptance, on a non-retryable reply, or after the retry; the window is measured from the first reading so a
+slow permission prompt doesn't eat into it. `CheckInDto.retryable` makes the server skip recording that first, too-far
+attempt as a blocked check-in (its retry is recorded; approximate-location rejections always are, since the app never
+retries them). Every attempt reaches the server so rejections can be recorded (below), and the app builds its "within Xm of <venue>" message from the `TOO_FAR`
 body. The distance-check toggle applies to workers and members alike; workers always
 send location on `IN_PERSON` slots, and members must too while the service's distance is checked (below).
 discuva-admin's Event Config form and detail panel draw this on a map (`VenueCoverageMap`): a solid circle at
@@ -14468,16 +14481,29 @@ by the global exception filter (`HttpExceptionFilter`, same mechanism `PlanGuard
 already uses). `distanceMeters` is the member's actual computed distance (rounded), included so the frontend can
 show it even when the failure came from the server rather than the client's own pre-check.
 
+**Distance is measured exactly, horizontally.** `UtilityService.calculateDistanceInMeters()` (check-in and nearby
+venues) uses GeographicLib's WGS84 geodesic (`geographiclib-geodesic` 2.2.0, MIT), accurate to well under a millimetre.
+Only the server measures distance. The earlier sphere (haversine) formula drifted by up to ~0.5%, about 1 m at a
+200 m limit. Verified against GeographicLib's Python reference: 241 distances in five cities agree to ~1e-8 %, and the
+backend's `validateLocation()` decides correctly 1 cm either side of every limit (960 cases).
+`src/utility/service/distance.spec.ts` pins reference values. Height is deliberately ignored: people on an upper floor
+are no further away horizontally, and phone altitude is too unreliable to use; multi-storey venues are handled by the
+accuracy credit, the best-of-5s reading, and a radius that reaches the building's far corners.
+
 **GPS accuracy is credited, capped at the radius.** `CheckInDto.location` takes an optional `accuracy` (meters,
 `>= 0`, the device's `GeolocationCoordinates.accuracy`), stored with the rest of `Attendance.location` (jsonb, no
 migration). `validateLocation()` rejects only when `distance - min(accuracy, allowedDistanceInMeters) >
 allowedDistanceInMeters`, so a vague fix can at most double the radius; without `accuracy` the check is unchanged.
 Indoor phone fixes are routinely 30–100m off, which made tight radii (e.g. 50m) reject people inside the building.
-The member app (`useEvents`, `getBestPosition()`) watches position with `maximumAge: 0` for up to 5s, keeping the
-most precise reading; it stops early on a fix within 20m or one that already passes the radius by the same rule
-(`utils/distance.ts` `passesRadius()`, timing only — the server still decides), and sends its `accuracy`. It no longer pre-checks distance itself
-(so it no longer calls `GET attendances/me/distance-check`, kept for older app versions): every attempt reaches the
-server so rejections can be recorded (below), and it builds its "within Xm of <venue>" message from the `TOO_FAR`
+The member app (`useEvents`, `startLocationSession()`) does no distance maths; the rule lives only on the server. It
+sends the **first** location reading at once (with its `accuracy`), so people inside pass instantly. If that reading was
+rough (> 20 m) and the service's distance is checked, it is sent with `retryable: true` while location keeps listening
+in the background; on a `TOO_FAR` reply the app retries once with the sharpest reading, sent as soon as one is within
+20 m or 5 s after the first reading. Location (`watchPosition`) and its timer are stopped as soon as the outcome is
+known: on acceptance, on a non-retryable reply, or after the retry; the window is measured from the first reading so a
+slow permission prompt doesn't eat into it. `CheckInDto.retryable` makes the server skip recording that first, too-far
+attempt as a blocked check-in (its retry is recorded; approximate-location rejections always are, since the app never
+retries them). Every attempt reaches the server so rejections can be recorded (below), and the app builds its "within Xm of <venue>" message from the `TOO_FAR`
 body. The distance-check toggle applies to workers and members alike; workers always
 send location on `IN_PERSON` slots, and members must too while the service's distance is checked (below).
 discuva-admin's Event Config form and detail panel draw this on a map (`VenueCoverageMap`): a solid circle at

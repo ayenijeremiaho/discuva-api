@@ -1,3 +1,4 @@
+import { Geodesic } from 'geographiclib-geodesic';
 import { Injectable } from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { randomBytes } from 'node:crypto';
@@ -23,27 +24,24 @@ export class UtilityService {
     return regex.test(date) && !Number.isNaN(new Date(date).getTime());
   }
 
+  // Horizontal distance on the WGS84 ellipsoid (GeographicLib, Karney's algorithm), accurate to well under a
+  // millimetre; a sphere formula drifts by up to ~0.5% (about 1 m at a 200 m check-in limit). Height is ignored on
+  // purpose: someone upstairs in the venue is no further away, and phone altitude is too unreliable to use.
   public static calculateDistanceInMeters(
     userLatitude: number,
     userLongitude: number,
     eventLatitude: number,
     eventLongitude: number,
   ): number {
-    const R = 6371;
-    const dLat = this.deg2rad(eventLatitude - userLatitude);
-    const dLon = this.deg2rad(eventLongitude - userLongitude);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(this.deg2rad(userLatitude)) *
-        Math.cos(this.deg2rad(eventLatitude)) *
-        Math.sin(dLon / 2) *
-        Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c * 1000;
-  }
-
-  private static deg2rad(deg: number): number {
-    return deg * (Math.PI / 180);
+    return (
+      Geodesic.WGS84.Inverse(
+        Number(userLatitude),
+        Number(userLongitude),
+        Number(eventLatitude),
+        Number(eventLongitude),
+        Geodesic.DISTANCE,
+      ).s12 ?? Number.NaN
+    );
   }
 
   public static createPaginationResponse<T>(

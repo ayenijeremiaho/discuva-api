@@ -1117,6 +1117,42 @@ describe('AttendanceService', () => {
         }
       });
 
+      it('still rejects a first attempt marked for retry, but leaves it out of blocked check-ins', async () => {
+        await expect(
+          service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...wellOutside, accuracy: 40 },
+            retryable: true,
+          }),
+        ).rejects.toThrow('You are too far from the venue to check in.');
+        await flushMicrotasks();
+        expect(mockBlockedCheckinService.record).not.toHaveBeenCalled();
+      });
+
+      it('records an approximate-location rejection even when marked for retry, since the app never retries it', async () => {
+        await expect(
+          service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...wellOutside, accuracy: 2500 },
+            retryable: true,
+          }),
+        ).rejects.toThrow(BadRequestException);
+        await flushMicrotasks();
+        expect(mockBlockedCheckinService.record).toHaveBeenCalledWith(
+          expect.objectContaining({ reason: 'IMPRECISE_LOCATION' }),
+        );
+      });
+
+      it('accepts a first attempt marked for retry when it is close enough', async () => {
+        await expect(
+          service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...justOutside, accuracy: 30 },
+            retryable: true,
+          }),
+        ).resolves.toEqual({ message: 'Check-in successful' });
+      });
+
       it('records nothing as blocked when the check-in passes', async () => {
         await service.checkin(user, {
           serviceSlotId: 'slot-1',
