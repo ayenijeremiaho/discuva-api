@@ -913,20 +913,14 @@ export class FormService {
           ]
         : baseWhere;
 
-    // fields is eager-loaded (Form.fields) but that alone doesn't order the
-    // joined rows — without this, Postgres returns them in whatever order
-    // its query planner picks, which isn't guaranteed to match each field's
-    // own `order` column and can genuinely change between otherwise-
-    // identical requests. The admin builder reads `fields` straight off
-    // this response (openEdit never does its own per-form GET), so an
-    // unordered join here was surfacing as the field list visibly
-    // reshuffling itself on every page load/refresh.
     const [forms, total] = await this.formRepo.findAndCount({
       where,
-      order: { createdAt: 'DESC', fields: { order: 'ASC' } },
+      order: { createdAt: 'DESC', id: 'ASC' },
       skip: (page - 1) * limit,
       take: limit,
     });
+    // The admin builder reads fields from here; sorted in code because a joined-column ORDER BY makes TypeORM page by field rows.
+    for (const form of forms) form.fields?.sort((a, b) => a.order - b.order);
     return UtilityService.createPaginationResponse(forms, page, limit, total);
   }
 

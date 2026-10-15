@@ -2530,6 +2530,18 @@ describe('FormService', () => {
   });
 
   describe('listForms', () => {
+    it('pages by form, not field rows, and sorts fields in code', async () => {
+      mockFormRepo.findAndCount.mockResolvedValue([
+        [{ id: 'form-1', fields: [{ order: 1 }, { order: 0 }] }],
+        1,
+      ]);
+      const result = await service.listForms();
+      expect(mockFormRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ order: { createdAt: 'DESC', id: 'ASC' } }),
+      );
+      expect(result.data[0].fields.map((f) => f.order)).toEqual([0, 1]);
+    });
+
     it('paginates with defaults when no filters are given', async () => {
       mockFormRepo.findAndCount.mockResolvedValue([[{ id: 'form-1' }], 1]);
       const result = await service.listForms();
