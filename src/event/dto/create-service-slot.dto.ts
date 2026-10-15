@@ -1,6 +1,5 @@
 import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import {
-  IsBoolean,
   IsDateString,
   IsEnum,
   IsIn,
@@ -59,11 +58,6 @@ export class CreateServiceSlotDto {
   @IsOptional()
   @IsInt()
   allowedDistanceOverride?: number;
-
-  // Deprecated and ignored; still accepted so older clients can save.
-  @IsOptional()
-  @IsBoolean()
-  enforceMemberLocationOverride?: boolean;
 
   /** Venue override for this specific slot. When omitted the slot uses config.defaultVenue. */
   @IsOptional()

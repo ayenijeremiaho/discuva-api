@@ -88,10 +88,6 @@ export class EventConfig extends BaseEntity {
   @Column({ name: 'check_distance', default: true })
   checkDistance: boolean;
 
-  // Deprecated: no longer read; replaced by checkDistance. Column dropped in a later release.
-  @Column({ name: 'enforce_member_location', default: false })
-  enforceMemberLocation: boolean;
-
   @OneToMany(() => ServiceSlot, (slot) => slot.config, { nullable: true })
   serviceSlots: ServiceSlot[];
 }

@@ -89,11 +89,7 @@ export class EventConfigService {
     this.assertValidFormat(format, venue?.id);
     config.defaultVenue = venue;
 
-    const {
-      defaultVenueId: _dv,
-      enforceMemberLocation: _deprecated,
-      ...rest
-    } = dto;
+    const { defaultVenueId: _dv, ...rest } = dto;
     Object.assign(config, rest);
     this.validateOffsets(config);
     const saved = await this.repo.save(config);
