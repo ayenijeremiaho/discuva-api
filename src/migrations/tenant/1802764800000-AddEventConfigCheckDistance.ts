@@ -5,13 +5,13 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
 export class AddEventConfigCheckDistance1802764800000 implements MigrationInterface {
   async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE event_configs ADD COLUMN IF NOT EXISTS check_distance BOOLEAN NOT NULL DEFAULT true`,
+      `ALTER TABLE event_config ADD COLUMN IF NOT EXISTS check_distance BOOLEAN NOT NULL DEFAULT true`,
     );
   }
 
   async down(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `ALTER TABLE event_configs DROP COLUMN IF EXISTS check_distance`,
+      `ALTER TABLE event_config DROP COLUMN IF EXISTS check_distance`,
     );
   }
 }
