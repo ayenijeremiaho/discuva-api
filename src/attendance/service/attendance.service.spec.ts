@@ -181,7 +181,7 @@ const defaultConfig = {
   allowedDistanceInMeters: 100,
   format: MeetingFormatEnum.IN_PERSON,
   onlineMeetingUrl: null,
-  enforceMemberLocation: false,
+  checkDistance: true,
 };
 
 const defaultLocation = { latitude: 6.5244, longitude: 3.3792 };
@@ -215,6 +215,8 @@ describe('AttendanceService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // clearAllMocks keeps implementations; a test that turns the distance check on must not leak into the next.
+    mockAttendanceSettingsService.isEnabled.mockResolvedValue(false);
     jest.restoreAllMocks();
 
     const module: TestingModule = await Test.createTestingModule({
@@ -575,55 +577,8 @@ describe('AttendanceService', () => {
       });
     });
 
-    it('throws BadRequestException if a member omits location while the resolved config has enforceMemberLocation on', async () => {
-      const now = new Date();
-      const slot = makeSlot(addHours(now, 1));
-      mockSlotRepo.findOne.mockResolvedValue(slot);
-      mockMemberService.getById.mockResolvedValue({
-        id: 'member-1',
-        role: MemberRoleEnum.MEMBER,
-        status: MemberStatusEnum.ACTIVE,
-        workerProfile: null,
-      });
-      mockEventService.resolveSlotConfig.mockReturnValue({
-        ...defaultConfig,
-        enforceMemberLocation: true,
-      });
-
-      await expect(service.checkin(user, dto as any)).rejects.toThrow(
-        'Your location is required to check in for this service.',
-      );
-    });
-
-    it('allows a member to check in without location when enforceMemberLocation is off (the default)', async () => {
-      const now = new Date();
-      const slot = makeSlot(addHours(now, 1));
-      mockSlotRepo.findOne.mockResolvedValue(slot);
-      mockMemberService.getById.mockResolvedValue({
-        id: 'member-1',
-        role: MemberRoleEnum.MEMBER,
-        status: MemberStatusEnum.ACTIVE,
-        workerProfile: null,
-      });
-      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
-      mockAttendanceRepo.findOne.mockResolvedValue(null);
-      mockAttendanceRepo.create.mockReturnValue({
-        status: AttendanceStatusEnum.PRESENT,
-      });
-      mockAttendanceRepo.save.mockResolvedValue({});
-
-      await expect(service.checkin(user, dto as any)).resolves.toEqual({
-        message: 'Check-in successful',
-      });
-    });
-
-    // These are two genuinely independent settings — a tenant enabling
-    // distance-check enforcement (is a too-far check-in rejected) must not
-    // implicitly also require members to submit location at all.
-    it('does not require member location just because distance-check enforcement is on', async () => {
-      const now = new Date();
-      const slot = makeSlot(addHours(now, 1));
-      mockSlotRepo.findOne.mockResolvedValue(slot);
+    it('requires a location from a member when the church checks distance for this service', async () => {
+      mockSlotRepo.findOne.mockResolvedValue(makeSlot(addHours(new Date(), 1)));
       mockMemberService.getById.mockResolvedValue({
         id: 'member-1',
         role: MemberRoleEnum.MEMBER,
@@ -632,6 +587,22 @@ describe('AttendanceService', () => {
       });
       mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
       mockAttendanceSettingsService.isEnabled.mockResolvedValue(true);
+
+      await expect(service.checkin(user, dto as any)).rejects.toThrow(
+        'Your location is required to check in for this service.',
+      );
+    });
+
+    it('lets a member check in without a location when the church distance check is off', async () => {
+      mockSlotRepo.findOne.mockResolvedValue(makeSlot(addHours(new Date(), 1)));
+      mockMemberService.getById.mockResolvedValue({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        status: MemberStatusEnum.ACTIVE,
+        workerProfile: null,
+      });
+      mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+      mockAttendanceSettingsService.isEnabled.mockResolvedValue(false);
       mockAttendanceRepo.findOne.mockResolvedValue(null);
       mockAttendanceRepo.create.mockReturnValue({
         status: AttendanceStatusEnum.PRESENT,
@@ -643,6 +614,67 @@ describe('AttendanceService', () => {
       });
     });
 
+    describe('a service whose config does not check distance (e.g. home fellowship)', () => {
+      const exempt = { ...defaultConfig, checkDistance: false };
+      const farAway = { latitude: 0, longitude: 0, accuracy: 10 };
+
+      beforeEach(() => {
+        mockSlotRepo.findOne.mockResolvedValue(
+          makeSlot(addHours(new Date(), 1)),
+        );
+        mockEventService.resolveSlotConfig.mockReturnValue(exempt);
+        mockAttendanceSettingsService.isEnabled.mockResolvedValue(true);
+        mockAttendanceRepo.findOne.mockResolvedValue(null);
+        mockAttendanceRepo.create.mockImplementation((v) => v);
+        mockAttendanceRepo.save.mockResolvedValue({ id: 'att-1' });
+      });
+
+      it('accepts a member from any distance, keeping the location on record', async () => {
+        mockMemberService.getById.mockResolvedValue({
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          status: MemberStatusEnum.ACTIVE,
+          workerProfile: null,
+        });
+
+        await expect(
+          service.checkin(user, { serviceSlotId: 'slot-1', location: farAway }),
+        ).resolves.toEqual({ message: 'Check-in successful' });
+        expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ location: farAway }),
+        );
+        await new Promise((r) => setImmediate(r));
+        expect(mockBlockedCheckinService.record).not.toHaveBeenCalled();
+      });
+
+      it('accepts a member who shares no location', async () => {
+        mockMemberService.getById.mockResolvedValue({
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          status: MemberStatusEnum.ACTIVE,
+          workerProfile: null,
+        });
+        await expect(service.checkin(user, dto as any)).resolves.toEqual({
+          message: 'Check-in successful',
+        });
+      });
+
+      it('still requires a worker to share their location', async () => {
+        mockMemberService.getById.mockResolvedValue({
+          id: 'worker-1',
+          role: MemberRoleEnum.WORKER,
+          status: MemberStatusEnum.ACTIVE,
+          workerProfile: { id: 'wp-1', status: WorkerStatusEnum.ACTIVE },
+        });
+        await expect(service.checkin(user, dto as any)).rejects.toThrow(
+          'Workers must provide their location to check in.',
+        );
+      });
+    });
+
+    // These are two genuinely independent settings — a tenant enabling
+    // distance-check enforcement (is a too-far check-in rejected) must not
+    // implicitly also require members to submit location at all.
     it('should mark PRESENT for a regular member checking in within window', async () => {
       const now = new Date();
       const startTime = addHours(now, 1);

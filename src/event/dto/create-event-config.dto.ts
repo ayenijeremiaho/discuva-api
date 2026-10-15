@@ -71,9 +71,12 @@ export class CreateEventConfigDto {
   @IsBoolean()
   autoStartSession?: boolean;
 
-  // Separate from the tenant-wide distance-check-enforcement setting — see
-  // EventConfig.enforceMemberLocation. A slot can override this via
-  // CreateServiceSlotDto.enforceMemberLocationOverride.
+  // Whether the church's distance check applies to these services; defaults to true.
+  @IsOptional()
+  @IsBoolean()
+  checkDistance?: boolean;
+
+  // Deprecated and ignored; still accepted so an admin page open from before this change can save.
   @IsOptional()
   @IsBoolean()
   enforceMemberLocation?: boolean;

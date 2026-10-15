@@ -699,6 +699,30 @@ describe('EventService', () => {
   });
 
   describe('resolveSlotConfig', () => {
+    it("carries the config's distance-check choice, defaulting to on", () => {
+      const slotWith = (config: Record<string, unknown>) =>
+        ({
+          id: 'slot-1',
+          name: 'Home Fellowship',
+          config: {
+            allowedDistanceInMeters: 100,
+            defaultVenue: { id: 'v1' },
+            defaultFormat: MeetingFormatEnum.IN_PERSON,
+            ...config,
+          },
+        }) as any;
+
+      expect(
+        service.resolveSlotConfig(slotWith({ checkDistance: false }))
+          .checkDistance,
+      ).toBe(false);
+      expect(
+        service.resolveSlotConfig(slotWith({ checkDistance: true }))
+          .checkDistance,
+      ).toBe(true);
+      expect(service.resolveSlotConfig(slotWith({})).checkDistance).toBe(true);
+    });
+
     it('should throw BadRequestException if slot has no config', () => {
       const slot = {
         id: 'slot-1',
@@ -870,60 +894,6 @@ describe('EventService', () => {
       expect(result.memberCheckinStartOffsetSeconds).toBe(-3600);
       expect(result.checkinStopOffsetSeconds).toBe(7200);
       expect(result.allowedDistanceInMeters).toBe(100);
-    });
-
-    it('resolves enforceMemberLocation from the config when the slot has no override', () => {
-      const config = {
-        workerCheckinStartOffsetSeconds: -7200,
-        workerLateOffsetSeconds: 0,
-        memberCheckinStartOffsetSeconds: -3600,
-        checkinStopOffsetSeconds: 7200,
-        allowedDistanceInMeters: 100,
-        defaultVenue,
-        defaultFormat: MeetingFormatEnum.IN_PERSON,
-        enforceMemberLocation: true,
-      } as any;
-      const slot = {
-        id: 'slot-1',
-        name: 'Service',
-        config,
-        venueOverride: null,
-        workerCheckinStartOverride: null,
-        workerLateOverride: null,
-        memberCheckinStartOverride: null,
-        checkinStopOverride: null,
-        allowedDistanceOverride: null,
-        enforceMemberLocationOverride: null,
-      } as any;
-
-      expect(service.resolveSlotConfig(slot).enforceMemberLocation).toBe(true);
-    });
-
-    it('lets a slot override enforceMemberLocation independently of its config', () => {
-      const config = {
-        workerCheckinStartOffsetSeconds: -7200,
-        workerLateOffsetSeconds: 0,
-        memberCheckinStartOffsetSeconds: -3600,
-        checkinStopOffsetSeconds: 7200,
-        allowedDistanceInMeters: 100,
-        defaultVenue,
-        defaultFormat: MeetingFormatEnum.IN_PERSON,
-        enforceMemberLocation: true,
-      } as any;
-      const slot = {
-        id: 'slot-1',
-        name: 'Service',
-        config,
-        venueOverride: null,
-        workerCheckinStartOverride: null,
-        workerLateOverride: null,
-        memberCheckinStartOverride: null,
-        checkinStopOverride: null,
-        allowedDistanceOverride: null,
-        enforceMemberLocationOverride: false,
-      } as any;
-
-      expect(service.resolveSlotConfig(slot).enforceMemberLocation).toBe(false);
     });
   });
 

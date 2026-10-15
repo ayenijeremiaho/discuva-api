@@ -210,7 +210,7 @@ describe('EventConfigService', () => {
       );
     });
 
-    it('defaults enforceMemberLocation to false when not provided', async () => {
+    it('checks distance by default when not provided', async () => {
       mockRepo.exists.mockResolvedValue(false);
       mockVenueService.getById.mockResolvedValue(defaultVenue);
       mockRepo.create.mockReturnValue({});
@@ -219,11 +219,24 @@ describe('EventConfigService', () => {
       await service.create(validDto);
 
       expect(mockRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ enforceMemberLocation: false }),
+        expect.objectContaining({ checkDistance: true }),
       );
     });
 
-    it('passes enforceMemberLocation through when explicitly set to true', async () => {
+    it('lets a config opt out of the distance check', async () => {
+      mockRepo.exists.mockResolvedValue(false);
+      mockVenueService.getById.mockResolvedValue(defaultVenue);
+      mockRepo.create.mockReturnValue({});
+      mockRepo.save.mockResolvedValue({});
+
+      await service.create({ ...validDto, checkDistance: false });
+
+      expect(mockRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ checkDistance: false }),
+      );
+    });
+
+    it('ignores the old enforceMemberLocation field from an older admin page', async () => {
       mockRepo.exists.mockResolvedValue(false);
       mockVenueService.getById.mockResolvedValue(defaultVenue);
       mockRepo.create.mockReturnValue({});
@@ -232,7 +245,7 @@ describe('EventConfigService', () => {
       await service.create({ ...validDto, enforceMemberLocation: true });
 
       expect(mockRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ enforceMemberLocation: true }),
+        expect.not.objectContaining({ enforceMemberLocation: true }),
       );
     });
 

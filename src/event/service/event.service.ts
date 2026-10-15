@@ -486,7 +486,7 @@ export class EventService {
     allowedDistanceInMeters: number;
     format: MeetingFormatEnum;
     onlineMeetingUrl: string | null;
-    enforceMemberLocation: boolean;
+    checkDistance: boolean;
   } {
     const c = slot.config;
     if (!c)
@@ -519,8 +519,7 @@ export class EventService {
         slot.allowedDistanceOverride ?? c.allowedDistanceInMeters,
       format,
       onlineMeetingUrl: c.onlineMeetingUrl,
-      enforceMemberLocation:
-        slot.enforceMemberLocationOverride ?? c.enforceMemberLocation,
+      checkDistance: c.checkDistance ?? true,
     };
   }
 

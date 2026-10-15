@@ -155,26 +155,21 @@ export class AttendanceService {
     const isWorker = member.role === MemberRoleEnum.WORKER;
     const cfg = this.eventService.resolveSlotConfig(slot);
 
-    // Online services have no physical location for anyone to verify.
-    if (cfg.format === MeetingFormatEnum.IN_PERSON) {
-      if (isWorker && !dto.location) {
-        throw new BadRequestException(
-          'Workers must provide their location to check in.',
-        );
-      }
-      // Per-slot-config setting (EventConfig.enforceMemberLocation, resolved
-      // above via resolveSlotConfig), deliberately separate from
-      // enforceDistance() (whether a too-far check-in gets rejected) — a
-      // church can require members to submit location for one service
-      // without necessarily rejecting them for being far away, or require
-      // it for their main Sunday service but not a small group meeting.
-      // Without this, a member could simply omit location to skip distance
-      // checking entirely even with distance enforcement enabled.
-      if (!isWorker && !dto.location && cfg.enforceMemberLocation) {
-        throw new BadRequestException(
-          'Your location is required to check in for this service.',
-        );
-      }
+    // Online services have no physical location for anyone to verify. Distance is checked when the church has it
+    // on and this service's config hasn't opted out (e.g. home fellowships).
+    const inPerson = cfg.format === MeetingFormatEnum.IN_PERSON;
+    const checkDistance =
+      inPerson && cfg.checkDistance && (await this.enforceDistance());
+    if (inPerson && isWorker && !dto.location) {
+      throw new BadRequestException(
+        'Workers must provide their location to check in.',
+      );
+    }
+    // Otherwise leaving the location out would skip the check.
+    if (checkDistance && !dto.location) {
+      throw new BadRequestException(
+        'Your location is required to check in for this service.',
+      );
     }
 
     // Only a genuinely-attended row blocks a fresh check-in — an ABSENT/
@@ -206,8 +201,8 @@ export class AttendanceService {
 
     this.validateCheckinWindow(now, slot, cfg, isWorker);
 
-    if (dto.location && cfg.venue) {
-      await this.validateLocation(dto.location, cfg.venue, cfg, user.id, slot);
+    if (checkDistance && dto.location && cfg.venue) {
+      this.validateLocation(dto.location, cfg.venue, cfg, user.id, slot);
     }
 
     const status = this.resolveStatus(now, slot, cfg, isWorker);
@@ -1523,7 +1518,7 @@ export class AttendanceService {
       : offsetClose;
   }
 
-  private async validateLocation(
+  private validateLocation(
     location: {
       latitude: number;
       longitude: number;
@@ -1533,7 +1528,7 @@ export class AttendanceService {
     cfg: ReturnType<EventService['resolveSlotConfig']>,
     memberId: string,
     slot: ServiceSlot,
-  ): Promise<void> {
+  ): void {
     const distance = UtilityService.calculateDistanceInMeters(
       location.latitude,
       location.longitude,
@@ -1545,12 +1540,7 @@ export class AttendanceService {
       typeof location.accuracy === 'number' ? location.accuracy : null;
     // Indoor fixes are often 30–100m off; capping the credit at the radius means a vague fix can at most double it.
     const slack = Math.min(accuracy ?? 0, cfg.allowedDistanceInMeters);
-    if (
-      distance - slack <= cfg.allowedDistanceInMeters ||
-      !(await this.enforceDistance())
-    ) {
-      return;
-    }
+    if (distance - slack <= cfg.allowedDistanceInMeters) return;
 
     // Approximate-location mode (iOS "Precise Location" off, Android "approximate") reports km-level accuracy.
     const imprecise = (accuracy ?? 0) > IMPRECISE_ACCURACY_METERS;

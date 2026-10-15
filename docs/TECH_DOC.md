@@ -812,7 +812,7 @@ most precise reading; it stops early on a fix within 20m or one that already pas
 (so it no longer calls `GET attendances/me/distance-check`, kept for older app versions): every attempt reaches the
 server so rejections can be recorded (below), and it builds its "within Xm of <venue>" message from the `TOO_FAR`
 body. The distance-check toggle applies to workers and members alike; workers always
-send location on `IN_PERSON` slots, members only when `enforceMemberLocation` is on (below).
+send location on `IN_PERSON` slots, and members must too while the service's distance is checked (below).
 discuva-admin's Event Config form and detail panel draw this on a map (`VenueCoverageMap`): a solid circle at
 `allowedDistanceInMeters` and a dashed one at twice it, for the most an accuracy credit can reach.
 
@@ -875,32 +875,19 @@ tenant migration must land before the new code takes traffic — fly.toml's `rel
 (and auto-rolling back if it fails). The migrations are additive, so the old code keeps working during the rolling
 switch. Building the two attendances indexes briefly blocks writes to that table, so deploy outside service times.
 
-**`EventConfig.enforceMemberLocation` — a separate, per-config setting from distance-check above.** Workers on an
-`IN_PERSON` slot have always had a hard, unconditional requirement to submit location (`checkin()` throws if
-`!dto.location`, regardless of the distance-check setting). Members had no equivalent — `location` is
-`@IsOptional()` on `CheckInDto`, so a member could simply omit it and skip `validateLocation()` entirely (which
-only runs `if (dto.location && cfg.venue)`), independent of whether distance-check enforcement was on. This setting
-lets a tenant require the same of members, **scoped per `EventConfig`** (like `allowedDistanceInMeters`, not the
-tenant-wide `AttendanceSettingsService`/distance-check toggle) — a church can require it for their main Sunday
-service's config while leaving a small-group config unaffected. Deliberately **not** merged into
-`enforceDistance()`/the distance-check setting — the two answer different questions ("is a too-far check-in
-rejected" vs. "must location be submitted at all") and a config may want either without the other (e.g. requiring
-members to share location for record-keeping without necessarily blocking anyone who happens to be far away).
-
-- **Storage**: `EventConfig.enforceMemberLocation` (boolean column, default `false`), with a per-slot override —
-  `ServiceSlot.enforceMemberLocationOverride` (nullable boolean, `null` = inherit from config) — same override
-  pattern as `checkinStopOverride`/`allowedDistanceOverride`. Resolved in `EventService.resolveSlotConfig()`
-  (`slot.enforceMemberLocationOverride ?? config.enforceMemberLocation`) alongside every other per-slot-resolved
-  setting, so `AttendanceService.checkin()` reads it synchronously off the already-resolved config rather than a
-  separate settings lookup.
-- **Enforcement**: `AttendanceService.checkin()` — for an `IN_PERSON` slot, a member omitting `location` while the
-  resolved `cfg.enforceMemberLocation` is `true` gets `BadRequestException('Your location is required to check in
-  for this service.')`.
-- **DTOs**: `CreateEventConfigDto.enforceMemberLocation?: boolean` (defaults to `false` in `EventConfigService.create()`
-  when omitted, same as `autoStartSession`), `CreateServiceSlotDto.enforceMemberLocationOverride?: boolean`.
-- **Frontend (admin)**: discuva-admin's Event Config page — a toggle inside each config's create/edit form
-  (alongside "Auto-Start Programme"), not a standalone tenant-wide banner like distance-check. Reflected as a
-  small "Member location required" badge on the config list row and detail view when on.
+**Per-config distance check (`EventConfig.checkDistance`).** One church-wide switch, "Distance Check" (formerly
+"Enforce Distance Check", `AttendanceSettingsService`), and one per-config switch, "Use Distance Check" (`check_distance BOOLEAN
+NOT NULL DEFAULT true`, tenant migration `1802764800000-AddEventConfigCheckDistance`), resolved by
+`EventService.resolveSlotConfig()` as `checkDistance` (missing = true). In `AttendanceService.checkin()`, for an
+`IN_PERSON` slot, the distance is checked when **both** are on; then anyone without a `location` is rejected ("Your
+location is required to check in for this service."), so leaving it out can't skip the check, and
+`validateLocation()` runs. With either off, any location is just recorded (with its cheap flags). Workers must send a
+location on every in-person slot regardless. Online slots are never checked. A config opts out for services held in
+different places (home fellowships). The member app shows "Your location is saved with your check-in" instead of the
+distance promise for such services and takes the first location reading.
+Replaces `enforceMemberLocation` / `ServiceSlot.enforceMemberLocationOverride`, which are no longer read: the DTOs
+still accept them (ignored) so an admin page open from before the change can save, and the columns are dropped in a
+later release (dropping them now would break the old version during a rolling deploy).
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
@@ -14485,7 +14472,7 @@ most precise reading; it stops early on a fix within 20m or one that already pas
 (so it no longer calls `GET attendances/me/distance-check`, kept for older app versions): every attempt reaches the
 server so rejections can be recorded (below), and it builds its "within Xm of <venue>" message from the `TOO_FAR`
 body. The distance-check toggle applies to workers and members alike; workers always
-send location on `IN_PERSON` slots, members only when `enforceMemberLocation` is on (below).
+send location on `IN_PERSON` slots, and members must too while the service's distance is checked (below).
 discuva-admin's Event Config form and detail panel draw this on a map (`VenueCoverageMap`): a solid circle at
 `allowedDistanceInMeters` and a dashed one at twice it, for the most an accuracy credit can reach.
 
@@ -14548,32 +14535,19 @@ tenant migration must land before the new code takes traffic — fly.toml's `rel
 (and auto-rolling back if it fails). The migrations are additive, so the old code keeps working during the rolling
 switch. Building the two attendances indexes briefly blocks writes to that table, so deploy outside service times.
 
-**`EventConfig.enforceMemberLocation` — a separate, per-config setting from distance-check above.** Workers on an
-`IN_PERSON` slot have always had a hard, unconditional requirement to submit location (`checkin()` throws if
-`!dto.location`, regardless of the distance-check setting). Members had no equivalent — `location` is
-`@IsOptional()` on `CheckInDto`, so a member could simply omit it and skip `validateLocation()` entirely (which
-only runs `if (dto.location && cfg.venue)`), independent of whether distance-check enforcement was on. This setting
-lets a tenant require the same of members, **scoped per `EventConfig`** (like `allowedDistanceInMeters`, not the
-tenant-wide `AttendanceSettingsService`/distance-check toggle) — a church can require it for their main Sunday
-service's config while leaving a small-group config unaffected. Deliberately **not** merged into
-`enforceDistance()`/the distance-check setting — the two answer different questions ("is a too-far check-in
-rejected" vs. "must location be submitted at all") and a config may want either without the other (e.g. requiring
-members to share location for record-keeping without necessarily blocking anyone who happens to be far away).
-
-- **Storage**: `EventConfig.enforceMemberLocation` (boolean column, default `false`), with a per-slot override —
-  `ServiceSlot.enforceMemberLocationOverride` (nullable boolean, `null` = inherit from config) — same override
-  pattern as `checkinStopOverride`/`allowedDistanceOverride`. Resolved in `EventService.resolveSlotConfig()`
-  (`slot.enforceMemberLocationOverride ?? config.enforceMemberLocation`) alongside every other per-slot-resolved
-  setting, so `AttendanceService.checkin()` reads it synchronously off the already-resolved config rather than a
-  separate settings lookup.
-- **Enforcement**: `AttendanceService.checkin()` — for an `IN_PERSON` slot, a member omitting `location` while the
-  resolved `cfg.enforceMemberLocation` is `true` gets `BadRequestException('Your location is required to check in
-  for this service.')`.
-- **DTOs**: `CreateEventConfigDto.enforceMemberLocation?: boolean` (defaults to `false` in `EventConfigService.create()`
-  when omitted, same as `autoStartSession`), `CreateServiceSlotDto.enforceMemberLocationOverride?: boolean`.
-- **Frontend (admin)**: discuva-admin's Event Config page — a toggle inside each config's create/edit form
-  (alongside "Auto-Start Programme"), not a standalone tenant-wide banner like distance-check. Reflected as a
-  small "Member location required" badge on the config list row and detail view when on.
+**Per-config distance check (`EventConfig.checkDistance`).** One church-wide switch, "Distance Check" (formerly
+"Enforce Distance Check", `AttendanceSettingsService`), and one per-config switch, "Use Distance Check" (`check_distance BOOLEAN
+NOT NULL DEFAULT true`, tenant migration `1802764800000-AddEventConfigCheckDistance`), resolved by
+`EventService.resolveSlotConfig()` as `checkDistance` (missing = true). In `AttendanceService.checkin()`, for an
+`IN_PERSON` slot, the distance is checked when **both** are on; then anyone without a `location` is rejected ("Your
+location is required to check in for this service."), so leaving it out can't skip the check, and
+`validateLocation()` runs. With either off, any location is just recorded (with its cheap flags). Workers must send a
+location on every in-person slot regardless. Online slots are never checked. A config opts out for services held in
+different places (home fellowships). The member app shows "Your location is saved with your check-in" instead of the
+distance promise for such services and takes the first location reading.
+Replaces `enforceMemberLocation` / `ServiceSlot.enforceMemberLocationOverride`, which are no longer read: the DTOs
+still accept them (ignored) so an admin page open from before the change can save, and the columns are dropped in a
+later release (dropping them now would break the old version during a rolling deploy).
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
