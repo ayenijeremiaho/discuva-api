@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, LessThanOrEqual, Repository } from 'typeorm';
+import { ExcelService } from '../../utility/service/excel.service';
 import * as ExcelJS from 'exceljs';
 import { SundaySchoolClass } from '../entity/sunday-school-class.entity';
 import { SundaySchoolMember } from '../entity/sunday-school-member.entity';
@@ -94,6 +95,7 @@ export class SundaySchoolReportService {
     private readonly sessionRepo: Repository<SundaySchoolSession>,
     @InjectRepository(SundaySchoolAttendance)
     private readonly attendanceRepo: Repository<SundaySchoolAttendance>,
+    private readonly excel: ExcelService,
   ) {}
 
   // Future sessions are left out: nothing to count yet.
@@ -393,6 +395,7 @@ export class SundaySchoolReportService {
     const members = await this.memberRows(sessions);
     const pct = (r: number | null) => (r === null ? '' : `${r}%`);
 
+    const theme = await this.excel.themeColors();
     const workbook = new ExcelJS.Workbook();
     const sheet = (
       title: string,
@@ -401,12 +404,7 @@ export class SundaySchoolReportService {
     ) => {
       const ws = workbook.addWorksheet(title);
       ws.columns = columns.map((c) => ({ ...c, width: c.width ?? 16 }));
-      ws.getRow(1).font = { bold: true };
-      ws.getRow(1).fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFEADCC9' },
-      };
+      this.excel.styleHeaderRow(ws, theme);
       rows.forEach((r) => ws.addRow(r));
     };
     sheet(

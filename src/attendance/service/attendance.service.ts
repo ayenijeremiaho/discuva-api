@@ -526,6 +526,15 @@ export class AttendanceService {
     const rows = records.map((r) => ({
       member: `${r.member?.firstname ?? ''} ${r.member?.lastname ?? ''}`.trim(),
       department: r.member?.workerProfile?.department?.name ?? '',
+      event: r.event?.name ?? '',
+      // A date-only column (the driver returns 'YYYY-MM-DD'); no timezone conversion, which could shift the day.
+      eventDate: r.event?.eventDate
+        ? String(
+            r.event.eventDate instanceof Date
+              ? r.event.eventDate.toISOString()
+              : r.event.eventDate,
+          ).slice(0, 10)
+        : '',
       service: r.serviceSlot?.name ?? '',
       status: r.status,
       checkinTime: r.checkinTime
@@ -542,6 +551,8 @@ export class AttendanceService {
       [
         { header: 'Member', key: 'member', width: 28 },
         { header: 'Department', key: 'department', width: 22 },
+        { header: 'Event', key: 'event', width: 28 },
+        { header: 'Event Date', key: 'eventDate', width: 14 },
         { header: 'Service', key: 'service', width: 24 },
         { header: 'Status', key: 'status', width: 14 },
         { header: 'Check-in Time', key: 'checkinTime', width: 24 },

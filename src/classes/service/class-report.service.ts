@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ExcelService } from '../../utility/service/excel.service';
 import * as ExcelJS from 'exceljs';
 import { ChurchClass } from '../entity/church-class.entity';
 import { ClassEnrollment } from '../entity/class-enrollment.entity';
@@ -53,6 +54,7 @@ export class ClassReportService {
     @InjectRepository(ClassType)
     private readonly classTypeRepo: Repository<ClassType>,
     private readonly progress: ClassProgressService,
+    private readonly excel: ExcelService,
   ) {}
 
   // Classes running at any point in [from, to] (open-ended dates count as running).
@@ -242,6 +244,7 @@ export class ClassReportService {
   async exportWorkbook(query: ClassReportQueryDto): Promise<Buffer> {
     const report = await this.build(query);
     const pc = (v: number | null) => (v === null ? '' : `${v}%`);
+    const theme = await this.excel.themeColors();
     const workbook = new ExcelJS.Workbook();
     const sheet = (
       title: string,
@@ -250,12 +253,7 @@ export class ClassReportService {
     ) => {
       const ws = workbook.addWorksheet(title);
       ws.columns = columns.map((c) => ({ ...c, width: c.width ?? 16 }));
-      ws.getRow(1).font = { bold: true };
-      ws.getRow(1).fill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFEADCC9' },
-      };
+      this.excel.styleHeaderRow(ws, theme);
       rows.forEach((r) => ws.addRow(r));
     };
     sheet(

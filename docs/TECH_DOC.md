@@ -569,6 +569,23 @@ The API independently rejects creation if any slot starts before the current ins
 
 **Times in emails, PDFs and exports use the church's timezone.** The server runs in UTC, so any `toLocale*String()` / `date-fns` `format()` without a zone rendered times an hour behind for a UTC+1 church (check-in confirmation, slot-assignment, service reminder, children's checkout, new-login, Sunday School check-in push, report-export emails; session/programme/event PDFs; the attendance export's Check-in Time column, previously raw UTC ISO). `DateService.format(date, pattern, timeZone?)` now always formats with `formatInTimeZone` (default: env `TIMEZONE`, never the process zone), every email/PDF site passes `await churchTimezone.get()`, and `PdfService.resolveBranding()` carries `timezone` for every draw function.
 
+**Attendance export columns.** `emailExportHistory()` writes Member, Department, **Event**, **Event Date**, Service,
+Status, Check-in Time. Event and Event Date come from `attendance.event` (already joined by `buildHistoryQb`), so an
+absence, which has no service, still says what was missed. Event Date is the date-only `event_date` value as-is
+(`YYYY-MM-DD`), never timezone-converted, which could shift it a day.
+
+**PDFs and spreadsheets use the church's theme.** `Tenant.themePreset` maps to colours in
+`src/tenant/constants/church-theme-palette.ts` (`churchThemeColors()`: `brand`, `accent`, and `soft` = accent halfway to
+white), which must match `THEME_PRESETS` in discuva-admin and discuva-member `utils/portal-theme.ts`. Classic gives
+exactly the original `#121212` / `#EADCC9` / `#F4EDE4`, so Classic churches see no change.
+- `PdfService`: `PdfBranding.theme`, resolved with the rest of the branding from the shared `tenant-branding:<id>`
+  cache. Header bands, total rows and service banners use `brand` (white or accent text); table headers and accent
+  bands use `accent`; alternate rows use `soft`. Body text stays dark for readability.
+- `ExcelService.themeColors()` (same cache entry) and `styleHeaderRow()`: header row in `accent` with dark bold text, a
+  `brand` rule beneath, frozen while scrolling. Used by `buildWorkbook()` (every single-sheet export) and by the class
+  and Sunday School report workbooks. Import templates (tithe, member, goals) stay plain.
+- Emails still use the fixed Classic layout.
+
 **Event series (`EventSeriesService`, `event_series` table):** every `POST /events` with `isRecurring: true` now creates a series row (pattern, interval, `startDate`, `endDate` — `null` when `recurrence.ongoing` — the slot blueprint, `autoProgramme`, `generatedThrough`, `isActive`) and its occurrences are ordinary `events` rows with `recurringEventId = series.id` and `seriesOccurrenceDate` (the church-local date they stand for; unique per series via `UQ_events_series_occurrence`). A fixed end date must be within a year of the start; an ongoing series has none.
 - **Generation:** `generate(series, tz, now, until?)` walks occurrence dates (k × interval days/weeks; monthly via calendar months) after `generatedThrough` up to `min(until ?? today + 56 days, endDate)`, skips dates whose first service has already started or that already exist, builds each via `EventService.buildOccurrence`, and advances `generatedThrough`. Because it never revisits dates at or before `generatedThrough`, **cancelling one date (`DELETE /events/:id`) sticks** — it is not recreated.
 - **Top-up (`EventSeriesScheduler`):** `@Cron('0 2 * * *')`, Redis lock `lock:event-series-top-up` (1800 s), `forEachActiveTenant`; tops every active series up to 8 weeks ahead in that tenant's timezone, one series' failure logged without stopping the rest. It only loads series that can still gain a date (`generated_through` is null or before the horizon, and before `end_date` for a fixed series), served by the partial index `IDX_event_series_active`, so finished series aren't reloaded every night.
@@ -14202,6 +14219,23 @@ Each slot can have multiple reminder schedules via sub-resource `/events/slots/:
 **Slot blueprint (`src/event/types/slot-blueprint.ts`):** series and service types store services as times of day, not instants: `{ name, startTime: "HH:mm", durationMinutes, dayOffset, configId?, venueOverrideId?, formatOverride?, audience?, audienceGroupId? }` (`SlotBlueprintDto`: `HH:mm` regex, duration 1–1440, dayOffset 0–13). `blueprintToSlotDtos(blueprint, date, tz)` builds each slot on `date + dayOffset` with `fromZonedTime` in the church timezone, so a 09:00 service stays 09:00 across DST changes; `slotDtosToBlueprint` is the inverse (via `formatInTimeZone`). The timezone is the tenant's `timezone` column, falling back to env `TIMEZONE` (`ChurchTimezoneService` in `src/utility/service/`, provided globally by `UtilityModule`, 10-minute in-memory cache per tenant).
 
 **Times in emails, PDFs and exports use the church's timezone.** The server runs in UTC, so any `toLocale*String()` / `date-fns` `format()` without a zone rendered times an hour behind for a UTC+1 church (check-in confirmation, slot-assignment, service reminder, children's checkout, new-login, Sunday School check-in push, report-export emails; session/programme/event PDFs; the attendance export's Check-in Time column, previously raw UTC ISO). `DateService.format(date, pattern, timeZone?)` now always formats with `formatInTimeZone` (default: env `TIMEZONE`, never the process zone), every email/PDF site passes `await churchTimezone.get()`, and `PdfService.resolveBranding()` carries `timezone` for every draw function.
+
+**Attendance export columns.** `emailExportHistory()` writes Member, Department, **Event**, **Event Date**, Service,
+Status, Check-in Time. Event and Event Date come from `attendance.event` (already joined by `buildHistoryQb`), so an
+absence, which has no service, still says what was missed. Event Date is the date-only `event_date` value as-is
+(`YYYY-MM-DD`), never timezone-converted, which could shift it a day.
+
+**PDFs and spreadsheets use the church's theme.** `Tenant.themePreset` maps to colours in
+`src/tenant/constants/church-theme-palette.ts` (`churchThemeColors()`: `brand`, `accent`, and `soft` = accent halfway to
+white), which must match `THEME_PRESETS` in discuva-admin and discuva-member `utils/portal-theme.ts`. Classic gives
+exactly the original `#121212` / `#EADCC9` / `#F4EDE4`, so Classic churches see no change.
+- `PdfService`: `PdfBranding.theme`, resolved with the rest of the branding from the shared `tenant-branding:<id>`
+  cache. Header bands, total rows and service banners use `brand` (white or accent text); table headers and accent
+  bands use `accent`; alternate rows use `soft`. Body text stays dark for readability.
+- `ExcelService.themeColors()` (same cache entry) and `styleHeaderRow()`: header row in `accent` with dark bold text, a
+  `brand` rule beneath, frozen while scrolling. Used by `buildWorkbook()` (every single-sheet export) and by the class
+  and Sunday School report workbooks. Import templates (tithe, member, goals) stay plain.
+- Emails still use the fixed Classic layout.
 
 **Event series (`EventSeriesService`, `event_series` table):** every `POST /events` with `isRecurring: true` now creates a series row (pattern, interval, `startDate`, `endDate` — `null` when `recurrence.ongoing` — the slot blueprint, `autoProgramme`, `generatedThrough`, `isActive`) and its occurrences are ordinary `events` rows with `recurringEventId = series.id` and `seriesOccurrenceDate` (the church-local date they stand for; unique per series via `UQ_events_series_occurrence`). A fixed end date must be within a year of the start; an ongoing series has none.
 - **Generation:** `generate(series, tz, now, until?)` walks occurrence dates (k × interval days/weeks; monthly via calendar months) after `generatedThrough` up to `min(until ?? today + 56 days, endDate)`, skips dates whose first service has already started or that already exist, builds each via `EventService.buildOccurrence`, and advances `generatedThrough`. Because it never revisits dates at or before `generatedThrough`, **cancelling one date (`DELETE /events/:id`) sticks** — it is not recreated.
