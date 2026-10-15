@@ -248,7 +248,7 @@ export class ClassesService {
       .leftJoinAndSelect('facilitators.member', 'facilitatorMember')
       .leftJoinAndSelect('c.classType', 'classType')
       .orderBy('c.createdAt', 'DESC')
-      .addOrderBy('facilitators.order', 'ASC')
+      .addOrderBy('c.id', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -256,6 +256,7 @@ export class ClassesService {
       query.where('classType.id = :classTypeId', { classTypeId });
 
     const [classes, total] = await query.getManyAndCount();
+    for (const c of classes) c.facilitators?.sort((a, b) => a.order - b.order);
     return UtilityService.createPaginationResponse(classes, page, limit, total);
   }
 

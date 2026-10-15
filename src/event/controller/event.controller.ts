@@ -32,6 +32,7 @@ interface GetEventsQuery {
   from?: string;
   to?: string;
   upcoming?: string;
+  past?: string;
   search?: string;
 }
 
@@ -91,6 +92,7 @@ export class EventController {
         from: query.from ? new Date(query.from) : undefined,
         to: query.to ? new Date(query.to) : undefined,
         upcoming: query.upcoming === 'true',
+        past: query.past === 'true',
         search: query.search,
         viewer: viewerOf(user),
       },

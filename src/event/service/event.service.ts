@@ -47,6 +47,15 @@ const SLOT_RELATIONS = [
   'serviceSlots.audienceGroup',
 ];
 
+const sortSlotsByStart = (events: Event[]): Event[] => {
+  for (const event of events)
+    event.serviceSlots?.sort(
+      (a, b) =>
+        new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+    );
+  return events;
+};
+
 // What a shared event link shows someone who isn't signed in: no attendance, members, groups or meeting links.
 export interface PublicEventView {
   id: string;
@@ -214,12 +223,16 @@ export class EventService {
       from?: Date;
       to?: Date;
       upcoming?: boolean;
+      // Ended events (end_time < now).
+      past?: boolean;
       search?: string;
       // Set for the member app: only events meant for this person.
       viewer?: EventViewer;
     } = {},
   ): Promise<PaginationResponseDto<Event>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
+    if (filter.upcoming && filter.past)
+      throw new BadRequestException('Choose upcoming or past, not both');
 
     const qb = this.eventRepository
       .createQueryBuilder('event')
@@ -229,8 +242,9 @@ export class EventService {
       .leftJoinAndSelect('config.defaultVenue', 'defaultVenue')
       .leftJoinAndSelect('serviceSlots.venueOverride', 'venueOverride')
       .leftJoinAndSelect('serviceSlots.audienceGroup', 'slotAudienceGroup')
+      // Ordering by a joined column makes TypeORM page by joined rows, which drops events and undercounts the total.
       .orderBy(`event.${orderBy}`, order)
-      .addOrderBy('serviceSlots.startTime', 'ASC')
+      .addOrderBy('event.id', 'ASC')
       .skip((page - 1) * limit)
       .take(limit);
 
@@ -247,6 +261,16 @@ export class EventService {
         qb.andWhere('event.eventDate >= :upcomingFloor', {
           upcomingFloor: floor,
         });
+    }
+    if (filter.past) {
+      const now = new Date();
+      qb.andWhere('event.endTime < :pastBefore', { pastBefore: now });
+      // An ended event started on or before today, so the event_date sort can skip the weeks already scheduled ahead.
+      qb.andWhere('event.eventDate <= :pastCeiling', {
+        pastCeiling: new Date(now.getTime() + 86_400_000)
+          .toISOString()
+          .slice(0, 10),
+      });
     }
     if (filter.from)
       qb.andWhere('event.eventDate >= :from', { from: filter.from });
@@ -284,6 +308,7 @@ export class EventService {
       });
 
     const [events, total] = await qb.getManyAndCount();
+    sortSlotsByStart(events);
 
     if (filter.viewer && events.length)
       await this.hideSlotsNotForViewer(events, filter.viewer);
@@ -459,21 +484,24 @@ export class EventService {
           viewerIsWorker: viewer.isWorker,
         })
         .orderBy('event.startTime', 'ASC')
-        .addOrderBy('serviceSlots.startTime', 'ASC')
+        .addOrderBy('event.id', 'ASC')
         .take(limit)
-        .getMany();
+        .getMany()
+        .then(sortSlotsByStart);
     }
-    return this.eventRepository.find({
-      where: { endTime: MoreThanOrEqual(new Date()) },
-      order: { startTime: 'ASC', serviceSlots: { startTime: 'ASC' } },
-      relations: [
-        'serviceSlots',
-        'serviceSlots.config',
-        'serviceSlots.config.defaultVenue',
-        'serviceSlots.venueOverride',
-      ],
-      take: limit,
-    });
+    return this.eventRepository
+      .find({
+        where: { endTime: MoreThanOrEqual(new Date()) },
+        order: { startTime: 'ASC', id: 'ASC' },
+        relations: [
+          'serviceSlots',
+          'serviceSlots.config',
+          'serviceSlots.config.defaultVenue',
+          'serviceSlots.venueOverride',
+        ],
+        take: limit,
+      })
+      .then(sortSlotsByStart);
   }
 
   resolveSlotConfig(slot: ServiceSlot): {

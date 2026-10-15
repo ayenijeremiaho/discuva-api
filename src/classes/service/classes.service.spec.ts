@@ -25,6 +25,7 @@ const makeQb = () => ({
   addSelect: jest.fn().mockReturnThis(),
   groupBy: jest.fn().mockReturnThis(),
   orderBy: jest.fn().mockReturnThis(),
+  addOrderBy: jest.fn().mockReturnThis(),
   skip: jest.fn().mockReturnThis(),
   take: jest.fn().mockReturnThis(),
   getManyAndCount: jest.fn(),
@@ -486,6 +487,26 @@ describe('ClassesService', () => {
       expect(mockEnrollmentRepo.count).toHaveBeenCalledWith({
         where: { status: EnrollmentStatusEnum.IN_PROGRESS },
       });
+    });
+  });
+
+  describe('getAllClasses', () => {
+    it('pages by class, not facilitator rows, and sorts facilitators in code', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([
+        [{ id: 'c-1', facilitators: [{ order: 2 }, { order: 1 }] }],
+        11,
+      ]);
+      mockClassRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getAllClasses(undefined, 2, 10);
+
+      expect(qb.orderBy).toHaveBeenCalledWith('c.createdAt', 'DESC');
+      expect(qb.addOrderBy).toHaveBeenCalledTimes(1);
+      expect(qb.addOrderBy).toHaveBeenCalledWith('c.id', 'ASC');
+      expect(qb.skip).toHaveBeenCalledWith(10);
+      expect(result.data[0].facilitators.map((f) => f.order)).toEqual([1, 2]);
+      expect(result.totalPages).toBe(2);
     });
   });
 

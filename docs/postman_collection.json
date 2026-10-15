@@ -5698,7 +5698,7 @@
             "method": "GET",
             "description": "Any authenticated user. Returns paginated events, optionally filtered by date range. Use `?upcoming=true` to get only future events (eventDate >= today). Optional `search` filters by event name (case-insensitive substring match).",
             "url": {
-              "raw": "{{baseUrl}}/events?page=1&limit=10&orderBy=eventDate&order=DESC&from=&to=&upcoming=&search=",
+              "raw": "{{baseUrl}}/events?page=1&limit=10&orderBy=eventDate&order=DESC&from=&to=&upcoming=&past=&search=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -5739,7 +5739,13 @@
                 {
                   "key": "upcoming",
                   "value": "true",
-                  "description": "true \u2014 return only future events (eventDate >= today)",
+                  "description": "true \u2014 only events that haven't ended (endTime >= now)",
+                  "disabled": true
+                },
+                {
+                  "key": "past",
+                  "value": "true",
+                  "description": "true \u2014 only ended events (endTime < now); use with order=DESC. 400 with upcoming=true",
                   "disabled": true
                 },
                 {

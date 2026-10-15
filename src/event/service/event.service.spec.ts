@@ -997,7 +997,7 @@ describe('EventService', () => {
       expect(mockEventRepo.find).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { endTime: MoreThanOrEqual(expect.any(Date)) },
-          order: { startTime: 'ASC', serviceSlots: { startTime: 'ASC' } },
+          order: { startTime: 'ASC', id: 'ASC' },
           take: 5,
         }),
       );
@@ -1017,6 +1017,11 @@ describe('EventService', () => {
 
       await service.getUpcomingEvents(5, { id: 'member-1', isWorker: false });
 
+      expect(qb.addOrderBy).toHaveBeenCalledWith('event.id', 'ASC');
+      expect(qb.addOrderBy).not.toHaveBeenCalledWith(
+        'serviceSlots.startTime',
+        expect.anything(),
+      );
       expect(qb.andWhere).toHaveBeenCalledWith(
         expect.stringContaining(
           "audience = 'WORKERS' AND :viewerIsWorker = true",
@@ -1069,16 +1074,59 @@ describe('EventService', () => {
       getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
     });
 
-    it('orders service slots by start time', async () => {
+    it('pages by event, never by a joined column, so every event is reachable', async () => {
       const qb = makeQb();
       mockEventRepo.createQueryBuilder.mockReturnValue(qb);
 
       await service.getAll(1, 10, 'eventDate', 'DESC', {});
 
-      expect(qb.addOrderBy).toHaveBeenCalledWith(
-        'serviceSlots.startTime',
-        'ASC',
+      expect(qb.orderBy).toHaveBeenCalledWith('event.eventDate', 'DESC');
+      expect(qb.addOrderBy).toHaveBeenCalledTimes(1);
+      expect(qb.addOrderBy).toHaveBeenCalledWith('event.id', 'ASC');
+    });
+
+    it("orders each event's service slots by start time", async () => {
+      const qb = makeQb();
+      const event = {
+        id: 'e1',
+        serviceSlots: [
+          { id: 'late', startTime: new Date('2026-10-18T11:00:00Z') },
+          { id: 'early', startTime: new Date('2026-10-18T08:00:00Z') },
+        ],
+      };
+      qb.getManyAndCount.mockResolvedValue([[event], 1]);
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      const result = await service.getAll(1, 10, 'eventDate', 'DESC', {});
+
+      expect(result.data[0].serviceSlots.map((s) => s.id)).toEqual([
+        'early',
+        'late',
+      ]);
+    });
+
+    it('lists ended events with a date ceiling the event_date index can use', async () => {
+      const qb = makeQb();
+      mockEventRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getAll(1, 10, 'eventDate', 'DESC', { past: true });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('event.endTime < :pastBefore', {
+        pastBefore: expect.any(Date),
+      });
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        'event.eventDate <= :pastCeiling',
+        { pastCeiling: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) },
       );
+    });
+
+    it('rejects asking for upcoming and past together', async () => {
+      await expect(
+        service.getAll(1, 10, 'eventDate', 'DESC', {
+          upcoming: true,
+          past: true,
+        }),
+      ).rejects.toThrow('Choose upcoming or past, not both');
     });
 
     it('applies a name search filter when provided', async () => {
