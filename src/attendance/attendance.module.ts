@@ -5,6 +5,9 @@ import { BullModule } from '@nestjs/bull';
 import { Attendance } from './entity/attendance.entity';
 import { AttendanceService } from './service/attendance.service';
 import { AttendanceSettingsService } from './service/attendance-settings.service';
+import { BlockedCheckinService } from './service/blocked-checkin.service';
+import { LocationFlagService } from './service/location-flag.service';
+import { BlockedCheckin } from './entity/blocked-checkin.entity';
 import { AttendanceController } from './controller/attendance.controller';
 import { AttendanceJobService } from './job/attendance-job';
 import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
@@ -18,7 +21,12 @@ import { FOLLOW_UP_QUEUE } from '../follow-up/processor/post-event.processor';
 
 @Module({
   imports: [
-    TenantTypeOrmModule.forFeature([Attendance, ServiceSlot, ChurchSetting]),
+    TenantTypeOrmModule.forFeature([
+      Attendance,
+      BlockedCheckin,
+      ServiceSlot,
+      ChurchSetting,
+    ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by AttendanceJobService's forEachActiveTenant loop.
     TypeOrmModule.forFeature([Tenant]),
@@ -32,6 +40,8 @@ import { FOLLOW_UP_QUEUE } from '../follow-up/processor/post-event.processor';
   providers: [
     AttendanceService,
     AttendanceSettingsService,
+    BlockedCheckinService,
+    LocationFlagService,
     AttendanceJobService,
   ],
   exports: [TenantTypeOrmModule, AttendanceService],

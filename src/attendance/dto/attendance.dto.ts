@@ -3,10 +3,24 @@ import {
   ONLINE_WINDOW_MAX_MINUTES,
   ONLINE_WINDOW_MIN_MINUTES,
 } from '../util/online-window';
-import { IsBoolean, IsEnum, IsNotEmpty, IsUUID } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { Exclude, Expose } from 'class-transformer';
 import { ToDateString } from '../../utility/dto/date-converter';
+
+export class UndoCheckinDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Give a reason for undoing this check-in.' })
+  @MaxLength(500)
+  reason: string;
+}
 
 export class CorrectAttendanceDto {
   @IsEnum(AttendanceStatusEnum)

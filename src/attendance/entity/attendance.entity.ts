@@ -13,10 +13,12 @@ import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Event } from '../../event/entity/event.entity';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 import { BaseEntity } from '../../utility/entity/base.entity';
+import { LocationFlagEnum } from '../util/location-flags';
 
 interface LocationData {
   longitude: number;
   latitude: number;
+  accuracy?: number | null;
 }
 
 @Entity({ name: 'attendances' })
@@ -59,4 +61,8 @@ export class Attendance extends BaseEntity {
 
   @Column({ type: 'jsonb', name: 'location', nullable: true })
   location: LocationData | null;
+
+  // Signs the location may have been faked; informational only, never blocks a check-in.
+  @Column({ type: 'character varying', array: true, default: '{}' })
+  locationFlags: LocationFlagEnum[];
 }

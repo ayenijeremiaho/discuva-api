@@ -2,6 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceService } from '../service/attendance.service';
 import { AttendanceSettingsService } from '../service/attendance-settings.service';
+import { BlockedCheckinService } from '../service/blocked-checkin.service';
+import { LocationFlagService } from '../service/location-flag.service';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
@@ -11,6 +13,7 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 
 const mockAttendanceService = {
   getAllHistory: jest.fn(),
+  undoCheckin: jest.fn().mockResolvedValue({}),
   getMyHistory: jest.fn(),
   getMyAttendanceSummary: jest.fn(),
   checkin: jest.fn(),
@@ -27,6 +30,25 @@ const mockAttendanceSettingsService = {
   setEnabled: jest.fn(),
 };
 
+const mockLocationFlagService = {
+  verify: jest.fn().mockResolvedValue({
+    locationFlags: [],
+    compared: true,
+    repeatedAt: [],
+    sharedWith: [],
+  }),
+};
+
+const mockBlockedCheckinService = {
+  list: jest.fn().mockResolvedValue({
+    data: [],
+    page: 1,
+    limit: 20,
+    totalCount: 0,
+    totalPages: 1,
+  }),
+};
+
 describe('AttendanceController', () => {
   let controller: AttendanceController;
 
@@ -41,6 +63,8 @@ describe('AttendanceController', () => {
           provide: AttendanceSettingsService,
           useValue: mockAttendanceSettingsService,
         },
+        { provide: BlockedCheckinService, useValue: mockBlockedCheckinService },
+        { provide: LocationFlagService, useValue: mockLocationFlagService },
       ],
     })
       .overrideGuard(AdminGuard)
@@ -120,6 +144,7 @@ describe('AttendanceController', () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       );
     });
 
@@ -145,6 +170,7 @@ describe('AttendanceController', () => {
         undefined,
         'john',
         undefined,
+        undefined,
       );
     });
 
@@ -164,6 +190,7 @@ describe('AttendanceController', () => {
         dateTo: '2026-06-30',
         search: 'doe',
         role: MemberRoleEnum.WORKER,
+        flagged: true,
       } as any);
 
       expect(mockAttendanceService.getAllHistory).toHaveBeenCalledWith(
@@ -176,6 +203,7 @@ describe('AttendanceController', () => {
         '2026-06-30',
         'doe',
         MemberRoleEnum.WORKER,
+        true,
       );
     });
 
@@ -238,6 +266,37 @@ describe('AttendanceController', () => {
         'member-1',
       );
       expect(result).toEqual({ enabled: false, isPlatformDefault: false });
+    });
+  });
+
+  describe('getBlockedCheckins', () => {
+    it('passes paging and the event filter to the service', async () => {
+      await controller.getBlockedCheckins({
+        page: 2,
+        limit: 10,
+        eventId: 'e1',
+      });
+      expect(mockBlockedCheckinService.list).toHaveBeenCalledWith(2, 10, 'e1');
+    });
+  });
+
+  describe('verifyLocation', () => {
+    it('verifies the given check-in on request', async () => {
+      await controller.verifyLocation('att-1');
+      expect(mockLocationFlagService.verify).toHaveBeenCalledWith('att-1');
+    });
+  });
+
+  describe('undoCheckin', () => {
+    it('passes the reason and the acting admin to the service', async () => {
+      await controller.undoCheckin('att-1', { reason: 'Location faked' }, {
+        member: { id: 'admin-member-1' },
+      } as any);
+      expect(mockAttendanceService.undoCheckin).toHaveBeenCalledWith(
+        'att-1',
+        'Location faked',
+        'admin-member-1',
+      );
     });
   });
 });

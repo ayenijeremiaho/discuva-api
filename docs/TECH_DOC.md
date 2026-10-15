@@ -762,6 +762,80 @@ by the global exception filter (`HttpExceptionFilter`, same mechanism `PlanGuard
 already uses). `distanceMeters` is the member's actual computed distance (rounded), included so the frontend can
 show it even when the failure came from the server rather than the client's own pre-check.
 
+**GPS accuracy is credited, capped at the radius.** `CheckInDto.location` takes an optional `accuracy` (meters,
+`>= 0`, the device's `GeolocationCoordinates.accuracy`), stored with the rest of `Attendance.location` (jsonb, no
+migration). `validateLocation()` rejects only when `distance - min(accuracy, allowedDistanceInMeters) >
+allowedDistanceInMeters`, so a vague fix can at most double the radius; without `accuracy` the check is unchanged.
+Indoor phone fixes are routinely 30–100m off, which made tight radii (e.g. 50m) reject people inside the building.
+The member app (`useEvents`, `getBestPosition()`) watches position with `maximumAge: 0` for up to 5s, keeping the
+most precise reading; it stops early on a fix within 20m or one that already passes the radius by the same rule
+(`utils/distance.ts` `passesRadius()`, timing only — the server still decides), and sends its `accuracy`. It no longer pre-checks distance itself
+(so it no longer calls `GET attendances/me/distance-check`, kept for older app versions): every attempt reaches the
+server so rejections can be recorded (below), and it builds its "within Xm of <venue>" message from the `TOO_FAR`
+body. The distance-check toggle applies to workers and members alike; workers always
+send location on `IN_PERSON` slots, members only when `enforceMemberLocation` is on (below).
+discuva-admin's Event Config form and detail panel draw this on a map (`VenueCoverageMap`): a solid circle at
+`allowedDistanceInMeters` and a dashed one at twice it, for the most an accuracy credit can reach.
+
+**Approximate-location phones get their own code.** When a rejected attempt reports `accuracy > 1000` (iOS "Precise
+Location" off, Android "approximate"), `validateLocation()` throws `code: 'IMPRECISE_LOCATION'` with a "turn on Precise
+Location" message instead of `TOO_FAR`; both bodies carry `distanceMeters`, `allowedDistanceInMeters` and
+`accuracyMeters`. The member check-in modal shows step-by-step tips for each code, and its Try Again re-reads the
+location immediately. It also shows how far the server put the member (`distanceMeters`, `accuracyMeters`, in m
+below 1 km and km above, via `formatDistance()`). The Precise Location steps match the device (`utils/precise-location-steps.ts`: iPhone/iPad incl.
+iPadOS's desktop user agent, Android, and the browser — Chrome, Samsung Internet, Firefox, Edge); unknown devices get both.
+
+**Blocked check-ins (`blocked_checkins`, tenant).** The rejected request's transaction rolls back (TenantMiddleware
+rolls back every response ≥ 400), so `validateLocation()` registers `BlockedCheckinService.record()` with
+`afterRollback()` (`tenant/utility/after-commit.ts`): TenantMiddleware runs those tasks after the rollback, each in a
+fresh tenant transaction, once the request's own connection is released — no queue or worker. Failures are logged. One row per `(member_id, event_id)`
+(`UQ_blocked_checkins_member_event`), upserted with `ON CONFLICT`: `attempts` increments, `closest_distance_meters`
+keeps the minimum and `accuracy_meters` follows the closest attempt, `service_slot_id`/`allowed_distance_meters`/
+`reason`/`last_attempt_at` track the latest. FKs: member and event `CASCADE`, slot `SET NULL`. Migration
+`tenant/1802505600000-CreateBlockedCheckins`; indexes `IDX_blocked_checkins_last_attempt (last_attempt_at DESC)` and
+`IDX_blocked_checkins_event_last_attempt (event_id, last_attempt_at DESC)` for the list, `IDX_blocked_checkins_
+service_slot_id` for the FK. `GET attendances/blocked-checkins?page&limit(≤100)&eventId` (`AdminGuard`,
+`ATTENDANCE_READ`) returns newest first, each row with `checkedInLater` (a PRESENT/LATE/ATTENDED_ONLINE attendance
+for that member and event, looked up in one query via the attendances unique index) and `wouldPassAtMeters` =
+`ceil(max(d/2, d - accuracy))`, the smallest radius that would have accepted the closest attempt (null for
+`IMPRECISE_LOCATION`). discuva-admin shows it as Attendance → Blocked Check-ins, with Mark present calling
+`POST attendances/admin/mark`. `GENUINELY_ATTENDED_STATUSES` moved to `src/attendance/util/attended-statuses.ts`.
+The admin Venues page's "Use my location" uses the same best-of-5s reading (`utils/geolocation.ts`) and shows its
+precision as a circle around the pin.
+
+**Location flags (possible fake location) — informational, never block, two tiers.** `Attendance.locationFlags`
+(`location_flags character varying[] NOT NULL DEFAULT '{}'`, tenant migration `1802592000000-AddAttendanceLocationFlags`).
+1. *At check-in, no extra queries:* `intrinsicLocationFlags()` judges the fix alone — `PERFECT_ACCURACY` (accuracy
+   < 1 m) and `ROUNDED_COORDINATES` (both coordinates ≤ 4 decimals) — saved with the row.
+2. *On request:* `POST attendances/:id/verify-location` (`AdminGuard`, `ATTENDANCE_WRITE`, `LocationFlagService.verify`)
+   compares that one check-in with the data set: `REPEATED_SPOT` (identical coordinates at the member's other events,
+   via `IDX_attendances_member_id`) and `SHARED_SPOT` (identical to another member at the same event, via
+   `IDX_attendances_event_latitude (event_id, ((location->>'latitude')::float8)) WHERE location IS NOT NULL`, tenant
+   migration `1802678400000`). Only fixes claiming ≤ 100 m accuracy are compared, because rough Wi-Fi/cell fixes
+   legitimately repeat. Matching rows get `SHARED_SPOT` too. Returns `{ locationFlags, compared, repeatedAt (≤ 5),
+   sharedWith }` and saves the merged flags. Cost: two indexed lookups, paid only when an admin asks.
+`GET attendances/history?flagged=true` filters on `cardinality(location_flags) > 0` (partial index
+`IDX_attendances_flagged_created`). discuva-admin: Flagged badge in Attendance History, the reasons plus a Verify
+location button in the record panel (`components/attendance/location-check.tsx`), and a flagged-only filter. No IP
+signal: IP geolocation is too coarse in many regions (often resolves to the capital).
+
+**Undo check-in (suspected fake).** `POST attendances/:id/undo-checkin` (`AdminGuard`, `ATTENDANCE_WRITE`, body
+`{ reason }`, 1–500 chars) → `AttendanceService.undoCheckin()`: only a PRESENT/LATE/ATTENDED_ONLINE row (else 400),
+set to ABSENT (affects streak and leaderboard like any absence; leaderboard cache expires on its TTL as for any
+check-in). The row keeps its location and flags, and the audit entry `ATTENDANCE_CHECKIN_UNDONE` (actor, target member,
+event, slot, previous status, check-in time, location, flags, reason) preserves the evidence, since a later genuine
+check-in overwrites the row. discuva-admin: Undo check-in at the foot of the Attendance History record panel
+(`components/attendance/undo-checkin.tsx`), reason required.
+
+**Robustness notes.** Only a numeric `location.accuracy` counts as reported (`typeof === 'number'`), so a client
+sending `accuracy: null` is not flagged PERFECT_ACCURACY or compared as precise. The member app's location sampling
+window starts at the first fix, not before the permission prompt (the browser's own `timeout` excludes prompt time),
+so a member slow to tap Allow is not failed. **Deploy:** every check-in now writes `location_flags`, so the
+tenant migration must land before the new code takes traffic — fly.toml's `release_command`
+(`node dist/migrate-all-tenants.js`) already guarantees this, running on the new image before Fly switches traffic
+(and auto-rolling back if it fails). The migrations are additive, so the old code keeps working during the rolling
+switch. Building the two attendances indexes briefly blocks writes to that table, so deploy outside service times.
+
 **`EventConfig.enforceMemberLocation` — a separate, per-config setting from distance-check above.** Workers on an
 `IN_PERSON` slot have always had a hard, unconditional requirement to submit location (`checkin()` throws if
 `!dto.location`, regardless of the distance-check setting). Members had no equivalent — `location` is
@@ -14321,6 +14395,80 @@ distanceMeters, allowedDistanceInMeters })` — extra keys beyond `message` are 
 by the global exception filter (`HttpExceptionFilter`, same mechanism `PlanGuard`'s `code: 'PLAN_UPGRADE_REQUIRED'`
 already uses). `distanceMeters` is the member's actual computed distance (rounded), included so the frontend can
 show it even when the failure came from the server rather than the client's own pre-check.
+
+**GPS accuracy is credited, capped at the radius.** `CheckInDto.location` takes an optional `accuracy` (meters,
+`>= 0`, the device's `GeolocationCoordinates.accuracy`), stored with the rest of `Attendance.location` (jsonb, no
+migration). `validateLocation()` rejects only when `distance - min(accuracy, allowedDistanceInMeters) >
+allowedDistanceInMeters`, so a vague fix can at most double the radius; without `accuracy` the check is unchanged.
+Indoor phone fixes are routinely 30–100m off, which made tight radii (e.g. 50m) reject people inside the building.
+The member app (`useEvents`, `getBestPosition()`) watches position with `maximumAge: 0` for up to 5s, keeping the
+most precise reading; it stops early on a fix within 20m or one that already passes the radius by the same rule
+(`utils/distance.ts` `passesRadius()`, timing only — the server still decides), and sends its `accuracy`. It no longer pre-checks distance itself
+(so it no longer calls `GET attendances/me/distance-check`, kept for older app versions): every attempt reaches the
+server so rejections can be recorded (below), and it builds its "within Xm of <venue>" message from the `TOO_FAR`
+body. The distance-check toggle applies to workers and members alike; workers always
+send location on `IN_PERSON` slots, members only when `enforceMemberLocation` is on (below).
+discuva-admin's Event Config form and detail panel draw this on a map (`VenueCoverageMap`): a solid circle at
+`allowedDistanceInMeters` and a dashed one at twice it, for the most an accuracy credit can reach.
+
+**Approximate-location phones get their own code.** When a rejected attempt reports `accuracy > 1000` (iOS "Precise
+Location" off, Android "approximate"), `validateLocation()` throws `code: 'IMPRECISE_LOCATION'` with a "turn on Precise
+Location" message instead of `TOO_FAR`; both bodies carry `distanceMeters`, `allowedDistanceInMeters` and
+`accuracyMeters`. The member check-in modal shows step-by-step tips for each code, and its Try Again re-reads the
+location immediately. It also shows how far the server put the member (`distanceMeters`, `accuracyMeters`, in m
+below 1 km and km above, via `formatDistance()`). The Precise Location steps match the device (`utils/precise-location-steps.ts`: iPhone/iPad incl.
+iPadOS's desktop user agent, Android, and the browser — Chrome, Samsung Internet, Firefox, Edge); unknown devices get both.
+
+**Blocked check-ins (`blocked_checkins`, tenant).** The rejected request's transaction rolls back (TenantMiddleware
+rolls back every response ≥ 400), so `validateLocation()` registers `BlockedCheckinService.record()` with
+`afterRollback()` (`tenant/utility/after-commit.ts`): TenantMiddleware runs those tasks after the rollback, each in a
+fresh tenant transaction, once the request's own connection is released — no queue or worker. Failures are logged. One row per `(member_id, event_id)`
+(`UQ_blocked_checkins_member_event`), upserted with `ON CONFLICT`: `attempts` increments, `closest_distance_meters`
+keeps the minimum and `accuracy_meters` follows the closest attempt, `service_slot_id`/`allowed_distance_meters`/
+`reason`/`last_attempt_at` track the latest. FKs: member and event `CASCADE`, slot `SET NULL`. Migration
+`tenant/1802505600000-CreateBlockedCheckins`; indexes `IDX_blocked_checkins_last_attempt (last_attempt_at DESC)` and
+`IDX_blocked_checkins_event_last_attempt (event_id, last_attempt_at DESC)` for the list, `IDX_blocked_checkins_
+service_slot_id` for the FK. `GET attendances/blocked-checkins?page&limit(≤100)&eventId` (`AdminGuard`,
+`ATTENDANCE_READ`) returns newest first, each row with `checkedInLater` (a PRESENT/LATE/ATTENDED_ONLINE attendance
+for that member and event, looked up in one query via the attendances unique index) and `wouldPassAtMeters` =
+`ceil(max(d/2, d - accuracy))`, the smallest radius that would have accepted the closest attempt (null for
+`IMPRECISE_LOCATION`). discuva-admin shows it as Attendance → Blocked Check-ins, with Mark present calling
+`POST attendances/admin/mark`. `GENUINELY_ATTENDED_STATUSES` moved to `src/attendance/util/attended-statuses.ts`.
+The admin Venues page's "Use my location" uses the same best-of-5s reading (`utils/geolocation.ts`) and shows its
+precision as a circle around the pin.
+
+**Location flags (possible fake location) — informational, never block, two tiers.** `Attendance.locationFlags`
+(`location_flags character varying[] NOT NULL DEFAULT '{}'`, tenant migration `1802592000000-AddAttendanceLocationFlags`).
+1. *At check-in, no extra queries:* `intrinsicLocationFlags()` judges the fix alone — `PERFECT_ACCURACY` (accuracy
+   < 1 m) and `ROUNDED_COORDINATES` (both coordinates ≤ 4 decimals) — saved with the row.
+2. *On request:* `POST attendances/:id/verify-location` (`AdminGuard`, `ATTENDANCE_WRITE`, `LocationFlagService.verify`)
+   compares that one check-in with the data set: `REPEATED_SPOT` (identical coordinates at the member's other events,
+   via `IDX_attendances_member_id`) and `SHARED_SPOT` (identical to another member at the same event, via
+   `IDX_attendances_event_latitude (event_id, ((location->>'latitude')::float8)) WHERE location IS NOT NULL`, tenant
+   migration `1802678400000`). Only fixes claiming ≤ 100 m accuracy are compared, because rough Wi-Fi/cell fixes
+   legitimately repeat. Matching rows get `SHARED_SPOT` too. Returns `{ locationFlags, compared, repeatedAt (≤ 5),
+   sharedWith }` and saves the merged flags. Cost: two indexed lookups, paid only when an admin asks.
+`GET attendances/history?flagged=true` filters on `cardinality(location_flags) > 0` (partial index
+`IDX_attendances_flagged_created`). discuva-admin: Flagged badge in Attendance History, the reasons plus a Verify
+location button in the record panel (`components/attendance/location-check.tsx`), and a flagged-only filter. No IP
+signal: IP geolocation is too coarse in many regions (often resolves to the capital).
+
+**Undo check-in (suspected fake).** `POST attendances/:id/undo-checkin` (`AdminGuard`, `ATTENDANCE_WRITE`, body
+`{ reason }`, 1–500 chars) → `AttendanceService.undoCheckin()`: only a PRESENT/LATE/ATTENDED_ONLINE row (else 400),
+set to ABSENT (affects streak and leaderboard like any absence; leaderboard cache expires on its TTL as for any
+check-in). The row keeps its location and flags, and the audit entry `ATTENDANCE_CHECKIN_UNDONE` (actor, target member,
+event, slot, previous status, check-in time, location, flags, reason) preserves the evidence, since a later genuine
+check-in overwrites the row. discuva-admin: Undo check-in at the foot of the Attendance History record panel
+(`components/attendance/undo-checkin.tsx`), reason required.
+
+**Robustness notes.** Only a numeric `location.accuracy` counts as reported (`typeof === 'number'`), so a client
+sending `accuracy: null` is not flagged PERFECT_ACCURACY or compared as precise. The member app's location sampling
+window starts at the first fix, not before the permission prompt (the browser's own `timeout` excludes prompt time),
+so a member slow to tap Allow is not failed. **Deploy:** every check-in now writes `location_flags`, so the
+tenant migration must land before the new code takes traffic — fly.toml's `release_command`
+(`node dist/migrate-all-tenants.js`) already guarantees this, running on the new image before Fly switches traffic
+(and auto-rolling back if it fails). The migrations are additive, so the old code keeps working during the rolling
+switch. Building the two attendances indexes briefly blocks writes to that table, so deploy outside service times.
 
 **`EventConfig.enforceMemberLocation` — a separate, per-config setting from distance-check above.** Workers on an
 `IN_PERSON` slot have always had a hard, unconditional requirement to submit location (`checkin()` throws if

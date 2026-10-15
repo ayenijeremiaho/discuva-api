@@ -4414,7 +4414,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"location\": {\n    \"latitude\": 6.5244,\n    \"longitude\": 3.3792\n  }\n}",
+              "raw": "{\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"location\": {\n    \"latitude\": 6.5244,\n    \"longitude\": 3.3792,\n    \"accuracy\": 25\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4431,7 +4431,7 @@
                 "checkin"
               ]
             },
-            "description": "Any authenticated user (MEMBER or WORKER) can check in. Workers MUST include location coordinates. Members may omit location. Location distance is validated if ENFORCE_DISTANCE_CHECK=true. One record per member per event \u2014 checking in to any slot of an event covers the whole event. Members are always PRESENT; workers are PRESENT or LATE depending on workerLateOffsetSeconds. Duplicate check-ins return 409 (enforced at DB level via unique constraint on (member, event))."
+            "description": "Any authenticated user (MEMBER or WORKER) can check in. Workers MUST include location coordinates. Members may omit location. Location distance is validated when the church's distance check is on (its own setting, else the platform default). Optional location.accuracy (meters, the device-reported precision) is credited up to the allowed radius. Rejections return code TOO_FAR, or IMPRECISE_LOCATION when accuracy > 1000m, and are recorded for GET /attendances/blocked-checkins. One record per member per event \u2014 checking in to any slot of an event covers the whole event. Members are always PRESENT; workers are PRESENT or LATE depending on workerLateOffsetSeconds. Duplicate check-ins return 409 (enforced at DB level via unique constraint on (member, event))."
           },
           "response": [
             {
@@ -4587,7 +4587,7 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/attendances/history?page=1&limit=10&memberId=&slotId=&status=ABSENT&dateFrom=2025-01-01&dateTo=2025-12-31&search=&role=",
+              "raw": "{{baseUrl}}/attendances/history?page=1&limit=10&memberId=&slotId=&status=ABSENT&dateFrom=2025-01-01&dateTo=2025-12-31&search=&role=&flagged=",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -4637,6 +4637,11 @@
                   "key": "role",
                   "value": "",
                   "description": "MEMBER | WORKER \u2014 filters roleAtCheckin (the role snapshotted at check-in time)"
+                },
+                {
+                  "key": "flagged",
+                  "value": "",
+                  "description": "true \u2014 only check-ins with locationFlags (possible fake location)"
                 }
               ]
             }
@@ -5191,6 +5196,105 @@
               "body": "{\n  \"minutes\": 150,\n  \"isDefault\": false\n}"
             }
           ]
+        },
+        {
+          "name": "Undo Check-in (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Not at church; same spot as another member\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/attendances/{{attendanceId}}/undo-checkin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "{{attendanceId}}",
+                "undo-checkin"
+              ]
+            },
+            "description": "ADMIN (ATTENDANCE_WRITE). For a check-in believed to be faked: sets an attended record (PRESENT/LATE/ATTENDED_ONLINE) to ABSENT, keeps its location and flags, and writes ATTENDANCE_CHECKIN_UNDONE to the audit log with the reason (required, max 500). 400 if the record is not an attended check-in."
+          }
+        },
+        {
+          "name": "Verify Check-in Location (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendances/{{attendanceId}}/verify-location",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "{{attendanceId}}",
+                "verify-location"
+              ]
+            },
+            "description": "ADMIN (ATTENDANCE_WRITE). On request: compares this check-in's coordinates with the member's other check-ins and everyone else at the same event. Returns { locationFlags, compared, repeatedAt, sharedWith } and saves REPEATED_SPOT / SHARED_SPOT flags (matching rows are flagged too). Only fixes with accuracy <= 100 m are compared."
+          }
+        },
+        {
+          "name": "Blocked Check-ins (Admin)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/attendances/blocked-checkins?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "attendances",
+                "blocked-checkins"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "eventId",
+                  "value": "{{eventId}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "ADMIN (ATTENDANCE_READ). Check-ins rejected by the distance check, newest first: one row per member per event with attempts, closest distance, accuracy, allowed radius, reason (TOO_FAR | IMPRECISE_LOCATION), checkedInLater and wouldPassAtMeters. Optional eventId filter; limit max 100."
+          }
         },
         {
           "name": "Get Enforce Distance Check Setting (Admin)",
