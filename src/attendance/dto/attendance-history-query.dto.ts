@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -7,7 +8,7 @@ import {
   IsUUID,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 
@@ -57,4 +58,10 @@ export class AdminAttendanceHistoryQueryDto extends AttendanceHistoryQueryDto {
   @IsOptional()
   @IsEnum(MemberRoleEnum)
   role?: MemberRoleEnum;
+
+  // Only check-ins with a location flag (possible fake location).
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  flagged?: boolean;
 }

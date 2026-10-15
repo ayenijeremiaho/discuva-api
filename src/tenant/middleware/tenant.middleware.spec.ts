@@ -21,6 +21,7 @@ const mockCls = {
     clsStore[k] = v;
   }),
   get: jest.fn((k: string) => clsStore[k]),
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
 };
 const mockConfigService = { get: jest.fn().mockReturnValue('localhost') };
 const mockTx = { query: jest.fn() };
@@ -216,6 +217,46 @@ describe('TenantMiddleware', () => {
       const res = makeRes(500);
       const next = jest.fn(() => {
         (clsStore.afterCommit as Array<() => unknown>).push(task);
+        res.fire('finish');
+      });
+      await middleware.use(makeReq('church-a.localhost'), res, next);
+      expect(task).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('after-rollback tasks', () => {
+    const activeTenant = {
+      id: 't1',
+      subdomain: 'church-a',
+      schemaName: 'church_a',
+      clusterId: 'default',
+      isActive: true,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+    };
+
+    it('runs them in a fresh transaction after a failed request rolls back', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+      const task = jest.fn();
+      const res = makeRes(400);
+      const next = jest.fn(() => {
+        (clsStore.afterRollback as Array<() => unknown>).push(task);
+        res.fire('finish');
+      });
+      mockTxHost.withTransaction.mockClear();
+
+      await middleware.use(makeReq('church-a.localhost'), res, next);
+
+      expect(task).toHaveBeenCalledTimes(1);
+      // Once for the request, once more for the after-rollback task.
+      expect(mockTxHost.withTransaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not run them when the request succeeds', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+      const task = jest.fn();
+      const res = makeRes(201);
+      const next = jest.fn(() => {
+        (clsStore.afterRollback as Array<() => unknown>).push(task);
         res.fire('finish');
       });
       await middleware.use(makeReq('church-a.localhost'), res, next);

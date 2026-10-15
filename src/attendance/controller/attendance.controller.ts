@@ -14,10 +14,14 @@ import {
 } from '@nestjs/common';
 import { AttendanceService } from '../service/attendance.service';
 import { AttendanceSettingsService } from '../service/attendance-settings.service';
+import { BlockedCheckinService } from '../service/blocked-checkin.service';
+import { BlockedCheckinQueryDto } from '../dto/blocked-checkin-query.dto';
+import { LocationFlagService } from '../service/location-flag.service';
 import { CheckInDto } from '../dto/check-in.dto';
 import {
   AdminMarkAttendanceDto,
   CorrectAttendanceDto,
+  UndoCheckinDto,
   UpdateEnforceDistanceCheckDto,
   UpdateOnlineWindowDto,
 } from '../dto/attendance.dto';
@@ -46,6 +50,8 @@ export class AttendanceController {
   constructor(
     private readonly attendanceService: AttendanceService,
     private readonly attendanceSettingsService: AttendanceSettingsService,
+    private readonly blockedCheckinService: BlockedCheckinService,
+    private readonly locationFlagService: LocationFlagService,
   ) {}
 
   @UseGuards(JwtAuthGuard)
@@ -118,6 +124,7 @@ export class AttendanceController {
       dateTo,
       search,
       role,
+      flagged,
     } = query;
     return this.attendanceService.getAllHistory(
       page,
@@ -129,6 +136,19 @@ export class AttendanceController {
       dateTo,
       search,
       role,
+      flagged,
+    );
+  }
+
+  // Check-ins turned away by the distance check, newest first — for spotting a radius that's too tight.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_READ)
+  @Get('blocked-checkins')
+  async getBlockedCheckins(@Query() query: BlockedCheckinQueryDto) {
+    return this.blockedCheckinService.list(
+      query.page,
+      query.limit,
+      query.eventId,
     );
   }
 
@@ -252,6 +272,28 @@ export class AttendanceController {
       dto.enabled,
       admin.member?.id,
     );
+  }
+
+  // For a check-in believed to be faked: marks it absent and records why in the audit log.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/undo-checkin')
+  async undoCheckin(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UndoCheckinDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.attendanceService.undoCheckin(id, dto.reason, admin.member?.id);
+  }
+
+  // On request: compare one check-in's spot with the member's history and the rest of that service.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.ATTENDANCE_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @Post(':id/verify-location')
+  async verifyLocation(@Param('id', ParseUUIDPipe) id: string) {
+    return this.locationFlagService.verify(id);
   }
 
   @UseGuards(AdminGuard)

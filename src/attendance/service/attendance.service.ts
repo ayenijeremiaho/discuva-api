@@ -22,6 +22,11 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { Attendance } from '../entity/attendance.entity';
 import { AttendanceSettingsService } from './attendance-settings.service';
+import { GENUINELY_ATTENDED_STATUSES } from '../util/attended-statuses';
+import { BlockedCheckinReasonEnum } from '../entity/blocked-checkin.entity';
+import { BlockedCheckinService } from './blocked-checkin.service';
+import { intrinsicLocationFlags } from '../util/location-flags';
+import { afterRollback } from '../../tenant/utility/after-commit';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import {
   FOLLOW_UP_QUEUE,
@@ -58,16 +63,7 @@ import { Admin } from '../../admin/entity/admin.entity';
 
 const MAX_EXPORT_ROWS = 5000;
 
-// Matches getAttendanceStreak's own "genuinely attended" convention
-// (PRESENT/LATE/ATTENDED_ONLINE, e.g. the raw SQL at line ~917/~1442 below)
-// — ABSENT/ON_LEAVE rows (auto-marked before a member shows up, or an
-// admin correction) don't count as "already checked in" the way checkin()
-// below needs to reason about a pre-existing Attendance row.
-const GENUINELY_ATTENDED_STATUSES = new Set([
-  AttendanceStatusEnum.PRESENT,
-  AttendanceStatusEnum.LATE,
-  AttendanceStatusEnum.ATTENDED_ONLINE,
-]);
+const IMPRECISE_ACCURACY_METERS = 1000;
 
 export interface DepartmentAttendanceSummary {
   departmentId: string;
@@ -135,6 +131,7 @@ export class AttendanceService {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly attendanceSettingsService: AttendanceSettingsService,
     private readonly churchTimezone: ChurchTimezoneService,
+    private readonly blockedCheckinService: BlockedCheckinService,
   ) {
     this.leaderboardTtl = this.configService.get<number>(
       'CACHE_TTL_LEADERBOARD_SECONDS',
@@ -210,10 +207,15 @@ export class AttendanceService {
     this.validateCheckinWindow(now, slot, cfg, isWorker);
 
     if (dto.location && cfg.venue) {
-      await this.validateLocation(dto.location, cfg.venue, cfg);
+      await this.validateLocation(dto.location, cfg.venue, cfg, user.id, slot);
     }
 
     const status = this.resolveStatus(now, slot, cfg, isWorker);
+
+    // Cheap checks on the fix alone; comparing against other check-ins happens on request (verify).
+    const locationFlags = dto.location
+      ? intrinsicLocationFlags(dto.location)
+      : [];
 
     try {
       if (existing) {
@@ -227,6 +229,7 @@ export class AttendanceService {
         existing.status = status;
         existing.roleAtCheckin = member.role;
         existing.location = dto.location ?? null;
+        existing.locationFlags = locationFlags;
         await this.attendanceRepository.save(existing);
       } else {
         await this.attendanceRepository.save(
@@ -238,6 +241,7 @@ export class AttendanceService {
             status,
             roleAtCheckin: member.role,
             location: dto.location ?? null,
+            locationFlags,
           }),
         );
       }
@@ -421,6 +425,7 @@ export class AttendanceService {
     dateTo?: string,
     search?: string,
     role?: MemberRoleEnum,
+    flagged?: boolean,
   ) {
     const qb = this.attendanceRepository
       .createQueryBuilder('attendance')
@@ -458,6 +463,8 @@ export class AttendanceService {
     // not the member's current role, which can drift after promotion/
     // demotion.
     if (role) qb.andWhere('attendance.roleAtCheckin = :role', { role });
+    // Same predicate as the partial index IDX_attendances_flagged_created.
+    if (flagged) qb.andWhere('cardinality(attendance.location_flags) > 0');
 
     return qb;
   }
@@ -472,6 +479,7 @@ export class AttendanceService {
     dateTo?: string,
     search?: string,
     role?: MemberRoleEnum,
+    flagged?: boolean,
   ): Promise<PaginationResponseDto<Attendance>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
@@ -483,6 +491,7 @@ export class AttendanceService {
       dateTo,
       search,
       role,
+      flagged,
     )
       .skip((page - 1) * limit)
       .take(limit)
@@ -1267,6 +1276,46 @@ export class AttendanceService {
     return saved;
   }
 
+  // For a check-in an admin believes was faked. Keeps the row (and its location and flags) as evidence, and
+  // copies that evidence into the audit log since a later genuine check-in overwrites the row.
+  async undoCheckin(
+    id: string,
+    reason: string,
+    actorMemberId?: string,
+  ): Promise<Attendance> {
+    const record = await this.attendanceRepository.findOne({
+      where: { id },
+      relations: ['member', 'event', 'serviceSlot'],
+    });
+    if (!record) throw new NotFoundException('Attendance record not found');
+    if (!GENUINELY_ATTENDED_STATUSES.has(record.status)) {
+      throw new BadRequestException('Only an attended check-in can be undone.');
+    }
+
+    const previousStatus = record.status;
+    record.status = AttendanceStatusEnum.ABSENT;
+    const saved = await this.attendanceRepository.save(record);
+
+    this.auditLogService.log('ATTENDANCE_CHECKIN_UNDONE', {
+      actorId: actorMemberId,
+      targetId: record.member?.id,
+      targetName:
+        `${record.member?.firstname ?? ''} ${record.member?.lastname ?? ''}`.trim(),
+      metadata: {
+        attendanceId: record.id,
+        eventId: record.event?.id,
+        eventName: record.event?.name,
+        serviceSlotName: record.serviceSlot?.name ?? null,
+        previousStatus,
+        checkinTime: record.checkinTime,
+        location: record.location,
+        locationFlags: record.locationFlags,
+        reason,
+      },
+    });
+    return saved;
+  }
+
   // Covers two cases with one action: checking in someone who has no phone
   // (no row exists yet for this member+event) and "restoring a streak" for
   // someone who was auto-marked ABSENT (a row exists — just flip it). Streak
@@ -1464,9 +1513,15 @@ export class AttendanceService {
   }
 
   private async validateLocation(
-    location: { latitude: number; longitude: number },
+    location: {
+      latitude: number;
+      longitude: number;
+      accuracy?: number | null;
+    },
     venue: Venue,
     cfg: ReturnType<EventService['resolveSlotConfig']>,
+    memberId: string,
+    slot: ServiceSlot,
   ): Promise<void> {
     const distance = UtilityService.calculateDistanceInMeters(
       location.latitude,
@@ -1474,17 +1529,44 @@ export class AttendanceService {
       venue.latitude,
       venue.longitude,
     );
+    // typeof, not ??: only a real number counts as a reported accuracy.
+    const accuracy =
+      typeof location.accuracy === 'number' ? location.accuracy : null;
+    // Indoor fixes are often 30–100m off; capping the credit at the radius means a vague fix can at most double it.
+    const slack = Math.min(accuracy ?? 0, cfg.allowedDistanceInMeters);
     if (
-      distance > cfg.allowedDistanceInMeters &&
-      (await this.enforceDistance())
+      distance - slack <= cfg.allowedDistanceInMeters ||
+      !(await this.enforceDistance())
     ) {
-      throw new BadRequestException({
-        message: 'You are too far from the venue to check in.',
-        code: 'TOO_FAR',
-        distanceMeters: Math.round(distance),
-        allowedDistanceInMeters: cfg.allowedDistanceInMeters,
-      });
+      return;
     }
+
+    // Approximate-location mode (iOS "Precise Location" off, Android "approximate") reports km-level accuracy.
+    const imprecise = (accuracy ?? 0) > IMPRECISE_ACCURACY_METERS;
+    const reason = imprecise
+      ? BlockedCheckinReasonEnum.IMPRECISE_LOCATION
+      : BlockedCheckinReasonEnum.TOO_FAR;
+    const attempt = {
+      memberId,
+      eventId: slot.event.id,
+      serviceSlotId: slot.id,
+      distanceMeters: distance,
+      accuracyMeters: accuracy,
+      allowedDistanceMeters: cfg.allowedDistanceInMeters,
+      reason,
+      at: this.dateService.now(),
+    };
+    // This request's transaction rolls back with the rejection, so the record is written just after it.
+    afterRollback(this.cls, () => this.blockedCheckinService.record(attempt));
+    throw new BadRequestException({
+      message: imprecise
+        ? 'Your phone is only sharing an approximate location. Turn on Precise Location for this app and try again.'
+        : 'You are too far from the venue to check in.',
+      code: reason,
+      distanceMeters: Math.round(distance),
+      allowedDistanceInMeters: cfg.allowedDistanceInMeters,
+      accuracyMeters: accuracy === null ? null : Math.round(accuracy),
+    });
   }
 
   private resolveStatus(

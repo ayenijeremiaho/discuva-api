@@ -9,4 +9,6 @@ export interface AppClsStore extends ClsStore {
   clusterId: string;
   // Tasks to run once the tenant transaction commits (see utility/after-commit.ts).
   afterCommit?: Array<() => unknown>;
+  // Tasks to run in a fresh transaction after the request's transaction rolls back.
+  afterRollback?: Array<() => unknown>;
 }

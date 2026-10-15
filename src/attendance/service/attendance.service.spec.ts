@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import { addHours, subHours } from 'date-fns';
 import { AttendanceService } from './attendance.service';
 import { AttendanceSettingsService } from './attendance-settings.service';
+import { BlockedCheckinService } from './blocked-checkin.service';
 import { Attendance } from '../entity/attendance.entity';
 import { AttendanceStatusEnum } from '../enums/check-in.enum';
 import { ServiceSlot } from '../../event/entity/service-slot.entity';
@@ -150,6 +151,13 @@ const mockDepartmentAccessService = {
   assertHasCapability: jest.fn(),
 };
 
+const mockBlockedCheckinService = {
+  record: jest.fn().mockResolvedValue(undefined),
+};
+
+// afterRollback runs its task on the next microtask outside a tenant transaction.
+const flushMicrotasks = () => new Promise((r) => setImmediate(r));
+
 const mockAttendanceSettingsService = {
   isEnabled: jest.fn().mockResolvedValue(false),
   getOnlineWindow: jest
@@ -260,6 +268,7 @@ describe('AttendanceService', () => {
           provide: AttendanceSettingsService,
           useValue: mockAttendanceSettingsService,
         },
+        { provide: BlockedCheckinService, useValue: mockBlockedCheckinService },
       ],
     }).compile();
 
@@ -979,6 +988,156 @@ describe('AttendanceService', () => {
 
       expect(result).toEqual({ message: 'Check-in successful' });
     });
+
+    describe('reported GPS accuracy', () => {
+      // ~111m north of the venue, against a 100m radius.
+      const justOutside = { latitude: 6.5254, longitude: 3.3792 };
+      // ~211m north of the venue.
+      const wellOutside = { latitude: 6.5263, longitude: 3.3792 };
+
+      beforeEach(() => {
+        mockSlotRepo.findOne.mockResolvedValue(
+          makeSlot(addHours(new Date(), 1)),
+        );
+        mockMemberService.getById.mockResolvedValue({
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          status: MemberStatusEnum.ACTIVE,
+          workerProfile: null,
+        });
+        mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+        mockAttendanceRepo.findOne.mockResolvedValue(null);
+        mockAttendanceRepo.create.mockImplementation((v) => v);
+        mockAttendanceRepo.save.mockResolvedValue({ id: 'att-1' });
+        mockAttendanceSettingsService.isEnabled.mockResolvedValue(true);
+      });
+
+      it('accepts a check-in just outside the radius when the fix is that imprecise', async () => {
+        const result = await service.checkin(user, {
+          serviceSlotId: 'slot-1',
+          location: { ...justOutside, accuracy: 30 },
+        });
+
+        expect(result).toEqual({ message: 'Check-in successful' });
+        expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            location: { ...justOutside, accuracy: 30 },
+          }),
+        );
+      });
+
+      it('still rejects the same spot when no accuracy is sent', async () => {
+        await expect(
+          service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: justOutside,
+          }),
+        ).rejects.toThrow('You are too far from the venue to check in.');
+      });
+
+      it('caps the credit at the radius, so a vague fix cannot more than double it', async () => {
+        await expect(
+          service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...wellOutside, accuracy: 300 },
+          }),
+        ).rejects.toThrow('You are too far from the venue to check in.');
+      });
+
+      it('records a rejected attempt once the rejected request has rolled back', async () => {
+        await expect(
+          service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...wellOutside, accuracy: 12 },
+          }),
+        ).rejects.toThrow(BadRequestException);
+        await flushMicrotasks();
+
+        expect(mockBlockedCheckinService.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            memberId: user.id,
+            eventId: 'event-1',
+            serviceSlotId: 'slot-1',
+            accuracyMeters: 12,
+            allowedDistanceMeters: 100,
+            reason: 'TOO_FAR',
+          }),
+        );
+        const { distanceMeters } =
+          mockBlockedCheckinService.record.mock.calls[0][0];
+        expect(distanceMeters).toBeGreaterThan(200);
+      });
+
+      it('treats accuracy: null as not reported when rejecting', async () => {
+        try {
+          await service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...wellOutside, accuracy: null },
+          } as any);
+          fail('expected checkin to throw');
+        } catch (err) {
+          const response = (err as BadRequestException).getResponse() as Record<
+            string,
+            unknown
+          >;
+          expect(response.code).toBe('TOO_FAR');
+          expect(response.accuracyMeters).toBeNull();
+        }
+      });
+
+      it('records nothing as blocked when the check-in passes', async () => {
+        await service.checkin(user, {
+          serviceSlotId: 'slot-1',
+          location: { ...justOutside, accuracy: 30 },
+        });
+        await flushMicrotasks();
+        expect(mockBlockedCheckinService.record).not.toHaveBeenCalled();
+      });
+
+      it('tells a phone sharing only an approximate location to turn on Precise Location', async () => {
+        try {
+          await service.checkin(user, {
+            serviceSlotId: 'slot-1',
+            location: { ...wellOutside, accuracy: 2500 },
+          });
+          fail('expected checkin to throw');
+        } catch (err) {
+          const response = (err as BadRequestException).getResponse() as Record<
+            string,
+            unknown
+          >;
+          expect(response.code).toBe('IMPRECISE_LOCATION');
+          expect(response.accuracyMeters).toBe(2500);
+          expect(response.message).toContain('Precise Location');
+        }
+        await flushMicrotasks();
+        expect(mockBlockedCheckinService.record).toHaveBeenCalledWith(
+          expect.objectContaining({ reason: 'IMPRECISE_LOCATION' }),
+        );
+      });
+
+      it('saves the cheap location flags with the check-in, without any extra queries', async () => {
+        const precise = { latitude: 6.524412345, longitude: 3.379212345 };
+        await service.checkin(user, {
+          serviceSlotId: 'slot-1',
+          location: { ...precise, accuracy: 0.4 },
+        });
+        expect(mockAttendanceRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ locationFlags: ['PERFECT_ACCURACY'] }),
+        );
+        expect(mockAttendanceRepo.createQueryBuilder).not.toHaveBeenCalled();
+      });
+
+      it('does not record when distance enforcement is off', async () => {
+        mockAttendanceSettingsService.isEnabled.mockResolvedValue(false);
+        await service.checkin(user, {
+          serviceSlotId: 'slot-1',
+          location: wellOutside,
+        });
+        await flushMicrotasks();
+        expect(mockBlockedCheckinService.record).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('confirmOnlineAttendance', () => {
@@ -1539,6 +1698,68 @@ describe('AttendanceService', () => {
         MemberRoleEnum.WORKER,
       );
       expect(rank).toBe(1);
+    });
+  });
+
+  describe('undoCheckin', () => {
+    const attended = () => ({
+      id: 'att-1',
+      status: AttendanceStatusEnum.PRESENT,
+      checkinTime: new Date('2026-10-18T08:12:00Z'),
+      location: { latitude: 6.5244, longitude: 3.3792, accuracy: 0.5 },
+      locationFlags: ['PERFECT_ACCURACY'],
+      member: { id: 'm1', firstname: 'Ada', lastname: 'Obi' },
+      event: { id: 'e1', name: 'Sunday Service' },
+      serviceSlot: { id: 's1', name: 'First Service' },
+    });
+
+    it('marks the check-in absent, keeps the evidence, and audits who did it and why', async () => {
+      mockAttendanceRepo.findOne.mockResolvedValue(attended());
+      mockAttendanceRepo.save.mockImplementation(async (r) => r);
+
+      const result = await service.undoCheckin(
+        'att-1',
+        'Not at church; location faked',
+        'admin-member-1',
+      );
+
+      expect(result.status).toBe(AttendanceStatusEnum.ABSENT);
+      expect(result.location).toEqual(attended().location);
+      expect(result.locationFlags).toEqual(['PERFECT_ACCURACY']);
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'ATTENDANCE_CHECKIN_UNDONE',
+        expect.objectContaining({
+          actorId: 'admin-member-1',
+          targetId: 'm1',
+          targetName: 'Ada Obi',
+          metadata: expect.objectContaining({
+            attendanceId: 'att-1',
+            eventId: 'e1',
+            previousStatus: AttendanceStatusEnum.PRESENT,
+            reason: 'Not at church; location faked',
+            location: attended().location,
+            locationFlags: ['PERFECT_ACCURACY'],
+          }),
+        }),
+      );
+    });
+
+    it('refuses a record that was never an attended check-in', async () => {
+      mockAttendanceRepo.findOne.mockResolvedValue({
+        ...attended(),
+        status: AttendanceStatusEnum.ABSENT,
+      });
+      await expect(service.undoCheckin('att-1', 'x')).rejects.toThrow(
+        'Only an attended check-in can be undone.',
+      );
+      expect(mockAttendanceRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('404s for an unknown record', async () => {
+      mockAttendanceRepo.findOne.mockResolvedValue(null);
+      await expect(service.undoCheckin('nope', 'x')).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 

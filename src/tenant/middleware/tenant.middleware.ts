@@ -21,7 +21,7 @@ import { extractSubdomain } from '../utility/extract-subdomain';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { JwtPayload } from '../../auth/interface/auth.interface';
 import refreshJwtConfig from '../../config/refresh.jwt.config';
-import { flushAfterCommit } from '../utility/after-commit';
+import { flushAfterCommit, flushAfterRollback } from '../utility/after-commit';
 
 const VALID_SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
 const REFRESH_COOKIE_NAME = 'refresh_token';
@@ -124,6 +124,7 @@ export class TenantMiddleware implements NestMiddleware {
     this.cls.set('schemaName', tenant.schemaName);
     this.cls.set('clusterId', tenant.clusterId);
     this.cls.set('afterCommit', []);
+    this.cls.set('afterRollback', []);
 
     try {
       await this.txHost.withTransaction(async () => {
@@ -156,7 +157,9 @@ export class TenantMiddleware implements NestMiddleware {
       // RollbackSignal is expected and silent; anything else (a genuine
       // error inside the SET LOCAL query itself, say) gets logged since
       // there's no exception filter left downstream to report it.
-      if (!(err instanceof RollbackSignal)) {
+      if (err instanceof RollbackSignal) {
+        await flushAfterRollback(this.cls, this.txHost);
+      } else {
         this.logger.error(
           `Unexpected error in tenant-scoped transaction: ${(err as Error).message}`,
         );
