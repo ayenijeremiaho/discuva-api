@@ -75,9 +75,4 @@ export class CreateEventConfigDto {
   @IsOptional()
   @IsBoolean()
   checkDistance?: boolean;
-
-  // Deprecated and ignored; still accepted so an admin page open from before this change can save.
-  @IsOptional()
-  @IsBoolean()
-  enforceMemberLocation?: boolean;
 }

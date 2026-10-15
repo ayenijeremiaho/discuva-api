@@ -885,9 +885,10 @@ location is required to check in for this service."), so leaving it out can't sk
 location on every in-person slot regardless. Online slots are never checked. A config opts out for services held in
 different places (home fellowships). The member app shows "Your location is saved with your check-in" instead of the
 distance promise for such services and takes the first location reading.
-Replaces `enforceMemberLocation` / `ServiceSlot.enforceMemberLocationOverride`, which are no longer read: the DTOs
-still accept them (ignored) so an admin page open from before the change can save, and the columns are dropped in a
-later release (dropping them now would break the old version during a rolling deploy).
+Replaces "Enforce Member Check-In Location" (`enforceMemberLocation` / `ServiceSlot.enforceMemberLocationOverride`).
+It shipped in two releases so the rolling deploy never broke the old version: the first stopped reading the setting
+(and still accepted the fields), the second dropped the columns (tenant migration `1802851200000-DropEnforceMemberLocation`)
+and removed the fields, so the API now rejects them (`src/event/dto/removed-location-fields.spec.ts`).
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
@@ -14545,9 +14546,10 @@ location is required to check in for this service."), so leaving it out can't sk
 location on every in-person slot regardless. Online slots are never checked. A config opts out for services held in
 different places (home fellowships). The member app shows "Your location is saved with your check-in" instead of the
 distance promise for such services and takes the first location reading.
-Replaces `enforceMemberLocation` / `ServiceSlot.enforceMemberLocationOverride`, which are no longer read: the DTOs
-still accept them (ignored) so an admin page open from before the change can save, and the columns are dropped in a
-later release (dropping them now would break the old version during a rolling deploy).
+Replaces "Enforce Member Check-In Location" (`enforceMemberLocation` / `ServiceSlot.enforceMemberLocationOverride`).
+It shipped in two releases so the rolling deploy never broke the old version: the first stopped reading the setting
+(and still accepted the fields), the second dropped the columns (tenant migration `1802851200000-DropEnforceMemberLocation`)
+and removed the fields, so the API now rejects them (`src/event/dto/removed-location-fields.spec.ts`).
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 

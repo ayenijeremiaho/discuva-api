@@ -236,19 +236,6 @@ describe('EventConfigService', () => {
       );
     });
 
-    it('ignores the old enforceMemberLocation field from an older admin page', async () => {
-      mockRepo.exists.mockResolvedValue(false);
-      mockVenueService.getById.mockResolvedValue(defaultVenue);
-      mockRepo.create.mockReturnValue({});
-      mockRepo.save.mockResolvedValue({});
-
-      await service.create({ ...validDto, enforceMemberLocation: true });
-
-      expect(mockRepo.create).toHaveBeenCalledWith(
-        expect.not.objectContaining({ enforceMemberLocation: true }),
-      );
-    });
-
     it('throws BadRequestException for an IN_PERSON config with no defaultVenueId', async () => {
       mockRepo.exists.mockResolvedValue(false);
       const { defaultVenueId: _dv, ...dtoWithoutVenue } = validDto;
