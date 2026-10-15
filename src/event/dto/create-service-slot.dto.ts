@@ -60,8 +60,7 @@ export class CreateServiceSlotDto {
   @IsInt()
   allowedDistanceOverride?: number;
 
-  // Same "separate from distance-check" reasoning as
-  // EventConfig.enforceMemberLocation — see CreateEventConfigDto.
+  // Deprecated and ignored; still accepted so older clients can save.
   @IsOptional()
   @IsBoolean()
   enforceMemberLocationOverride?: boolean;

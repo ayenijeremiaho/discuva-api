@@ -78,6 +78,7 @@ export class ServiceSlot extends BaseEntity {
   @Column({ name: 'allowed_distance_override', nullable: true, type: 'int' })
   allowedDistanceOverride: number | null;
 
+  // Deprecated: no longer read. Column dropped in a later release.
   @Column({
     name: 'enforce_member_location_override',
     nullable: true,

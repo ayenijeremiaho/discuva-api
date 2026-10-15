@@ -59,7 +59,7 @@ export class EventConfigService {
         dto.checkinCloseMode ?? CheckinCloseModeEnum.AFTER_START,
       allowedDistanceInMeters: dto.allowedDistanceInMeters,
       autoStartSession: dto.autoStartSession ?? false,
-      enforceMemberLocation: dto.enforceMemberLocation ?? false,
+      checkDistance: dto.checkDistance ?? true,
       defaultVenue,
       defaultFormat: format,
       onlineMeetingUrl: dto.onlineMeetingUrl ?? null,
@@ -89,7 +89,11 @@ export class EventConfigService {
     this.assertValidFormat(format, venue?.id);
     config.defaultVenue = venue;
 
-    const { defaultVenueId: _dv, ...rest } = dto;
+    const {
+      defaultVenueId: _dv,
+      enforceMemberLocation: _deprecated,
+      ...rest
+    } = dto;
     Object.assign(config, rest);
     this.validateOffsets(config);
     const saved = await this.repo.save(config);

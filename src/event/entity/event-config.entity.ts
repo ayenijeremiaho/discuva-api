@@ -83,13 +83,12 @@ export class EventConfig extends BaseEntity {
   @Column({ name: 'auto_start_session', default: false })
   autoStartSession: boolean;
 
-  // When true, a member (not just a worker, who is always required
-  // regardless of this) must submit their location to check in to a slot
-  // using this config — enforced in AttendanceService.checkin(), resolved
-  // per-slot via ServiceSlot.enforceMemberLocationOverride. Separate from
-  // the tenant-wide distance-check-enforcement setting: that one decides
-  // whether a too-far check-in is rejected; this one decides whether
-  // location must be submitted at all.
+  // Whether the church's distance check applies to services using this config (off for e.g. home fellowships).
+  // Takes effect only while the church-wide distance check is on; see AttendanceService.checkin().
+  @Column({ name: 'check_distance', default: true })
+  checkDistance: boolean;
+
+  // Deprecated: no longer read; replaced by checkDistance. Column dropped in a later release.
   @Column({ name: 'enforce_member_location', default: false })
   enforceMemberLocation: boolean;
 
