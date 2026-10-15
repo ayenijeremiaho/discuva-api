@@ -2336,9 +2336,17 @@ describe('AttendanceService', () => {
       qb.getMany.mockResolvedValue([
         {
           member: { firstname: 'John', lastname: 'Doe', workerProfile: null },
+          event: { name: 'Sunday Service', eventDate: '2026-06-14' },
           serviceSlot: { name: 'First Service' },
           status: AttendanceStatusEnum.PRESENT,
           checkinTime: new Date('2026-06-15T08:00:00Z'),
+        },
+        {
+          member: { firstname: 'Mary', lastname: 'Ade', workerProfile: null },
+          event: { name: 'Midweek Service', eventDate: '2026-06-17' },
+          serviceSlot: null,
+          status: AttendanceStatusEnum.ABSENT,
+          checkinTime: null,
         },
       ]);
       mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
@@ -2351,11 +2359,33 @@ describe('AttendanceService', () => {
         [
           expect.objectContaining({
             member: 'John Doe',
+            event: 'Sunday Service',
+            eventDate: '2026-06-14',
             service: 'First Service',
             status: AttendanceStatusEnum.PRESENT,
           }),
+          // An absence has no service, so the event is the only thing that says what was missed.
+          expect.objectContaining({
+            member: 'Mary Ade',
+            event: 'Midweek Service',
+            eventDate: '2026-06-17',
+            service: '',
+            status: AttendanceStatusEnum.ABSENT,
+          }),
         ],
       );
+      const columns = mockExcelService.buildWorkbook.mock.calls[0][1].map(
+        (c: { key: string }) => c.key,
+      );
+      expect(columns).toEqual([
+        'member',
+        'department',
+        'event',
+        'eventDate',
+        'service',
+        'status',
+        'checkinTime',
+      ]);
       expect(
         mockEmailQueueService.queueEmailWithTemplateAndAttachments,
       ).toHaveBeenCalledWith(

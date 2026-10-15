@@ -1,4 +1,5 @@
 import * as ExcelJS from 'exceljs';
+import { ExcelService } from '../../utility/service/excel.service';
 import { ClassReportService } from './class-report.service';
 import { EnrollmentStatusEnum as E } from '../enum/enrollment-status.enum';
 
@@ -35,6 +36,12 @@ describe('ClassReportService', () => {
     enrollmentRepo as any,
     classTypeRepo as any,
     progress as any,
+    new ExcelService(
+      { get: (_k: string, d: unknown) => d } as any,
+      { get: () => undefined } as any,
+      {} as any,
+      {} as any,
+    ),
   );
 
   const believersType = {
@@ -194,5 +201,10 @@ describe('ClassReportService', () => {
     expect(wb.getWorksheet('Next steps')!.getRow(2).getCell(5).value).toBe(
       '75%',
     );
+    // No church in context: the Classic header.
+    expect(
+      (wb.getWorksheet('Classes')!.getRow(1).getCell(1).fill as any).fgColor
+        .argb,
+    ).toBe('FFEADCC9');
   });
 });

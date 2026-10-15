@@ -1,5 +1,6 @@
 import * as ExcelJS from 'exceljs';
 import { NotFoundException } from '@nestjs/common';
+import { ExcelService } from '../../utility/service/excel.service';
 import { SundaySchoolReportService } from './sunday-school-report.service';
 import { SundaySchoolAttendanceStatus as S } from '../enums/sunday-school-attendance-status.enum';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
@@ -45,6 +46,12 @@ describe('SundaySchoolReportService', () => {
     assignRepo as any,
     sessionRepo as any,
     attendanceRepo as any,
+    new ExcelService(
+      { get: (_k: string, d: unknown) => d } as any,
+      { get: () => undefined } as any,
+      {} as any,
+      {} as any,
+    ),
   );
 
   beforeEach(() => {

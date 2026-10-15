@@ -17,6 +17,10 @@ import { ServiceSlot } from '../../event/entity/service-slot.entity';
 import { Event as ChurchEvent } from '../../event/entity/event.entity';
 import { ServiceSlotTypeLabels } from '../../service-programme/enum/service-slot-type.enum';
 import { Member } from '../../member/entity/member.entity';
+import {
+  ChurchThemeColors,
+  churchThemeColors,
+} from '../../tenant/constants/church-theme-palette';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { CacheService } from './cache.service';
@@ -44,6 +48,8 @@ interface PdfBranding {
   logoImage: { dataUrl: string; format: 'PNG' | 'JPEG' } | null;
   // IANA zone for rendering times — the server runs in UTC.
   timezone: string;
+  // The church's theme preset; Classic reproduces the original black and gold.
+  theme: ChurchThemeColors;
 }
 
 // The HOD's own department, at the visibility rules already applied by
@@ -91,8 +97,6 @@ export interface ClassCertificatePdf {
 
 const DARK = '#121212';
 const MUTED = '#8A817C';
-const ACCENT = '#EADCC9';
-const LIGHT_GOLD = '#F4EDE4';
 const DANGER = '#C0392B';
 const SUCCESS = '#2E7D32';
 const WHITE = '#FFFFFF';
@@ -130,6 +134,7 @@ export class PdfService {
       currencyLocale: this.config.get<string>('CURRENCY_LOCALE'),
       logoImage: null,
       timezone: this.config.get<string>('TIMEZONE') ?? 'Africa/Lagos',
+      theme: churchThemeColors(null),
     };
 
     const tenantId = this.cls.get('tenantId');
@@ -154,6 +159,7 @@ export class PdfService {
       currencyLocale: fallback.currencyLocale,
       logoImage,
       timezone: tenant.timezone || fallback.timezone,
+      theme: churchThemeColors(tenant.themePreset),
     };
   }
 
@@ -201,10 +207,10 @@ export class PdfService {
     const H = 210;
     const mid = W / 2;
 
-    doc.setDrawColor(ACCENT);
+    doc.setDrawColor(branding.theme.accent);
     doc.setLineWidth(3);
     doc.rect(8, 8, W - 16, H - 16);
-    doc.setDrawColor(DARK);
+    doc.setDrawColor(branding.theme.brand);
     doc.setLineWidth(0.4);
     doc.rect(13, 13, W - 26, H - 26);
 
@@ -245,7 +251,7 @@ export class PdfService {
     doc.setFont('times', 'bold');
     doc.setFontSize(28);
     doc.text(cert.recipientName, mid, y + 52, { align: 'center' });
-    doc.setDrawColor(ACCENT);
+    doc.setDrawColor(branding.theme.accent);
     doc.setLineWidth(0.6);
     doc.line(mid - 80, y + 56, mid + 80, y + 56);
 
@@ -272,7 +278,7 @@ export class PdfService {
     const slots = signers.length ? signers : [''];
     slots.forEach((name, i) => {
       const x = slots.length === 1 ? 60 : 45 + i * 70;
-      doc.setDrawColor(DARK);
+      doc.setDrawColor(branding.theme.brand);
       doc.setLineWidth(0.3);
       doc.line(x - 25, baseY, x + 25, baseY);
       doc.text(name || 'Facilitator', x, baseY + 5, { align: 'center' });
@@ -387,6 +393,7 @@ export class PdfService {
 
     y = this.drawAccentBand(
       doc,
+      branding.theme,
       y,
       report.programme.serviceSlotName ?? 'Session',
       this.fmtDate(report.startedAt, branding.timezone),
@@ -457,13 +464,13 @@ export class PdfService {
         6: { cellWidth: 28 },
       },
       headStyles: {
-        fillColor: ACCENT,
+        fillColor: branding.theme.accent,
         textColor: DARK,
         fontStyle: 'bold',
         fontSize: 9,
       },
       bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: LIGHT_GOLD },
+      alternateRowStyles: { fillColor: branding.theme.soft },
       didParseCell: (data) => {
         if (
           data.section === 'body' &&
@@ -509,13 +516,13 @@ export class PdfService {
           2: { cellWidth: 30 },
         },
         headStyles: {
-          fillColor: ACCENT,
+          fillColor: branding.theme.accent,
           textColor: DARK,
           fontStyle: 'bold',
           fontSize: 9,
         },
         bodyStyles: { fontSize: 9, textColor: MUTED, fillColor: WHITE },
-        alternateRowStyles: { fillColor: LIGHT_GOLD },
+        alternateRowStyles: { fillColor: branding.theme.soft },
       });
     }
 
@@ -529,7 +536,7 @@ export class PdfService {
             return MARGIN;
           })()
         : cursorY;
-    this.drawTimeSummaryBand(doc, summaryY, report);
+    this.drawTimeSummaryBand(doc, branding.theme, summaryY, report);
 
     this.drawPageFooter(doc, branding);
   }
@@ -555,7 +562,10 @@ export class PdfService {
         month: 'long',
         year: 'numeric',
       });
-      const shade = { fillColor: LIGHT_GOLD, fontStyle: 'bold' as const };
+      const shade = {
+        fillColor: branding.theme.soft,
+        fontStyle: 'bold' as const,
+      };
       rows.push([
         { content: monthName, colSpan: 2, styles: shade },
         {
@@ -610,6 +620,7 @@ export class PdfService {
 
     y = this.drawAccentBand(
       doc,
+      branding.theme,
       y,
       `${this.cap(member.firstname)} ${this.cap(member.lastname)}`,
       generatedText,
@@ -662,7 +673,7 @@ export class PdfService {
         4: { cellWidth: 'auto', fontSize: 7.5 },
       },
       headStyles: {
-        fillColor: ACCENT,
+        fillColor: branding.theme.accent,
         textColor: DARK,
         fontStyle: 'bold',
         fontSize: 9,
@@ -670,7 +681,7 @@ export class PdfService {
       bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
       alternateRowStyles: { fillColor: WHITE },
       footStyles: {
-        fillColor: DARK,
+        fillColor: branding.theme.brand,
         textColor: WHITE,
         fontStyle: 'bold',
         fontSize: 9,
@@ -702,7 +713,13 @@ export class PdfService {
     );
 
     let y = this.drawPageHeader(doc, 'Sunday Service Report', branding);
-    y = this.drawAccentBand(doc, y, report.eventName, eventDateFormatted);
+    y = this.drawAccentBand(
+      doc,
+      branding.theme,
+      y,
+      report.eventName,
+      eventDateFormatted,
+    );
     y += 6;
 
     // ── Event-level variance overview table ──────────────────────────────
@@ -761,15 +778,15 @@ export class PdfService {
         5: { cellWidth: 28 },
       },
       headStyles: {
-        fillColor: ACCENT,
+        fillColor: branding.theme.accent,
         textColor: DARK,
         fontStyle: 'bold',
         fontSize: 9,
       },
       bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: LIGHT_GOLD },
+      alternateRowStyles: { fillColor: branding.theme.soft },
       footStyles: {
-        fillColor: DARK,
+        fillColor: branding.theme.brand,
         textColor: WHITE,
         fontStyle: 'bold',
         fontSize: 9,
@@ -796,7 +813,13 @@ export class PdfService {
         y = MARGIN;
       }
 
-      y = this.drawSectionDivider(doc, y, entry.serviceSlotName, slotTime);
+      y = this.drawSectionDivider(
+        doc,
+        branding.theme,
+        y,
+        entry.serviceSlotName,
+        slotTime,
+      );
       y = this.drawLabelValueGrid(doc, y + 4, [
         ['Session Code', r.sessionCode],
         [
@@ -858,13 +881,13 @@ export class PdfService {
           6: { cellWidth: 28 },
         },
         headStyles: {
-          fillColor: ACCENT,
+          fillColor: branding.theme.accent,
           textColor: DARK,
           fontStyle: 'bold',
           fontSize: 9,
         },
         bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
-        alternateRowStyles: { fillColor: LIGHT_GOLD },
+        alternateRowStyles: { fillColor: branding.theme.soft },
         didParseCell: (data) => {
           if (
             data.section === 'body' &&
@@ -904,13 +927,13 @@ export class PdfService {
               : `${Math.round(p.durationSeconds / 60)} min`,
           ]),
           headStyles: {
-            fillColor: ACCENT,
+            fillColor: branding.theme.accent,
             textColor: DARK,
             fontStyle: 'bold',
             fontSize: 9,
           },
           bodyStyles: { fontSize: 9, textColor: MUTED, fillColor: WHITE },
-          alternateRowStyles: { fillColor: LIGHT_GOLD },
+          alternateRowStyles: { fillColor: branding.theme.soft },
         });
         y = (doc as any).lastAutoTable.finalY + 4;
       }
@@ -922,7 +945,7 @@ export class PdfService {
               return MARGIN;
             })()
           : y;
-      y = this.drawTimeSummaryBand(doc, bandY, r) + 8;
+      y = this.drawTimeSummaryBand(doc, branding.theme, bandY, r) + 8;
     }
 
     this.drawPageFooter(doc, branding);
@@ -941,7 +964,7 @@ export class PdfService {
       { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' },
     );
 
-    doc.setFillColor(DARK);
+    doc.setFillColor(branding.theme.brand);
     doc.rect(0, 0, PAGE_W, 22, 'F');
     doc
       .setFont('helvetica', 'bold')
@@ -951,7 +974,7 @@ export class PdfService {
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
-      .setTextColor(ACCENT)
+      .setTextColor(branding.theme.accent)
       .text(branding.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
 
     doc
@@ -981,7 +1004,7 @@ export class PdfService {
       .setFontSize(7.5)
       .text(`Generated: ${generatedAt}`, PAGE_W / 2, 55, { align: 'center' });
     doc
-      .setDrawColor(ACCENT)
+      .setDrawColor(branding.theme.accent)
       .setLineWidth(0.5)
       .line(MARGIN, 59, PAGE_W - MARGIN, 59);
 
@@ -1035,7 +1058,7 @@ export class PdfService {
 
     cards.forEach(({ label, value, color }, i) => {
       const x = MARGIN + i * (cardW + 2);
-      doc.setFillColor(ACCENT);
+      doc.setFillColor(branding.theme.accent);
       doc.roundedRect(x, y, cardW, cardH, 2, 2, 'F');
       doc
         .setFont('helvetica', 'normal')
@@ -1098,13 +1121,13 @@ export class PdfService {
         6: { cellWidth: 18 },
       },
       headStyles: {
-        fillColor: ACCENT,
+        fillColor: branding.theme.accent,
         textColor: DARK,
         fontStyle: 'bold',
         fontSize: 8.5,
       },
       bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: LIGHT_GOLD },
+      alternateRowStyles: { fillColor: branding.theme.soft },
       didParseCell: (data) => {
         if (data.section !== 'body') return;
         const row = allRows[data.row.index];
@@ -1208,6 +1231,7 @@ export class PdfService {
     );
     this.drawOrderOfServiceTable(
       doc,
+      branding.theme,
       y,
       slot?.name ?? 'Service',
       slot?.startTime ?? null,
@@ -1243,7 +1267,13 @@ export class PdfService {
       }
 
       if (!programme) {
-        y = this.drawNoProgammePlaceholder(doc, y, slot, branding.timezone);
+        y = this.drawNoProgammePlaceholder(
+          doc,
+          branding.theme,
+          y,
+          slot,
+          branding.timezone,
+        );
         continue;
       }
 
@@ -1252,6 +1282,7 @@ export class PdfService {
       );
       y = this.drawOrderOfServiceTable(
         doc,
+        branding.theme,
         y,
         slot.name,
         slot.startTime ?? null,
@@ -1272,7 +1303,7 @@ export class PdfService {
     dateLabel: string,
     branding: PdfBranding,
   ): number {
-    doc.setFillColor(DARK);
+    doc.setFillColor(branding.theme.brand);
     doc.rect(0, 0, PAGE_W, 22, 'F');
     doc
       .setFont('helvetica', 'bold')
@@ -1282,7 +1313,7 @@ export class PdfService {
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
-      .setTextColor(ACCENT)
+      .setTextColor(branding.theme.accent)
       .text(branding.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
 
     doc
@@ -1296,7 +1327,7 @@ export class PdfService {
       .setTextColor(MUTED)
       .text(dateLabel, PAGE_W / 2, 48, { align: 'center' });
     doc
-      .setDrawColor(ACCENT)
+      .setDrawColor(branding.theme.accent)
       .setLineWidth(0.5)
       .line(MARGIN, 52, PAGE_W - MARGIN, 52);
     return 58;
@@ -1304,6 +1335,7 @@ export class PdfService {
 
   private drawOrderOfServiceTable(
     doc: jsPDF,
+    theme: ChurchThemeColors,
     y: number,
     serviceName: string,
     serviceStart: Date | null,
@@ -1419,7 +1451,7 @@ export class PdfService {
             colSpan: colCount,
             styles: {
               halign: 'center',
-              fillColor: DARK,
+              fillColor: theme.brand,
               textColor: WHITE,
               fontStyle: 'bold',
               fontSize: 10,
@@ -1433,15 +1465,15 @@ export class PdfService {
       foot: [footRow],
       columnStyles,
       headStyles: {
-        fillColor: ACCENT,
+        fillColor: theme.accent,
         textColor: DARK,
         fontStyle: 'bold',
         fontSize: 8.5,
       },
       bodyStyles: { fontSize: 9, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: LIGHT_GOLD },
+      alternateRowStyles: { fillColor: theme.soft },
       footStyles: {
-        fillColor: DARK,
+        fillColor: theme.brand,
         textColor: WHITE,
         fontStyle: 'bold',
         fontSize: 9,
@@ -1454,6 +1486,7 @@ export class PdfService {
 
   private drawNoProgammePlaceholder(
     doc: jsPDF,
+    theme: ChurchThemeColors,
     y: number,
     slot: ServiceSlot,
     timeZone: string,
@@ -1473,7 +1506,7 @@ export class PdfService {
             colSpan: 6,
             styles: {
               halign: 'center',
-              fillColor: DARK,
+              fillColor: theme.brand,
               textColor: WHITE,
               fontStyle: 'bold',
               fontSize: 10,
@@ -1497,7 +1530,7 @@ export class PdfService {
           },
         ],
       ],
-      headStyles: { fillColor: DARK, textColor: WHITE },
+      headStyles: { fillColor: theme.brand, textColor: WHITE },
       bodyStyles: { fillColor: WHITE },
     });
 
@@ -1516,11 +1549,12 @@ export class PdfService {
 
   private drawSectionDivider(
     doc: jsPDF,
+    theme: ChurchThemeColors,
     y: number,
     title: string,
     subtitle: string,
   ): number {
-    doc.setFillColor(DARK);
+    doc.setFillColor(theme.brand);
     doc.rect(MARGIN, y, CONTENT_W, 9, 'F');
     doc
       .setFont('helvetica', 'bold')
@@ -1530,7 +1564,7 @@ export class PdfService {
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
-      .setTextColor(ACCENT)
+      .setTextColor(theme.accent)
       .text(subtitle, PAGE_W - MARGIN - 4, y + 6, { align: 'right' });
     return y + 9;
   }
@@ -1542,7 +1576,7 @@ export class PdfService {
     title: string,
     branding: PdfBranding,
   ): number {
-    doc.setFillColor(DARK);
+    doc.setFillColor(branding.theme.brand);
     doc.rect(0, 0, PAGE_W, 22, 'F');
 
     // Logo shifts the church name/tagline right to make room — wrapped in
@@ -1575,7 +1609,7 @@ export class PdfService {
     doc
       .setFont('helvetica', 'normal')
       .setFontSize(8)
-      .setTextColor(ACCENT)
+      .setTextColor(branding.theme.accent)
       .text(branding.churchTagline, PAGE_W - MARGIN, 10, { align: 'right' });
 
     doc
@@ -1585,7 +1619,7 @@ export class PdfService {
       .text(title, MARGIN, 36);
 
     doc
-      .setDrawColor(ACCENT)
+      .setDrawColor(branding.theme.accent)
       .setLineWidth(0.6)
       .line(MARGIN, 40, PAGE_W - MARGIN, 40);
 
@@ -1594,6 +1628,7 @@ export class PdfService {
 
   private drawAccentBand(
     doc: jsPDF,
+    theme: ChurchThemeColors,
     y: number,
     primary: string,
     secondary: string,
@@ -1601,7 +1636,7 @@ export class PdfService {
     rightValue?: string,
   ): number {
     const h = 14;
-    doc.setFillColor(ACCENT);
+    doc.setFillColor(theme.accent);
     doc.roundedRect(MARGIN, y, CONTENT_W, h, 2, 2, 'F');
 
     doc
@@ -1767,11 +1802,12 @@ export class PdfService {
 
   private drawTimeSummaryBand(
     doc: jsPDF,
+    theme: ChurchThemeColors,
     y: number,
     report: SessionReport,
   ): number {
     const h = 14;
-    doc.setFillColor(ACCENT);
+    doc.setFillColor(theme.accent);
     doc.roundedRect(MARGIN, y, CONTENT_W, h, 2, 2, 'F');
 
     const colW = CONTENT_W / 4;
@@ -1828,7 +1864,7 @@ export class PdfService {
       doc.setPage(i);
       const pageH = 297;
       doc
-        .setDrawColor(ACCENT)
+        .setDrawColor(branding.theme.accent)
         .setLineWidth(0.4)
         .line(MARGIN, pageH - 16, PAGE_W - MARGIN, pageH - 16);
       doc
@@ -1893,6 +1929,7 @@ export class PdfService {
     let y = this.drawPageHeader(doc, 'Department Goals', branding);
     y = this.drawAccentBand(
       doc,
+      branding.theme,
       y,
       report.departmentName,
       report.cycleName,
@@ -1926,13 +1963,13 @@ export class PdfService {
         2: { cellWidth: CONTENT_W * 0.25 },
       },
       headStyles: {
-        fillColor: ACCENT,
+        fillColor: branding.theme.accent,
         textColor: DARK,
         fontStyle: 'bold',
         fontSize: 9,
       },
       bodyStyles: { fontSize: 8.5, textColor: DARK, fillColor: WHITE },
-      alternateRowStyles: { fillColor: LIGHT_GOLD },
+      alternateRowStyles: { fillColor: branding.theme.soft },
     });
   }
 }
