@@ -4487,7 +4487,7 @@
                 "distance-check"
               ]
             },
-            "description": "Member-readable mirror of the admin distance-check setting above \u2014 whether the tenant currently enforces the venue distance check on check-in. Any authenticated member or worker; not sensitive data. The member app uses this to skip its own client-side distance pre-check when enforcement is off, instead of always blocking regardless of the tenant's actual setting."
+            "description": "Any authenticated member or worker. Returns { enabled }: whether the church's Distance Check is on, served from the Redis cache (no database read). The member app asks only when a service is open for in-person check-in, to word its check-in screen; the server makes the real decision at check-in."
           },
           "response": [
             {

@@ -889,6 +889,12 @@ Replaces "Enforce Member Check-In Location" (`enforceMemberLocation` / `ServiceS
 It shipped in two releases so the rolling deploy never broke the old version: the first stopped reading the setting
 (and still accepted the fields), the second dropped the columns (tenant migration `1802851200000-DropEnforceMemberLocation`)
 and removed the fields, so the API now rejects them (`src/event/dto/removed-location-fields.spec.ts`).
+What each screen shows follows both switches. discuva-admin loads the church setting once on Event Configs and shares it
+with the banner, list and form: while Distance Check is off, each config's radius reads "… · not checked while Distance
+Check is off" and the form notes that Use Distance Check has no effect; a config's own setting never changes. The member
+app asks `GET attendances/me/distance-check` only once a service is open for in-person check-in (once per session), and
+says the location is just saved when either switch is off. That endpoint now returns `{ enabled }` from the Redis-cached
+`AttendanceSettingsService.isEnabled()` (same cache as the check-in path), so it adds no database reads.
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 
@@ -14550,6 +14556,12 @@ Replaces "Enforce Member Check-In Location" (`enforceMemberLocation` / `ServiceS
 It shipped in two releases so the rolling deploy never broke the old version: the first stopped reading the setting
 (and still accepted the fields), the second dropped the columns (tenant migration `1802851200000-DropEnforceMemberLocation`)
 and removed the fields, so the API now rejects them (`src/event/dto/removed-location-fields.spec.ts`).
+What each screen shows follows both switches. discuva-admin loads the church setting once on Event Configs and shares it
+with the banner, list and form: while Distance Check is off, each config's radius reads "… · not checked while Distance
+Check is off" and the form notes that Use Distance Check has no effect; a config's own setting never changes. The member
+app asks `GET attendances/me/distance-check` only once a service is open for in-person check-in (once per session), and
+says the location is just saved when either switch is off. That endpoint now returns `{ enabled }` from the Redis-cached
+`AttendanceSettingsService.isEnabled()` (same cache as the check-in path), so it adds no database reads.
 
 **Distributed absence-marking lock:** The every-5-minute cron job acquires a Redis `SET NX EX 270` lock before running. If a second instance starts while the first is running, it sees the lock and skips silently. The TTL (270 s) is shorter than the cron interval (300 s) so the lock self-expires if the process crashes mid-run. Department-scoped history endpoints (`/history/department`, `/department/event/:eventId`) are automatically scoped to the caller's own department via their lead-role assignment — no `departmentId` query parameter is accepted or needed.
 

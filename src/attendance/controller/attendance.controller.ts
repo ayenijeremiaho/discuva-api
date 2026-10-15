@@ -61,13 +61,12 @@ export class AttendanceController {
     return this.attendanceService.checkin(req.user, dto);
   }
 
-  // Member-readable mirror of admin's settings/distance-check below — not
-  // sensitive data, just whether the app should bother enforcing distance
-  // client-side before letting a member attempt check-in at all.
+  // Whether the church checks distance, for what the member app's check-in screen says. Served from the same
+  // Redis-cached value the check-in path uses, so a busy Sunday morning adds no database reads.
   @UseGuards(JwtAuthGuard)
   @Get('me/distance-check')
   async getMyEnforceDistanceCheck() {
-    return this.attendanceSettingsService.getConfig();
+    return { enabled: await this.attendanceSettingsService.isEnabled() };
   }
 
   @UseGuards(JwtAuthGuard)
