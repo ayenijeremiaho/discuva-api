@@ -1,0 +1,13 @@
+.report-badge {
+          background-color: {{ soft_color }};
+          border-left: 3px solid {{ brand_color }};
+          border-radius: 8px;
+          padding: 18px 20px;
+          margin: 24px 0;
+      }
+.report-badge p {
+          color: #121212;
+          margin: 0;
+          font-weight: 600;
+          font-size: 16px;
+      }

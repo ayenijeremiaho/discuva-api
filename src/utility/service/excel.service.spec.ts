@@ -59,6 +59,7 @@ describe('ExcelService', () => {
         brand: '#121212',
         accent: '#EADCC9',
         soft: '#F4EDE4',
+        tint: '#FAF8F4',
       });
     }
   });

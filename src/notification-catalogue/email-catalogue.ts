@@ -331,16 +331,19 @@ function fillHtml(html: string, vars: Record<string, string>): string {
 
 const TEMPLATE_DIR = path.resolve(__dirname, '..', 'utility', 'templates');
 const compiled = new Map<string, Handlebars.TemplateDelegate>();
-const styles = new Map<string, string>();
+const styles = new Map<string, Handlebars.TemplateDelegate | null>();
 
-function extraStyles(key: string): string {
+// Per-email CSS is a template too, so it can use the church's theme ({{ brand_color }}, {{ soft_color }}).
+function extraStyles(key: string, vars: Record<string, unknown>): string {
   let css = styles.get(key);
   if (css === undefined) {
     const file = path.join(TEMPLATE_DIR, 'content', `${key}.css`);
-    css = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
+    css = fs.existsSync(file)
+      ? Handlebars.compile(fs.readFileSync(file, 'utf-8'))
+      : null;
     styles.set(key, css);
   }
-  return css;
+  return css ? css(vars) : '';
 }
 
 function compileFile(relative: string): Handlebars.TemplateDelegate {
@@ -352,6 +355,37 @@ function compileFile(relative: string): Handlebars.TemplateDelegate {
     compiled.set(relative, template);
   }
   return template;
+}
+
+// Emails outside the catalogue (fixed wording) that still use the shared layout: name → preheader.
+const LAYOUT_EMAILS: Record<string, string> = {
+  'report-export': 'Your requested report — {{ reportTitle }}',
+  'service-session-report': 'Session report for {{ serviceName }} — {{ date }}',
+  'finance-budget-alert':
+    'Budget {{ budgetName }} is {{ utilizationPct }}% utilised — action may be required.',
+};
+
+export function usesSharedLayout(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(LAYOUT_EMAILS, name);
+}
+
+// content/<name>.html (and optional .css) inside the shared layout; the content carries its own sign-off.
+export function renderInLayout(
+  name: string,
+  data: TemplateData,
+  branding: Record<string, string>,
+  subject: string,
+): { subject: string; html: string } {
+  const base = { ...branding, ...data };
+  const html = compileFile('layouts/base.html')({
+    ...base,
+    subject,
+    preheader: Handlebars.compile(LAYOUT_EMAILS[name])(base),
+    show_signoff: false,
+    extra_styles: extraStyles(name, base),
+    content: compileFile(`content/${name}.html`)(base),
+  });
+  return { subject, html };
 }
 
 // defaultSubject is the sender's own subject, available to wording as {{default_subject}}.
@@ -391,7 +425,7 @@ export function renderCatalogueEmail(
     signoff,
     signature,
     show_signoff: !!(signoff || signature),
-    extra_styles: extraStyles(key),
+    extra_styles: extraStyles(key, base),
     content,
   });
   return { subject, html };

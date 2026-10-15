@@ -74,6 +74,7 @@
     "exceljs": "^4.4.0",
     "handlebars": "^4.7.9",
     "helmet": "^8.2.0",
+    "image-size": "1.2.1",
     "ioredis": "^5.11.1",
     "joi": "^18.2.1",
     "jsdom": "^28.1.0",

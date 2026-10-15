@@ -584,7 +584,29 @@ exactly the original `#121212` / `#EADCC9` / `#F4EDE4`, so Classic churches see 
 - `ExcelService.themeColors()` (same cache entry) and `styleHeaderRow()`: header row in `accent` with dark bold text, a
   `brand` rule beneath, frozen while scrolling. Used by `buildWorkbook()` (every single-sheet export) and by the class
   and Sunday School report workbooks. Import templates (tithe, member, goals) stay plain.
-- Emails still use the fixed Classic layout.
+- Emails use the theme too (below).
+
+**Email layout (`utility/templates/layouts/base.html`).** One shared, table-based layout for every church email: a header
+band in `brand_color` with the logo on a white rounded tile (white-background logos look intentional, and dark
+transparent logos stay visible against a dark band) and the church name in white; a white rounded card for the
+content; a muted footer. `EmailQueueService.resolveBrandingData()` adds `brand_color`, `accent_color` and `soft_color`
+(the palette's `tint`, accent 80% toward white, so highlight boxes stay light on vivid themes) from `Tenant.themePreset`
+(Classic outside a tenant). Buttons, links, highlight/reminder/details boxes and the "copy this link" boxes use them.
+Per-email CSS (`content/<key>.css`) is compiled with Handlebars too, so it can use the same variables; per-email `h1`
+overrides were removed so headings follow the layout. `report-export`, `service-session-report` and
+`finance-budget-alert` (fixed wording, outside the catalogue) now render `content/<name>.html` inside the same layout via
+`renderInLayout()` / `usesSharedLayout()` in `email-catalogue.ts`; their old standalone files were removed. Discuva's
+own platform emails (`tenant-welcome`, `founder-welcome`, `platform-admin-welcome`, `tenant-approval-needed`) keep their
+standalone files.
+
+**Email logo sizing.** The logo gets exact `width`/`height` that fit a 200×64 box at its own proportions
+(`utility/util/logo-size.ts`: `fitLogo`, `measureLogo` via the `image-size` package, `fetchLogoBytes` with a 4s timeout;
+data URLs decoded locally). `EmailQueueService.logoSizeVars()` measures each logo URL once and caches the natural size
+for a day under `email-logo-size:<url>` (a new upload has a new URL), adding `logo_width`/`logo_height` to the branding.
+Explicit attributes are what Outlook honours; CSS-only `height` + `max-width` squeezed wide logos (a 6:1 logo came out
+200×64). When a logo can't be fetched or read, the layout falls back to `width/height: auto` with `max-width: 200px;
+max-height: 64px`. The recommended upload (square, 512×512) shows at 64×64. A white logo on a transparent background
+vanishes on the white tile; the Church Profile upload hint says so.
 
 **Event series (`EventSeriesService`, `event_series` table):** every `POST /events` with `isRecurring: true` now creates a series row (pattern, interval, `startDate`, `endDate` — `null` when `recurrence.ongoing` — the slot blueprint, `autoProgramme`, `generatedThrough`, `isActive`) and its occurrences are ordinary `events` rows with `recurringEventId = series.id` and `seriesOccurrenceDate` (the church-local date they stand for; unique per series via `UQ_events_series_occurrence`). A fixed end date must be within a year of the start; an ongoing series has none.
 - **Generation:** `generate(series, tz, now, until?)` walks occurrence dates (k × interval days/weeks; monthly via calendar months) after `generatedThrough` up to `min(until ?? today + 56 days, endDate)`, skips dates whose first service has already started or that already exist, builds each via `EventService.buildOccurrence`, and advances `generatedThrough`. Because it never revisits dates at or before `generatedThrough`, **cancelling one date (`DELETE /events/:id`) sticks** — it is not recreated.
@@ -14235,7 +14257,29 @@ exactly the original `#121212` / `#EADCC9` / `#F4EDE4`, so Classic churches see 
 - `ExcelService.themeColors()` (same cache entry) and `styleHeaderRow()`: header row in `accent` with dark bold text, a
   `brand` rule beneath, frozen while scrolling. Used by `buildWorkbook()` (every single-sheet export) and by the class
   and Sunday School report workbooks. Import templates (tithe, member, goals) stay plain.
-- Emails still use the fixed Classic layout.
+- Emails use the theme too (below).
+
+**Email layout (`utility/templates/layouts/base.html`).** One shared, table-based layout for every church email: a header
+band in `brand_color` with the logo on a white rounded tile (white-background logos look intentional, and dark
+transparent logos stay visible against a dark band) and the church name in white; a white rounded card for the
+content; a muted footer. `EmailQueueService.resolveBrandingData()` adds `brand_color`, `accent_color` and `soft_color`
+(the palette's `tint`, accent 80% toward white, so highlight boxes stay light on vivid themes) from `Tenant.themePreset`
+(Classic outside a tenant). Buttons, links, highlight/reminder/details boxes and the "copy this link" boxes use them.
+Per-email CSS (`content/<key>.css`) is compiled with Handlebars too, so it can use the same variables; per-email `h1`
+overrides were removed so headings follow the layout. `report-export`, `service-session-report` and
+`finance-budget-alert` (fixed wording, outside the catalogue) now render `content/<name>.html` inside the same layout via
+`renderInLayout()` / `usesSharedLayout()` in `email-catalogue.ts`; their old standalone files were removed. Discuva's
+own platform emails (`tenant-welcome`, `founder-welcome`, `platform-admin-welcome`, `tenant-approval-needed`) keep their
+standalone files.
+
+**Email logo sizing.** The logo gets exact `width`/`height` that fit a 200×64 box at its own proportions
+(`utility/util/logo-size.ts`: `fitLogo`, `measureLogo` via the `image-size` package, `fetchLogoBytes` with a 4s timeout;
+data URLs decoded locally). `EmailQueueService.logoSizeVars()` measures each logo URL once and caches the natural size
+for a day under `email-logo-size:<url>` (a new upload has a new URL), adding `logo_width`/`logo_height` to the branding.
+Explicit attributes are what Outlook honours; CSS-only `height` + `max-width` squeezed wide logos (a 6:1 logo came out
+200×64). When a logo can't be fetched or read, the layout falls back to `width/height: auto` with `max-width: 200px;
+max-height: 64px`. The recommended upload (square, 512×512) shows at 64×64. A white logo on a transparent background
+vanishes on the white tile; the Church Profile upload hint says so.
 
 **Event series (`EventSeriesService`, `event_series` table):** every `POST /events` with `isRecurring: true` now creates a series row (pattern, interval, `startDate`, `endDate` — `null` when `recurrence.ongoing` — the slot blueprint, `autoProgramme`, `generatedThrough`, `isActive`) and its occurrences are ordinary `events` rows with `recurringEventId = series.id` and `seriesOccurrenceDate` (the church-local date they stand for; unique per series via `UQ_events_series_occurrence`). A fixed end date must be within a year of the start; an ongoing series has none.
 - **Generation:** `generate(series, tz, now, until?)` walks occurrence dates (k × interval days/weeks; monthly via calendar months) after `generatedThrough` up to `min(until ?? today + 56 days, endDate)`, skips dates whose first service has already started or that already exist, builds each via `EventService.buildOccurrence`, and advances `generatedThrough`. Because it never revisits dates at or before `generatedThrough`, **cancelling one date (`DELETE /events/:id`) sticks** — it is not recreated.

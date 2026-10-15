@@ -1,0 +1,27 @@
+.report-badge {
+          background-color: {{ soft_color }};
+          border-left: 3px solid {{ brand_color }};
+          border-radius: 8px;
+          padding: 18px 20px;
+          margin: 24px 0;
+      }
+.report-badge p {
+          color: #121212;
+          margin: 0;
+          font-weight: 600;
+          font-size: 16px;
+      }
+.stat-row {
+          border-top: 1px solid rgba(18, 18, 18, 0.08);
+          padding: 10px 0;
+      }
+.stat-label {
+          font-size: 13px;
+          color: #8A817C;
+          font-weight: 400;
+      }
+.stat-value {
+          font-size: 15px;
+          color: #121212;
+          font-weight: 500;
+      }

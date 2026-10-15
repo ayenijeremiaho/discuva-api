@@ -1,5 +1,5 @@
 .alert {
-          background: #fdfaf2;
+          background: {{ soft_color }};
           border: 1px dashed rgba(18, 18, 18, 0.15);
           padding: 16px 20px;
           margin: 24px 0;

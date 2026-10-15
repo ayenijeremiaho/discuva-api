@@ -66,6 +66,9 @@ const mockTemplates = {
 const mockRecipients = { byEmail: jest.fn() };
 
 describe('EmailQueueService', () => {
+  let fetchSpy: jest.SpyInstance;
+  afterEach(() => fetchSpy.mockRestore());
+
   let service: EmailQueueService;
 
   beforeEach(async () => {
@@ -83,6 +86,10 @@ describe('EmailQueueService', () => {
     );
     mockEmailCategorySettingsService.isEnabled.mockResolvedValue(true);
     (fs.readFileSync as jest.Mock).mockReturnValue(TEMPLATE);
+    // Logo measuring would otherwise download the sample logo URLs.
+    fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ ok: false } as Response);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -412,6 +419,103 @@ describe('EmailQueueService', () => {
         name: 'St. Example Church',
         subdomain: 'example',
       });
+    });
+
+    it('sizes the logo to fit the header tile at its own proportions, measuring it once per URL', async () => {
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+        'base64',
+      );
+      png.writeUInt32BE(600, 16);
+      png.writeUInt32BE(100, 20);
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        arrayBuffer: async () => png,
+      } as unknown as Response);
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        subdomain: 'example',
+        logoUrl: 'https://cdn.example.com/wide-logo.png',
+      });
+
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        'Report',
+        'report-export',
+        {
+          reportTitle: 'Attendance History',
+          generatedAt: 'today',
+        },
+      );
+
+      const img = sentHtml().match(/<img[^>]*wide-logo\.png[^>]*>/)![0];
+      expect(img).toContain('width="200"');
+      expect(img).toContain('height="33"');
+      expect(mockCacheService.getOrSet).toHaveBeenCalledWith(
+        'email-logo-size:https://cdn.example.com/wide-logo.png',
+        expect.any(Function),
+        86400,
+      );
+    });
+
+    it("falls back to shrink-to-fit when the logo can't be read", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        subdomain: 'example',
+        logoUrl: 'https://cdn.example.com/broken.png',
+      });
+
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        'Report',
+        'report-export',
+        {
+          reportTitle: 'Attendance History',
+          generatedAt: 'today',
+        },
+      );
+
+      const img = sentHtml().match(/<img[^>]*broken\.png[^>]*>/)![0];
+      expect(img).toContain('max-width: 200px; max-height: 64px');
+    });
+
+    it("sends the report email in the shared layout, in the church's theme", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        id: 'tenant-1',
+        name: 'St. Example Church',
+        subdomain: 'example',
+        themePreset: 'ocean',
+      });
+
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        'Report',
+        'report-export',
+        {
+          reportTitle: 'Attendance History',
+          generatedAt: 'today',
+        },
+      );
+
+      const html = sentHtml();
+      expect(html).toContain('Attendance History');
+      expect(html).toContain('St. Example Church');
+      expect(html).toContain('background-color: #084C61');
+    });
+
+    it('uses Classic colours for a church on the default theme', async () => {
+      await service.queueEmailWithTemplate(
+        'a@b.com',
+        'Report',
+        'report-export',
+        {
+          reportTitle: 'Attendance History',
+          generatedAt: 'today',
+        },
+      );
+      expect(sentHtml()).toContain('background-color: #121212');
     });
 
     it("uses the church's wording, including its subject, around the locked details", async () => {

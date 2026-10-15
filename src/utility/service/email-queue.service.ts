@@ -1,3 +1,5 @@
+import { fetchLogoBytes, fitLogo, measureLogo } from '../util/logo-size';
+import { churchThemeColors } from '../../tenant/constants/church-theme-palette';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -21,10 +23,21 @@ import {
   EmailWording,
   isCatalogueEmail,
   renderCatalogueEmail,
+  renderInLayout,
+  usesSharedLayout,
 } from '../../notification-catalogue/email-catalogue';
 import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
 import { NotificationRecipientService } from '../../notification-catalogue/service/notification-recipient.service';
 import { needsRecipient } from '../../notification-catalogue/recipient';
+
+// The church's theme for the email layout: brand_color (header, buttons, links) and soft_color (highlight boxes).
+function themeVars(preset: string | null): Record<string, string> {
+  const { brand, accent, tint } = churchThemeColors(preset);
+  return { brand_color: brand, accent_color: accent, soft_color: tint };
+}
+
+// A church's logo rarely changes; re-measured daily, or sooner when its URL changes (new upload).
+const LOGO_SIZE_TTL_SECONDS = 24 * 60 * 60;
 
 @Injectable()
 export class EmailQueueService {
@@ -216,6 +229,14 @@ export class EmailQueueService {
         await this.recipientFor(templateName, wording, templateData, to),
       );
     }
+    if (usesSharedLayout(templateName)) {
+      return renderInLayout(
+        templateName,
+        templateData,
+        await this.resolveBrandingData(),
+        subject,
+      );
+    }
     const templatePath = path.resolve(
       __dirname,
       '..',
@@ -281,6 +302,11 @@ export class EmailQueueService {
   // "Church Subdomain" field from it, rather than the URL's host carrying
   // it the way member's does.
   private async resolveBrandingData(): Promise<Record<string, string>> {
+    const branding = await this.resolveBrandingBase();
+    return { ...branding, ...(await this.logoSizeVars(branding.logo_url)) };
+  }
+
+  private async resolveBrandingBase(): Promise<Record<string, string>> {
     const fallback = {
       church_name: this.config.get<string>('CHURCH_NAME'),
       church_address: this.config.get<string>('CHURCH_ADDRESS'),
@@ -291,7 +317,9 @@ export class EmailQueueService {
     };
 
     const tenant = await this.getCurrentTenant();
-    if (!tenant) return { ...fallback, support_email: '' };
+    if (!tenant) {
+      return { ...fallback, support_email: '', ...themeVars(null) };
+    }
 
     return {
       church_name: tenant.name || fallback.church_name,
@@ -303,7 +331,27 @@ export class EmailQueueService {
       admin_login_url: buildAdminUrl(fallback.admin_login_url, '', {
         subdomain: tenant.subdomain,
       }),
+      ...themeVars(tenant.themePreset),
     };
+  }
+  // Exact width/height for the logo, so it fits the header tile at its own proportions in every email app
+  // (Outlook ignores CSS sizing). Measured once per logo URL; blank when it can't be read, and the layout then
+  // falls back to shrink-to-fit CSS.
+  private async logoSizeVars(
+    logoUrl: string | undefined,
+  ): Promise<Record<string, string>> {
+    if (!logoUrl) return {};
+    const natural = await this.cacheService.getOrSet(
+      `email-logo-size:${logoUrl}`,
+      async () => {
+        const bytes = await fetchLogoBytes(logoUrl);
+        return bytes ? measureLogo(bytes) : null;
+      },
+      LOGO_SIZE_TTL_SECONDS,
+    );
+    if (!natural) return {};
+    const { width, height } = fitLogo(natural);
+    return { logo_width: String(width), logo_height: String(height) };
   }
 
   // Public escape hatch for the one call site (AuthService's session

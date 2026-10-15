@@ -3,6 +3,8 @@ import {
   EmailTemplateKey,
   defaultWording,
   renderCatalogueEmail,
+  renderInLayout,
+  usesSharedLayout,
 } from './email-catalogue';
 
 const TOKEN = /{{\s*(\w+)\s*}}/g;
@@ -18,7 +20,103 @@ const visibleText = (html: string) =>
     .replace(/<[^>]+>/g, ' ')
     .replace(/\s+/g, ' ');
 
+const ocean = {
+  brand_color: '#084C61',
+  accent_color: '#8DD5D5',
+  soft_color: '#E8F6F6',
+};
+
 describe('email catalogue', () => {
+  it.each(Object.entries(EMAIL_CATALOGUE))(
+    "%s fills the church's theme into its styles, leaving no placeholders",
+    (key, template) => {
+      const { html } = renderCatalogueEmail(
+        key as EmailTemplateKey,
+        defaultWording(key as EmailTemplateKey),
+        template.sampleData,
+        { ...branding, ...ocean },
+      );
+      const styles = html.match(/<style[\s\S]*?<\/style>/)![0];
+      expect(styles).not.toMatch(/{{|}}/);
+      expect(html).toContain('background-color: #084C61');
+    },
+  );
+
+  it('gives the logo its exact fitted size when it has been measured', () => {
+    const { html } = renderCatalogueEmail(
+      EmailTemplateKey.HAPPY_BIRTHDAY,
+      defaultWording(EmailTemplateKey.HAPPY_BIRTHDAY),
+      { name: 'Ada' },
+      { ...branding, ...ocean, logo_width: '200', logo_height: '33' },
+    );
+    const img = html.match(/<img[^>]*logo\.png[^>]*>/)![0];
+    expect(img).toContain('width="200"');
+    expect(img).toContain('height="33"');
+    expect(img).toContain('width: 200px; height: 33px');
+    expect(img).toContain('alt="Test Church"');
+  });
+
+  it('shrinks an unmeasured logo to fit without stretching it', () => {
+    const { html } = renderCatalogueEmail(
+      EmailTemplateKey.HAPPY_BIRTHDAY,
+      defaultWording(EmailTemplateKey.HAPPY_BIRTHDAY),
+      { name: 'Ada' },
+      { ...branding, ...ocean },
+    );
+    const img = html.match(/<img[^>]*logo\.png[^>]*>/)![0];
+    expect(img).toContain(
+      'width: auto; height: auto; max-width: 200px; max-height: 64px',
+    );
+    expect(img).not.toMatch(/\s(width|height)="/);
+  });
+
+  it('leaves the logo tile out when the church has no logo', () => {
+    const { html } = renderCatalogueEmail(
+      EmailTemplateKey.HAPPY_BIRTHDAY,
+      defaultWording(EmailTemplateKey.HAPPY_BIRTHDAY),
+      { name: 'Ada' },
+      { ...branding, ...ocean, logo_url: '' },
+    );
+    expect(html).not.toContain('<img');
+    expect(html).toContain('Test Church');
+  });
+
+  it.each([
+    [
+      'report-export',
+      { reportTitle: 'Attendance History', generatedAt: 'today' },
+      'Attendance History',
+    ],
+    [
+      'service-session-report',
+      { serviceName: 'First Service', date: '18 Oct', sessionCode: 'FS-1' },
+      'FS-1',
+    ],
+    [
+      'finance-budget-alert',
+      { budgetName: 'Outreach', utilizationPct: 92, isExhausted: false },
+      'Outreach',
+    ],
+  ])('%s uses the shared themed layout', (name, data, expected) => {
+    expect(usesSharedLayout(name)).toBe(true);
+    const { html } = renderInLayout(
+      name,
+      data,
+      { ...branding, ...ocean },
+      'Subject',
+    );
+    expect(html.startsWith('<!DOCTYPE')).toBe(true);
+    expect(visibleText(html)).toContain(expected);
+    expect(visibleText(html)).not.toMatch(/{{|}}/);
+    expect(html.match(/<style[\s\S]*?<\/style>/)![0]).not.toMatch(/{{|}}/);
+    expect(html).toContain('background-color: #084C61');
+    expect(html).toContain('Test Church');
+  });
+
+  it('keeps the other standalone emails on their own files', () => {
+    expect(usesSharedLayout('tenant-welcome')).toBe(false);
+  });
+
   it.each(Object.entries(EMAIL_CATALOGUE))(
     '%s declares every placeholder its wording uses and renders cleanly',
     (key, template) => {
