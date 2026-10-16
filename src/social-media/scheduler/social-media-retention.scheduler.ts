@@ -13,6 +13,9 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { CacheService } from '../../utility/service/cache.service';
+
+const RUN_ONCE_SECONDS = 3600;
 
 // Closes a gap none of the researched incumbents (Buffer/Hootsuite/Later)
 // document clearly: an abandoned draft's uploaded media would otherwise sit
@@ -33,10 +36,20 @@ export class SocialMediaRetentionScheduler {
     private readonly cloudinaryService: CloudinaryService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly cacheService: CacheService,
   ) {}
 
   @Cron('0 3 * * *')
   async deleteStaleDraftMedia(): Promise<void> {
+    // Once per run across all instances. Left to expire, so an instance whose clock is a little behind
+    // doesn't run it again after a quick first run.
+    if (
+      !(await this.cacheService.acquireLock(
+        'lock:social-media-retention',
+        RUN_ONCE_SECONDS,
+      ))
+    )
+      return;
     const retentionDays =
       await this.platformSettingsService.getSocialMediaDraftRetentionDays();
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);

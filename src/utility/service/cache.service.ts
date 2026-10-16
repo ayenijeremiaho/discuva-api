@@ -7,7 +7,27 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import Redis from 'ioredis';
+import { randomUUID } from 'node:crypto';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+
+// Deletes the lock only if this instance still holds it.
+const RELEASE_LOCK = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
+
+// Counts a hit in a window shared by every instance; starts a block once the limit is passed.
+// Returns hits, ms left in the window, ms left in the block.
+const HIT_WINDOW = `
+local hits = redis.call('INCR', KEYS[1])
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) ttl = tonumber(ARGV[1]) end
+local blocked = redis.call('PTTL', KEYS[2])
+if blocked < 0 then
+  blocked = 0
+  if hits > tonumber(ARGV[2]) then redis.call('SET', KEYS[2], '1', 'PX', ARGV[3]) blocked = tonumber(ARGV[3]) end
+end
+return {hits, ttl, blocked}`;
+
+// Locks taken but never released (left to expire) are forgotten after this many.
+const MAX_HELD_LOCKS = 1000;
 
 interface CacheStats {
   hits: number;
@@ -21,6 +41,8 @@ interface CacheStats {
 export class CacheService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CacheService.name);
   private readonly redis: Redis;
+  // Locks this instance holds: scoped key → its token.
+  private readonly heldLocks = new Map<string, string>();
   private accessStats: { hits: number; misses: number } = {
     hits: 0,
     misses: 0,
@@ -256,19 +278,48 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     await this.redis.ping();
   }
 
+  // The lock holds a token unique to this acquisition, so with several instances running, one whose lock expired
+  // mid-job can't release the lock another instance has since taken.
   async acquireLock(rawKey: string, ttlSeconds: number): Promise<boolean> {
-    const result = await this.redis.set(
-      this.scopedKey(rawKey),
-      '1',
-      'EX',
-      ttlSeconds,
-      'NX',
-    );
-    return result === 'OK';
+    const key = this.scopedKey(rawKey);
+    const token = randomUUID();
+    const result = await this.redis.set(key, token, 'EX', ttlSeconds, 'NX');
+    if (result !== 'OK') return false;
+    if (this.heldLocks.size >= MAX_HELD_LOCKS) this.heldLocks.clear();
+    this.heldLocks.set(key, token);
+    return true;
   }
 
   releaseLock(rawKey: string): void {
-    this.redis.del(this.scopedKey(rawKey));
+    const key = this.scopedKey(rawKey);
+    const token = this.heldLocks.get(key);
+    if (!token) return;
+    this.heldLocks.delete(key);
+    this.redis
+      .eval(RELEASE_LOCK, 1, key, token)
+      .catch((err: Error) =>
+        this.logger.warn(`Could not release lock ${key}: ${err.message}`),
+      );
+  }
+
+  // Rate-limit counter shared by every instance (see RedisThrottlerStorage).
+  async hitWindow(
+    rawKey: string,
+    windowMs: number,
+    limit: number,
+    blockMs: number,
+  ): Promise<{ hits: number; windowMsLeft: number; blockMsLeft: number }> {
+    const key = this.globalKey(rawKey);
+    const [hits, windowMsLeft, blockMsLeft] = (await this.redis.eval(
+      HIT_WINDOW,
+      2,
+      key,
+      `${key}:blocked`,
+      windowMs,
+      limit,
+      blockMs,
+    )) as [number, number, number];
+    return { hits, windowMsLeft, blockMsLeft };
   }
 
   private async delByPattern(pattern: string): Promise<number> {

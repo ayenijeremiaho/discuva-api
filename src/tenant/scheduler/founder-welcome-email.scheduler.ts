@@ -11,6 +11,9 @@ import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { runInTenantContext } from '../utility/run-in-tenant-context';
 import { Admin } from '../../admin/entity/admin.entity';
 import { UtilityService } from '../../utility/service/utility.service';
+import { CacheService } from '../../utility/service/cache.service';
+
+const RUN_ONCE_SECONDS = 3600;
 
 // A day-granularity threshold gets a daily check, not an hourly one — same
 // reasoning AssignmentReminderScheduler/PledgeReminderScheduler document for
@@ -35,10 +38,20 @@ export class FounderWelcomeEmailScheduler {
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly utilityService: UtilityService,
+    private readonly cacheService: CacheService,
   ) {}
 
   @Cron('0 9 * * *')
   async sendDueFounderWelcomeEmails(): Promise<void> {
+    // Once per run across all instances. Left to expire, so an instance whose clock is a little behind
+    // doesn't run it again after a quick first run.
+    if (
+      !(await this.cacheService.acquireLock(
+        'lock:founder-welcome-emails',
+        RUN_ONCE_SECONDS,
+      ))
+    )
+      return;
     const cutoff = new Date(
       Date.now() - ACTIVATION_GRACE_HOURS * 60 * 60 * 1000,
     );
