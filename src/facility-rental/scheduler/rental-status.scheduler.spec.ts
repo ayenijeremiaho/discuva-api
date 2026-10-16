@@ -1,4 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { RentalNotifierService } from '../service/rental-notifier.service';
+
+const mockNotifier = { reminder: jest.fn().mockResolvedValue(undefined) };
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
@@ -39,6 +42,7 @@ describe('RentalStatusScheduler', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RentalStatusScheduler,
+        { provide: RentalNotifierService, useValue: mockNotifier },
         {
           provide: getRepositoryToken(RentalBooking),
           useValue: mockBookingRepo,
@@ -60,7 +64,8 @@ describe('RentalStatusScheduler', () => {
 
     await scheduler.transitionBookingStatuses();
 
-    expect(mockBookingRepo.find).toHaveBeenCalledTimes(4);
+    // Per church: due reminders, then bookings starting, then bookings ending.
+    expect(mockBookingRepo.find).toHaveBeenCalledTimes(6);
     expect(mockTxHost.tx.query).toHaveBeenCalledWith(
       'SET LOCAL search_path TO "church_a", public',
     );
@@ -74,6 +79,7 @@ describe('RentalStatusScheduler', () => {
       { id: 't1', subdomain: 'a', schemaName: 'church_a' },
     ]);
     mockBookingRepo.find
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ id: 'booking-1' }])
       .mockResolvedValueOnce([]);
 
@@ -99,6 +105,42 @@ describe('RentalStatusScheduler', () => {
     expect(mockBookingRepo.find).toHaveBeenCalled();
   });
 
+  it('reminds each renter once, the day before, marking it before sending', async () => {
+    const booking = {
+      id: 'b1',
+      startDateTime: new Date(Date.now() + 3_600_000),
+    };
+    mockBookingRepo.find.mockResolvedValueOnce([booking]).mockResolvedValue([]);
+
+    await scheduler.runTransitions();
+
+    expect(mockBookingRepo.find.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: RentalBookingStatus.CONFIRMED,
+          reminderSentAt: expect.anything(),
+        }),
+        relations: ['member', 'facility'],
+      }),
+    );
+    expect(mockBookingRepo.update).toHaveBeenCalledWith(['b1'], {
+      reminderSentAt: expect.any(Date),
+    });
+    expect(mockNotifier.reminder).toHaveBeenCalledWith(booking);
+    expect(mockBookingRepo.update.mock.invocationCallOrder[0]).toBeLessThan(
+      mockNotifier.reminder.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('wakes for the earliest of a booking starting or ending and a reminder falling due', async () => {
+    mockNextQb.getRawOne
+      .mockResolvedValueOnce({ next: '2026-10-10T15:00:00.000Z' })
+      .mockResolvedValueOnce({ start: '2026-10-09T09:00:00.000Z' });
+    await expect(scheduler.runTransitions()).resolves.toEqual(
+      new Date('2026-10-08T09:00:00.000Z'),
+    );
+  });
+
   it('reports when the next booking starts or ends so quiet churches can be skipped', async () => {
     mockNextQb.getRawOne.mockResolvedValueOnce({
       next: '2026-10-04T15:00:00.000Z',
@@ -109,7 +151,10 @@ describe('RentalStatusScheduler', () => {
     expect(mockNextQb.where).toHaveBeenCalledWith('b.status IN (:...open)', {
       open: [RentalBookingStatus.CONFIRMED, RentalBookingStatus.IN_PROGRESS],
     });
-    mockNextQb.getRawOne.mockResolvedValueOnce({ next: null });
+    mockNextQb.getRawOne
+      .mockResolvedValueOnce({ start: null })
+      .mockResolvedValueOnce({ next: null })
+      .mockResolvedValueOnce({ start: null });
     await expect(scheduler.runTransitions()).resolves.toBeNull();
   });
 });

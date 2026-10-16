@@ -84,6 +84,10 @@ export class RentalBooking extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   rejectionReason: string;
 
+  // Set once the day-before reminder is sent, so the scheduler (every 10 minutes) sends it once.
+  @Column({ type: 'timestamptz', nullable: true })
+  reminderSentAt: Date | null;
+
   @OneToMany(() => RentalBookingAddon, (ba) => ba.booking, { cascade: true })
   bookingAddons: RentalBookingAddon[];
 

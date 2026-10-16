@@ -1,4 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { RentalNotifierService } from './rental-notifier.service';
+
+const mockNotifier = {
+  confirmed: jest.fn().mockResolvedValue(undefined),
+  rejected: jest.fn().mockResolvedValue(undefined),
+  paymentReceived: jest.fn().mockResolvedValue(undefined),
+  cautionRefunded: jest.fn().mockResolvedValue(undefined),
+};
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { RentalAdminService } from './rental-admin.service';
@@ -39,6 +47,7 @@ describe('RentalAdminService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RentalAdminService,
+        { provide: RentalNotifierService, useValue: mockNotifier },
         {
           provide: getRepositoryToken(RentalBooking),
           useValue: mockBookingRepo,
@@ -88,6 +97,41 @@ describe('RentalAdminService', () => {
       });
       const result = await service.confirmBooking('b-1', {});
       expect(result.status).toBe(RentalBookingStatus.CONFIRMED);
+      expect(mockNotifier.confirmed).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'b-1' }),
+      );
+    });
+
+    it('counts the confirmation as the reminder when the booking starts within a day', async () => {
+      const soon = {
+        id: 'b-2',
+        status: RentalBookingStatus.PENDING,
+        startDateTime: new Date(Date.now() + 3_600_000),
+      };
+      const later = {
+        id: 'b-3',
+        status: RentalBookingStatus.PENDING,
+        startDateTime: new Date(Date.now() + 5 * 86_400_000),
+      };
+      mockBookingRepo.save.mockImplementation((b) => Promise.resolve(b));
+      mockBookingService.getBookingById.mockResolvedValueOnce(soon);
+      await service.confirmBooking('b-2', {});
+      mockBookingService.getBookingById.mockResolvedValueOnce(later);
+      await service.confirmBooking('b-3', {});
+      expect(soon).toEqual(
+        expect.objectContaining({ reminderSentAt: expect.any(Date) }),
+      );
+      expect(later).not.toHaveProperty('reminderSentAt');
+    });
+
+    it('tells the renter when a booking is not approved', async () => {
+      const booking = { id: 'b-4', status: RentalBookingStatus.PENDING };
+      mockBookingService.getBookingById.mockResolvedValue(booking);
+      mockBookingRepo.save.mockImplementation((b) => Promise.resolve(b));
+      await service.rejectBooking('b-4', { rejectionReason: 'Closed' });
+      expect(mockNotifier.rejected).toHaveBeenCalledWith(
+        expect.objectContaining({ rejectionReason: 'Closed' }),
+      );
     });
   });
 
@@ -125,6 +169,12 @@ describe('RentalAdminService', () => {
         reference: 'TXN123',
       });
       expect(result.status).toBe(RentalPaymentStatus.PAID);
+      expect(mockPaymentRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          relations: ['booking', 'booking.member', 'booking.facility'],
+        }),
+      );
+      expect(mockNotifier.paymentReceived).toHaveBeenCalled();
     });
   });
 

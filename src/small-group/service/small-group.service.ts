@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -21,9 +22,18 @@ import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
+import { DateService } from '../../utility/service/date.service';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { SmallGroupAttendanceStatusEnum } from '../enum/small-group-attendance-status.enum';
+
+const MISSED_IN_A_ROW = 3;
 
 @Injectable()
 export class SmallGroupService {
+  private readonly logger = new Logger(SmallGroupService.name);
+
   constructor(
     @InjectRepository(SmallGroup)
     private readonly groupRepo: Repository<SmallGroup>,
@@ -32,6 +42,8 @@ export class SmallGroupService {
     @InjectRepository(SmallGroupAttendance)
     private readonly attendanceRepo: Repository<SmallGroupAttendance>,
     private readonly auditLogService: AuditLogService,
+    private readonly notificationDispatchService: NotificationDispatchService,
+    private readonly dateService: DateService,
   ) {}
 
   // ── Admin CRUD ─────────────────────────────────────────────────────────────
@@ -295,7 +307,7 @@ export class SmallGroupService {
     leaderMemberId: string,
     dto: RecordAttendanceDto,
   ): Promise<SmallGroupAttendance[]> {
-    await this.assertIsGroupLeader(groupId, leaderMemberId);
+    const group = await this.assertIsGroupLeader(groupId, leaderMemberId);
 
     // One query for all existing rows for this meeting, keyed by member id,
     // instead of a find+save round trip per record — a fellowship's roster
@@ -307,6 +319,16 @@ export class SmallGroupService {
     const existingByMemberId = new Map(
       existingRows.map((row) => [row.member.id, row]),
     );
+
+    // Only absences recorded by this save count, so re-saving a meeting never alerts twice.
+    const newlyAbsent = dto.records
+      .filter(
+        (entry) =>
+          entry.status === SmallGroupAttendanceStatusEnum.ABSENT &&
+          existingByMemberId.get(entry.memberId)?.status !==
+            SmallGroupAttendanceStatusEnum.ABSENT,
+      )
+      .map((entry) => entry.memberId);
 
     const toSave = dto.records.map((entry) => {
       const existing = existingByMemberId.get(entry.memberId);
@@ -322,7 +344,100 @@ export class SmallGroupService {
       });
     });
 
-    return this.attendanceRepo.save(toSave);
+    const saved = await this.attendanceRepo.save(toSave);
+    // The attendance is what matters; a failed alert is logged, never allowed to undo the save.
+    await this.alertLeaderOfMissedMeetings(
+      group,
+      newlyAbsent,
+      dto.meetingDate,
+    ).catch((err: Error) =>
+      this.logger.warn(`Fellowship absence alert not sent: ${err.message}`),
+    );
+    return saved;
+  }
+
+  // Tells the leader when a member's run of absences reaches three, and not again at four or five.
+  private async alertLeaderOfMissedMeetings(
+    group: SmallGroup,
+    memberIds: string[],
+    meetingDate: string,
+  ): Promise<void> {
+    const leader = group.leader;
+    const candidates = memberIds.filter((id) => id !== leader?.id);
+    if (!leader || !candidates.length) return;
+    // Served by the (group_id, member_id, meeting_date) unique index.
+    const rows: {
+      member_id: string;
+      status: SmallGroupAttendanceStatusEnum;
+      meeting_date: string;
+      firstname: string;
+      lastname: string;
+    }[] = await this.attendanceRepo.query(
+      `SELECT t.member_id, t.status, t.meeting_date, m.firstname, m.lastname
+         FROM (
+           SELECT a.member_id, a.status, a.meeting_date::text AS meeting_date,
+                  ROW_NUMBER() OVER (PARTITION BY a.member_id ORDER BY a.meeting_date DESC) AS rn
+             FROM small_group_attendance a
+            WHERE a.group_id = $1 AND a.member_id = ANY($2::uuid[])
+         ) t
+         JOIN members m ON m.id = t.member_id
+        WHERE t.rn <= $3
+        ORDER BY t.member_id, t.meeting_date DESC`,
+      [group.id, candidates, MISSED_IN_A_ROW + 1],
+    );
+    const byMember = new Map<string, typeof rows>();
+    for (const row of rows)
+      byMember.set(row.member_id, [
+        ...(byMember.get(row.member_id) ?? []),
+        row,
+      ]);
+
+    for (const [memberId, recent] of byMember) {
+      const run = recent.slice(0, MISSED_IN_A_ROW);
+      const reachesThree =
+        recent[0].meeting_date === meetingDate &&
+        run.length === MISSED_IN_A_ROW &&
+        run.every((r) => r.status === SmallGroupAttendanceStatusEnum.ABSENT) &&
+        recent[MISSED_IN_A_ROW]?.status !==
+          SmallGroupAttendanceStatusEnum.ABSENT;
+      if (!reachesThree) continue;
+      const memberName = `${recent[0].firstname} ${recent[0].lastname}`.trim();
+      const missedDates = run
+        .map((r) =>
+          this.dateService.format(
+            new Date(`${r.meeting_date}T12:00:00Z`),
+            'd MMM',
+            'UTC',
+          ),
+        )
+        .reverse()
+        .join(', ');
+      this.notificationDispatchService.notifyMember({
+        category: EmailCategory.FELLOWSHIPS,
+        ...(leader.email && {
+          email: {
+            to: leader.email,
+            recipientMemberId: leader.id,
+            subject: `${memberName} has missed three meetings`,
+            template: 'fellowship-member-missing',
+            data: {
+              name: leader.firstname,
+              memberName,
+              groupName: group.name,
+              groupId: group.id,
+              missedDates,
+            },
+          },
+        }),
+        push: {
+          memberIds: [leader.id],
+          key: PushNotificationKey.FELLOWSHIP_MEMBER_MISSING,
+          vars: { member_name: memberName, group_name: group.name },
+          url: `/small-groups/${group.id}`,
+          idempotencyKey: `fellowship-missing:${group.id}:${memberId}:${meetingDate}`,
+        },
+      });
+    }
   }
 
   private async assertIsGroupMember(
@@ -347,13 +462,14 @@ export class SmallGroupService {
   private async assertIsGroupLeader(
     groupId: string,
     memberId: string,
-  ): Promise<void> {
+  ): Promise<SmallGroup> {
     const group = await this.getOrThrow(groupId);
     if (!group.leader || group.leader.id !== memberId) {
       throw new ForbiddenException(
         "Only this group's leader can record attendance.",
       );
     }
+    return group;
   }
 
   private async getOrThrow(id: string): Promise<SmallGroup> {

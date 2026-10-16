@@ -1,4 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
+
+const mockDispatch = { notifyMember: jest.fn().mockResolvedValue(undefined) };
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrayerRequestService } from './prayer-request.service';
@@ -77,6 +80,7 @@ describe('PrayerRequestService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PrayerRequestService,
+        { provide: NotificationDispatchService, useValue: mockDispatch },
         {
           provide: getRepositoryToken(PrayerRequest),
           useValue: mockPrayerRequestRepo,
@@ -233,6 +237,107 @@ describe('PrayerRequestService', () => {
   });
 
   describe('updateStatus', () => {
+    it('tells the member when their request is prayed for or answered, once per change', async () => {
+      const member = { id: 'm1', firstname: 'Ada', email: 'ada@x.org' };
+      const request = {
+        id: 'pr-2',
+        status: PrayerRequestStatusEnum.OPEN,
+        content: 'Please pray for my exams.',
+        member,
+      };
+      mockPrayerRequestRepo.findOne.mockResolvedValue(request);
+      mockPrayerRequestRepo.save.mockImplementation((r) => Promise.resolve(r));
+      mockDispatch.notifyMember.mockClear();
+
+      await service.updateStatus(
+        'pr-2',
+        { status: PrayerRequestStatusEnum.PRAYED_FOR },
+        'actor-1',
+      );
+      await service.updateStatus(
+        'pr-2',
+        { status: PrayerRequestStatusEnum.PRAYED_FOR },
+        'actor-1',
+      );
+      await service.updateStatus(
+        'pr-2',
+        { status: PrayerRequestStatusEnum.ANSWERED },
+        'actor-1',
+      );
+
+      expect(mockDispatch.notifyMember).toHaveBeenCalledTimes(2);
+      expect(mockDispatch.notifyMember).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          email: expect.objectContaining({
+            to: 'ada@x.org',
+            template: 'prayer-request-prayed-for',
+            data: { name: 'Ada', requestExcerpt: 'Please pray for my exams.' },
+          }),
+          push: expect.objectContaining({
+            memberIds: ['m1'],
+            idempotencyKey: 'prayer-request:pr-2:PRAYED_FOR',
+          }),
+        }),
+      );
+      expect(mockDispatch.notifyMember).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          email: expect.objectContaining({
+            template: 'prayer-request-answered',
+          }),
+        }),
+      );
+    });
+
+    it("doesn't notify for a request without a member, or when it's reopened", async () => {
+      mockDispatch.notifyMember.mockClear();
+      mockPrayerRequestRepo.save.mockImplementation((r) => Promise.resolve(r));
+      mockPrayerRequestRepo.findOne.mockResolvedValueOnce({
+        id: 'pr-3',
+        status: PrayerRequestStatusEnum.OPEN,
+        content: 'x',
+        member: null,
+      });
+      await service.updateStatus(
+        'pr-3',
+        { status: PrayerRequestStatusEnum.ANSWERED },
+        'a',
+      );
+      mockPrayerRequestRepo.findOne.mockResolvedValueOnce({
+        id: 'pr-4',
+        status: PrayerRequestStatusEnum.ANSWERED,
+        content: 'x',
+        member: { id: 'm1', firstname: 'Ada', email: 'a@x.org' },
+      });
+      await service.updateStatus(
+        'pr-4',
+        { status: PrayerRequestStatusEnum.OPEN },
+        'a',
+      );
+      expect(mockDispatch.notifyMember).not.toHaveBeenCalled();
+    });
+
+    it('shortens a long request in the email', async () => {
+      mockDispatch.notifyMember.mockClear();
+      mockPrayerRequestRepo.save.mockImplementation((r) => Promise.resolve(r));
+      mockPrayerRequestRepo.findOne.mockResolvedValueOnce({
+        id: 'pr-5',
+        status: PrayerRequestStatusEnum.OPEN,
+        content: 'a'.repeat(500),
+        member: { id: 'm1', firstname: 'Ada', email: 'a@x.org' },
+      });
+      await service.updateStatus(
+        'pr-5',
+        { status: PrayerRequestStatusEnum.PRAYED_FOR },
+        'a',
+      );
+      const excerpt =
+        mockDispatch.notifyMember.mock.calls[0][0].email.data.requestExcerpt;
+      expect(excerpt).toHaveLength(201);
+      expect(excerpt.endsWith('…')).toBe(true);
+    });
+
     it('throws NotFoundException when the request does not exist', async () => {
       mockPrayerRequestRepo.findOne.mockResolvedValue(null);
 

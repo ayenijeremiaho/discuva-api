@@ -1,0 +1,17 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+  <tr>
+    <td class="attributes_content">
+      <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+        <tr><td class="attributes_item"><strong>Member:</strong> {{ memberName }}</td></tr>
+        <tr><td class="attributes_item"><strong>Fellowship:</strong> {{ groupName }}</td></tr>
+        <tr><td class="attributes_item"><strong>Last three meetings:</strong> {{ missedDates }}</td></tr>
+      </table>
+    </td>
+  </tr>
+</table>
+<table class="body-action" align="center" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+  <tr><td align="center"><a href="{{login_url}}/small-groups/{{groupId}}" class="button" target="_blank">Open fellowship</a></td></tr>
+</table>
+{{{ closing_html }}}
