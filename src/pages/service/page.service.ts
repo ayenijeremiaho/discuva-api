@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -793,14 +792,11 @@ export class PageService {
   private async assertChurchCalendarEntitled(): Promise<void> {
     const tenantId = this.cls.get('tenantId');
     if (!tenantId) return;
-    const { features } = await this.planFeatureResolver.resolve(tenantId);
-    if (!features.includes(PlanFeature.CHURCH_CALENDAR)) {
-      throw new ForbiddenException({
-        message: 'The Church Calendar section requires an upgraded plan.',
-        code: 'PLAN_UPGRADE_REQUIRED',
-        requiredFeature: PlanFeature.CHURCH_CALENDAR,
-      });
-    }
+    await this.planFeatureResolver.assertEntitled(
+      tenantId,
+      PlanFeature.CHURCH_CALENDAR,
+      'The Church Calendar section requires an upgraded plan.',
+    );
   }
 
   // Re-checked at read time (getForPublic/getForPreview), not just at save

@@ -81,6 +81,12 @@ const mockServiceSessionService = {
 const mockPlanFeatureResolver = {
   resolve: jest.fn().mockResolvedValue({ features: [], overrides: {} }),
 };
+// The real gate logic over the mocked resolve(); every feature is on some plan unless a test says otherwise.
+Object.assign(mockPlanFeatureResolver, {
+  releasedFeatures: jest.fn().mockResolvedValue({ includes: () => true }),
+  gateReason: PlanFeatureResolverService.prototype.gateReason,
+  assertEntitled: PlanFeatureResolverService.prototype.assertEntitled,
+});
 const mockGalleryFolderSyncService = {
   extractFolderId: jest.fn(
     (url: string) => /\/folders\/([a-zA-Z0-9_-]+)/.exec(url)?.[1] ?? null,

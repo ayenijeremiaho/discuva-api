@@ -15,11 +15,17 @@ import { PlanFeatureResolverService } from '../service/plan-feature-resolver.ser
 import { CacheService } from '../../utility/service/cache.service';
 
 const mockSubscriptionRepo = { findOne: jest.fn() };
-const mockPlanRepo = { findOne: jest.fn() };
+const mockPlanRepo = {
+  findOne: jest.fn(),
+  // Which features some plan includes; a feature on none of them isn't released yet.
+  find: jest.fn().mockResolvedValue([{ id: 'pro', features: ['sermons'] }]),
+};
 // Tenant row supplies moduleOverrides; null (no overrides) unless a test sets one.
 const mockTenantRepo = { findOne: jest.fn().mockResolvedValue(null) };
 const mockFeatureUsageService = { tryConsume: jest.fn(), getUsage: jest.fn() };
 const mockCacheService = {
+  getGlobal: jest.fn().mockResolvedValue(undefined),
+  setGlobal: jest.fn().mockResolvedValue(undefined),
   getOrSet: jest
     .fn()
     .mockImplementation((_key: string, fn: () => Promise<unknown>) => fn()),
@@ -97,6 +103,39 @@ describe('PlanGuard', () => {
     expect(mockFeatureUsageService.getUsage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      'NOT_ON_PLAN',
+      [{ id: 'pro', features: [PlanFeature.SMS] }],
+      'This feature requires an upgraded plan.',
+    ],
+    [
+      'NOT_RELEASED',
+      [{ id: 'pro', features: ['sermons'] }],
+      "This feature isn't available yet.",
+    ],
+  ])(
+    'says %s when the feature is missing from the church plan',
+    async (reason, plans, message) => {
+      mockReflectorReturns(reflector, { [REQUIRES_PLAN_KEY]: PlanFeature.SMS });
+      mockCls.get.mockReturnValue('tenant-1');
+      mockSubscriptionRepo.findOne.mockResolvedValue({ planId: 'free' });
+      mockPlanRepo.findOne.mockResolvedValue({
+        features: [],
+        featureLimits: {},
+      });
+      mockPlanRepo.find.mockResolvedValueOnce(plans);
+      const err = await guard.canActivate(mockContext()).catch((e) => e);
+      expect(err).toBeInstanceOf(ForbiddenException);
+      expect(err.getResponse()).toEqual({
+        message,
+        code: 'PLAN_UPGRADE_REQUIRED',
+        reason,
+        requiredFeature: PlanFeature.SMS,
+      });
+    },
+  );
+
   it("grants access through a platform admin's per-church override even without the plan", async () => {
     mockReflectorReturns(reflector, {
       [REQUIRES_PLAN_KEY]: PlanFeature.SERMON,
@@ -126,7 +165,7 @@ describe('PlanGuard', () => {
     });
 
     await expect(guard.canActivate(mockContext())).rejects.toThrow(
-      'This feature has been disabled for your account.',
+      'This feature has been turned off for your church.',
     );
   });
 

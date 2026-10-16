@@ -35,6 +35,7 @@ import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dt
 import { SetModuleRolloutDto } from '../dto/set-module-rollout.dto';
 import { DiscountType } from '../../billing/enum/discount-type.enum';
 import { KNOWN_MODULES } from '../../church-settings/constants/known-modules.constant';
+import { RELEASED_FEATURES_KEY } from '../../billing/service/plan-feature-resolver.service';
 
 export interface TenantAdminContact {
   name: string;
@@ -521,6 +522,7 @@ export class PlatformTenantService {
       plan.features = plan.features.filter((f) => f !== moduleKey);
     }
     await this.planRepo.save(affected);
+    this.cacheService.delGlobal(RELEASED_FEATURES_KEY).catch(() => undefined);
   }
 
   private async addModuleToAllPlans(moduleKey: string): Promise<void> {
@@ -531,6 +533,7 @@ export class PlatformTenantService {
       plan.features = [...plan.features, moduleKey];
     }
     await this.planRepo.save(affected);
+    this.cacheService.delGlobal(RELEASED_FEATURES_KEY).catch(() => undefined);
   }
 
   private async clearAllOverridesFor(moduleKey: string): Promise<void> {

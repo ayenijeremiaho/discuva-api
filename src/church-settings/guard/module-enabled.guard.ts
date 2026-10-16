@@ -39,33 +39,8 @@ export class ModuleEnabledGuard implements CanActivate {
     const tenantId = this.cls.get('tenantId');
     if (!tenantId) return true;
 
-    const { features, overrides } =
-      await this.planFeatureResolver.resolve(tenantId);
-
-    // Tenant.moduleOverrides — a platform-admin manual override, checked
-    // ahead of plan membership either direction: `false` blocks access
-    // regardless of what the plan includes (pulling one tenant's access
-    // without touching their plan or anyone else on it); `true` grants
-    // access regardless of plan (comping a specific church, or rolling a
-    // feature out to hand-picked tenants before a real paid tier for it
-    // exists). A key simply absent means no override — fall through to the
-    // plan check below, unchanged from before this existed.
-    const override = overrides[moduleKey];
-    if (override === false) {
-      throw new ForbiddenException(
-        'This feature has been disabled for your account.',
-      );
-    }
-    if (override === true) return true;
-
-    if (!features.includes(moduleKey)) {
-      throw new ForbiddenException({
-        message: 'This feature requires an upgraded plan.',
-        code: 'PLAN_UPGRADE_REQUIRED',
-        requiredFeature: moduleKey,
-      });
-    }
-
+    // Platform overrides win over the plan either way (Tenant.moduleOverrides); the 403 says which reason applies.
+    await this.planFeatureResolver.assertEntitled(tenantId, moduleKey);
     return true;
   }
 }

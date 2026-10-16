@@ -1924,6 +1924,25 @@ Billing/plan settings UI in `discuva-admin` (`/billing`) is built — plan picke
 plan-inheritance indicator for a sponsored branch. (SMS wallet top-up UI was removed along with the wallet itself —
 SMS billing is now entirely the tenant's own vendor relationship, outside this app.)
 
+**Why a feature is refused (`reason`):** every feature-gate 403 — `PlanGuard`, `ModuleEnabledGuard`, and the
+service-level checks for journal posting and the Church Calendar page section — goes through
+`PlanFeatureResolverService.assertEntitled` and returns `{ message, code: 'PLAN_UPGRADE_REQUIRED', reason,
+requiredFeature }`. The code stays the same for every reason (the apps key on it to show their gate or quietly hide a
+section); `reason` says which message is true:
+
+| `reason` | When | Message |
+|---|---|---|
+| `NOT_ON_PLAN` | The church's plan lacks the feature, and some plan includes it | This feature requires an upgraded plan. |
+| `NOT_RELEASED` | No plan includes the feature yet (rollout off, e.g. Social Media) | This feature isn't available yet. |
+| `DISABLED_FOR_CHURCH` | A platform admin forced it off for this church (`Tenant.moduleOverrides[key] = false`) | This feature has been turned off for your church. |
+| `LIMIT_REACHED` | The plan's usage cap is used up (`PlanGuard` only) | You've reached this plan's usage limit for this feature. |
+
+A `true` override grants the feature without a plan and skips usage caps. "Some plan includes it" is the union of
+every plan's `features`, cached globally (`plans:released-features`, 5 minutes) and cleared when a plan is created
+or edited or a module rollout adds/removes it from plans. The admin and member apps' upgrade modals word each reason
+honestly and only offer "Upgrade plan" for `NOT_ON_PLAN`/`LIMIT_REACHED`; the admin Social Media page explains a
+refusal in its own panel instead of the modal.
+
 **Plan feature gating (`PlanGuard`) — boolean gate plus an optional, per-route numeric cap:** any route decorated
 `@RequiresPlan(PlanFeature.X)` first checks `Plan.features` membership (boolean gate, cached under
 `plan-features:${tenantId}` for 300s via the shared `PlanFeatureResolverService`) and throws

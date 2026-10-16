@@ -15,7 +15,10 @@ const mockPlanRepo = {
   create: jest.fn((v) => v),
 };
 const mockSubscriptionRepo = { find: jest.fn() };
-const mockCacheService = { del: jest.fn() };
+const mockCacheService = {
+  del: jest.fn(),
+  delGlobal: jest.fn().mockResolvedValue(1),
+};
 const mockClsService = { runWith: jest.fn((_ctx, fn) => fn()) };
 
 describe('PlatformPlanService', () => {

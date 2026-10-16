@@ -97,6 +97,12 @@ const mockAccountRepo = {
 const mockPlanFeatureResolver = {
   resolve: jest.fn(),
 };
+// The real gate logic over the mocked resolve(); every feature is on some plan unless a test says otherwise.
+Object.assign(mockPlanFeatureResolver, {
+  releasedFeatures: jest.fn().mockResolvedValue({ includes: () => true }),
+  gateReason: PlanFeatureResolverService.prototype.gateReason,
+  assertEntitled: PlanFeatureResolverService.prototype.assertEntitled,
+});
 
 const mockCls = {
   get: jest.fn(),
@@ -169,6 +175,7 @@ describe('FinanceRequestService', () => {
     mockPlanFeatureResolver.resolve.mockResolvedValue({
       features: [PlanFeature.FINANCE],
       featureLimits: {},
+      overrides: {},
     });
 
     const module: TestingModule = await Test.createTestingModule({
@@ -953,6 +960,7 @@ describe('FinanceRequestService', () => {
         mockPlanFeatureResolver.resolve.mockResolvedValue({
           features: [],
           featureLimits: {},
+          overrides: {},
         });
 
         await expect(

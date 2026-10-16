@@ -1,9 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  ForbiddenException,
-  Injectable,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClsService } from 'nestjs-cls';
 import { PlanFeature } from '../enum/plan-feature.enum';
@@ -11,7 +6,10 @@ import { REQUIRES_PLAN_KEY } from '../decorator/requires-plan.decorator';
 import { COUNTS_TOWARD_LIMIT_KEY } from '../decorator/counts-toward-limit.decorator';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { FeatureUsageService } from '../service/feature-usage.service';
-import { PlanFeatureResolverService } from '../service/plan-feature-resolver.service';
+import {
+  PlanFeatureResolverService,
+  featureGateError,
+} from '../service/plan-feature-resolver.service';
 
 @Injectable()
 export class PlanGuard implements CanActivate {
@@ -41,25 +39,11 @@ export class PlanGuard implements CanActivate {
     // same key (`plan-features:${tenantId}`) — PlatformTenantService.changeTenantPlan
     // (manual platform-admin override) already does this; self-serve upgrade
     // checkout is still deferred (§9 Phase 3) and will need the same call.
-    const { features, featureLimits, overrides } =
+    await this.planFeatureResolver.assertEntitled(tenantId, required);
+    const { featureLimits, overrides } =
       await this.planFeatureResolver.resolve(tenantId);
-
-    // Platform-admin per-church override, same precedence as ModuleEnabledGuard.
-    const override = overrides[required];
-    if (override === false) {
-      throw new ForbiddenException(
-        'This feature has been disabled for your account.',
-      );
-    }
-    if (override === true) return true;
-
-    if (!features.includes(required)) {
-      throw new ForbiddenException({
-        message: 'This feature requires an upgraded plan.',
-        code: 'PLAN_UPGRADE_REQUIRED',
-        requiredFeature: required,
-      });
-    }
+    // A church given the feature by override isn't held to plan limits.
+    if (overrides[required] === true) return true;
 
     // Numeric cap is opt-in per plan (Plan.featureLimits, admin-configurable
     // — see plan.entity.ts) layered on top of the boolean feature gate
@@ -77,11 +61,7 @@ export class PlanGuard implements CanActivate {
     if (countsToward && limit != null) {
       const used = await this.featureUsageService.getUsage(tenantId, required);
       if (used >= limit) {
-        throw new ForbiddenException({
-          message: `You've reached this plan's usage limit for this feature.`,
-          code: 'PLAN_UPGRADE_REQUIRED',
-          requiredFeature: required,
-        });
+        throw featureGateError(required, 'LIMIT_REACHED');
       }
     }
 
