@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { EventService } from '../service/event.service';
 import { CreateEventDto } from '../dto/create-event.dto';
+import { PreviewEventDto } from '../dto/preview-event.dto';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
@@ -54,6 +55,14 @@ export class EventController {
   @Post()
   async create(@Body() dto: CreateEventDto, @CurrentUser() user: MemberAuth) {
     return this.eventService.create(dto, user.id);
+  }
+
+  // Everything create would check and do, without saving: the admin reviews, then creates.
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.EVENTS_WRITE)
+  @Post('preview')
+  async preview(@Body() dto: PreviewEventDto) {
+    return this.eventService.preview(dto);
   }
 
   @UseGuards(AdminGuard)

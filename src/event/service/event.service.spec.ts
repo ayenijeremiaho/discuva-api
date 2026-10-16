@@ -46,6 +46,9 @@ const mockVenueService = {
 const mockAuditLogService = { log: jest.fn() };
 const mockSeriesService = {
   createFromEvent: jest.fn(),
+  datesGivingWay: jest.fn().mockResolvedValue([]),
+  givingWay: jest.fn().mockResolvedValue([]),
+  preview: jest.fn(),
   deactivate: jest.fn().mockResolvedValue(undefined),
 };
 const mockProgrammeService = {
@@ -96,6 +99,29 @@ const defaultVenue = {
 
 import { EventSeriesService } from './event-series.service';
 import { ServiceProgrammeService } from '../../service-programme/service/service-programme.service';
+import { EventOverlapService } from './event-overlap.service';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { ScheduledEvent } from './event.service';
+import { EventOverlapRule } from '../enums/event-overlap-rule.enum';
+
+const mockOverlapService = {
+  getRule: jest.fn().mockResolvedValue(EventOverlapRule.ALLOW),
+  assertNoClash: jest.fn().mockResolvedValue(undefined),
+  findClashes: jest.fn().mockResolvedValue([]),
+  lockSchedule: jest.fn().mockResolvedValue(undefined),
+  overlapPhrase: jest.fn(
+    (_rule, label: string, _mine, other: { eventName: string }) =>
+      Promise.resolve(`${label} overlaps "${other.eventName}"`),
+  ),
+  overlapDetail: jest.fn(
+    (_rule, mine: { name: string }, other: { eventName: string }) =>
+      Promise.resolve({
+        service: { name: mine.name },
+        other: { eventName: other.eventName },
+      }),
+  ),
+};
+const mockChurchTimezone = { get: jest.fn().mockResolvedValue('Africa/Lagos') };
 describe('EventService', () => {
   let service: EventService;
 
@@ -120,6 +146,8 @@ describe('EventService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: EventSeriesService, useValue: mockSeriesService },
         { provide: ServiceProgrammeService, useValue: mockProgrammeService },
+        { provide: EventOverlapService, useValue: mockOverlapService },
+        { provide: ChurchTimezoneService, useValue: mockChurchTimezone },
       ],
     }).compile();
 
@@ -287,10 +315,16 @@ describe('EventService', () => {
     });
 
     it('hands recurring events to the series service', async () => {
-      mockSeriesService.createFromEvent.mockResolvedValue([
-        { id: 'event-0' },
-        { id: 'event-1' },
-      ]);
+      mockSeriesService.createFromEvent.mockResolvedValue({
+        created: [{ id: 'event-0' }, { id: 'event-1' }],
+        skipped: [
+          {
+            date: '2026-12-06',
+            clashesWith: 'Carols',
+            note: 'Skipped Sun 6 Dec — clashes with "Carols".',
+          },
+        ],
+      });
       const dto = {
         name: 'Weekly Service',
         isRecurring: true,
@@ -314,10 +348,17 @@ describe('EventService', () => {
         'actor-1',
       );
       expect(result).toHaveLength(2);
+      expect((result as ScheduledEvent[])[0].scheduleNotes).toEqual([
+        'Skipped Sun 6 Dec — clashes with "Carols".',
+      ]);
       expect(mockAuditLogService.log).toHaveBeenCalledWith(
         'EVENT_CREATED',
         expect.objectContaining({
-          metadata: expect.objectContaining({ ongoing: true, count: 2 }),
+          metadata: expect.objectContaining({
+            ongoing: true,
+            count: 2,
+            skipped: ['2026-12-06'],
+          }),
         }),
       );
     });
@@ -1060,6 +1101,259 @@ describe('EventService', () => {
       expect(qb.andWhere).toHaveBeenCalledWith('event.endTime < :now', {
         now: expect.any(Date),
       });
+    });
+  });
+
+  describe('preview', () => {
+    const tomorrow = Date.now() + 86_400_000;
+    const body = (over: Record<string, unknown> = {}) =>
+      ({
+        name: 'Carol Service',
+        isRecurring: false,
+        serviceSlots: [
+          {
+            name: 'Carols',
+            startTime: new Date(tomorrow).toISOString(),
+            endTime: new Date(tomorrow + 7_200_000).toISOString(),
+            configId: 'cfg-1',
+          },
+        ],
+        ...over,
+      }) as never;
+
+    beforeEach(() => {
+      mockOverlapService.getRule.mockResolvedValue(EventOverlapRule.BLOCK_ALL);
+      mockEventConfigService.get.mockResolvedValue({
+        defaultFormat: MeetingFormatEnum.ONLINE,
+      });
+    });
+
+    it('is ready, and names the series dates that will give way, without saving anything', async () => {
+      const step = {
+        seriesName: 'Sunday Service',
+        date: '2026-12-06',
+        day: 'Sun 6 Dec',
+      };
+      mockSeriesService.givingWay.mockResolvedValueOnce([step]);
+      const result = await service.preview(body());
+      expect(result).toEqual({
+        dates: [expect.objectContaining({ status: 'READY', clashes: [] })],
+        givingWay: [step],
+        canSave: true,
+      });
+      expect(mockEventRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('lists every clash and blocks saving', async () => {
+      mockOverlapService.findClashes.mockImplementationOnce((slots) =>
+        Promise.resolve([{ slot: slots[0], eventName: 'Youth Night' }]),
+      );
+      const result = await service.preview(body());
+      expect(result.canSave).toBe(false);
+      expect(result.dates[0]).toEqual(
+        expect.objectContaining({
+          status: 'BLOCKED',
+          clashes: [
+            {
+              service: { name: 'Carols' },
+              other: { eventName: 'Youth Night' },
+            },
+          ],
+        }),
+      );
+      expect(result.givingWay).toEqual([]);
+    });
+
+    it('hands a repeating event to the series preview', async () => {
+      mockSeriesService.preview.mockResolvedValueOnce({
+        dates: [],
+        givingWay: [],
+        canSave: true,
+      });
+      await service.preview(
+        body({
+          isRecurring: true,
+          recurrence: {
+            recurrencePattern: 'weekly',
+            recurrenceInterval: 1,
+            ongoing: true,
+          },
+        }),
+      );
+      expect(mockSeriesService.preview).toHaveBeenCalled();
+    });
+
+    it("when editing a date, skips only itself (the series' other dates still count), and refuses once it has history", async () => {
+      jest.spyOn(service, 'getById').mockResolvedValue({
+        id: 'e1',
+        recurringEventId: 's1',
+        audience: 'EVERYONE',
+        serviceSlots: [],
+      } as never);
+      const history = jest
+        .spyOn(service, 'hasRecordedHistory')
+        .mockResolvedValue(false);
+      await service.preview(body({ eventId: 'e1' }));
+      expect(mockOverlapService.findClashes).toHaveBeenCalledWith(
+        expect.any(Array),
+        EventOverlapRule.BLOCK_ALL,
+        { eventId: 'e1' },
+      );
+
+      history.mockResolvedValue(true);
+      await expect(service.preview(body({ eventId: 'e1' }))).rejects.toThrow(
+        'recorded session or attendance history',
+      );
+    });
+
+    it("doesn't block an edit that leaves times, venue and audience as they are", async () => {
+      const slots = (
+        body() as unknown as {
+          serviceSlots: { startTime: string; endTime: string; name: string }[];
+        }
+      ).serviceSlots;
+      jest.spyOn(service, 'getById').mockResolvedValue({
+        id: 'e1',
+        audience: 'EVERYONE',
+        serviceSlots: slots.map((sl) => ({
+          name: sl.name,
+          startTime: new Date(sl.startTime),
+          endTime: new Date(sl.endTime),
+          config: { id: 'cfg-1' },
+        })),
+      } as never);
+      jest.spyOn(service, 'hasRecordedHistory').mockResolvedValue(false);
+      mockOverlapService.findClashes.mockClear();
+
+      const result = await service.preview(
+        body({ eventId: 'e1', name: 'New name' }),
+      );
+
+      expect(mockOverlapService.findClashes).not.toHaveBeenCalled();
+      expect(result.canSave).toBe(true);
+    });
+
+    it('refuses a new event in the past, as create does', async () => {
+      await expect(
+        service.preview(
+          body({
+            serviceSlots: [
+              {
+                name: 'Old',
+                startTime: '2020-01-01T09:00:00Z',
+                endTime: '2020-01-01T10:00:00Z',
+                configId: 'cfg-1',
+              },
+            ],
+          }),
+        ),
+      ).rejects.toThrow('Service slots cannot start in the past');
+    });
+  });
+
+  describe('assertNoClash', () => {
+    const dto = (name: string, audience?: EventAudienceEnum.WORKERS) => ({
+      name,
+      startTime: '2026-11-01T09:00:00Z',
+      endTime: '2026-11-01T11:00:00Z',
+      configId: 'cfg-1',
+      ...(audience && { audience }),
+    });
+
+    it('returns notes on series dates that will give way to this booking', async () => {
+      mockOverlapService.getRule.mockResolvedValueOnce(
+        EventOverlapRule.BLOCK_ALL,
+      );
+      mockEventConfigService.get.mockResolvedValue({
+        defaultFormat: MeetingFormatEnum.ONLINE,
+      });
+      mockSeriesService.datesGivingWay.mockResolvedValueOnce([
+        "Sunday Service won't be added on Sun 6 Dec.",
+      ]);
+      await expect(
+        service.assertNoClash([dto('A')], undefined, 'Carols', {
+          eventId: 'e1',
+        }),
+      ).resolves.toEqual(["Sunday Service won't be added on Sun 6 Dec."]);
+      expect(mockSeriesService.datesGivingWay).toHaveBeenCalledWith(
+        [expect.objectContaining({ name: 'A', venueId: null })],
+        EventOverlapRule.BLOCK_ALL,
+        'Carols',
+        undefined,
+      );
+    });
+
+    it('locks before checking when saving, never when previewing', async () => {
+      mockOverlapService.getRule.mockResolvedValue(EventOverlapRule.BLOCK_ALL);
+      mockEventConfigService.get.mockResolvedValue({
+        defaultFormat: MeetingFormatEnum.ONLINE,
+      });
+      await service.assertNoClash([dto('A')], undefined, 'A');
+      expect(mockOverlapService.lockSchedule).toHaveBeenCalledTimes(1);
+      expect(
+        mockOverlapService.lockSchedule.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mockOverlapService.assertNoClash.mock.invocationCallOrder[0],
+      );
+
+      mockOverlapService.lockSchedule.mockClear();
+      await service.preview({
+        name: 'A',
+        isRecurring: false,
+        serviceSlots: [
+          {
+            name: 'A',
+            startTime: new Date(Date.now() + 86_400_000).toISOString(),
+            endTime: new Date(Date.now() + 90_000_000).toISOString(),
+            configId: 'cfg-1',
+          },
+        ],
+      } as never);
+      expect(mockOverlapService.lockSchedule).not.toHaveBeenCalled();
+    });
+
+    it('skips the lookups when overlaps are allowed', async () => {
+      mockOverlapService.getRule.mockResolvedValueOnce(EventOverlapRule.ALLOW);
+      await service.assertNoClash([dto('A')], undefined, 'A');
+      expect(mockOverlapService.assertNoClash).not.toHaveBeenCalled();
+    });
+
+    it('looks each config up once and marks who each service is for', async () => {
+      mockOverlapService.getRule.mockResolvedValueOnce(
+        EventOverlapRule.GROUPS_AT_OTHER_VENUES,
+      );
+      mockEventConfigService.get.mockResolvedValue({
+        defaultFormat: MeetingFormatEnum.IN_PERSON,
+        defaultVenue: { id: 'v1' },
+      });
+      await service.assertNoClash(
+        [dto('A'), dto('B', EventAudienceEnum.WORKERS), dto('C')],
+        EventAudienceEnum.EVERYONE,
+        'Sunday',
+        { seriesId: 's1' },
+      );
+      expect(mockEventConfigService.get).toHaveBeenCalledTimes(1);
+      expect(mockOverlapService.assertNoClash).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            name: 'A',
+            venueId: 'v1',
+            forEveryone: true,
+          }),
+          expect.objectContaining({
+            name: 'B',
+            venueId: 'v1',
+            forEveryone: false,
+          }),
+          expect.objectContaining({
+            name: 'C',
+            venueId: 'v1',
+            forEveryone: true,
+          }),
+        ],
+        EventOverlapRule.GROUPS_AT_OTHER_VENUES,
+        { seriesId: 's1' },
+      );
     });
   });
 

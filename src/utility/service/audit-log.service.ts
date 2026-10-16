@@ -77,6 +77,7 @@ export type AuditAction =
   | 'EVENT_SERIES_STOPPED'
   | 'EVENT_TEMPLATE_SAVED'
   | 'EVENT_TEMPLATE_DELETED'
+  | 'EVENT_OVERLAP_RULE_UPDATED'
   // Live service (admin Live Session, Front Desk and the Programme Manager link)
   | 'LIVE_SESSION_STARTED'
   | 'LIVE_SESSION_ENDED'

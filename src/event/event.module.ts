@@ -31,6 +31,9 @@ import {
   EventAudienceController,
 } from './controller/event-series.controller';
 import { ServiceProgrammeModule } from '../service-programme/service-programme.module';
+import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
+import { EventOverlapService } from './service/event-overlap.service';
+import { EventSettingsController } from './controller/event-settings.controller';
 
 @Module({
   imports: [
@@ -42,6 +45,7 @@ import { ServiceProgrammeModule } from '../service-programme/service-programme.m
       EventSeries,
       EventTemplate,
       Group,
+      ChurchSetting,
     ]),
     // Tenant is public-schema, control-plane — plain TypeOrmModule, needed
     // by EventReminderService.dispatchDueReminders' forEachActiveTenant loop.
@@ -58,6 +62,7 @@ import { ServiceProgrammeModule } from '../service-programme/service-programme.m
     EventAudienceController,
     EventSeriesController,
     EventTemplateController,
+    EventSettingsController,
     EventController,
     EventConfigController,
     EventReminderController,
@@ -70,6 +75,7 @@ import { ServiceProgrammeModule } from '../service-programme/service-programme.m
     EventTemplateService,
     ChurchTimezoneService,
     EventSeriesScheduler,
+    EventOverlapService,
   ],
   exports: [TenantTypeOrmModule, EventService, EventConfigService],
 })

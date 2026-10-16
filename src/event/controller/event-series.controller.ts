@@ -51,6 +51,16 @@ export class EventSeriesController {
     return this.seriesService.update(id, dto, admin.member.id);
   }
 
+  // What the edit would do to each upcoming date it can change, without saving.
+  @RequiresPermission(AdminPermission.EVENTS_WRITE)
+  @Post(':id/preview')
+  preview(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateEventSeriesDto,
+  ) {
+    return this.seriesService.previewUpdate(id, dto);
+  }
+
   @RequiresPermission(AdminPermission.EVENTS_WRITE)
   @Post(':id/stop')
   stop(
