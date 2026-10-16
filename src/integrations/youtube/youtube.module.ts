@@ -5,6 +5,7 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { YoutubeSubscriptionService } from './service/youtube-subscription.service';
 import { YoutubeLiveDetectionService } from './service/youtube-live-detection.service';
 import { TenantYoutubeIntegrationService } from './service/tenant-youtube-integration.service';
+import { YoutubeChannelCheckService } from './service/youtube-channel-check.service';
 import { YoutubeSubscriptionScheduler } from './scheduler/youtube-subscription.scheduler';
 import { YoutubeWebhookController } from './controller/youtube-webhook.controller';
 import { YoutubeIntegrationController } from './controller/youtube-integration.controller';
@@ -28,6 +29,7 @@ import { UtilityModule } from '../../utility/utility.module';
     YoutubeSubscriptionService,
     YoutubeLiveDetectionService,
     TenantYoutubeIntegrationService,
+    YoutubeChannelCheckService,
     YoutubeSubscriptionScheduler,
   ],
   controllers: [YoutubeWebhookController, YoutubeIntegrationController],

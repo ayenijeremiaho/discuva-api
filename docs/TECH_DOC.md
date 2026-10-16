@@ -5912,8 +5912,15 @@ streak, weekly availability, points, ranks and achievements. Admins: `GET admin/
 Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when a tenant's configured
 YouTube channel goes live and calls `AnnouncementService.createSystemAnnouncement()` automatically, no admin click
 needed. Per-tenant BYOK, redesigned from an earlier single-global-channel version (`docs/MULTI_TENANT_MIGRATION.md`
-§9 Phase 8b) — every tenant sets their own channel (and optionally their own Data API key) via
-`PUT /v1/youtube-integration`; there is no platform-wide default channel.
+§9 Phase 8b) — every tenant sets their own channel and their own YouTube Data API v3 key via
+`PUT /v1/youtube-integration`; there is no platform-wide default channel or key (the `YOUTUBE_API_KEY` Fly secret is
+not read by any code). A key is required to connect; on later edits a blank key keeps the saved one. Before saving,
+`YoutubeChannelCheckService` calls `channels.list` (1 quota unit of the church's own 10,000/day, 8-second timeout)
+with the channel and key, so a mistake is caught at save time with a plain explanation instead of announcements
+silently never happening: invalid key, YouTube Data API v3 not enabled for the key's project, daily quota used up,
+key restricted to websites/IPs (Application restrictions must be None) or to other APIs, channel or @handle not found,
+or YouTube unreachable. The channel can be given as its `UC…` id, a `/channel/` link, or an `@handle` / handle link
+(resolved via `forHandle`); the resolved id and the channel's name are saved.
 
 **Entity — `TenantYoutubeIntegration` (`tenant_youtube_integrations`, `public` schema, not tenant-schema):**
 
@@ -5922,6 +5929,7 @@ needed. Per-tenant BYOK, redesigned from an earlier single-global-channel versio
 | id                       | UUID                 | PK |
 | tenantId                 | UUID, unique         | FK → `tenants.id`, `CASCADE` — one integration per tenant |
 | channelId                | varchar, unique      | The tenant's YouTube channel id |
+| channelTitle             | varchar \| null      | The channel's name, read from YouTube on save (root migration `AddYoutubeIntegrationChannelTitle`) |
 | apiKeyEncrypted          | varchar \| null, `select: false` | AES-256-GCM (`EncryptionService`); `null` means live-detection is a no-op until the tenant sets one — no platform-wide fallback |
 | lastAnnouncedVideoId     | varchar \| null      | Idempotency key — prevents double-announcing the same livestream |
 | subscriptionExpiresAt    | timestamptz \| null  | Estimated WebSub lease expiry (informational; re-subscription runs daily regardless) |
@@ -5959,8 +5967,9 @@ per tenant, no `:id`/`:channel` param):
 
 | Method | Path                       | Permission                 | Description |
 |--------|-----------------------------|-----------------------------|--------------|
-| GET    | `/youtube-integration`      | YOUTUBE_INTEGRATION_READ   | Returns `{ channelId, hasOwnApiKey, isActive, subscriptionExpiresAt } \| null` — never the key itself |
-| PUT    | `/youtube-integration`      | YOUTUBE_INTEGRATION_WRITE  | Body `{ channelId, apiKey? }` — upserts this tenant's config, encrypting `apiKey` if given. Rejects (`409`) a `channelId` already owned by a different tenant. Switching channels unsubscribes the old one before subscribing the new one |
+| GET    | `/youtube-integration`      | YOUTUBE_INTEGRATION_READ   | Returns `{ channelId, channelTitle, hasOwnApiKey, isActive, status, subscriptionExpiresAt } \| null` — never the key itself. `status`: `ANNOUNCING`, `NEEDS_API_KEY` (connected before keys were required; nothing is announced) or `PAUSED` |
+| PUT    | `/youtube-integration`      | YOUTUBE_INTEGRATION_WRITE  | Body `{ channelId, apiKey? }` — `channelId` may be an id, `/channel/` link or `@handle`. `apiKey` is required when none is saved (`400` otherwise); blank keeps the saved key. Checks both with YouTube first (`400` with the reason), then saves the resolved id, name and encrypted key. Rejects (`409`) a channel already owned by a different tenant. Switching channels unsubscribes the old one before subscribing the new one |
+| POST   | `/youtube-integration/test` | YOUTUBE_INTEGRATION_WRITE  | Body `{ channelId, apiKey? }` — the same YouTube check without saving (blank key uses the saved one). Returns `{ channelId, channelTitle }` |
 | PATCH  | `/youtube-integration`      | YOUTUBE_INTEGRATION_WRITE  | Body `{ isActive }` — enable/disable without touching the stored channel/key; subscribes on enable, unsubscribes on disable |
 
 **WebSub (PubSubHubbub) flow:**

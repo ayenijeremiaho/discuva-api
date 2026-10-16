@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
@@ -11,6 +12,8 @@ import { TenantYoutubeIntegration } from '../entity/tenant-youtube-integration.e
 import { EncryptionService } from '../../../utility/service/encryption.service';
 import { YoutubeSubscriptionService } from './youtube-subscription.service';
 
+import { YoutubeChannelCheckService } from './youtube-channel-check.service';
+
 const mockIntegrationRepo = {
   findOne: jest.fn(),
   create: jest.fn(),
@@ -19,6 +22,17 @@ const mockIntegrationRepo = {
 
 const mockEncryptionService = {
   encrypt: jest.fn((v: string) => `enc(${v})`),
+  decrypt: jest.fn((v: string) => v.replace(/^enc\((.*)\)$/, '$1')),
+};
+
+// YouTube answers with the real channel ID and its name; a link or @handle resolves to the ID.
+const mockChannelCheck = {
+  check: jest.fn((input: string) =>
+    Promise.resolve({
+      channelId: input.startsWith('@') ? 'UC-from-handle' : input,
+      channelTitle: 'Grace Chapel',
+    }),
+  ),
 };
 
 const mockSubscriptionService = {
@@ -47,6 +61,7 @@ describe('TenantYoutubeIntegrationService', () => {
           provide: YoutubeSubscriptionService,
           useValue: mockSubscriptionService,
         },
+        { provide: YoutubeChannelCheckService, useValue: mockChannelCheck },
         {
           provide: getRepositoryToken(TenantYoutubeIntegration),
           useValue: mockIntegrationRepo,
@@ -81,54 +96,123 @@ describe('TenantYoutubeIntegrationService', () => {
 
       expect(result).toEqual({
         channelId: 'UC123',
+        channelTitle: null,
         hasOwnApiKey: true,
+        isActive: true,
+        status: 'ANNOUNCING',
+        subscriptionExpiresAt: null,
+      });
+    });
+
+    it("says plainly when nothing is being announced for lack of a key, or because it's paused", async () => {
+      mockIntegrationRepo.findOne.mockResolvedValueOnce({
+        channelId: 'UC123',
+        apiKeyEncrypted: null,
         isActive: true,
         subscriptionExpiresAt: null,
       });
+      expect((await service.get())?.status).toBe('NEEDS_API_KEY');
+      mockIntegrationRepo.findOne.mockResolvedValueOnce({
+        channelId: 'UC123',
+        apiKeyEncrypted: 'enc(k)',
+        isActive: false,
+        subscriptionExpiresAt: null,
+      });
+      expect((await service.get())?.status).toBe('PAUSED');
     });
   });
 
   describe('upsert', () => {
-    it('creates a new integration, encrypts the api key, and subscribes', async () => {
+    // findOne is called first for this church's saved integration, then for anyone else owning the channel.
+    it('checks the channel and key with YouTube, then saves the key encrypted and subscribes', async () => {
       mockIntegrationRepo.findOne
-        .mockResolvedValueOnce(null) // no existing config for this channel (conflict check)
-        .mockResolvedValueOnce(null); // no existing config for this tenant
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(null);
       mockIntegrationRepo.save.mockResolvedValue({});
 
       const result = await service.upsert({
-        channelId: 'UC123',
-        apiKey: 'my-key',
+        channelId: '@gracechapel',
+        apiKey: ' my-key ',
       });
 
-      expect(mockEncryptionService.encrypt).toHaveBeenCalledWith('my-key');
+      expect(mockChannelCheck.check).toHaveBeenCalledWith(
+        '@gracechapel',
+        'my-key',
+      );
       expect(mockIntegrationRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: 'tenant-1',
-          channelId: 'UC123',
+          channelId: 'UC-from-handle',
+          channelTitle: 'Grace Chapel',
           apiKeyEncrypted: 'enc(my-key)',
           isActive: true,
         }),
       );
-      expect(mockSubscriptionService.subscribe).toHaveBeenCalledWith('UC123');
-      expect(mockSubscriptionService.unsubscribe).not.toHaveBeenCalled();
-      expect(result.channelId).toBe('UC123');
-      expect(result.hasOwnApiKey).toBe(true);
+      expect(mockSubscriptionService.subscribe).toHaveBeenCalledWith(
+        'UC-from-handle',
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          channelTitle: 'Grace Chapel',
+          hasOwnApiKey: true,
+          status: 'ANNOUNCING',
+        }),
+      );
     });
 
-    it('stores no api key when omitted — platform default applies at send time', async () => {
+    it('refuses to connect without a key, since there is no platform key to fall back on', async () => {
       mockIntegrationRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.upsert({ channelId: 'UC123' })).rejects.toThrow(
+        'Add your YouTube API key',
+      );
+      expect(mockChannelCheck.check).not.toHaveBeenCalled();
+      expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('keeps the saved key when the field is left blank on an edit', async () => {
+      const saved = {
+        id: 'i1',
+        tenantId: 'tenant-1',
+        channelId: 'UC123',
+        apiKeyEncrypted: 'enc(old-key)',
+        isActive: true,
+      };
+      mockIntegrationRepo.findOne
+        .mockResolvedValueOnce(saved)
+        .mockResolvedValueOnce(saved);
       mockIntegrationRepo.save.mockResolvedValue({});
 
-      const result = await service.upsert({ channelId: 'UC123' });
+      await service.upsert({ channelId: 'UC123' });
 
+      expect(mockChannelCheck.check).toHaveBeenCalledWith('UC123', 'old-key');
       expect(mockEncryptionService.encrypt).not.toHaveBeenCalled();
-      expect(result.hasOwnApiKey).toBe(false);
+      expect(mockIntegrationRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKeyEncrypted: 'enc(old-key)' }),
+      );
+    });
+
+    it('saves nothing when YouTube rejects the key or channel', async () => {
+      mockIntegrationRepo.findOne.mockResolvedValue(null);
+      mockChannelCheck.check.mockRejectedValueOnce(
+        new BadRequestException("That API key isn't valid."),
+      );
+
+      await expect(
+        service.upsert({ channelId: 'UC123', apiKey: 'bad' }),
+      ).rejects.toThrow("That API key isn't valid.");
+      expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
+      expect(mockSubscriptionService.subscribe).not.toHaveBeenCalled();
     });
 
     it('unsubscribes the old channel before subscribing the new one when switching channels', async () => {
       mockIntegrationRepo.findOne
-        .mockResolvedValueOnce(null) // no conflicting owner for the new channel
-        .mockResolvedValueOnce({ tenantId: 'tenant-1', channelId: 'UC-old' });
+        .mockResolvedValueOnce({
+          tenantId: 'tenant-1',
+          channelId: 'UC-old',
+          apiKeyEncrypted: 'enc(k)',
+        })
+        .mockResolvedValueOnce(null);
       mockIntegrationRepo.save.mockResolvedValue({});
 
       await service.upsert({ channelId: 'UC-new' });
@@ -139,28 +223,43 @@ describe('TenantYoutubeIntegrationService', () => {
       expect(mockSubscriptionService.subscribe).toHaveBeenCalledWith('UC-new');
     });
 
-    it('rejects a channel id already registered to a different tenant', async () => {
-      mockIntegrationRepo.findOne.mockResolvedValueOnce({
-        tenantId: 'some-other-tenant',
-        channelId: 'UC123',
-      });
+    it('rejects a channel already registered to a different church', async () => {
+      mockIntegrationRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          tenantId: 'some-other-tenant',
+          channelId: 'UC123',
+        });
 
-      await expect(service.upsert({ channelId: 'UC123' })).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.upsert({ channelId: 'UC123', apiKey: 'k' }),
+      ).rejects.toThrow(ConflictException);
       expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
       expect(mockSubscriptionService.subscribe).not.toHaveBeenCalled();
     });
+  });
 
-    it('allows re-saving the same channel already owned by this tenant (no conflict with self)', async () => {
-      mockIntegrationRepo.findOne
-        .mockResolvedValueOnce({ tenantId: 'tenant-1', channelId: 'UC123' })
-        .mockResolvedValueOnce({ tenantId: 'tenant-1', channelId: 'UC123' });
-      mockIntegrationRepo.save.mockResolvedValue({});
+  describe('test', () => {
+    it('checks with YouTube using the typed key, or the saved one, and saves nothing', async () => {
+      mockIntegrationRepo.findOne.mockResolvedValue({
+        tenantId: 'tenant-1',
+        apiKeyEncrypted: 'enc(saved-key)',
+      });
 
-      await expect(
-        service.upsert({ channelId: 'UC123' }),
-      ).resolves.toBeDefined();
+      await expect(service.test({ channelId: 'UC123' })).resolves.toEqual({
+        channelId: 'UC123',
+        channelTitle: 'Grace Chapel',
+      });
+      expect(mockChannelCheck.check).toHaveBeenLastCalledWith(
+        'UC123',
+        'saved-key',
+      );
+      await service.test({ channelId: 'UC123', apiKey: 'new-key' });
+      expect(mockChannelCheck.check).toHaveBeenLastCalledWith(
+        'UC123',
+        'new-key',
+      );
+      expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
     });
   });
 
