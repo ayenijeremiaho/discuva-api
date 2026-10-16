@@ -45,7 +45,10 @@ const mockProvisioningService = {
   provision: jest.fn(),
   enqueueProvisioning: jest.fn(),
 };
-const mockCacheService = { del: jest.fn() };
+const mockCacheService = {
+  del: jest.fn(),
+  delGlobal: jest.fn().mockResolvedValue(1),
+};
 const mockClsService = { runWith: jest.fn((_ctx, fn) => fn()) };
 
 const baseTenant = {

@@ -14,6 +14,7 @@ import { UpdatePlanDto } from '../dto/update-plan.dto';
 import { CacheService } from '../../utility/service/cache.service';
 import { ClsService } from 'nestjs-cls';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { RELEASED_FEATURES_KEY } from '../../billing/service/plan-feature-resolver.service';
 
 @Injectable()
 export class PlatformPlanService {
@@ -36,7 +37,9 @@ export class PlatformPlanService {
       throw new ConflictException(`Plan "${dto.id}" already exists.`);
     }
     this.validateFeatureLimits(dto.featureLimits);
-    return this.planRepo.save(this.planRepo.create(dto));
+    const created = await this.planRepo.save(this.planRepo.create(dto));
+    this.cacheService.delGlobal(RELEASED_FEATURES_KEY).catch(() => undefined);
+    return created;
   }
 
   async updatePlan(id: string, dto: UpdatePlanDto): Promise<Plan> {
@@ -59,6 +62,7 @@ export class PlatformPlanService {
     }
     Object.assign(plan, dto);
     const saved = await this.planRepo.save(plan);
+    this.cacheService.delGlobal(RELEASED_FEATURES_KEY).catch(() => undefined);
 
     // PlanFeatureResolverService.resolve() caches per tenant for 300s
     // (plan-features:${tenantId}) — a features/featureLimits change here

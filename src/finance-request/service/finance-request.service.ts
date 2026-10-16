@@ -501,14 +501,11 @@ export class FinanceRequestService {
   ): Promise<void> {
     const tenantId = this.cls.get('tenantId');
     if (tenantId) {
-      const { features } = await this.planFeatureResolver.resolve(tenantId);
-      if (!features.includes(PlanFeature.FINANCE)) {
-        throw new ForbiddenException({
-          message: 'Posting to the journal requires an upgraded plan.',
-          code: 'PLAN_UPGRADE_REQUIRED',
-          requiredFeature: PlanFeature.FINANCE,
-        });
-      }
+      await this.planFeatureResolver.assertEntitled(
+        tenantId,
+        PlanFeature.FINANCE,
+        'Posting to the journal requires an upgraded plan.',
+      );
     }
 
     const idempotencyKey = `finance-request:${request.id}`;

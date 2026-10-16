@@ -8,6 +8,12 @@ import { PlanFeatureResolverService } from '../../billing/service/plan-feature-r
 
 const mockChurchSettingsService = { isEnabled: jest.fn() };
 const mockPlanFeatureResolver = { resolve: jest.fn() };
+// The real gate logic over the mocked resolve(); every feature is on some plan unless a test says otherwise.
+Object.assign(mockPlanFeatureResolver, {
+  releasedFeatures: jest.fn().mockResolvedValue({ includes: () => true }),
+  gateReason: PlanFeatureResolverService.prototype.gateReason,
+  assertEntitled: PlanFeatureResolverService.prototype.assertEntitled,
+});
 const mockCls = { get: jest.fn() };
 
 function mockContext(): ExecutionContext {
