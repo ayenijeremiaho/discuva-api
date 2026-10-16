@@ -5988,6 +5988,113 @@
           ]
         },
         {
+          "name": "Preview Event",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Easter Conference\",\n  \"description\": \"\",\n  \"onlineAttendanceEnabled\": false,\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2027-04-05T09:00:00.000Z\",\n      \"endTime\": \"2027-04-05T11:00:00.000Z\",\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "preview"
+              ]
+            },
+            "description": "EVENTS_WRITE. Same body as Create Event (add eventId to check a change to one date). Saves nothing. Returns { dates: [{ date, startTime, endTime, status: READY|SKIPPED|BLOCKED, clashes: [{ service, other, why }] }], givingWay: [{ seriesName, date, day, clash }], canSave }."
+          },
+          "response": []
+        },
+        {
+          "name": "Preview Series Update",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"effectiveFrom\": \"2026-10-25\",\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"09:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/series/{{eventSeriesId}}/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "series",
+                "{{eventSeriesId}}",
+                "preview"
+              ]
+            },
+            "description": "EVENTS_WRITE. Same body as Update Series. Saves nothing. Rows only for upcoming dates with no check-ins or session (keptWithHistory counts the rest): READY (recreated when services change) or SKIPPED (new time clashes; stays as it is). With moveTo, rows are the new schedule's dates."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Overlapping Events Rule",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/events/settings/overlap",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "settings",
+                "overlap"
+              ]
+            },
+            "description": "EVENTS_READ. { rule, isDefault }. rule: BLOCK_ALL (default) | GROUPS_AT_OTHER_VENUES | ALLOW."
+          },
+          "response": []
+        },
+        {
+          "name": "Set Overlapping Events Rule",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rule\": \"GROUPS_AT_OTHER_VENUES\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/events/settings/overlap",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "settings",
+                "overlap"
+              ]
+            },
+            "description": "EVENTS_WRITE. BLOCK_ALL: no two events may overlap. GROUPS_AT_OTHER_VENUES: only services for workers or a contact list may share a time, at different venues. ALLOW: no check. Creating or editing an event that clashes with something on the schedule returns 400 with code EVENT_OVERLAP. A one-off on a future series date that isn't created yet is saved and its response carries scheduleNotes (that series date will be skipped); series create/edit/move skip clashing dates and report them (scheduleNotes on the first created event; skipped[] on PATCH /events/series/:id)."
+          },
+          "response": []
+        },
+        {
           "name": "List Service Types",
           "request": {
             "method": "GET",

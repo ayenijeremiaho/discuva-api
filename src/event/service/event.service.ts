@@ -31,6 +31,17 @@ import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
+import {
+  EventOverlapService,
+  OverlapCandidate,
+  OverlapExclusion,
+  overlapKey,
+} from './event-overlap.service';
+import { EventOverlapRule } from '../enums/event-overlap-rule.enum';
+import { PreviewEventDto } from '../dto/preview-event.dto';
+import { EventPreview } from '../types/event-preview';
+import { localDate } from '../types/slot-blueprint';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { EventConfigService } from './event-config.service';
 import { VenueService } from '../../venue/service/venue.service';
 import { OrderBy } from '../types/order-by.type';
@@ -84,6 +95,9 @@ export interface EventViewer {
   isWorker: boolean;
 }
 
+// What a save returns: the event, plus anything the admin should know about the schedule around it.
+export type ScheduledEvent = Event & { scheduleNotes?: string[] };
+
 @Injectable()
 export class EventService {
   private readonly logger = new Logger(EventService.name);
@@ -106,9 +120,14 @@ export class EventService {
     @Inject(forwardRef(() => EventSeriesService))
     private readonly seriesService: EventSeriesService,
     private readonly programmeService: ServiceProgrammeService,
+    private readonly overlapService: EventOverlapService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
-  async create(dto: CreateEventDto, actorId: string): Promise<Event | Event[]> {
+  async create(
+    dto: CreateEventDto,
+    actorId: string,
+  ): Promise<ScheduledEvent | ScheduledEvent[]> {
     dto = { ...dto, ...(await this.resolveAudience(dto)) };
     if (dto.isRecurring) {
       if (!dto.recurrence)
@@ -116,7 +135,10 @@ export class EventService {
           'Recurrence details required for recurring events',
         );
       this.validateFutureSlots(dto.serviceSlots);
-      const result = await this.seriesService.createFromEvent(dto, actorId);
+      const { created, skipped } = await this.seriesService.createFromEvent(
+        dto,
+        actorId,
+      );
       this.auditLogService.log('EVENT_CREATED', {
         actorId,
         targetName: dto.name,
@@ -124,9 +146,13 @@ export class EventService {
           name: dto.name,
           isRecurring: true,
           ongoing: !!dto.recurrence.ongoing,
-          count: result.length,
+          count: created.length,
+          skipped: skipped.map((d) => d.date),
         },
       });
+      // The list shape is unchanged; notes ride on the first date.
+      const result: ScheduledEvent[] = created;
+      if (skipped.length) result[0].scheduleNotes = skipped.map((d) => d.note);
       return result;
     }
 
@@ -148,8 +174,9 @@ export class EventService {
     id: string,
     dto: Partial<CreateEventDto>,
     actorId: string,
-  ): Promise<Event> {
+  ): Promise<ScheduledEvent> {
     const event = await this.getById(id);
+    let notes: string[] = [];
 
     if (dto.name) event.name = dto.name;
     if (dto.description !== undefined) event.description = dto.description;
@@ -167,6 +194,13 @@ export class EventService {
           'This event has recorded session or attendance history — its schedule can no longer be edited',
         );
       }
+      if (this.schedulingChanges(event, dto.serviceSlots, dto.audience))
+        notes = await this.assertNoClash(
+          dto.serviceSlots,
+          dto.audience ?? event.audience,
+          dto.name || event.name,
+          { eventId: id },
+        );
       await this.slotRepository.delete({ event: { id } });
       const slots = await this.buildSlots(dto.serviceSlots);
       event.serviceSlots = slots;
@@ -182,11 +216,20 @@ export class EventService {
       event.onlineAttendanceEnabled = dto.onlineAttendanceEnabled;
 
     if (dto.audience !== undefined) {
+      // Opening an event to everyone can clash with what's already at that time.
+      if (!dto.serviceSlots?.length && dto.audience !== event.audience)
+        notes = await this.assertNoClash(
+          event.serviceSlots.map((s) => this.toSlotDto(s)),
+          dto.audience,
+          dto.name || event.name,
+          { eventId: id },
+        );
       Object.assign(event, await this.resolveAudience(dto));
       event.audienceGroup = undefined;
     }
 
-    const saved = await this.eventRepository.save(event);
+    const saved: ScheduledEvent = await this.eventRepository.save(event);
+    if (notes.length) saved.scheduleNotes = notes;
     this.auditLogService.log('EVENT_UPDATED', {
       actorId,
       targetId: id,
@@ -551,6 +594,154 @@ export class EventService {
     };
   }
 
+  // What create (or saving a change to one date, with eventId) would do, checked the same way, saving nothing.
+  async preview(dto: PreviewEventDto): Promise<EventPreview> {
+    const { eventId, ...rest } = dto;
+    const input = { ...rest, ...(await this.resolveAudience(rest)) };
+    let unchanged = false;
+    if (eventId) {
+      const event = await this.getById(eventId);
+      unchanged = !this.schedulingChanges(
+        event,
+        input.serviceSlots,
+        input.audience,
+      );
+      if (await this.hasRecordedHistory(eventId)) {
+        throw new BadRequestException(
+          'This event has recorded session or attendance history — its schedule can no longer be edited',
+        );
+      }
+    } else {
+      this.validateFutureSlots(input.serviceSlots);
+    }
+    await this.buildSlots(input.serviceSlots);
+
+    if (input.isRecurring && !eventId) {
+      if (!input.recurrence)
+        throw new BadRequestException(
+          'Recurrence details required for recurring events',
+        );
+      return this.seriesService.preview(input);
+    }
+
+    const rule = await this.overlapService.getRule();
+    const candidates = await this.toCandidates(
+      input.serviceSlots,
+      input.audience,
+    );
+    // One date of a series is checked against its own series' other dates too.
+    const clashes = unchanged
+      ? []
+      : await this.overlapService.findClashes(candidates, rule, { eventId });
+    const details = await Promise.all(
+      clashes.map((c) => this.overlapService.overlapDetail(rule, c.slot, c)),
+    );
+    const givingWay =
+      clashes.length || unchanged
+        ? []
+        : await this.seriesService.givingWay(candidates, rule, input.name);
+    const starts = candidates.map((c) => c.startTime.getTime());
+    const ends = candidates.map((c) => c.endTime.getTime());
+    const first = new Date(Math.min(...starts));
+    return {
+      dates: [
+        {
+          date: localDate(first, await this.churchTimezone.get()),
+          startTime: first.toISOString(),
+          endTime: new Date(Math.max(...ends)).toISOString(),
+          status: clashes.length ? 'BLOCKED' : 'READY',
+          clashes: details,
+        },
+      ],
+      givingWay,
+      canSave: !clashes.length,
+    };
+  }
+
+  // Blocks a clash with anything on the schedule; returns notes on series dates not created yet that will give way.
+  async assertNoClash(
+    slotDtos: CreateServiceSlotDto[],
+    eventAudience: EventAudienceEnum | undefined,
+    eventName: string,
+    exclude: OverlapExclusion = {},
+  ): Promise<string[]> {
+    if (!slotDtos.length) return [];
+    const rule = await this.overlapService.getRule();
+    if (rule === EventOverlapRule.ALLOW) return [];
+    await this.overlapService.lockSchedule();
+    const candidates = await this.toCandidates(slotDtos, eventAudience);
+    await this.overlapService.assertNoClash(candidates, rule, exclude);
+    return this.seriesService.datesGivingWay(
+      candidates,
+      rule,
+      eventName,
+      exclude.seriesId,
+    );
+  }
+
+  // Whether an edit changes anything a clash depends on: times, venue, format or who it's for.
+  private schedulingChanges(
+    event: Event,
+    slotDtos: CreateServiceSlotDto[],
+    audience: EventAudienceEnum | undefined,
+  ): boolean {
+    return (
+      overlapKey(slotDtos, audience ?? event.audience) !==
+      overlapKey(
+        event.serviceSlots.map((s) => this.toSlotDto(s)),
+        event.audience,
+      )
+    );
+  }
+
+  // Services as the overlap rule sees them. Pass the same map across calls to look each config up once.
+  async toCandidates(
+    slotDtos: CreateServiceSlotDto[],
+    eventAudience: EventAudienceEnum | undefined,
+    venues = new Map<string, Promise<string | null>>(),
+  ): Promise<OverlapCandidate[]> {
+    const venueOf = (s: CreateServiceSlotDto) => {
+      const key = `${s.configId}|${s.venueOverrideId ?? ''}|${s.formatOverride ?? ''}`;
+      if (!venues.has(key)) venues.set(key, this.inPersonVenueId(s));
+      return venues.get(key)!;
+    };
+    return Promise.all(
+      slotDtos.map(async (s) => ({
+        name: s.name ?? 'Service',
+        startTime: new Date(s.startTime),
+        endTime: new Date(s.endTime),
+        venueId: await venueOf(s),
+        forEveryone:
+          (s.audience ?? eventAudience ?? EventAudienceEnum.EVERYONE) ===
+          EventAudienceEnum.EVERYONE,
+      })),
+    );
+  }
+
+  toSlotDto(slot: ServiceSlot): CreateServiceSlotDto {
+    return {
+      name: slot.name,
+      startTime: slot.startTime.toISOString(),
+      endTime: slot.endTime.toISOString(),
+      configId: slot.config?.id,
+      venueOverrideId: slot.venueOverride?.id,
+      formatOverride: slot.formatOverride ?? undefined,
+      audience: (slot.audience ??
+        undefined) as CreateServiceSlotDto['audience'],
+    } as CreateServiceSlotDto;
+  }
+
+  private async inPersonVenueId(
+    slot: CreateServiceSlotDto,
+  ): Promise<string | null> {
+    const config = slot.configId
+      ? await this.eventConfigService.get(slot.configId)
+      : undefined;
+    const format = slot.formatOverride ?? config?.defaultFormat;
+    if (format !== MeetingFormatEnum.IN_PERSON) return null;
+    return slot.venueOverrideId ?? config?.defaultVenue?.id ?? null;
+  }
+
   private validateFutureSlots(slots: CreateServiceSlotDto[]): void {
     const now = Date.now();
     if (slots.some((slot) => new Date(slot.startTime).getTime() < now)) {
@@ -558,7 +749,12 @@ export class EventService {
     }
   }
 
-  private async createSingle(dto: CreateEventDto): Promise<Event> {
+  private async createSingle(dto: CreateEventDto): Promise<ScheduledEvent> {
+    const notes = await this.assertNoClash(
+      dto.serviceSlots,
+      dto.audience,
+      dto.name,
+    );
     const slots = await this.buildSlots(dto.serviceSlots);
     const { eventDate, endDate, startTime, endTime } =
       this.deriveDateRange(slots);
@@ -574,7 +770,9 @@ export class EventService {
       audienceGroupId: dto.audienceGroupId ?? null,
     });
     event.serviceSlots = slots;
-    return this.eventRepository.save(event);
+    const saved: ScheduledEvent = await this.eventRepository.save(event);
+    if (notes.length) saved.scheduleNotes = notes;
+    return saved;
   }
 
   // Groups an event can be for — reference data, so the full list.
