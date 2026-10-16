@@ -75,9 +75,17 @@ describe('PlatformSocialAppService', () => {
   });
 
   describe('upsertApp', () => {
+    const fetchMock = jest.fn();
+    const metaReplies = (body: unknown) =>
+      fetchMock.mockResolvedValue({ json: () => Promise.resolve(body) });
+    beforeEach(() => {
+      global.fetch = fetchMock as never;
+      metaReplies({ id: '1234567890123', name: 'Discuva' });
+    });
+
     const dto = {
       platform: SocialPlatform.FACEBOOK,
-      clientId: 'meta-client-id',
+      clientId: '1234567890123',
       clientSecret: 'meta-client-secret',
       redirectUri:
         'https://api.discuva.app/v1/integrations/social/FACEBOOK/oauth/callback',
@@ -102,7 +110,7 @@ describe('PlatformSocialAppService', () => {
       expect(mockAppRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
           platform: SocialPlatform.FACEBOOK,
-          clientId: 'meta-client-id',
+          clientId: '1234567890123',
           clientSecretEncrypted: 'iv:tag:ct',
           redirectUri: dto.redirectUri,
           scopes: 'pages_show_list,pages_read_engagement,pages_manage_posts',
@@ -130,10 +138,10 @@ describe('PlatformSocialAppService', () => {
       mockEncryptionService.encrypt.mockReturnValue('iv:tag:ct');
       mockAppRepo.save.mockImplementation((app) => Promise.resolve(app));
 
-      await service.upsertApp({ ...dto, configId: 'config-123' });
+      await service.upsertApp({ ...dto, configId: '987654321' });
 
       expect(mockAppRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ configId: 'config-123' }),
+        expect.objectContaining({ configId: '987654321' }),
       );
     });
 
@@ -155,7 +163,7 @@ describe('PlatformSocialAppService', () => {
       expect(mockAppRepo.create).not.toHaveBeenCalled();
       expect(mockAppRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
-          clientId: 'meta-client-id',
+          clientId: '1234567890123',
           clientSecretEncrypted: 'new-iv:new-tag:new-ct',
           isActive: false,
         }),
@@ -214,6 +222,95 @@ describe('PlatformSocialAppService', () => {
       expect(mockAppRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ scopes: 'whatever_x_calls_it' }),
       );
+    });
+
+    it('trims a pasted App ID and checks it with Meta before saving', async () => {
+      mockAppRepo.findOneBy.mockResolvedValue(null);
+      mockAppRepo.create.mockReturnValue({
+        platform: SocialPlatform.INSTAGRAM,
+      });
+      mockAppRepo.save.mockImplementation((app) => Promise.resolve(app));
+      await service.upsertApp({
+        ...dto,
+        platform: SocialPlatform.INSTAGRAM,
+        clientId: ' 1234567890123\n',
+        scopes: [
+          'pages_show_list',
+          'pages_read_engagement',
+          'pages_read_user_content',
+          'instagram_basic',
+          'instagram_content_publish',
+        ],
+      });
+      expect(fetchMock.mock.calls[0][0]).toContain(
+        'graph.facebook.com/v21.0/1234567890123?fields=id,name&access_token=1234567890123%7Cmeta-client-secret',
+      );
+      expect(mockAppRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ clientId: '1234567890123' }),
+      );
+    });
+
+    it.each([
+      ['not a number', { clientId: 'abc-123' }, /isn't a Meta App ID/],
+      [
+        'a non-numeric Configuration ID',
+        { configId: 'cfg-1' },
+        /isn't a Configuration ID/,
+      ],
+    ])('rejects %s without calling Meta', async (_label, change, message) => {
+      await expect(service.upsertApp({ ...dto, ...change })).rejects.toThrow(
+        message,
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockAppRepo.save).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      [
+        'a wrong secret',
+        {
+          error: {
+            message: 'Invalid OAuth access token signature.',
+            code: 190,
+          },
+        },
+        /App Secret doesn't match/,
+      ],
+      [
+        'an unknown App ID',
+        {
+          error: {
+            message: 'Error validating application. Invalid application ID.',
+            code: 101,
+          },
+        },
+        /doesn't recognise App ID 1234567890123/,
+      ],
+    ])('explains %s and saves nothing', async (_label, reply, message) => {
+      metaReplies(reply);
+      await expect(service.upsertApp(dto)).rejects.toThrow(message);
+      expect(mockAppRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("says so when Meta can't be reached", async () => {
+      fetchMock.mockRejectedValue(new Error('timeout'));
+      await expect(service.upsertApp(dto)).rejects.toThrow(
+        /Couldn't reach Meta/,
+      );
+      expect(mockAppRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('only checks Meta apps', async () => {
+      mockAppRepo.findOneBy.mockResolvedValue(null);
+      mockAppRepo.create.mockReturnValue({ platform: SocialPlatform.X });
+      mockAppRepo.save.mockImplementation((app) => Promise.resolve(app));
+      await service.upsertApp({
+        ...dto,
+        platform: SocialPlatform.X,
+        clientId: 'x-client',
+        scopes: ['tweet.write'],
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 
@@ -310,6 +407,26 @@ describe('PlatformSocialAppService', () => {
         }),
       );
       expect(result?.app.configId).toBe('config-123');
+    });
+
+    it('trims values saved with a stray space or line break', async () => {
+      mockAppRepo.findOne.mockResolvedValue({
+        platform: SocialPlatform.FACEBOOK,
+        clientId: '1234567890123 ',
+        clientSecretEncrypted: 'iv:tag:ct',
+        redirectUri: 'https://api/cb\n',
+        configId: ' 987654321',
+      });
+      mockEncryptionService.decrypt.mockReturnValue('secret\n');
+      const result = await service.getDecryptedApp(SocialPlatform.FACEBOOK);
+      expect(result).toEqual({
+        app: expect.objectContaining({
+          clientId: '1234567890123',
+          redirectUri: 'https://api/cb',
+          configId: '987654321',
+        }),
+        clientSecret: 'secret',
+      });
     });
   });
 });

@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,8 +23,19 @@ import {
 // and tenant-broadcast machinery — publishers resolve isActive live on
 // every call (via SocialPublisherRegistry) rather than through a cached
 // per-tenant credential resolver, so there's nothing to invalidate here.
+const META_PLATFORMS = new Set([
+  SocialPlatform.FACEBOOK,
+  SocialPlatform.INSTAGRAM,
+]);
+const META_ID = /^\d{5,20}$/;
+const META_CHECK_TIMEOUT_MS = 8000;
+const WHERE_APP_ID =
+  'Use the App ID from developers.facebook.com → your app → App settings → Basic. Facebook and Instagram both use this same App ID, not the "Instagram app ID" shown under the Instagram product.';
+
 @Injectable()
 export class PlatformSocialAppService {
+  private readonly logger = new Logger(PlatformSocialAppService.name);
+
   constructor(
     @InjectRepository(SocialPlatformApp)
     private readonly appRepo: Repository<SocialPlatformApp>,
@@ -49,18 +61,62 @@ export class PlatformSocialAppService {
     dto: RegisterSocialPlatformAppDto,
   ): Promise<SocialPlatformApp> {
     this.validateScopes(dto.platform, dto.scopes);
+    // Pasted IDs often carry a space or line break, which Meta then rejects as an invalid app.
+    const clientId = dto.clientId.trim();
+    const configId = dto.configId?.trim() || null;
+    if (META_PLATFORMS.has(dto.platform))
+      await this.checkMetaApp(clientId, dto.clientSecret.trim(), configId);
 
     const existing = await this.appRepo.findOneBy({ platform: dto.platform });
     const app = existing ?? this.appRepo.create({ platform: dto.platform });
-    app.clientId = dto.clientId;
+    app.clientId = clientId;
     app.clientSecretEncrypted = this.encryptionService.encrypt(
-      dto.clientSecret,
+      dto.clientSecret.trim(),
     );
-    app.redirectUri = dto.redirectUri;
+    app.redirectUri = dto.redirectUri.trim();
     app.scopes = dto.scopes.join(SCOPE_SEPARATOR[dto.platform] ?? ' ');
-    app.configId = dto.configId ?? null;
+    app.configId = configId;
     const saved = await this.appRepo.save(app);
     return this.stripSecret(saved);
+  }
+
+  // Asks Meta whether this App ID and secret belong to a real app, so a wrong value is caught here rather than as
+  // Facebook's "invalid app ID" page when a church tries to connect.
+  private async checkMetaApp(
+    clientId: string,
+    clientSecret: string,
+    configId: string | null,
+  ): Promise<void> {
+    if (!META_ID.test(clientId))
+      throw new BadRequestException(
+        `"${clientId}" isn't a Meta App ID (it's a number). ${WHERE_APP_ID}`,
+      );
+    if (configId && !META_ID.test(configId))
+      throw new BadRequestException(
+        `"${configId}" isn't a Configuration ID (it's a number). Copy it from Facebook Login for Business → Configurations.`,
+      );
+    let body: { id?: string; error?: { message?: string; code?: number } };
+    try {
+      const response = await fetch(
+        `https://graph.facebook.com/v21.0/${clientId}?fields=id,name&access_token=${encodeURIComponent(`${clientId}|${clientSecret}`)}`,
+        { signal: AbortSignal.timeout(META_CHECK_TIMEOUT_MS) },
+      );
+      body = (await response.json().catch(() => ({}))) as typeof body;
+    } catch (err) {
+      this.logger.warn(`Meta app check failed: ${(err as Error).message}`);
+      throw new BadRequestException(
+        "Couldn't reach Meta to check this App ID. Please try again in a moment.",
+      );
+    }
+    if (body.id === clientId) return;
+    const message = body.error?.message ?? 'Meta did not recognise this app.';
+    if (/signature|secret/i.test(message))
+      throw new BadRequestException(
+        "That App Secret doesn't match this App ID. Copy it again from App settings → Basic → App Secret.",
+      );
+    throw new BadRequestException(
+      `Meta doesn't recognise App ID ${clientId} (${message}). ${WHERE_APP_ID}`,
+    );
   }
 
   // No catalog entry for this platform (X, TikTok — no real exchanger yet)
@@ -153,9 +209,15 @@ export class PlatformSocialAppService {
       ],
     });
     if (!app) return null;
+    // Rows saved before values were trimmed on save may carry a pasted space or line break.
+    app.clientId = app.clientId.trim();
+    app.redirectUri = app.redirectUri.trim();
+    app.configId = app.configId?.trim() || null;
     return {
       app,
-      clientSecret: this.encryptionService.decrypt(app.clientSecretEncrypted),
+      clientSecret: this.encryptionService
+        .decrypt(app.clientSecretEncrypted)
+        .trim(),
     };
   }
 
