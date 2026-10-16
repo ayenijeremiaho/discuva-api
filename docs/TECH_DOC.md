@@ -5913,17 +5913,33 @@ streak, weekly availability, points, ranks and achievements. Admins: `GET admin/
 Members get one "🔴 Live Now" announcement (and one push) when the church goes live on a connected Facebook Page or
 Instagram account. Neither platform notifies us of a live start with the permissions approved for production
 (Facebook's `live_videos` Page webhook needs `pages_manage_metadata`; Instagram has no live-start webhook at all), so
-`SocialLiveScheduler` asks: every 2 minutes (Redis lock, gated job `social-live`), but only for a church that has the
-`social_media` module (its own toggle, its plan or a platform override — the same rule as `ModuleEnabledGuard`), at
-least one connected Facebook/Instagram account with `announceLive` on, and a service slot running now or starting
-within 15 minutes. Otherwise the church sleeps until 15 minutes before its next slot (woken by writes to
-`service_slots`, `events`, `social_accounts` and `church_settings`), so no Meta calls are made outside service times.
-Calls: Facebook `GET /{page-id}/live_videos?broadcast_status=["LIVE"]` and Instagram `GET /{ig-user-id}/live_media`,
-both with the stored Page token and an 8-second timeout (`MetaGraphApiService.getLiveFacebookVideo` /
-`getLiveInstagramMedia`). Each broadcast is announced once (`social_accounts.last_live_id`, recorded before
-announcing, so a failure is skipped rather than repeated); one account failing (e.g. an expired token) doesn't stop
-the others. The title is Meta's broadcast title, else the running event's name. Streams outside a scheduled service
-aren't detected.
+`SocialLiveScheduler` asks Meta every 2 minutes (Redis lock), but only during scheduled services, and keeps the
+database out of those checks:
+
+- **Plan (database, gated job `social-live`):** for a church that has the `social_media` module (its own toggle, its
+  plan or a platform override — the same rule as `ModuleEnabledGuard`) and at least one connected Facebook/Instagram
+  account with `announceLive` on, it looks for a service slot running now or starting within 15 minutes. If there is
+  one, it stores a **watch** in Redis (`social-live:watch:{tenantId}`, global key): the window end (the slot's end, or
+  5 minutes before a token expires if sooner), the running event's name, and per account its id, Meta id, last
+  announced broadcast and access token — **still encrypted** (`EncryptionService`), decrypted only in memory for each
+  call. The church then sleeps until the window ends. With no slot, it clears any watch and sleeps until 15 minutes
+  before the next slot. Writes to `service_slots`, `events`, `social_accounts` and `church_settings` wake it, so an
+  edited service or account replans on the next tick; the gate's hourly cap also replans long windows, which renews
+  tokens.
+- **Check (Redis and Meta only):** every tick reads each active church's watch and, for those inside their window,
+  calls Facebook `GET /{page-id}/live_videos?broadcast_status=["LIVE"]` and Instagram `GET /{ig-user-id}/live_media`
+  (`MetaGraphApiService.getLiveFacebookVideo` / `getLiveInstagramMedia`, 8-second timeout) with **no transaction
+  open**. Accounts of a church are checked in parallel; churches 10 at a time. A failing account (e.g. an expired
+  token) is logged once per window and doesn't stop the others.
+- **Announce (database, only on a new broadcast):** the broadcast id is recorded in the watch first (a failed
+  announcement is skipped, not repeated every 2 minutes), then one tenant transaction sets
+  `social_accounts.last_live_id` and posts via `LiveAnnouncementService`. The title is Meta's broadcast title, else
+  the running event's name.
+
+Database cost per church per service window is one short planning transaction, plus for each broadcast announced
+the announcement itself and a quick replan (the account write wakes the job), instead of one every 2 minutes, and the database can sleep through slots nobody attends. Outside windows
+the only cost is the gate's usual top-of-the-hour check, shared with the other gated jobs. Streams outside a
+scheduled service aren't detected.
 
 **One announcement per service across platforms:** `LiveAnnouncementService` (announcement module, also used by
 YouTube Live Detection) creates the first announcement of a service and remembers it for 4 hours (Redis `live-now`,
