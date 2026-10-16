@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
 import { DateService } from '../../utility/service/date.service';
+import { MeetingFrequencyEnum } from '../enum/meeting-frequency.enum';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
 const mockDispatch = { notifyMember: jest.fn().mockResolvedValue(undefined) };
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -67,6 +69,10 @@ describe('SmallGroupService', () => {
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: NotificationDispatchService, useValue: mockDispatch },
+        {
+          provide: ChurchTimezoneService,
+          useValue: { get: jest.fn().mockResolvedValue('Africa/Lagos') },
+        },
         {
           provide: DateService,
           useValue: { format: (d: Date) => d.toISOString().slice(5, 10) },
@@ -506,6 +512,86 @@ describe('SmallGroupService', () => {
         totalCount: 1,
         totalPages: 1,
       });
+    });
+  });
+
+  describe('meeting schedule', () => {
+    const weekly = {
+      meetingFrequency: MeetingFrequencyEnum.WEEKLY,
+      meetingWeekday: 3,
+      meetingStartTime: '18:00',
+      meetingEndTime: '20:00',
+    };
+
+    it('lets the leader set when, where and how it meets, and returns the next meeting', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        name: 'Lekki',
+        leader: { id: 'leader-1' },
+      });
+      mockGroupRepo.save.mockImplementation((g: unknown) => Promise.resolve(g));
+
+      const result = await service.leaderUpdate('group-1', 'leader-1', {
+        ...weekly,
+        meetingLocation: '12 Admiralty Way',
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          meetingWeekday: 3,
+          meetingLocation: '12 Admiralty Way',
+          scheduleSummary: 'Every Wednesday, 6:00 PM–8:00 PM',
+          nextMeetingAt: expect.stringMatching(/T17:00:00\.000Z$/),
+          lastMeetingDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        }),
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'SMALL_GROUP_UPDATED',
+        expect.objectContaining({
+          actorId: 'leader-1',
+          metadata: expect.objectContaining({ byLeader: true }),
+        }),
+      );
+    });
+
+    it("refuses anyone but the fellowship's leader", async () => {
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        leader: { id: 'someone-else' },
+      });
+      await expect(
+        service.leaderUpdate('group-1', 'member-1', weekly),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockGroupRepo.save).not.toHaveBeenCalled();
+    });
+
+    it("refuses a schedule that can't work, before saving", async () => {
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        leader: { id: 'leader-1' },
+      });
+      mockGroupRepo.save.mockClear();
+      await expect(
+        service.leaderUpdate('group-1', 'leader-1', {
+          ...weekly,
+          meetingEndTime: '17:00',
+        }),
+      ).rejects.toThrow('end time must be after');
+      expect(mockGroupRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('a fellowship without a regular schedule has no next meeting', async () => {
+      mockGroupRepo.findOne.mockResolvedValue({
+        id: 'group-1',
+        name: 'Ad hoc',
+      });
+      await expect(service.getOne('group-1')).resolves.toEqual(
+        expect.objectContaining({
+          nextMeetingAt: null,
+          lastMeetingDate: null,
+          scheduleSummary: null,
+        }),
+      );
     });
   });
 

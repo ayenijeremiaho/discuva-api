@@ -6,6 +6,7 @@ import { RentalBooking } from '../../facility-rental/entity/rental-booking.entit
 import { ServiceSession } from '../../service-programme/entity/service-session.entity';
 import { ClassSession } from '../../classes/entity/class-session.entity';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
+import { SmallGroup } from '../../small-group/entity/small-group.entity';
 import { Member } from '../../member/entity/member.entity';
 
 describe('SchedulerGateSubscriber', () => {
@@ -40,7 +41,12 @@ describe('SchedulerGateSubscriber', () => {
       ['programme-auto-start'],
     ],
     ['a class session', ClassSession, ['class-session-reminders']],
-    ['reminder settings', ChurchSetting, ['class-session-reminders']],
+    [
+      'reminder settings',
+      ChurchSetting,
+      ['class-session-reminders', 'fellowship-reminders'],
+    ],
+    ['a fellowship', SmallGroup, ['fellowship-reminders']],
   ])('wakes the jobs that depend on %s', (_label, target, jobs) => {
     subscriber.afterInsert(ev(target));
     subscriber.afterUpdate(ev(target));

@@ -31296,6 +31296,43 @@
           }
         },
         {
+          "name": "Update Meeting Details (Leader Only)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"meetingFrequency\": \"WEEKLY\",\n  \"meetingWeekday\": 5,\n  \"meetingStartTime\": \"18:00\",\n  \"meetingEndTime\": \"20:00\",\n  \"meetingIntervalWeeks\": 2,\n  \"meetingStartsOn\": \"2026-10-23\",\n  \"meetingWeekOfMonth\": null,\n  \"meetingNotes\": \"Bring a friend\",\n  \"meetingFormat\": \"IN_PERSON\",\n  \"meetingLocation\": \"12 Admiralty Way\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/small-groups/{{group_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "small-groups",
+                "{{group_id}}"
+              ]
+            },
+            "description": "The fellowship's leader only (403 otherwise). Sets when, where and how it meets: meetingFrequency NONE | WEEKLY | MONTHLY, meetingWeekday 0 (Sunday)\u20136, meetingStartTime/meetingEndTime HH:mm (church time), meetingIntervalWeeks 1\u20134 (above 1 needs meetingStartsOn, a date it meets), meetingWeekOfMonth 1\u20134 or -1 (monthly), meetingNotes, meetingLocation, meetingFormat, meetingLink. Returns the fellowship with nextMeetingAt, lastMeetingDate and scheduleSummary."
+          },
+          "response": []
+        },
+        {
           "name": "Record Attendance (Leader Only)",
           "request": {
             "method": "POST",
@@ -31353,7 +31390,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Westside Cell\",\n  \"description\": \"Weekly home fellowship on the west side.\",\n  \"leaderId\": \"\",\n  \"meetingDay\": \"Wednesday\",\n  \"meetingLocation\": \"12 Ronke Street\",\n  \"venueId\": \"\",\n  \"meetingFormat\": \"IN_PERSON\",\n  \"meetingLink\": \"\"\n}",
+              "raw": "{\n  \"name\": \"Westside Cell\",\n  \"description\": \"Weekly home fellowship on the west side.\",\n  \"leaderId\": \"\",\n  \"meetingFrequency\": \"WEEKLY\",\n  \"meetingWeekday\": 3,\n  \"meetingStartTime\": \"18:00\",\n  \"meetingEndTime\": \"20:00\",\n  \"meetingIntervalWeeks\": 1,\n  \"meetingNotes\": \"No meeting during Easter week\",\n  \"meetingLocation\": \"12 Ronke Street\",\n  \"venueId\": \"\",\n  \"meetingFormat\": \"IN_PERSON\",\n  \"meetingLink\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

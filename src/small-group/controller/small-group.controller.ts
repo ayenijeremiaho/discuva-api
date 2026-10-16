@@ -7,6 +7,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Request,
@@ -17,6 +18,7 @@ import { RequiresModule } from '../../church-settings/decorator/requires-module.
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { SmallGroupService } from '../service/small-group.service';
 import { RecordAttendanceDto } from '../dto/record-attendance.dto';
+import { LeaderUpdateSmallGroupDto } from '../dto/small-group.dto';
 
 @RequiresModule('small_groups')
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard)
@@ -40,6 +42,16 @@ export class SmallGroupController {
   @Get(':id')
   getOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.smallGroupService.getOne(id);
+  }
+
+  // The fellowship's leader only (403 otherwise): when, where and how it meets.
+  @Patch(':id')
+  leaderUpdate(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LeaderUpdateSmallGroupDto,
+    @Request() req: any,
+  ) {
+    return this.smallGroupService.leaderUpdate(id, req.user.id, dto);
   }
 
   @Get(':id/members')

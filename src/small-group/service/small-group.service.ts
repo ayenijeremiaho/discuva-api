@@ -27,8 +27,51 @@ import { DateService } from '../../utility/service/date.service';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 import { SmallGroupAttendanceStatusEnum } from '../enum/small-group-attendance-status.enum';
+import { MeetingFrequencyEnum } from '../enum/meeting-frequency.enum';
+import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import {
+  LeaderUpdateSmallGroupDto,
+  MeetingScheduleDto,
+} from '../dto/small-group.dto';
+import {
+  MeetingSchedule,
+  assertValidSchedule,
+  describeSchedule,
+  lastMeetingDate,
+  nextMeeting,
+} from '../util/meeting-schedule';
 
 const MISSED_IN_A_ROW = 3;
+
+const SCHEDULE_FIELDS = [
+  'meetingFrequency',
+  'meetingWeekday',
+  'meetingStartTime',
+  'meetingEndTime',
+  'meetingIntervalWeeks',
+  'meetingWeekOfMonth',
+  'meetingStartsOn',
+  'meetingNotes',
+] as const;
+
+// A fellowship as the apps show it: its schedule worked out into the next meeting and a plain-words summary.
+export type ScheduledSmallGroup<T extends SmallGroup = SmallGroup> = T & {
+  nextMeetingAt: string | null;
+  lastMeetingDate: string | null;
+  scheduleSummary: string | null;
+};
+
+export function scheduleOf(group: SmallGroup): MeetingSchedule {
+  return {
+    frequency: group.meetingFrequency ?? MeetingFrequencyEnum.NONE,
+    weekday: group.meetingWeekday ?? null,
+    startTime: group.meetingStartTime ?? null,
+    endTime: group.meetingEndTime ?? null,
+    intervalWeeks: group.meetingIntervalWeeks ?? 1,
+    weekOfMonth: group.meetingWeekOfMonth ?? null,
+    startsOn: group.meetingStartsOn ?? null,
+  };
+}
 
 @Injectable()
 export class SmallGroupService {
@@ -44,6 +87,7 @@ export class SmallGroupService {
     private readonly auditLogService: AuditLogService,
     private readonly notificationDispatchService: NotificationDispatchService,
     private readonly dateService: DateService,
+    private readonly churchTimezone: ChurchTimezoneService,
   ) {}
 
   // ── Admin CRUD ─────────────────────────────────────────────────────────────
@@ -60,6 +104,7 @@ export class SmallGroupService {
       meetingLink: dto.meetingLink ?? null,
       createdBy: { id: admin.id } as Admin,
     });
+    this.applySchedule(group, dto);
 
     const saved = await this.groupRepo.save(group);
     this.auditLogService.log('SMALL_GROUP_CREATED', {
@@ -92,6 +137,7 @@ export class SmallGroupService {
     if (dto.meetingFormat !== undefined)
       group.meetingFormat = dto.meetingFormat;
     if (dto.meetingLink !== undefined) group.meetingLink = dto.meetingLink;
+    this.applySchedule(group, dto);
 
     const saved = await this.groupRepo.save(group);
     this.auditLogService.log('SMALL_GROUP_UPDATED', {
@@ -144,16 +190,74 @@ export class SmallGroupService {
 
     const [data, total] = await qb.getManyAndCount();
 
-    return UtilityService.createPaginationResponse(data, page, limit, total);
+    return UtilityService.createPaginationResponse(
+      await this.withSchedule(data),
+      page,
+      limit,
+      total,
+    );
   }
 
-  async getOne(id: string): Promise<SmallGroup> {
+  async getOne(id: string): Promise<ScheduledSmallGroup> {
     const group = await this.groupRepo.findOne({
       where: { id },
       relations: ['leader', 'venue'],
     });
     if (!group) throw new NotFoundException('Small group not found');
-    return group;
+    const [scheduled] = await this.withSchedule([group]);
+    return scheduled;
+  }
+
+  // A leader keeps their own fellowship's meeting details current; name, description and who leads stay with admins.
+  async leaderUpdate(
+    groupId: string,
+    leaderMemberId: string,
+    dto: LeaderUpdateSmallGroupDto,
+  ): Promise<ScheduledSmallGroup> {
+    const group = await this.assertIsGroupLeader(groupId, leaderMemberId);
+    if (dto.meetingLocation !== undefined)
+      group.meetingLocation = dto.meetingLocation;
+    if (dto.meetingFormat !== undefined)
+      group.meetingFormat = dto.meetingFormat;
+    if (dto.meetingLink !== undefined) group.meetingLink = dto.meetingLink;
+    this.applySchedule(group, dto);
+    const saved = await this.groupRepo.save(group);
+    this.auditLogService.log('SMALL_GROUP_UPDATED', {
+      actorId: leaderMemberId,
+      targetId: groupId,
+      targetName: saved.name,
+      metadata: { changes: Object.keys(dto), byLeader: true },
+    });
+    const [scheduled] = await this.withSchedule([saved]);
+    return scheduled;
+  }
+
+  private applySchedule(group: SmallGroup, dto: MeetingScheduleDto): void {
+    for (const field of SCHEDULE_FIELDS)
+      if (dto[field] !== undefined)
+        (group as unknown as Record<string, unknown>)[field] = dto[field];
+    group.meetingFrequency ??= MeetingFrequencyEnum.NONE;
+    group.meetingIntervalWeeks ??= 1;
+    assertValidSchedule(scheduleOf(group));
+  }
+
+  // The church timezone is cached, so this adds no query.
+  private async withSchedule<T extends SmallGroup>(
+    groups: T[],
+  ): Promise<ScheduledSmallGroup<T>[]> {
+    if (!groups.length) return [];
+    const timezone = await this.churchTimezone.get();
+    const now = new Date();
+    return groups.map((g) => {
+      const schedule = scheduleOf(g);
+      return {
+        ...g,
+        nextMeetingAt:
+          nextMeeting(schedule, now, timezone)?.toISOString() ?? null,
+        lastMeetingDate: lastMeetingDate(schedule, now, timezone),
+        scheduleSummary: describeSchedule(schedule),
+      };
+    });
   }
 
   async getRoster(
@@ -235,7 +339,7 @@ export class SmallGroupService {
       counts.map((c) => [c.groupId, Number(c.count)]),
     );
 
-    const data = groups.map((g) => ({
+    const data = (await this.withSchedule(groups)).map((g) => ({
       ...g,
       memberCount: countByGroup.get(g.id) ?? 0,
     }));
@@ -243,12 +347,12 @@ export class SmallGroupService {
     return UtilityService.createPaginationResponse(data, page, limit, total);
   }
 
-  async listMine(memberId: string): Promise<SmallGroup[]> {
+  async listMine(memberId: string): Promise<ScheduledSmallGroup[]> {
     const memberships = await this.memberRepo.find({
       where: { member: { id: memberId } },
       relations: ['group', 'group.leader', 'group.venue'],
     });
-    return memberships.map((m) => m.group);
+    return this.withSchedule(memberships.map((m) => m.group));
   }
 
   async getMembers(

@@ -1,3 +1,4 @@
+import { MeetingFrequencyEnum } from '../enum/meeting-frequency.enum';
 import {
   Column,
   Entity,
@@ -27,8 +28,50 @@ export class SmallGroup extends BaseEntity {
   @JoinColumn({ name: 'leader_id' })
   leader: Member | null;
 
+  // Superseded by the schedule columns below; kept until existing values have been read into them.
   @Column({ type: 'varchar', nullable: true, name: 'meeting_day' })
   meetingDay: string | null;
+
+  @Column({
+    type: 'varchar',
+    name: 'meeting_frequency',
+    default: MeetingFrequencyEnum.NONE,
+  })
+  meetingFrequency: MeetingFrequencyEnum;
+
+  // 0 = Sunday … 6 = Saturday.
+  @Column({ type: 'smallint', nullable: true, name: 'meeting_weekday' })
+  meetingWeekday: number | null;
+
+  // 'HH:mm' in the church's timezone.
+  @Column({
+    type: 'varchar',
+    length: 5,
+    nullable: true,
+    name: 'meeting_start_time',
+  })
+  meetingStartTime: string | null;
+
+  @Column({
+    type: 'varchar',
+    length: 5,
+    nullable: true,
+    name: 'meeting_end_time',
+  })
+  meetingEndTime: string | null;
+
+  @Column({ type: 'smallint', default: 1, name: 'meeting_interval_weeks' })
+  meetingIntervalWeeks: number;
+
+  // 1–4, or -1 for the last week of the month.
+  @Column({ type: 'smallint', nullable: true, name: 'meeting_week_of_month' })
+  meetingWeekOfMonth: number | null;
+
+  @Column({ type: 'date', nullable: true, name: 'meeting_starts_on' })
+  meetingStartsOn: string | null;
+
+  @Column({ type: 'text', nullable: true, name: 'meeting_notes' })
+  meetingNotes: string | null;
 
   @Column({ type: 'varchar', nullable: true, name: 'meeting_location' })
   meetingLocation: string | null;

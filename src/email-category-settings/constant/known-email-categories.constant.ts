@@ -135,8 +135,8 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
         'Sent to the renter when a booking is confirmed or not approved, when a payment is received or a caution deposit refunded, and the day before the booking.',
     },
     [EmailCategory.FELLOWSHIPS]: {
-      label: 'Fellowship Absences',
+      label: 'Fellowship Updates',
       description:
-        'Sent to a fellowship leader when a member has missed three meetings in a row.',
+        "Reminders to a fellowship's members before each meeting (timing set under Reminder Settings), and a note to the leader when a member has missed three meetings in a row.",
     },
   };

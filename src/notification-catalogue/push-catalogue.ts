@@ -44,6 +44,7 @@ export enum PushNotificationKey {
   RENTAL_CAUTION_REFUNDED = 'RENTAL_CAUTION_REFUNDED',
   RENTAL_BOOKING_REMINDER = 'RENTAL_BOOKING_REMINDER',
   FELLOWSHIP_MEMBER_MISSING = 'FELLOWSHIP_MEMBER_MISSING',
+  FELLOWSHIP_MEETING_REMINDER = 'FELLOWSHIP_MEETING_REMINDER',
 }
 
 export interface PushTemplate {
@@ -512,6 +513,20 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       facility_name: 'Main Hall',
       booking_date: 'Sat 7 Nov',
       booking_time: '10:00 AM–4:00 PM',
+    },
+  },
+  [PushNotificationKey.FELLOWSHIP_MEETING_REMINDER]: {
+    category: EmailCategory.FELLOWSHIPS,
+    label: 'Fellowship meeting reminder',
+    description: "Sent to a fellowship's members before each meeting.",
+    title: '{{group_name}} meets {{when}}',
+    body: '{{time}}{{place}}',
+    url: '/small-groups',
+    placeholders: {
+      group_name: 'Lekki Fellowship',
+      when: 'today',
+      time: '6:00 PM–8:00 PM',
+      place: ' · 12 Admiralty Way',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {
