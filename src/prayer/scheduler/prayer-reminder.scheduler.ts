@@ -15,6 +15,9 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { CacheService } from '../../utility/service/cache.service';
+
+const RUN_ONCE_SECONDS = 3600;
 
 @Injectable()
 export class PrayerReminderScheduler {
@@ -29,10 +32,20 @@ export class PrayerReminderScheduler {
     private readonly pushService: PushNotificationService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly cacheService: CacheService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_8AM, { timeZone: CHURCH_TIMEZONE })
   async sendReminders(): Promise<void> {
+    // Once per run across all instances. Left to expire, so an instance whose clock is a little behind
+    // doesn't run it again after a quick first run.
+    if (
+      !(await this.cacheService.acquireLock(
+        'lock:prayer-reminders',
+        RUN_ONCE_SECONDS,
+      ))
+    )
+      return;
     const today = new Date();
     const twoDaysAhead = new Date(today);
     twoDaysAhead.setDate(today.getDate() + 2);

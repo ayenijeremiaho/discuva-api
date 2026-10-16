@@ -14,6 +14,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { BullModule } from '@nestjs/bull';
 import { AppThrottlerGuard } from './app-throttler.guard';
+import { RedisThrottlerStorage } from './utility/service/redis-throttler-storage.service';
 import { serializeRequest, serializeResponse } from './utility/request-log';
 import dbConfig from './config/db.config';
 import { envValidationSchema } from './config/env.validation';
@@ -120,13 +121,17 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
       validationOptions: { abortEarly: false },
     }),
     ThrottlerModule.forRootAsync({
-      useFactory: (config: ConfigService) => [
-        {
-          ttl: config.get<number>('THROTTLE_TTL_MS', 60_000),
-          limit: config.get<number>('THROTTLE_LIMIT', 100),
-        },
-      ],
-      inject: [ConfigService],
+      imports: [UtilityModule],
+      useFactory: (config: ConfigService, storage: RedisThrottlerStorage) => ({
+        throttlers: [
+          {
+            ttl: config.get<number>('THROTTLE_TTL_MS', 60_000),
+            limit: config.get<number>('THROTTLE_LIMIT', 100),
+          },
+        ],
+        storage,
+      }),
+      inject: [ConfigService, RedisThrottlerStorage],
     }),
     LoggerModule.forRootAsync({
       inject: [ConfigService],

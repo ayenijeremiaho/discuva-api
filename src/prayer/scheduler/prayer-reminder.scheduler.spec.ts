@@ -7,6 +7,11 @@ import { PrayerRosterEntry } from '../entity/prayer-roster-entry.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { CacheService } from '../../utility/service/cache.service';
+
+const mockCacheService = {
+  acquireLock: jest.fn().mockResolvedValue(true),
+};
 
 const mockRosterRepo = {
   find: jest.fn().mockResolvedValue([]),
@@ -42,6 +47,7 @@ describe('PrayerReminderScheduler', () => {
         { provide: PushNotificationService, useValue: mockPushService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        { provide: CacheService, useValue: mockCacheService },
       ],
     }).compile();
     scheduler = module.get(PrayerReminderScheduler);
@@ -185,5 +191,11 @@ describe('PrayerReminderScheduler', () => {
 
     await expect(scheduler.sendReminders()).resolves.toBeUndefined();
     expect(mockRosterRepo.find).toHaveBeenCalled();
+  });
+
+  it('does nothing when another instance already ran it', async () => {
+    mockCacheService.acquireLock.mockResolvedValueOnce(false);
+    await scheduler.sendReminders();
+    expect(mockTenantRepo.find).not.toHaveBeenCalled();
   });
 });

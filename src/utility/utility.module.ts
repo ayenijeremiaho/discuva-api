@@ -1,3 +1,4 @@
+import { RedisThrottlerStorage } from './service/redis-throttler-storage.service';
 import { Global, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bull';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -58,6 +59,7 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     CommunicationProviderModule,
   ],
   providers: [
+    RedisThrottlerStorage,
     GmailProvider,
     ResendProvider,
     SmtpProvider,
@@ -98,6 +100,7 @@ import { CommunicationProviderModule } from '../communication-provider/communica
   ],
   controllers: [UtilityController, AuditLogController, EmailLogController],
   exports: [
+    RedisThrottlerStorage,
     UtilityService,
     DateService,
     CacheService,

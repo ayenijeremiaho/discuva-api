@@ -10,6 +10,11 @@ import { PastorFeedback } from '../entity/pastor-feedback.entity';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
+import { CacheService } from '../../utility/service/cache.service';
+
+const mockCacheService = {
+  acquireLock: jest.fn().mockResolvedValue(true),
+};
 
 const mockDepartmentRepo = { find: jest.fn().mockResolvedValue([]) };
 const mockLeadRepo = { find: jest.fn().mockResolvedValue([]) };
@@ -51,6 +56,7 @@ describe('PastorFeedbackReminderScheduler', () => {
         { provide: PushNotificationService, useValue: mockPushService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        { provide: CacheService, useValue: mockCacheService },
       ],
     }).compile();
     scheduler = module.get(PastorFeedbackReminderScheduler);
@@ -123,5 +129,11 @@ describe('PastorFeedbackReminderScheduler', () => {
 
     await expect(scheduler.sendReminders()).resolves.toBeUndefined();
     expect(mockDepartmentRepo.find).toHaveBeenCalled();
+  });
+
+  it('does nothing when another instance already ran it', async () => {
+    mockCacheService.acquireLock.mockResolvedValueOnce(false);
+    await scheduler.sendReminders();
+    expect(mockTenantRepo.find).not.toHaveBeenCalled();
   });
 });

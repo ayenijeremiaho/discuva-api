@@ -8343,7 +8343,11 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 ### Global Rate Limiting
 
 Applied to every endpoint via `ThrottlerGuard` as a global `APP_GUARD`. Returns HTTP 429 when exceeded. The
-`GET /health` endpoint is exempt via `@SkipThrottle()`.
+`GET /health` endpoint is exempt via `@SkipThrottle()`. Counts live in Redis (`RedisThrottlerStorage` →
+`CacheService.hitWindow`, keys `global:throttle:{name}:{key}`, one Lua call per request), so the limit holds across
+every API instance instead of multiplying with the number of machines. Each window is fixed (starts at the first
+request); passing the limit blocks that key for the window length. If Redis is unreachable the request is let
+through (logged) rather than failing.
 
 | Variable          | Default | Description                            |
 |-------------------|---------|----------------------------------------|
@@ -8351,6 +8355,25 @@ Applied to every endpoint via `ThrottlerGuard` as a global `APP_GUARD`. Returns 
 | `THROTTLE_LIMIT`  | `100`   | Max requests per window per IP         |
 | `TRUST_PROXY_HOPS` | `2` on Fly, else `0` | Reverse-proxy hops in front of the API, passed to Express `trust proxy` so `req.ip` is the visitor. Fly is two hops: its edge, then its internal proxy (production logs show `X-Forwarded-For: <visitor>, <edge>` over a `172.16.x.x` socket) |
 | `INTERNAL_API_KEY` | — | Shared with the member app (same value, min 32 chars). Its server sends `X-Visitor-IP` + `X-Internal-Key` on calls it makes for visitors (church details, public pages, forms, shared events), and rate limits then count that visitor. Unset = those calls share the member server's allowance |
+
+### Running more than one API instance
+
+What keeps several machines safe:
+
+- **Scheduled jobs:** every `@Cron` takes a Redis lock (`CacheService.acquireLock`), so one instance runs each tick.
+  Locks hold a token unique to the acquisition, and `releaseLock` deletes the key only if it still holds that token
+  (Lua compare-and-delete) — an instance whose lock expired mid-job can't release the lock another instance took
+  since. Once-a-day/week jobs that don't release (prayer reminders, pastor feedback reminders, founder welcome
+  emails, form attachment cleanup, social media draft retention) hold a one-hour lock and leave it to expire, so an
+  instance whose clock is a few seconds behind doesn't repeat a quick first run.
+- **Gated jobs** keep their per-church next-due markers in Redis (`SchedulerGateService`).
+- **Socket.IO** fans out through `RedisIoAdapter`; the admin and member apps connect with WebSocket only, because
+  long-polling needs every request on the same machine and Fly has no sticky sessions.
+- **Queues** (Bull: email, push, scheduled posts) are shared; workers on every instance pull from them.
+- **Rate limits** are counted in Redis (see Global Rate Limiting).
+- **Database connections:** each instance opens up to `DATABASE_POOL_SIZE` (default 50); keep
+  instances × pool size under the database's connection limit.
+- Per-instance only, by design: the church timezone cache (10-minute refresh) and log de-duplication.
 
 ### Redis
 

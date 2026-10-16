@@ -6,6 +6,11 @@ import { FounderWelcomeEmailScheduler } from './founder-welcome-email.scheduler'
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { UtilityService } from '../../utility/service/utility.service';
+import { CacheService } from '../../utility/service/cache.service';
+
+const mockCacheService = {
+  acquireLock: jest.fn().mockResolvedValue(true),
+};
 
 jest.mock('../utility/run-in-tenant-context', () => ({
   runInTenantContext: jest.fn((cls, txHost, envelope, fn) => fn()),
@@ -41,6 +46,7 @@ describe('FounderWelcomeEmailScheduler', () => {
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        { provide: CacheService, useValue: mockCacheService },
         { provide: UtilityService, useValue: mockUtilityService },
       ],
     }).compile();
@@ -136,5 +142,11 @@ describe('FounderWelcomeEmailScheduler', () => {
     expect(mockTenantRepo.update).toHaveBeenCalledWith('tenant-2', {
       founderWelcomeEmailSentAt: expect.any(Date),
     });
+  });
+
+  it('does nothing when another instance already ran it', async () => {
+    mockCacheService.acquireLock.mockResolvedValueOnce(false);
+    await scheduler.sendDueFounderWelcomeEmails();
+    expect(mockTenantRepo.find).not.toHaveBeenCalled();
   });
 });

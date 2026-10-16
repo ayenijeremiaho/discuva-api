@@ -9,6 +9,11 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { SocialPostStatus } from '../enum/social-media.enum';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { CacheService } from '../../utility/service/cache.service';
+
+const mockCacheService = {
+  acquireLock: jest.fn().mockResolvedValue(true),
+};
 
 jest.mock('../../tenant/utility/run-in-tenant-context', () => ({
   runInTenantContext: jest.fn((cls, txHost, envelope, fn) => fn()),
@@ -51,6 +56,7 @@ describe('SocialMediaRetentionScheduler', () => {
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: ClsService, useValue: mockCls },
         { provide: TransactionHost, useValue: mockTxHost },
+        { provide: CacheService, useValue: mockCacheService },
       ],
     }).compile();
     scheduler = module.get(SocialMediaRetentionScheduler);
@@ -100,5 +106,11 @@ describe('SocialMediaRetentionScheduler', () => {
     expect(
       mockPlatformSettingsService.getSocialMediaDraftRetentionDays,
     ).toHaveBeenCalled();
+  });
+
+  it('does nothing when another instance already ran it', async () => {
+    mockCacheService.acquireLock.mockResolvedValueOnce(false);
+    await scheduler.deleteStaleDraftMedia();
+    expect(mockTenantRepo.find).not.toHaveBeenCalled();
   });
 });

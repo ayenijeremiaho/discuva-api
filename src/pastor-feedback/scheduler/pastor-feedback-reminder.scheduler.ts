@@ -17,6 +17,9 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+import { CacheService } from '../../utility/service/cache.service';
+
+const RUN_ONCE_SECONDS = 3600;
 
 @Injectable()
 export class PastorFeedbackReminderScheduler {
@@ -35,6 +38,7 @@ export class PastorFeedbackReminderScheduler {
     private readonly pushService: PushNotificationService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly cacheService: CacheService,
   ) {}
 
   // Monday 9am — the "has last week's feedback been submitted" condition is
@@ -42,6 +46,15 @@ export class PastorFeedbackReminderScheduler {
   // whose rows pre-exist and just get a boolean flipped).
   @Cron('0 9 * * 1', { timeZone: CHURCH_TIMEZONE })
   async sendReminders(): Promise<void> {
+    // Once per run across all instances. Left to expire, so an instance whose clock is a little behind
+    // doesn't run it again after a quick first run.
+    if (
+      !(await this.cacheService.acquireLock(
+        'lock:pastor-feedback-reminders',
+        RUN_ONCE_SECONDS,
+      ))
+    )
+      return;
     await forEachActiveTenant(
       this.tenantRepo,
       this.cls,
