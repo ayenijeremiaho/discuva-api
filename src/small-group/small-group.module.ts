@@ -7,6 +7,7 @@ import { SmallGroupService } from './service/small-group.service';
 import { SmallGroupAdminController } from './controller/small-group-admin.controller';
 import { SmallGroupController } from './controller/small-group.controller';
 import { UtilityModule } from '../utility/utility.module';
+import { FellowshipReminderScheduler } from './scheduler/fellowship-reminder.scheduler';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { UtilityModule } from '../utility/utility.module';
     ]),
     UtilityModule,
   ],
-  providers: [SmallGroupService],
+  providers: [SmallGroupService, FellowshipReminderScheduler],
   controllers: [SmallGroupAdminController, SmallGroupController],
 })
 export class SmallGroupModule {}

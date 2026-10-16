@@ -50,4 +50,9 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: 'hours before session',
     defaultThresholds: [24, 1],
   },
+  [ReminderSettingKey.FELLOWSHIP_MEETING]: {
+    label: 'Fellowship Meeting Reminders',
+    unit: 'hours before meeting',
+    defaultThresholds: [3],
+  },
 };

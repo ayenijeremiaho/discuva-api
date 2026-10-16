@@ -20,6 +20,7 @@ import { RentalBooking } from '../../facility-rental/entity/rental-booking.entit
 import { ChurchClass } from '../../classes/entity/church-class.entity';
 import { ClassSession } from '../../classes/entity/class-session.entity';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
+import { SmallGroup } from '../../small-group/entity/small-group.entity';
 
 // Which gated jobs depend on each table. Any insert/update/delete, through any code path, wakes them for that church.
 export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
@@ -33,7 +34,8 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   [ChurchClass, ['class-session-reminders']],
   [ClassSession, ['class-session-reminders']],
   // Reminder thresholds (and other church settings) live here.
-  [ChurchSetting, ['class-session-reminders']],
+  [ChurchSetting, ['class-session-reminders', 'fellowship-reminders']],
+  [SmallGroup, ['fellowship-reminders']],
 ]);
 
 @Injectable()
