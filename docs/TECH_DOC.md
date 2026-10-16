@@ -4290,6 +4290,7 @@ but no `FacebookStatsFetcher`/`InstagramStatsFetcher` exists yet; both platforms
 |--------|-------|------|-------|
 | POST   | `/social-media/accounts`                    | AdminGuard (SOCIAL_MEDIA_WRITE) | Register an account to post to; `isConnected` is always `false` on create — connecting is a separate step |
 | GET    | `/social-media/accounts`                    | AdminGuard (SOCIAL_MEDIA_READ)  | List all registered accounts |
+| PATCH  | `/social-media/accounts/:id`                | AdminGuard (SOCIAL_MEDIA_WRITE) | `{ announceLive: boolean }` — turn "we're live" announcements on or off for a Facebook/Instagram account (on by default) |
 | DELETE | `/social-media/accounts/:id`                | AdminGuard (SOCIAL_MEDIA_WRITE) | Remove an account |
 | GET    | `/social-media/accounts/:id/authorize-url`  | AdminGuard (SOCIAL_MEDIA_WRITE) | Returns `{url}` — the platform's OAuth authorize URL, `state`-encoded to this account/tenant |
 | GET    | `/v1/integrations/social/:platform/oauth/callback` | `@Public()`, tenant-excluded | Called by the OAuth provider's redirect, not the frontend directly — see above |
@@ -5907,10 +5908,37 @@ two are mixed into each level round within their range. Both are cached 5 min an
 players are at each level, from the totals tables and indexed lookups only. `GET bible-games` returns the member's levels, Daily status and
 streak, weekly availability, points, ranks and achievements. Admins: `GET admin/bible-games/scoreboard` (`GAMES_READ`).
 
+### Live Announcements — Facebook & Instagram (`src/social-media/scheduler/social-live.scheduler.ts`)
+
+Members get one "🔴 Live Now" announcement (and one push) when the church goes live on a connected Facebook Page or
+Instagram account. Neither platform notifies us of a live start with the permissions approved for production
+(Facebook's `live_videos` Page webhook needs `pages_manage_metadata`; Instagram has no live-start webhook at all), so
+`SocialLiveScheduler` asks: every 2 minutes (Redis lock, gated job `social-live`), but only for a church that has the
+`social_media` module (its own toggle, its plan or a platform override — the same rule as `ModuleEnabledGuard`), at
+least one connected Facebook/Instagram account with `announceLive` on, and a service slot running now or starting
+within 15 minutes. Otherwise the church sleeps until 15 minutes before its next slot (woken by writes to
+`service_slots`, `events`, `social_accounts` and `church_settings`), so no Meta calls are made outside service times.
+Calls: Facebook `GET /{page-id}/live_videos?broadcast_status=["LIVE"]` and Instagram `GET /{ig-user-id}/live_media`,
+both with the stored Page token and an 8-second timeout (`MetaGraphApiService.getLiveFacebookVideo` /
+`getLiveInstagramMedia`). Each broadcast is announced once (`social_accounts.last_live_id`, recorded before
+announcing, so a failure is skipped rather than repeated); one account failing (e.g. an expired token) doesn't stop
+the others. The title is Meta's broadcast title, else the running event's name. Streams outside a scheduled service
+aren't detected.
+
+**One announcement per service across platforms:** `LiveAnnouncementService` (announcement module, also used by
+YouTube Live Detection) creates the first announcement of a service and remembers it for 4 hours (Redis `live-now`,
+tenant-scoped); a second platform going live adds an "Also live on Instagram: <link>" line to it
+(`AnnouncementService.appendToSystemAnnouncement`, no second push). A Redis lock stops two platforms going live at
+the same moment from creating two announcements; if the remembered announcement was deleted, a new one is created.
+
+**Columns (tenant migration `AddSocialAccountLiveAnnouncements`):** `social_accounts.announce_live` (boolean, default
+`true`), `social_accounts.last_live_id` (varchar, nullable). Queries use the existing `service_slots` start/end time
+indexes; `social_accounts` holds a handful of rows per church.
+
 ### YouTube Live Detection (`src/integrations/youtube/`)
 
 Automated follow-up to the Sermon Module's manual "Announce Live" trigger — detects when a tenant's configured
-YouTube channel goes live and calls `AnnouncementService.createSystemAnnouncement()` automatically, no admin click
+YouTube channel goes live and calls `LiveAnnouncementService.announce()` automatically (shared with Facebook/Instagram — see above), no admin click
 needed. Per-tenant BYOK, redesigned from an earlier single-global-channel version (`docs/MULTI_TENANT_MIGRATION.md`
 §9 Phase 8b) — every tenant sets their own channel and their own YouTube Data API v3 key via
 `PUT /v1/youtube-integration`; there is no platform-wide default channel or key (the `YOUTUBE_API_KEY` Fly secret is

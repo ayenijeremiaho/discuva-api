@@ -17,7 +17,7 @@ jest.mock('../../../utility/service/sanitization.service', () => ({
 import { YoutubeLiveDetectionService } from './youtube-live-detection.service';
 import { TenantYoutubeIntegration } from '../entity/tenant-youtube-integration.entity';
 import { Tenant } from '../../../tenant/entity/tenant.entity';
-import { AnnouncementService } from '../../../announcement/service/announcement.service';
+import { LiveAnnouncementService } from '../../../announcement/service/live-announcement.service';
 import { CacheService } from '../../../utility/service/cache.service';
 import { EncryptionService } from '../../../utility/service/encryption.service';
 
@@ -31,7 +31,7 @@ const mockTenantRepo = {
 };
 
 const mockAnnouncementService = {
-  createSystemAnnouncement: jest.fn().mockResolvedValue({ id: 'ann-1' }),
+  announce: jest.fn().mockResolvedValue(undefined),
 };
 
 const mockCacheService = {
@@ -81,7 +81,7 @@ describe('YoutubeLiveDetectionService', () => {
           useValue: mockIntegrationRepo,
         },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
-        { provide: AnnouncementService, useValue: mockAnnouncementService },
+        { provide: LiveAnnouncementService, useValue: mockAnnouncementService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: EncryptionService, useValue: mockEncryptionService },
         { provide: ClsService, useValue: mockCls },
@@ -93,16 +93,12 @@ describe('YoutubeLiveDetectionService', () => {
 
   it('does nothing when videoId is null', async () => {
     await service.handleNotification(null, 'UC123');
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it('does nothing when channelId is null', async () => {
     await service.handleNotification('vid-1', null);
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it('ignores a channel with no active tenant integration', async () => {
@@ -112,9 +108,7 @@ describe('YoutubeLiveDetectionService', () => {
     await service.handleNotification('vid-1', 'UC-unknown');
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it('skips already-announced video ids (idempotency)', async () => {
@@ -128,9 +122,7 @@ describe('YoutubeLiveDetectionService', () => {
     await service.handleNotification('vid-1', 'UC123');
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it("uses the tenant's own decrypted API key when configured", async () => {
@@ -168,9 +160,7 @@ describe('YoutubeLiveDetectionService', () => {
 
     expect(mockEncryptionService.decrypt).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it('does not announce when the video is not actually live', async () => {
@@ -197,9 +187,7 @@ describe('YoutubeLiveDetectionService', () => {
 
     await service.handleNotification('vid-2', 'UC123');
 
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
     expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
   });
 
@@ -239,12 +227,11 @@ describe('YoutubeLiveDetectionService', () => {
     expect(mockTxHost.tx.query).toHaveBeenCalledWith(
       expect.stringContaining('SET LOCAL search_path'),
     );
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).toHaveBeenCalledWith(
-      expect.stringContaining('Sunday Service'),
-      expect.stringContaining('https://www.youtube.com/watch?v=vid-3'),
-    );
+    expect(mockAnnouncementService.announce).toHaveBeenCalledWith({
+      platform: 'YouTube',
+      title: expect.stringContaining('Sunday Service'),
+      url: 'https://www.youtube.com/watch?v=vid-3',
+    });
     expect(mockIntegrationRepo.save).toHaveBeenCalledWith(
       expect.objectContaining({ lastAnnouncedVideoId: 'vid-3' }),
     );
@@ -274,9 +261,7 @@ describe('YoutubeLiveDetectionService', () => {
 
     await service.handleNotification('vid-forged', 'UC123');
 
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
     expect(mockIntegrationRepo.save).not.toHaveBeenCalled();
   });
 
@@ -292,9 +277,7 @@ describe('YoutubeLiveDetectionService', () => {
     await expect(
       service.handleNotification('vid-4', 'UC123'),
     ).resolves.toBeUndefined();
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it('skips processing when the per-video lock is already held (concurrent redelivery)', async () => {
@@ -304,9 +287,7 @@ describe('YoutubeLiveDetectionService', () => {
     await service.handleNotification('vid-5', 'UC123');
 
     expect(fetchSpy).not.toHaveBeenCalled();
-    expect(
-      mockAnnouncementService.createSystemAnnouncement,
-    ).not.toHaveBeenCalled();
+    expect(mockAnnouncementService.announce).not.toHaveBeenCalled();
   });
 
   it('releases the lock after processing', async () => {

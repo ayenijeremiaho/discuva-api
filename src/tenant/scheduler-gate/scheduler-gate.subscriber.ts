@@ -20,6 +20,7 @@ import { RentalBooking } from '../../facility-rental/entity/rental-booking.entit
 import { ChurchClass } from '../../classes/entity/church-class.entity';
 import { ClassSession } from '../../classes/entity/class-session.entity';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
+import { SocialAccount } from '../../social-media/entity/social-account.entity';
 import { SmallGroup } from '../../small-group/entity/small-group.entity';
 
 // Which gated jobs depend on each table. Any insert/update/delete, through any code path, wakes them for that church.
@@ -27,15 +28,27 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   [ServiceProgramme, ['programme-auto-start']],
   [ServiceSession, ['programme-auto-start']],
   [EventConfig, ['programme-auto-start']],
-  [Event, ['programme-auto-start', 'absence-marking']],
-  [ServiceSlot, ['programme-auto-start', 'absence-marking', 'event-reminders']],
+  [Event, ['programme-auto-start', 'absence-marking', 'social-live']],
+  [
+    ServiceSlot,
+    [
+      'programme-auto-start',
+      'absence-marking',
+      'event-reminders',
+      'social-live',
+    ],
+  ],
   [EventReminder, ['event-reminders']],
   [RentalBooking, ['rental-status']],
   [ChurchClass, ['class-session-reminders']],
   [ClassSession, ['class-session-reminders']],
   // Reminder thresholds (and other church settings) live here.
-  [ChurchSetting, ['class-session-reminders', 'fellowship-reminders']],
+  [
+    ChurchSetting,
+    ['class-session-reminders', 'fellowship-reminders', 'social-live'],
+  ],
   [SmallGroup, ['fellowship-reminders']],
+  [SocialAccount, ['social-live']],
 ]);
 
 @Injectable()

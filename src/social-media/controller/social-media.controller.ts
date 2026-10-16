@@ -23,6 +23,7 @@ import {
   CreateSocialAccountDto,
   CreateSocialPostDto,
   ScheduleSocialPostDto,
+  UpdateSocialAccountDto,
   UpdateTargetFocalPointDto,
   UpdateTargetOverrideDto,
 } from '../dto/social-media.dto';
@@ -112,6 +113,15 @@ export class SocialMediaController {
   @Get('accounts')
   getAccounts() {
     return this.accountService.getAll();
+  }
+
+  @RequiresPermission(AdminPermission.SOCIAL_MEDIA_WRITE)
+  @Patch('accounts/:id')
+  updateAccount(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateSocialAccountDto,
+  ) {
+    return this.accountService.update(id, dto);
   }
 
   @RequiresPermission(AdminPermission.SOCIAL_MEDIA_WRITE)

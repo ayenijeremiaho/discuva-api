@@ -52,6 +52,26 @@ describe('SocialAccountService', () => {
     });
   });
 
+  describe('update', () => {
+    it('turns live announcements off for an account', async () => {
+      mockAccountRepo.findOneBy.mockResolvedValue({
+        id: 'acc-1',
+        announceLive: true,
+      });
+      mockAccountRepo.save.mockImplementation((a) => Promise.resolve(a));
+      await expect(
+        service.update('acc-1', { announceLive: false }),
+      ).resolves.toEqual({ id: 'acc-1', announceLive: false });
+    });
+
+    it('throws NotFoundException for an unknown account', async () => {
+      mockAccountRepo.findOneBy.mockResolvedValue(null);
+      await expect(
+        service.update('missing', { announceLive: false }),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('delete', () => {
     it('removes an existing account', async () => {
       const account = { id: 'acc-1' };

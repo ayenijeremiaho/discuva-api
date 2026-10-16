@@ -3,6 +3,7 @@ import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { Announcement } from './entity/announcement.entity';
 import { AnnouncementReaction } from './entity/announcement-reaction.entity';
 import { AnnouncementService } from './service/announcement.service';
+import { LiveAnnouncementService } from './service/live-announcement.service';
 import { AnnouncementController } from './controller/announcement.controller';
 import { MemberModule } from '../member/member.module';
 import { UtilityModule } from '../utility/utility.module';
@@ -19,8 +20,8 @@ import { ClassesModule } from '../classes/classes.module';
     SmsModule,
     ClassesModule,
   ],
-  providers: [AnnouncementService],
+  providers: [AnnouncementService, LiveAnnouncementService],
   controllers: [AnnouncementController],
-  exports: [TenantTypeOrmModule, AnnouncementService],
+  exports: [TenantTypeOrmModule, AnnouncementService, LiveAnnouncementService],
 })
 export class AnnouncementModule {}

@@ -1,6 +1,7 @@
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNotEmpty,
@@ -29,6 +30,11 @@ export class CreateSocialAccountDto {
   @IsNotEmpty()
   @IsString()
   displayName: string;
+}
+
+export class UpdateSocialAccountDto {
+  @IsBoolean()
+  announceLive: boolean;
 }
 
 export class SocialPostTargetDto {
