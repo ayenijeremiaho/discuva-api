@@ -45,6 +45,21 @@ function toNullableRef<T extends { id: string }>(id?: string): T | null {
   return id ? ({ id } as T) : null;
 }
 
+// Bodies are HTML; a push shows plain text.
+function pushText(html: string): string {
+  return html
+    .replace(/<\/(p|div|li|h[1-6])>|<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 @Injectable()
 export class AnnouncementService {
   constructor(
@@ -149,8 +164,8 @@ export class AnnouncementService {
         return this.pushNotificationService.dispatchToMemberIds(memberIds, {
           idempotencyKey: announcement.id,
           title: announcement.title,
-          body: announcement.body.slice(0, 150),
-          url: '/announcements',
+          body: pushText(announcement.body).slice(0, 150),
+          url: `/announcements/${announcement.id}`,
         });
       })
       .catch((err: Error) =>
@@ -240,15 +255,22 @@ export class AnnouncementService {
     return saved;
   }
 
-  // Adds a line to a system announcement without pushing it again. False if it's gone.
-  async appendToSystemAnnouncement(id: string, text: string): Promise<boolean> {
+  // Adds HTML to a system announcement without pushing it again (nothing if it already has `unlessContains`).
+  // False if the announcement is gone.
+  async appendToSystemAnnouncement(
+    id: string,
+    html: string,
+    unlessContains?: string,
+  ): Promise<boolean> {
     const announcement = await this.announcementRepo.findOne({
       where: { id },
       select: { id: true, body: true },
     });
     if (!announcement) return false;
+    if (unlessContains && announcement.body.includes(unlessContains))
+      return true;
     await this.announcementRepo.update(id, {
-      body: `${announcement.body}\n\n${this.sanitizationService.sanitizeForEmail(text)}`,
+      body: `${announcement.body}${this.sanitizationService.sanitizeForEmail(html)}`,
     });
     return true;
   }

@@ -13,7 +13,7 @@ import { LivePlatformEnum } from '../enum/live-platform.enum';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
-import { AnnouncementService } from '../../announcement/service/announcement.service';
+import { LiveAnnouncementService } from '../../announcement/service/live-announcement.service';
 import { Admin } from '../../admin/entity/admin.entity';
 import {
   LegacySermonNote,
@@ -31,7 +31,7 @@ export class SermonService {
     @InjectRepository(Sermon)
     private readonly sermonRepo: Repository<Sermon>,
     private readonly auditLogService: AuditLogService,
-    private readonly announcementService: AnnouncementService,
+    private readonly liveAnnouncementService: LiveAnnouncementService,
     private readonly notesService: NotesService,
   ) {}
 
@@ -125,11 +125,13 @@ export class SermonService {
   }
 
   async announceLive(dto: AnnounceLiveDto, admin: Admin): Promise<void> {
-    const title = dto.title ?? `🔴 Live Now on ${PLATFORM_LABEL[dto.platform]}`;
-    const body = `We're live now — tap to watch.\n\n${dto.url}`;
-    await this.announcementService.createSystemAnnouncement(
-      title,
-      body,
+    // Shares the automatic announcement, so announcing by hand during a detected stream doesn't push twice.
+    await this.liveAnnouncementService.announce(
+      {
+        platform: PLATFORM_LABEL[dto.platform],
+        url: dto.url,
+        heading: dto.title ?? `🔴 Live Now on ${PLATFORM_LABEL[dto.platform]}`,
+      },
       admin.id,
     );
   }

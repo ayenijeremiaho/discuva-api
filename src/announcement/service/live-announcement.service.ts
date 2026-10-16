@@ -6,9 +6,20 @@ export interface LiveBroadcast {
   platform: string;
   title?: string | null;
   url: string;
+  // Replaces the default "🔴 Live Now: <title>" heading.
+  heading?: string;
 }
 
 const LIVE_NOW_KEY = 'live-now';
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+const watchLink = (live: LiveBroadcast, label: string) =>
+  `<p><a href="${escapeHtml(live.url)}">${escapeHtml(label)}</a></p>`;
 const LOCK_KEY = 'lock:live-now';
 // Long enough to cover a service, so a second platform joins the same announcement.
 const SERVICE_TTL_SECONDS = 4 * 3600;
@@ -24,7 +35,7 @@ export class LiveAnnouncementService {
     private readonly cacheService: CacheService,
   ) {}
 
-  async announce(live: LiveBroadcast): Promise<void> {
+  async announce(live: LiveBroadcast, actorId?: string): Promise<void> {
     // Two platforms going live together must not both create an announcement.
     let locked = false;
     for (let i = 0; i < LOCK_ATTEMPTS && !locked; i++) {
@@ -37,14 +48,16 @@ export class LiveAnnouncementService {
         existingId &&
         (await this.announcementService.appendToSystemAnnouncement(
           existingId,
-          `Also live on ${live.platform}: ${live.url}`,
+          watchLink(live, `Also live on ${live.platform}`),
+          `href="${escapeHtml(live.url)}"`,
         ))
       )
         return;
 
       const created = await this.announcementService.createSystemAnnouncement(
-        `🔴 Live Now: ${live.title?.trim() || 'Service'}`,
-        `We're live now on ${live.platform} — tap to watch.\n\n${live.url}`,
+        live.heading ?? `🔴 Live Now: ${live.title?.trim() || 'Service'}`,
+        `<p>We're live now on ${escapeHtml(live.platform)}. Tap to watch.</p>${watchLink(live, `Watch on ${live.platform}`)}`,
+        actorId,
       );
       await this.cacheService.set(
         LIVE_NOW_KEY,
