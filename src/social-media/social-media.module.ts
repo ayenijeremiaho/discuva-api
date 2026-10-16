@@ -42,6 +42,9 @@ import { YouTubeApiService } from './platform/youtube/youtube-api.service';
 import { SocialPostPublishProcessor } from './processor/social-post-publish.processor';
 import { SocialMediaRetentionScheduler } from './scheduler/social-media-retention.scheduler';
 import { UtilityModule } from '../utility/utility.module';
+import { AnnouncementModule } from '../announcement/announcement.module';
+import { ServiceSlot } from '../event/entity/service-slot.entity';
+import { SocialLiveScheduler } from './scheduler/social-live.scheduler';
 
 // Tenant.id/schemaName lookup has to happen via a plain TypeOrmModule
 // (public schema) alongside the tenant-scoped entities — the OAuth callback
@@ -55,9 +58,11 @@ import { UtilityModule } from '../utility/utility.module';
       SocialPost,
       SocialPostTarget,
       SocialPostMedia,
+      ServiceSlot,
     ]),
     TypeOrmModule.forFeature([Tenant, SocialDataDeletionRequest]),
     BullModule.registerQueue({ name: 'social-post-publish' }),
+    AnnouncementModule,
     UtilityModule,
   ],
   providers: [
@@ -90,6 +95,7 @@ import { UtilityModule } from '../utility/utility.module';
     YouTubeApiService,
     SocialPostPublishProcessor,
     SocialMediaRetentionScheduler,
+    SocialLiveScheduler,
     MetaDataDeletionService,
   ],
   controllers: [

@@ -6,7 +6,7 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { TenantYoutubeIntegration } from '../entity/tenant-youtube-integration.entity';
 import { Tenant } from '../../../tenant/entity/tenant.entity';
-import { AnnouncementService } from '../../../announcement/service/announcement.service';
+import { LiveAnnouncementService } from '../../../announcement/service/live-announcement.service';
 import { CacheService } from '../../../utility/service/cache.service';
 import { EncryptionService } from '../../../utility/service/encryption.service';
 import { AppClsStore } from '../../../tenant/interface/tenant-cls-store.interface';
@@ -32,7 +32,7 @@ export class YoutubeLiveDetectionService {
     private readonly integrationRepo: Repository<TenantYoutubeIntegration>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
-    private readonly announcementService: AnnouncementService,
+    private readonly liveAnnouncementService: LiveAnnouncementService,
     private readonly cacheService: CacheService,
     private readonly encryptionService: EncryptionService,
     private readonly cls: ClsService<AppClsStore>,
@@ -122,10 +122,11 @@ export class YoutubeLiveDetectionService {
             await this.txHost.tx.query(
               `SET LOCAL search_path TO "${tenant.schemaName}", public`,
             );
-            await this.announcementService.createSystemAnnouncement(
-              `🔴 Live Now: ${snippet.title ?? 'Service'}`,
-              `We're live now — tap to watch.\n\n${watchUrl}`,
-            );
+            await this.liveAnnouncementService.announce({
+              platform: 'YouTube',
+              title: snippet.title,
+              url: watchUrl,
+            });
           }),
       );
 

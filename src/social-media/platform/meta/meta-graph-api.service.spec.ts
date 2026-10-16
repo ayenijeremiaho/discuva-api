@@ -317,4 +317,52 @@ describe('MetaGraphApiService', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
   });
+
+  describe('live checks', () => {
+    it('finds the Page broadcast that is live, with a full link and a timeout', async () => {
+      mockFetchOnce(200, {
+        data: [
+          { id: 'v1', title: 'Sunday', permalink_url: '/grace/videos/v1/' },
+        ],
+      });
+      await expect(
+        service.getLiveFacebookVideo('page-1', 'page-token'),
+      ).resolves.toEqual({
+        id: 'v1',
+        title: 'Sunday',
+        url: 'https://www.facebook.com/grace/videos/v1/',
+      });
+      const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(url).toContain('/page-1/live_videos?');
+      expect(decodeURIComponent(url)).toContain('broadcast_status=["LIVE"]');
+      expect(init.signal).toBeDefined();
+    });
+
+    it('returns null when the Page is not live', async () => {
+      mockFetchOnce(200, { data: [] });
+      await expect(
+        service.getLiveFacebookVideo('page-1', 'page-token'),
+      ).resolves.toBeNull();
+    });
+
+    it("links to the Instagram account's live page", async () => {
+      mockFetchOnce(200, { data: [{ id: 'm1', username: 'gracechapel' }] });
+      await expect(
+        service.getLiveInstagramMedia('ig-1', 'page-token'),
+      ).resolves.toEqual({
+        id: 'm1',
+        title: null,
+        url: 'https://www.instagram.com/gracechapel/live/',
+      });
+      const [url] = (global.fetch as jest.Mock).mock.calls[0];
+      expect(url).toContain('/ig-1/live_media?');
+    });
+
+    it('surfaces a Meta error so the caller can log it', async () => {
+      mockFetchOnce(400, { error: { message: 'Invalid OAuth access token.' } });
+      await expect(
+        service.getLiveInstagramMedia('ig-1', 'bad'),
+      ).rejects.toThrow('Invalid OAuth access token.');
+    });
+  });
 });

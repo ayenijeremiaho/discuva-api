@@ -2,7 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SocialAccount } from '../entity/social-account.entity';
-import { CreateSocialAccountDto } from '../dto/social-media.dto';
+import {
+  CreateSocialAccountDto,
+  UpdateSocialAccountDto,
+} from '../dto/social-media.dto';
 
 @Injectable()
 export class SocialAccountService {
@@ -25,6 +28,16 @@ export class SocialAccountService {
 
   async getAll(): Promise<SocialAccount[]> {
     return this.accountRepo.find({ order: { createdAt: 'DESC' } });
+  }
+
+  async update(
+    id: string,
+    dto: UpdateSocialAccountDto,
+  ): Promise<SocialAccount> {
+    const account = await this.accountRepo.findOneBy({ id });
+    if (!account) throw new NotFoundException('Social account not found');
+    account.announceLive = dto.announceLive;
+    return this.accountRepo.save(account);
   }
 
   async delete(id: string): Promise<void> {

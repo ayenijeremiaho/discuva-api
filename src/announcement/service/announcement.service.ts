@@ -240,6 +240,19 @@ export class AnnouncementService {
     return saved;
   }
 
+  // Adds a line to a system announcement without pushing it again. False if it's gone.
+  async appendToSystemAnnouncement(id: string, text: string): Promise<boolean> {
+    const announcement = await this.announcementRepo.findOne({
+      where: { id },
+      select: { id: true, body: true },
+    });
+    if (!announcement) return false;
+    await this.announcementRepo.update(id, {
+      body: `${announcement.body}\n\n${this.sanitizationService.sanitizeForEmail(text)}`,
+    });
+    return true;
+  }
+
   async update(
     id: string,
     dto: UpdateAnnouncementDto,

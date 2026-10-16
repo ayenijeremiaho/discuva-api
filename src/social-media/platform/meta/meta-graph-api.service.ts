@@ -18,6 +18,15 @@ const AUTHORIZE_BASE = `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`;
 const VIDEO_POLL_INTERVAL_MS = 3_000;
 const VIDEO_POLL_MAX_ATTEMPTS = 20;
 
+// Live checks run in a background job, so a slow Meta mustn't stall it.
+const LIVE_CHECK_TIMEOUT_MS = 8_000;
+
+export interface LiveBroadcastInfo {
+  id: string;
+  title: string | null;
+  url: string;
+}
+
 export interface ResolvedPage {
   pageId: string;
   pageName: string;
@@ -256,12 +265,64 @@ export class MetaGraphApiService {
     );
   }
 
+  // The Page's broadcast that's live right now, or null.
+  async getLiveFacebookVideo(
+    pageId: string,
+    pageAccessToken: string,
+  ): Promise<LiveBroadcastInfo | null> {
+    const result = await this.get<{
+      data?: { id: string; title?: string; permalink_url?: string }[];
+    }>(
+      `/${pageId}/live_videos`,
+      {
+        broadcast_status: '["LIVE"]',
+        fields: 'id,title,permalink_url',
+        limit: '1',
+        access_token: pageAccessToken,
+      },
+      LIVE_CHECK_TIMEOUT_MS,
+    );
+    const video = result.data?.[0];
+    if (!video) return null;
+    return {
+      id: video.id,
+      title: video.title || null,
+      url: video.permalink_url
+        ? new URL(video.permalink_url, 'https://www.facebook.com').toString()
+        : `https://www.facebook.com/${pageId}/live`,
+    };
+  }
+
+  // The Instagram account's live broadcast right now, or null.
+  async getLiveInstagramMedia(
+    igUserId: string,
+    pageAccessToken: string,
+  ): Promise<LiveBroadcastInfo | null> {
+    const result = await this.get<{
+      data?: { id: string; username?: string }[];
+    }>(
+      `/${igUserId}/live_media`,
+      { fields: 'id,username', access_token: pageAccessToken },
+      LIVE_CHECK_TIMEOUT_MS,
+    );
+    const media = result.data?.[0];
+    if (!media) return null;
+    return {
+      id: media.id,
+      title: null,
+      url: media.username
+        ? `https://www.instagram.com/${media.username}/live/`
+        : 'https://www.instagram.com/',
+    };
+  }
+
   private async get<T>(
     path: string,
     params: Record<string, string>,
+    timeoutMs?: number,
   ): Promise<T> {
     const query = new URLSearchParams(params).toString();
-    return this.request<T>('GET', `${path}?${query}`);
+    return this.request<T>('GET', `${path}?${query}`, timeoutMs);
   }
 
   private async post<T>(
@@ -272,8 +333,15 @@ export class MetaGraphApiService {
     return this.request<T>('POST', `${path}?${query}`);
   }
 
-  private async request<T>(method: 'GET' | 'POST', path: string): Promise<T> {
-    const response = await fetch(`${GRAPH_BASE}${path}`, { method });
+  private async request<T>(
+    method: 'GET' | 'POST',
+    path: string,
+    timeoutMs?: number,
+  ): Promise<T> {
+    const response = await fetch(`${GRAPH_BASE}${path}`, {
+      method,
+      ...(timeoutMs && { signal: AbortSignal.timeout(timeoutMs) }),
+    });
     const json: any = await response.json().catch(() => ({}));
 
     if (!response.ok || json.error) {

@@ -59,4 +59,12 @@ export class SocialAccount extends BaseEntity {
 
   @Column({ nullable: true })
   scope: string | null;
+
+  // Facebook and Instagram only: post a "we're live" announcement when this account goes live during a service.
+  @Column({ name: 'announce_live', default: true })
+  announceLive: boolean;
+
+  // The last live broadcast announced, so one broadcast is never announced twice.
+  @Column({ name: 'last_live_id', type: 'varchar', nullable: true })
+  lastLiveId: string | null;
 }

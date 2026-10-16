@@ -3404,6 +3404,46 @@
           "response": []
         },
         {
+          "name": "Update Social Account (live announcements)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/social-media/accounts/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "social-media",
+                "accounts",
+                ":id"
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "SOCIAL_MEDIA_WRITE. Turns \"we're live\" announcements on or off for a Facebook or Instagram account (on by default). Returns the account.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"announceLive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Delete Social Account",
           "request": {
             "method": "DELETE",
