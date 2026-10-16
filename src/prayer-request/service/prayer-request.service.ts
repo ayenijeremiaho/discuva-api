@@ -28,6 +28,29 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberService } from '../../member/service/member.service';
 import { MemberAuth } from '../../auth/interface/auth.interface';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
+
+// Statuses the member hears about, with the email and push for each.
+const STATUS_NOTICE: Partial<
+  Record<
+    PrayerRequestStatusEnum,
+    { template: string; subject: string; push: PushNotificationKey }
+  >
+> = {
+  [PrayerRequestStatusEnum.PRAYED_FOR]: {
+    template: 'prayer-request-prayed-for',
+    subject: 'Your prayer request was prayed for',
+    push: PushNotificationKey.PRAYER_REQUEST_PRAYED_FOR,
+  },
+  [PrayerRequestStatusEnum.ANSWERED]: {
+    template: 'prayer-request-answered',
+    subject: 'Your prayer was answered',
+    push: PushNotificationKey.PRAYER_REQUEST_ANSWERED,
+  },
+};
+const EXCERPT_LENGTH = 200;
 
 @Injectable()
 export class PrayerRequestService {
@@ -45,6 +68,7 @@ export class PrayerRequestService {
     private readonly memberService: MemberService,
     private readonly auditLogService: AuditLogService,
     private readonly departmentAccessService: DepartmentAccessService,
+    private readonly notificationDispatchService: NotificationDispatchService,
   ) {}
 
   async submitRequest(
@@ -194,11 +218,16 @@ export class PrayerRequestService {
     dto: UpdatePrayerRequestStatusDto,
     actorId: string,
   ): Promise<PrayerRequest> {
-    const request = await this.prayerRequestRepo.findOne({ where: { id } });
+    const request = await this.prayerRequestRepo.findOne({
+      where: { id },
+      relations: ['member'],
+    });
     if (!request) throw new NotFoundException('Prayer request not found');
 
+    const changed = request.status !== dto.status;
     request.status = dto.status;
     const saved = await this.prayerRequestRepo.save(request);
+    if (changed) this.notifyStatus(saved);
 
     this.auditLogService.log('PRAYER_REQUEST_STATUS_UPDATED', {
       actorId,
@@ -208,6 +237,34 @@ export class PrayerRequestService {
     });
 
     return saved;
+  }
+
+  // Only a change of status reaches the member, so saving the same status twice never sends twice.
+  private notifyStatus(request: PrayerRequest): void {
+    const notice = STATUS_NOTICE[request.status];
+    const member = request.member;
+    if (!notice || !member) return;
+    const excerpt =
+      request.content.length > EXCERPT_LENGTH
+        ? `${request.content.slice(0, EXCERPT_LENGTH).trimEnd()}…`
+        : request.content;
+    this.notificationDispatchService.notifyMember({
+      category: EmailCategory.PRAYER_REQUESTS,
+      ...(member.email && {
+        email: {
+          to: member.email,
+          recipientMemberId: member.id,
+          subject: notice.subject,
+          template: notice.template,
+          data: { name: member.firstname, requestExcerpt: excerpt },
+        },
+      }),
+      push: {
+        memberIds: [member.id],
+        key: notice.push,
+        idempotencyKey: `prayer-request:${request.id}:${request.status}`,
+      },
+    });
   }
 
   async createPregnancyCase(

@@ -203,6 +203,9 @@ export class EmailQueueService {
       [EmailCategory.EVANGELISM]: 'EMAIL_EVANGELISM_ENABLED',
       [EmailCategory.NOTES]: 'EMAIL_NOTES_ENABLED',
       [EmailCategory.BIBLE_GAMES]: 'EMAIL_BIBLE_GAMES_ENABLED',
+      [EmailCategory.PRAYER_REQUESTS]: 'EMAIL_PRAYER_REQUESTS_ENABLED',
+      [EmailCategory.FACILITY_RENTAL]: 'EMAIL_FACILITY_RENTAL_ENABLED',
+      [EmailCategory.FELLOWSHIPS]: 'EMAIL_FELLOWSHIPS_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);

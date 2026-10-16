@@ -18,6 +18,7 @@ import { RentalAdminService } from './service/rental-admin.service';
 import { RentalAdminController } from './controller/rental-admin.controller';
 import { RentalMemberController } from './controller/rental-member.controller';
 import { RentalStatusScheduler } from './scheduler/rental-status.scheduler';
+import { RentalNotifierService } from './service/rental-notifier.service';
 import { UtilityModule } from '../utility/utility.module';
 import { Tenant } from '../tenant/entity/tenant.entity';
 
@@ -45,6 +46,7 @@ import { Tenant } from '../tenant/entity/tenant.entity';
     RentalConfigService,
     RentalBookingService,
     RentalAdminService,
+    RentalNotifierService,
     RentalStatusScheduler,
   ],
   controllers: [RentalAdminController, RentalMemberController],

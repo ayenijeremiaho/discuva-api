@@ -124,4 +124,19 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'Push to members when someone challenges them to a Guess the Bible Character duel, when it is their turn, and when a duel ends.',
     },
+    [EmailCategory.PRAYER_REQUESTS]: {
+      label: 'Prayer Request Updates',
+      description:
+        'Sent to a member when the prayer team marks their request as prayed for, and when it is marked answered (with an invitation to share a testimony).',
+    },
+    [EmailCategory.FACILITY_RENTAL]: {
+      label: 'Facility Rental Updates',
+      description:
+        'Sent to the renter when a booking is confirmed or not approved, when a payment is received or a caution deposit refunded, and the day before the booking.',
+    },
+    [EmailCategory.FELLOWSHIPS]: {
+      label: 'Fellowship Absences',
+      description:
+        'Sent to a fellowship leader when a member has missed three meetings in a row.',
+    },
   };

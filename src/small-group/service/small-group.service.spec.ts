@@ -1,4 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
+import { DateService } from '../../utility/service/date.service';
+
+const mockDispatch = { notifyMember: jest.fn().mockResolvedValue(undefined) };
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
   BadRequestException,
@@ -37,6 +41,7 @@ const mockAttendanceRepo = {
   findOne: jest.fn(),
   find: jest.fn(),
   findAndCount: jest.fn(),
+  query: jest.fn().mockResolvedValue([]),
 };
 
 const mockAuditLogService = { log: jest.fn() };
@@ -61,6 +66,11 @@ describe('SmallGroupService', () => {
           useValue: mockAttendanceRepo,
         },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: NotificationDispatchService, useValue: mockDispatch },
+        {
+          provide: DateService,
+          useValue: { format: (d: Date) => d.toISOString().slice(5, 10) },
+        },
       ],
     }).compile();
 
@@ -500,6 +510,127 @@ describe('SmallGroupService', () => {
   });
 
   describe('recordAttendance', () => {
+    describe('telling the leader about repeated absences', () => {
+      const leader = {
+        id: 'leader-1',
+        firstname: 'Grace',
+        email: 'grace@x.org',
+      };
+      const row = (
+        meeting_date: string,
+        status: SmallGroupAttendanceStatusEnum,
+      ) => ({
+        member_id: 'm2',
+        status,
+        meeting_date,
+        firstname: 'John',
+        lastname: 'Smith',
+      });
+      const { ABSENT, PRESENT } = SmallGroupAttendanceStatusEnum;
+      const save = (status = ABSENT, meetingDate = '2026-06-15') =>
+        service.recordAttendance('group-1', 'leader-1', {
+          meetingDate,
+          records: [{ memberId: 'm2', status }],
+        });
+
+      beforeEach(() => {
+        mockGroupRepo.findOne.mockResolvedValue({
+          id: 'group-1',
+          name: 'Lekki Fellowship',
+          leader,
+        });
+        mockAttendanceRepo.find.mockResolvedValue([]);
+        mockAttendanceRepo.create.mockImplementation((r: unknown) => r);
+        mockAttendanceRepo.save.mockImplementation((r: unknown) =>
+          Promise.resolve(r),
+        );
+        mockDispatch.notifyMember.mockClear();
+        mockAttendanceRepo.query.mockClear();
+      });
+
+      it('alerts once the run of absences reaches three', async () => {
+        mockAttendanceRepo.query.mockResolvedValue([
+          row('2026-06-15', ABSENT),
+          row('2026-06-08', ABSENT),
+          row('2026-06-01', ABSENT),
+          row('2026-05-25', PRESENT),
+        ]);
+        await save();
+        expect(mockAttendanceRepo.query).toHaveBeenCalledWith(
+          expect.stringContaining(
+            'ROW_NUMBER() OVER (PARTITION BY a.member_id',
+          ),
+          ['group-1', ['m2'], 4],
+        );
+        expect(mockDispatch.notifyMember).toHaveBeenCalledWith(
+          expect.objectContaining({
+            email: expect.objectContaining({
+              to: 'grace@x.org',
+              template: 'fellowship-member-missing',
+              data: expect.objectContaining({
+                memberName: 'John Smith',
+                groupName: 'Lekki Fellowship',
+                missedDates: '06-01, 06-08, 06-15',
+              }),
+            }),
+            push: expect.objectContaining({
+              memberIds: ['leader-1'],
+              url: '/small-groups/group-1',
+              idempotencyKey: 'fellowship-missing:group-1:m2:2026-06-15',
+            }),
+          }),
+        );
+      });
+
+      it('stays quiet at four in a row, so a leader is told once', async () => {
+        mockAttendanceRepo.query.mockResolvedValue([
+          row('2026-06-15', ABSENT),
+          row('2026-06-08', ABSENT),
+          row('2026-06-01', ABSENT),
+          row('2026-05-25', ABSENT),
+        ]);
+        await save();
+        expect(mockDispatch.notifyMember).not.toHaveBeenCalled();
+      });
+
+      it('stays quiet when an older meeting is edited, or with fewer than three', async () => {
+        mockAttendanceRepo.query.mockResolvedValueOnce([
+          row('2026-06-22', PRESENT),
+          row('2026-06-15', ABSENT),
+          row('2026-06-08', ABSENT),
+          row('2026-06-01', ABSENT),
+        ]);
+        await save();
+        mockAttendanceRepo.query.mockResolvedValueOnce([
+          row('2026-06-15', ABSENT),
+          row('2026-06-08', ABSENT),
+        ]);
+        await save();
+        expect(mockDispatch.notifyMember).not.toHaveBeenCalled();
+      });
+
+      it('keeps the attendance when the alert fails', async () => {
+        mockAttendanceRepo.query.mockRejectedValueOnce(new Error('db hiccup'));
+        await expect(save()).resolves.toEqual([
+          expect.objectContaining({ status: ABSENT }),
+        ]);
+        expect(mockDispatch.notifyMember).not.toHaveBeenCalled();
+      });
+
+      it("doesn't look again when the absence was already recorded, or for the leader", async () => {
+        mockAttendanceRepo.find.mockResolvedValueOnce([
+          { member: { id: 'm2' }, status: ABSENT },
+        ]);
+        await save();
+        await service.recordAttendance('group-1', 'leader-1', {
+          meetingDate: '2026-06-15',
+          records: [{ memberId: 'leader-1', status: ABSENT }],
+        });
+        await save(PRESENT);
+        expect(mockAttendanceRepo.query).not.toHaveBeenCalled();
+      });
+    });
+
     it('throws ForbiddenException when the caller is not the group leader', async () => {
       mockGroupRepo.findOne.mockResolvedValue({
         id: 'group-1',

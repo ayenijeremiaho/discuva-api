@@ -23,6 +23,10 @@ import {
 } from '../dto/rental-booking.dto';
 import { MarkPaymentPaidDto } from '../dto/rental-payment.dto';
 import { RentalBookingService } from './rental-booking.service';
+import {
+  REMINDER_LEAD_MS,
+  RentalNotifierService,
+} from './rental-notifier.service';
 
 @Injectable()
 export class RentalAdminService {
@@ -40,6 +44,7 @@ export class RentalAdminService {
     @InjectRepository(RentalAddon)
     private readonly addonRepo: Repository<RentalAddon>,
     private readonly bookingService: RentalBookingService,
+    private readonly notifier: RentalNotifierService,
   ) {}
 
   async getAllBookings(status?: RentalBookingStatus): Promise<RentalBooking[]> {
@@ -67,8 +72,15 @@ export class RentalAdminService {
     }
     booking.status = RentalBookingStatus.CONFIRMED;
     if (dto.notes) booking.notes = dto.notes;
+    // Confirmed within a day of starting: the confirmation is the reminder.
+    if (
+      new Date(booking.startDateTime).getTime() - Date.now() <=
+      REMINDER_LEAD_MS
+    )
+      booking.reminderSentAt = new Date();
     const saved = await this.bookingRepo.save(booking);
     this.logger.log(`Booking ${id} confirmed`);
+    await this.notifier.confirmed(saved);
     return saved;
   }
 
@@ -84,6 +96,7 @@ export class RentalAdminService {
     booking.rejectionReason = dto.rejectionReason;
     const saved = await this.bookingRepo.save(booking);
     this.logger.log(`Booking ${id} rejected`);
+    await this.notifier.rejected(saved);
     return saved;
   }
 
@@ -181,7 +194,7 @@ export class RentalAdminService {
   ): Promise<RentalPayment> {
     const payment = await this.paymentRepo.findOne({
       where: { id: paymentId },
-      relations: ['booking'],
+      relations: ['booking', 'booking.member', 'booking.facility'],
     });
     if (!payment) throw new NotFoundException('Payment record not found');
     if (payment.status === RentalPaymentStatus.PAID) {
@@ -191,13 +204,15 @@ export class RentalAdminService {
     payment.paidAt = new Date();
     if (dto.reference) payment.reference = dto.reference;
     if (dto.proofUrl) payment.proofUrl = dto.proofUrl;
-    return this.paymentRepo.save(payment);
+    const saved = await this.paymentRepo.save(payment);
+    await this.notifier.paymentReceived(saved, payment.booking);
+    return saved;
   }
 
   async markCautionRefunded(paymentId: string): Promise<RentalPayment> {
     const payment = await this.paymentRepo.findOne({
       where: { id: paymentId },
-      relations: ['booking'],
+      relations: ['booking', 'booking.member', 'booking.facility'],
     });
     if (!payment) throw new NotFoundException('Payment record not found');
     if (payment.type !== 'CAUTION') {
@@ -210,6 +225,8 @@ export class RentalAdminService {
     }
     payment.status = RentalPaymentStatus.REFUNDED;
     payment.refundedAt = new Date();
-    return this.paymentRepo.save(payment);
+    const saved = await this.paymentRepo.save(payment);
+    await this.notifier.cautionRefunded(saved, payment.booking);
+    return saved;
   }
 }

@@ -36,6 +36,14 @@ export enum PushNotificationKey {
   BIBLE_DUEL_INVITE = 'BIBLE_DUEL_INVITE',
   BIBLE_DUEL_YOUR_TURN = 'BIBLE_DUEL_YOUR_TURN',
   BIBLE_DUEL_FINISHED = 'BIBLE_DUEL_FINISHED',
+  PRAYER_REQUEST_PRAYED_FOR = 'PRAYER_REQUEST_PRAYED_FOR',
+  PRAYER_REQUEST_ANSWERED = 'PRAYER_REQUEST_ANSWERED',
+  RENTAL_BOOKING_CONFIRMED = 'RENTAL_BOOKING_CONFIRMED',
+  RENTAL_BOOKING_REJECTED = 'RENTAL_BOOKING_REJECTED',
+  RENTAL_PAYMENT_RECEIVED = 'RENTAL_PAYMENT_RECEIVED',
+  RENTAL_CAUTION_REFUNDED = 'RENTAL_CAUTION_REFUNDED',
+  RENTAL_BOOKING_REMINDER = 'RENTAL_BOOKING_REMINDER',
+  FELLOWSHIP_MEMBER_MISSING = 'FELLOWSHIP_MEMBER_MISSING',
 }
 
 export interface PushTemplate {
@@ -417,6 +425,107 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: 'Your duel with {{player_name}}: {{outcome}}',
     url: '/games/characters/duels',
     placeholders: { player_name: 'Grace Adebayo', outcome: 'you won!' },
+  },
+  [PushNotificationKey.PRAYER_REQUEST_PRAYED_FOR]: {
+    category: EmailCategory.PRAYER_REQUESTS,
+    label: 'Prayer request prayed for',
+    description:
+      'Sent to a member when the prayer team marks their request as prayed for.',
+    title: 'Your request was prayed for',
+    body: 'The prayer team has prayed for your request. You are not alone.',
+    url: '/prayer-requests',
+    placeholders: {},
+  },
+  [PushNotificationKey.PRAYER_REQUEST_ANSWERED]: {
+    category: EmailCategory.PRAYER_REQUESTS,
+    label: 'Prayer request answered',
+    description:
+      'Sent to a member when their request is marked answered, inviting a testimony.',
+    title: 'Praise God, your prayer was answered',
+    body: 'Would you like to share what God has done? Tap to share a testimony.',
+    url: '/prayer-requests',
+    placeholders: {},
+  },
+  [PushNotificationKey.RENTAL_BOOKING_CONFIRMED]: {
+    category: EmailCategory.FACILITY_RENTAL,
+    label: 'Booking confirmed',
+    description: 'Sent to the renter when a booking is confirmed.',
+    title: 'Your booking is confirmed',
+    body: '{{facility_name}} on {{booking_date}}, {{booking_time}}.',
+    url: '/facility-rental',
+    placeholders: {
+      facility_name: 'Main Hall',
+      booking_date: 'Sat 7 Nov',
+      booking_time: '10:00 AM–4:00 PM',
+    },
+  },
+  [PushNotificationKey.RENTAL_BOOKING_REJECTED]: {
+    category: EmailCategory.FACILITY_RENTAL,
+    label: 'Booking not approved',
+    description: "Sent to the renter when a booking request isn't approved.",
+    title: "Your booking wasn't approved",
+    body: '{{facility_name}} on {{booking_date}}: {{reason}}',
+    url: '/facility-rental',
+    placeholders: {
+      facility_name: 'Main Hall',
+      booking_date: 'Sat 7 Nov',
+      reason: 'The hall is closed for repairs that weekend.',
+    },
+  },
+  [PushNotificationKey.RENTAL_PAYMENT_RECEIVED]: {
+    category: EmailCategory.FACILITY_RENTAL,
+    label: 'Rental payment received',
+    description:
+      "Sent to the renter when a booking's fee or caution is marked paid.",
+    title: 'Payment received',
+    body: '{{amount}} {{payment_label}} for {{facility_name}} on {{booking_date}}. Thank you.',
+    url: '/facility-rental',
+    placeholders: {
+      amount: 'NGN 50,000.00',
+      payment_label: 'booking fee',
+      facility_name: 'Main Hall',
+      booking_date: 'Sat 7 Nov',
+    },
+  },
+  [PushNotificationKey.RENTAL_CAUTION_REFUNDED]: {
+    category: EmailCategory.FACILITY_RENTAL,
+    label: 'Caution deposit refunded',
+    description:
+      "Sent to the renter when a booking's caution deposit is refunded.",
+    title: 'Caution deposit refunded',
+    body: '{{amount}} for {{facility_name}} on {{booking_date}} has been refunded.',
+    url: '/facility-rental',
+    placeholders: {
+      amount: 'NGN 20,000.00',
+      facility_name: 'Main Hall',
+      booking_date: 'Sat 7 Nov',
+    },
+  },
+  [PushNotificationKey.RENTAL_BOOKING_REMINDER]: {
+    category: EmailCategory.FACILITY_RENTAL,
+    label: 'Booking tomorrow',
+    description: 'Sent to the renter the day before a confirmed booking.',
+    title: 'Your booking is coming up',
+    body: '{{facility_name}}, {{booking_date}} at {{booking_time}}.',
+    url: '/facility-rental',
+    placeholders: {
+      facility_name: 'Main Hall',
+      booking_date: 'Sat 7 Nov',
+      booking_time: '10:00 AM–4:00 PM',
+    },
+  },
+  [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {
+    category: EmailCategory.FELLOWSHIPS,
+    label: 'Member missed 3 meetings',
+    description:
+      'Sent to a fellowship leader when a member has missed three meetings in a row.',
+    title: '{{member_name}} has missed 3 meetings',
+    body: "{{member_name}} hasn't been at {{group_name}} for the last three meetings. A call might help.",
+    url: '/small-groups',
+    placeholders: {
+      member_name: 'Ada Obi',
+      group_name: 'Lekki Fellowship',
+    },
   },
 };
 
