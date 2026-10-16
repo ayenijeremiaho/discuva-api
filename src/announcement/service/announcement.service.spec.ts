@@ -74,6 +74,7 @@ const mockAnnouncementRepo = {
   save: jest.fn(),
   create: jest.fn(),
   remove: jest.fn(),
+  update: jest.fn(),
   createQueryBuilder: jest.fn(),
 };
 
@@ -469,7 +470,7 @@ describe('AnnouncementService', () => {
         expect.objectContaining({
           idempotencyKey: 'ann-1',
           title: 'Call Leaders Meeting',
-          url: '/announcements',
+          url: '/announcements/ann-1',
         }),
       );
     });
@@ -528,7 +529,7 @@ describe('AnnouncementService', () => {
         expect.objectContaining({
           idempotencyKey: 'ann-1',
           title: 'Session Moved',
-          url: '/announcements',
+          url: '/announcements/ann-1',
         }),
       );
     });
@@ -562,7 +563,7 @@ describe('AnnouncementService', () => {
         expect.objectContaining({
           idempotencyKey: 'ann-2',
           title: 'General',
-          url: '/announcements',
+          url: '/announcements/ann-2',
         }),
       );
     });
@@ -627,6 +628,70 @@ describe('AnnouncementService', () => {
         mockPushNotificationService.dispatchToMemberIds,
       ).toHaveBeenCalledWith(['member-5'], expect.any(Object));
       expect(result).toBe(announcement);
+    });
+
+    it('pushes plain text, not HTML, and opens the announcement itself', async () => {
+      const announcement = {
+        id: 'sys-2',
+        title: '🔴 Live Now: Sunday',
+        body: '<p>We&#39;re live &amp; ready.</p><p><a href="https://x">Watch on Facebook</a></p>',
+        audience: AnnouncementAudienceEnum.ALL,
+        author: null,
+      };
+      mockAnnouncementRepo.create.mockReturnValue(announcement);
+      mockAnnouncementRepo.save.mockResolvedValue(announcement);
+      mockMemberQb.getMany.mockResolvedValueOnce([{ id: 'member-5' }]);
+      await service.createSystemAnnouncement('t', 'b');
+      await new Promise(process.nextTick);
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).toHaveBeenCalledWith(
+        ['member-5'],
+        expect.objectContaining({
+          body: "We're live & ready. Watch on Facebook",
+          url: '/announcements/sys-2',
+        }),
+      );
+    });
+  });
+
+  describe('appendToSystemAnnouncement', () => {
+    it('adds HTML without pushing again', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue({
+        id: 'a1',
+        body: '<p>Live</p>',
+      });
+      await expect(
+        service.appendToSystemAnnouncement('a1', '<p>More</p>'),
+      ).resolves.toBe(true);
+      expect(mockAnnouncementRepo.update).toHaveBeenCalledWith('a1', {
+        body: '<p>Live</p><p>More</p>',
+      });
+      expect(
+        mockPushNotificationService.dispatchToMemberIds,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('leaves it alone when it already has the link', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue({
+        id: 'a1',
+        body: '<a href="https://x">Watch</a>',
+      });
+      await expect(
+        service.appendToSystemAnnouncement(
+          'a1',
+          '<p>dup</p>',
+          'href="https://x"',
+        ),
+      ).resolves.toBe(true);
+      expect(mockAnnouncementRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('reports a deleted announcement', async () => {
+      mockAnnouncementRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.appendToSystemAnnouncement('gone', '<p>x</p>'),
+      ).resolves.toBe(false);
     });
   });
 

@@ -1335,8 +1335,13 @@ lookup. No audit logging on reactions — too high-frequency/low-stakes to be wo
 **System-triggered announcements (`createSystemAnnouncement`):** a small internal entry point used by features that
 need to publish an `ALL`-audience announcement without going through the admin-authored `create()` flow — no
 `Admin`/SMS-permission check, `author` is left `null` (the FK is nullable for exactly this reason), `publishedAt` is
-now, and the same persist + push-notify path runs. Used today by the Sermon Archive's "Announce Live" trigger (see
-Sermon Module); designed to also be the target of the planned YouTube WebSub livestream-detection integration.
+now, and the same persist + push-notify path runs. Live announcements (Sermons' "Announce Live", YouTube, Facebook
+and Instagram detection) reach it through `LiveAnnouncementService` (see Live Announcements); the membership
+anniversary greeting calls it directly.
+
+**Push for every announcement:** the push text is the body with HTML removed (tags dropped, common entities decoded,
+whitespace collapsed, first 150 characters), and tapping it opens that announcement (`/announcements/{id}` in the
+member app) rather than the list.
 
 **Routes prefix:** `/announcements`
 
@@ -5600,8 +5605,10 @@ metadata beyond a filterable label. Paginated (grows unboundedly, same policy as
 
 **"Announce Live" manual trigger (`POST admin/sermons/announce-live`):** the MVP for "auto-trigger an announcement
 when we go live" — an admin clicks "We're Live on YouTube" or "We're Live on Mixlr" on the Sermons page, providing
-the livestream URL. This calls `AnnouncementService.createSystemAnnouncement()` directly (see Announcements Module)
-with a default title (`🔴 Live Now on YouTube` / `🔴 Live Now on Mixlr`, overridable) and a body containing the URL.
+the livestream URL. This goes through `LiveAnnouncementService` (see Live Announcements), recording the admin as the
+actor, with a default title (`🔴 Live Now on YouTube` / `🔴 Live Now on Mixlr`, overridable) and a "Watch on …" link —
+so announcing by hand while a stream was already detected adds the link to that announcement (or does nothing if it's
+the same link) instead of pushing twice.
 Zero external-API risk, works identically for both platforms today, and doubles as the fallback path for the planned
 YouTube WebSub automation (a channel actually going live still needs a human-clickable escape hatch for when the
 automated detection misses a stream or a platform's API is unavailable).
@@ -5943,8 +5950,11 @@ scheduled service aren't detected.
 
 **One announcement per service across platforms:** `LiveAnnouncementService` (announcement module, also used by
 YouTube Live Detection) creates the first announcement of a service and remembers it for 4 hours (Redis `live-now`,
-tenant-scoped); a second platform going live adds an "Also live on Instagram: <link>" line to it
-(`AnnouncementService.appendToSystemAnnouncement`, no second push). A Redis lock stops two platforms going live at
+tenant-scoped); a second platform going live adds an "Also live on Instagram" link to it
+(`AnnouncementService.appendToSystemAnnouncement`, no second push; nothing is added if the announcement already has
+that link). The body is HTML (`<p>We're live now on Facebook. Tap to watch.</p><p><a href="…">Watch on
+Facebook</a></p>`, the URL escaped), since the member app renders announcement bodies as HTML — a plain-text URL
+would show as unclickable text. A Redis lock stops two platforms going live at
 the same moment from creating two announcements; if the remembered announcement was deleted, a new one is created.
 
 **Columns (tenant migration `AddSocialAccountLiveAnnouncements`):** `social_accounts.announce_live` (boolean, default

@@ -17,7 +17,7 @@ import { SermonService } from './sermon.service';
 import { Sermon } from '../entity/sermon.entity';
 import { LivePlatformEnum } from '../enum/live-platform.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
-import { AnnouncementService } from '../../announcement/service/announcement.service';
+import { LiveAnnouncementService } from '../../announcement/service/live-announcement.service';
 import { NotesService } from '../../notes/service/notes.service';
 
 const mockAdmin = { id: 'admin-1' } as any;
@@ -41,7 +41,7 @@ const mockAuditLogService = {
 };
 
 const mockAnnouncementService = {
-  createSystemAnnouncement: jest.fn().mockResolvedValue({ id: 'ann-1' }),
+  announce: jest.fn().mockResolvedValue(undefined),
 };
 
 describe('SermonService', () => {
@@ -55,7 +55,7 @@ describe('SermonService', () => {
         { provide: getRepositoryToken(Sermon), useValue: mockSermonRepo },
         { provide: NotesService, useValue: mockNotesService },
         { provide: AuditLogService, useValue: mockAuditLogService },
-        { provide: AnnouncementService, useValue: mockAnnouncementService },
+        { provide: LiveAnnouncementService, useValue: mockAnnouncementService },
       ],
     }).compile();
 
@@ -178,7 +178,7 @@ describe('SermonService', () => {
   });
 
   describe('announceLive', () => {
-    it('builds a default title per platform and delegates to createSystemAnnouncement', async () => {
+    it('builds a default title per platform and shares the live announcement', async () => {
       await service.announceLive(
         {
           platform: LivePlatformEnum.YOUTUBE,
@@ -187,11 +187,12 @@ describe('SermonService', () => {
         mockAdmin,
       );
 
-      expect(
-        mockAnnouncementService.createSystemAnnouncement,
-      ).toHaveBeenCalledWith(
-        '🔴 Live Now on YouTube',
-        expect.stringContaining('https://youtube.com/live/abc'),
+      expect(mockAnnouncementService.announce).toHaveBeenCalledWith(
+        {
+          platform: 'YouTube',
+          url: 'https://youtube.com/live/abc',
+          heading: '🔴 Live Now on YouTube',
+        },
         'admin-1',
       );
     });
@@ -206,9 +207,10 @@ describe('SermonService', () => {
         mockAdmin,
       );
 
-      expect(
-        mockAnnouncementService.createSystemAnnouncement,
-      ).toHaveBeenCalledWith('Custom Title', expect.any(String), 'admin-1');
+      expect(mockAnnouncementService.announce).toHaveBeenCalledWith(
+        expect.objectContaining({ heading: 'Custom Title' }),
+        'admin-1',
+      );
     });
   });
 

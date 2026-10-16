@@ -40,7 +40,8 @@ describe('LiveAnnouncementService', () => {
     });
     expect(announcements.createSystemAnnouncement).toHaveBeenCalledWith(
       '🔴 Live Now: Sunday Service',
-      "We're live now on Facebook — tap to watch.\n\nhttps://www.facebook.com/x/videos/1/",
+      `<p>We're live now on Facebook. Tap to watch.</p><p><a href="https://www.facebook.com/x/videos/1/">Watch on Facebook</a></p>`,
+      undefined,
     );
     expect(cache.releaseLock).toHaveBeenCalled();
   });
@@ -51,7 +52,8 @@ describe('LiveAnnouncementService', () => {
     expect(announcements.createSystemAnnouncement).toHaveBeenCalledTimes(1);
     expect(announcements.appendToSystemAnnouncement).toHaveBeenCalledWith(
       'ann-1',
-      'Also live on Instagram: https://ig/live/',
+      '<p><a href="https://ig/live/">Also live on Instagram</a></p>',
+      'href="https://ig/live/"',
     );
   });
 
@@ -62,6 +64,7 @@ describe('LiveAnnouncementService', () => {
     expect(announcements.createSystemAnnouncement).toHaveBeenCalledWith(
       '🔴 Live Now: Service',
       expect.any(String),
+      undefined,
     );
   });
 
@@ -70,5 +73,23 @@ describe('LiveAnnouncementService', () => {
     await service.announce({ platform: 'Facebook', url: 'u' });
     expect(cache.acquireLock).toHaveBeenCalledTimes(2);
     expect(announcements.createSystemAnnouncement).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a given heading, records who announced, and escapes the link', async () => {
+    await service.announce(
+      {
+        platform: 'Mixlr',
+        url: 'https://mixlr.com/x?a=1&b="2"',
+        heading: 'Prayer night',
+      },
+      'admin-1',
+    );
+    expect(announcements.createSystemAnnouncement).toHaveBeenCalledWith(
+      'Prayer night',
+      expect.stringContaining(
+        'href="https://mixlr.com/x?a=1&amp;b=&quot;2&quot;"',
+      ),
+      'admin-1',
+    );
   });
 });
