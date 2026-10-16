@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Patch, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Patch,
+  Post,
+  Put,
+  UseGuards,
+} from '@nestjs/common';
 import { AdminGuard } from '../../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../../admin/decorator/requires-permission.decorator';
 import { AdminPermission } from '../../../admin/enum/admin-permission.enum';
@@ -32,6 +42,14 @@ export class YoutubeIntegrationController {
   @Put()
   upsert(@Body() dto: UpsertYoutubeIntegrationDto) {
     return this.service.upsert(dto);
+  }
+
+  // Checks the channel and key with YouTube, saving nothing; returns the channel's ID and name.
+  @RequiresPermission(AdminPermission.YOUTUBE_INTEGRATION_WRITE)
+  @Post('test')
+  @HttpCode(HttpStatus.OK)
+  test(@Body() dto: UpsertYoutubeIntegrationDto) {
+    return this.service.test(dto);
   }
 
   @RequiresPermission(AdminPermission.YOUTUBE_INTEGRATION_WRITE)

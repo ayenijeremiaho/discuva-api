@@ -1,14 +1,12 @@
 import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class UpsertYoutubeIntegrationDto {
+  // A channel ID, a /channel/ link, or an @handle; saved as the channel ID YouTube returns.
   @IsString()
   @IsNotEmpty()
   channelId: string;
 
-  // Optional at save time, but live-detection is a no-op without one —
-  // there is no platform-wide fallback key. A tenant can set the channel
-  // first and add a key later; until they do, notifications from that
-  // channel are silently ignored (see YoutubeLiveDetectionService).
+  // Required the first time; afterwards leave it out to keep the saved key. There's no platform key to fall back on.
   @IsOptional()
   @IsString()
   @IsNotEmpty()

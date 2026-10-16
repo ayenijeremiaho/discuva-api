@@ -33,6 +33,10 @@ export class TenantYoutubeIntegration extends BaseEntity {
   @Column({ nullable: true })
   lastAnnouncedVideoId: string | null;
 
+  // Read from YouTube when the channel is connected.
+  @Column({ type: 'varchar', nullable: true })
+  channelTitle: string | null;
+
   @Column({ nullable: true, type: 'timestamptz' })
   subscriptionExpiresAt: Date | null;
 

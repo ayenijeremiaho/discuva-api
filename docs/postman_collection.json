@@ -20983,6 +20983,131 @@
       ]
     },
     {
+      "name": "YouTube Integration (Admin)",
+      "item": [
+        {
+          "name": "Get YouTube Integration",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/youtube-integration",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "youtube-integration"
+              ]
+            },
+            "description": "YOUTUBE_INTEGRATION_READ. { channelId, channelTitle, hasOwnApiKey, isActive, status: ANNOUNCING | NEEDS_API_KEY | PAUSED, subscriptionExpiresAt } or null. Never returns the key."
+          },
+          "response": []
+        },
+        {
+          "name": "Test YouTube Connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channelId\": \"@yourchurch\",\n  \"apiKey\": \"AIza...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/youtube-integration/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "youtube-integration",
+                "test"
+              ]
+            },
+            "description": "YOUTUBE_INTEGRATION_WRITE. Checks the channel (UC\u2026 id, /channel/ link or @handle) and key with YouTube without saving; a blank key uses the saved one. 200 { channelId, channelTitle }, or 400 with what to fix (invalid key, API not enabled, quota, key restrictions, channel not found)."
+          },
+          "response": []
+        },
+        {
+          "name": "Connect / Update YouTube Channel",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"channelId\": \"https://www.youtube.com/@yourchurch\",\n  \"apiKey\": \"AIza...\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/youtube-integration",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "youtube-integration"
+              ]
+            },
+            "description": "YOUTUBE_INTEGRATION_WRITE. apiKey is required when none is saved; leave it out to keep the saved key. Checks with YouTube first (400 with the reason), saves the resolved channel id and name, then subscribes for live notifications. 409 if another church owns the channel."
+          },
+          "response": []
+        },
+        {
+          "name": "Pause / Resume Announcements",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/youtube-integration",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "youtube-integration"
+              ]
+            },
+            "description": "YOUTUBE_INTEGRATION_WRITE. Turns live announcements off or on without changing the channel or key."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Finance (Admin)",
       "description": "Admin-side management of department finance requests raised by HODs.\n\n**Access:** AdminGuard \u2014 FINANCE_READ for list/get, FINANCE_WRITE for approve/reject/proof.\n\n**Key concepts:**\n- Finance categories group requests by expense type (e.g. Equipment, Printing, Transport). Admin creates categories first.\n- HODs raise requests with an amount, recipient bank details, reason, and optional attachment.\n- Admin reviews and approves or rejects (rejection requires a reason, which is emailed to the HOD).\n- After approving, admin can attach a payment proof file via `PATCH /admin/finance/requests/:id/proof` to confirm disbursement.\n\n**Status flow:** `PENDING` \u2192 `APPROVED` (admin approves) \u2192 proof attached (still `APPROVED`, but `isPaid: true` \u2014 shown as Paid) OR `REJECTED` (with reason). List filter `status` also accepts `AWAITING_PAYMENT` and `PAID`.",
       "item": [
