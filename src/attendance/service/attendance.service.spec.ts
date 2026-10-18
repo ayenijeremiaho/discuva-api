@@ -1943,6 +1943,7 @@ describe('AttendanceService', () => {
           status: AttendanceStatusEnum.PRESENT,
           roleAtCheckin: MemberRoleEnum.WORKER,
           location: null,
+          checkedInBy: { id: 'admin-1' },
         }),
       );
       expect(result.id).toBe('att-new');
@@ -2493,6 +2494,7 @@ describe('AttendanceService', () => {
         'service',
         'status',
         'checkinTime',
+        'checkedInBy',
       ]);
       expect(
         mockEmailQueueService.queueEmailWithTemplateAndAttachments,

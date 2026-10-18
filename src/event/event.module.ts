@@ -35,6 +35,8 @@ import { ChurchSetting } from '../church-settings/entity/church-setting.entity';
 import { EventOverlapService } from './service/event-overlap.service';
 import { EventSettingsController } from './controller/event-settings.controller';
 
+import { ServiceReminderScheduler } from './scheduler/service-reminder.scheduler';
+
 @Module({
   imports: [
     TenantTypeOrmModule.forFeature([
@@ -76,6 +78,7 @@ import { EventSettingsController } from './controller/event-settings.controller'
     ChurchTimezoneService,
     EventSeriesScheduler,
     EventOverlapService,
+    ServiceReminderScheduler,
   ],
   exports: [TenantTypeOrmModule, EventService, EventConfigService],
 })

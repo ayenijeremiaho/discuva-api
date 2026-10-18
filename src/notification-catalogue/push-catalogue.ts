@@ -285,7 +285,7 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     category: EmailCategory.EVENT_REMINDER,
     label: 'Service reminder',
     description:
-      'Sent ahead of a service, at the times set in Event Reminders.',
+      "Sent before each service to the people it's for: at the hours in Reminder Settings (Service Reminders), or at a service's own reminders when it has any.",
     title: 'Service Reminder: {{service_name}}',
     body: '{{service_name}} begins in {{time_until}}. Please make your way and check in on time.',
     url: '/events',

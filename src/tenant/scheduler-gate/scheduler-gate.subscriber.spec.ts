@@ -29,7 +29,7 @@ describe('SchedulerGateSubscriber', () => {
   });
 
   it.each([
-    ['a reminder', EventReminder, ['event-reminders']],
+    ['a reminder', EventReminder, ['event-reminders', 'service-reminders']],
     [
       'a service slot',
       ServiceSlot,
@@ -38,6 +38,7 @@ describe('SchedulerGateSubscriber', () => {
         'absence-marking',
         'event-reminders',
         'social-live',
+        'service-reminders',
       ],
     ],
     ['a rental booking', RentalBooking, ['rental-status']],
@@ -50,7 +51,12 @@ describe('SchedulerGateSubscriber', () => {
     [
       'reminder settings',
       ChurchSetting,
-      ['class-session-reminders', 'fellowship-reminders', 'social-live'],
+      [
+        'class-session-reminders',
+        'fellowship-reminders',
+        'social-live',
+        'service-reminders',
+      ],
     ],
     ['a fellowship', SmallGroup, ['fellowship-reminders']],
     ['a social account', SocialAccount, ['social-live']],

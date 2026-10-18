@@ -33,6 +33,7 @@ describe('ProgrammePlanningService', () => {
     ]),
   };
   const adminRepo = { findOne: jest.fn() };
+  const auditLog = { log: jest.fn() };
   const access = { hasCapability: jest.fn() };
   const now = new Date('2026-10-18T08:00:00Z');
   const dates = {
@@ -55,6 +56,7 @@ describe('ProgrammePlanningService', () => {
     access as never,
     dates as never,
     programmes as never,
+    auditLog as never,
   );
 
   beforeEach(() => {
@@ -314,6 +316,32 @@ describe('ProgrammePlanningService', () => {
       expect(JSON.stringify(view)).not.toContain('secret@x.org');
       expect(view.totalMinutes).toBe(75);
       expect(view.warning).toBe('Ada is also leading another item');
+    });
+  });
+
+  describe('audit', () => {
+    it('logs a planner change against the service, marked as from the member app', () => {
+      service.audit(
+        'PROGRAMME_ITEM_ADDED',
+        'm1',
+        ProgrammePlanningService.nameOf({
+          id: 'p1',
+          event: { id: 'e1', name: 'Sunday Service', eventDate: now },
+          service: {
+            id: 's1',
+            name: 'First Service',
+            startTime: now,
+            endTime: now,
+          },
+        }),
+        { topic: 'Sermon' },
+      );
+      expect(auditLog.log).toHaveBeenCalledWith('PROGRAMME_ITEM_ADDED', {
+        actorId: 'm1',
+        targetId: 'p1',
+        targetName: 'Sunday Service — First Service',
+        metadata: { via: 'member_app', topic: 'Sermon' },
+      });
     });
   });
 });

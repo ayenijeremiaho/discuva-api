@@ -27136,6 +27136,100 @@
             "description": ""
           },
           "response": []
+        },
+        {
+          "name": "Save as template",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}/template",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}",
+                "template"
+              ]
+            },
+            "description": "Saves the current order now (type, title, minutes, department; not people). Same name replaces that template. Returns { id, name, replaced }.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Standard Sunday\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Programme PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}/pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}",
+                "pdf"
+              ]
+            },
+            "description": "The service's order of service as a PDF. Audited."
+          },
+          "response": []
+        },
+        {
+          "name": "Whole event PDF",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/events/{{eventId}}/pdf",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "events",
+                "{{eventId}}",
+                "pdf"
+              ]
+            },
+            "description": "Every service of the event in one PDF. Audited."
+          },
+          "response": []
         }
       ]
     },

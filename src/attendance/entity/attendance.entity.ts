@@ -49,6 +49,12 @@ export class Attendance extends BaseEntity {
   @JoinColumn({ name: 'service_slot_id' })
   serviceSlot: ServiceSlot | null;
 
+  // Who checked them in when it wasn't them (front desk or admin); null for a self check-in.
+  @Index('IDX_attendances_checked_in_by_id')
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'checked_in_by_id' })
+  checkedInBy: Member | null;
+
   @Index()
   @Column({ type: 'timestamptz', nullable: true })
   checkinTime: Date;

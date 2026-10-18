@@ -17,6 +17,10 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { MeetingFormatEnum } from '../../utility/enum/meeting-format.enum';
 import { DateService } from '../../utility/service/date.service';
 import {
+  AuditAction,
+  AuditLogService,
+} from '../../utility/service/audit-log.service';
+import {
   ServiceProgrammeService,
   ServiceProgrammeWithSummary,
 } from './service-programme.service';
@@ -94,7 +98,32 @@ export class ProgrammePlanningService {
     private readonly departmentAccess: DepartmentAccessService,
     private readonly dateService: DateService,
     private readonly programmes: ServiceProgrammeService,
+    private readonly auditLog: AuditLogService,
   ) {}
+
+  // Every planner change is in the audit log, named by its service ("Sunday Service — First Service").
+  audit(
+    action: AuditAction,
+    actorId: string,
+    target: { id: string; name?: string },
+    metadata: Record<string, unknown> = {},
+  ): void {
+    this.auditLog.log(action, {
+      actorId,
+      targetId: target.id,
+      targetName: target.name,
+      metadata: { via: 'member_app', ...metadata },
+    });
+  }
+
+  static nameOf(
+    programme: Pick<PlanningProgramme, 'id' | 'event' | 'service'>,
+  ): { id: string; name?: string } {
+    const name = [programme.event?.name, programme.service?.name]
+      .filter(Boolean)
+      .join(' — ');
+    return { id: programme.id, name: name || undefined };
+  }
 
   // Admins with programme edit access, or workers in a department with Service Programme Planning.
   async canPlan(memberId: string): Promise<boolean> {

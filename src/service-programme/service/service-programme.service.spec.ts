@@ -65,7 +65,12 @@ const mockSlotRepo = {
   createQueryBuilder: jest.fn(() => mockSlotConflictQueryBuilder),
 };
 
+const mockTemplateQb = {
+  where: jest.fn().mockReturnThis(),
+  getOne: jest.fn(),
+};
 const mockTemplateRepo = {
+  createQueryBuilder: jest.fn(() => mockTemplateQb),
   create: jest.fn(),
   save: jest.fn(),
   findOne: jest.fn(),
@@ -2018,6 +2023,91 @@ describe('ServiceProgrammeService', () => {
 
       expect(result).toEqual([]);
       expect(mockProgrammeRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('saveAsNamedTemplate', () => {
+    const programme = {
+      id: 'p1',
+      serviceSlot: { name: 'First Service' },
+      slots: [
+        {
+          position: 3,
+          type: 'SPEAKER',
+          topic: 'Sermon',
+          allocatedMinutes: 40,
+          department: null,
+          member: { id: 'm1' },
+        },
+        {
+          position: 1,
+          type: 'WORSHIP',
+          topic: 'Praise',
+          allocatedMinutes: 20,
+          department: { id: 'd1' },
+        },
+      ],
+    };
+
+    it('saves the order now, without people, under the given name', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(programme);
+      mockTemplateQb.getOne.mockResolvedValue(null);
+      mockTemplateRepo.create.mockImplementation((x) => x);
+      mockTemplateRepo.save.mockImplementation((x) =>
+        Promise.resolve({ id: 't1', ...x }),
+      );
+
+      await expect(
+        service.saveAsNamedTemplate('p1', 'Standard Sunday'),
+      ).resolves.toEqual({
+        id: 't1',
+        name: 'Standard Sunday',
+        replaced: false,
+      });
+      expect(mockTemplateRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slots: [
+            {
+              position: 0,
+              type: 'WORSHIP',
+              topic: 'Praise',
+              allocatedMinutes: 20,
+              departmentId: 'd1',
+            },
+            {
+              position: 1,
+              type: 'SPEAKER',
+              topic: 'Sermon',
+              allocatedMinutes: 40,
+              departmentId: null,
+            },
+          ],
+        }),
+      );
+    });
+
+    it('replaces a template with the same name', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue(programme);
+      mockTemplateQb.getOne.mockResolvedValue({
+        id: 't9',
+        name: 'Standard Sunday',
+        slots: [],
+      });
+      mockTemplateRepo.save.mockImplementation((x) => Promise.resolve(x));
+      await expect(
+        service.saveAsNamedTemplate('p1', 'standard sunday'),
+      ).resolves.toEqual({
+        id: 't9',
+        name: 'Standard Sunday',
+        replaced: true,
+      });
+    });
+
+    it('needs at least one item', async () => {
+      mockProgrammeRepo.findOne.mockResolvedValue({ ...programme, slots: [] });
+      await expect(service.saveAsNamedTemplate('p1', 'Empty')).rejects.toThrow(
+        'Add at least one item',
+      );
     });
   });
 });

@@ -28,7 +28,15 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   [ServiceProgramme, ['programme-auto-start']],
   [ServiceSession, ['programme-auto-start']],
   [EventConfig, ['programme-auto-start']],
-  [Event, ['programme-auto-start', 'absence-marking', 'social-live']],
+  [
+    Event,
+    [
+      'programme-auto-start',
+      'absence-marking',
+      'social-live',
+      'service-reminders',
+    ],
+  ],
   [
     ServiceSlot,
     [
@@ -36,16 +44,22 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
       'absence-marking',
       'event-reminders',
       'social-live',
+      'service-reminders',
     ],
   ],
-  [EventReminder, ['event-reminders']],
+  [EventReminder, ['event-reminders', 'service-reminders']],
   [RentalBooking, ['rental-status']],
   [ChurchClass, ['class-session-reminders']],
   [ClassSession, ['class-session-reminders']],
   // Reminder thresholds (and other church settings) live here.
   [
     ChurchSetting,
-    ['class-session-reminders', 'fellowship-reminders', 'social-live'],
+    [
+      'class-session-reminders',
+      'fellowship-reminders',
+      'social-live',
+      'service-reminders',
+    ],
   ],
   [SmallGroup, ['fellowship-reminders']],
   [SocialAccount, ['social-live']],
