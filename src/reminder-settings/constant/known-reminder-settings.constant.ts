@@ -60,4 +60,9 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: 'hours before the service',
     defaultThresholds: [24, 2],
   },
+  [ReminderSettingKey.CHECKIN_NUDGE]: {
+    label: 'Check-in Reminders',
+    unit: "minutes before the late time (workers) or the start (members), to anyone who hasn't checked in",
+    defaultThresholds: [15],
+  },
 };

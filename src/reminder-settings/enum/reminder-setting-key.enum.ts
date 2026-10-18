@@ -9,4 +9,5 @@ export enum ReminderSettingKey {
   CLASS_SESSION = 'class_session',
   FELLOWSHIP_MEETING = 'fellowship_meeting',
   SERVICE_REMINDER = 'service_reminder',
+  CHECKIN_NUDGE = 'checkin_nudge',
 }

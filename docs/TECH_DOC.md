@@ -251,6 +251,18 @@ otherwise it's skipped. `service_name` is "Event · Service" when they differ; `
 the push opens `/events/{eventId}`. The job sleeps until the next reminder is due, or until the next service comes
 within reach of the earliest threshold.
 
+**Check-in reminders (`src/event/scheduler/checkin-nudge.scheduler.ts`):** a nudge minutes before it matters, only
+to people with nothing recorded for the event yet (`NOT EXISTS` on `attendances (member_id, event_id)`, both
+indexed). Workers are nudged before they'd be marked late (service start + `workerLateOverride ??
+config.workerLateOffsetSeconds`, the rule check-in uses) with `CHECKIN_NUDGE_WORKER` ("Check in before {{late_time}}");
+members, who are never late, before the service starts with `CHECKIN_NUDGE_MEMBER` ("{{service_name}} starts at
+{{start_time}}"). Both are push only, category `EVENT_REMINDER`, open `/events/{eventId}`, and are editable in
+Notification Settings. Minutes come from Reminder Settings → **Check-in Reminders**
+(`ReminderSettingKey.CHECKIN_NUDGE`, default `[15]`, on unless turned off). `CheckinNudgeScheduler` runs every 5
+minutes (Redis lock, gated job `checkin-nudges`, woken by writes to `events`, `service_slots`, `event_configs` and
+`church_settings`); each nudge goes out once (Redis key + push idempotency key) if the run is within 15 minutes of its
+time and the deadline hasn't passed. Times are shown in the church's timezone.
+
 ### Reminder Settings Module
 
 Lets a tenant admin control the timing (and on/off state) of 8 reminder-email categories, per-installation, without a
