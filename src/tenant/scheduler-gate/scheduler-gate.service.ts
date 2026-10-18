@@ -18,7 +18,8 @@ export type GatedJob =
   | 'class-session-reminders'
   | 'fellowship-reminders'
   | 'social-live'
-  | 'service-reminders';
+  | 'service-reminders'
+  | 'checkin-nudges';
 
 export const ALL_GATED_JOBS: GatedJob[] = [
   'programme-auto-start',
@@ -29,6 +30,7 @@ export const ALL_GATED_JOBS: GatedJob[] = [
   'fellowship-reminders',
   'social-live',
   'service-reminders',
+  'checkin-nudges',
 ];
 
 export type ActiveTenant = Pick<

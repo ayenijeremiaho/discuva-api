@@ -36,6 +36,7 @@ import { EventOverlapService } from './service/event-overlap.service';
 import { EventSettingsController } from './controller/event-settings.controller';
 
 import { ServiceReminderScheduler } from './scheduler/service-reminder.scheduler';
+import { CheckinNudgeScheduler } from './scheduler/checkin-nudge.scheduler';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { ServiceReminderScheduler } from './scheduler/service-reminder.scheduler
     EventSeriesScheduler,
     EventOverlapService,
     ServiceReminderScheduler,
+    CheckinNudgeScheduler,
   ],
   exports: [TenantTypeOrmModule, EventService, EventConfigService],
 })

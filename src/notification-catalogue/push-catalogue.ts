@@ -23,6 +23,8 @@ export enum PushNotificationKey {
   SERVICE_SLOT_TEAM_ASSIGNED = 'SERVICE_SLOT_TEAM_ASSIGNED',
   SERVICE_SLOT_REMINDER = 'SERVICE_SLOT_REMINDER',
   SERVICE_REMINDER = 'SERVICE_REMINDER',
+  CHECKIN_NUDGE_WORKER = 'CHECKIN_NUDGE_WORKER',
+  CHECKIN_NUDGE_MEMBER = 'CHECKIN_NUDGE_MEMBER',
   GOAL_CHANGES_REQUESTED = 'GOAL_CHANGES_REQUESTED',
   GOAL_LEVEL_APPROVED = 'GOAL_LEVEL_APPROVED',
   GOAL_FULLY_APPROVED = 'GOAL_FULLY_APPROVED',
@@ -290,6 +292,26 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     body: '{{service_name}} begins in {{time_until}}. Please make your way and check in on time.',
     url: '/events',
     placeholders: { service_name: 'Sunday Service', time_until: '1 hour' },
+  },
+  [PushNotificationKey.CHECKIN_NUDGE_WORKER]: {
+    category: EmailCategory.EVENT_REMINDER,
+    label: 'Check-in reminder (workers)',
+    description:
+      "Sent to workers who haven't checked in yet, minutes before they'd be marked late (Reminder Settings → Check-in Reminders).",
+    title: 'Check in before {{late_time}}',
+    body: "{{service_name}}: you'll be marked late after {{late_time}}. Tap to check in.",
+    url: '/events',
+    placeholders: { service_name: 'Sunday Service', late_time: '6:15 AM' },
+  },
+  [PushNotificationKey.CHECKIN_NUDGE_MEMBER]: {
+    category: EmailCategory.EVENT_REMINDER,
+    label: 'Check-in reminder (members)',
+    description:
+      "Sent to members who haven't checked in yet, minutes before the service starts (Reminder Settings → Check-in Reminders).",
+    title: '{{service_name}} starts at {{start_time}}',
+    body: 'Remember to check in when you arrive. Tap to check in.',
+    url: '/events',
+    placeholders: { service_name: 'Sunday Service', start_time: '6:00 AM' },
   },
   [PushNotificationKey.GOAL_CHANGES_REQUESTED]: {
     category: EmailCategory.DEPARTMENT_GOAL_ACTIVITY,
