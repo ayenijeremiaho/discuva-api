@@ -400,6 +400,12 @@ export class AttendanceService {
       .createQueryBuilder('attendance')
       .leftJoinAndSelect('attendance.event', 'event')
       .leftJoinAndSelect('attendance.serviceSlot', 'slot')
+      .leftJoin('attendance.checkedInBy', 'checkedInBy')
+      .addSelect([
+        'checkedInBy.id',
+        'checkedInBy.firstname',
+        'checkedInBy.lastname',
+      ])
       .where('attendance.member.id = :memberId', { memberId: user.id })
       .orderBy('attendance.createdAt', 'DESC')
       .skip((page - 1) * limit)
@@ -433,6 +439,12 @@ export class AttendanceService {
       .createQueryBuilder('attendance')
       .leftJoinAndSelect('attendance.event', 'event')
       .leftJoinAndSelect('attendance.member', 'member')
+      .leftJoin('attendance.checkedInBy', 'checkedInBy')
+      .addSelect([
+        'checkedInBy.id',
+        'checkedInBy.firstname',
+        'checkedInBy.lastname',
+      ])
       .leftJoinAndSelect('member.workerProfile', 'profile')
       .leftJoinAndSelect('profile.department', 'department')
       .leftJoinAndSelect('attendance.serviceSlot', 'slot')
@@ -546,6 +558,9 @@ export class AttendanceService {
             timeZone,
           )
         : '',
+      checkedInBy: r.checkedInBy
+        ? `${r.checkedInBy.firstname ?? ''} ${r.checkedInBy.lastname ?? ''}`.trim()
+        : '',
     }));
 
     const buffer = await this.excelService.buildWorkbook(
@@ -558,6 +573,7 @@ export class AttendanceService {
         { header: 'Service', key: 'service', width: 24 },
         { header: 'Status', key: 'status', width: 14 },
         { header: 'Check-in Time', key: 'checkinTime', width: 24 },
+        { header: 'Checked In By', key: 'checkedInBy', width: 24 },
       ],
       rows,
     );
@@ -1358,9 +1374,11 @@ export class AttendanceService {
       where: { member: { id: memberId }, event: { id: slot.event.id } },
     });
 
+    const checkedInBy = { id: actorId } as Member;
     if (record) {
       record.status = status;
       record.serviceSlot = slot;
+      record.checkedInBy = checkedInBy;
       record.checkinTime = record.checkinTime ?? this.dateService.now();
     } else {
       // A new record outside the event's audience would count against that person's streak and rank.
@@ -1373,6 +1391,7 @@ export class AttendanceService {
         status,
         roleAtCheckin: member.role,
         location: null,
+        checkedInBy,
       });
     }
 

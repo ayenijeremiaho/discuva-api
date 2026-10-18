@@ -235,6 +235,22 @@ Finance, Administration, etc.) carry no `moduleKey` and are always shown.
 
 **Routes prefix:** `/admin/settings` (admin CRUD), `/modules/state` (shared read endpoint, all authenticated roles)
 
+### Automatic service reminders (`src/event/scheduler/service-reminder.scheduler.ts`)
+
+Members are reminded before every service without anyone adding reminders to each date, which repeating services
+never copied. `ServiceReminderScheduler` (every 15 minutes, Redis lock, gated job `service-reminders`, woken by writes
+to `events`, `service_slots`, `event_reminders` and `church_settings`) sends the `SERVICE_REMINDER` push (category
+`EVENT_REMINDER`, "Service Reminder: {{service_name}} … begins in {{time_until}}", editable in Notification
+Settings) at the hours in Reminder Settings → **Service Reminders** (`ReminderSettingKey.SERVICE_REMINDER`, hours
+before the service, default `[24, 2]`, on unless the church turns it off). Recipients are active members in the
+service's audience (event and slot audience, as check-in uses); push only, since an email to every member before
+every service would be noise and use the church's email allowance. A service with its own enabled reminders
+(`event_reminders`, admin-set) gets only those (`NOT EXISTS`, indexed `service_slot_id`). Each threshold goes out once
+per service (Redis key set before sending, plus the push idempotency key), if the run is within an hour of its time;
+otherwise it's skipped. `service_name` is "Event · Service" when they differ; `time_until` reads "1 day" or "2 hours";
+the push opens `/events/{eventId}`. The job sleeps until the next reminder is due, or until the next service comes
+within reach of the earliest threshold.
+
 ### Reminder Settings Module
 
 Lets a tenant admin control the timing (and on/off state) of 8 reminder-email categories, per-installation, without a
@@ -6203,6 +6219,7 @@ Delivers Web Push notifications to members and workers via the standard Web Push
 | Prayer reminder — 2 days before (`PrayerReminderScheduler`) | The assigned worker (alongside email) |
 | Prayer reminder — day of (`PrayerReminderScheduler`) | The assigned worker (alongside email) |
 | Service/event reminder (`EventReminderService`) | All eligible members per audience scope (alongside email — see note below) |
+| Automatic service reminder (`ServiceReminderScheduler`) | The people each service is for (push only) — see Automatic service reminders |
 
 `ServiceProgrammeService.notifySlotAssignment` (create/auto-assign/manual-assign/reschedule paths) and `EventReminderService.fireReminder` both route through `NotificationDispatchService.notifyMember()` (see "Notification Dispatch Service" above) — their push leg is gated by `EmailCategorySettingsService.isEnabled(...)` the same way their email leg always was, instead of firing unconditionally. The other rows above (selection window, entry removed, prayer reminders) call `PushNotificationService` directly and remain ungated by category preference — candidates for the same migration in a future pass, per the progressive rollout this was scoped to.
 
@@ -6376,12 +6393,23 @@ the admin linked to them (`createdByAdmin`), or none. Every programme response i
 warning? }` where `leader`/`backup` are `{ kind: member|guest|department, id, name }` — so planners never receive
 members' contact details. Item changes return the refreshed programme, with the API's clash `warning` if any.
 
+**Audit:** every programme change and download is in the audit log, from the planner (`metadata.via: member_app`,
+actor the member) and from the admin app (`via: admin`, actor the admin's member): `PROGRAMME_CREATED`,
+`PROGRAMME_DELETED`, `PROGRAMME_ITEM_ADDED` / `_UPDATED` (with the changed fields) / `_REMOVED`,
+`PROGRAMME_REORDERED`, `PROGRAMME_TEMPLATE_APPLIED` / `_SAVED` (with `replaced`) / `_DELETED` and
+`PROGRAMME_PDF_DOWNLOADED` (`scope: event` for a whole-event PDF). Entries are named by service ("Sunday Service —
+First Service"; the admin side looks the names up with `ServiceProgrammeService.labelOf`, names only). Before this,
+programme edits weren't audited at all.
+
 | Method | Route | Notes |
 |---|---|---|
 | GET | `/programme-planning/access` | `{ canPlan }` — whether the app shows the planner (no planner guard) |
 | GET | `/programme-planning/events?days=60` | Services that haven't ended and start within `days` (1–180, default 60), grouped by event: `[{ eventId, name, eventDate, services[{ serviceSlotId, name, startTime, endTime, place, programme: { id, status, itemCount, totalMinutes } \| null }] }]`. `place` is the venue, or `Online`. One query for services (indexed `start_time`/`end_time`, max 200), one for their programmes (unique, indexed `service_slot_id`) |
 | GET | `/programme-planning/people?q=` | Who can lead an item: matching departments, and active members once `q` has 2+ characters (each word must match a first or last name, using the members' trigram indexes; max 8). Names and photos only |
 | GET | `/programme-planning/templates` | Saved templates |
+| POST | `/programme-planning/programmes/:id/template` | `{ name }` (1–80) — saves the programme's current order as a template now: type, title, minutes and department per item (people aren't kept). A template with the same name (case-insensitive) is replaced; returns `{ id, name, replaced }`. 400 with no items |
+| GET | `/programme-planning/programmes/:id/pdf` | The service's order of service as a PDF (`filename` from the event and service names) — the app opens the phone's share sheet with it, or downloads it |
+| GET | `/programme-planning/events/:eventId/pdf` | Every service of the event in one PDF |
 | POST | `/programme-planning/programmes` | `{ serviceSlotId, templateId?, copyFromProgrammeId? }` — a new DRAFT, empty, from a template, or copying another programme's items (people, backups and minutes included). 409 if the service already has one; 400 if both sources are given |
 | GET | `/programme-planning/programmes/:id` | The programme (lean view) |
 | DELETE | `/programme-planning/programmes/:id` | DRAFT only |
@@ -7444,7 +7472,7 @@ outside the requested `?months=` window).
 | GET    | /attendances/leaderboard                                   | AdminGuard (ATTENDANCE_READ)                                  | Top workers by attendance                                                                                     |
 | PATCH  | /attendances/:id/correct                                   | AdminGuard (ATTENDANCE_WRITE)                                 | Admin correction of an attendance record status                                                               |
 | GET    | /attendances/at-risk?minAbsences=&from=&to=&page=&limit=   | AdminGuard (ATTENDANCE_READ)                                  | Members with ≥ N ABSENT records in range; returns `absenceCount`, `lastSeenAt`, `hasOpenFollowUpTask`         |
-| POST   | /attendances/admin/mark                                    | AdminGuard (ATTENDANCE_WRITE)                                 | Create/backfill an attendance record for any member+event — no-phone check-in and streak restore, body `{ memberId, serviceSlotId, status? }`. Without `status` it's worked out from the time with the self check-in rule (a worker at or after the slot start + `workerLateOffsetSeconds` is `LATE`, otherwise `PRESENT`; members are `PRESENT`). Send `status` for corrections, e.g. after the service ended. Returns the record, including the status recorded |
+| POST   | /attendances/admin/mark                                    | AdminGuard (ATTENDANCE_WRITE)                                 | Create/backfill an attendance record for any member+event — no-phone check-in and streak restore, body `{ memberId, serviceSlotId, status? }`. Without `status` it's worked out from the time with the self check-in rule (a worker at or after the slot start + `workerLateOffsetSeconds` is `LATE`, otherwise `PRESENT`; members are `PRESENT`). Send `status` for corrections, e.g. after the service ended. Returns the record, including the status recorded. Records who did it in `attendances.checked_in_by_id` (tenant migration `AddAttendanceCheckedInBy`, indexed, `SET NULL` if that member is deleted; null for a self check-in), which history (`GET /attendances/history`, `/my-history`) returns as `checkedInBy { id, firstname, lastname }` and the emailed export as a Checked In By column |
 | POST   | /attendances/department/mark                               | JwtAuthGuard (Admin-department worker)                        | Same action, mobile-reachable for Admin-department front-desk workers; same body                              |
 | GET    | /attendances/department/search-members?q=                 | JwtAuthGuard (Admin-department worker)                        | Narrow member lookup (≤10 results, id/firstname/lastname/role only) backing the mobile check-in picker         |
 | POST   | /attendances/online-confirm                                | JwtAuthGuard (any authenticated member)                       | Confirm online attendance for an event (updates ABSENT → ATTENDED_ONLINE within window)                       |

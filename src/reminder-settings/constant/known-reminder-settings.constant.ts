@@ -55,4 +55,9 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: 'hours before meeting',
     defaultThresholds: [3],
   },
+  [ReminderSettingKey.SERVICE_REMINDER]: {
+    label: 'Service Reminders',
+    unit: 'hours before the service',
+    defaultThresholds: [24, 2],
+  },
 };

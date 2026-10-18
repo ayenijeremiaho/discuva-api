@@ -1499,6 +1499,64 @@ export class ServiceProgrammeService {
     return { buffer, eventName: event.name };
   }
 
+  // "Sunday Service — First Service", for audit entries; loads only the names.
+  async labelOf(programmeId: string): Promise<string | undefined> {
+    const p = await this.programmeRepo.findOne({
+      where: { id: programmeId },
+      relations: { serviceSlot: { event: true } },
+      select: {
+        id: true,
+        serviceSlot: { id: true, name: true, event: { id: true, name: true } },
+      },
+    });
+    if (!p) return undefined;
+    return (
+      [p.serviceSlot?.event?.name, p.serviceSlot?.name]
+        .filter(Boolean)
+        .join(' — ') || undefined
+    );
+  }
+
+  // Saves a programme's order now as a named template (replacing one with the same name). Items keep their type,
+  // title, minutes and department; people aren't kept, since they change from service to service.
+  async saveAsNamedTemplate(
+    programmeId: string,
+    name: string,
+  ): Promise<{ id: string; name: string; replaced: boolean }> {
+    const programme = await this.programmeRepo.findOne({
+      where: { id: programmeId },
+      relations: { serviceSlot: true, slots: { department: true } },
+    });
+    if (!programme) throw new NotFoundException('Programme not found');
+    if (!programme.slots.length)
+      throw new BadRequestException(
+        'Add at least one item before saving it as a template.',
+      );
+    const slots: TemplateProgrammeSlot[] = [...programme.slots]
+      .sort((a, b) => a.position - b.position)
+      .map((s, index) => ({
+        position: index,
+        type: s.type,
+        topic: s.topic,
+        allocatedMinutes: s.allocatedMinutes,
+        departmentId: s.department?.id ?? null,
+      }));
+    const existing = await this.templateRepo
+      .createQueryBuilder('t')
+      .where('LOWER(t.name) = LOWER(:name)', { name })
+      .getOne();
+    const template =
+      existing ??
+      this.templateRepo.create({
+        name,
+        serviceSlotName: programme.serviceSlot?.name ?? name,
+      });
+    template.slots = slots;
+    template.createdFrom = programme;
+    const saved = await this.templateRepo.save(template);
+    return { id: saved.id, name: saved.name, replaced: !!existing };
+  }
+
   async upsertTemplateFromProgramme(
     programme: ServiceProgramme,
   ): Promise<void> {
