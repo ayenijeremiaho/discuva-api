@@ -1871,6 +1871,46 @@ describe('AttendanceService', () => {
 
   describe('adminMarkAttendance', () => {
     const slot = makeSlot(new Date());
+
+    describe('with no status chosen (checking someone in at the door)', () => {
+      const markAuto = async (
+        startMinutesAgo: number,
+        role: MemberRoleEnum,
+      ) => {
+        mockSlotRepo.findOne.mockResolvedValue(
+          makeSlot(new Date(Date.now() - startMinutesAgo * 60_000)),
+        );
+        mockMemberService.getById.mockResolvedValue({ ...member, role });
+        mockEventService.resolveSlotConfig.mockReturnValue(defaultConfig);
+        mockAttendanceRepo.findOne.mockResolvedValue(null);
+        mockAttendanceRepo.create.mockImplementation((x) => x);
+        mockAttendanceRepo.save.mockImplementation((x) => Promise.resolve(x));
+        return service.adminMarkAttendance(
+          'member-1',
+          'slot-1',
+          undefined,
+          'admin-1',
+        );
+      };
+
+      it('marks a worker who arrives after the late time as Late', async () => {
+        await expect(markAuto(30, MemberRoleEnum.WORKER)).resolves.toEqual(
+          expect.objectContaining({ status: AttendanceStatusEnum.LATE }),
+        );
+      });
+
+      it('marks a worker who arrives before the service starts as Present', async () => {
+        await expect(markAuto(-30, MemberRoleEnum.WORKER)).resolves.toEqual(
+          expect.objectContaining({ status: AttendanceStatusEnum.PRESENT }),
+        );
+      });
+
+      it('marks a member Present, as self check-in does', async () => {
+        await expect(markAuto(30, MemberRoleEnum.MEMBER)).resolves.toEqual(
+          expect.objectContaining({ status: AttendanceStatusEnum.PRESENT }),
+        );
+      });
+    });
     const member = {
       id: 'member-1',
       email: 'ada@test.com',

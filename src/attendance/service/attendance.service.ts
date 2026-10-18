@@ -1337,13 +1337,22 @@ export class AttendanceService {
   async adminMarkAttendance(
     memberId: string,
     serviceSlotId: string,
-    status: AttendanceStatusEnum,
+    requestedStatus: AttendanceStatusEnum | undefined,
     actorId: string,
   ): Promise<Attendance> {
     const [slot, member] = await Promise.all([
       this.getSlotOrThrow(serviceSlotId),
       this.memberService.getById(memberId),
     ]);
+    // Checking someone in at the door follows the self check-in rule; a chosen status is for corrections.
+    const status =
+      requestedStatus ??
+      this.resolveStatus(
+        this.dateService.now(),
+        slot,
+        this.eventService.resolveSlotConfig(slot),
+        member.role === MemberRoleEnum.WORKER,
+      );
 
     let record = await this.attendanceRepository.findOne({
       where: { member: { id: memberId }, event: { id: slot.event.id } },

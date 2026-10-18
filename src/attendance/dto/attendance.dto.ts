@@ -1,4 +1,4 @@
-import { IsInt, Max, Min } from 'class-validator';
+import { IsOptional, IsInt, Max, Min } from 'class-validator';
 import {
   ONLINE_WINDOW_MAX_MINUTES,
   ONLINE_WINDOW_MIN_MINUTES,
@@ -40,8 +40,10 @@ export class AdminMarkAttendanceDto {
   @IsUUID()
   serviceSlotId: string;
 
+  // Left out: worked out from the time, as self check-in does (a worker past the late time is LATE).
+  @IsOptional()
   @IsEnum(AttendanceStatusEnum)
-  status: AttendanceStatusEnum;
+  status?: AttendanceStatusEnum;
 }
 
 @Exclude()
