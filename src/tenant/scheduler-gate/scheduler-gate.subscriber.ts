@@ -27,7 +27,10 @@ import { SmallGroup } from '../../small-group/entity/small-group.entity';
 export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   [ServiceProgramme, ['programme-auto-start']],
   [ServiceSession, ['programme-auto-start']],
-  [EventConfig, ['programme-auto-start', 'checkin-nudges']],
+  [
+    EventConfig,
+    ['programme-auto-start', 'service-reminders', 'checkin-nudges'],
+  ],
   [
     Event,
     [
