@@ -11,6 +11,7 @@ export enum DepartmentCapability {
   MANAGE_EVANGELISM_CONVERTS = 'MANAGE_EVANGELISM_CONVERTS',
   MANAGE_FOLLOW_UP = 'MANAGE_FOLLOW_UP',
   FRONT_DESK_OPERATIONS = 'FRONT_DESK_OPERATIONS',
+  PLAN_SERVICE_PROGRAMME = 'PLAN_SERVICE_PROGRAMME',
 }
 
 export const DepartmentCapabilityLabels: Record<DepartmentCapability, string> =
@@ -24,4 +25,6 @@ export const DepartmentCapabilityLabels: Record<DepartmentCapability, string> =
     [DepartmentCapability.MANAGE_FOLLOW_UP]: 'Follow-Up Management',
     [DepartmentCapability.FRONT_DESK_OPERATIONS]:
       'Front Desk Operations (manual check-in, session reports)',
+    [DepartmentCapability.PLAN_SERVICE_PROGRAMME]:
+      'Service Programme Planning (build orders of service on the app)',
   };

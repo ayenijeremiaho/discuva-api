@@ -6359,6 +6359,37 @@ Backend replacement for the Firebase-based Service Timer POC. Manages service pr
 
 **Routes prefix:** `/service-programme`, `/service-session`
 
+### Programme Planning — building orders of service from the member app (`/programme-planning`)
+
+Planners build and edit a service's order of service from `discuva-member` (`/programme-planner`). **Who:** an active
+admin whose role has `SERVICE_PROGRAMME_WRITE`, or a worker whose primary or secondary department has the
+`PLAN_SERVICE_PROGRAMME` capability ("Service Programme Planning", granted on the admin Departments page like Front
+Desk Operations). `ProgrammePlanningService.canPlan` decides; `ProgrammePlannerGuard` enforces it on every route
+except `access`. Routes sit under their own prefix so they never collide with `/service-programme/:id`, and use the
+member token (`JwtAuthGuard`), not the admin surface. Same plan feature and `service_programme` module gate as the
+admin routes.
+
+The editing is `ServiceProgrammeService`'s, so notifications, day-before reminders, department assignments, backups,
+templates and the DRAFT-only edit rule behave exactly as in the admin app. A programme created by a planner records
+the admin linked to them (`createdByAdmin`), or none. Every programme response is a lean view —
+`{ id, status, event, service, items[{ id, position, type, topic, allocatedMinutes, leader, backup }], totalMinutes,
+warning? }` where `leader`/`backup` are `{ kind: member|guest|department, id, name }` — so planners never receive
+members' contact details. Item changes return the refreshed programme, with the API's clash `warning` if any.
+
+| Method | Route | Notes |
+|---|---|---|
+| GET | `/programme-planning/access` | `{ canPlan }` — whether the app shows the planner (no planner guard) |
+| GET | `/programme-planning/events?days=60` | Services that haven't ended and start within `days` (1–180, default 60), grouped by event: `[{ eventId, name, eventDate, services[{ serviceSlotId, name, startTime, endTime, place, programme: { id, status, itemCount, totalMinutes } \| null }] }]`. `place` is the venue, or `Online`. One query for services (indexed `start_time`/`end_time`, max 200), one for their programmes (unique, indexed `service_slot_id`) |
+| GET | `/programme-planning/people?q=` | Who can lead an item: matching departments, and active members once `q` has 2+ characters (each word must match a first or last name, using the members' trigram indexes; max 8). Names and photos only |
+| GET | `/programme-planning/templates` | Saved templates |
+| POST | `/programme-planning/programmes` | `{ serviceSlotId, templateId?, copyFromProgrammeId? }` — a new DRAFT, empty, from a template, or copying another programme's items (people, backups and minutes included). 409 if the service already has one; 400 if both sources are given |
+| GET | `/programme-planning/programmes/:id` | The programme (lean view) |
+| DELETE | `/programme-planning/programmes/:id` | DRAFT only |
+| POST | `/programme-planning/programmes/:id/items` | Same body as admin add-slot; `null` clears a leader/backup field |
+| PATCH | `/programme-planning/programmes/:id/items/:itemId` | Same body as admin update-slot |
+| DELETE | `/programme-planning/programmes/:id/items/:itemId` | Remove an item |
+| PUT | `/programme-planning/programmes/:id/items/reorder` | `{ slots: [{ id }] }` in the new order |
+
 ### Games Module
 
 Kahoot-style live quiz for member engagement. A `Game` (title, description, optional `department`/`churchClass` for
@@ -8650,7 +8681,7 @@ Granular permissions assigned to `AdminRole` records:
 A department can hold any combination of these; each is named after the action it unlocks rather than after a
 department, so it stays meaningful regardless of what a given church calls the department that holds it.
 
-`MANAGE_SUNDAY_SCHOOL` · `MANAGE_CHILDREN_CHURCH` · `MANAGE_PRAYER_REQUESTS` · `MANAGE_EVANGELISM_CONVERTS` · `MANAGE_FOLLOW_UP` · `FRONT_DESK_OPERATIONS`
+`MANAGE_SUNDAY_SCHOOL` · `MANAGE_CHILDREN_CHURCH` · `MANAGE_PRAYER_REQUESTS` · `MANAGE_EVANGELISM_CONVERTS` · `MANAGE_FOLLOW_UP` · `FRONT_DESK_OPERATIONS` · `PLAN_SERVICE_PROGRAMME`
 
 ### SundaySchoolAttendanceStatus
 

@@ -211,7 +211,8 @@ export class ServiceProgrammeService {
 
   async create(
     dto: CreateServiceProgrammeDto,
-    admin: Admin,
+    // Null when a planner builds it from the member app without an admin account.
+    admin: Admin | null,
   ): Promise<ServiceProgrammeWithSummary | ServiceProgrammeWithSummary[]> {
     const serviceSlotIds = dto.programmes.map((p) => p.serviceSlotId);
 
@@ -243,7 +244,7 @@ export class ServiceProgrammeService {
     const savedProgrammes = await this.programmeRepo.save(programmes);
     savedProgrammes.forEach((saved, index) => {
       this.logger.log(
-        `Programme ${saved.id} created for slot ${dto.programmes[index].serviceSlotId} by admin ${admin.id}`,
+        `Programme ${saved.id} created for slot ${dto.programmes[index].serviceSlotId} by ${admin ? `admin ${admin.id}` : 'a planner'}`,
       );
     });
 

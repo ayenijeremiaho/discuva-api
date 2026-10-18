@@ -26782,6 +26782,364 @@
       ]
     },
     {
+      "name": "Programme Planning (member app)",
+      "description": "Building orders of service from the member app. Member token. Admins with SERVICE_PROGRAMME_WRITE or workers in a PLAN_SERVICE_PROGRAMME department.",
+      "item": [
+        {
+          "name": "Planner access",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/access",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "access"
+              ]
+            },
+            "description": "{ canPlan } — whether to show the planner."
+          },
+          "response": []
+        },
+        {
+          "name": "Upcoming services to plan",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/events?days=60",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "events"
+              ],
+              "query": [
+                {
+                  "key": "days",
+                  "value": "60"
+                }
+              ]
+            },
+            "description": "Services not yet ended, grouped by event, with each programme's status, item count and minutes."
+          },
+          "response": []
+        },
+        {
+          "name": "Search people",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/people?q=ada",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "people"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "ada"
+                }
+              ]
+            },
+            "description": "Departments, and members once q has 2+ characters. Names and photos only."
+          },
+          "response": []
+        },
+        {
+          "name": "Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "templates"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Create programme",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"copyFromProgrammeId\": \"{{programmeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes"
+              ]
+            },
+            "description": "Empty, from templateId, or copying copyFromProgrammeId (not both). Returns the lean programme."
+          },
+          "response": []
+        },
+        {
+          "name": "Get programme",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Delete programme",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}"
+              ]
+            },
+            "description": "DRAFT only."
+          },
+          "response": []
+        },
+        {
+          "name": "Add item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"PRAYER\",\n  \"topic\": \"Opening Prayer\",\n  \"allocatedMinutes\": 5,\n  \"memberId\": \"{{memberId}}\",\n  \"guestName\": null,\n  \"departmentId\": null,\n  \"backupMemberId\": null,\n  \"backupGuestName\": null,\n  \"backupDepartmentId\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}/items",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}",
+                "items"
+              ]
+            },
+            "description": "null clears a leader/backup field. Returns the refreshed programme, with warning if any."
+          },
+          "response": []
+        },
+        {
+          "name": "Update item",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"allocatedMinutes\": 10,\n  \"memberId\": null,\n  \"guestName\": \"Rev. Guest\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}/items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}",
+                "items",
+                "{{itemId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Remove item",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}/items/{{itemId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}",
+                "items",
+                "{{itemId}}"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        },
+        {
+          "name": "Reorder items",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slots\": [\n    {\n      \"id\": \"{{itemId}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/programme-planning/programmes/{{programmeId}}/items/reorder",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "programme-planning",
+                "programmes",
+                "{{programmeId}}",
+                "items",
+                "reorder"
+              ]
+            },
+            "description": ""
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Service Headcount",
       "description": "Manual headcount recording per service slot \u2014 tracks congregation by demographic group (male adults, female adults, teenagers, children, mobile church, and custom groups).\n\n**Access:** Admin-department workers (primary or secondary department `key: ADMIN`) or AdminGuard.\n\n**Key concepts:**\n- One headcount record per service slot (unique constraint on `service_slot_id`). Recording again for the same slot edits that row in place instead of creating a duplicate or returning a conflict \u2014 there is no separate correction endpoint; re-recording *is* the correction.\n- `customGroups` is a flexible JSON map for additional demographic splits.\n- `GET /v1/service-headcount/trends` returns weekly/monthly aggregates for admin reporting.\n- `GET /v1/service-headcount/event/:eventId/summary` returns every sub-service under an event with its headcount (or null) plus the aggregate total \u2014 the primary admin view (\"By Event\" tab).\n\n**Typical flow:**\n1. After service: ushers count attendees per demographic group\n2. Worker or admin: `POST /v1/service-headcount` with slot ID and counts\n3. If a recount is needed: `POST /v1/service-headcount` again for the same slot \u2014 it updates the existing record rather than creating a new one",
       "item": [
