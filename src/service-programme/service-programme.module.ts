@@ -31,6 +31,10 @@ import refreshJwtConfig from '../config/refresh.jwt.config';
 
 import { Department } from '../department/entity/department.entity';
 
+import { ProgrammePlanningController } from './controller/programme-planning.controller';
+import { ProgrammePlanningService } from './service/programme-planning.service';
+import { ProgrammePlannerGuard } from './guard/programme-planner.guard';
+
 @Module({
   imports: [
     // Independent registration from AuthModule's own (same jwtConfig/
@@ -60,10 +64,16 @@ import { Department } from '../department/entity/department.entity';
     UtilityModule,
     DepartmentModule,
   ],
-  controllers: [ServiceProgrammeController, ServiceSessionController],
+  controllers: [
+    ServiceProgrammeController,
+    ServiceSessionController,
+    ProgrammePlanningController,
+  ],
   providers: [
     ServiceProgrammeService,
     ServiceSessionService,
+    ProgrammePlanningService,
+    ProgrammePlannerGuard,
     ServiceSessionGateway,
     ShareTokenGuard,
     NamedAccessGuard,
