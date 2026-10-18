@@ -261,7 +261,15 @@ Notification Settings. Minutes come from Reminder Settings → **Check-in Remind
 (`ReminderSettingKey.CHECKIN_NUDGE`, default `[15]`, on unless turned off). `CheckinNudgeScheduler` runs every 5
 minutes (Redis lock, gated job `checkin-nudges`, woken by writes to `events`, `service_slots`, `event_configs` and
 `church_settings`); each nudge goes out once (Redis key + push idempotency key) if the run is within 15 minutes of its
-time and the deadline hasn't passed. Times are shown in the church's timezone.
+time and the deadline hasn't passed. Times are shown in the church's timezone. When the late time is at or after check-in
+closes (`checkinCloseMode`/`checkinStopOffsetSeconds` with the slot's overrides — i.e. no one can ever be marked
+late), workers are reminded before the start with members, using the member wording.
+
+**Per-config switches:** `event_config.send_service_reminders` and `send_checkin_reminders` (booleans, default
+`true`; tenant migration `AddEventConfigReminderSwitches`; `sendServiceReminders` / `sendCheckinReminders` on
+create/update) turn the automatic service reminders or the check-in reminders off for services using that config
+(e.g. a workers' meeting). Timings stay church-wide in Reminder Settings, where the toggle turns each off for the
+whole church; the push wording is editable under Notification Settings → Push Messages.
 
 ### Reminder Settings Module
 

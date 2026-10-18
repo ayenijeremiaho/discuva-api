@@ -83,6 +83,14 @@ export class EventConfig extends BaseEntity {
   @Column({ name: 'auto_start_session', default: false })
   autoStartSession: boolean;
 
+  // Services using this config get the automatic reminders before they start (timings in Reminder Settings).
+  @Column({ name: 'send_service_reminders', default: true })
+  sendServiceReminders: boolean;
+
+  // People who haven't checked in get a nudge before they'd be late, or before the start.
+  @Column({ name: 'send_checkin_reminders', default: true })
+  sendCheckinReminders: boolean;
+
   // Whether the church's distance check applies to services using this config (off for e.g. home fellowships).
   // Takes effect only while the church-wide distance check is on; see AttendanceService.checkin().
   @Column({ name: 'check_distance', default: true })

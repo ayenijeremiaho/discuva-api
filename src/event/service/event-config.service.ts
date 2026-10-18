@@ -59,6 +59,8 @@ export class EventConfigService {
         dto.checkinCloseMode ?? CheckinCloseModeEnum.AFTER_START,
       allowedDistanceInMeters: dto.allowedDistanceInMeters,
       autoStartSession: dto.autoStartSession ?? false,
+      sendServiceReminders: dto.sendServiceReminders ?? true,
+      sendCheckinReminders: dto.sendCheckinReminders ?? true,
       checkDistance: dto.checkDistance ?? true,
       defaultVenue,
       defaultFormat: format,
