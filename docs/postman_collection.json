@@ -4958,7 +4958,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"status\": \"PRESENT\"\n}",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"serviceSlotId\": \"{{slotId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4999,7 +4999,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"serviceSlotId\": \"{{slotId}}\",\n  \"status\": \"PRESENT\"\n}",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"serviceSlotId\": \"{{slotId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
