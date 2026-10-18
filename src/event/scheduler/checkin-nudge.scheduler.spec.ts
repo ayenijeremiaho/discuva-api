@@ -12,7 +12,13 @@ describe('CheckinNudgeScheduler', () => {
     startTime: start,
     endTime: new Date(start.getTime() + 120 * MIN),
     workerLateOverride: null,
-    config: { workerLateOffsetSeconds: 15 * 60 },
+    config: {
+      workerLateOffsetSeconds: 15 * 60,
+      checkinCloseMode: 'AFTER_START',
+      checkinStopOffsetSeconds: 60 * 60,
+    },
+    checkinCloseModeOverride: null,
+    checkinStopOverride: null,
     event: { id: 'e1', name: 'Sunday Service' },
   };
 
@@ -128,5 +134,26 @@ describe('CheckinNudgeScheduler', () => {
     settings.getConfig.mockResolvedValue({ enabled: false, thresholds: [15] });
     await expect(scheduler.runNudges(at(1))).resolves.toBeNull();
     expect(slotRepo.createQueryBuilder).not.toHaveBeenCalled();
+  });
+
+  it('reminds everyone before the start when no one can be late', async () => {
+    slots = [{ ...slot, workerLateOverride: 2 * 60 * 60 }];
+    await scheduler.runNudges(at(-14));
+    const calls = notifications.notifyMember.mock.calls.map((c) => c[0].push);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].key).toBe(PushNotificationKey.CHECKIN_NUDGE_MEMBER);
+    expect(calls[0].idempotencyKey).toBe('checkin-nudge:s1:everyone:15');
+    expect(memberQb.andWhere).not.toHaveBeenCalledWith(
+      expect.stringContaining('m.role'),
+      expect.anything(),
+    );
+  });
+
+  it('leaves out services whose config has check-in reminders off', async () => {
+    await scheduler.runNudges(at(1));
+    const qb = slotRepo.createQueryBuilder.mock.results[0].value;
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      '(config.id IS NULL OR config.sendCheckinReminders = true)',
+    );
   });
 });

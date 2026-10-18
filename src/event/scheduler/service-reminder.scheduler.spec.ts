@@ -18,6 +18,7 @@ describe('ServiceReminderScheduler', () => {
     const qb: Record<string, jest.Mock> = {};
     for (const m of [
       'innerJoinAndSelect',
+      'leftJoin',
       'select',
       'where',
       'andWhere',

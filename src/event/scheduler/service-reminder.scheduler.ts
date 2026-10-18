@@ -80,7 +80,9 @@ export class ServiceReminderScheduler {
     const slots = await this.slotRepo
       .createQueryBuilder('slot')
       .innerJoinAndSelect('slot.event', 'event')
+      .leftJoin('slot.config', 'config')
       .where('slot.startTime > :now', { now })
+      .andWhere('(config.id IS NULL OR config.sendServiceReminders = true)')
       .andWhere('slot.startTime <= :until', {
         until: new Date(now.getTime() + furthest + SEND_WINDOW_MS),
       })

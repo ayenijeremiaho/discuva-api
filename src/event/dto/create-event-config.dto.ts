@@ -71,6 +71,16 @@ export class CreateEventConfigDto {
   @IsBoolean()
   autoStartSession?: boolean;
 
+  // Automatic reminders before services using this config; defaults to true.
+  @IsOptional()
+  @IsBoolean()
+  sendServiceReminders?: boolean;
+
+  // Nudge anyone who hasn't checked in; defaults to true.
+  @IsOptional()
+  @IsBoolean()
+  sendCheckinReminders?: boolean;
+
   // Whether the church's distance check applies to these services; defaults to true.
   @IsOptional()
   @IsBoolean()

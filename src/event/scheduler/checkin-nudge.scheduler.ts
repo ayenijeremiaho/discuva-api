@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { ServiceSlot } from '../entity/service-slot.entity';
+import { CheckinCloseModeEnum } from '../enums/checkin-close-mode.enum';
 import { Member } from '../../member/entity/member.entity';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
@@ -26,7 +27,8 @@ const SEND_WINDOW_MS = 15 * MINUTE_MS;
 const LOOKBACK_MS = 12 * 60 * MINUTE_MS;
 const SENT_TTL_SECONDS = 2 * 24 * 3600;
 
-type Kind = 'worker' | 'member';
+// 'everyone' is for services where nobody can be late, so workers are reminded before the start too.
+type Kind = 'worker' | 'member' | 'everyone';
 
 interface DueNudge {
   slot: ServiceSlot;
@@ -84,6 +86,18 @@ export class CheckinNudgeScheduler {
     return new Date(slot.startTime.getTime() + offset * 1000);
   }
 
+  // When check-in closes: the service's end, or a set time after the start (never past the end).
+  static closesAt(slot: ServiceSlot): Date {
+    const mode = slot.checkinCloseModeOverride ?? slot.config?.checkinCloseMode;
+    if (mode === CheckinCloseModeEnum.SERVICE_END || !slot.config)
+      return slot.endTime;
+    const stop =
+      slot.checkinStopOverride ?? slot.config.checkinStopOffsetSeconds;
+    return new Date(
+      Math.min(slot.startTime.getTime() + stop * 1000, slot.endTime.getTime()),
+    );
+  }
+
   // Returns when this church next needs a run (null when nudges are off or nothing is scheduled).
   async runNudges(now = new Date()): Promise<Date | null> {
     const { enabled, thresholds } = await this.reminderSettings.getConfig(
@@ -98,6 +112,7 @@ export class CheckinNudgeScheduler {
       .innerJoinAndSelect('slot.event', 'event')
       .leftJoinAndSelect('slot.config', 'config')
       .where('slot.endTime > :now', { now })
+      .andWhere('(config.id IS NULL OR config.sendCheckinReminders = true)')
       .andWhere('slot.startTime >= :from', {
         from: new Date(now.getTime() - LOOKBACK_MS),
       })
@@ -110,10 +125,15 @@ export class CheckinNudgeScheduler {
     const due: DueNudge[] = [];
     const upcoming: number[] = [];
     for (const slot of slots) {
-      const deadlines: [Kind, Date][] = [
-        ['worker', CheckinNudgeScheduler.lateAt(slot)],
-        ['member', slot.startTime],
-      ];
+      // A late time at or after check-in closes means no one is ever marked late.
+      const lateAt = CheckinNudgeScheduler.lateAt(slot);
+      const deadlines: [Kind, Date][] =
+        lateAt < CheckinNudgeScheduler.closesAt(slot)
+          ? [
+              ['worker', lateAt],
+              ['member', slot.startTime],
+            ]
+          : [['everyone', slot.startTime]];
       for (const [kind, deadline] of deadlines)
         for (const minutes of leads) {
           const at = deadline.getTime() - minutes * MINUTE_MS;
@@ -157,12 +177,15 @@ export class CheckinNudgeScheduler {
         .select(['m.id'])
         .where('m.status = :status', { status: MemberStatusEnum.ACTIVE })
         .andWhere(
-          kind === 'worker' ? 'm.role = :worker' : 'm.role != :worker',
-          { worker: MemberRoleEnum.WORKER },
-        )
-        .andWhere(
           'NOT EXISTS (SELECT 1 FROM attendances a WHERE a.member_id = m.id AND a.event_id = :eventId)',
           { eventId: slot.event.id },
+        );
+      if (kind !== 'everyone')
+        qb.andWhere(
+          kind === 'worker' ? 'm.role = :worker' : 'm.role != :worker',
+          {
+            worker: MemberRoleEnum.WORKER,
+          },
         );
       scopeToAudience(qb, 'm', slot.event ?? {});
       scopeToAudience(qb, 'm', slot, 'slotAudience');
