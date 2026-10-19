@@ -111,7 +111,8 @@ export const KNOWN_ASSETS = [
   {
     key: 'service-hands',
     label: 'Service History / Volunteering',
-    description: 'Header on service history and volunteering screens',
+    description:
+      'Header on service history, volunteering and serving rota screens',
   },
   {
     key: 'teamwork-hands-unity',
