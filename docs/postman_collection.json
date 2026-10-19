@@ -27875,6 +27875,63 @@
       ]
     },
     {
+      "name": "Notification Preferences",
+      "item": [
+        {
+          "name": "List my notification choices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/notification-preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification-preferences"
+              ]
+            },
+            "description": "Optional notification kinds this church sends, with whether the member still gets each one."
+          }
+        },
+        {
+          "name": "Turn a notification kind off or on",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"EVENT_REMINDER\",\n  \"enabled\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/notification-preferences",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "notification-preferences"
+              ]
+            },
+            "description": "Returns the updated list."
+          }
+        }
+      ]
+    },
+    {
       "name": "Email Category Settings",
       "item": [
         {

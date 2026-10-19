@@ -113,6 +113,10 @@ export class Member extends BaseEntity {
   @Column({ nullable: true })
   photoPublicId: string | null;
 
+  // Notification kinds this member turned off (MEMBER_NOTIFICATION_CHOICES categories).
+  @Column({ type: 'varchar', array: true, default: '{}' })
+  mutedNotifications: string[];
+
   @OneToOne(() => WorkerProfile, (wp) => wp.member, {
     nullable: true,
     cascade: true,

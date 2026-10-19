@@ -49,6 +49,7 @@ import { ServiceHeadcountModule } from './service-headcount/service-headcount.mo
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
 import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
 import { EmailCategorySettingsModule } from './email-category-settings/email-category-settings.module';
+import { NotificationPreferencesModule } from './notification-preferences/notification-preferences.module';
 import { NotificationCatalogueModule } from './notification-catalogue/notification-catalogue.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
@@ -263,6 +264,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     ChurchSettingsModule,
     ReminderSettingsModule,
     EmailCategorySettingsModule,
+    NotificationPreferencesModule,
     NotificationCatalogueModule,
     IncidentReportModule,
     SermonModule,

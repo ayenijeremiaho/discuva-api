@@ -2,9 +2,9 @@ import { fetchLogoBytes, fitLogo, measureLogo } from '../util/logo-size';
 import { churchThemeColors } from '../../tenant/constants/church-theme-palette';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bull';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as Handlebars from 'handlebars';
@@ -29,6 +29,8 @@ import {
 import { NotificationTemplateService } from '../../notification-catalogue/service/notification-template.service';
 import { NotificationRecipientService } from '../../notification-catalogue/service/notification-recipient.service';
 import { needsRecipient } from '../../notification-catalogue/recipient';
+import { queryTenant } from '../../tenant/utility/query-tenant';
+import { MUTABLE_CATEGORIES } from '../../notification-preferences/constant/member-notification-choices.constant';
 
 // The church's theme for the email layout: brand_color (header, buttons, links) and soft_color (highlight boxes).
 function themeVars(preset: string | null): Record<string, string> {
@@ -54,6 +56,7 @@ export class EmailQueueService {
     private readonly emailCategorySettingsService: EmailCategorySettingsService,
     private readonly notificationTemplates: NotificationTemplateService,
     private readonly recipients: NotificationRecipientService,
+    @InjectDataSource() private readonly dataSource: DataSource,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
@@ -71,6 +74,16 @@ export class EmailQueueService {
         `Email suppressed (category ${category} disabled): "${subject}"`,
       );
       return '';
+    }
+    if (category && MUTABLE_CATEGORIES.has(category)) {
+      const wanted = await this.withoutMutedRecipients(to, category);
+      if (!wanted) {
+        this.logger.debug(
+          `Email suppressed (recipient turned ${category} off): "${subject}"`,
+        );
+        return '';
+      }
+      to = wanted;
     }
     const job = await this.emailQueue.add(
       'send',
@@ -164,6 +177,26 @@ export class EmailQueueService {
     delayed: number;
   }> {
     return this.emailQueue.getJobCounts();
+  }
+
+  // Drops addresses whose member turned this kind of notification off; null when none are left.
+  private async withoutMutedRecipients(
+    to: string | string[],
+    category: EmailCategory,
+  ): Promise<string | string[] | null> {
+    const addresses = Array.isArray(to) ? to : [to];
+    const muted = await queryTenant<{ email: string }>(
+      this.dataSource,
+      this.cls.get('schemaName'),
+      (schema) =>
+        `SELECT LOWER(email) AS email FROM ${schema}.members WHERE LOWER(email) = ANY($1::text[]) AND $2 = ANY(muted_notifications)`,
+      [addresses.map((a) => a.toLowerCase()), category],
+    );
+    if (!muted.length) return to;
+    const off = new Set(muted.map((r) => r.email));
+    const kept = addresses.filter((a) => !off.has(a.toLowerCase()));
+    if (!kept.length) return null;
+    return Array.isArray(to) ? kept : kept[0];
   }
 
   // Two independent layers: the env var is a platform-wide kill switch

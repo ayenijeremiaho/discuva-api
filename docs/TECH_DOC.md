@@ -565,6 +565,27 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### Notification Preferences Module (`src/notification-preferences/`)
+
+Members choose which optional notifications they get. `members.muted_notifications` (`character varying[]`, default
+`'{}'`, tenant migration `AddMemberMutedNotifications`) holds the categories a member turned off.
+`MEMBER_NOTIFICATION_CHOICES` lists the kinds a member may turn off: service reminders (`EVENT_REMINDER`, which also
+covers check-in nudges), check-in confirmations, birthday wishes, membership anniversary, prayer request updates
+(module `prayer`), fellowship reminders (`small_groups`), class reminders (`classes`), notes nudges (`notes`) and
+Bible game challenges (`bible_games`). Everything else (duties such as prayer roster, programme assignments, pastor
+feedback and goal activity; receipts, bookings, sign-in alerts) always sends.
+
+- `GET /notification-preferences` (`JwtAuthGuard`) returns `[{ category, label, description, enabled }]`, only for
+  kinds the church actually sends: module on and on the plan, and email or push left on for the category.
+- `PATCH /notification-preferences` `{ category, enabled }` updates in one statement (`array_remove`/`array_append`)
+  and returns the new list.
+
+**Applied where notifications leave:** `PushNotificationService.dispatchToMemberIds` joins `members` in the same
+subscription query (`NOT ($2 = ANY(m.muted_notifications))`) for catalogue pushes in a mutable category, so it adds no
+round trip; admin-written pushes (announcements) aren't filtered. `EmailQueueService.queueEmail` drops addresses whose
+member muted the category (one query on `LOWER(email)`, served by `IDX_members_email_lower`), only for mutable
+categories; no addresses left means nothing is queued. Both run after the church-level category switches.
+
 ### Event Module
 
 Manages events and service slots. Events can be single or repeating (daily/weekly/monthly, with an end date or
@@ -7437,6 +7458,8 @@ outside the requested `?months=` window).
 | DELETE | /members/:id/serve-interest                                | AdminGuard (MEMBERS_WRITE)                                    | Dismiss a member's serve request (declined); idempotent, audited. The member can request again                 |
 | POST   | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Upload/replace own profile photo — multipart field `photo`, image mimetypes only, 3MB limit                    |
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
+| GET    | /notification-preferences                                  | JwtAuthGuard                                                  | Optional notification kinds the church sends, with the member's on/off |
+| PATCH  | /notification-preferences                                  | JwtAuthGuard                                                  | `{ category, enabled }` — turn one kind off or on; returns the list |
 | DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
 | GET    | /members?page=&limit=&role=&status=&search=&wantsToServe=  | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role and account `status` (ACTIVE\|INACTIVE); `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
 | POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |
