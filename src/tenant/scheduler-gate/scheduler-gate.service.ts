@@ -19,7 +19,11 @@ export type GatedJob =
   | 'fellowship-reminders'
   | 'social-live'
   | 'service-reminders'
-  | 'checkin-nudges';
+  | 'checkin-nudges'
+  | 'team-pulse'
+  | 'team-space-digest'
+  | 'team-meeting-reminders'
+  | 'rota-reminders';
 
 export const ALL_GATED_JOBS: GatedJob[] = [
   'programme-auto-start',
@@ -31,6 +35,10 @@ export const ALL_GATED_JOBS: GatedJob[] = [
   'social-live',
   'service-reminders',
   'checkin-nudges',
+  'team-pulse',
+  'team-space-digest',
+  'team-meeting-reminders',
+  'rota-reminders',
 ];
 
 export type ActiveTenant = Pick<

@@ -139,4 +139,19 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         "Reminders to a fellowship's members before each meeting (timing set under Reminder Settings), and a note to the leader when a member has missed three meetings in a row.",
     },
+    [EmailCategory.TEAM_PULSE]: {
+      label: 'Team Pulse',
+      description:
+        'App notifications to a department when its lead opens a team check-in, and a reminder before a required one closes.',
+    },
+    [EmailCategory.TEAM_SPACES]: {
+      label: 'Team Spaces',
+      description:
+        "App notifications from department and fellowship spaces: a leader's new post, a reply to your post, and one evening summary of anything you haven't read.",
+    },
+    [EmailCategory.SERVING_ROTA]: {
+      label: 'Serving Rota',
+      description:
+        'App notifications to workers when they are put on (or taken off) the rota, reminders before they serve, and cover requests from teammates.',
+    },
   };

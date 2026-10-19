@@ -47,6 +47,21 @@ export enum PushNotificationKey {
   RENTAL_BOOKING_REMINDER = 'RENTAL_BOOKING_REMINDER',
   FELLOWSHIP_MEMBER_MISSING = 'FELLOWSHIP_MEMBER_MISSING',
   FELLOWSHIP_MEETING_REMINDER = 'FELLOWSHIP_MEETING_REMINDER',
+  TEAM_PULSE_OPEN = 'TEAM_PULSE_OPEN',
+  TEAM_PULSE_REMINDER = 'TEAM_PULSE_REMINDER',
+  TEAM_SPACE_LEADER_POST = 'TEAM_SPACE_LEADER_POST',
+  TEAM_SPACE_REPLY = 'TEAM_SPACE_REPLY',
+  TEAM_SPACE_DIGEST = 'TEAM_SPACE_DIGEST',
+  TEAM_SPACE_MEETING = 'TEAM_SPACE_MEETING',
+  TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
+  TEAM_SPACE_MEETING_REMINDER = 'TEAM_SPACE_MEETING_REMINDER',
+  TEAM_SPACE_POLL = 'TEAM_SPACE_POLL',
+  ROTA_ASSIGNED = 'ROTA_ASSIGNED',
+  ROTA_REMOVED = 'ROTA_REMOVED',
+  ROTA_REMINDER = 'ROTA_REMINDER',
+  ROTA_COVER_NEEDED = 'ROTA_COVER_NEEDED',
+  ROTA_COVER_TAKEN = 'ROTA_COVER_TAKEN',
+  ROTA_CHECKIN_NUDGE = 'ROTA_CHECKIN_NUDGE',
 }
 
 export interface PushTemplate {
@@ -549,6 +564,216 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       when: 'today',
       time: '6:00 PM–8:00 PM',
       place: ' · 12 Admiralty Way',
+    },
+  },
+  [PushNotificationKey.TEAM_PULSE_OPEN]: {
+    category: EmailCategory.TEAM_PULSE,
+    label: 'Team check-in open',
+    description:
+      'Sent to a department when its lead opens a Team Pulse check-in.',
+    title: '{{department_name}}: how are we doing?',
+    body: '{{pulse_title}} · takes about a minute, and your answers are anonymous.',
+    url: '/team-pulse',
+    placeholders: {
+      department_name: 'Choir',
+      pulse_title: 'After Sunday',
+    },
+  },
+  [PushNotificationKey.TEAM_PULSE_REMINDER]: {
+    category: EmailCategory.TEAM_PULSE,
+    label: 'Team check-in closing',
+    description:
+      "Sent the day before a required check-in closes, only to those who haven't answered.",
+    title: 'Your team is waiting on you',
+    body: '{{pulse_title}} closes {{closes}}. It takes about a minute.',
+    url: '/team-pulse',
+    placeholders: {
+      pulse_title: 'After Sunday',
+      closes: 'tomorrow at 6:00 PM',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_LEADER_POST]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Leader posted in a team space',
+    description:
+      'Sent to a department or fellowship when its leader posts in the team space (other posts go in the evening summary).',
+    title: '{{space_name}}: {{author_name}} posted',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      author_name: 'Deacon Femi',
+      excerpt: 'Rehearsal moves to 5pm on Saturday. Please bring your folders.',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_REPLY]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Reply to your post',
+    description:
+      'Sent to the author of a team space post when someone replies (at most once every 30 minutes per post).',
+    title: '{{author_name}} replied in {{space_name}}',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      author_name: 'Ada',
+      space_name: 'Choir',
+      excerpt: "I'll be there, thanks!",
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_DIGEST]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Evening summary of team spaces',
+    description:
+      "One evening notification summing up today's posts and replies the member hasn't read yet.",
+    title: 'Today in your teams',
+    body: '{{summary}}',
+    url: '/team-spaces',
+    placeholders: {
+      summary: '5 new in Choir and Ushering',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'New team meeting',
+    description:
+      'Sent to a department or fellowship when its leader sets up a meeting.',
+    title: '{{space_name}}: {{title}}',
+    body: '{{when}}. Tap to say if you can make it.',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      title: 'Planning meeting',
+      when: 'Sat 24 Oct at 5:00 PM',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING_CHANGED]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Team meeting moved or cancelled',
+    description: 'Sent to the team when a leader moves or cancels a meeting.',
+    title: '{{space_name}}: {{title}} {{change}}',
+    body: 'Tap for the details.',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      title: 'Planning meeting',
+      change: 'moved to Sun 25 Oct at 4:00 PM',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING_REMINDER]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Team meeting reminder',
+    description:
+      "Sent before a team meeting to everyone except those who said they can't come (timing set under Reminder Settings).",
+    title: '{{title}} {{when}}',
+    body: '{{space_name}}{{place}}',
+    url: '/team-spaces',
+    placeholders: {
+      title: 'Planning meeting',
+      when: 'tomorrow at 5:00 PM',
+      space_name: 'Choir',
+      place: ' · Room 2',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_POLL]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'New team poll',
+    description:
+      'Sent to a department or fellowship when its leader asks a quick question.',
+    title: '{{space_name}} asks',
+    body: '{{question}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      question: 'Which Saturday works for the retreat?',
+    },
+  },
+  [PushNotificationKey.ROTA_ASSIGNED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: "You're on the rota",
+    description:
+      'Sent to a worker when their department lead puts them on the rota for a service.',
+    title: "You're serving: {{service_name}}",
+    body: '{{when}}{{role}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      role: ' · Main door',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_REMOVED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Taken off the rota',
+    description:
+      'Sent to a worker when their department lead takes them off a service they were down for.',
+    title: "You're no longer serving: {{service_name}}",
+    body: '{{when}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_REMINDER]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Serving reminder',
+    description:
+      'Sent before a service to everyone on the rota for it (timing set under Reminder Settings).',
+    title: "You're serving {{when}}",
+    body: '{{service_name}}{{role}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      when: 'tomorrow at 8:00 AM',
+      service_name: 'Sunday Service',
+      role: ' · Main door',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_COVER_NEEDED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Cover needed',
+    description:
+      "Sent to teammates (or one chosen teammate) when someone on the rota can't make it.",
+    title: '{{requester}} needs cover',
+    body: '{{service_name}}, {{when}}{{role}}. Tap to help.',
+    url: '/rota',
+    placeholders: {
+      requester: 'Ada Obi',
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      role: ' · Main door',
+    },
+  },
+  [PushNotificationKey.ROTA_COVER_TAKEN]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Cover found',
+    description:
+      'Sent to the person who asked for cover, and to the department leads, when a teammate takes the duty.',
+    title: '{{volunteer}} is covering {{service_name}}',
+    body: '{{when}}{{role}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      volunteer: 'Grace Eze',
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      role: ' · Main door',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_CHECKIN_NUDGE]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Check in: you are serving',
+    description:
+      "Sent when a department lead nudges the people on a service's rota who haven't checked in yet.",
+    title: "You're serving at {{service_name}}",
+    body: "{{department_name}} hasn't seen your check-in yet. Please check in for {{time}}.",
+    url: '/home',
+    placeholders: {
+      service_name: 'Sunday Service',
+      department_name: 'Ushering',
+      time: '8:00 AM',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {

@@ -308,7 +308,19 @@ export type AuditAction =
   | 'DEPARTMENT_GOAL_COMMENT_ADDED'
   | 'DEPARTMENT_GOAL_APPROVAL_LEVEL_OVERRIDE_SET'
   | 'DEPARTMENT_GOAL_IMPORT_PREVIEWED'
-  | 'DEPARTMENT_GOAL_IMPORT_COMMITTED';
+  | 'DEPARTMENT_GOAL_IMPORT_COMMITTED'
+  // Team Pulse (responses are never logged: they're anonymous)
+  | 'TEAM_PULSE_STARTED'
+  | 'TEAM_PULSE_STOPPED'
+  | 'TEAM_PULSE_RESUMED'
+  | 'TEAM_PULSE_REMINDER_SENT'
+  // Team Spaces (post contents are never logged)
+  | 'TEAM_POST_REMOVED'
+  | 'TEAM_SPACE_SETTINGS_UPDATED'
+  | 'VOLUNTEER_CHAT_SETTINGS_UPDATED'
+  // Serving Rota
+  | 'ROTA_UPDATED'
+  | 'ROTA_COVER_ACCEPTED';
 
 export interface AuditContext {
   actorId?: string;

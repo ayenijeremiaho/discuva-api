@@ -27875,6 +27875,1365 @@
       ]
     },
     {
+      "name": "Newcomer Journey",
+      "item": [
+        {
+          "name": "My journey",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/journey/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "journey",
+                "me"
+              ]
+            },
+            "description": "Steps from first visit to serving, with status (DONE, IN_PROGRESS, NEXT, TODO) and the next action."
+          }
+        },
+        {
+          "name": "Journey settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "settings"
+              ]
+            },
+            "description": "Steps, saved settings and the class types to choose from. follow_up:read."
+          }
+        },
+        {
+          "name": "Save journey settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "settings"
+              ]
+            },
+            "description": "classTypeIds null or empty uses the default class chain. follow_up:write.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classTypeIds\": [\n    \"{{classTypeId}}\"\n  ],\n  \"stuckAfterDays\": 21\n}"
+            }
+          }
+        },
+        {
+          "name": "Journey funnel",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/funnel?from=2026-01-01T00:00:00Z&to=2026-10-19T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "funnel"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-19T00:00:00Z"
+                }
+              ]
+            },
+            "description": "How many people who started in the range reached each step."
+          }
+        },
+        {
+          "name": "Stuck at a step",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/stuck?step=MEMBER&from=2026-01-01T00:00:00Z&to=2026-10-19T00:00:00Z&page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "stuck"
+              ],
+              "query": [
+                {
+                  "key": "step",
+                  "value": "MEMBER"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-19T00:00:00Z"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Finished the previous step but not this one, waiting longer than stuckAfterDays. step is VISIT/WELCOMED/MEMBER/SERVING or CLASS:{classTypeId}."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Serving Rota",
+      "item": [
+        {
+          "name": "My duties and cover I could take",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "mine"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "My departments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/departments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "departments"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Upcoming services for a department",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/departments/{{departmentId}}/services",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "departments",
+                "{{departmentId}}",
+                "services"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Rota for one service",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/departments/{{departmentId}}/services/{{slotId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "departments",
+                "{{departmentId}}",
+                "services",
+                "{{slotId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Save a service's rota",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/departments/{{departmentId}}/services/{{slotId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "departments",
+                "{{departmentId}}",
+                "services",
+                "{{slotId}}"
+              ]
+            },
+            "description": "Leads only. The whole list; people added or removed are told.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": [\n    {\n      \"memberId\": \"{{memberId}}\",\n      \"role\": \"Main door\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Ask for cover",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/assignments/{{assignmentId}}/cover",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "assignments",
+                "{{assignmentId}}",
+                "cover"
+              ]
+            },
+            "description": "Leave out targetMemberId to ask the whole department.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Travelling that weekend\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Take a cover request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/cover/{{requestId}}/accept",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "cover",
+                "{{requestId}}",
+                "accept"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Nudge rostered people who haven't checked in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/departments/{{departmentId}}/services/{{slotId}}/nudge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "departments",
+                "{{departmentId}}",
+                "services",
+                "{{slotId}}",
+                "nudge"
+              ]
+            },
+            "description": "Leads only; once every 10 minutes."
+          }
+        },
+        {
+          "name": "Cancel a cover request",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/cover/{{requestId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "cover",
+                "{{requestId}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Team Spaces",
+      "item": [
+        {
+          "name": "My spaces",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Open a space",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}"
+              ]
+            },
+            "description": "Marks it read. Returns canPost, isUnder18, isLeader and pinned posts."
+          }
+        },
+        {
+          "name": "Open a volunteering space",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/VOLUNTEERING/{{opportunity_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "VOLUNTEERING",
+                "{{opportunity_id}}"
+              ]
+            },
+            "description": "For people signed up to the opportunity and its leaders. Returns closed: true (read-only) from 3 days after the event. No meetings in these spaces."
+          }
+        },
+        {
+          "name": "Volunteering chat lifespan",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/team-spaces/volunteering-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "team-spaces",
+                "volunteering-settings"
+              ]
+            },
+            "description": "Days after the event a volunteering chat stays open (openDays) and listed (listedDays). volunteer:read."
+          }
+        },
+        {
+          "name": "Set volunteering chat lifespan",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/team-spaces/volunteering-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "team-spaces",
+                "volunteering-settings"
+              ]
+            },
+            "description": "openDays 0-30, listedDays 1-90 and at least openDays. Applies to existing chats too. volunteer:write.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openDays\": 3,\n  \"listedDays\": 14\n}"
+            }
+          }
+        },
+        {
+          "name": "Feed page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/posts?cursor={{cursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "posts"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "{{cursor}}"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Start a post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "posts"
+              ]
+            },
+            "description": "Not for members under 18. Leaders only when the space is set that way.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Rehearsal moves to 5pm on Saturday.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Leaders-only posting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "settings"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leadersOnly\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Post with replies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Edit my post",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Rehearsal moves to 5:30pm.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Remove a post",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Pin a post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}",
+                "pin"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pinned\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Reply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/replies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}",
+                "replies"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"I'll be there.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edit my reply",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/replies/{{replyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "replies",
+                "{{replyId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"I'll be there at 5:30.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Remove a reply",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/replies/{{replyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "replies",
+                "{{replyId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Set up a meeting",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/meetings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "meetings"
+              ]
+            },
+            "description": "Leaders only. Tells the team.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Planning meeting\",\n  \"startsAt\": \"2026-10-24T16:00:00Z\",\n  \"repeat\": \"WEEKLY\",\n  \"location\": \"Room 2\",\n  \"agenda\": \"1. Christmas programme\\n2. Rehearsal times\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Meeting details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Move or cancel a meeting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancel\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "RSVP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}/rsvp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}",
+                "rsvp"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"GOING\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Save minutes",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}/minutes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}",
+                "minutes"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": \"Agreed to rehearse Saturdays at 5pm.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Record attendance",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}/attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}",
+                "attendance"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberIds\": [\n    \"{{memberId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Ask a poll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/polls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "polls"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Which Saturday works for the retreat?\",\n  \"options\": [\n    \"Sat 7 Nov\",\n    \"Sat 14 Nov\"\n  ],\n  \"multiple\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Vote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/polls/{{postId}}/vote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "polls",
+                "{{postId}}",
+                "vote"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"optionIds\": [\n    \"{{optionId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Close a poll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/polls/{{postId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "polls",
+                "{{postId}}",
+                "close"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Team Pulse",
+      "item": [
+        {
+          "name": "My check-ins",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "mine"
+              ]
+            },
+            "description": "Check-ins waiting for me, my departments, whether I'm a pastor."
+          }
+        },
+        {
+          "name": "Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "templates"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Department pulses and trend",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/departments/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "departments",
+                "{{departmentId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Round results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/rounds/{{roundId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "rounds",
+                "{{roundId}}"
+              ]
+            },
+            "description": "Averages and comments appear once 3 people have answered."
+          }
+        },
+        {
+          "name": "Answer a check-in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/rounds/{{roundId}}/responses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "rounds",
+                "{{roundId}}",
+                "responses"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"{{questionId}}\": 4\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Remind those who haven't answered",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/rounds/{{roundId}}/remind",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "rounds",
+                "{{roundId}}",
+                "remind"
+              ]
+            },
+            "description": "Leads only; once every 12 hours."
+          }
+        },
+        {
+          "name": "Start a pulse",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse"
+              ]
+            },
+            "description": "Leads only. Opens the first round straight away.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"title\": \"After Sunday\",\n  \"frequency\": \"WEEKLY\",\n  \"responseWindowDays\": 3,\n  \"required\": false,\n  \"questions\": [\n    {\n      \"kind\": \"RATING\",\n      \"text\": \"How well did we serve today?\"\n    },\n    {\n      \"kind\": \"TEXT\",\n      \"text\": \"What should we do differently next time?\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Stop or resume a pulse",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/{{pulseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "{{pulseId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Pastor overview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/overview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "overview"
+              ]
+            },
+            "description": "Clergy with feedback-review access."
+          }
+        }
+      ]
+    },
+    {
       "name": "My Week",
       "item": [
         {

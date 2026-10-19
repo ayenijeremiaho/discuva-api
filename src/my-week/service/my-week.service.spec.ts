@@ -30,8 +30,10 @@ describe('MyWeekService', () => {
   const groupRepo = { createQueryBuilder: jest.fn(() => qb(() => groups)) };
   const sessionRepo = {
     createQueryBuilder: jest.fn(() => qb(() => sessions)),
+    query: jest.fn().mockResolvedValue([]),
   };
   const churchSettings = { isEnabled: jest.fn() };
+  const spaces = { memberships: jest.fn().mockResolvedValue([]) };
   const planFeatures = { gateReason: jest.fn() };
   const service = new MyWeekService(
     rosterRepo as never,
@@ -41,6 +43,7 @@ describe('MyWeekService', () => {
     planFeatures as never,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
     { get: jest.fn().mockReturnValue('tenant-1') } as never,
+    spaces as never,
   );
 
   const prayerRow = (date: string, start: string, end: string) => ({
@@ -151,6 +154,29 @@ describe('MyWeekService', () => {
       (i) => i.kind,
     );
     expect(kinds).toEqual(['class', 'prayer']);
+  });
+
+  it('lists services the member is on the rota for', async () => {
+    sessionRepo.query.mockResolvedValueOnce([
+      {
+        id: 'a1',
+        role: 'Main door',
+        department_name: 'Ushering',
+        name: 'First Service',
+        event_name: 'Sunday Service',
+        start_time: new Date('2026-10-25T07:00:00Z'),
+        end_time: new Date('2026-10-25T09:00:00Z'),
+      },
+    ]);
+    const items = await service.forMember('m1', undefined, now);
+    expect(items).toEqual([
+      expect.objectContaining({
+        kind: 'duty',
+        title: 'Sunday Service · First Service',
+        detail: 'Ushering · Main door',
+        url: '/rota',
+      }),
+    ]);
   });
 
   it('skips modules the church has off or that are not on its plan', async () => {

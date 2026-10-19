@@ -111,12 +111,14 @@ export const KNOWN_ASSETS = [
   {
     key: 'service-hands',
     label: 'Service History / Volunteering',
-    description: 'Header on service history and volunteering screens',
+    description:
+      'Header on service history, volunteering and serving rota screens',
   },
   {
     key: 'teamwork-hands-unity',
     label: 'Fellowships & Forms',
-    description: 'Header on fellowships, department summary, and forms screens',
+    description:
+      'Header on fellowships, department summary, forms, Team Pulse and Team Spaces screens',
   },
   {
     key: 'birthday-cake-candles',
@@ -132,7 +134,7 @@ export const KNOWN_ASSETS = [
     key: 'profile-journal',
     label: 'Profile',
     description:
-      'Header on More, My Account (and its notifications, biometric login and appearance screens), edit-profile and My Week screens',
+      'Header on More, My Account (and its notifications, biometric login and appearance screens), edit-profile, My Week and My Journey screens',
   },
   {
     key: 'profile-statistics',

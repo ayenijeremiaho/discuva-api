@@ -58,6 +58,13 @@ export const MEMBER_NOTIFICATION_CHOICES: MemberNotificationChoice[] = [
     module: 'notes',
   },
   {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Team space updates',
+    description:
+      "A leader's new post, replies to your posts, and an evening summary of what you haven't read.",
+    module: 'team_spaces',
+  },
+  {
     category: EmailCategory.BIBLE_GAMES,
     label: 'Bible game challenges',
     description: 'When someone challenges you, or it’s your turn.',

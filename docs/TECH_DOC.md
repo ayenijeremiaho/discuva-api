@@ -565,6 +565,299 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### Newcomer Journey Module (`src/newcomer-journey/`)
+
+The path from first visit to serving, shown to members as "My Journey" (More → My Journey) and to admins as a funnel
+with lists of who is stuck. Module key `newcomer_journey` (root migration `AddNewcomerJourneyToPlans` adds it to every
+plan with `team_pulse` or `departments`). No new tables: it reads first-timers, follow-up tasks, members, class
+enrolments and worker profiles. Tenant migration `AddFollowUpTaskFirstTimerIndex` indexes `follow_up_tasks.first_timer_id`.
+
+**Steps**, in order (a step is left out when its module is off):
+1. `VISIT` "First visit": the first-timer's `created_at`, or the member's `created_at` if they never registered as a
+   first-timer.
+2. `WELCOMED` (needs `follow_up`): the first-timer's follow-up task is `COMPLETED`. Members with no first-timer record
+   count as welcomed.
+3. `MEMBER` "Joined the church app": the first-timer was converted to a member, or the person is a member.
+4. `CLASS:{classTypeId}` for each class on the path (needs `classes`): an enrolment in a class of that type is
+   `COMPLETED`; `IN_PROGRESS` shows as under way.
+5. `SERVING`: an `ACTIVE` worker profile. A pending serve request (`members.serve_interest_at`) shows as under way.
+
+**Settings** (church_settings row `journey:settings`, cached 10 minutes): `classTypeIds` (up to 6, in order; `null`
+means the default) and `stuckAfterDays` (3–180, default 21). By default the path follows the church's linked class
+chain (`class_types.next_class_type_id`, starting at a class nothing leads to), or the earliest active class type if
+none are linked. It stops after 6 classes or at a loop.
+
+**Member view:** each step has `status` `DONE`/`IN_PROGRESS`/`NEXT`/`TODO`, with `at`, `note` and `action`. The first
+step not started is `NEXT`. A class step's action names the soonest active class of that type that is open for
+requests (`classId` null if none is open); the serving step's action is `{ kind: 'SERVE' }`, which uses the existing
+`POST /members/me/serve-interest`.
+
+**Admin view:** the cohort is everyone who started in the range: first-timers registered then, plus members who joined
+then without a first-timer record. The funnel counts how many of them reached each step. "Stuck" lists people who
+finished the step before but not this one and started more than `stuckAfterDays` ago, oldest first, with name, phone,
+email, `firstTimerId`/`memberId` and `daysSinceStart`. Ranges are capped at three years.
+
+**Query cost** (5,000 first-timers and 20,000 members over 3 years, 10,000 enrolments): the member's journey 5 ms; the
+3-year funnel and a stuck list 20–75 ms (PGlite, so a real server will be faster). Class completions are grouped once and joined, not looked up per person.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /journey/me | any member | My steps with status, dates and the next action; `{ steps, done, total }` |
+| GET | /admin/journey/settings | `follow_up:read` | `{ steps, settings, classTypes }` |
+| PUT | /admin/journey/settings | `follow_up:write` | `{ classTypeIds?: string[] \| null, stuckAfterDays }`; returns the same as GET |
+| GET | /admin/journey/funnel?from&to | `follow_up:read` | `{ total, steps: [{ key, label, description, reached, percent }] }` |
+| GET | /admin/journey/stuck?step&from&to&page&limit | `follow_up:read` | `{ step, total, page, limit, people }`; `limit` up to 100 |
+
+### Serving Rota Module (`src/serving-rota/`)
+
+Who serves with each department at each service, and swapping when someone can't make it. Module key `serving_rota`
+(root migration `AddServingRotaToPlans` adds it to every plan that has `departments`). Everything is in the member app
+under More → Serving Rota.
+
+**Tables** (tenant migration `CreateServingRota`):
+- `rota_assignments`: department, `service_slot_id`, member, optional `role` (≤ 80 characters, e.g. "Main door") and
+  `assigned_by_id`. Unique on `(service_slot_id, department_id, member_id)`; indexes on `member_id` and
+  `(department_id, service_slot_id)`.
+- `rota_cover_requests`: assignment, department, `requested_by_id`, optional `target_member_id` (null means anyone in
+  the department), reason, and `status` `OPEN`/`ACCEPTED`/`CANCELLED`, plus `accepted_by_id` and `resolved_at`. A
+  partial unique index allows one open request per duty; a partial index covers each department's open requests.
+
+**Rules:**
+- **Planning:** HODs and Assistant HODs plan up to 8 weeks ahead. They pick a service and tick the department's active
+  workers (primary or secondary department), with an optional role each. "Copy last rota" pre-fills the previous rota.
+  The picker shows anyone already serving with another department at the same service. Saving sends the whole list:
+  removals, additions and role changes are applied as a diff. Only the people added (`ROTA_ASSIGNED`, one send per
+  role) or removed (`ROTA_REMOVED`) are told. Started services can't be changed. Audit: `ROTA_UPDATED` with counts.
+- **Asking for cover:** a worker asks for cover on their own future duty, from everyone in the department who isn't
+  already serving then, or from one chosen teammate (`ROTA_COVER_NEEDED`). The asker or a leader can cancel it.
+- **Accepting cover:** the first eligible teammate to accept takes the duty. The request row is locked
+  (`pessimistic_write`) and the assignment moves to them. It checks that the request is still open, the service
+  hasn't started, it isn't the asker's own request, it matches the chosen teammate, the person is an active worker
+  in the department, and they aren't already on the rota then. The asker and the department leads are told
+  (`ROTA_COVER_TAKEN`). Audit: `ROTA_COVER_ACCEPTED`.
+- **Reminders:** gated job `rota-reminders`, every 15 minutes; it sleeps until the next reminder. Saving a rota
+  that adds people wakes it, since those writes use raw SQL and skip the entity subscriber. Hours come from
+  Reminder Settings key `rota_duty` (default 24 and 2). There's one send per department and role at each service, and
+  each is sent once (Redis key `rota-reminder:{slotId}:{hours}`). Writes to `rota_assignments`, `service_slots` or
+  church settings wake it.
+- **My Week:** it lists the member's duties (`kind: 'duty'`).
+- **Leave:** the team picker and the rota show each person's leave for the service's church-local date (`leave`:
+  `APPROVED` or `PENDING`, from `request_leave` via the worker profile). Asking the whole department for cover leaves
+  out people on approved leave. Asking someone on approved leave, or accepting while on approved leave, is refused.
+  "Cover I could take" hides requests on the member's approved-leave days.
+- **Check-in:** each rostered person's `checkin` (`PRESENT`/`LATE`/`ATTENDED_ONLINE` with the time) comes from their
+  attendance for the service's event; ABSENT and ON_LEAVE placeholders don't count. Leads can nudge everyone on the
+  rota who hasn't checked in (`ROTA_CHECKIN_NUDGE`), at most once every 10 minutes per service and department (Redis
+  key `rota-nudge:{slotId}:{departmentId}`).
+
+**Query cost** (two years of services: 315 services, 3,000 workers, 40 departments, about 118,000 duties, about 3,500
+cover requests): the leader's 8-week list 13 ms, one service's rota 4.6 ms, the team picker 4.6 ms, my duties 3.4 ms,
+cover I could take 9 ms, reminders 3.8 ms. All are index-driven, with no full scans.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /rota/mine | any worker | My duties for the next 8 weeks (with my open cover request), and cover requests I could take |
+| GET | /rota/departments | any worker | Departments I serve in or lead (`isLeader`) |
+| GET | /rota/departments/:departmentId/services | that department | Next 8 weeks of services with `assigned`, `openCover` and `mine` |
+| GET | /rota/departments/:departmentId/services/:slotId | that department | The rota for one service and the department's `team` (with `servingElsewhere`); leaders also get `previous` |
+| PUT | /rota/departments/:departmentId/services/:slotId | leads | `{ entries: [{ memberId, role? }] }`, the whole list |
+| POST | /rota/assignments/:assignmentId/cover | the person serving | `{ targetMemberId?, reason? }` |
+| POST | /rota/cover/:requestId/accept | eligible teammates | Takes the duty; 409 if someone was quicker |
+| DELETE | /rota/cover/:requestId | asker or leads | Cancels the request |
+| POST | /rota/departments/:departmentId/services/:slotId/nudge | leads | Pushes a check-in nudge to rostered people who haven't checked in; `{ nudged }` |
+
+### Team Spaces Module (`src/team-space/`)
+
+A shared space for each department, fellowship and volunteering opportunity: posts, replies, up to 3 pinned posts per
+space, and one evening summary. Module key `team_spaces` (root migration `AddTeamSpacesToPlans` adds it to every plan that has
+`departments`).
+
+**Who is in a space:** membership is never stored; it comes straight from the roster.
+- **Department:** active workers whose primary or secondary department it is, plus its HOD and Assistant HOD.
+- **Fellowship:** `small_group_members`, plus the fellowship's leader.
+- **Volunteering** (needs the `volunteering` module too): `CONFIRMED` sign-ups, plus the opportunity's leaders: the
+  member account of the admin who created it, and the leads of its department if it has one. Cancelling a sign-up
+  removes access straight away.
+- **Leaders:** department leads, the fellowship leader, or the volunteering leaders above. They can pin and remove anything, and can switch the space
+  to "Only leaders can start posts" (`leaders_only`).
+
+**Volunteering spaces close:** they take posts, replies, polls and votes until `openDays` after the event (default 3),
+or until the opportunity is cancelled; after that they stay readable (`closed: true`, writes return 403). They're
+listed until `listedDays` after the event (default 14), and cancelled opportunities aren't listed. Leaders who
+haven't signed up themselves only see opportunities in the next 30 days, so an admin who posts many stays manageable. Both are set per
+church on the admin Volunteering page (church_settings row `volunteering:chat`, cached 10 minutes; `openDays` 0–30,
+`listedDays` 1–90 and at least `openDays`). They're applied live, so a change affects existing chats too. Audit:
+`VOLUNTEER_CHAT_SETTINGS_UPDATED`. Meetings aren't offered for a one-off event (400); posts and polls are. No new tables or
+indexes: the lookups use the existing indexes on `volunteer_signups (member_id)`, `(opportunity_id)` and
+`volunteer_opportunities (created_by_id)`, `(department_id)`, `(date)`. Measured with 2,000 opportunities and 40,000
+sign-ups: a member's volunteering spaces 1–4 ms (13 ms for an admin who created all 2,000), opening one 0.1 ms, its
+roster 0.4 ms, no sequential scans.
+
+**Under 18:** members under 18 can read and reply, but can't start posts. Age comes from the profile's birth year,
+month and day (`isUnder18`); without a birth year, someone counts as an adult. There are no private messages: everything
+in a space is visible to the whole team and its leaders.
+
+**Tables** (tenant migration `CreateTeamSpaces`):
+- `team_spaces`: `(kind, ref_id)` unique, `leaders_only` and `last_activity_at`. Created the first time anyone opens it.
+- `team_posts`: body (≤ 2000 characters, plain text), `pinned`, `reply_count`, `last_activity_at` (moves with each
+  reply), `edited_at`, and soft removal (`removed_at`, `removed_by_id`).
+- `team_post_replies`: body ≤ 1000 characters, with the same edit and removal fields.
+- `team_space_reads`: `(member_id, space_id)` unique, `last_read_at` (upserted when a space is opened, posted or replied in).
+
+**Query cost** (measured on a large church: 100 spaces, 60,000 posts, 240,000 replies, 5,000 members):
+- **Feed:** keyset pages of 20 on the partial index `(space_id, last_activity_at DESC, id DESC) WHERE removed_at IS
+  NULL`, about 0.8 ms on any page.
+- **Replies:** keyset pages of 50 on `(post_id, created_at, id) WHERE removed_at IS NULL`, about 0.2 ms.
+- **Pinned posts:** partial index on pinned posts.
+- **Unread counts:** each space counts conversations with activity since the member's last visit, stopping at 99 (about
+  4 ms for all of a member's spaces).
+- **Membership lookups:** index-driven unions, 1–7 ms.
+
+**Notifications** (category `TEAM_SPACES`, push-only; members can turn it off under My Account → Notifications):
+- `TEAM_SPACE_LEADER_POST`: sent straight away when a leader posts. Other posts wait for the evening summary.
+- `TEAM_SPACE_REPLY`: sent to the post's author, at most once every 30 minutes per post (Redis key
+  `team-reply-push:{postId}`).
+- `TEAM_SPACE_DIGEST`: sent at 18:00 church time by the gated job `team-space-digest`. It ticks on the hour with the
+  other gated jobs (never on its own), sleeps each church until its evening; church-setting writes wake it.
+  - It reads only spaces active in the last 24 hours and counts posts and replies by others that the member hasn't
+    seen since their last visit.
+  - Members with the same summary ("5 new in Choir and Ushering") share one send. On the test data above it took
+    about 12 ms.
+  - It runs once per day per church (Redis key `team-space-digest:{date}`).
+
+All recipient and name lookups happen inside the request; only the send itself finishes afterwards. Audit:
+`TEAM_POST_REMOVED` when a leader removes someone else's post or reply, and `TEAM_SPACE_SETTINGS_UPDATED`. Contents
+are never logged.
+
+**Endpoints** (`JwtAuthGuard`, module `team_spaces`; `:kind` is `DEPARTMENT`, `FELLOWSHIP` or `VOLUNTEERING`, where
+`:refId` is the opportunity id):
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /team-spaces | any member | My spaces with `isLeader`, `leadersOnly`, `lastActivityAt` and `unread` (max 99); volunteering ones add `eventAt` and `closed` |
+| GET | /team-spaces/:kind/:refId | team | Opens the space (marks it read): `canPost`, `isUnder18`, `isLeader`, `closed`, `eventAt` and pinned posts |
+| GET | /team-spaces/:kind/:refId/posts?cursor= | team | Feed page of 20 (pinned posts excluded) with `nextCursor` |
+| POST | /team-spaces/:kind/:refId/posts | team (not under 18; leaders only if `leadersOnly`) | `{ body }` |
+| PATCH | /team-spaces/:kind/:refId/settings | leaders | `{ leadersOnly }` |
+| GET | /admin/team-spaces/volunteering-settings | `volunteer:read` | `{ openDays, listedDays }` for volunteering chats |
+| PUT | /admin/team-spaces/volunteering-settings | `volunteer:write` | `{ openDays, listedDays }`; 400 if `listedDays` < `openDays` |
+| GET | /team-spaces/posts/:postId?cursor= | team | Post with replies, 50 per page, oldest first |
+| PATCH | /team-spaces/posts/:postId | author | `{ body }` (marks it edited) |
+| DELETE | /team-spaces/posts/:postId | author or leader | Removes the post |
+| POST | /team-spaces/posts/:postId/pin | leaders | `{ pinned }`, up to 3 per space |
+| POST | /team-spaces/posts/:postId/replies | team, including under 18 | `{ body }` |
+| PATCH | /team-spaces/replies/:replyId | author | `{ body }` |
+| DELETE | /team-spaces/replies/:replyId | author or leader | Removes the reply |
+
+**Meetings and polls** (tenant migration `AddTeamMeetingsAndPolls`): both are posts with `team_posts.type` `MEETING`
+or `POLL`, so they come with the feed, replies, pinning, unread counts, the evening summary and moderation. Only
+leaders create them; everyone in the space, including under-18s, can RSVP and vote.
+- **Meetings:** `team_meetings` (keyed by `post_id`): title, `starts_at`, `ends_at`, location, `online_link`, minutes
+  (`minutes_updated_at`, `minutes_by_id`) and `cancelled_at`. The agenda is the post body. Indexes:
+  `(space_id, starts_at)`, and `starts_at WHERE cancelled_at IS NULL` for reminders.
+- **RSVPs:** `team_meeting_rsvps` (`meeting_id`, `member_id`) unique, with `response` `GOING`/`MAYBE`/`NOT_GOING` and
+  `attended`. Leaders record attendance by ticking names; everyone else on the list is set to not attended.
+- **Polls:** `team_polls` (keyed by `post_id`): `options` jsonb `[{ id, text }]` (2–10 different options),
+  `multiple` and `closes_at`. Votes are in `team_poll_votes` (`poll_id`, `member_id`) unique, with `option_ids`.
+  Votes can be changed until the poll closes; counts are shown, not who voted for what.
+- **Feed details:** `TeamSpaceExtrasService.details` loads every meeting and poll on a page in at most two queries:
+  RSVP counts and my response; tallies, voter count and my vote.
+- **Meeting notifications:** the team is told when a meeting is set up (`TEAM_SPACE_MEETING`), and when it's moved
+  or cancelled (`TEAM_SPACE_MEETING_CHANGED`).
+- **Repeating meetings** (tenant migration `AddTeamMeetingSeries`): `repeat` `WEEKLY`/`FORTNIGHTLY`/`MONTHLY`
+  (optional `repeatUntil` date) creates a `team_meeting_series`.
+  - **Schedule:** it's taken from the first meeting in church time: weekday, start and end time, every 1 or 2 weeks,
+    or the same week of each month (dates after the 28th mean the last such weekday). It reuses the fellowship
+    `MeetingSchedule` helpers (`nextMeeting`, `describeSchedule`).
+  - **Details:** title, location, online link and agenda are stored on the series.
+  - **The next meeting:** only the next meeting exists at a time (`team_meetings.series_id`). Once it has started,
+    `rollSeries` (run by the `team-meeting-reminders` job, even with reminders off) adds the next one: a new post,
+    with no push, carrying the same details and link. Each meeting keeps its own RSVPs, attendance and minutes.
+  - **Ending:** a series stops after `ends_on`, or when a leader sends `{ stopRepeating: true }`. Cancelling one
+    meeting doesn't stop the series.
+  - **Display:** feed details and the meeting page include `repeat` (e.g. "Every Saturday, 5:00 PM–6:30 PM") while
+    the series is active.
+  - **Indexes:** `(series_id, starts_at DESC)` partial, and active series. Series writes wake the job.
+- **Meeting reminders:** gated job `team-meeting-reminders`, every 15 minutes; it sleeps until the next reminder.
+  Hours come from Reminder Settings key `team_meeting` (default 24 and 1). It skips anyone who answered Not going,
+  and sends each reminder once (Redis key `team-meeting-reminder:{postId}:{hours}`). Writes to `team_meetings` or
+  church settings wake it.
+- **Poll notifications:** the team is told when a leader asks a question (`TEAM_SPACE_POLL`).
+- **My Week:** it lists the member's upcoming team meetings, except ones they've said they can't make.
+- **Measured** (1,000 meetings, about 20,000 RSVPs, 1,000 polls, about 18,000 votes): page details 7–9 ms; a meeting's
+  page 2.7 ms; RSVP and vote upserts 1–3 ms; reminder query 0.4 ms; My Week meetings 0.7 ms.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| POST | /team-spaces/:kind/:refId/meetings | leaders | `{ title, startsAt, endsAt?, location?, onlineLink?, agenda?, repeat?, repeatUntil? }` |
+| GET | /team-spaces/meetings/:postId | team | Details, Going, Maybe, Not going and No reply lists, attendance and minutes |
+| PATCH | /team-spaces/meetings/:postId | leaders | Edit any field (with `applyToSeries: true`, the series too: its details, and a new time resets the schedule from that date), `{ cancel: true }` (this meeting only), or `{ stopRepeating: true }` |
+| POST | /team-spaces/meetings/:postId/rsvp | team | `{ response: GOING \| MAYBE \| NOT_GOING }` |
+| PATCH | /team-spaces/meetings/:postId/minutes | leaders | `{ minutes }` |
+| PATCH | /team-spaces/meetings/:postId/attendance | leaders | `{ memberIds }`, the people who came |
+| POST | /team-spaces/:kind/:refId/polls | leaders | `{ question, options, multiple?, closesAt? }` |
+| POST | /team-spaces/polls/:postId/vote | team | `{ optionIds }`, can be changed until it closes |
+| POST | /team-spaces/polls/:postId/close | leaders | Closes the poll now |
+
+### Team Pulse Module (`src/team-pulse/`)
+
+Recurring, anonymous check-ins a department's HOD or Assistant HOD sends their team about how **the team** is doing.
+There is deliberately no way to rate a named person. Module key `team_pulse` (root migration `AddTeamPulseToPlans`
+adds it to every plan that already has `pastor_feedback`; movable from the Plans page).
+
+**Tables** (tenant migration `CreateTeamPulse`):
+- `team_pulses`: department, title, `questions` (jsonb `[{ id, kind: RATING|TEXT, text }]`, up to 6, at least one
+  rating), `frequency` (`ONCE`/`WEEKLY`/`FORTNIGHTLY`/`MONTHLY`), `response_window_days` (1–14, default 3),
+  `required`, `active` and `next_open_at`.
+- `team_pulse_rounds`: one sending, with `opens_at`/`closes_at`, `invited_count`, `response_count`, and the answers
+  held **only as totals**: `ratings` jsonb `{ questionId: { count, sum, spread[1..5] } }` and `comments` jsonb
+  `{ questionId: string[] }`.
+- `team_pulse_participations`: `(round_id, member_id)`, unique, recording only that someone answered.
+
+Nothing links an answer to a person: totals and comments carry no member or time, and responses are never audited.
+Answering locks the round row (`pessimistic_write`), checks the member hasn't answered, adds to the totals and inserts
+the participation in the request's transaction.
+
+**Rules:**
+- Results (averages, spread and comments) appear only once at least 3 people have answered (`MIN_RESPONSES_TO_SHOW`).
+  Comments are shuffled on every read.
+- Answering is open to active workers whose primary or secondary department is the pulse's.
+- Viewing is open to that team, its leads, and pastors (clergy with `canReviewFeedback`, as in Pastor Feedback).
+- While a round is open, leads see the names of those who haven't answered (never what anyone said) and can send a
+  reminder, at most once every 12 hours.
+- Creating a pulse opens the first round at once. Stopping one closes any open round. Resuming opens a new round.
+- Audit: `TEAM_PULSE_STARTED`, `_STOPPED`, `_RESUMED`, `_REMINDER_SENT`.
+
+**Scheduler (`TeamPulseScheduler`):** gated job `team-pulse`, every 15 minutes. It opens rounds for active pulses
+whose `next_open_at` has passed, advancing past any missed openings. It also sends `TEAM_PULSE_REMINDER` to
+non-responders of required rounds closing within 24 hours (once per round). It sleeps until the earliest of the next
+opening or the next reminder. Writes to `team_pulses` or church settings wake it. Round writes don't: every answer
+updates a round, and none of them changes when the job is next due.
+
+**Query cost:** trend lists read each pulse's latest 12 rounds through the `(pulse_id, opens_at)` index (`unnest` plus
+`LATERAL ... LIMIT 12`), without comments, so the cost stays flat as history grows. Permission lookups (lead, pastor,
+team) run in parallel. Measured on a large church (3,000 workers, 120 pulses, 12,600 rounds, 566,000
+participations): a department's trend takes about 1 ms, the pastor view about 14 ms, and answering, the
+duplicate check, `notYetAnswered` and every scheduler query each take under 5 ms. Indexes: the partial
+`IDX_team_pulses_next_open_due`, `(pulse_id, opens_at)`, `closes_at`, the participation unique pair and `member_id`.
+
+**Notifications:** category `TEAM_PULSE` (push-only), keys `TEAM_PULSE_OPEN` and `TEAM_PULSE_REMINDER`, both
+linking to `/team-pulse`.
+
+**Endpoints** (`JwtAuthGuard`, module `team_pulse`):
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /team-pulse/mine | any worker | Check-ins waiting for this member, their departments (`canManage` for leads), `isPastor` |
+| GET | /team-pulse/templates | any | Ready-made question sets |
+| GET | /team-pulse/departments/:departmentId | team, its leads, pastors | Active pulses plus the 10 latest stopped ones, each with up to 12 recent rounds (`score` null below 3 answers) |
+| GET | /team-pulse/rounds/:roundId | team, its leads, pastors | Per-question averages, spread and comments (3+ answers); leads also get `notYetAnswered` and `canRemind` |
+| POST | /team-pulse/rounds/:roundId/responses | team member | `{ answers: { questionId: 1-5 \| text } }`; 409 if already answered |
+| POST | /team-pulse/rounds/:roundId/remind | lead | Push reminder to those who haven't answered |
+| POST | /team-pulse | lead | `{ departmentId, title, questions, frequency, responseWindowDays?, required? }`; opens the first round |
+| PATCH | /team-pulse/:id | lead | `{ active?, required? }` to stop, resume or change required |
+| GET | /team-pulse/overview | pastors | Every department's pulses with latest and previous score, response rate and score history |
+
 ### My Week Module (`src/my-week/`)
 
 `GET /my-week` (`JwtAuthGuard`) — the member's own commitments outside services for the next 7 days, in date order,
@@ -4620,6 +4913,9 @@ dedicated host).
 | `PRAYER_REQUESTS` | `EMAIL_PRAYER_REQUESTS_ENABLED` | `true` (to the member when their request is marked prayed for or answered) |
 | `FACILITY_RENTAL` | `EMAIL_FACILITY_RENTAL_ENABLED` | `true` (to the renter: booking confirmed / not approved, payment received, caution refunded, day-before reminder) |
 | `FELLOWSHIPS` | `EMAIL_FELLOWSHIPS_ENABLED` | `true` (to a fellowship leader when a member misses three meetings in a row) |
+| `TEAM_PULSE` | `EMAIL_TEAM_PULSE_ENABLED` | `true` (push-only: a department's check-in opened, and the day-before reminder for a required one) |
+| `TEAM_SPACES` | `EMAIL_TEAM_SPACES_ENABLED` | `true` (push-only: a leader's new post, a reply to your post, the evening summary; members can opt out) |
+| `SERVING_ROTA` | `EMAIL_SERVING_ROTA_ENABLED` | `true` (push-only: put on or taken off the rota, serving reminders, cover requests and cover found) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 **Prayer request, facility rental and fellowship notifications** (push, with email for members without push; each category switchable per church and push-first capable). *Prayer requests* (`PrayerRequestService.updateStatus`): only a change of status notifies, so re-saving never sends twice; `PRAYED_FOR` → `PRAYER_REQUEST_PRAYED_FOR` / `prayer-request-prayed-for`, `ANSWERED` → `PRAYER_REQUEST_ANSWERED` / `prayer-request-answered` (invites a testimony); the email quotes the request (first 200 characters); requests without a member (deactivated) send nothing; push idempotency `prayer-request:{id}:{status}`. *Facility rental* (`RentalNotifierService`, facility, date and time in the church timezone, amounts as `{currency} 1,234.00`): `confirmBooking` → `RENTAL_BOOKING_CONFIRMED` (with total), `rejectBooking` → `RENTAL_BOOKING_REJECTED` (with the reason), `markPaymentPaid` → `RENTAL_PAYMENT_RECEIVED` (booking fee or caution deposit, with reference), `markCautionRefunded` → `RENTAL_CAUTION_REFUNDED`. The day-before reminder (`RENTAL_BOOKING_REMINDER`) is sent by `RentalStatusScheduler` once per booking: `rental_bookings.reminder_sent_at` (tenant migration `AddRentalBookingReminderSentAt`, partial index `IDX_rental_bookings_reminder_due` on `start_date_time` WHERE `status = 'CONFIRMED' AND reminder_sent_at IS NULL`) is set before sending, the query covers bookings starting within 24 hours, `nextTransitionDue` includes each confirmed booking's reminder time so the gated scheduler wakes for it, and a booking confirmed within 24 hours of starting is marked reminded at confirmation (the confirmation stands in for it). *Fellowships* (`SmallGroupService.recordAttendance`): for members newly marked absent in that save (not the leader, not already absent), one windowed query reads each one's last four meetings in the group (served by `IDX_small_group_attendance_group_id_meeting_date`); the leader is told (`FELLOWSHIP_MEMBER_MISSING` / `fellowship-member-missing`, linking to `/small-groups/{id}` with the three dates) only when this meeting is their latest and the run of absences is exactly three, so it fires once per run, never on re-saves or edits to older meetings. Fellowship meeting reminders: see the Small Group Module's *Meeting schedule*. A notice can never undo what it reports: `RentalNotifierService` methods catch and log their own errors, and the fellowship alert is caught in `recordAttendance`, because each request runs in one transaction that rolls back on an error (a failed reminder is logged once and not retried). Timezone and currency for the wording come from caches (in-memory and Redis), so notices add no database round trip.
@@ -8465,6 +8761,9 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_PRAYER_REQUESTS_ENABLED` | `true` | Prayer request prayed-for / answered notifications |
 | `EMAIL_FACILITY_RENTAL_ENABLED` | `true` | Facility rental notifications to the renter |
 | `EMAIL_FELLOWSHIPS_ENABLED` | `true` | Fellowship leader alert for three missed meetings in a row |
+| `EMAIL_TEAM_PULSE_ENABLED` | `true` | Team Pulse check-in notices (push-only) |
+| `EMAIL_TEAM_SPACES_ENABLED` | `true` | Team Spaces notifications (push-only) |
+| `EMAIL_SERVING_ROTA_ENABLED` | `true` | Serving Rota notifications (push-only) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP

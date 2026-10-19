@@ -5,6 +5,7 @@ import { SmallGroup } from '../small-group/entity/small-group.entity';
 import { ClassSession } from '../classes/entity/class-session.entity';
 import { MyWeekService } from './service/my-week.service';
 import { MyWeekController } from './controller/my-week.controller';
+import { TeamSpaceModule } from '../team-space/team-space.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { MyWeekController } from './controller/my-week.controller';
       SmallGroup,
       ClassSession,
     ]),
+    TeamSpaceModule,
   ],
   providers: [MyWeekService],
   controllers: [MyWeekController],
