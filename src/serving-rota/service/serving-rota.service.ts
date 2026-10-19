@@ -22,6 +22,7 @@ import { DateService } from '../../utility/service/date.service';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { RotaEntryDto, RequestCoverDto } from '../dto/serving-rota.dto';
 import { localDate } from '../../event/types/slot-blueprint';
+import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 import { CacheService } from '../../utility/service/cache.service';
 
 const DAY_MS = 24 * 3600 * 1000;
@@ -77,6 +78,7 @@ export class ServingRotaService {
     private readonly dateService: DateService,
     private readonly churchTimezone: ChurchTimezoneService,
     private readonly cacheService: CacheService,
+    private readonly gate: SchedulerGateService,
   ) {}
 
   // Departments the member serves in or leads.
@@ -277,6 +279,8 @@ export class ServingRotaService {
           memberId,
         ],
       );
+    // Raw SQL skips the entity subscriber, so wake the reminder job here: a newly rostered service may be due soon.
+    if (added.length) void this.gate.wake(['rota-reminders']);
     if (changed.length)
       await this.assignmentRepo.query(
         `UPDATE rota_assignments a SET role = x.role, updated_at = now()

@@ -47,7 +47,8 @@ export class TeamSpaceDigestService {
       );
     const tonight = at(today);
     const tomorrow = at(addDays(today, 1));
-    if (now < tonight) return tonight;
+    // A tick that fires a moment early still counts, so the summary doesn't slip an hour.
+    if (now.getTime() < tonight.getTime() - 60_000) return tonight;
     const sentKey = `team-space-digest:${today}`;
     if (await this.cacheService.get(sentKey)) return tomorrow;
     this.cacheService.set(sentKey, true, 2 * 24 * 3600);

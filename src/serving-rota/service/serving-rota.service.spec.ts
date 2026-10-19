@@ -109,6 +109,7 @@ describe('ServingRotaService', () => {
   };
   const cache = { get: jest.fn().mockResolvedValue(undefined), set: jest.fn() };
   const audit = { log: jest.fn() };
+  const gate = { wake: jest.fn().mockResolvedValue(undefined) };
   const service = new ServingRotaService(
     assignmentRepo as never,
     coverRepo as never,
@@ -118,6 +119,7 @@ describe('ServingRotaService', () => {
     { format: () => 'Sun 25 Oct, 8:00 AM' } as never,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
     cache as never,
+    gate as never,
   );
   const pushes = () =>
     notifications.notifyMember.mock.calls.map((c) => c[0].push);
@@ -213,6 +215,7 @@ describe('ServingRotaService', () => {
         [['a-keep'], ['Main door']],
       );
       expect(assignmentRepo.update).not.toHaveBeenCalled();
+      expect(gate.wake).toHaveBeenCalledWith(['rota-reminders']);
       const [added, removed] = pushes();
       expect(added.memberIds).toEqual(['w3', 'w4']);
       expect(added.vars.role).toBe(' · Car park');

@@ -7,7 +7,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { ChurchSettingsService } from '../../church-settings/service/church-settings.service';
 import { TeamSpaceDigestService } from '../service/team-space-digest.service';
 
-// Hourly tick, but each church sleeps until its own evening, so the database is touched once a day per church.
+// Hourly, on the same top-of-hour tick as the other gated jobs, so it never wakes the database on its own.
 @Injectable()
 export class TeamSpaceDigestScheduler {
   private static readonly LOCK_KEY = 'lock:team-space-digest';
@@ -21,7 +21,7 @@ export class TeamSpaceDigestScheduler {
     private readonly digest: TeamSpaceDigestService,
   ) {}
 
-  @Cron('5 * * * *')
+  @Cron('0 * * * *')
   async run(): Promise<void> {
     if (
       !(await this.cacheService.acquireLock(

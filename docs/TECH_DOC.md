@@ -635,7 +635,8 @@ under More → Serving Rota.
   hasn't started, it isn't the asker's own request, it matches the chosen teammate, the person is an active worker
   in the department, and they aren't already on the rota then. The asker and the department leads are told
   (`ROTA_COVER_TAKEN`). Audit: `ROTA_COVER_ACCEPTED`.
-- **Reminders:** gated job `rota-reminders`, every 15 minutes; it sleeps until the next reminder. Hours come from
+- **Reminders:** gated job `rota-reminders`, every 15 minutes; it sleeps until the next reminder. Saving a rota
+  that adds people wakes it, since those writes use raw SQL and skip the entity subscriber. Hours come from
   Reminder Settings key `rota_duty` (default 24 and 2). There's one send per department and role at each service, and
   each is sent once (Redis key `rota-reminder:{slotId}:{hours}`). Writes to `rota_assignments`, `service_slots` or
   church settings wake it.
@@ -716,8 +717,8 @@ in a space is visible to the whole team and its leaders.
 - `TEAM_SPACE_LEADER_POST`: sent straight away when a leader posts. Other posts wait for the evening summary.
 - `TEAM_SPACE_REPLY`: sent to the post's author, at most once every 30 minutes per post (Redis key
   `team-reply-push:{postId}`).
-- `TEAM_SPACE_DIGEST`: sent at 18:00 church time by the gated job `team-space-digest`. The hourly tick sleeps each
-  church until its evening; church-setting writes wake it.
+- `TEAM_SPACE_DIGEST`: sent at 18:00 church time by the gated job `team-space-digest`. It ticks on the hour with the
+  other gated jobs (never on its own), sleeps each church until its evening; church-setting writes wake it.
   - It reads only spaces active in the last 24 hours and counts posts and replies by others that the member hasn't
     seen since their last visit.
   - Members with the same summary ("5 new in Choir and Ushering") share one send. On the test data above it took
