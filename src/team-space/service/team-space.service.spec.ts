@@ -100,6 +100,12 @@ describe('TeamSpaceService', () => {
     notifyMember: jest.fn().mockResolvedValue(undefined),
   };
   const audit = { log: jest.fn() };
+  const extras = {
+    details: jest
+      .fn()
+      .mockResolvedValue({ meetings: new Map(), polls: new Map() }),
+    upcoming: jest.fn().mockResolvedValue([]),
+  };
   const cache = { get: jest.fn().mockResolvedValue(undefined), set: jest.fn() };
   const service = new TeamSpaceService(
     spaceRepo as never,
@@ -110,6 +116,7 @@ describe('TeamSpaceService', () => {
     notifications as never,
     audit as never,
     cache as never,
+    extras as never,
   );
 
   beforeEach(() => {

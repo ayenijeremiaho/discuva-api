@@ -16,6 +16,11 @@ import {
   TeamSpaceAccessService,
 } from './team-space-access.service';
 import {
+  MeetingView,
+  PollView,
+  TeamSpaceExtrasService,
+} from './team-space-extras.service';
+import {
   FEED_PAGE_SIZE,
   MAX_PINNED,
   REPLY_PAGE_SIZE,
@@ -36,6 +41,7 @@ export interface Author {
 
 interface PostRow {
   id: string;
+  type: string;
   body: string;
   pinned: boolean;
   reply_count: number;
@@ -95,6 +101,7 @@ export class TeamSpaceService {
     private readonly notifications: NotificationDispatchService,
     private readonly audit: AuditLogService,
     private readonly cacheService: CacheService,
+    private readonly extras: TeamSpaceExtrasService,
   ) {}
 
   // The member's spaces, busiest first, each with how many conversations have news since they last looked.
@@ -149,10 +156,12 @@ export class TeamSpaceService {
       this.access.access(memberId, kind, refId),
       this.access.isMinor(memberId),
     ]);
-    const [pinned] = await Promise.all([
+    const [pinned, upcomingMeetings] = await Promise.all([
       this.postRows(acc.space.id, { pinned: true }),
+      this.extras.upcoming(acc.space.id),
       this.markRead(memberId, acc.space.id),
     ]);
+    const details = await this.extras.details(pinned, memberId);
     return {
       kind,
       refId,
@@ -161,7 +170,8 @@ export class TeamSpaceService {
       leadersOnly: acc.space.leadersOnly,
       isUnder18: minor,
       canPost: !minor && (!acc.space.leadersOnly || acc.isLeader),
-      pinned: pinned.map((p) => this.toPost(p, memberId, acc)),
+      pinned: pinned.map((p) => this.toPost(p, memberId, acc, details)),
+      upcomingMeetings,
     };
   }
 
@@ -178,8 +188,9 @@ export class TeamSpaceService {
     });
     const page = rows.slice(0, FEED_PAGE_SIZE);
     const last = page[page.length - 1];
+    const details = await this.extras.details(page, memberId);
     return {
-      items: page.map((p) => this.toPost(p, memberId, acc)),
+      items: page.map((p) => this.toPost(p, memberId, acc, details)),
       nextCursor:
         rows.length > FEED_PAGE_SIZE && last
           ? encodeCursor(last.last_activity_at, last.id)
@@ -286,7 +297,7 @@ export class TeamSpaceService {
     const after = decodeCursor(cursor);
     const [postRow, replies] = await Promise.all([
       this.spaceRepo.query(
-        `SELECT p.id, p.body, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}
+        `SELECT p.id, p.type, p.body, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}
          FROM team_posts p LEFT JOIN members a ON a.id = p.author_id WHERE p.id = $1`,
         [postId],
       ) as Promise<PostRow[]>,
@@ -304,10 +315,13 @@ export class TeamSpaceService {
     ]);
     const page = replies.slice(0, REPLY_PAGE_SIZE);
     const last = page[page.length - 1];
-    const minor = await this.access.isMinor(memberId);
+    const [minor, details] = await Promise.all([
+      this.access.isMinor(memberId),
+      this.extras.details(postRow, memberId),
+    ]);
     return {
       space: { kind: acc.kind, refId: acc.refId, name: acc.name },
-      post: this.toPost(postRow[0], memberId, acc),
+      post: this.toPost(postRow[0], memberId, acc, details),
       canReply: true,
       isUnder18: minor,
       replies: page.map((r) => ({
@@ -446,7 +460,7 @@ export class TeamSpaceService {
   ): Promise<PostRow[]> {
     const { after } = opts;
     return this.spaceRepo.query(
-      `SELECT p.id, p.body, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}
+      `SELECT p.id, p.type, p.body, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}
        FROM team_posts p LEFT JOIN members a ON a.id = p.author_id
        WHERE p.space_id = $1 AND p.removed_at IS NULL AND p.pinned = $2
          ${after ? 'AND (p.last_activity_at, p.id) < ($4, $5)' : ''}
@@ -458,9 +472,20 @@ export class TeamSpaceService {
     ) as Promise<PostRow[]>;
   }
 
-  private toPost(p: PostRow, memberId: string, acc: SpaceAccess) {
+  private toPost(
+    p: PostRow,
+    memberId: string,
+    acc: SpaceAccess,
+    details: {
+      meetings: Map<string, MeetingView>;
+      polls: Map<string, PollView>;
+    },
+  ) {
     return {
       id: p.id,
+      type: p.type,
+      meeting: details.meetings.get(p.id) ?? null,
+      poll: details.polls.get(p.id) ?? null,
       body: p.body,
       pinned: p.pinned,
       replyCount: Number(p.reply_count),

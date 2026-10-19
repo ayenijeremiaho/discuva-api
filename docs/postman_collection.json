@@ -28221,6 +28221,285 @@
             },
             "description": ""
           }
+        },
+        {
+          "name": "Set up a meeting",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/meetings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "meetings"
+              ]
+            },
+            "description": "Leaders only. Tells the team.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Planning meeting\",\n  \"startsAt\": \"2026-10-24T16:00:00Z\",\n  \"location\": \"Room 2\",\n  \"agenda\": \"1. Christmas programme\\n2. Rehearsal times\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Meeting details",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Move or cancel a meeting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cancel\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "RSVP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}/rsvp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}",
+                "rsvp"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"GOING\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Save minutes",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}/minutes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}",
+                "minutes"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minutes\": \"Agreed to rehearse Saturdays at 5pm.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Record attendance",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/meetings/{{postId}}/attendance",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "meetings",
+                "{{postId}}",
+                "attendance"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberIds\": [\n    \"{{memberId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Ask a poll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/polls",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "polls"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"question\": \"Which Saturday works for the retreat?\",\n  \"options\": [\n    \"Sat 7 Nov\",\n    \"Sat 14 Nov\"\n  ],\n  \"multiple\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Vote",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/polls/{{postId}}/vote",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "polls",
+                "{{postId}}",
+                "vote"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"optionIds\": [\n    \"{{optionId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Close a poll",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/polls/{{postId}}/close",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "polls",
+                "{{postId}}",
+                "close"
+              ]
+            },
+            "description": ""
+          }
         }
       ]
     },

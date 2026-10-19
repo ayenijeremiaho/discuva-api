@@ -630,6 +630,42 @@ are never logged.
 | PATCH | /team-spaces/replies/:replyId | author | `{ body }` |
 | DELETE | /team-spaces/replies/:replyId | author or leader | Removes the reply |
 
+**Meetings and polls** (tenant migration `AddTeamMeetingsAndPolls`): both are posts with `team_posts.type` `MEETING`
+or `POLL`, so they come with the feed, replies, pinning, unread counts, the evening summary and moderation. Only
+leaders create them; everyone in the space, including under-18s, can RSVP and vote.
+- **Meetings:** `team_meetings` (keyed by `post_id`): title, `starts_at`, `ends_at`, location, `online_link`, minutes
+  (`minutes_updated_at`, `minutes_by_id`) and `cancelled_at`. The agenda is the post body. Indexes:
+  `(space_id, starts_at)`, and `starts_at WHERE cancelled_at IS NULL` for reminders.
+- **RSVPs:** `team_meeting_rsvps` (`meeting_id`, `member_id`) unique, with `response` `GOING`/`MAYBE`/`NOT_GOING` and
+  `attended`. Leaders record attendance by ticking names; everyone else on the list is set to not attended.
+- **Polls:** `team_polls` (keyed by `post_id`): `options` jsonb `[{ id, text }]` (2–10 different options),
+  `multiple` and `closes_at`. Votes are in `team_poll_votes` (`poll_id`, `member_id`) unique, with `option_ids`.
+  Votes can be changed until the poll closes; counts are shown, not who voted for what.
+- **Feed details:** `TeamSpaceExtrasService.details` loads every meeting and poll on a page in at most two queries:
+  RSVP counts and my response; tallies, voter count and my vote.
+- **Meeting notifications:** the team is told when a meeting is set up (`TEAM_SPACE_MEETING`), and when it's moved
+  or cancelled (`TEAM_SPACE_MEETING_CHANGED`).
+- **Meeting reminders:** gated job `team-meeting-reminders`, every 15 minutes; it sleeps until the next reminder.
+  Hours come from Reminder Settings key `team_meeting` (default 24 and 1). It skips anyone who answered Not going,
+  and sends each reminder once (Redis key `team-meeting-reminder:{postId}:{hours}`). Writes to `team_meetings` or
+  church settings wake it.
+- **Poll notifications:** the team is told when a leader asks a question (`TEAM_SPACE_POLL`).
+- **My Week:** it lists the member's upcoming team meetings, except ones they've said they can't make.
+- **Measured** (1,000 meetings, about 20,000 RSVPs, 1,000 polls, about 18,000 votes): page details 7–9 ms; a meeting's
+  page 2.7 ms; RSVP and vote upserts 1–3 ms; reminder query 0.4 ms; My Week meetings 0.7 ms.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| POST | /team-spaces/:kind/:refId/meetings | leaders | `{ title, startsAt, endsAt?, location?, onlineLink?, agenda? }` |
+| GET | /team-spaces/meetings/:postId | team | Details, Going, Maybe, Not going and No reply lists, attendance and minutes |
+| PATCH | /team-spaces/meetings/:postId | leaders | Edit any field, or `{ cancel: true }` |
+| POST | /team-spaces/meetings/:postId/rsvp | team | `{ response: GOING \| MAYBE \| NOT_GOING }` |
+| PATCH | /team-spaces/meetings/:postId/minutes | leaders | `{ minutes }` |
+| PATCH | /team-spaces/meetings/:postId/attendance | leaders | `{ memberIds }`, the people who came |
+| POST | /team-spaces/:kind/:refId/polls | leaders | `{ question, options, multiple?, closesAt? }` |
+| POST | /team-spaces/polls/:postId/vote | team | `{ optionIds }`, can be changed until it closes |
+| POST | /team-spaces/polls/:postId/close | leaders | Closes the poll now |
+
 ### Team Pulse Module (`src/team-pulse/`)
 
 Recurring, anonymous check-ins a department's HOD or Assistant HOD sends their team about how **the team** is doing.

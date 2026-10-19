@@ -65,4 +65,9 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: "minutes before the late time (workers) or the start (members), to anyone who hasn't checked in",
     defaultThresholds: [15],
   },
+  [ReminderSettingKey.TEAM_MEETING]: {
+    label: 'Team Meeting Reminders',
+    unit: "hours before a department or fellowship meeting, to everyone except those who said they can't come",
+    defaultThresholds: [24, 1],
+  },
 };

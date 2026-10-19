@@ -32,6 +32,7 @@ describe('MyWeekService', () => {
     createQueryBuilder: jest.fn(() => qb(() => sessions)),
   };
   const churchSettings = { isEnabled: jest.fn() };
+  const spaces = { memberships: jest.fn().mockResolvedValue([]) };
   const planFeatures = { gateReason: jest.fn() };
   const service = new MyWeekService(
     rosterRepo as never,
@@ -41,6 +42,7 @@ describe('MyWeekService', () => {
     planFeatures as never,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
     { get: jest.fn().mockReturnValue('tenant-1') } as never,
+    spaces as never,
   );
 
   const prayerRow = (date: string, start: string, end: string) => ({

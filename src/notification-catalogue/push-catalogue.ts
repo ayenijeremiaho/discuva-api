@@ -52,6 +52,10 @@ export enum PushNotificationKey {
   TEAM_SPACE_LEADER_POST = 'TEAM_SPACE_LEADER_POST',
   TEAM_SPACE_REPLY = 'TEAM_SPACE_REPLY',
   TEAM_SPACE_DIGEST = 'TEAM_SPACE_DIGEST',
+  TEAM_SPACE_MEETING = 'TEAM_SPACE_MEETING',
+  TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
+  TEAM_SPACE_MEETING_REMINDER = 'TEAM_SPACE_MEETING_REMINDER',
+  TEAM_SPACE_POLL = 'TEAM_SPACE_POLL',
 }
 
 export interface PushTemplate {
@@ -620,6 +624,61 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     url: '/team-spaces',
     placeholders: {
       summary: '5 new in Choir and Ushering',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'New team meeting',
+    description:
+      'Sent to a department or fellowship when its leader sets up a meeting.',
+    title: '{{space_name}}: {{title}}',
+    body: '{{when}}. Tap to say if you can make it.',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      title: 'Planning meeting',
+      when: 'Sat 24 Oct at 5:00 PM',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING_CHANGED]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Team meeting moved or cancelled',
+    description: 'Sent to the team when a leader moves or cancels a meeting.',
+    title: '{{space_name}}: {{title}} {{change}}',
+    body: 'Tap for the details.',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      title: 'Planning meeting',
+      change: 'moved to Sun 25 Oct at 4:00 PM',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING_REMINDER]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Team meeting reminder',
+    description:
+      "Sent before a team meeting to everyone except those who said they can't come (timing set under Reminder Settings).",
+    title: '{{title}} {{when}}',
+    body: '{{space_name}}{{place}}',
+    url: '/team-spaces',
+    placeholders: {
+      title: 'Planning meeting',
+      when: 'tomorrow at 5:00 PM',
+      space_name: 'Choir',
+      place: ' · Room 2',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_POLL]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'New team poll',
+    description:
+      'Sent to a department or fellowship when its leader asks a quick question.',
+    title: '{{space_name}} asks',
+    body: '{{question}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      question: 'Which Saturday works for the retreat?',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {

@@ -17,8 +17,16 @@ import { MemberAuth } from '../../auth/interface/auth.interface';
 import { RequiresModule } from '../../church-settings/decorator/requires-module.decorator';
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { TeamSpaceService } from '../service/team-space.service';
+import { TeamSpaceExtrasService } from '../service/team-space-extras.service';
 import { TeamSpaceKindEnum } from '../entity/team-space.entity';
 import {
+  AttendanceDto,
+  CreateMeetingDto,
+  CreatePollDto,
+  MinutesDto,
+  RsvpDto,
+  UpdateMeetingDto,
+  VoteDto,
   PinPostDto,
   PostBodyDto,
   ReplyBodyDto,
@@ -32,7 +40,65 @@ const Uuid = (name: string) => Param(name, ParseUUIDPipe);
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('team-spaces')
 export class TeamSpaceController {
-  constructor(private readonly spaces: TeamSpaceService) {}
+  constructor(
+    private readonly spaces: TeamSpaceService,
+    private readonly extras: TeamSpaceExtrasService,
+  ) {}
+
+  @Get('meetings/:postId')
+  meeting(@CurrentUser() user: MemberAuth, @Uuid('postId') postId: string) {
+    return this.extras.meeting(user.id, postId);
+  }
+
+  @Patch('meetings/:postId')
+  updateMeeting(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: UpdateMeetingDto,
+  ) {
+    return this.extras.updateMeeting(user.id, postId, dto);
+  }
+
+  @Post('meetings/:postId/rsvp')
+  rsvp(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: RsvpDto,
+  ) {
+    return this.extras.rsvp(user.id, postId, dto.response);
+  }
+
+  @Patch('meetings/:postId/minutes')
+  minutes(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: MinutesDto,
+  ) {
+    return this.extras.saveMinutes(user.id, postId, dto.minutes);
+  }
+
+  @Patch('meetings/:postId/attendance')
+  attendance(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: AttendanceDto,
+  ) {
+    return this.extras.saveAttendance(user.id, postId, dto.memberIds);
+  }
+
+  @Post('polls/:postId/vote')
+  vote(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: VoteDto,
+  ) {
+    return this.extras.vote(user.id, postId, dto.optionIds);
+  }
+
+  @Post('polls/:postId/close')
+  closePoll(@CurrentUser() user: MemberAuth, @Uuid('postId') postId: string) {
+    return this.extras.closePoll(user.id, postId);
+  }
 
   @Get()
   list(@CurrentUser() user: MemberAuth) {
@@ -124,6 +190,26 @@ export class TeamSpaceController {
     @Body() dto: PostBodyDto,
   ) {
     return this.spaces.createPost(user.id, kind, refId, dto.body);
+  }
+
+  @Post(':kind/:refId/meetings')
+  createMeeting(
+    @CurrentUser() user: MemberAuth,
+    @Kind() kind: TeamSpaceKindEnum,
+    @Uuid('refId') refId: string,
+    @Body() dto: CreateMeetingDto,
+  ) {
+    return this.extras.createMeeting(user.id, kind, refId, dto);
+  }
+
+  @Post(':kind/:refId/polls')
+  createPoll(
+    @CurrentUser() user: MemberAuth,
+    @Kind() kind: TeamSpaceKindEnum,
+    @Uuid('refId') refId: string,
+    @Body() dto: CreatePollDto,
+  ) {
+    return this.extras.createPoll(user.id, kind, refId, dto);
   }
 
   @Patch(':kind/:refId/settings')

@@ -21,12 +21,13 @@ import { PlanFeatureResolverService } from '../../billing/service/plan-feature-r
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { addDays, localDate } from '../../event/types/slot-blueprint';
+import { TeamSpaceAccessService } from '../../team-space/service/team-space-access.service';
 
 const DAY_MS = 24 * 3600 * 1000;
 const WINDOW_DAYS = 7;
 
 export interface MyWeekItem {
-  kind: 'prayer' | 'fellowship' | 'class';
+  kind: 'prayer' | 'fellowship' | 'class' | 'meeting';
   id: string;
   title: string;
   detail: string | null;
@@ -51,6 +52,7 @@ export class MyWeekService {
     private readonly planFeatures: PlanFeatureResolverService,
     private readonly churchTimezone: ChurchTimezoneService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly spaces: TeamSpaceAccessService,
   ) {}
 
   async forMember(
@@ -60,7 +62,7 @@ export class MyWeekService {
   ): Promise<MyWeekItem[]> {
     const timezone = await this.churchTimezone.get();
     const until = new Date(now.getTime() + WINDOW_DAYS * DAY_MS);
-    const [prayer, fellowship, classes] = await Promise.all([
+    const [prayer, fellowship, classes, meetings] = await Promise.all([
       this.when('prayer', () =>
         this.prayer(memberId, workerProfileId, now, until, timezone),
       ),
@@ -68,8 +70,9 @@ export class MyWeekService {
         this.fellowships(memberId, now, until, timezone),
       ),
       this.when('classes', () => this.classes(memberId, now, until)),
+      this.when('team_spaces', () => this.meetings(memberId, now, until)),
     ]);
-    return [...prayer, ...fellowship, ...classes].sort((a, b) =>
+    return [...prayer, ...fellowship, ...classes, ...meetings].sort((a, b) =>
       a.startsAt.localeCompare(b.startsAt),
     );
   }
@@ -193,6 +196,53 @@ export class MyWeekService {
           url: `/small-groups/${g.id}`,
         },
       ];
+    });
+  }
+
+  // Team meetings in the member's spaces, leaving out ones they've said they can't make.
+  private async meetings(
+    memberId: string,
+    now: Date,
+    until: Date,
+  ): Promise<MyWeekItem[]> {
+    const memberships = await this.spaces.memberships(memberId);
+    if (!memberships.length) return [];
+    const rows = (await this.sessionRepo.query(
+      `SELECT m.post_id, m.title, m.starts_at, m.ends_at, m.location, s.kind, s.ref_id
+       FROM team_spaces s
+       JOIN team_meetings m ON m.space_id = s.id AND m.cancelled_at IS NULL AND m.starts_at > $4 AND m.starts_at <= $5
+       JOIN team_posts p ON p.id = m.post_id AND p.removed_at IS NULL
+       WHERE (s.kind, s.ref_id) IN (SELECT * FROM unnest($1::varchar[], $2::uuid[]))
+         AND NOT EXISTS (SELECT 1 FROM team_meeting_rsvps r WHERE r.meeting_id = m.post_id AND r.member_id = $3 AND r.response = 'NOT_GOING')`,
+      [
+        memberships.map((x) => x.kind),
+        memberships.map((x) => x.refId),
+        memberId,
+        new Date(now.getTime() - 3600 * 1000),
+        until,
+      ],
+    )) as {
+      post_id: string;
+      title: string;
+      starts_at: Date;
+      ends_at: Date | null;
+      location: string | null;
+      kind: string;
+      ref_id: string;
+    }[];
+    const byRef = new Map(memberships.map((x) => [`${x.kind}:${x.refId}`, x]));
+    return rows.map((r) => {
+      const space = byRef.get(`${r.kind}:${r.ref_id}`);
+      return {
+        kind: 'meeting' as const,
+        id: r.post_id,
+        title: r.title,
+        detail: [space?.name, r.location].filter(Boolean).join(' · ') || null,
+        role: space?.isLeader ? 'Leader' : null,
+        startsAt: new Date(r.starts_at).toISOString(),
+        endsAt: r.ends_at ? new Date(r.ends_at).toISOString() : null,
+        url: `/team-spaces/meeting/${r.post_id}`,
+      };
     });
   }
 
