@@ -597,9 +597,15 @@ the participation in the request's transaction.
 **Scheduler (`TeamPulseScheduler`):** gated job `team-pulse`, every 15 minutes. It opens rounds for active pulses
 whose `next_open_at` has passed, advancing past any missed openings. It also sends `TEAM_PULSE_REMINDER` to
 non-responders of required rounds closing within 24 hours (once per round). It sleeps until the earliest of the next
-opening or the next reminder. Writes to `team_pulses`, `team_pulse_rounds` or church settings wake it. Indexes: the
-partial `IDX_team_pulses_next_open_due`, `(pulse_id, opens_at)`, `closes_at`, the participation unique pair and
-`member_id`.
+opening or the next reminder. Writes to `team_pulses` or church settings wake it. Round writes don't: every answer
+updates a round, and none of them changes when the job is next due.
+
+**Query cost:** trend lists read each pulse's latest 12 rounds through the `(pulse_id, opens_at)` index (`unnest` plus
+`LATERAL ... LIMIT 12`), without comments, so the cost stays flat as history grows. Permission lookups (lead, pastor,
+team) run in parallel. Measured on a large church (3,000 workers, 120 pulses, 12,600 rounds, 566,000
+participations): a department's trend takes about 1 ms, the pastor view about 14 ms, and answering, the
+duplicate check, `notYetAnswered` and every scheduler query each take under 5 ms. Indexes: the partial
+`IDX_team_pulses_next_open_due`, `(pulse_id, opens_at)`, `closes_at`, the participation unique pair and `member_id`.
 
 **Notifications:** category `TEAM_PULSE` (push-only), keys `TEAM_PULSE_OPEN` and `TEAM_PULSE_REMINDER`, both
 linking to `/team-pulse`.

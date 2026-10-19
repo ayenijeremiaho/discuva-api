@@ -23,7 +23,6 @@ import { ChurchSetting } from '../../church-settings/entity/church-setting.entit
 import { SocialAccount } from '../../social-media/entity/social-account.entity';
 import { SmallGroup } from '../../small-group/entity/small-group.entity';
 import { TeamPulse } from '../../team-pulse/entity/team-pulse.entity';
-import { TeamPulseRound } from '../../team-pulse/entity/team-pulse-round.entity';
 
 // Which gated jobs depend on each table. Any insert/update/delete, through any code path, wakes them for that church.
 export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
@@ -72,8 +71,8 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   ],
   [SmallGroup, ['fellowship-reminders']],
   [SocialAccount, ['social-live']],
+  // Not rounds: answers update them every few seconds and never change when the job is next due.
   [TeamPulse, ['team-pulse']],
-  [TeamPulseRound, ['team-pulse']],
 ]);
 
 @Injectable()

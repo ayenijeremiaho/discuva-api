@@ -85,6 +85,7 @@ describe('TeamPulseService', () => {
   let answered: boolean;
 
   const roundRepo = {
+    query: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn((r) => Promise.resolve({ id: 'r-new', ...r })),
     create: jest.fn((r) => r),
@@ -313,12 +314,18 @@ describe('TeamPulseService', () => {
         invitedCount: 5,
         ratings: tally(2),
       };
-      const q = qb(null);
-      q.getRawAndEntities = jest.fn().mockResolvedValue({
-        entities: [closedOld, closedNew, open],
-        raw: [{ pulse_id: 'p1' }, { pulse_id: 'p1' }, { pulse_id: 'p1' }],
+      const row = (r: typeof open) => ({
+        id: 'x',
+        pulse_id: 'p1',
+        opens_at: r.opensAt,
+        closes_at: r.closesAt,
+        invited_count: r.invitedCount,
+        response_count: r.responseCount,
+        ratings: r.ratings,
       });
-      roundRepo.createQueryBuilder.mockReturnValueOnce(q);
+      roundRepo.query.mockResolvedValueOnce(
+        [closedOld, closedNew, open].map(row),
+      );
       const [dept] = (await service.overview('m1', now)) as {
         pulses: Record<string, unknown>[];
       }[];

@@ -589,23 +589,40 @@ export class TeamPulseService {
     return rows.map((r) => r.id);
   }
 
+  // Each pulse's latest rounds straight from the (pulse_id, opens_at) index, so the cost doesn't grow with history.
+  // Comments are left out: trends only need the totals, and comments load with a round's own results.
   private async recentRounds(
     pulseIds: string[],
   ): Promise<Map<string, TeamPulseRound[]>> {
-    const rows = await this.roundRepo
-      .createQueryBuilder('r')
-      .addSelect('r.pulse_id', 'pulse_id')
-      .where(
-        `r.id IN (SELECT x.id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY pulse_id ORDER BY opens_at DESC) AS n FROM team_pulse_rounds WHERE pulse_id IN (:...pulseIds)) x WHERE x.n <= :limit)`,
-        { pulseIds, limit: TREND_ROUNDS },
-      )
-      .orderBy('r.opensAt', 'ASC')
-      .getRawAndEntities();
+    const rows = await this.roundRepo.query(
+      `SELECT r.id, r.pulse_id, r.opens_at, r.closes_at, r.invited_count, r.response_count, r.ratings
+       FROM unnest($1::uuid[]) AS p(id)
+       CROSS JOIN LATERAL (
+         SELECT * FROM team_pulse_rounds WHERE pulse_id = p.id ORDER BY opens_at DESC LIMIT $2
+       ) r
+       ORDER BY r.opens_at ASC`,
+      [pulseIds, TREND_ROUNDS],
+    );
     const map = new Map<string, TeamPulseRound[]>();
-    rows.entities.forEach((round, i) => {
-      const pulseId = (rows.raw[i] as { pulse_id: string }).pulse_id;
-      map.set(pulseId, [...(map.get(pulseId) ?? []), round]);
-    });
+    for (const row of rows as {
+      id: string;
+      pulse_id: string;
+      opens_at: Date;
+      closes_at: Date;
+      invited_count: number;
+      response_count: number;
+      ratings: TeamPulseRound['ratings'];
+    }[]) {
+      const round = Object.assign(new TeamPulseRound(), {
+        id: row.id,
+        opensAt: new Date(row.opens_at),
+        closesAt: new Date(row.closes_at),
+        invitedCount: Number(row.invited_count),
+        responseCount: Number(row.response_count),
+        ratings: row.ratings ?? {},
+      });
+      map.set(row.pulse_id, [...(map.get(row.pulse_id) ?? []), round]);
+    }
     return map;
   }
 
@@ -613,11 +630,14 @@ export class TeamPulseService {
     memberId: string,
     departmentId: string,
   ): Promise<Access> {
-    if ((await this.leadDepartmentIds(memberId)).includes(departmentId))
-      return 'lead';
-    if (await this.isPastor(memberId)) return 'pastor';
-    if ((await this.workerDepartmentIds(memberId)).includes(departmentId))
-      return 'member';
+    const [leads, pastor, teams] = await Promise.all([
+      this.leadDepartmentIds(memberId),
+      this.isPastor(memberId),
+      this.workerDepartmentIds(memberId),
+    ]);
+    if (leads.includes(departmentId)) return 'lead';
+    if (pastor) return 'pastor';
+    if (teams.includes(departmentId)) return 'member';
     throw new ForbiddenException("This isn't one of your teams.");
   }
 
