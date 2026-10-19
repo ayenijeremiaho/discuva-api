@@ -667,15 +667,27 @@ cover I could take 9 ms, reminders 3.8 ms. All are index-driven, with no full sc
 
 ### Team Spaces Module (`src/team-space/`)
 
-A shared space for each department and fellowship: posts, replies, up to 3 pinned posts per space, and one evening
-summary. Module key `team_spaces` (root migration `AddTeamSpacesToPlans` adds it to every plan that has
+A shared space for each department, fellowship and volunteering opportunity: posts, replies, up to 3 pinned posts per
+space, and one evening summary. Module key `team_spaces` (root migration `AddTeamSpacesToPlans` adds it to every plan that has
 `departments`).
 
 **Who is in a space:** membership is never stored; it comes straight from the roster.
 - **Department:** active workers whose primary or secondary department it is, plus its HOD and Assistant HOD.
 - **Fellowship:** `small_group_members`, plus the fellowship's leader.
-- **Leaders:** department leads, or the fellowship leader. They can pin and remove anything, and can switch the space
+- **Volunteering** (needs the `volunteering` module too): `CONFIRMED` sign-ups, plus the opportunity's leaders: the
+  member account of the admin who created it, and the leads of its department if it has one. Cancelling a sign-up
+  removes access straight away.
+- **Leaders:** department leads, the fellowship leader, or the volunteering leaders above. They can pin and remove anything, and can switch the space
   to "Only leaders can start posts" (`leaders_only`).
+
+**Volunteering spaces close:** they take posts, replies, polls and votes until 3 days after the event
+(`VOLUNTEER_SPACE_OPEN_DAYS`), or until the opportunity is cancelled; after that they stay readable (`closed: true`,
+writes return 403). They're listed until 14 days after the event (`VOLUNTEER_SPACE_LISTED_DAYS`), and cancelled
+opportunities aren't listed. Meetings aren't offered for a one-off event (400); posts and polls are. No new tables or
+indexes: the lookups use the existing indexes on `volunteer_signups (member_id)`, `(opportunity_id)` and
+`volunteer_opportunities (created_by_id)`, `(department_id)`, `(date)`. Measured with 2,000 opportunities and 40,000
+sign-ups: a member's volunteering spaces 1–4 ms (13 ms for an admin who created all 2,000), opening one 0.1 ms, its
+roster 0.4 ms, no sequential scans.
 
 **Under 18:** members under 18 can read and reply, but can't start posts. Age comes from the profile's birth year,
 month and day (`isUnder18`); without a birth year, someone counts as an adult. There are no private messages: everything
@@ -713,12 +725,13 @@ All recipient and name lookups happen inside the request; only the send itself f
 `TEAM_POST_REMOVED` when a leader removes someone else's post or reply, and `TEAM_SPACE_SETTINGS_UPDATED`. Contents
 are never logged.
 
-**Endpoints** (`JwtAuthGuard`, module `team_spaces`; `:kind` is `DEPARTMENT` or `FELLOWSHIP`):
+**Endpoints** (`JwtAuthGuard`, module `team_spaces`; `:kind` is `DEPARTMENT`, `FELLOWSHIP` or `VOLUNTEERING`, where
+`:refId` is the opportunity id):
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| GET | /team-spaces | any member | My spaces with `isLeader`, `leadersOnly`, `lastActivityAt` and `unread` (max 99) |
-| GET | /team-spaces/:kind/:refId | team | Opens the space (marks it read): `canPost`, `isUnder18`, `isLeader` and pinned posts |
+| GET | /team-spaces | any member | My spaces with `isLeader`, `leadersOnly`, `lastActivityAt` and `unread` (max 99); volunteering ones add `eventAt` and `closed` |
+| GET | /team-spaces/:kind/:refId | team | Opens the space (marks it read): `canPost`, `isUnder18`, `isLeader`, `closed`, `eventAt` and pinned posts |
 | GET | /team-spaces/:kind/:refId/posts?cursor= | team | Feed page of 20 (pinned posts excluded) with `nextCursor` |
 | POST | /team-spaces/:kind/:refId/posts | team (not under 18; leaders only if `leadersOnly`) | `{ body }` |
 | PATCH | /team-spaces/:kind/:refId/settings | leaders | `{ leadersOnly }` |

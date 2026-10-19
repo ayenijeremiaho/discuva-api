@@ -237,6 +237,10 @@ export class TeamSpaceExtrasService {
     dto: CreateMeetingDto,
     now = new Date(),
   ) {
+    if (kind === TeamSpaceKindEnum.VOLUNTEERING)
+      throw new BadRequestException(
+        "Volunteering spaces don't have meetings. Post the details instead.",
+      );
     const acc = await this.leaderAccess(memberId, kind, refId);
     const startsAt = new Date(dto.startsAt);
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
@@ -548,7 +552,9 @@ export class TeamSpaceExtrasService {
     });
     if (!poll || poll.post.removedAt)
       throw new NotFoundException('Poll not found');
-    await this.access.accessBySpace(memberId, poll.post.space);
+    this.access.assertOpen(
+      await this.access.accessBySpace(memberId, poll.post.space),
+    );
     if (poll.closesAt && poll.closesAt <= now)
       throw new BadRequestException('This poll has closed.');
     const valid = new Set(poll.options.map((o) => o.id));
@@ -588,6 +594,7 @@ export class TeamSpaceExtrasService {
       throw new ForbiddenException(
         'Only leaders can set up meetings and polls.',
       );
+    this.access.assertOpen(acc);
     return acc;
   }
 

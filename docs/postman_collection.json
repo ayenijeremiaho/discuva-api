@@ -28333,6 +28333,30 @@
           }
         },
         {
+          "name": "Open a volunteering space",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/VOLUNTEERING/{{opportunity_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "VOLUNTEERING",
+                "{{opportunity_id}}"
+              ]
+            },
+            "description": "For people signed up to the opportunity and its leaders. Returns closed: true (read-only) from 3 days after the event. No meetings in these spaces."
+          }
+        },
+        {
           "name": "Feed page",
           "request": {
             "method": "GET",

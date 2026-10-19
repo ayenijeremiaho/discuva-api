@@ -13,6 +13,9 @@ describe('TeamSpaceExtrasService', () => {
   const access = {
     access: jest.fn(() => Promise.resolve(acc)),
     accessBySpace: jest.fn(() => Promise.resolve(acc)),
+    assertOpen: jest.fn((a: { closed?: boolean }) => {
+      if (a.closed) throw new ForbiddenException('closed');
+    }),
     memberIds: jest.fn().mockResolvedValue(['m1', 'm2', 'm3']),
   };
   const spaceRepo = {
@@ -83,6 +86,20 @@ describe('TeamSpaceExtrasService', () => {
       const push = notifications.notifyMember.mock.calls[0][0].push;
       expect(push.memberIds).toEqual(['m2', 'm3']);
       expect(push.vars.when).toBe('Sat 24 Oct at 5:00 PM');
+    });
+
+    it("doesn't offer meetings in volunteering spaces", async () => {
+      acc.isLeader = true;
+      await expect(
+        service.createMeeting(
+          'm1',
+          TeamSpaceKindEnum.VOLUNTEERING,
+          'o1',
+          dto,
+          now,
+        ),
+      ).rejects.toThrow("Volunteering spaces don't have meetings.");
+      expect(access.access).not.toHaveBeenCalled();
     });
 
     it("doesn't let members set up meetings, or schedule one in the past", async () => {
@@ -435,6 +452,14 @@ describe('TeamSpaceExtrasService', () => {
       await expect(
         service.vote('m2', 'p9', ['a', 'b', 'a'], now),
       ).resolves.toEqual({ myVote: ['a', 'b'] });
+    });
+
+    it('stops votes once a volunteering space has closed', async () => {
+      pollRepo.findOne.mockResolvedValue(poll());
+      acc.closed = true;
+      await expect(service.vote('m2', 'p9', ['a'], now)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
     it('stops votes once closed', async () => {

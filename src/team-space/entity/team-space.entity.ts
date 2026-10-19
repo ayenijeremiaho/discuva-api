@@ -4,9 +4,10 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 export enum TeamSpaceKindEnum {
   DEPARTMENT = 'DEPARTMENT',
   FELLOWSHIP = 'FELLOWSHIP',
+  VOLUNTEERING = 'VOLUNTEERING',
 }
 
-// A department's or fellowship's shared space. Membership isn't stored: it follows the roster.
+// A department's, fellowship's or volunteering opportunity's shared space. Membership isn't stored: it follows the roster.
 @Entity({ name: 'team_spaces' })
 @Unique(['kind', 'refId'])
 export class TeamSpace extends BaseEntity {
@@ -16,7 +17,7 @@ export class TeamSpace extends BaseEntity {
   @Column({ type: 'varchar' })
   kind: TeamSpaceKindEnum;
 
-  // The department's or fellowship's id.
+  // The department's, fellowship's or volunteering opportunity's id.
   @Column({ type: 'uuid', name: 'ref_id' })
   refId: string;
 

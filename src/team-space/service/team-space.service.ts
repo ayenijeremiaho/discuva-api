@@ -169,7 +169,10 @@ export class TeamSpaceService {
       isLeader: acc.isLeader,
       leadersOnly: acc.space.leadersOnly,
       isUnder18: minor,
-      canPost: !minor && (!acc.space.leadersOnly || acc.isLeader),
+      eventAt: acc.eventAt ?? null,
+      closed: !!acc.closed,
+      canPost:
+        !acc.closed && !minor && (!acc.space.leadersOnly || acc.isLeader),
       pinned: pinned.map((p) => this.toPost(p, memberId, acc, details)),
       upcomingMeetings,
     };
@@ -209,6 +212,7 @@ export class TeamSpaceService {
       this.access.access(memberId, kind, refId),
       this.access.isMinor(memberId),
     ]);
+    this.access.assertOpen(acc);
     if (minor)
       throw new ForbiddenException(
         'Members under 18 can read and reply to posts, but not start them.',
@@ -322,7 +326,7 @@ export class TeamSpaceService {
     return {
       space: { kind: acc.kind, refId: acc.refId, name: acc.name },
       post: this.toPost(postRow[0], memberId, acc, details),
-      canReply: true,
+      canReply: !acc.closed,
       isUnder18: minor,
       replies: page.map((r) => ({
         id: r.id,
@@ -348,6 +352,7 @@ export class TeamSpaceService {
   ) {
     const post = await this.findPost(postId);
     const acc = await this.access.accessBySpace(memberId, post.space);
+    this.access.assertOpen(acc);
     const reply = await this.replyRepo.save(
       this.replyRepo.create({
         post: { id: postId } as TeamPost,

@@ -58,6 +58,9 @@ describe('TeamSpaceService', () => {
   const access = {
     access: jest.fn(() => Promise.resolve(acc)),
     accessBySpace: jest.fn(() => Promise.resolve(acc)),
+    assertOpen: jest.fn((a: { closed?: boolean }) => {
+      if (a.closed) throw new ForbiddenException('closed');
+    }),
     isMinor: jest.fn(() => Promise.resolve(minor)),
     memberIds: jest.fn().mockResolvedValue(['m1', 'm2', 'm3']),
     memberships: jest.fn(),
@@ -145,6 +148,17 @@ describe('TeamSpaceService', () => {
       await expect(service.createPost('m1', DEPT, 'd1', 'Hi')).rejects.toThrow(
         'Members under 18 can read and reply to posts, but not start them.',
       );
+    });
+
+    it('stops new posts and replies once a volunteering space has closed', async () => {
+      acc.closed = true;
+      await expect(service.createPost('m1', DEPT, 'd1', 'Hi')).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(service.reply('m1', 'p1', 'Thanks')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(postRepo.save).not.toHaveBeenCalled();
     });
 
     it('keeps leaders-only spaces to leaders', async () => {

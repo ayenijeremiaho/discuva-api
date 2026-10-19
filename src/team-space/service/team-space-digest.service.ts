@@ -130,7 +130,7 @@ export class TeamSpaceDigestService {
   private async spaceNames(spaces: TeamSpace[]): Promise<Map<string, string>> {
     const ids = (kind: TeamSpaceKindEnum) =>
       spaces.filter((s) => s.kind === kind).map((s) => s.refId);
-    const [departments, groups] = await Promise.all([
+    const [departments, groups, opportunities] = await Promise.all([
       this.spaceRepo.query(
         `SELECT id, name FROM departments WHERE id = ANY($1)`,
         [ids(TeamSpaceKindEnum.DEPARTMENT)],
@@ -139,9 +139,13 @@ export class TeamSpaceDigestService {
         `SELECT id, name FROM small_groups WHERE id = ANY($1)`,
         [ids(TeamSpaceKindEnum.FELLOWSHIP)],
       ) as Promise<{ id: string; name: string }[]>,
+      this.spaceRepo.query(
+        `SELECT id, title AS name FROM volunteer_opportunities WHERE id = ANY($1)`,
+        [ids(TeamSpaceKindEnum.VOLUNTEERING)],
+      ) as Promise<{ id: string; name: string }[]>,
     ]);
     const byRef = new Map(
-      [...departments, ...groups].map((r) => [r.id, r.name]),
+      [...departments, ...groups, ...opportunities].map((r) => [r.id, r.name]),
     );
     return new Map(
       spaces.map((s) => [s.id, byRef.get(s.refId) ?? 'your team']),
