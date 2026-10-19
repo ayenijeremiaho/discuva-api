@@ -565,6 +565,54 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### Serving Rota Module (`src/serving-rota/`)
+
+Who serves with each department at each service, and swapping when someone can't make it. Module key `serving_rota`
+(root migration `AddServingRotaToPlans` adds it to every plan that has `departments`). Everything is in the member app
+under More → Serving Rota.
+
+**Tables** (tenant migration `CreateServingRota`):
+- `rota_assignments`: department, `service_slot_id`, member, optional `role` (≤ 80 characters, e.g. "Main door") and
+  `assigned_by_id`. Unique on `(service_slot_id, department_id, member_id)`; indexes on `member_id` and
+  `(department_id, service_slot_id)`.
+- `rota_cover_requests`: assignment, department, `requested_by_id`, optional `target_member_id` (null means anyone in
+  the department), reason, and `status` `OPEN`/`ACCEPTED`/`CANCELLED`, plus `accepted_by_id` and `resolved_at`. A
+  partial unique index allows one open request per duty; a partial index covers each department's open requests.
+
+**Rules:**
+- **Planning:** HODs and Assistant HODs plan up to 8 weeks ahead. They pick a service and tick the department's active
+  workers (primary or secondary department), with an optional role each. "Copy last rota" pre-fills the previous rota.
+  The picker shows anyone already serving with another department at the same service. Saving sends the whole list:
+  removals, additions and role changes are applied as a diff. Only the people added (`ROTA_ASSIGNED`, one send per
+  role) or removed (`ROTA_REMOVED`) are told. Started services can't be changed. Audit: `ROTA_UPDATED` with counts.
+- **Asking for cover:** a worker asks for cover on their own future duty, from everyone in the department who isn't
+  already serving then, or from one chosen teammate (`ROTA_COVER_NEEDED`). The asker or a leader can cancel it.
+- **Accepting cover:** the first eligible teammate to accept takes the duty. The request row is locked
+  (`pessimistic_write`) and the assignment moves to them. It checks that the request is still open, the service
+  hasn't started, it isn't the asker's own request, it matches the chosen teammate, the person is an active worker
+  in the department, and they aren't already on the rota then. The asker and the department leads are told
+  (`ROTA_COVER_TAKEN`). Audit: `ROTA_COVER_ACCEPTED`.
+- **Reminders:** gated job `rota-reminders`, every 15 minutes; it sleeps until the next reminder. Hours come from
+  Reminder Settings key `rota_duty` (default 24 and 2). There's one send per department and role at each service, and
+  each is sent once (Redis key `rota-reminder:{slotId}:{hours}`). Writes to `rota_assignments`, `service_slots` or
+  church settings wake it.
+- **My Week:** it lists the member's duties (`kind: 'duty'`).
+
+**Query cost** (two years of services: 315 services, 3,000 workers, 40 departments, about 118,000 duties, about 3,500
+cover requests): the leader's 8-week list 13 ms, one service's rota 4.6 ms, the team picker 4.6 ms, my duties 3.4 ms,
+cover I could take 9 ms, reminders 3.8 ms. All are index-driven, with no full scans.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /rota/mine | any worker | My duties for the next 8 weeks (with my open cover request), and cover requests I could take |
+| GET | /rota/departments | any worker | Departments I serve in or lead (`isLeader`) |
+| GET | /rota/departments/:departmentId/services | that department | Next 8 weeks of services with `assigned`, `openCover` and `mine` |
+| GET | /rota/departments/:departmentId/services/:slotId | that department | The rota for one service; leaders also get `team` (with `servingElsewhere`) and `previous` |
+| PUT | /rota/departments/:departmentId/services/:slotId | leads | `{ entries: [{ memberId, role? }] }`, the whole list |
+| POST | /rota/assignments/:assignmentId/cover | the person serving | `{ targetMemberId?, reason? }` |
+| POST | /rota/cover/:requestId/accept | eligible teammates | Takes the duty; 409 if someone was quicker |
+| DELETE | /rota/cover/:requestId | asker or leads | Cancels the request |
+
 ### Team Spaces Module (`src/team-space/`)
 
 A shared space for each department and fellowship: posts, replies, up to 3 pinned posts per space, and one evening
@@ -4782,6 +4830,7 @@ dedicated host).
 | `FELLOWSHIPS` | `EMAIL_FELLOWSHIPS_ENABLED` | `true` (to a fellowship leader when a member misses three meetings in a row) |
 | `TEAM_PULSE` | `EMAIL_TEAM_PULSE_ENABLED` | `true` (push-only: a department's check-in opened, and the day-before reminder for a required one) |
 | `TEAM_SPACES` | `EMAIL_TEAM_SPACES_ENABLED` | `true` (push-only: a leader's new post, a reply to your post, the evening summary; members can opt out) |
+| `SERVING_ROTA` | `EMAIL_SERVING_ROTA_ENABLED` | `true` (push-only: put on or taken off the rota, serving reminders, cover requests and cover found) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 **Prayer request, facility rental and fellowship notifications** (push, with email for members without push; each category switchable per church and push-first capable). *Prayer requests* (`PrayerRequestService.updateStatus`): only a change of status notifies, so re-saving never sends twice; `PRAYED_FOR` → `PRAYER_REQUEST_PRAYED_FOR` / `prayer-request-prayed-for`, `ANSWERED` → `PRAYER_REQUEST_ANSWERED` / `prayer-request-answered` (invites a testimony); the email quotes the request (first 200 characters); requests without a member (deactivated) send nothing; push idempotency `prayer-request:{id}:{status}`. *Facility rental* (`RentalNotifierService`, facility, date and time in the church timezone, amounts as `{currency} 1,234.00`): `confirmBooking` → `RENTAL_BOOKING_CONFIRMED` (with total), `rejectBooking` → `RENTAL_BOOKING_REJECTED` (with the reason), `markPaymentPaid` → `RENTAL_PAYMENT_RECEIVED` (booking fee or caution deposit, with reference), `markCautionRefunded` → `RENTAL_CAUTION_REFUNDED`. The day-before reminder (`RENTAL_BOOKING_REMINDER`) is sent by `RentalStatusScheduler` once per booking: `rental_bookings.reminder_sent_at` (tenant migration `AddRentalBookingReminderSentAt`, partial index `IDX_rental_bookings_reminder_due` on `start_date_time` WHERE `status = 'CONFIRMED' AND reminder_sent_at IS NULL`) is set before sending, the query covers bookings starting within 24 hours, `nextTransitionDue` includes each confirmed booking's reminder time so the gated scheduler wakes for it, and a booking confirmed within 24 hours of starting is marked reminded at confirmation (the confirmation stands in for it). *Fellowships* (`SmallGroupService.recordAttendance`): for members newly marked absent in that save (not the leader, not already absent), one windowed query reads each one's last four meetings in the group (served by `IDX_small_group_attendance_group_id_meeting_date`); the leader is told (`FELLOWSHIP_MEMBER_MISSING` / `fellowship-member-missing`, linking to `/small-groups/{id}` with the three dates) only when this meeting is their latest and the run of absences is exactly three, so it fires once per run, never on re-saves or edits to older meetings. Fellowship meeting reminders: see the Small Group Module's *Meeting schedule*. A notice can never undo what it reports: `RentalNotifierService` methods catch and log their own errors, and the fellowship alert is caught in `recordAttendance`, because each request runs in one transaction that rolls back on an error (a failed reminder is logged once and not retried). Timezone and currency for the wording come from caches (in-memory and Redis), so notices add no database round trip.
@@ -8629,6 +8678,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_FELLOWSHIPS_ENABLED` | `true` | Fellowship leader alert for three missed meetings in a row |
 | `EMAIL_TEAM_PULSE_ENABLED` | `true` | Team Pulse check-in notices (push-only) |
 | `EMAIL_TEAM_SPACES_ENABLED` | `true` | Team Spaces notifications (push-only) |
+| `EMAIL_SERVING_ROTA_ENABLED` | `true` | Serving Rota notifications (push-only) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP

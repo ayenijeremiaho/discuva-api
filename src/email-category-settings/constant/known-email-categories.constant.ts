@@ -149,4 +149,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         "App notifications from department and fellowship spaces: a leader's new post, a reply to your post, and one evening summary of anything you haven't read.",
     },
+    [EmailCategory.SERVING_ROTA]: {
+      label: 'Serving Rota',
+      description:
+        'App notifications to workers when they are put on (or taken off) the rota, reminders before they serve, and cover requests from teammates.',
+    },
   };

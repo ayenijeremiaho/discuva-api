@@ -70,4 +70,9 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: "hours before a department or fellowship meeting, to everyone except those who said they can't come",
     defaultThresholds: [24, 1],
   },
+  [ReminderSettingKey.ROTA_DUTY]: {
+    label: 'Serving Rota Reminders',
+    unit: 'hours before a service, to everyone on the rota for it',
+    defaultThresholds: [24, 2],
+  },
 };

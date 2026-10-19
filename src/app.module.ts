@@ -53,6 +53,7 @@ import { NotificationPreferencesModule } from './notification-preferences/notifi
 import { MyWeekModule } from './my-week/my-week.module';
 import { TeamPulseModule } from './team-pulse/team-pulse.module';
 import { TeamSpaceModule } from './team-space/team-space.module';
+import { ServingRotaModule } from './serving-rota/serving-rota.module';
 import { NotificationCatalogueModule } from './notification-catalogue/notification-catalogue.module';
 import { IncidentReportModule } from './incident-report/incident-report.module';
 import { SermonModule } from './sermon/sermon.module';
@@ -271,6 +272,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     MyWeekModule,
     TeamPulseModule,
     TeamSpaceModule,
+    ServingRotaModule,
     NotificationCatalogueModule,
     IncidentReportModule,
     SermonModule,

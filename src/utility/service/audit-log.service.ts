@@ -316,7 +316,10 @@ export type AuditAction =
   | 'TEAM_PULSE_REMINDER_SENT'
   // Team Spaces (post contents are never logged)
   | 'TEAM_POST_REMOVED'
-  | 'TEAM_SPACE_SETTINGS_UPDATED';
+  | 'TEAM_SPACE_SETTINGS_UPDATED'
+  // Serving Rota
+  | 'ROTA_UPDATED'
+  | 'ROTA_COVER_ACCEPTED';
 
 export interface AuditContext {
   actorId?: string;

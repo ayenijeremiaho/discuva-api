@@ -11,4 +11,5 @@ export enum ReminderSettingKey {
   SERVICE_REMINDER = 'service_reminder',
   CHECKIN_NUDGE = 'checkin_nudge',
   TEAM_MEETING = 'team_meeting',
+  ROTA_DUTY = 'rota_duty',
 }

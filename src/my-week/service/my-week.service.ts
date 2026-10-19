@@ -27,7 +27,7 @@ const DAY_MS = 24 * 3600 * 1000;
 const WINDOW_DAYS = 7;
 
 export interface MyWeekItem {
-  kind: 'prayer' | 'fellowship' | 'class' | 'meeting';
+  kind: 'prayer' | 'fellowship' | 'class' | 'meeting' | 'duty';
   id: string;
   title: string;
   detail: string | null;
@@ -62,7 +62,7 @@ export class MyWeekService {
   ): Promise<MyWeekItem[]> {
     const timezone = await this.churchTimezone.get();
     const until = new Date(now.getTime() + WINDOW_DAYS * DAY_MS);
-    const [prayer, fellowship, classes, meetings] = await Promise.all([
+    const [prayer, fellowship, classes, meetings, duties] = await Promise.all([
       this.when('prayer', () =>
         this.prayer(memberId, workerProfileId, now, until, timezone),
       ),
@@ -71,9 +71,10 @@ export class MyWeekService {
       ),
       this.when('classes', () => this.classes(memberId, now, until)),
       this.when('team_spaces', () => this.meetings(memberId, now, until)),
+      this.when('serving_rota', () => this.duties(memberId, now, until)),
     ]);
-    return [...prayer, ...fellowship, ...classes, ...meetings].sort((a, b) =>
-      a.startsAt.localeCompare(b.startsAt),
+    return [...prayer, ...fellowship, ...classes, ...meetings, ...duties].sort(
+      (a, b) => a.startsAt.localeCompare(b.startsAt),
     );
   }
 
@@ -244,6 +245,44 @@ export class MyWeekService {
         url: `/team-spaces/meeting/${r.post_id}`,
       };
     });
+  }
+
+  // Services the member is on the rota for.
+  private async duties(
+    memberId: string,
+    now: Date,
+    until: Date,
+  ): Promise<MyWeekItem[]> {
+    const rows = (await this.sessionRepo.query(
+      `SELECT a.id, a.role, d.name AS department_name, ss.name, e.name AS event_name, ss.start_time, ss.end_time
+       FROM rota_assignments a
+       JOIN service_slots ss ON ss.id = a.service_slot_id
+       JOIN events e ON e.id = ss.event_id
+       JOIN departments d ON d.id = a.department_id
+       WHERE a.member_id = $1 AND ss.end_time > $2 AND ss.start_time <= $3`,
+      [memberId, now, until],
+    )) as {
+      id: string;
+      role: string | null;
+      department_name: string;
+      name: string;
+      event_name: string;
+      start_time: Date;
+      end_time: Date;
+    }[];
+    return rows.map((r) => ({
+      kind: 'duty' as const,
+      id: r.id,
+      title:
+        r.event_name && r.event_name !== r.name
+          ? `${r.event_name} · ${r.name}`
+          : r.name,
+      detail: [r.department_name, r.role].filter(Boolean).join(' · '),
+      role: 'Serving',
+      startsAt: new Date(r.start_time).toISOString(),
+      endsAt: new Date(r.end_time).toISOString(),
+      url: '/rota',
+    }));
   }
 
   private async classes(

@@ -1,3 +1,4 @@
+import { RotaAssignment } from '../../serving-rota/entity/rota-assignment.entity';
 import { TeamMeeting } from '../../team-space/entity/team-meeting.entity';
 import { TeamPulse } from '../../team-pulse/entity/team-pulse.entity';
 import { SchedulerGateSubscriber } from './scheduler-gate.subscriber';
@@ -42,6 +43,7 @@ describe('SchedulerGateSubscriber', () => {
         'social-live',
         'service-reminders',
         'checkin-nudges',
+        'rota-reminders',
       ],
     ],
     ['a rental booking', RentalBooking, ['rental-status']],
@@ -63,12 +65,14 @@ describe('SchedulerGateSubscriber', () => {
         'team-pulse',
         'team-space-digest',
         'team-meeting-reminders',
+        'rota-reminders',
       ],
     ],
     ['a fellowship', SmallGroup, ['fellowship-reminders']],
     ['a social account', SocialAccount, ['social-live']],
     ['a team pulse', TeamPulse, ['team-pulse']],
     ['a team meeting', TeamMeeting, ['team-meeting-reminders']],
+    ['a rota assignment', RotaAssignment, ['rota-reminders']],
   ])('wakes the jobs that depend on %s', (_label, target, jobs) => {
     subscriber.afterInsert(ev(target));
     subscriber.afterUpdate(ev(target));

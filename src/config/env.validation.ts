@@ -204,6 +204,7 @@ export const envValidationSchema = Joi.object({
   EMAIL_FELLOWSHIPS_ENABLED: Joi.boolean().default(true),
   EMAIL_TEAM_PULSE_ENABLED: Joi.boolean().default(true),
   EMAIL_TEAM_SPACES_ENABLED: Joi.boolean().default(true),
+  EMAIL_SERVING_ROTA_ENABLED: Joi.boolean().default(true),
 
   BULL_BOARD_USER: Joi.string().allow('').optional(),
   BULL_BOARD_PASSWORD: Joi.string().allow('').optional(),

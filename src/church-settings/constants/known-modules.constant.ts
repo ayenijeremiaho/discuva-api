@@ -12,6 +12,7 @@ export const KNOWN_MODULES = [
   { key: 'pastor_feedback', moduleName: 'Pastor Feedback', required: false },
   { key: 'team_pulse', moduleName: 'Team Pulse', required: false },
   { key: 'team_spaces', moduleName: 'Team Spaces', required: false },
+  { key: 'serving_rota', moduleName: 'Serving Rota', required: false },
   { key: 'prayer', moduleName: 'Prayer', required: false },
   { key: 'sunday_school', moduleName: 'Sunday School', required: false },
   {

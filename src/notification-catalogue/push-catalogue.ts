@@ -56,6 +56,11 @@ export enum PushNotificationKey {
   TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
   TEAM_SPACE_MEETING_REMINDER = 'TEAM_SPACE_MEETING_REMINDER',
   TEAM_SPACE_POLL = 'TEAM_SPACE_POLL',
+  ROTA_ASSIGNED = 'ROTA_ASSIGNED',
+  ROTA_REMOVED = 'ROTA_REMOVED',
+  ROTA_REMINDER = 'ROTA_REMINDER',
+  ROTA_COVER_NEEDED = 'ROTA_COVER_NEEDED',
+  ROTA_COVER_TAKEN = 'ROTA_COVER_TAKEN',
 }
 
 export interface PushTemplate {
@@ -679,6 +684,81 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     placeholders: {
       space_name: 'Choir',
       question: 'Which Saturday works for the retreat?',
+    },
+  },
+  [PushNotificationKey.ROTA_ASSIGNED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: "You're on the rota",
+    description:
+      'Sent to a worker when their department lead puts them on the rota for a service.',
+    title: "You're serving: {{service_name}}",
+    body: '{{when}}{{role}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      role: ' · Main door',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_REMOVED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Taken off the rota',
+    description:
+      'Sent to a worker when their department lead takes them off a service they were down for.',
+    title: "You're no longer serving: {{service_name}}",
+    body: '{{when}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_REMINDER]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Serving reminder',
+    description:
+      'Sent before a service to everyone on the rota for it (timing set under Reminder Settings).',
+    title: "You're serving {{when}}",
+    body: '{{service_name}}{{role}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      when: 'tomorrow at 8:00 AM',
+      service_name: 'Sunday Service',
+      role: ' · Main door',
+      department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_COVER_NEEDED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Cover needed',
+    description:
+      "Sent to teammates (or one chosen teammate) when someone on the rota can't make it.",
+    title: '{{requester}} needs cover',
+    body: '{{service_name}}, {{when}}{{role}}. Tap to help.',
+    url: '/rota',
+    placeholders: {
+      requester: 'Ada Obi',
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      role: ' · Main door',
+    },
+  },
+  [PushNotificationKey.ROTA_COVER_TAKEN]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Cover found',
+    description:
+      'Sent to the person who asked for cover, and to the department leads, when a teammate takes the duty.',
+    title: '{{volunteer}} is covering {{service_name}}',
+    body: '{{when}}{{role}} · {{department_name}}',
+    url: '/rota',
+    placeholders: {
+      volunteer: 'Grace Eze',
+      service_name: 'Sunday Service',
+      when: 'Sun 25 Oct, 8:00 AM',
+      role: ' · Main door',
+      department_name: 'Ushering',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {
