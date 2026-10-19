@@ -62,6 +62,15 @@ export class ServingRotaController {
     return this.rota.saveSlotRota(user.id, departmentId, slotId, dto.entries);
   }
 
+  @Post('departments/:departmentId/services/:slotId/nudge')
+  nudge(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+    @Uuid('slotId') slotId: string,
+  ) {
+    return this.rota.nudgeNotCheckedIn(user.id, departmentId, slotId);
+  }
+
   @Post('assignments/:assignmentId/cover')
   requestCover(
     @CurrentUser() user: MemberAuth,

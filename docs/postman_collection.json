@@ -28067,6 +28067,33 @@
           }
         },
         {
+          "name": "Nudge rostered people who haven't checked in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/rota/departments/{{departmentId}}/services/{{slotId}}/nudge",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "rota",
+                "departments",
+                "{{departmentId}}",
+                "services",
+                "{{slotId}}",
+                "nudge"
+              ]
+            },
+            "description": "Leads only; once every 10 minutes."
+          }
+        },
+        {
           "name": "Cancel a cover request",
           "request": {
             "method": "DELETE",

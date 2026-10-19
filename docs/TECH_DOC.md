@@ -597,6 +597,14 @@ under More → Serving Rota.
   each is sent once (Redis key `rota-reminder:{slotId}:{hours}`). Writes to `rota_assignments`, `service_slots` or
   church settings wake it.
 - **My Week:** it lists the member's duties (`kind: 'duty'`).
+- **Leave:** the team picker and the rota show each person's leave for the service's church-local date (`leave`:
+  `APPROVED` or `PENDING`, from `request_leave` via the worker profile). Asking the whole department for cover leaves
+  out people on approved leave. Asking someone on approved leave, or accepting while on approved leave, is refused.
+  "Cover I could take" hides requests on the member's approved-leave days.
+- **Check-in:** each rostered person's `checkin` (`PRESENT`/`LATE`/`ATTENDED_ONLINE` with the time) comes from their
+  attendance for the service's event; ABSENT and ON_LEAVE placeholders don't count. Leads can nudge everyone on the
+  rota who hasn't checked in (`ROTA_CHECKIN_NUDGE`), at most once every 10 minutes per service and department (Redis
+  key `rota-nudge:{slotId}:{departmentId}`).
 
 **Query cost** (two years of services: 315 services, 3,000 workers, 40 departments, about 118,000 duties, about 3,500
 cover requests): the leader's 8-week list 13 ms, one service's rota 4.6 ms, the team picker 4.6 ms, my duties 3.4 ms,
@@ -612,6 +620,7 @@ cover I could take 9 ms, reminders 3.8 ms. All are index-driven, with no full sc
 | POST | /rota/assignments/:assignmentId/cover | the person serving | `{ targetMemberId?, reason? }` |
 | POST | /rota/cover/:requestId/accept | eligible teammates | Takes the duty; 409 if someone was quicker |
 | DELETE | /rota/cover/:requestId | asker or leads | Cancels the request |
+| POST | /rota/departments/:departmentId/services/:slotId/nudge | leads | Pushes a check-in nudge to rostered people who haven't checked in; `{ nudged }` |
 
 ### Team Spaces Module (`src/team-space/`)
 

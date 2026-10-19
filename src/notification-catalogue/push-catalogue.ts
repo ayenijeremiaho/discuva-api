@@ -61,6 +61,7 @@ export enum PushNotificationKey {
   ROTA_REMINDER = 'ROTA_REMINDER',
   ROTA_COVER_NEEDED = 'ROTA_COVER_NEEDED',
   ROTA_COVER_TAKEN = 'ROTA_COVER_TAKEN',
+  ROTA_CHECKIN_NUDGE = 'ROTA_CHECKIN_NUDGE',
 }
 
 export interface PushTemplate {
@@ -759,6 +760,20 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       when: 'Sun 25 Oct, 8:00 AM',
       role: ' · Main door',
       department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_CHECKIN_NUDGE]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Check in: you are serving',
+    description:
+      "Sent when a department lead nudges the people on a service's rota who haven't checked in yet.",
+    title: "You're serving at {{service_name}}",
+    body: "{{department_name}} hasn't seen your check-in yet. Please check in for {{time}}.",
+    url: '/home',
+    placeholders: {
+      service_name: 'Sunday Service',
+      department_name: 'Ushering',
+      time: '8:00 AM',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {

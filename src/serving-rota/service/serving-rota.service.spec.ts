@@ -16,6 +16,7 @@ describe('ServingRotaService', () => {
   let alreadyOnRota: unknown[];
   const slot = {
     slot_id: 's1',
+    event_id: 'e1',
     name: 'First Service',
     event_name: 'Sunday Service',
     start_time: future,
@@ -24,7 +25,13 @@ describe('ServingRotaService', () => {
   };
 
   // Answers each raw query by what it asks for.
+  let leave: string | null = null;
+  let notCheckedIn: { member_id: string; role: string | null }[] = [];
   const query = jest.fn((sql: string, _params?: unknown[]) => {
+    if (sql.startsWith('SELECT (SELECT rl.status'))
+      return Promise.resolve([{ leave }]);
+    if (sql.includes('AND NOT EXISTS (SELECT 1 FROM attendances at'))
+      return Promise.resolve(notCheckedIn);
     if (
       sql.includes('AS is_leader') &&
       sql.includes('AS is_member') &&
@@ -100,6 +107,7 @@ describe('ServingRotaService', () => {
   const notifications = {
     notifyMember: jest.fn().mockResolvedValue(undefined),
   };
+  const cache = { get: jest.fn().mockResolvedValue(undefined), set: jest.fn() };
   const audit = { log: jest.fn() };
   const service = new ServingRotaService(
     assignmentRepo as never,
@@ -109,6 +117,7 @@ describe('ServingRotaService', () => {
     audit as never,
     { format: () => 'Sun 25 Oct, 8:00 AM' } as never,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
+    cache as never,
   );
   const pushes = () =>
     notifications.notifyMember.mock.calls.map((c) => c[0].push);
@@ -120,6 +129,8 @@ describe('ServingRotaService', () => {
     eligible = [];
     lockedRequest = { id: 'c1', status: 'OPEN' };
     alreadyOnRota = [];
+    leave = null;
+    notCheckedIn = [];
     acceptDetails = {
       assignment_id: 'a1',
       department_id: 'd1',
@@ -213,6 +224,56 @@ describe('ServingRotaService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('leave', () => {
+    it("won't ask a teammate who's on approved leave that day", async () => {
+      leave = 'APPROVED';
+      await expect(
+        service.requestCover('m1', 'a1', { targetMemberId: 'm2' }, now),
+      ).rejects.toThrow("They're on leave that day. Pick someone else.");
+    });
+
+    it("won't let someone on approved leave take a duty", async () => {
+      leave = 'APPROVED';
+      await expect(service.acceptCover('m2', 'c1', now)).rejects.toThrow(
+        "You're on leave that day.",
+      );
+    });
+
+    it('leaves people on approved leave out when asking the whole department', async () => {
+      await service.requestCover('m1', 'a1', {}, now);
+      const recipients = query.mock.calls.find((c) =>
+        (c[0] as string).includes('AND wp.member_id <> $2'),
+      );
+      expect(recipients?.[0]).toContain("IS DISTINCT FROM 'APPROVED'");
+      expect(recipients?.[1]).toEqual(['d1', 'm1', 's1', '2026-10-25']);
+    });
+  });
+
+  describe('check-in nudge', () => {
+    it("nudges only the people on the rota who haven't checked in, once every 10 minutes", async () => {
+      notCheckedIn = [
+        { member_id: 'w2', role: null },
+        { member_id: 'w3', role: 'Door' },
+      ];
+      await expect(
+        service.nudgeNotCheckedIn('lead', 'd1', 's1', now),
+      ).resolves.toEqual({ nudged: 2 });
+      expect(pushes()[0].memberIds).toEqual(['w2', 'w3']);
+      expect(cache.set).toHaveBeenCalledWith('rota-nudge:s1:d1', true, 600);
+      cache.get.mockResolvedValueOnce(true);
+      await expect(
+        service.nudgeNotCheckedIn('lead', 'd1', 's1', now),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('is for leaders only', async () => {
+      role = { is_leader: false, is_member: true };
+      await expect(
+        service.nudgeNotCheckedIn('m1', 'd1', 's1', now),
+      ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 
