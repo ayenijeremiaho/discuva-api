@@ -568,7 +568,7 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
 ### My Week Module (`src/my-week/`)
 
 `GET /my-week` (`JwtAuthGuard`) — the member's own commitments outside services for the next 7 days, in date order,
-for the member app's home screen: `[{ kind: 'prayer'|'fellowship'|'class', id, title, detail, role, startsAt, endsAt,
+for the member app's My Week screen (More → My Week): `[{ kind: 'prayer'|'fellowship'|'class', id, title, detail, role, startsAt, endsAt,
 url }]`. Services and programme assignments aren't included (the home screen already loads those).
 
 - **Prayer:** `prayer_roster_entries` for the member or their worker profile, `SCHEDULED`, on a meeting that isn't
