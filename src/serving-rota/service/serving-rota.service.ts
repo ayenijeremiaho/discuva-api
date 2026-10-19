@@ -277,10 +277,15 @@ export class ServingRotaService {
           memberId,
         ],
       );
-    for (const c of changed)
-      await this.assignmentRepo.update(c.id, {
-        role: wanted.get(c.member_id) ?? null,
-      });
+    if (changed.length)
+      await this.assignmentRepo.query(
+        `UPDATE rota_assignments a SET role = x.role, updated_at = now()
+         FROM unnest($1::uuid[], $2::varchar[]) AS x(id, role) WHERE a.id = x.id`,
+        [
+          changed.map((c) => c.id),
+          changed.map((c) => wanted.get(c.member_id) ?? null),
+        ],
+      );
 
     const timezone = await this.churchTimezone.get();
     const department = await this.departmentName(departmentId);

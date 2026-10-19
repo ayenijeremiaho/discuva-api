@@ -207,9 +207,12 @@ describe('ServingRotaService', () => {
         ['Car park', 'Car park'],
         'lead',
       ]);
-      expect(assignmentRepo.update).toHaveBeenCalledWith('a-keep', {
-        role: 'Main door',
-      });
+      // Role changes go in one statement, not one per person.
+      expect(query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE rota_assignments a SET role = x.role'),
+        [['a-keep'], ['Main door']],
+      );
+      expect(assignmentRepo.update).not.toHaveBeenCalled();
       const [added, removed] = pushes();
       expect(added.memberIds).toEqual(['w3', 'w4']);
       expect(added.vars.role).toBe(' · Car park');

@@ -42,6 +42,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { DateService } from '../../utility/service/date.service';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 
+const STOPPED_SHOWN = 10;
 const DAY_MS = 24 * 3600 * 1000;
 const REMIND_AGAIN_AFTER_MS = 12 * 3600 * 1000;
 
@@ -175,10 +176,19 @@ export class TeamPulseService {
       select: { id: true, name: true },
     });
     if (!department) throw new NotFoundException('Department not found');
-    const pulses = await this.pulseRepo.find({
-      where: { department: { id: departmentId } },
-      order: { active: 'DESC', createdAt: 'DESC' },
-    });
+    // Every active check-in, but only the latest stopped ones, so old history doesn't pile up.
+    const [active, stopped] = await Promise.all([
+      this.pulseRepo.find({
+        where: { department: { id: departmentId }, active: true },
+        order: { createdAt: 'DESC' },
+      }),
+      this.pulseRepo.find({
+        where: { department: { id: departmentId }, active: false },
+        order: { createdAt: 'DESC' },
+        take: STOPPED_SHOWN,
+      }),
+    ]);
+    const pulses = [...active, ...stopped];
     const rounds = pulses.length
       ? await this.recentRounds(pulses.map((p) => p.id))
       : new Map<string, TeamPulseRound[]>();

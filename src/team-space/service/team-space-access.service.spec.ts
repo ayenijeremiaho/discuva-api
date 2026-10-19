@@ -82,7 +82,12 @@ describe('TeamSpaceAccessService (volunteering)', () => {
     ]);
     const [sql, params] = spaceRepo.query.mock.calls[2];
     expect(sql).toContain("s.status = 'CONFIRMED'");
-    expect(params).toEqual(['m1', new Date(now.getTime() - 14 * day)]);
+    expect(params).toEqual([
+      'm1',
+      new Date(now.getTime() - 14 * day),
+      new Date(now.getTime() + 30 * day),
+    ]);
+    expect(sql).toContain('o.date <= $3 OR EXISTS');
   });
 
   it('leaves volunteering out when the module is off', async () => {
@@ -116,6 +121,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
     expect(spaceRepo.query.mock.calls[2][1]).toEqual([
       'm1',
       new Date(now.getTime() - 30 * day),
+      new Date(now.getTime() + 30 * day),
     ]);
     expect(
       volunteerSpaceClosed(

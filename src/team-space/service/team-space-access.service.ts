@@ -21,6 +21,7 @@ export interface SpaceMembership {
 }
 
 const DAY_MS = 24 * 3600 * 1000;
+const LEADER_LOOKAHEAD_DAYS = 30;
 
 // Leads a volunteering space: the admin who created the opportunity, or a lead of its department.
 const VOLUNTEER_LEADER_SQL = `(
@@ -123,10 +124,13 @@ export class TeamSpaceAccessService {
   ): Promise<SpaceMembership[]> {
     if (!(await this.churchSettings.isEnabled('volunteering'))) return [];
     const { openDays, listedDays } = await this.chatSettings.get();
+    // Leaders who didn't sign up only see the next few weeks, so a busy organiser's list stays short.
     const rows = (await this.spaceRepo.query(
       `SELECT o.id, o.title, o.date, o.status, ${VOLUNTEER_LEADER_SQL} AS is_leader
        FROM volunteer_opportunities o
        WHERE o.date > $2 AND o.status <> 'CANCELLED'
+         AND (o.date <= $3 OR EXISTS (
+           SELECT 1 FROM volunteer_signups s WHERE s.opportunity_id = o.id AND s.member_id = $1 AND s.status = 'CONFIRMED'))
          AND o.id IN (
            SELECT s.opportunity_id FROM volunteer_signups s WHERE s.member_id = $1 AND s.status = 'CONFIRMED'
            UNION SELECT o2.id FROM volunteer_opportunities o2 JOIN admins a ON a.id = o2.created_by_id WHERE a.member_id = $1
@@ -135,7 +139,11 @@ export class TeamSpaceAccessService {
                SELECT l.department_id FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id
                WHERE lw.member_id = $1)
          )`,
-      [memberId, new Date(now.getTime() - listedDays * DAY_MS)],
+      [
+        memberId,
+        new Date(now.getTime() - listedDays * DAY_MS),
+        new Date(now.getTime() + LEADER_LOOKAHEAD_DAYS * DAY_MS),
+      ],
     )) as {
       id: string;
       title: string;

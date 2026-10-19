@@ -119,6 +119,7 @@ describe('TeamPulseService', () => {
   };
   const departmentRepo = {
     findOneOrFail: jest.fn().mockResolvedValue({ id: 'd1', name: 'Choir' }),
+    findOne: jest.fn().mockResolvedValue({ id: 'd1', name: 'Choir' }),
   };
   const notifications = {
     notifyMember: jest.fn().mockResolvedValue(undefined),
@@ -235,6 +236,21 @@ describe('TeamPulseService', () => {
       expect(result.questions[0]).not.toHaveProperty('average');
       expect(result.questions[1]).not.toHaveProperty('comments');
     });
+  });
+
+  it("shows a department's active check-ins and only its 10 latest stopped ones", async () => {
+    pulseRepo.find
+      .mockResolvedValueOnce([{ id: 'p-active', active: true, questions: [] }])
+      .mockResolvedValueOnce([{ id: 'p-old', active: false, questions: [] }]);
+    roundRepo.query.mockResolvedValueOnce([]);
+    const res = await service.forDepartment('m1', 'd1', now);
+    expect(res.pulses.map((p) => p.id)).toEqual(['p-active', 'p-old']);
+    expect(pulseRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { department: { id: 'd1' }, active: false },
+        take: 10,
+      }),
+    );
   });
 
   describe('create', () => {

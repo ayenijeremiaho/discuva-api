@@ -682,7 +682,8 @@ space, and one evening summary. Module key `team_spaces` (root migration `AddTea
 
 **Volunteering spaces close:** they take posts, replies, polls and votes until `openDays` after the event (default 3),
 or until the opportunity is cancelled; after that they stay readable (`closed: true`, writes return 403). They're
-listed until `listedDays` after the event (default 14), and cancelled opportunities aren't listed. Both are set per
+listed until `listedDays` after the event (default 14), and cancelled opportunities aren't listed. Leaders who
+haven't signed up themselves only see opportunities in the next 30 days, so an admin who posts many stays manageable. Both are set per
 church on the admin Volunteering page (church_settings row `volunteering:chat`, cached 10 minutes; `openDays` 0–30,
 `listedDays` 1–90 and at least `openDays`). They're applied live, so a change affects existing chats too. Audit:
 `VOLUNTEER_CHAT_SETTINGS_UPDATED`. Meetings aren't offered for a one-off event (400); posts and polls are. No new tables or
@@ -848,7 +849,7 @@ linking to `/team-pulse`.
 |---|---|---|---|
 | GET | /team-pulse/mine | any worker | Check-ins waiting for this member, their departments (`canManage` for leads), `isPastor` |
 | GET | /team-pulse/templates | any | Ready-made question sets |
-| GET | /team-pulse/departments/:departmentId | team, its leads, pastors | Pulses with up to 12 recent rounds (`score` null below 3 answers) |
+| GET | /team-pulse/departments/:departmentId | team, its leads, pastors | Active pulses plus the 10 latest stopped ones, each with up to 12 recent rounds (`score` null below 3 answers) |
 | GET | /team-pulse/rounds/:roundId | team, its leads, pastors | Per-question averages, spread and comments (3+ answers); leads also get `notYetAnswered` and `canRemind` |
 | POST | /team-pulse/rounds/:roundId/responses | team member | `{ answers: { questionId: 1-5 \| text } }`; 409 if already answered |
 | POST | /team-pulse/rounds/:roundId/remind | lead | Push reminder to those who haven't answered |
