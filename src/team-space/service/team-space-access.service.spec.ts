@@ -18,30 +18,34 @@ describe('TeamSpaceAccessService (volunteering)', () => {
       Promise.resolve(key === 'volunteering' ? volunteeringOn : true),
     ),
   };
+  let chat: { openDays: number; listedDays: number };
+  const chatSettings = { get: jest.fn(() => Promise.resolve(chat)) };
   const service = new TeamSpaceAccessService(
     spaceRepo as never,
     churchSettings as never,
+    chatSettings as never,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     volunteeringOn = true;
+    chat = { openDays: 3, listedDays: 14 };
   });
 
   it('closes a volunteering space three days after the event, or when cancelled', () => {
     const at = (offsetDays: number) =>
       new Date(now.getTime() + offsetDays * day);
-    expect(volunteerSpaceClosed({ status: 'OPEN', date: at(5) }, now)).toBe(
+    expect(volunteerSpaceClosed({ status: 'OPEN', date: at(5) }, 3, now)).toBe(
       false,
     );
-    expect(volunteerSpaceClosed({ status: 'CLOSED', date: at(-2) }, now)).toBe(
-      false,
-    );
-    expect(volunteerSpaceClosed({ status: 'OPEN', date: at(-3) }, now)).toBe(
+    expect(
+      volunteerSpaceClosed({ status: 'CLOSED', date: at(-2) }, 3, now),
+    ).toBe(false);
+    expect(volunteerSpaceClosed({ status: 'OPEN', date: at(-3) }, 3, now)).toBe(
       true,
     );
     expect(
-      volunteerSpaceClosed({ status: 'CANCELLED', date: at(5) }, now),
+      volunteerSpaceClosed({ status: 'CANCELLED', date: at(5) }, 3, now),
     ).toBe(true);
   });
 
@@ -89,6 +93,44 @@ describe('TeamSpaceAccessService (volunteering)', () => {
     await expect(
       service.access('m1', TeamSpaceKindEnum.VOLUNTEERING, 'o1'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("uses the church's own chat lifespan", async () => {
+    chat = { openDays: 1, listedDays: 30 };
+    spaceRepo.query
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'o1',
+          title: 'Clean-up',
+          date: new Date(now.getTime() - 2 * day),
+          status: 'OPEN',
+          is_leader: false,
+        },
+      ]);
+    const [space] = await service.memberships('m1', now);
+    expect(space).toEqual(
+      expect.objectContaining({ refId: 'o1', closed: true }),
+    );
+    expect(spaceRepo.query.mock.calls[2][1]).toEqual([
+      'm1',
+      new Date(now.getTime() - 30 * day),
+    ]);
+    expect(
+      volunteerSpaceClosed(
+        { status: 'OPEN', date: new Date(now.getTime() - 2 * day) },
+        0,
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      volunteerSpaceClosed(
+        { status: 'OPEN', date: new Date(now.getTime() + day) },
+        0,
+        now,
+      ),
+    ).toBe(false);
   });
 
   it('lets in people who signed up and leaders, but nobody else', async () => {

@@ -28357,6 +28357,62 @@
           }
         },
         {
+          "name": "Volunteering chat lifespan",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/team-spaces/volunteering-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "team-spaces",
+                "volunteering-settings"
+              ]
+            },
+            "description": "Days after the event a volunteering chat stays open (openDays) and listed (listedDays). volunteer:read."
+          }
+        },
+        {
+          "name": "Set volunteering chat lifespan",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/team-spaces/volunteering-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "team-spaces",
+                "volunteering-settings"
+              ]
+            },
+            "description": "openDays 0-30, listedDays 1-90 and at least openDays. Applies to existing chats too. volunteer:write.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"openDays\": 3,\n  \"listedDays\": 14\n}"
+            }
+          }
+        },
+        {
           "name": "Feed page",
           "request": {
             "method": "GET",

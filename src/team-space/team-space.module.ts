@@ -16,6 +16,8 @@ import { TeamSpaceService } from './service/team-space.service';
 import { TeamSpaceDigestService } from './service/team-space-digest.service';
 import { TeamSpaceDigestScheduler } from './scheduler/team-space-digest.scheduler';
 import { TeamSpaceController } from './controller/team-space.controller';
+import { VolunteerChatSettingsService } from './service/volunteer-chat-settings.service';
+import { VolunteerChatSettingsController } from './controller/volunteer-chat-settings.controller';
 
 @Module({
   imports: [
@@ -38,8 +40,9 @@ import { TeamSpaceController } from './controller/team-space.controller';
     TeamSpaceDigestScheduler,
     TeamSpaceExtrasService,
     TeamMeetingReminderScheduler,
+    VolunteerChatSettingsService,
   ],
   exports: [TeamSpaceAccessService],
-  controllers: [TeamSpaceController],
+  controllers: [TeamSpaceController, VolunteerChatSettingsController],
 })
 export class TeamSpaceModule {}

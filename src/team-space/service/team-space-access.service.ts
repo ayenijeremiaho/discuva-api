@@ -6,11 +6,8 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TeamSpace, TeamSpaceKindEnum } from '../entity/team-space.entity';
-import {
-  ADULT_AGE,
-  VOLUNTEER_SPACE_LISTED_DAYS,
-  VOLUNTEER_SPACE_OPEN_DAYS,
-} from '../constant/team-space.constant';
+import { ADULT_AGE } from '../constant/team-space.constant';
+import { VolunteerChatSettingsService } from './volunteer-chat-settings.service';
 import { ChurchSettingsService } from '../../church-settings/service/church-settings.service';
 
 export interface SpaceMembership {
@@ -34,12 +31,12 @@ const VOLUNTEER_LEADER_SQL = `(
 
 export function volunteerSpaceClosed(
   o: { status: string; date: Date },
+  openDays: number,
   now = new Date(),
 ): boolean {
   return (
     o.status === 'CANCELLED' ||
-    new Date(o.date).getTime() + VOLUNTEER_SPACE_OPEN_DAYS * DAY_MS <=
-      now.getTime()
+    new Date(o.date).getTime() + openDays * DAY_MS <= now.getTime()
   );
 }
 
@@ -71,6 +68,7 @@ export class TeamSpaceAccessService {
     @InjectRepository(TeamSpace)
     private readonly spaceRepo: Repository<TeamSpace>,
     private readonly churchSettings: ChurchSettingsService,
+    private readonly chatSettings: VolunteerChatSettingsService,
   ) {}
 
   async memberships(
@@ -124,6 +122,7 @@ export class TeamSpaceAccessService {
     now: Date,
   ): Promise<SpaceMembership[]> {
     if (!(await this.churchSettings.isEnabled('volunteering'))) return [];
+    const { openDays, listedDays } = await this.chatSettings.get();
     const rows = (await this.spaceRepo.query(
       `SELECT o.id, o.title, o.date, o.status, ${VOLUNTEER_LEADER_SQL} AS is_leader
        FROM volunteer_opportunities o
@@ -136,10 +135,7 @@ export class TeamSpaceAccessService {
                SELECT l.department_id FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id
                WHERE lw.member_id = $1)
          )`,
-      [
-        memberId,
-        new Date(now.getTime() - VOLUNTEER_SPACE_LISTED_DAYS * DAY_MS),
-      ],
+      [memberId, new Date(now.getTime() - listedDays * DAY_MS)],
     )) as {
       id: string;
       title: string;
@@ -153,7 +149,7 @@ export class TeamSpaceAccessService {
       name: o.title,
       isLeader: !!o.is_leader,
       eventAt: o.date,
-      closed: volunteerSpaceClosed(o, now),
+      closed: volunteerSpaceClosed(o, openDays, now),
     }));
   }
 
@@ -201,6 +197,7 @@ export class TeamSpaceAccessService {
   ): Promise<SpaceAccess> {
     if (!(await this.churchSettings.isEnabled('volunteering')))
       throw new NotFoundException('Team not found');
+    const { openDays } = await this.chatSettings.get();
     const rows = (await this.spaceRepo.query(
       `SELECT o.title, o.date, o.status, ${VOLUNTEER_LEADER_SQL} AS is_leader,
          EXISTS (SELECT 1 FROM volunteer_signups s
@@ -226,7 +223,7 @@ export class TeamSpaceAccessService {
       name: row.title,
       isLeader: !!row.is_leader,
       eventAt: row.date,
-      closed: volunteerSpaceClosed(row, now),
+      closed: volunteerSpaceClosed(row, openDays, now),
       space: await this.ensureSpace(TeamSpaceKindEnum.VOLUNTEERING, refId),
     };
   }

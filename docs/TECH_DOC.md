@@ -680,10 +680,12 @@ space, and one evening summary. Module key `team_spaces` (root migration `AddTea
 - **Leaders:** department leads, the fellowship leader, or the volunteering leaders above. They can pin and remove anything, and can switch the space
   to "Only leaders can start posts" (`leaders_only`).
 
-**Volunteering spaces close:** they take posts, replies, polls and votes until 3 days after the event
-(`VOLUNTEER_SPACE_OPEN_DAYS`), or until the opportunity is cancelled; after that they stay readable (`closed: true`,
-writes return 403). They're listed until 14 days after the event (`VOLUNTEER_SPACE_LISTED_DAYS`), and cancelled
-opportunities aren't listed. Meetings aren't offered for a one-off event (400); posts and polls are. No new tables or
+**Volunteering spaces close:** they take posts, replies, polls and votes until `openDays` after the event (default 3),
+or until the opportunity is cancelled; after that they stay readable (`closed: true`, writes return 403). They're
+listed until `listedDays` after the event (default 14), and cancelled opportunities aren't listed. Both are set per
+church on the admin Volunteering page (church_settings row `volunteering:chat`, cached 10 minutes; `openDays` 0–30,
+`listedDays` 1–90 and at least `openDays`). They're applied live, so a change affects existing chats too. Audit:
+`VOLUNTEER_CHAT_SETTINGS_UPDATED`. Meetings aren't offered for a one-off event (400); posts and polls are. No new tables or
 indexes: the lookups use the existing indexes on `volunteer_signups (member_id)`, `(opportunity_id)` and
 `volunteer_opportunities (created_by_id)`, `(department_id)`, `(date)`. Measured with 2,000 opportunities and 40,000
 sign-ups: a member's volunteering spaces 1–4 ms (13 ms for an admin who created all 2,000), opening one 0.1 ms, its
@@ -735,6 +737,8 @@ are never logged.
 | GET | /team-spaces/:kind/:refId/posts?cursor= | team | Feed page of 20 (pinned posts excluded) with `nextCursor` |
 | POST | /team-spaces/:kind/:refId/posts | team (not under 18; leaders only if `leadersOnly`) | `{ body }` |
 | PATCH | /team-spaces/:kind/:refId/settings | leaders | `{ leadersOnly }` |
+| GET | /admin/team-spaces/volunteering-settings | `volunteer:read` | `{ openDays, listedDays }` for volunteering chats |
+| PUT | /admin/team-spaces/volunteering-settings | `volunteer:write` | `{ openDays, listedDays }`; 400 if `listedDays` < `openDays` |
 | GET | /team-spaces/posts/:postId?cursor= | team | Post with replies, 50 per page, oldest first |
 | PATCH | /team-spaces/posts/:postId | author | `{ body }` (marks it edited) |
 | DELETE | /team-spaces/posts/:postId | author or leader | Removes the post |

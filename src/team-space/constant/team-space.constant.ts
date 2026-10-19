@@ -10,7 +10,7 @@ export const REPLY_PUSH_THROTTLE_SECONDS = 30 * 60;
 // The evening summary goes out at this hour, church time.
 export const DIGEST_HOUR = 18;
 export const ADULT_AGE = 18;
-// A volunteering space takes new posts until this long after the event, then stays readable.
+// Defaults for volunteering spaces (churches can change them): takes new posts until this many days after the event, then stays readable.
 export const VOLUNTEER_SPACE_OPEN_DAYS = 3;
-// ...and is listed until this long after the event.
+// ...and is listed until this many days after the event.
 export const VOLUNTEER_SPACE_LISTED_DAYS = 14;

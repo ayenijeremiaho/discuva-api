@@ -317,6 +317,7 @@ export type AuditAction =
   // Team Spaces (post contents are never logged)
   | 'TEAM_POST_REMOVED'
   | 'TEAM_SPACE_SETTINGS_UPDATED'
+  | 'VOLUNTEER_CHAT_SETTINGS_UPDATED'
   // Serving Rota
   | 'ROTA_UPDATED'
   | 'ROTA_COVER_ACCEPTED';
