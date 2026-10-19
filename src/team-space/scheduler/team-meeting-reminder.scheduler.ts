@@ -6,6 +6,7 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { TeamSpace, TeamSpaceKindEnum } from '../entity/team-space.entity';
 import { TeamSpaceAccessService } from '../service/team-space-access.service';
+import { TeamSpaceExtrasService } from '../service/team-space-extras.service';
 import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { ChurchSettingsService } from '../../church-settings/service/church-settings.service';
@@ -50,6 +51,7 @@ export class TeamMeetingReminderScheduler {
     private readonly churchTimezone: ChurchTimezoneService,
     private readonly dateService: DateService,
     private readonly notifications: NotificationDispatchService,
+    private readonly extras: TeamSpaceExtrasService,
   ) {}
 
   @Cron('*/15 * * * *')
@@ -73,8 +75,18 @@ export class TeamMeetingReminderScheduler {
     }
   }
 
+  // Adds the next meeting of repeating series (even with reminders off), then sends reminders; sleeps until the sooner job.
   async runReminders(now = new Date()): Promise<Date | null> {
     if (!(await this.churchSettings.isEnabled('team_spaces'))) return null;
+    const nextRoll = await this.extras.rollSeries(now);
+    const nextReminder = await this.reminders(now);
+    const times = [nextRoll, nextReminder].filter((t): t is Date => !!t);
+    return times.length
+      ? new Date(Math.min(...times.map((t) => t.getTime())))
+      : null;
+  }
+
+  private async reminders(now: Date): Promise<Date | null> {
     const { enabled, thresholds } = await this.reminderSettings.getConfig(
       ReminderSettingKey.TEAM_MEETING,
     );

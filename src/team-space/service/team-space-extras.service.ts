@@ -12,6 +12,16 @@ import { TeamPost, TeamPostTypeEnum } from '../entity/team-post.entity';
 import { TeamMeeting } from '../entity/team-meeting.entity';
 import { RsvpResponseEnum } from '../entity/team-meeting-rsvp.entity';
 import { TeamPoll } from '../entity/team-poll.entity';
+import {
+  TeamMeetingSeries,
+  seriesSchedule,
+} from '../entity/team-meeting-series.entity';
+import { MeetingFrequencyEnum } from '../../small-group/enum/meeting-frequency.enum';
+import {
+  describeSchedule,
+  nextMeeting,
+} from '../../small-group/util/meeting-schedule';
+import { localDate } from '../../event/types/slot-blueprint';
 import { Member } from '../../member/entity/member.entity';
 import {
   SpaceAccess,
@@ -25,8 +35,37 @@ import { ChurchTimezoneService } from '../../utility/service/church-timezone.ser
 import {
   CreateMeetingDto,
   CreatePollDto,
+  MeetingRepeatEnum,
   UpdateMeetingDto,
 } from '../dto/team-space.dto';
+
+type SeriesCols = {
+  s_frequency: MeetingFrequencyEnum | null;
+  s_weekday: number | null;
+  s_start_time: string | null;
+  s_end_time: string | null;
+  s_interval_weeks: number | null;
+  s_week_of_month: number | null;
+  s_starts_on: string | null;
+  s_active: boolean | null;
+};
+
+const SERIES_SQL = `s.frequency AS s_frequency, s.weekday AS s_weekday, s.start_time AS s_start_time, s.end_time AS s_end_time,
+  s.interval_weeks AS s_interval_weeks, s.week_of_month AS s_week_of_month, s.starts_on AS s_starts_on, s.active AS s_active`;
+
+// "Every Saturday, 5:00 PM" while the series is still repeating; null otherwise.
+function repeatLabel(r: SeriesCols): string | null {
+  if (!r.s_active || !r.s_frequency) return null;
+  return describeSchedule({
+    frequency: r.s_frequency,
+    weekday: r.s_weekday,
+    startTime: r.s_start_time,
+    endTime: r.s_end_time,
+    intervalWeeks: r.s_interval_weeks ?? 1,
+    weekOfMonth: r.s_week_of_month,
+    startsOn: r.s_starts_on,
+  });
+}
 
 export interface MeetingView {
   title: string;
@@ -38,6 +77,7 @@ export interface MeetingView {
   hasMinutes: boolean;
   myResponse: RsvpResponseEnum | null;
   counts: Record<'GOING' | 'MAYBE' | 'NOT_GOING', number>;
+  repeat: string | null;
 }
 
 export interface PollView {
@@ -61,6 +101,8 @@ export class TeamSpaceExtrasService {
     private readonly meetingRepo: Repository<TeamMeeting>,
     @InjectRepository(TeamPoll)
     private readonly pollRepo: Repository<TeamPoll>,
+    @InjectRepository(TeamMeetingSeries)
+    private readonly seriesRepo: Repository<TeamMeetingSeries>,
     private readonly access: TeamSpaceAccessService,
     private readonly notifications: NotificationDispatchService,
     private readonly dateService: DateService,
@@ -89,11 +131,13 @@ export class TeamSpaceExtrasService {
                (SELECT r.response FROM team_meeting_rsvps r WHERE r.meeting_id = m.post_id AND r.member_id = $2) AS my_response,
                (SELECT json_object_agg(x.response, x.n) FROM (
                   SELECT r.response, count(*)::int AS n FROM team_meeting_rsvps r
-                  WHERE r.meeting_id = m.post_id AND r.response IS NOT NULL GROUP BY r.response) x) AS counts
-             FROM team_meetings m WHERE m.post_id = ANY($1)`,
+                  WHERE r.meeting_id = m.post_id AND r.response IS NOT NULL GROUP BY r.response) x) AS counts,
+               ${SERIES_SQL}
+             FROM team_meetings m LEFT JOIN team_meeting_series s ON s.id = m.series_id
+             WHERE m.post_id = ANY($1)`,
             [meetingIds, memberId],
           ) as Promise<
-            {
+            ({
               post_id: string;
               title: string;
               starts_at: Date;
@@ -104,7 +148,7 @@ export class TeamSpaceExtrasService {
               has_minutes: boolean;
               my_response: RsvpResponseEnum | null;
               counts: Record<string, number> | null;
-            }[]
+            } & SeriesCols)[]
           >)
         : [],
       pollIds.length
@@ -148,6 +192,7 @@ export class TeamSpaceExtrasService {
               MAYBE: m.counts?.MAYBE ?? 0,
               NOT_GOING: m.counts?.NOT_GOING ?? 0,
             },
+            repeat: repeatLabel(m),
           },
         ]),
       ),
@@ -199,6 +244,10 @@ export class TeamSpaceExtrasService {
       throw new BadRequestException('Pick a time in the future.');
     if (endsAt && endsAt <= startsAt)
       throw new BadRequestException('The meeting must end after it starts.');
+    const series =
+      dto.repeat && dto.repeat !== MeetingRepeatEnum.NONE
+        ? await this.createSeries(acc, memberId, dto, startsAt, endsAt)
+        : null;
     const post = await this.newPost(
       acc,
       memberId,
@@ -214,6 +263,7 @@ export class TeamSpaceExtrasService {
       endsAt,
       location: dto.location?.trim() || null,
       onlineLink: dto.onlineLink?.trim() || null,
+      series,
     });
     await this.notifyTeam(
       acc,
@@ -244,6 +294,17 @@ export class TeamSpaceExtrasService {
     const acc = await this.access.accessBySpace(memberId, meeting.space);
     if (!acc.isLeader)
       throw new ForbiddenException('Only leaders can change meetings.');
+
+    if (dto.stopRepeating) {
+      const seriesId = (
+        (await this.spaceRepo.query(
+          `SELECT series_id FROM team_meetings WHERE post_id = $1`,
+          [postId],
+        )) as { series_id: string | null }[]
+      )[0]?.series_id;
+      if (seriesId) await this.seriesRepo.update(seriesId, { active: false });
+      return { ok: true };
+    }
 
     if (dto.cancel) {
       if (meeting.cancelledAt) return { ok: true };
@@ -332,7 +393,13 @@ export class TeamSpaceExtrasService {
     });
     if (!meeting) throw new NotFoundException('Meeting not found');
     const acc = await this.access.accessBySpace(memberId, meeting.space);
-    const roster = await this.access.memberIds(meeting.space);
+    const [roster, seriesRows] = await Promise.all([
+      this.access.memberIds(meeting.space),
+      this.spaceRepo.query(
+        `SELECT ${SERIES_SQL} FROM team_meetings m JOIN team_meeting_series s ON s.id = m.series_id WHERE m.post_id = $1`,
+        [postId],
+      ) as Promise<SeriesCols[]>,
+    ]);
     const rows = (await this.spaceRepo.query(
       `SELECT m.id, NULLIF(TRIM(COALESCE(m.firstname, '') || ' ' || COALESCE(m.lastname, '')), '') AS name,
          m.photo_url, r.response, r.attended
@@ -363,6 +430,7 @@ export class TeamSpaceExtrasService {
       location: meeting.location,
       onlineLink: meeting.onlineLink,
       cancelled: !!meeting.cancelledAt,
+      repeat: seriesRows[0] ? repeatLabel(seriesRows[0]) : null,
       isLeader: acc.isLeader,
       myResponse: rows.find((r) => r.id === memberId)?.response ?? null,
       going: by(RsvpResponseEnum.GOING),
@@ -526,6 +594,129 @@ export class TeamSpaceExtrasService {
     if (!acc.isLeader)
       throw new ForbiddenException('Only leaders can do this.');
     return meeting;
+  }
+
+  // Turns the first meeting's time into a schedule in church time: same weekday and time, every week, two weeks or month.
+  private async createSeries(
+    acc: SpaceAccess,
+    memberId: string,
+    dto: CreateMeetingDto,
+    startsAt: Date,
+    endsAt: Date | null,
+  ): Promise<TeamMeetingSeries> {
+    const timezone = await this.churchTimezone.get();
+    const date = localDate(startsAt, timezone);
+    if (dto.repeatUntil && dto.repeatUntil.slice(0, 10) < date)
+      throw new BadRequestException(
+        '"Repeat until" must be after the first meeting.',
+      );
+    const day = Number(date.slice(8, 10));
+    const week = Math.ceil(day / 7);
+    return this.seriesRepo.save(
+      this.seriesRepo.create({
+        space: { id: acc.space.id } as TeamSpace,
+        title: dto.title.trim(),
+        location: dto.location?.trim() || null,
+        onlineLink: dto.onlineLink?.trim() || null,
+        agenda: dto.agenda?.trim() || null,
+        frequency:
+          dto.repeat === MeetingRepeatEnum.MONTHLY
+            ? MeetingFrequencyEnum.MONTHLY
+            : MeetingFrequencyEnum.WEEKLY,
+        weekday: new Date(`${date}T00:00:00Z`).getUTCDay(),
+        startTime: this.dateService.format(startsAt, 'HH:mm', timezone),
+        endTime: endsAt
+          ? this.dateService.format(endsAt, 'HH:mm', timezone)
+          : null,
+        intervalWeeks: dto.repeat === MeetingRepeatEnum.FORTNIGHTLY ? 2 : 1,
+        // A date past the 28th is the month's last such weekday.
+        weekOfMonth:
+          dto.repeat === MeetingRepeatEnum.MONTHLY
+            ? week >= 5
+              ? -1
+              : week
+            : null,
+        startsOn: date,
+        endsOn: dto.repeatUntil ? dto.repeatUntil.slice(0, 10) : null,
+        createdBy: { id: memberId } as Member,
+      }),
+    );
+  }
+
+  // Adds the next meeting of each repeating series once its latest has started, with the same details and link.
+  // Quiet on purpose: the reminders tell people. Returns when the next one is due to be added.
+  async rollSeries(now = new Date()): Promise<Date | null> {
+    const rows = (await this.spaceRepo.query(
+      `SELECT s.id, latest.starts_at AS latest
+       FROM team_meeting_series s
+       CROSS JOIN LATERAL (
+         SELECT m.starts_at FROM team_meetings m WHERE m.series_id = s.id ORDER BY m.starts_at DESC LIMIT 1
+       ) latest
+       WHERE s.active`,
+    )) as { id: string; latest: Date }[];
+    const later: number[] = [];
+    const due = rows.filter((r) => {
+      if (new Date(r.latest) > now) {
+        later.push(new Date(r.latest).getTime());
+        return false;
+      }
+      return true;
+    });
+    if (due.length) {
+      const timezone = await this.churchTimezone.get();
+      for (const row of due) {
+        const series = await this.seriesRepo.findOne({
+          where: { id: row.id },
+          relations: { space: true, createdBy: true },
+        });
+        if (!series) continue;
+        const at = nextMeeting(
+          seriesSchedule(series),
+          new Date(row.latest),
+          timezone,
+        );
+        if (!at || (series.endsOn && localDate(at, timezone) > series.endsOn)) {
+          await this.seriesRepo.update(series.id, { active: false });
+          continue;
+        }
+        const duration =
+          series.endTime && series.startTime
+            ? this.minutes(series.endTime) - this.minutes(series.startTime)
+            : null;
+        const post = await this.postRepo.save(
+          this.postRepo.create({
+            space: { id: series.space.id } as TeamSpace,
+            author: series.createdBy
+              ? ({ id: series.createdBy.id } as Member)
+              : null,
+            type: TeamPostTypeEnum.MEETING,
+            body: series.agenda || series.title,
+            lastActivityAt: now,
+          }),
+        );
+        await this.meetingRepo.insert({
+          postId: post.id,
+          space: { id: series.space.id } as TeamSpace,
+          title: series.title,
+          startsAt: at,
+          endsAt:
+            duration && duration > 0
+              ? new Date(at.getTime() + duration * 60000)
+              : null,
+          location: series.location,
+          onlineLink: series.onlineLink,
+          series: { id: series.id } as TeamMeetingSeries,
+        });
+        await this.spaceRepo.update(series.space.id, { lastActivityAt: now });
+        later.push(at.getTime());
+      }
+    }
+    return later.length ? new Date(Math.min(...later)) : null;
+  }
+
+  private minutes(hhmm: string): number {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
   }
 
   private async newPost(

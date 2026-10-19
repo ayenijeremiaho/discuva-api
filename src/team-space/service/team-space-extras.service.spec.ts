@@ -1,3 +1,4 @@
+import { formatInTimeZone } from 'date-fns-tz';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { TeamSpaceExtrasService } from './team-space-extras.service';
 import { TeamSpaceKindEnum } from '../entity/team-space.entity';
@@ -29,6 +30,12 @@ describe('TeamSpaceExtrasService', () => {
     update: jest.fn(),
   };
   const pollRepo = { insert: jest.fn(), findOne: jest.fn(), update: jest.fn() };
+  const seriesRepo = {
+    save: jest.fn((x) => Promise.resolve({ id: 'series1', ...x })),
+    create: jest.fn((x) => x),
+    findOne: jest.fn(),
+    update: jest.fn(),
+  };
   const notifications = {
     notifyMember: jest.fn().mockResolvedValue(undefined),
   };
@@ -37,9 +44,15 @@ describe('TeamSpaceExtrasService', () => {
     postRepo as never,
     meetingRepo as never,
     pollRepo as never,
+    seriesRepo as never,
     access as never,
     notifications as never,
-    { format: () => 'Sat 24 Oct at 5:00 PM' } as never,
+    {
+      format: (d: Date, pattern: string, tz: string) =>
+        pattern === 'HH:mm'
+          ? formatInTimeZone(d, tz, 'HH:mm')
+          : 'Sat 24 Oct at 5:00 PM',
+    } as never,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
   );
 
@@ -148,6 +161,165 @@ describe('TeamSpaceExtrasService', () => {
       await expect(
         service.saveAttendance('m2', 'p1', []),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+  });
+
+  describe('repeating meetings', () => {
+    // Saturday 24 Oct 2026, 5pm Lagos.
+    const base = {
+      title: 'Choir practice',
+      startsAt: '2026-10-24T16:00:00Z',
+      endsAt: '2026-10-24T17:30:00Z',
+      onlineLink: 'https://meet.example.org/choir',
+    };
+
+    it('makes a weekly series from the first meeting, in church time', async () => {
+      await service.createMeeting(
+        'm1',
+        DEPT,
+        'd1',
+        { ...base, repeat: 'WEEKLY' as never },
+        now,
+      );
+      expect(seriesRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          frequency: 'WEEKLY',
+          weekday: 6,
+          startTime: '17:00',
+          endTime: '18:30',
+          intervalWeeks: 1,
+          weekOfMonth: null,
+          startsOn: '2026-10-24',
+          onlineLink: 'https://meet.example.org/choir',
+        }),
+      );
+      expect(meetingRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          series: expect.objectContaining({ id: 'series1' }),
+        }),
+      );
+    });
+
+    it('handles every two weeks, and the same week of each month', async () => {
+      await service.createMeeting(
+        'm1',
+        DEPT,
+        'd1',
+        { ...base, repeat: 'FORTNIGHTLY' as never },
+        now,
+      );
+      expect(seriesRepo.create.mock.calls[0][0]).toEqual(
+        expect.objectContaining({ frequency: 'WEEKLY', intervalWeeks: 2 }),
+      );
+      await service.createMeeting(
+        'm1',
+        DEPT,
+        'd1',
+        { ...base, repeat: 'MONTHLY' as never },
+        now,
+      );
+      // The 24th is the fourth Saturday.
+      expect(seriesRepo.create.mock.calls[1][0]).toEqual(
+        expect.objectContaining({ frequency: 'MONTHLY', weekOfMonth: 4 }),
+      );
+      await service.createMeeting(
+        'm1',
+        DEPT,
+        'd1',
+        {
+          ...base,
+          startsAt: '2026-10-31T16:00:00Z',
+          endsAt: undefined,
+          repeat: 'MONTHLY' as never,
+        },
+        now,
+      );
+      expect(seriesRepo.create.mock.calls[2][0]).toEqual(
+        expect.objectContaining({ weekOfMonth: -1 }),
+      );
+    });
+
+    it('rejects an end date before the first meeting', async () => {
+      await expect(
+        service.createMeeting(
+          'm1',
+          DEPT,
+          'd1',
+          { ...base, repeat: 'WEEKLY' as never, repeatUntil: '2026-10-20' },
+          now,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    const series = {
+      id: 'series1',
+      space: { id: 's1' },
+      createdBy: { id: 'm1' },
+      title: 'Choir practice',
+      location: 'Room 2',
+      onlineLink: 'https://meet.example.org/choir',
+      agenda: null,
+      frequency: 'WEEKLY',
+      weekday: 6,
+      startTime: '17:00',
+      endTime: '18:30',
+      intervalWeeks: 1,
+      weekOfMonth: null,
+      startsOn: '2026-10-24',
+      endsOn: null,
+      active: true,
+    };
+
+    it('adds the next meeting with the same details and link once the latest has started', async () => {
+      spaceRepo.query.mockResolvedValueOnce([
+        { id: 'series1', latest: new Date('2026-10-24T16:00:00Z') },
+      ]);
+      seriesRepo.findOne.mockResolvedValue(series);
+      const next = await service.rollSeries(new Date('2026-10-24T16:05:00Z'));
+      expect(meetingRepo.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          startsAt: new Date('2026-10-31T16:00:00Z'),
+          endsAt: new Date('2026-10-31T17:30:00Z'),
+          onlineLink: 'https://meet.example.org/choir',
+          location: 'Room 2',
+          series: { id: 'series1' },
+        }),
+      );
+      expect(notifications.notifyMember).not.toHaveBeenCalled();
+      expect(next).toEqual(new Date('2026-10-31T16:00:00Z'));
+    });
+
+    it('waits until the latest meeting starts, and stops at the end date', async () => {
+      spaceRepo.query.mockResolvedValueOnce([
+        { id: 'series1', latest: new Date('2026-10-31T16:00:00Z') },
+      ]);
+      await expect(
+        service.rollSeries(new Date('2026-10-25T10:00:00Z')),
+      ).resolves.toEqual(new Date('2026-10-31T16:00:00Z'));
+      expect(meetingRepo.insert).not.toHaveBeenCalled();
+
+      spaceRepo.query.mockResolvedValueOnce([
+        { id: 'series1', latest: new Date('2026-10-24T16:00:00Z') },
+      ]);
+      seriesRepo.findOne.mockResolvedValue({ ...series, endsOn: '2026-10-30' });
+      await service.rollSeries(new Date('2026-10-24T16:05:00Z'));
+      expect(meetingRepo.insert).not.toHaveBeenCalled();
+      expect(seriesRepo.update).toHaveBeenCalledWith('series1', {
+        active: false,
+      });
+    });
+
+    it('lets a leader stop a meeting repeating', async () => {
+      meetingRepo.findOne.mockResolvedValue({
+        postId: 'p1',
+        title: 'Choir practice',
+        space,
+      });
+      spaceRepo.query.mockResolvedValueOnce([{ series_id: 'series1' }]);
+      await service.updateMeeting('m1', 'p1', { stopRepeating: true }, now);
+      expect(seriesRepo.update).toHaveBeenCalledWith('series1', {
+        active: false,
+      });
     });
   });
 

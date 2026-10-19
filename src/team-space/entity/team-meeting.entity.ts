@@ -10,6 +10,7 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TeamPost } from './team-post.entity';
 import { TeamSpace } from './team-space.entity';
+import { TeamMeetingSeries } from './team-meeting-series.entity';
 
 // A meeting is a post in the space, so it gets replies, pinning and unread counts for free. The agenda is the post body.
 @Entity({ name: 'team_meetings' })
@@ -52,4 +53,8 @@ export class TeamMeeting extends BaseEntity {
 
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
+
+  @ManyToOne(() => TeamMeetingSeries, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'series_id' })
+  series: TeamMeetingSeries | null;
 }

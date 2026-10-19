@@ -8,6 +8,7 @@ import { TeamMeeting } from './entity/team-meeting.entity';
 import { TeamMeetingRsvp } from './entity/team-meeting-rsvp.entity';
 import { TeamPoll } from './entity/team-poll.entity';
 import { TeamPollVote } from './entity/team-poll-vote.entity';
+import { TeamMeetingSeries } from './entity/team-meeting-series.entity';
 import { TeamSpaceExtrasService } from './service/team-space-extras.service';
 import { TeamMeetingReminderScheduler } from './scheduler/team-meeting-reminder.scheduler';
 import { TeamSpaceAccessService } from './service/team-space-access.service';
@@ -27,6 +28,7 @@ import { TeamSpaceController } from './controller/team-space.controller';
       TeamMeetingRsvp,
       TeamPoll,
       TeamPollVote,
+      TeamMeetingSeries,
     ]),
   ],
   providers: [

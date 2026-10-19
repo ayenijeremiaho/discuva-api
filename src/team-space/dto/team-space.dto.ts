@@ -46,7 +46,23 @@ export class SpaceSettingsDto {
   leadersOnly: boolean;
 }
 
+export enum MeetingRepeatEnum {
+  NONE = 'NONE',
+  WEEKLY = 'WEEKLY',
+  FORTNIGHTLY = 'FORTNIGHTLY',
+  MONTHLY = 'MONTHLY',
+}
+
 export class CreateMeetingDto {
+  @IsOptional()
+  @IsEnum(MeetingRepeatEnum)
+  repeat?: MeetingRepeatEnum;
+
+  // 'YYYY-MM-DD'; no meetings after this date.
+  @IsOptional()
+  @IsDateString()
+  repeatUntil?: string;
+
   @IsString()
   @Length(2, 120)
   title: string;
@@ -105,6 +121,10 @@ export class UpdateMeetingDto {
   @IsOptional()
   @IsBoolean()
   cancel?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  stopRepeating?: boolean;
 }
 
 export class RsvpDto {

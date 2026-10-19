@@ -28469,7 +28469,7 @@
             "description": "Leaders only. Tells the team.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Planning meeting\",\n  \"startsAt\": \"2026-10-24T16:00:00Z\",\n  \"location\": \"Room 2\",\n  \"agenda\": \"1. Christmas programme\\n2. Rehearsal times\"\n}"
+              "raw": "{\n  \"title\": \"Planning meeting\",\n  \"startsAt\": \"2026-10-24T16:00:00Z\",\n  \"repeat\": \"WEEKLY\",\n  \"location\": \"Room 2\",\n  \"agenda\": \"1. Christmas programme\\n2. Rehearsal times\"\n}"
             }
           }
         },

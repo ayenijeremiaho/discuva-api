@@ -693,6 +693,20 @@ leaders create them; everyone in the space, including under-18s, can RSVP and vo
   RSVP counts and my response; tallies, voter count and my vote.
 - **Meeting notifications:** the team is told when a meeting is set up (`TEAM_SPACE_MEETING`), and when it's moved
   or cancelled (`TEAM_SPACE_MEETING_CHANGED`).
+- **Repeating meetings** (tenant migration `AddTeamMeetingSeries`): `repeat` `WEEKLY`/`FORTNIGHTLY`/`MONTHLY`
+  (optional `repeatUntil` date) creates a `team_meeting_series`.
+  - **Schedule:** it's taken from the first meeting in church time: weekday, start and end time, every 1 or 2 weeks,
+    or the same week of each month (dates after the 28th mean the last such weekday). It reuses the fellowship
+    `MeetingSchedule` helpers (`nextMeeting`, `describeSchedule`).
+  - **Details:** title, location, online link and agenda are stored on the series.
+  - **The next meeting:** only the next meeting exists at a time (`team_meetings.series_id`). Once it has started,
+    `rollSeries` (run by the `team-meeting-reminders` job, even with reminders off) adds the next one: a new post,
+    with no push, carrying the same details and link. Each meeting keeps its own RSVPs, attendance and minutes.
+  - **Ending:** a series stops after `ends_on`, or when a leader sends `{ stopRepeating: true }`. Cancelling one
+    meeting doesn't stop the series.
+  - **Display:** feed details and the meeting page include `repeat` (e.g. "Every Saturday, 5:00 PM–6:30 PM") while
+    the series is active.
+  - **Indexes:** `(series_id, starts_at DESC)` partial, and active series. Series writes wake the job.
 - **Meeting reminders:** gated job `team-meeting-reminders`, every 15 minutes; it sleeps until the next reminder.
   Hours come from Reminder Settings key `team_meeting` (default 24 and 1). It skips anyone who answered Not going,
   and sends each reminder once (Redis key `team-meeting-reminder:{postId}:{hours}`). Writes to `team_meetings` or
@@ -704,9 +718,9 @@ leaders create them; everyone in the space, including under-18s, can RSVP and vo
 
 | Method | Path | Who | What |
 |---|---|---|---|
-| POST | /team-spaces/:kind/:refId/meetings | leaders | `{ title, startsAt, endsAt?, location?, onlineLink?, agenda? }` |
+| POST | /team-spaces/:kind/:refId/meetings | leaders | `{ title, startsAt, endsAt?, location?, onlineLink?, agenda?, repeat?, repeatUntil? }` |
 | GET | /team-spaces/meetings/:postId | team | Details, Going, Maybe, Not going and No reply lists, attendance and minutes |
-| PATCH | /team-spaces/meetings/:postId | leaders | Edit any field, or `{ cancel: true }` |
+| PATCH | /team-spaces/meetings/:postId | leaders | Edit any field, `{ cancel: true }` (this meeting only), or `{ stopRepeating: true }` |
 | POST | /team-spaces/meetings/:postId/rsvp | team | `{ response: GOING \| MAYBE \| NOT_GOING }` |
 | PATCH | /team-spaces/meetings/:postId/minutes | leaders | `{ minutes }` |
 | PATCH | /team-spaces/meetings/:postId/attendance | leaders | `{ memberIds }`, the people who came |
