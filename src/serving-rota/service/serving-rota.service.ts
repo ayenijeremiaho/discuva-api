@@ -147,7 +147,8 @@ export class ServingRotaService {
           cover_target: string | null;
         }[]
       >,
-      role === 'leader' ? this.team(departmentId, slotId) : Promise.resolve([]),
+      // Everyone in the department sees the team, so a worker can ask one teammate for cover.
+      this.team(departmentId, slotId),
       role === 'leader'
         ? (this.assignmentRepo.query(
             `SELECT a.member_id, a.role FROM rota_assignments a

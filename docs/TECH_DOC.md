@@ -607,7 +607,7 @@ cover I could take 9 ms, reminders 3.8 ms. All are index-driven, with no full sc
 | GET | /rota/mine | any worker | My duties for the next 8 weeks (with my open cover request), and cover requests I could take |
 | GET | /rota/departments | any worker | Departments I serve in or lead (`isLeader`) |
 | GET | /rota/departments/:departmentId/services | that department | Next 8 weeks of services with `assigned`, `openCover` and `mine` |
-| GET | /rota/departments/:departmentId/services/:slotId | that department | The rota for one service; leaders also get `team` (with `servingElsewhere`) and `previous` |
+| GET | /rota/departments/:departmentId/services/:slotId | that department | The rota for one service and the department's `team` (with `servingElsewhere`); leaders also get `previous` |
 | PUT | /rota/departments/:departmentId/services/:slotId | leads | `{ entries: [{ memberId, role? }] }`, the whole list |
 | POST | /rota/assignments/:assignmentId/cover | the person serving | `{ targetMemberId?, reason? }` |
 | POST | /rota/cover/:requestId/accept | eligible teammates | Takes the duty; 409 if someone was quicker |
