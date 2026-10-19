@@ -313,7 +313,10 @@ export type AuditAction =
   | 'TEAM_PULSE_STARTED'
   | 'TEAM_PULSE_STOPPED'
   | 'TEAM_PULSE_RESUMED'
-  | 'TEAM_PULSE_REMINDER_SENT';
+  | 'TEAM_PULSE_REMINDER_SENT'
+  // Team Spaces (post contents are never logged)
+  | 'TEAM_POST_REMOVED'
+  | 'TEAM_SPACE_SETTINGS_UPDATED';
 
 export interface AuditContext {
   actorId?: string;

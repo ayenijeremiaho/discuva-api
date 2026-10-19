@@ -60,6 +60,7 @@ describe('SchedulerGateSubscriber', () => {
         'service-reminders',
         'checkin-nudges',
         'team-pulse',
+        'team-space-digest',
       ],
     ],
     ['a fellowship', SmallGroup, ['fellowship-reminders']],

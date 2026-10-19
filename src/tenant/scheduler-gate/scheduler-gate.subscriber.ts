@@ -67,6 +67,7 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
       'service-reminders',
       'checkin-nudges',
       'team-pulse',
+      'team-space-digest',
     ],
   ],
   [SmallGroup, ['fellowship-reminders']],

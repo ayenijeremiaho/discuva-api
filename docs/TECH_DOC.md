@@ -565,6 +565,71 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### Team Spaces Module (`src/team-space/`)
+
+A shared space for each department and fellowship: posts, replies, up to 3 pinned posts per space, and one evening
+summary. Module key `team_spaces` (root migration `AddTeamSpacesToPlans` adds it to every plan that has
+`departments`).
+
+**Who is in a space:** membership is never stored; it comes straight from the roster.
+- **Department:** active workers whose primary or secondary department it is, plus its HOD and Assistant HOD.
+- **Fellowship:** `small_group_members`, plus the fellowship's leader.
+- **Leaders:** department leads, or the fellowship leader. They can pin and remove anything, and can switch the space
+  to "Only leaders can start posts" (`leaders_only`).
+
+**Under 18:** members under 18 can read and reply, but can't start posts. Age comes from the profile's birth year,
+month and day (`isUnder18`); without a birth year, someone counts as an adult. There are no private messages: everything
+in a space is visible to the whole team and its leaders.
+
+**Tables** (tenant migration `CreateTeamSpaces`):
+- `team_spaces`: `(kind, ref_id)` unique, `leaders_only` and `last_activity_at`. Created the first time anyone opens it.
+- `team_posts`: body (≤ 2000 characters, plain text), `pinned`, `reply_count`, `last_activity_at` (moves with each
+  reply), `edited_at`, and soft removal (`removed_at`, `removed_by_id`).
+- `team_post_replies`: body ≤ 1000 characters, with the same edit and removal fields.
+- `team_space_reads`: `(member_id, space_id)` unique, `last_read_at` (upserted when a space is opened, posted or replied in).
+
+**Query cost** (measured on a large church: 100 spaces, 60,000 posts, 240,000 replies, 5,000 members):
+- **Feed:** keyset pages of 20 on the partial index `(space_id, last_activity_at DESC, id DESC) WHERE removed_at IS
+  NULL`, about 0.8 ms on any page.
+- **Replies:** keyset pages of 50 on `(post_id, created_at, id) WHERE removed_at IS NULL`, about 0.2 ms.
+- **Pinned posts:** partial index on pinned posts.
+- **Unread counts:** each space counts conversations with activity since the member's last visit, stopping at 99 (about
+  4 ms for all of a member's spaces).
+- **Membership lookups:** index-driven unions, 1–7 ms.
+
+**Notifications** (category `TEAM_SPACES`, push-only; members can turn it off under My Account → Notifications):
+- `TEAM_SPACE_LEADER_POST`: sent straight away when a leader posts. Other posts wait for the evening summary.
+- `TEAM_SPACE_REPLY`: sent to the post's author, at most once every 30 minutes per post (Redis key
+  `team-reply-push:{postId}`).
+- `TEAM_SPACE_DIGEST`: sent at 18:00 church time by the gated job `team-space-digest`. The hourly tick sleeps each
+  church until its evening; church-setting writes wake it.
+  - It reads only spaces active in the last 24 hours and counts posts and replies by others that the member hasn't
+    seen since their last visit.
+  - Members with the same summary ("5 new in Choir and Ushering") share one send. On the test data above it took
+    about 12 ms.
+  - It runs once per day per church (Redis key `team-space-digest:{date}`).
+
+All recipient and name lookups happen inside the request; only the send itself finishes afterwards. Audit:
+`TEAM_POST_REMOVED` when a leader removes someone else's post or reply, and `TEAM_SPACE_SETTINGS_UPDATED`. Contents
+are never logged.
+
+**Endpoints** (`JwtAuthGuard`, module `team_spaces`; `:kind` is `DEPARTMENT` or `FELLOWSHIP`):
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /team-spaces | any member | My spaces with `isLeader`, `leadersOnly`, `lastActivityAt` and `unread` (max 99) |
+| GET | /team-spaces/:kind/:refId | team | Opens the space (marks it read): `canPost`, `isUnder18`, `isLeader` and pinned posts |
+| GET | /team-spaces/:kind/:refId/posts?cursor= | team | Feed page of 20 (pinned posts excluded) with `nextCursor` |
+| POST | /team-spaces/:kind/:refId/posts | team (not under 18; leaders only if `leadersOnly`) | `{ body }` |
+| PATCH | /team-spaces/:kind/:refId/settings | leaders | `{ leadersOnly }` |
+| GET | /team-spaces/posts/:postId?cursor= | team | Post with replies, 50 per page, oldest first |
+| PATCH | /team-spaces/posts/:postId | author | `{ body }` (marks it edited) |
+| DELETE | /team-spaces/posts/:postId | author or leader | Removes the post |
+| POST | /team-spaces/posts/:postId/pin | leaders | `{ pinned }`, up to 3 per space |
+| POST | /team-spaces/posts/:postId/replies | team, including under 18 | `{ body }` |
+| PATCH | /team-spaces/replies/:replyId | author | `{ body }` |
+| DELETE | /team-spaces/replies/:replyId | author or leader | Removes the reply |
+
 ### Team Pulse Module (`src/team-pulse/`)
 
 Recurring, anonymous check-ins a department's HOD or Assistant HOD sends their team about how **the team** is doing.
@@ -4680,6 +4745,7 @@ dedicated host).
 | `FACILITY_RENTAL` | `EMAIL_FACILITY_RENTAL_ENABLED` | `true` (to the renter: booking confirmed / not approved, payment received, caution refunded, day-before reminder) |
 | `FELLOWSHIPS` | `EMAIL_FELLOWSHIPS_ENABLED` | `true` (to a fellowship leader when a member misses three meetings in a row) |
 | `TEAM_PULSE` | `EMAIL_TEAM_PULSE_ENABLED` | `true` (push-only: a department's check-in opened, and the day-before reminder for a required one) |
+| `TEAM_SPACES` | `EMAIL_TEAM_SPACES_ENABLED` | `true` (push-only: a leader's new post, a reply to your post, the evening summary; members can opt out) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 **Prayer request, facility rental and fellowship notifications** (push, with email for members without push; each category switchable per church and push-first capable). *Prayer requests* (`PrayerRequestService.updateStatus`): only a change of status notifies, so re-saving never sends twice; `PRAYED_FOR` → `PRAYER_REQUEST_PRAYED_FOR` / `prayer-request-prayed-for`, `ANSWERED` → `PRAYER_REQUEST_ANSWERED` / `prayer-request-answered` (invites a testimony); the email quotes the request (first 200 characters); requests without a member (deactivated) send nothing; push idempotency `prayer-request:{id}:{status}`. *Facility rental* (`RentalNotifierService`, facility, date and time in the church timezone, amounts as `{currency} 1,234.00`): `confirmBooking` → `RENTAL_BOOKING_CONFIRMED` (with total), `rejectBooking` → `RENTAL_BOOKING_REJECTED` (with the reason), `markPaymentPaid` → `RENTAL_PAYMENT_RECEIVED` (booking fee or caution deposit, with reference), `markCautionRefunded` → `RENTAL_CAUTION_REFUNDED`. The day-before reminder (`RENTAL_BOOKING_REMINDER`) is sent by `RentalStatusScheduler` once per booking: `rental_bookings.reminder_sent_at` (tenant migration `AddRentalBookingReminderSentAt`, partial index `IDX_rental_bookings_reminder_due` on `start_date_time` WHERE `status = 'CONFIRMED' AND reminder_sent_at IS NULL`) is set before sending, the query covers bookings starting within 24 hours, `nextTransitionDue` includes each confirmed booking's reminder time so the gated scheduler wakes for it, and a booking confirmed within 24 hours of starting is marked reminded at confirmation (the confirmation stands in for it). *Fellowships* (`SmallGroupService.recordAttendance`): for members newly marked absent in that save (not the leader, not already absent), one windowed query reads each one's last four meetings in the group (served by `IDX_small_group_attendance_group_id_meeting_date`); the leader is told (`FELLOWSHIP_MEMBER_MISSING` / `fellowship-member-missing`, linking to `/small-groups/{id}` with the three dates) only when this meeting is their latest and the run of absences is exactly three, so it fires once per run, never on re-saves or edits to older meetings. Fellowship meeting reminders: see the Small Group Module's *Meeting schedule*. A notice can never undo what it reports: `RentalNotifierService` methods catch and log their own errors, and the fellowship alert is caught in `recordAttendance`, because each request runs in one transaction that rolls back on an error (a failed reminder is logged once and not retried). Timezone and currency for the wording come from caches (in-memory and Redis), so notices add no database round trip.
@@ -8526,6 +8592,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_FACILITY_RENTAL_ENABLED` | `true` | Facility rental notifications to the renter |
 | `EMAIL_FELLOWSHIPS_ENABLED` | `true` | Fellowship leader alert for three missed meetings in a row |
 | `EMAIL_TEAM_PULSE_ENABLED` | `true` | Team Pulse check-in notices (push-only) |
+| `EMAIL_TEAM_SPACES_ENABLED` | `true` | Team Spaces notifications (push-only) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP

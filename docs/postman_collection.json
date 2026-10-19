@@ -27875,6 +27875,356 @@
       ]
     },
     {
+      "name": "Team Spaces",
+      "item": [
+        {
+          "name": "My spaces",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Open a space",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}"
+              ]
+            },
+            "description": "Marks it read. Returns canPost, isUnder18, isLeader and pinned posts."
+          }
+        },
+        {
+          "name": "Feed page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/posts?cursor={{cursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "posts"
+              ],
+              "query": [
+                {
+                  "key": "cursor",
+                  "value": "{{cursor}}"
+                }
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Start a post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/posts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "posts"
+              ]
+            },
+            "description": "Not for members under 18. Leaders only when the space is set that way.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Rehearsal moves to 5pm on Saturday.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Leaders-only posting",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/DEPARTMENT/{{departmentId}}/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "DEPARTMENT",
+                "{{departmentId}}",
+                "settings"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leadersOnly\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Post with replies",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Edit my post",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Rehearsal moves to 5:30pm.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Remove a post",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Pin a post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}",
+                "pin"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pinned\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Reply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/replies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}",
+                "replies"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"I'll be there.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Edit my reply",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/replies/{{replyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "replies",
+                "{{replyId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"I'll be there at 5:30.\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Remove a reply",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/replies/{{replyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "replies",
+                "{{replyId}}"
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
       "name": "Team Pulse",
       "item": [
         {

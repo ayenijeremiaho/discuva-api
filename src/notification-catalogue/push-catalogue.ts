@@ -49,6 +49,9 @@ export enum PushNotificationKey {
   FELLOWSHIP_MEETING_REMINDER = 'FELLOWSHIP_MEETING_REMINDER',
   TEAM_PULSE_OPEN = 'TEAM_PULSE_OPEN',
   TEAM_PULSE_REMINDER = 'TEAM_PULSE_REMINDER',
+  TEAM_SPACE_LEADER_POST = 'TEAM_SPACE_LEADER_POST',
+  TEAM_SPACE_REPLY = 'TEAM_SPACE_REPLY',
+  TEAM_SPACE_DIGEST = 'TEAM_SPACE_DIGEST',
 }
 
 export interface PushTemplate {
@@ -577,6 +580,46 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     placeholders: {
       pulse_title: 'After Sunday',
       closes: 'tomorrow at 6:00 PM',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_LEADER_POST]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Leader posted in a team space',
+    description:
+      'Sent to a department or fellowship when its leader posts in the team space (other posts go in the evening summary).',
+    title: '{{space_name}}: {{author_name}} posted',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Choir',
+      author_name: 'Deacon Femi',
+      excerpt: 'Rehearsal moves to 5pm on Saturday. Please bring your folders.',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_REPLY]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Reply to your post',
+    description:
+      'Sent to the author of a team space post when someone replies (at most once every 30 minutes per post).',
+    title: '{{author_name}} replied in {{space_name}}',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      author_name: 'Ada',
+      space_name: 'Choir',
+      excerpt: "I'll be there, thanks!",
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_DIGEST]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Evening summary of team spaces',
+    description:
+      "One evening notification summing up today's posts and replies the member hasn't read yet.",
+    title: 'Today in your teams',
+    body: '{{summary}}',
+    url: '/team-spaces',
+    placeholders: {
+      summary: '5 new in Choir and Ushering',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {
