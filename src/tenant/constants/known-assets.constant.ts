@@ -117,7 +117,7 @@ export const KNOWN_ASSETS = [
     key: 'teamwork-hands-unity',
     label: 'Fellowships & Forms',
     description:
-      'Header on fellowships, department summary, forms and Team Pulse screens',
+      'Header on fellowships, department summary, forms, Team Pulse and Team Spaces screens',
   },
   {
     key: 'birthday-cake-candles',
