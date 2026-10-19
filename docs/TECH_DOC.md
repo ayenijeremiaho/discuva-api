@@ -565,6 +565,24 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### My Week Module (`src/my-week/`)
+
+`GET /my-week` (`JwtAuthGuard`) — the member's own commitments outside services for the next 7 days, in date order,
+for the member app's home screen: `[{ kind: 'prayer'|'fellowship'|'class', id, title, detail, role, startsAt, endsAt,
+url }]`. Services and programme assignments aren't included (the home screen already loads those).
+
+- **Prayer:** `prayer_roster_entries` for the member or their worker profile, `SCHEDULED`, on a meeting that isn't
+  cancelled, dated today to +7 days (church timezone); time from the meeting's day config. Ones already over are left out.
+- **Fellowship:** groups the member leads or belongs to with a regular schedule; the next meeting from
+  `nextMeeting(scheduleOf(group))`, the same calculation as fellowship reminders. `role: 'Leader'` for the leader.
+- **Class:** sessions of active classes the member facilitates or is enrolled in (`IN_PROGRESS`) that haven't ended
+  and start within 7 days. `role: 'Facilitator'` for facilitators.
+
+Each part is skipped when its module (`prayer`, `small_groups`, `classes`) is off for the church or not on its plan.
+Three queries run in parallel; all are served by existing indexes (roster member/worker profile and meeting date,
+`small_group_members.member_id`, `small_groups.leader_id`, `class_sessions (church_class_id, starts_at)`, enrollment
+and facilitator member indexes).
+
 ### Notification Preferences Module (`src/notification-preferences/`)
 
 Members choose which optional notifications they get. `members.muted_notifications` (`character varying[]`, default
@@ -7460,6 +7478,7 @@ outside the requested `?months=` window).
 | DELETE | /members/me/photo                                          | Any (JwtAuthGuard)                                            | Remove own profile photo                                                                                       |
 | GET    | /notification-preferences                                  | JwtAuthGuard                                                  | Optional notification kinds the church sends, with the member's on/off |
 | PATCH  | /notification-preferences                                  | JwtAuthGuard                                                  | `{ category, enabled }` — turn one kind off or on; returns the list |
+| GET    | /my-week                                                   | JwtAuthGuard                                                  | Next 7 days of the member's prayer slots, fellowship meetings and class sessions |
 | DELETE | /members/:id/photo                                         | AdminGuard (MEMBERS_WRITE)                                    | Moderation — clear a member's profile photo                                                                    |
 | GET    | /members?page=&limit=&role=&status=&search=&wantsToServe=  | AdminGuard (MEMBERS_READ)                                     | List members — filterable by role and account `status` (ACTIVE\|INACTIVE); `search` matches firstname, lastname, email, or phone (case-insensitive); `wantsToServe=true` returns only active members with a pending serve request |
 | POST   | /members                                                   | AdminGuard (MEMBERS_WRITE)                                    | Create a plain MEMBER account directly (body: `SignupDto`) — shares `signup()`'s temp-password/forced-change-password flow; audit-logged as `MEMBER_CREATED_BY_ADMIN` |

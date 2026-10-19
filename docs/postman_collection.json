@@ -27875,6 +27875,33 @@
       ]
     },
     {
+      "name": "My Week",
+      "item": [
+        {
+          "name": "My next 7 days",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/my-week",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "my-week"
+              ]
+            },
+            "description": "The member's prayer roster slots, fellowship meetings and class sessions for the next 7 days, in date order."
+          }
+        }
+      ]
+    },
+    {
       "name": "Notification Preferences",
       "item": [
         {
