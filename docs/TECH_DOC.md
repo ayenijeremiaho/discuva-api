@@ -565,6 +565,49 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### Newcomer Journey Module (`src/newcomer-journey/`)
+
+The path from first visit to serving, shown to members as "My Journey" (More → My Journey) and to admins as a funnel
+with lists of who is stuck. Module key `newcomer_journey` (root migration `AddNewcomerJourneyToPlans` adds it to every
+plan with `team_pulse` or `departments`). No new tables: it reads first-timers, follow-up tasks, members, class
+enrolments and worker profiles. Tenant migration `AddFollowUpTaskFirstTimerIndex` indexes `follow_up_tasks.first_timer_id`.
+
+**Steps**, in order (a step is left out when its module is off):
+1. `VISIT` "First visit": the first-timer's `created_at`, or the member's `created_at` if they never registered as a
+   first-timer.
+2. `WELCOMED` (needs `follow_up`): the first-timer's follow-up task is `COMPLETED`. Members with no first-timer record
+   count as welcomed.
+3. `MEMBER` "Joined the church app": the first-timer was converted to a member, or the person is a member.
+4. `CLASS:{classTypeId}` for each class on the path (needs `classes`): an enrolment in a class of that type is
+   `COMPLETED`; `IN_PROGRESS` shows as under way.
+5. `SERVING`: an `ACTIVE` worker profile. A pending serve request (`members.serve_interest_at`) shows as under way.
+
+**Settings** (church_settings row `journey:settings`, cached 10 minutes): `classTypeIds` (up to 6, in order; `null`
+means the default) and `stuckAfterDays` (3–180, default 21). By default the path follows the church's linked class
+chain (`class_types.next_class_type_id`, starting at a class nothing leads to), or the earliest active class type if
+none are linked. It stops after 6 classes or at a loop.
+
+**Member view:** each step has `status` `DONE`/`IN_PROGRESS`/`NEXT`/`TODO`, with `at`, `note` and `action`. The first
+step not started is `NEXT`. A class step's action names the soonest active class of that type that is open for
+requests (`classId` null if none is open); the serving step's action is `{ kind: 'SERVE' }`, which uses the existing
+`POST /members/me/serve-interest`.
+
+**Admin view:** the cohort is everyone who started in the range: first-timers registered then, plus members who joined
+then without a first-timer record. The funnel counts how many of them reached each step. "Stuck" lists people who
+finished the step before but not this one and started more than `stuckAfterDays` ago, oldest first, with name, phone,
+email, `firstTimerId`/`memberId` and `daysSinceStart`. Ranges are capped at three years.
+
+**Query cost** (5,000 first-timers and 20,000 members over 3 years, 10,000 enrolments): the member's journey 5 ms; the
+3-year funnel and a stuck list 20–75 ms (PGlite, so a real server will be faster). Class completions are grouped once and joined, not looked up per person.
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /journey/me | any member | My steps with status, dates and the next action; `{ steps, done, total }` |
+| GET | /admin/journey/settings | `follow_up:read` | `{ steps, settings, classTypes }` |
+| PUT | /admin/journey/settings | `follow_up:write` | `{ classTypeIds?: string[] \| null, stuckAfterDays }`; returns the same as GET |
+| GET | /admin/journey/funnel?from&to | `follow_up:read` | `{ total, steps: [{ key, label, description, reached, percent }] }` |
+| GET | /admin/journey/stuck?step&from&to&page&limit | `follow_up:read` | `{ step, total, page, limit, people }`; `limit` up to 100 |
+
 ### Serving Rota Module (`src/serving-rota/`)
 
 Who serves with each department at each service, and swapping when someone can't make it. Module key `serving_rota`

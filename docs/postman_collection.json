@@ -27875,6 +27875,170 @@
       ]
     },
     {
+      "name": "Newcomer Journey",
+      "item": [
+        {
+          "name": "My journey",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/journey/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "journey",
+                "me"
+              ]
+            },
+            "description": "Steps from first visit to serving, with status (DONE, IN_PROGRESS, NEXT, TODO) and the next action."
+          }
+        },
+        {
+          "name": "Journey settings",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "settings"
+              ]
+            },
+            "description": "Steps, saved settings and the class types to choose from. follow_up:read."
+          }
+        },
+        {
+          "name": "Save journey settings",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "settings"
+              ]
+            },
+            "description": "classTypeIds null or empty uses the default class chain. follow_up:write.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"classTypeIds\": [\n    \"{{classTypeId}}\"\n  ],\n  \"stuckAfterDays\": 21\n}"
+            }
+          }
+        },
+        {
+          "name": "Journey funnel",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/funnel?from=2026-01-01T00:00:00Z&to=2026-10-19T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "funnel"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-19T00:00:00Z"
+                }
+              ]
+            },
+            "description": "How many people who started in the range reached each step."
+          }
+        },
+        {
+          "name": "Stuck at a step",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/journey/stuck?step=MEMBER&from=2026-01-01T00:00:00Z&to=2026-10-19T00:00:00Z&page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "journey",
+                "stuck"
+              ],
+              "query": [
+                {
+                  "key": "step",
+                  "value": "MEMBER"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-19T00:00:00Z"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Finished the previous step but not this one, waiting longer than stuckAfterDays. step is VISIT/WELCOMED/MEMBER/SERVING or CLASS:{classTypeId}."
+          }
+        }
+      ]
+    },
+    {
       "name": "Serving Rota",
       "item": [
         {

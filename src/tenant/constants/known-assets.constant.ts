@@ -134,7 +134,7 @@ export const KNOWN_ASSETS = [
     key: 'profile-journal',
     label: 'Profile',
     description:
-      'Header on More, My Account (and its notifications, biometric login and appearance screens), edit-profile and My Week screens',
+      'Header on More, My Account (and its notifications, biometric login and appearance screens), edit-profile, My Week and My Journey screens',
   },
   {
     key: 'profile-statistics',
