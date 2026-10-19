@@ -131,7 +131,8 @@ export const KNOWN_ASSETS = [
   {
     key: 'profile-journal',
     label: 'Profile',
-    description: 'Header on profile, account, and edit-profile screens',
+    description:
+      'Header on More, My Account (and its notifications, biometric login and appearance screens), edit-profile and My Week screens',
   },
   {
     key: 'profile-statistics',
@@ -141,7 +142,8 @@ export const KNOWN_ASSETS = [
   {
     key: 'security-key',
     label: 'Security Screens',
-    description: 'Header on password/email change and device-reset screens',
+    description:
+      'Header on password/email change, device-reset and biometric login screens',
   },
   {
     key: 'member-directory-hero',
