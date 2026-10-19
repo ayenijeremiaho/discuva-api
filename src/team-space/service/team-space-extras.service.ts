@@ -347,6 +347,8 @@ export class TeamSpaceExtrasService {
           ? meeting.onlineLink
           : dto.onlineLink?.trim() || null,
     });
+    if (dto.applyToSeries)
+      await this.updateSeriesFrom(postId, dto, startsAt, endsAt);
     if (dto.agenda !== undefined)
       await this.postRepo.update(postId, {
         body: dto.agenda.trim() || meeting.title,
@@ -389,7 +391,7 @@ export class TeamSpaceExtrasService {
   async meeting(memberId: string, postId: string) {
     const meeting = await this.meetingRepo.findOne({
       where: { postId },
-      relations: { space: true, minutesBy: true },
+      relations: { space: true, minutesBy: true, post: true },
     });
     if (!meeting) throw new NotFoundException('Meeting not found');
     const acc = await this.access.accessBySpace(memberId, meeting.space);
@@ -425,6 +427,11 @@ export class TeamSpaceExtrasService {
       postId,
       space: { kind: acc.kind, refId: acc.refId, name: acc.name },
       title: meeting.title,
+      // The agenda is the post body, which repeats the title when none was given.
+      agenda:
+        meeting.post && meeting.post.body !== meeting.title
+          ? meeting.post.body
+          : null,
       startsAt: meeting.startsAt,
       endsAt: meeting.endsAt,
       location: meeting.location,
@@ -597,6 +604,49 @@ export class TeamSpaceExtrasService {
   }
 
   // Turns the first meeting's time into a schedule in church time: same weekday and time, every week, two weeks or month.
+  // "This and future meetings": the series takes this meeting's new details, and its time sets the schedule from here on.
+  private async updateSeriesFrom(
+    postId: string,
+    dto: UpdateMeetingDto,
+    startsAt: Date,
+    endsAt: Date | null,
+  ) {
+    const series = (
+      (await this.spaceRepo.query(
+        `SELECT s.id, s.frequency FROM team_meetings m JOIN team_meeting_series s ON s.id = m.series_id WHERE m.post_id = $1`,
+        [postId],
+      )) as { id: string; frequency: MeetingFrequencyEnum }[]
+    )[0];
+    if (!series) return;
+    const timezone = await this.churchTimezone.get();
+    const date = localDate(startsAt, timezone);
+    const week = Math.ceil(Number(date.slice(8, 10)) / 7);
+    await this.seriesRepo.update(series.id, {
+      ...(dto.title?.trim() ? { title: dto.title.trim() } : {}),
+      ...(dto.location !== undefined
+        ? { location: dto.location?.trim() || null }
+        : {}),
+      ...(dto.onlineLink !== undefined
+        ? { onlineLink: dto.onlineLink?.trim() || null }
+        : {}),
+      ...(dto.agenda !== undefined
+        ? { agenda: dto.agenda.trim() || null }
+        : {}),
+      weekday: new Date(`${date}T00:00:00Z`).getUTCDay(),
+      startTime: this.dateService.format(startsAt, 'HH:mm', timezone),
+      endTime: endsAt
+        ? this.dateService.format(endsAt, 'HH:mm', timezone)
+        : null,
+      startsOn: date,
+      weekOfMonth:
+        series.frequency === MeetingFrequencyEnum.MONTHLY
+          ? week >= 5
+            ? -1
+            : week
+          : null,
+    });
+  }
+
   private async createSeries(
     acc: SpaceAccess,
     memberId: string,

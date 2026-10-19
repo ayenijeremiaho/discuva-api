@@ -309,6 +309,61 @@ describe('TeamSpaceExtrasService', () => {
       });
     });
 
+    it('applies an edit to this and future meetings, moving the schedule with it', async () => {
+      meetingRepo.findOne.mockResolvedValue({
+        postId: 'p1',
+        title: 'Choir practice',
+        startsAt: new Date('2026-10-24T16:00:00Z'),
+        endsAt: null,
+        location: 'Room 2',
+        onlineLink: 'https://old.example.org',
+        cancelledAt: null,
+        space,
+      });
+      spaceRepo.query.mockResolvedValueOnce([
+        { id: 'series1', frequency: 'WEEKLY' },
+      ]);
+      await service.updateMeeting(
+        'm1',
+        'p1',
+        {
+          startsAt: '2026-10-25T15:00:00Z',
+          onlineLink: 'https://new.example.org',
+          applyToSeries: true,
+        },
+        now,
+      );
+      expect(seriesRepo.update).toHaveBeenCalledWith(
+        'series1',
+        expect.objectContaining({
+          onlineLink: 'https://new.example.org',
+          weekday: 0,
+          startTime: '16:00',
+          startsOn: '2026-10-25',
+          weekOfMonth: null,
+        }),
+      );
+      expect(meetingRepo.update).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ onlineLink: 'https://new.example.org' }),
+      );
+    });
+
+    it('leaves the series alone when only this meeting changes', async () => {
+      meetingRepo.findOne.mockResolvedValue({
+        postId: 'p1',
+        title: 'Choir practice',
+        startsAt: new Date('2026-10-24T16:00:00Z'),
+        endsAt: null,
+        location: 'Room 2',
+        onlineLink: null,
+        cancelledAt: null,
+        space,
+      });
+      await service.updateMeeting('m1', 'p1', { location: 'Main hall' }, now);
+      expect(seriesRepo.update).not.toHaveBeenCalled();
+    });
+
     it('lets a leader stop a meeting repeating', async () => {
       meetingRepo.findOne.mockResolvedValue({
         postId: 'p1',

@@ -720,7 +720,7 @@ leaders create them; everyone in the space, including under-18s, can RSVP and vo
 |---|---|---|---|
 | POST | /team-spaces/:kind/:refId/meetings | leaders | `{ title, startsAt, endsAt?, location?, onlineLink?, agenda?, repeat?, repeatUntil? }` |
 | GET | /team-spaces/meetings/:postId | team | Details, Going, Maybe, Not going and No reply lists, attendance and minutes |
-| PATCH | /team-spaces/meetings/:postId | leaders | Edit any field, `{ cancel: true }` (this meeting only), or `{ stopRepeating: true }` |
+| PATCH | /team-spaces/meetings/:postId | leaders | Edit any field (with `applyToSeries: true`, the series too: its details, and a new time resets the schedule from that date), `{ cancel: true }` (this meeting only), or `{ stopRepeating: true }` |
 | POST | /team-spaces/meetings/:postId/rsvp | team | `{ response: GOING \| MAYBE \| NOT_GOING }` |
 | PATCH | /team-spaces/meetings/:postId/minutes | leaders | `{ minutes }` |
 | PATCH | /team-spaces/meetings/:postId/attendance | leaders | `{ memberIds }`, the people who came |

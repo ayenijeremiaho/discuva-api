@@ -125,6 +125,11 @@ export class UpdateMeetingDto {
   @IsOptional()
   @IsBoolean()
   stopRepeating?: boolean;
+
+  // For a repeating meeting: also change the meetings after this one.
+  @IsOptional()
+  @IsBoolean()
+  applyToSeries?: boolean;
 }
 
 export class RsvpDto {
