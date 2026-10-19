@@ -239,6 +239,7 @@ export class EmailQueueService {
       [EmailCategory.PRAYER_REQUESTS]: 'EMAIL_PRAYER_REQUESTS_ENABLED',
       [EmailCategory.FACILITY_RENTAL]: 'EMAIL_FACILITY_RENTAL_ENABLED',
       [EmailCategory.FELLOWSHIPS]: 'EMAIL_FELLOWSHIPS_ENABLED',
+      [EmailCategory.TEAM_PULSE]: 'EMAIL_TEAM_PULSE_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);

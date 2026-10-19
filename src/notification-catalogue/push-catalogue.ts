@@ -47,6 +47,8 @@ export enum PushNotificationKey {
   RENTAL_BOOKING_REMINDER = 'RENTAL_BOOKING_REMINDER',
   FELLOWSHIP_MEMBER_MISSING = 'FELLOWSHIP_MEMBER_MISSING',
   FELLOWSHIP_MEETING_REMINDER = 'FELLOWSHIP_MEETING_REMINDER',
+  TEAM_PULSE_OPEN = 'TEAM_PULSE_OPEN',
+  TEAM_PULSE_REMINDER = 'TEAM_PULSE_REMINDER',
 }
 
 export interface PushTemplate {
@@ -549,6 +551,32 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       when: 'today',
       time: '6:00 PM–8:00 PM',
       place: ' · 12 Admiralty Way',
+    },
+  },
+  [PushNotificationKey.TEAM_PULSE_OPEN]: {
+    category: EmailCategory.TEAM_PULSE,
+    label: 'Team check-in open',
+    description:
+      'Sent to a department when its lead opens a Team Pulse check-in.',
+    title: '{{department_name}}: how are we doing?',
+    body: '{{pulse_title}} · takes about a minute, and your answers are anonymous.',
+    url: '/team-pulse',
+    placeholders: {
+      department_name: 'Choir',
+      pulse_title: 'After Sunday',
+    },
+  },
+  [PushNotificationKey.TEAM_PULSE_REMINDER]: {
+    category: EmailCategory.TEAM_PULSE,
+    label: 'Team check-in closing',
+    description:
+      "Sent the day before a required check-in closes, only to those who haven't answered.",
+    title: 'Your team is waiting on you',
+    body: '{{pulse_title}} closes {{closes}}. It takes about a minute.',
+    url: '/team-pulse',
+    placeholders: {
+      pulse_title: 'After Sunday',
+      closes: 'tomorrow at 6:00 PM',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {

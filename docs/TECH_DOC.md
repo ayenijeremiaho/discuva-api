@@ -565,6 +565,59 @@ emails are customizable so far — `welcome-member`, `happy-birthday`, `service-
   `[{ id, action, content, changedBy, createdAt }]`, newest first; `POST push/:key/history/:versionId/restore` and
   `POST email/:key/history/:versionId/restore` (`admin:write` + plan feature) return the updated template view.
 
+### Team Pulse Module (`src/team-pulse/`)
+
+Recurring, anonymous check-ins a department's HOD or Assistant HOD sends their team about how **the team** is doing.
+There is deliberately no way to rate a named person. Module key `team_pulse` (root migration `AddTeamPulseToPlans`
+adds it to every plan that already has `pastor_feedback`; movable from the Plans page).
+
+**Tables** (tenant migration `CreateTeamPulse`):
+- `team_pulses`: department, title, `questions` (jsonb `[{ id, kind: RATING|TEXT, text }]`, up to 6, at least one
+  rating), `frequency` (`ONCE`/`WEEKLY`/`FORTNIGHTLY`/`MONTHLY`), `response_window_days` (1–14, default 3),
+  `required`, `active` and `next_open_at`.
+- `team_pulse_rounds`: one sending, with `opens_at`/`closes_at`, `invited_count`, `response_count`, and the answers
+  held **only as totals**: `ratings` jsonb `{ questionId: { count, sum, spread[1..5] } }` and `comments` jsonb
+  `{ questionId: string[] }`.
+- `team_pulse_participations`: `(round_id, member_id)`, unique, recording only that someone answered.
+
+Nothing links an answer to a person: totals and comments carry no member or time, and responses are never audited.
+Answering locks the round row (`pessimistic_write`), checks the member hasn't answered, adds to the totals and inserts
+the participation in the request's transaction.
+
+**Rules:**
+- Results (averages, spread and comments) appear only once at least 3 people have answered (`MIN_RESPONSES_TO_SHOW`).
+  Comments are shuffled on every read.
+- Answering is open to active workers whose primary or secondary department is the pulse's.
+- Viewing is open to that team, its leads, and pastors (clergy with `canReviewFeedback`, as in Pastor Feedback).
+- While a round is open, leads see the names of those who haven't answered (never what anyone said) and can send a
+  reminder, at most once every 12 hours.
+- Creating a pulse opens the first round at once. Stopping one closes any open round. Resuming opens a new round.
+- Audit: `TEAM_PULSE_STARTED`, `_STOPPED`, `_RESUMED`, `_REMINDER_SENT`.
+
+**Scheduler (`TeamPulseScheduler`):** gated job `team-pulse`, every 15 minutes. It opens rounds for active pulses
+whose `next_open_at` has passed, advancing past any missed openings. It also sends `TEAM_PULSE_REMINDER` to
+non-responders of required rounds closing within 24 hours (once per round). It sleeps until the earliest of the next
+opening or the next reminder. Writes to `team_pulses`, `team_pulse_rounds` or church settings wake it. Indexes: the
+partial `IDX_team_pulses_next_open_due`, `(pulse_id, opens_at)`, `closes_at`, the participation unique pair and
+`member_id`.
+
+**Notifications:** category `TEAM_PULSE` (push-only), keys `TEAM_PULSE_OPEN` and `TEAM_PULSE_REMINDER`, both
+linking to `/team-pulse`.
+
+**Endpoints** (`JwtAuthGuard`, module `team_pulse`):
+
+| Method | Path | Who | What |
+|---|---|---|---|
+| GET | /team-pulse/mine | any worker | Check-ins waiting for this member, their departments (`canManage` for leads), `isPastor` |
+| GET | /team-pulse/templates | any | Ready-made question sets |
+| GET | /team-pulse/departments/:departmentId | team, its leads, pastors | Pulses with up to 12 recent rounds (`score` null below 3 answers) |
+| GET | /team-pulse/rounds/:roundId | team, its leads, pastors | Per-question averages, spread and comments (3+ answers); leads also get `notYetAnswered` and `canRemind` |
+| POST | /team-pulse/rounds/:roundId/responses | team member | `{ answers: { questionId: 1-5 \| text } }`; 409 if already answered |
+| POST | /team-pulse/rounds/:roundId/remind | lead | Push reminder to those who haven't answered |
+| POST | /team-pulse | lead | `{ departmentId, title, questions, frequency, responseWindowDays?, required? }`; opens the first round |
+| PATCH | /team-pulse/:id | lead | `{ active?, required? }` to stop, resume or change required |
+| GET | /team-pulse/overview | pastors | Every department's pulses with latest and previous score, response rate and score history |
+
 ### My Week Module (`src/my-week/`)
 
 `GET /my-week` (`JwtAuthGuard`) — the member's own commitments outside services for the next 7 days, in date order,
@@ -4620,6 +4673,7 @@ dedicated host).
 | `PRAYER_REQUESTS` | `EMAIL_PRAYER_REQUESTS_ENABLED` | `true` (to the member when their request is marked prayed for or answered) |
 | `FACILITY_RENTAL` | `EMAIL_FACILITY_RENTAL_ENABLED` | `true` (to the renter: booking confirmed / not approved, payment received, caution refunded, day-before reminder) |
 | `FELLOWSHIPS` | `EMAIL_FELLOWSHIPS_ENABLED` | `true` (to a fellowship leader when a member misses three meetings in a row) |
+| `TEAM_PULSE` | `EMAIL_TEAM_PULSE_ENABLED` | `true` (push-only: a department's check-in opened, and the day-before reminder for a required one) |
 | `DEPARTMENT_GOAL_ACTIVITY` | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` (push-only for now — see Department Goals) |
 
 **Prayer request, facility rental and fellowship notifications** (push, with email for members without push; each category switchable per church and push-first capable). *Prayer requests* (`PrayerRequestService.updateStatus`): only a change of status notifies, so re-saving never sends twice; `PRAYED_FOR` → `PRAYER_REQUEST_PRAYED_FOR` / `prayer-request-prayed-for`, `ANSWERED` → `PRAYER_REQUEST_ANSWERED` / `prayer-request-answered` (invites a testimony); the email quotes the request (first 200 characters); requests without a member (deactivated) send nothing; push idempotency `prayer-request:{id}:{status}`. *Facility rental* (`RentalNotifierService`, facility, date and time in the church timezone, amounts as `{currency} 1,234.00`): `confirmBooking` → `RENTAL_BOOKING_CONFIRMED` (with total), `rejectBooking` → `RENTAL_BOOKING_REJECTED` (with the reason), `markPaymentPaid` → `RENTAL_PAYMENT_RECEIVED` (booking fee or caution deposit, with reference), `markCautionRefunded` → `RENTAL_CAUTION_REFUNDED`. The day-before reminder (`RENTAL_BOOKING_REMINDER`) is sent by `RentalStatusScheduler` once per booking: `rental_bookings.reminder_sent_at` (tenant migration `AddRentalBookingReminderSentAt`, partial index `IDX_rental_bookings_reminder_due` on `start_date_time` WHERE `status = 'CONFIRMED' AND reminder_sent_at IS NULL`) is set before sending, the query covers bookings starting within 24 hours, `nextTransitionDue` includes each confirmed booking's reminder time so the gated scheduler wakes for it, and a booking confirmed within 24 hours of starting is marked reminded at confirmation (the confirmation stands in for it). *Fellowships* (`SmallGroupService.recordAttendance`): for members newly marked absent in that save (not the leader, not already absent), one windowed query reads each one's last four meetings in the group (served by `IDX_small_group_attendance_group_id_meeting_date`); the leader is told (`FELLOWSHIP_MEMBER_MISSING` / `fellowship-member-missing`, linking to `/small-groups/{id}` with the three dates) only when this meeting is their latest and the run of absences is exactly three, so it fires once per run, never on re-saves or edits to older meetings. Fellowship meeting reminders: see the Small Group Module's *Meeting schedule*. A notice can never undo what it reports: `RentalNotifierService` methods catch and log their own errors, and the fellowship alert is caught in `recordAttendance`, because each request runs in one transaction that rolls back on an error (a failed reminder is logged once and not retried). Timezone and currency for the wording come from caches (in-memory and Redis), so notices add no database round trip.
@@ -8465,6 +8519,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `EMAIL_PRAYER_REQUESTS_ENABLED` | `true` | Prayer request prayed-for / answered notifications |
 | `EMAIL_FACILITY_RENTAL_ENABLED` | `true` | Facility rental notifications to the renter |
 | `EMAIL_FELLOWSHIPS_ENABLED` | `true` | Fellowship leader alert for three missed meetings in a row |
+| `EMAIL_TEAM_PULSE_ENABLED` | `true` | Team Pulse check-in notices (push-only) |
 | `EMAIL_DEPARTMENT_GOAL_ACTIVITY_ENABLED` | `true` | Department Goals approval decisions and comments (push-only for now — the flag exists for consistency and to gate a future email leg) |
 
 ### Auth / OTP

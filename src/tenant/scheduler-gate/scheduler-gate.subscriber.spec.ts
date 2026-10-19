@@ -1,3 +1,5 @@
+import { TeamPulse } from '../../team-pulse/entity/team-pulse.entity';
+import { TeamPulseRound } from '../../team-pulse/entity/team-pulse-round.entity';
 import { SchedulerGateSubscriber } from './scheduler-gate.subscriber';
 import { Tenant } from '../entity/tenant.entity';
 import { EventReminder } from '../../event/entity/event-reminder.entity';
@@ -58,10 +60,13 @@ describe('SchedulerGateSubscriber', () => {
         'social-live',
         'service-reminders',
         'checkin-nudges',
+        'team-pulse',
       ],
     ],
     ['a fellowship', SmallGroup, ['fellowship-reminders']],
     ['a social account', SocialAccount, ['social-live']],
+    ['a team pulse', TeamPulse, ['team-pulse']],
+    ['a team pulse round', TeamPulseRound, ['team-pulse']],
   ])('wakes the jobs that depend on %s', (_label, target, jobs) => {
     subscriber.afterInsert(ev(target));
     subscriber.afterUpdate(ev(target));

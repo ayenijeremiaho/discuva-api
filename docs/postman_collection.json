@@ -27875,6 +27875,247 @@
       ]
     },
     {
+      "name": "Team Pulse",
+      "item": [
+        {
+          "name": "My check-ins",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/mine",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "mine"
+              ]
+            },
+            "description": "Check-ins waiting for me, my departments, whether I'm a pastor."
+          }
+        },
+        {
+          "name": "Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/templates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "templates"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Department pulses and trend",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/departments/{{departmentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "departments",
+                "{{departmentId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Round results",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/rounds/{{roundId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "rounds",
+                "{{roundId}}"
+              ]
+            },
+            "description": "Averages and comments appear once 3 people have answered."
+          }
+        },
+        {
+          "name": "Answer a check-in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/rounds/{{roundId}}/responses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "rounds",
+                "{{roundId}}",
+                "responses"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"{{questionId}}\": 4\n  }\n}"
+            }
+          }
+        },
+        {
+          "name": "Remind those who haven't answered",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/rounds/{{roundId}}/remind",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "rounds",
+                "{{roundId}}",
+                "remind"
+              ]
+            },
+            "description": "Leads only; once every 12 hours."
+          }
+        },
+        {
+          "name": "Start a pulse",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse"
+              ]
+            },
+            "description": "Leads only. Opens the first round straight away.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"departmentId\": \"{{departmentId}}\",\n  \"title\": \"After Sunday\",\n  \"frequency\": \"WEEKLY\",\n  \"responseWindowDays\": 3,\n  \"required\": false,\n  \"questions\": [\n    {\n      \"kind\": \"RATING\",\n      \"text\": \"How well did we serve today?\"\n    },\n    {\n      \"kind\": \"TEXT\",\n      \"text\": \"What should we do differently next time?\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Stop or resume a pulse",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/{{pulseId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "{{pulseId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Pastor overview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-pulse/overview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-pulse",
+                "overview"
+              ]
+            },
+            "description": "Clergy with feedback-review access."
+          }
+        }
+      ]
+    },
+    {
       "name": "My Week",
       "item": [
         {
