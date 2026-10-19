@@ -24,6 +24,7 @@ import { EmailCategorySettingsService } from '../../email-category-settings/serv
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { queryTenant } from '../../tenant/utility/query-tenant';
+import { MUTABLE_CATEGORIES } from '../../notification-preferences/constant/member-notification-choices.constant';
 
 @Injectable()
 export class PushNotificationService implements OnModuleInit {
@@ -43,6 +44,7 @@ export class PushNotificationService implements OnModuleInit {
   // Null when the church has switched this category's push off. personal = wording uses recipient details.
   private async resolve(push: DispatchPush): Promise<{
     personal: boolean;
+    category?: string;
     build: (recipient?: Record<string, string>) => PushPayload;
   } | null> {
     if (!('key' in push)) return { personal: false, build: () => push };
@@ -58,6 +60,7 @@ export class PushNotificationService implements OnModuleInit {
     );
     return {
       personal: needsRecipient([template.title, template.body], vars),
+      category: template.category,
       build: (recipient) => ({
         ...renderPush(
           template,
@@ -139,6 +142,10 @@ export class PushNotificationService implements OnModuleInit {
     if (!memberIds.length) return;
     const resolved = await this.resolve(push);
     if (!resolved) return;
+    // Members who turned this kind off are left out in the same query.
+    const mutable =
+      resolved.category !== undefined &&
+      MUTABLE_CATEGORIES.has(resolved.category);
     // Schema-qualified: most dispatches are fire-and-forget and outlive the caller's tenant transaction.
     const subscriptions = await queryTenant<
       Pick<PushSubscription, 'memberId' | 'endpoint' | 'p256dh' | 'auth'>
@@ -146,8 +153,10 @@ export class PushNotificationService implements OnModuleInit {
       this.dataSource,
       this.cls.get('schemaName'),
       (schema) =>
-        `SELECT member_id AS "memberId", endpoint, p256dh, auth FROM ${schema}.push_subscriptions WHERE member_id = ANY($1::uuid[])`,
-      [memberIds],
+        mutable
+          ? `SELECT ps.member_id AS "memberId", ps.endpoint, ps.p256dh, ps.auth FROM ${schema}.push_subscriptions ps JOIN ${schema}.members m ON m.id = ps.member_id WHERE ps.member_id = ANY($1::uuid[]) AND NOT ($2 = ANY(m.muted_notifications))`
+          : `SELECT member_id AS "memberId", endpoint, p256dh, auth FROM ${schema}.push_subscriptions WHERE member_id = ANY($1::uuid[])`,
+      mutable ? [memberIds, resolved.category] : [memberIds],
     );
     if (!subscriptions.length) return;
     const details = resolved.personal

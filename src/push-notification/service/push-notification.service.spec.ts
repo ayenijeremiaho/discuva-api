@@ -275,6 +275,32 @@ describe('PushNotificationService', () => {
       ]);
     });
 
+    it('leaves out members who turned this kind off, in the same query', async () => {
+      await service.dispatchToMemberIds(['m1'], {
+        key: PushNotificationKey.SERVICE_REMINDER,
+        vars: { service_name: 'Sunday', when: 'tomorrow' },
+        idempotencyKey: 'k-mute',
+      });
+
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('NOT ($2 = ANY(m.muted_notifications))'),
+        [['m1'], EmailCategory.EVENT_REMINDER],
+      );
+    });
+
+    it('never filters kinds members cannot turn off', async () => {
+      await service.dispatchToMemberIds(['m1'], {
+        key: PushNotificationKey.PRAYER_ASSIGNED,
+        vars: { meeting_date: '2026-10-04' },
+        idempotencyKey: 'k-duty',
+      });
+
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.not.stringContaining('muted_notifications'),
+        [['m1']],
+      );
+    });
+
     it('fills the catalogue wording and default link', async () => {
       await service.dispatchToMemberIds(['m1'], {
         key: PushNotificationKey.PRAYER_ASSIGNED,

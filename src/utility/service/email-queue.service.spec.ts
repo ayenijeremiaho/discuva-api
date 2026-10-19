@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import { Test, TestingModule } from '@nestjs/testing';
-import { getRepositoryToken } from '@nestjs/typeorm';
+import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
@@ -35,6 +35,8 @@ const mockCacheService = {
     .fn()
     .mockImplementation((_key: string, fn: () => Promise<unknown>) => fn()),
 };
+const mockDataSource = { query: jest.fn().mockResolvedValue([]) };
+
 const mockCls = {
   get: jest.fn(),
   isActive: jest.fn().mockReturnValue(true),
@@ -105,6 +107,7 @@ describe('EmailQueueService', () => {
         },
         { provide: NotificationTemplateService, useValue: mockTemplates },
         { provide: NotificationRecipientService, useValue: mockRecipients },
+        { provide: getDataSourceToken(), useValue: mockDataSource },
       ],
     }).compile();
     service = module.get(EmailQueueService);
@@ -330,6 +333,61 @@ describe('EmailQueueService', () => {
         EmailCategory.BIRTHDAY,
       );
 
+      expect(mockQueue.add).toHaveBeenCalled();
+    });
+
+    it('leaves out members who turned this kind of notification off', async () => {
+      mockCls.get.mockImplementation((k: string) =>
+        k === 'schemaName' ? 'tenant_a' : undefined,
+      );
+      mockDataSource.query.mockResolvedValueOnce([{ email: 'b@c.com' }]);
+
+      await service.queueEmail(
+        ['a@b.com', 'B@c.com'],
+        'Subject',
+        '<p>hi</p>',
+        undefined,
+        undefined,
+        EmailCategory.BIRTHDAY,
+      );
+
+      expect(mockDataSource.query).toHaveBeenCalledWith(
+        expect.stringContaining('muted_notifications'),
+        [['a@b.com', 'b@c.com'], EmailCategory.BIRTHDAY],
+      );
+      expect(mockQueue.add.mock.calls[0][1].to).toEqual(['a@b.com']);
+    });
+
+    it('sends nothing when the only recipient turned it off', async () => {
+      mockCls.get.mockImplementation((k: string) =>
+        k === 'schemaName' ? 'tenant_a' : undefined,
+      );
+      mockDataSource.query.mockResolvedValueOnce([{ email: 'a@b.com' }]);
+
+      const jobId = await service.queueEmail(
+        'a@b.com',
+        'Subject',
+        '<p>hi</p>',
+        undefined,
+        undefined,
+        EmailCategory.BIRTHDAY,
+      );
+
+      expect(jobId).toBe('');
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('never checks member choices for kinds members cannot turn off', async () => {
+      await service.queueEmail(
+        'a@b.com',
+        'Receipt',
+        '<p>hi</p>',
+        undefined,
+        undefined,
+        EmailCategory.GIVING_RECEIPT,
+      );
+
+      expect(mockDataSource.query).not.toHaveBeenCalled();
       expect(mockQueue.add).toHaveBeenCalled();
     });
   });
