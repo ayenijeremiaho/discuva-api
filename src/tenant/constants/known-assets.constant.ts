@@ -27,14 +27,48 @@ export const KNOWN_ASSETS = [
     description: 'Header on the member home screen',
   },
   {
-    key: 'dashboard-bible',
-    label: 'Dashboard',
-    description: 'Header on the personal stats dashboard',
+    key: 'more-hero',
+    label: 'More',
+    description: 'Header on the More screen',
+    // Starts as the same picture as profile-journal, but changes on its own.
+    defaultImage: 'profile-journal',
+  },
+  {
+    key: 'profile-journal',
+    label: 'My Account',
+    description:
+      'Header on My Account, its Notifications and Appearance screens, and Edit Profile',
+  },
+  {
+    key: 'profile-statistics',
+    label: 'My Stats',
+    description: 'Header on the My Stats screen',
+  },
+  {
+    key: 'my-week-hero',
+    label: 'My Week',
+    description: 'Header on the My Week screen',
+    // Starts as the same picture as profile-journal, but changes on its own.
+    defaultImage: 'profile-journal',
+  },
+  {
+    key: 'my-journey-hero',
+    label: 'My Journey',
+    description: 'Header on the My Journey screen',
+    // Starts as the same picture as profile-journal, but changes on its own.
+    defaultImage: 'profile-journal',
+  },
+  {
+    key: 'whats-new-hero',
+    label: "What's New",
+    description: "Header on the What's New screen",
+    // Starts as the same picture as profile-journal, but changes on its own.
+    defaultImage: 'profile-journal',
   },
   {
     key: 'events-hero',
     label: 'Events',
-    description: 'Header on the events list',
+    description: 'Header on the events list and the public event page',
   },
   {
     key: 'church-calendar-hero',
@@ -44,7 +78,14 @@ export const KNOWN_ASSETS = [
   {
     key: 'attendance-backdrop',
     label: 'Attendance',
-    description: 'Header on the check-in / attendance screen',
+    description: 'Header on the My Attendance screen',
+  },
+  {
+    key: 'admin-checkin-hero',
+    label: 'Check Someone In',
+    description: 'Header on the admin department Check Someone In screen',
+    // Starts as the same picture as attendance-backdrop, but changes on its own.
+    defaultImage: 'attendance-backdrop',
   },
   {
     key: 'attendance-department-backdrop',
@@ -64,13 +105,19 @@ export const KNOWN_ASSETS = [
   {
     key: 'leave-request-backdrop',
     label: 'Leave Requests',
-    description:
-      'Header on worker leave requests (also used for weekly pastor feedback)',
+    description: 'Header on the worker Leave Requests screen',
+  },
+  {
+    key: 'pastor-feedback-hero',
+    label: 'Weekly Feedback',
+    description: 'Header on the weekly pastor feedback screen',
+    // Starts as the same picture as leave-request-backdrop, but changes on its own.
+    defaultImage: 'leave-request-backdrop',
   },
   {
     key: 'classes-backdrop',
     label: 'Training Classes',
-    description: 'Header on the training classes screens',
+    description: 'Header on the training classes list and each class page',
   },
   {
     key: 'sunday-school-classroom',
@@ -95,13 +142,19 @@ export const KNOWN_ASSETS = [
   {
     key: 'game-backdrop',
     label: 'Games',
-    description: 'Header on the join-a-game screen',
+    description: 'Header on the Games screen and My quiz history (shown muted)',
   },
   {
     key: 'prayer-hands-bible',
     label: 'Prayer',
-    description:
-      'Header on prayer roster, prayer requests, and evangelism screens',
+    description: 'Header on the Prayer Roster and Prayer Requests screens',
+  },
+  {
+    key: 'evangelism-hero',
+    label: 'Evangelism',
+    description: 'Header on the evangelism (converts) screen',
+    // Starts as the same picture as prayer-hands-bible, but changes on its own.
+    defaultImage: 'prayer-hands-bible',
   },
   {
     key: 'follow-up-backdrop',
@@ -110,15 +163,88 @@ export const KNOWN_ASSETS = [
   },
   {
     key: 'service-hands',
-    label: 'Service History / Volunteering',
-    description:
-      'Header on service history, volunteering and serving rota screens',
+    label: 'Service History',
+    description: 'Header on the Service History screen',
+  },
+  {
+    key: 'order-of-service-hero',
+    label: 'Order of Service',
+    description: 'Header on the Order of Service screen',
+    // Starts as the same picture as service-hands, but changes on its own.
+    defaultImage: 'service-hands',
+  },
+  {
+    key: 'programme-planner-hero',
+    label: 'Plan Services',
+    description: 'Header on the Plan Services screen for programme planners',
+    // Starts as the same picture as events-hero, but changes on its own.
+    defaultImage: 'events-hero',
+  },
+  {
+    key: 'volunteering-hero',
+    label: 'Volunteering',
+    description: 'Header on the Volunteering screen',
+    // Starts as the same picture as service-hands, but changes on its own.
+    defaultImage: 'service-hands',
+  },
+  {
+    key: 'serving-rota-hero',
+    label: 'Serving Rota',
+    description: 'Header on the Serving Rota screens',
+    // Starts as the same picture as service-hands, but changes on its own.
+    defaultImage: 'service-hands',
   },
   {
     key: 'teamwork-hands-unity',
-    label: 'Fellowships & Forms',
-    description:
-      'Header on fellowships, department summary, forms, Team Pulse and Team Spaces screens',
+    label: 'Fellowships',
+    description: 'Header on the fellowships list and each fellowship page',
+  },
+  {
+    key: 'forms-hero',
+    label: 'Forms',
+    description: 'Header on the Forms screen and My Scores & Votes',
+    // Starts as the same picture as teamwork-hands-unity, but changes on its own.
+    defaultImage: 'teamwork-hands-unity',
+  },
+  {
+    key: 'department-goals-hero',
+    label: 'Department Goals',
+    description: 'Header on the Department Goals screen',
+    // Starts as the same picture as teamwork-hands-unity, but changes on its own.
+    defaultImage: 'teamwork-hands-unity',
+  },
+  {
+    key: 'department-summary-hero',
+    label: 'Department Summary',
+    description: 'Header on the HOD Department Summary screen',
+    // Starts as the same picture as teamwork-hands-unity, but changes on its own.
+    defaultImage: 'teamwork-hands-unity',
+  },
+  {
+    key: 'team-pulse-hero',
+    label: 'Team Pulse',
+    description: 'Header on the Team Pulse screens',
+    // Starts as the same picture as teamwork-hands-unity, but changes on its own.
+    defaultImage: 'teamwork-hands-unity',
+  },
+  {
+    key: 'team-spaces-hero',
+    label: 'Team Spaces',
+    description: 'Header on the Team Spaces screens',
+    // Starts as the same picture as teamwork-hands-unity, but changes on its own.
+    defaultImage: 'teamwork-hands-unity',
+  },
+  {
+    key: 'dashboard-bible',
+    label: 'Sermons',
+    description: 'Header on the sermon archive',
+  },
+  {
+    key: 'notes-hero',
+    label: 'Notes',
+    description: 'Header on the My notes screen',
+    // Starts as the same picture as dashboard-bible, but changes on its own.
+    defaultImage: 'dashboard-bible',
   },
   {
     key: 'birthday-cake-candles',
@@ -131,21 +257,10 @@ export const KNOWN_ASSETS = [
     description: 'Header on the help / support screen',
   },
   {
-    key: 'profile-journal',
-    label: 'Profile',
-    description:
-      'Header on More, My Account (and its notifications, biometric login and appearance screens), edit-profile, My Week and My Journey screens',
-  },
-  {
-    key: 'profile-statistics',
-    label: 'Dashboard Stats',
-    description: 'Secondary image on the personal dashboard',
-  },
-  {
     key: 'security-key',
     label: 'Security Screens',
     description:
-      'Header on password/email change, device-reset and biometric login screens',
+      'Header on password/email change, forgot password, device-reset and biometric login screens',
   },
   {
     key: 'member-directory-hero',
@@ -153,5 +268,11 @@ export const KNOWN_ASSETS = [
     description: 'Header on the member directory search screen',
   },
 ] as const;
+
+// The bundled default the member app falls back to (public/images/<file>.jpg): the key itself unless defaultImage says otherwise.
+export function defaultImageFor(key: string): string {
+  const asset = KNOWN_ASSETS.find((a) => a.key === key);
+  return asset && 'defaultImage' in asset ? asset.defaultImage : key;
+}
 
 export type KnownAssetKey = (typeof KNOWN_ASSETS)[number]['key'];

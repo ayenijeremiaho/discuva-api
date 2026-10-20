@@ -66,9 +66,7 @@ export class TenantAssetService {
       );
     }
 
-    if (previousPublicId) {
-      this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
-    }
+    if (previousPublicId) await this.deleteIfUnused(previousPublicId);
 
     return this.getOverrides(tenantId);
   }
@@ -84,10 +82,18 @@ export class TenantAssetService {
     });
     if (existing) {
       await this.overrideRepo.remove(existing);
-      this.cloudinaryService.deleteByPublicId(existing.imagePublicId, 'image');
+      await this.deleteIfUnused(existing.imagePublicId);
     }
 
     return this.getOverrides(tenantId);
+  }
+
+  // Pages split from a shared image start with the same uploaded file, so only delete it once no key uses it.
+  private async deleteIfUnused(publicId: string) {
+    const stillUsed = await this.overrideRepo.count({
+      where: { imagePublicId: publicId },
+    });
+    if (!stillUsed) this.cloudinaryService.deleteByPublicId(publicId, 'image');
   }
 
   private assertKnownKey(assetKey: string): asserts assetKey is KnownAssetKey {

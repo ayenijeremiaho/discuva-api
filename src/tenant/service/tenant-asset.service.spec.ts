@@ -4,6 +4,10 @@ import { BadRequestException } from '@nestjs/common';
 import { TenantAssetService } from './tenant-asset.service';
 import { TenantAssetOverride } from '../entity/tenant-asset-override.entity';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import {
+  KNOWN_ASSETS,
+  defaultImageFor,
+} from '../constants/known-assets.constant';
 
 const mockOverrideRepo = {
   find: jest.fn(),
@@ -11,6 +15,7 @@ const mockOverrideRepo = {
   create: jest.fn((v) => v),
   save: jest.fn((v) => Promise.resolve({ id: 'override-1', ...v })),
   remove: jest.fn(),
+  count: jest.fn(),
 };
 
 const mockCloudinaryService = {
@@ -23,6 +28,7 @@ describe('TenantAssetService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockOverrideRepo.count.mockResolvedValue(0);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TenantAssetService,
@@ -173,5 +179,36 @@ describe('TenantAssetService', () => {
         'image',
       );
     });
+    it('keeps the file when another page still uses it', async () => {
+      mockOverrideRepo.findOne.mockResolvedValue({
+        id: 'override-2',
+        assetKey: 'volunteering-hero',
+        imagePublicId: 'tenant-assets/shared',
+      });
+      mockOverrideRepo.find.mockResolvedValue([]);
+      mockOverrideRepo.count.mockResolvedValue(1);
+
+      await service.removeOverride('tenant-1', 'volunteering-hero');
+
+      expect(mockOverrideRepo.count).toHaveBeenCalledWith({
+        where: { imagePublicId: 'tenant-assets/shared' },
+      });
+      expect(mockCloudinaryService.deleteByPublicId).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('known assets', () => {
+  it('gives every page image a unique key and a description', () => {
+    const keys = KNOWN_ASSETS.map((a) => a.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const a of KNOWN_ASSETS)
+      expect(a.description.length).toBeGreaterThan(10);
+  });
+
+  it('points split keys at the picture they started from', () => {
+    expect(defaultImageFor('volunteering-hero')).toBe('service-hands');
+    expect(defaultImageFor('service-hands')).toBe('service-hands');
+    expect(defaultImageFor('notes-hero')).toBe('dashboard-bible');
   });
 });
