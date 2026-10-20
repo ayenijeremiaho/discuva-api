@@ -2040,9 +2040,13 @@ new row is saved, so a failed re-upload never leaves a tenant with no logo. All 
 
 **Mobile app appearance (`tenant_asset_overrides`):** the member PWA (`discuva-member`) ships a bundled
 default hero/backdrop image for every screen — `KNOWN_ASSETS`
-(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (25 keys today,
+(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (44 keys today,
 e.g. `login-backdrop`, `home-door-welcome`, `giving-backdrop`, `finance-backdrop`), each mapped to the screen(s) it actually renders on
-in the mobile app. A church can override any of these with its own image; anything left unset silently falls back
+in the mobile app. Each key belongs to one page, or one page and its own sub-screens (a fellowship and the fellowships
+list; My Account and its settings screens), and its description names every screen it appears on, so changing one
+never changes an unrelated page. A key that reuses another key's bundled picture says so in `defaultImage`
+(`defaultImageFor(key)`); the member app falls back to `/images/<defaultImage or key>.jpg` and the admin Images page
+previews the same file, so splitting a key costs no extra download. A church can override any of these with its own image; anything left unset silently falls back
 to the app's own bundled default — that fallback resolution happens **client-side** in discuva-member, not
 here. This backend only ever knows what's been explicitly overridden.
 
@@ -2060,7 +2064,7 @@ here. This backend only ever knows what's been explicitly overridden.
   production; tenant normally comes from the JWT instead), so a public route there has nothing to identify its
   tenant with unless it's carried explicitly.
 - `GET /tenant/assets/catalog` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — the fixed `KNOWN_ASSETS` list with
-  labels/descriptions, for the admin appearance-settings page to render without duplicating the catalog
+  labels/descriptions and, for split keys, `defaultImage`, for the admin appearance-settings page to render without duplicating the catalog
   client-side.
 - `POST /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — upload/replace the override for one asset key.
   Same upload shape as logo upload (multer, `PlatformSettingKey.MAX_LOGO_UPLOAD_MB` limit — 5MB default, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
@@ -2068,7 +2072,15 @@ here. This backend only ever knows what's been explicitly overridden.
   `TenantAssetService`, not at the DB level, so the catalog can grow without a migration. Same "new asset saved
   before the old one is deleted" ordering as logo upload.
 - `DELETE /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — removes the override row and the Cloudinary
-  asset, reverting that screen to the app's bundled default. A no-op (still `200`, still deletes nothing) if no
+  asset, reverting that screen to the app's bundled default. Replacing or removing only deletes the Cloudinary file
+  when no other key still uses it (indexed `image_public_id` lookup), since split keys start out sharing one upload.
+- **Splitting a shared key** (root migration `CopySharedPageImagesToOwnKeys`): 17 pages that shared an image got
+  their own key (`more-hero`, `my-week-hero`, `my-journey-hero`, `whats-new-hero`, `admin-checkin-hero`,
+  `pastor-feedback-hero`, `evangelism-hero`, `order-of-service-hero`, `volunteering-hero`, `serving-rota-hero`,
+  `forms-hero`, `department-goals-hero`, `department-summary-hero`, `team-pulse-hero`, `team-spaces-hero`,
+  `notes-hero`, `programme-planner-hero`). The migration copies each church's existing override to the new keys
+  (never overwriting one already set), so every page looks the same after deploy and only drifts once an admin
+  changes it. Its `down` removes only copies still pointing at the original upload. A no-op (still `200`, still deletes nothing) if no
   override existed for that key.
 
 **discuva-member: public-link routes vs. "the app" (`components/pwa/standalone-gate.tsx`).** `PUBLIC_LINK_ROUTE_PREFIXES`
@@ -4073,7 +4085,7 @@ Admin-configurable, dated programme calendars — the in-app equivalent of the f
 
 New `CloudinaryFolder` member `'church-calendar-images'` and new `PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB` (default 5MB, same shape as `MAX_PAGE_IMAGE_UPLOAD_MB`).
 
-The member app's list-page header is its own `KNOWN_ASSETS` entry (`church-calendar-hero`, `src/tenant/constants/known-assets.constant.ts`), overridable from discuva-admin's Mobile App Appearance page like every other page header. It was initially built reusing the existing `events-hero` key to save a step — fixed once flagged, since that would have meant a church customizing the Events page's header silently changed Church Calendar's too (or vice versa). Each page header gets its own key unless it's one of the few *deliberately* shared ones (e.g. `prayer-hands-bible` across prayer/prayer-requests/evangelism) — reusing one should be a conscious choice, not a shortcut.
+The member app's list-page header is its own `KNOWN_ASSETS` entry (`church-calendar-hero`, `src/tenant/constants/known-assets.constant.ts`), overridable from discuva-admin's Mobile App Appearance page like every other page header. It was initially built reusing the existing `events-hero` key to save a step — fixed once flagged, since that would have meant a church customizing the Events page's header silently changed Church Calendar's too (or vice versa). Each page header gets its own key unless the screens are one feature (e.g. `prayer-hands-bible` across Prayer Roster and Prayer Requests) — reusing one should be a conscious choice, not a shortcut.
 
 **`DateService.today()`** (new): today's date as a plain `'yyyy-MM-dd'` string in the church's configured timezone, for comparing against a `date`-typed column. Added because nothing on `DateService` already did this — `format(new Date(), 'yyyy-MM-dd')` renders using the *server process's* timezone, which can land on the wrong calendar day near midnight for a church whose timezone differs from the server's; `today()` runs `new Date()` through the same `toZonedTime` shift `startOfDay()`/`endOfDay()` already use before formatting, so the date components come out right regardless of what timezone the Node process itself is running in.
 
@@ -15854,9 +15866,13 @@ new row is saved, so a failed re-upload never leaves a tenant with no logo. All 
 
 **Mobile app appearance (`tenant_asset_overrides`):** the member PWA (`discuva-member`) ships a bundled
 default hero/backdrop image for every screen — `KNOWN_ASSETS`
-(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (25 keys today,
+(`src/tenant/constants/known-assets.constant.ts`) is the fixed catalog of what can be overridden (44 keys today,
 e.g. `login-backdrop`, `home-door-welcome`, `giving-backdrop`, `finance-backdrop`), each mapped to the screen(s) it actually renders on
-in the mobile app. A church can override any of these with its own image; anything left unset silently falls back
+in the mobile app. Each key belongs to one page, or one page and its own sub-screens (a fellowship and the fellowships
+list; My Account and its settings screens), and its description names every screen it appears on, so changing one
+never changes an unrelated page. A key that reuses another key's bundled picture says so in `defaultImage`
+(`defaultImageFor(key)`); the member app falls back to `/images/<defaultImage or key>.jpg` and the admin Images page
+previews the same file, so splitting a key costs no extra download. A church can override any of these with its own image; anything left unset silently falls back
 to the app's own bundled default — that fallback resolution happens **client-side** in discuva-member, not
 here. This backend only ever knows what's been explicitly overridden.
 
@@ -15874,7 +15890,7 @@ here. This backend only ever knows what's been explicitly overridden.
   production; tenant normally comes from the JWT instead), so a public route there has nothing to identify its
   tenant with unless it's carried explicitly.
 - `GET /tenant/assets/catalog` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — the fixed `KNOWN_ASSETS` list with
-  labels/descriptions, for the admin appearance-settings page to render without duplicating the catalog
+  labels/descriptions and, for split keys, `defaultImage`, for the admin appearance-settings page to render without duplicating the catalog
   client-side.
 - `POST /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — upload/replace the override for one asset key.
   Same upload shape as logo upload (multer, `PlatformSettingKey.MAX_LOGO_UPLOAD_MB` limit — 5MB default, image-mimetype-only, `CloudinaryService.uploadBuffer`, into
@@ -15882,7 +15898,15 @@ here. This backend only ever knows what's been explicitly overridden.
   `TenantAssetService`, not at the DB level, so the catalog can grow without a migration. Same "new asset saved
   before the old one is deleted" ordering as logo upload.
 - `DELETE /tenant/assets/:key` (`AdminGuard`, `CHURCH_PROFILE_WRITE`) — removes the override row and the Cloudinary
-  asset, reverting that screen to the app's bundled default. A no-op (still `200`, still deletes nothing) if no
+  asset, reverting that screen to the app's bundled default. Replacing or removing only deletes the Cloudinary file
+  when no other key still uses it (indexed `image_public_id` lookup), since split keys start out sharing one upload.
+- **Splitting a shared key** (root migration `CopySharedPageImagesToOwnKeys`): 17 pages that shared an image got
+  their own key (`more-hero`, `my-week-hero`, `my-journey-hero`, `whats-new-hero`, `admin-checkin-hero`,
+  `pastor-feedback-hero`, `evangelism-hero`, `order-of-service-hero`, `volunteering-hero`, `serving-rota-hero`,
+  `forms-hero`, `department-goals-hero`, `department-summary-hero`, `team-pulse-hero`, `team-spaces-hero`,
+  `notes-hero`, `programme-planner-hero`). The migration copies each church's existing override to the new keys
+  (never overwriting one already set), so every page looks the same after deploy and only drifts once an admin
+  changes it. Its `down` removes only copies still pointing at the original upload. A no-op (still `200`, still deletes nothing) if no
   override existed for that key.
 
 **discuva-member: public-link routes vs. "the app" (`components/pwa/standalone-gate.tsx`).** `PUBLIC_LINK_ROUTE_PREFIXES`
@@ -17853,7 +17877,7 @@ Admin-configurable, dated programme calendars — the in-app equivalent of the f
 
 New `CloudinaryFolder` member `'church-calendar-images'` and new `PlatformSettingKey.MAX_CHURCH_CALENDAR_IMAGE_UPLOAD_MB` (default 5MB, same shape as `MAX_PAGE_IMAGE_UPLOAD_MB`).
 
-The member app's list-page header is its own `KNOWN_ASSETS` entry (`church-calendar-hero`, `src/tenant/constants/known-assets.constant.ts`), overridable from discuva-admin's Mobile App Appearance page like every other page header. It was initially built reusing the existing `events-hero` key to save a step — fixed once flagged, since that would have meant a church customizing the Events page's header silently changed Church Calendar's too (or vice versa). Each page header gets its own key unless it's one of the few *deliberately* shared ones (e.g. `prayer-hands-bible` across prayer/prayer-requests/evangelism) — reusing one should be a conscious choice, not a shortcut.
+The member app's list-page header is its own `KNOWN_ASSETS` entry (`church-calendar-hero`, `src/tenant/constants/known-assets.constant.ts`), overridable from discuva-admin's Mobile App Appearance page like every other page header. It was initially built reusing the existing `events-hero` key to save a step — fixed once flagged, since that would have meant a church customizing the Events page's header silently changed Church Calendar's too (or vice versa). Each page header gets its own key unless the screens are one feature (e.g. `prayer-hands-bible` across Prayer Roster and Prayer Requests) — reusing one should be a conscious choice, not a shortcut.
 
 **`DateService.today()`** (new): today's date as a plain `'yyyy-MM-dd'` string in the church's configured timezone, for comparing against a `date`-typed column. Added because nothing on `DateService` already did this — `format(new Date(), 'yyyy-MM-dd')` renders using the *server process's* timezone, which can land on the wrong calendar day near midnight for a church whose timezone differs from the server's; `today()` runs `new Date()` through the same `toZonedTime` shift `startOfDay()`/`endOfDay()` already use before formatting, so the date components come out right regardless of what timezone the Node process itself is running in.
 
