@@ -7,8 +7,8 @@ import {
   IsEnum,
   IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
+  IsUrl,
   Length,
   MaxLength,
 } from 'class-validator';
@@ -21,6 +21,12 @@ import {
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
+
+export class ReactionDto {
+  @IsString()
+  @MaxLength(16)
+  emoji: string;
+}
 
 export class PostBodyDto {
   @Transform(trim)

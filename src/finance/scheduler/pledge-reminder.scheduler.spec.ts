@@ -176,6 +176,17 @@ describe('PledgeReminderScheduler', () => {
     // in the future, so ONE_OFF can never produce a positive diffDays. Set
     // startDate one month before the target due date so the recurrence
     // loop lands exactly on today+10.
+    // A fixed mid-month day: near month-end, "a month before today + 10" can land on a day that doesn't exist.
+    jest.useFakeTimers({
+      now: new Date(2026, 5, 5, 9),
+      doNotFake: [
+        'nextTick',
+        'setImmediate',
+        'setTimeout',
+        'setInterval',
+        'queueMicrotask',
+      ],
+    });
     const dueDate = new Date();
     dueDate.setDate(dueDate.getDate() + 10);
     const startDateObj = new Date(dueDate);
@@ -202,5 +213,6 @@ describe('PledgeReminderScheduler', () => {
       undefined,
       expect.any(String),
     );
+    jest.useRealTimers();
   });
 });

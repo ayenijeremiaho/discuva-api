@@ -21,6 +21,10 @@ import {
   TeamSpaceExtrasService,
 } from './team-space-extras.service';
 import {
+  ReactionSummary,
+  TeamSpaceReactionService,
+} from './team-space-reaction.service';
+import {
   FEED_PAGE_SIZE,
   MAX_PINNED,
   REPLY_PAGE_SIZE,
@@ -102,6 +106,7 @@ export class TeamSpaceService {
     private readonly audit: AuditLogService,
     private readonly cacheService: CacheService,
     private readonly extras: TeamSpaceExtrasService,
+    private readonly reactions: TeamSpaceReactionService,
   ) {}
 
   // The member's spaces, busiest first, each with how many conversations have news since they last looked.
@@ -161,7 +166,13 @@ export class TeamSpaceService {
       this.extras.upcoming(acc.space.id),
       this.markRead(memberId, acc.space.id),
     ]);
-    const details = await this.extras.details(pinned, memberId);
+    const [details, reactions] = await Promise.all([
+      this.extras.details(pinned, memberId),
+      this.reactions.summaries(
+        memberId,
+        pinned.map((p) => p.id),
+      ),
+    ]);
     return {
       kind,
       refId,
@@ -173,7 +184,9 @@ export class TeamSpaceService {
       closed: !!acc.closed,
       canPost:
         !acc.closed && !minor && (!acc.space.leadersOnly || acc.isLeader),
-      pinned: pinned.map((p) => this.toPost(p, memberId, acc, details)),
+      pinned: pinned.map((p) =>
+        this.toPost(p, memberId, acc, details, reactions),
+      ),
       upcomingMeetings,
     };
   }
@@ -191,9 +204,15 @@ export class TeamSpaceService {
     });
     const page = rows.slice(0, FEED_PAGE_SIZE);
     const last = page[page.length - 1];
-    const details = await this.extras.details(page, memberId);
+    const [details, reactions] = await Promise.all([
+      this.extras.details(page, memberId),
+      this.reactions.summaries(
+        memberId,
+        page.map((p) => p.id),
+      ),
+    ]);
     return {
-      items: page.map((p) => this.toPost(p, memberId, acc, details)),
+      items: page.map((p) => this.toPost(p, memberId, acc, details, reactions)),
       nextCursor:
         rows.length > FEED_PAGE_SIZE && last
           ? encodeCursor(last.last_activity_at, last.id)
@@ -319,13 +338,18 @@ export class TeamSpaceService {
     ]);
     const page = replies.slice(0, REPLY_PAGE_SIZE);
     const last = page[page.length - 1];
-    const [minor, details] = await Promise.all([
+    const [minor, details, reactions] = await Promise.all([
       this.access.isMinor(memberId),
       this.extras.details(postRow, memberId),
+      this.reactions.summaries(
+        memberId,
+        [postId],
+        page.map((r) => r.id),
+      ),
     ]);
     return {
       space: { kind: acc.kind, refId: acc.refId, name: acc.name },
-      post: this.toPost(postRow[0], memberId, acc, details),
+      post: this.toPost(postRow[0], memberId, acc, details, reactions),
       canReply: !acc.closed,
       isUnder18: minor,
       replies: page.map((r) => ({
@@ -336,6 +360,7 @@ export class TeamSpaceService {
         author: this.author(r),
         mine: r.author_id === memberId,
         canRemove: r.author_id === memberId || acc.isLeader,
+        reactions: reactions.get(r.id) ?? [],
       })),
       nextCursor:
         replies.length > REPLY_PAGE_SIZE && last
@@ -485,6 +510,7 @@ export class TeamSpaceService {
       meetings: Map<string, MeetingView>;
       polls: Map<string, PollView>;
     },
+    reactions: Map<string, ReactionSummary[]>,
   ) {
     return {
       id: p.id,
@@ -501,6 +527,7 @@ export class TeamSpaceService {
       mine: p.author_id === memberId,
       canRemove: p.author_id === memberId || acc.isLeader,
       canPin: acc.isLeader,
+      reactions: reactions.get(p.id) ?? [],
     };
   }
 

@@ -422,7 +422,28 @@ export class AttendanceService {
       });
 
     const [data, total] = await qb.getManyAndCount();
-    return UtilityService.createPaginationResponse(data, page, limit, total);
+    // The member's own rating for each service on this page, so the list can show it without opening the rating sheet.
+    const slotIds = [
+      ...new Set(data.map((a) => a.serviceSlot?.id).filter(Boolean)),
+    ];
+    const ratings = slotIds.length
+      ? ((await this.attendanceRepository.query(
+          `SELECT service_slot_id, rating FROM service_ratings WHERE member_id = $1 AND service_slot_id = ANY($2::uuid[])`,
+          [user.id, slotIds],
+        )) as { service_slot_id: string; rating: number }[])
+      : [];
+    const bySlot = new Map(ratings.map((r) => [r.service_slot_id, r.rating]));
+    const withRatings = data.map((a) =>
+      Object.assign(a, {
+        myRating: (a.serviceSlot && bySlot.get(a.serviceSlot.id)) ?? null,
+      }),
+    );
+    return UtilityService.createPaginationResponse(
+      withRatings,
+      page,
+      limit,
+      total,
+    );
   }
 
   private buildHistoryQb(

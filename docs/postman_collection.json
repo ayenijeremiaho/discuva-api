@@ -28656,6 +28656,122 @@
           }
         },
         {
+          "name": "React to a post",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/reactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}",
+                "reactions"
+              ]
+            },
+            "description": "One of \ud83d\udc4d \u2764\ufe0f \ud83d\ude4f \ud83d\ude02 \ud83c\udf89. Tapping the same emoji again removes it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"emoji\": \"\ud83d\udc4d\"}"
+            }
+          }
+        },
+        {
+          "name": "Who reacted to a post",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/reactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "posts",
+                "{{postId}}",
+                "reactions"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "React to a reply",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/replies/{{replyId}}/reactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "replies",
+                "{{replyId}}",
+                "reactions"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"emoji\": \"\ud83d\ude4f\"}"
+            }
+          }
+        },
+        {
+          "name": "Who reacted to a reply",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{memberToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/team-spaces/replies/{{replyId}}/reactions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "team-spaces",
+                "replies",
+                "{{replyId}}",
+                "reactions"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
           "name": "Edit my reply",
           "request": {
             "method": "PATCH",
