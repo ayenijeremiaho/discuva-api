@@ -85,6 +85,7 @@ const mockAttendanceRepo = {
   find: jest.fn(),
   findOne: jest.fn(),
   createQueryBuilder: jest.fn(),
+  query: jest.fn(),
 };
 
 const mockSlotRepo = {
@@ -2156,6 +2157,57 @@ describe('AttendanceService', () => {
         'attendance.event',
         'event',
       );
+    });
+
+    it("includes the member's own rating for each service on the page, in one query", async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([
+        [
+          { id: 'att-1', serviceSlot: { id: 'slot-1' } },
+          { id: 'att-2', serviceSlot: { id: 'slot-2' } },
+          { id: 'att-3', serviceSlot: { id: 'slot-1' } },
+        ],
+        3,
+      ]);
+      mockAttendanceRepo.createQueryBuilder.mockReturnValue(qb);
+      mockAttendanceRepo.query.mockResolvedValue([
+        { service_slot_id: 'slot-1', rating: 4 },
+      ]);
+      const spy = jest
+        .spyOn(UtilityService, 'createPaginationResponse')
+        .mockImplementation((data) => ({
+          data,
+          page: 1,
+          limit: 10,
+          totalCount: 3,
+          totalPages: 1,
+        }));
+
+      await service.getMyHistory(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        1,
+        10,
+      );
+
+      expect(mockAttendanceRepo.query).toHaveBeenCalledTimes(1);
+      expect(mockAttendanceRepo.query).toHaveBeenCalledWith(
+        expect.stringContaining('FROM service_ratings WHERE member_id = $1'),
+        ['member-1', ['slot-1', 'slot-2']],
+      );
+      const rows = spy.mock.calls[0][0] as {
+        id: string;
+        myRating: number | null;
+      }[];
+      expect(rows.map((r) => [r.id, r.myRating])).toEqual([
+        ['att-1', 4],
+        ['att-2', null],
+        ['att-3', 4],
+      ]);
     });
 
     it('should apply status filter when provided', async () => {
