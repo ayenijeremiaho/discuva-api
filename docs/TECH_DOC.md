@@ -681,6 +681,8 @@ space, and one evening summary. Module key `team_spaces` (root migration `AddTea
 - **Leaders:** department leads, the fellowship leader, or the volunteering leaders above. They can pin and remove anything, and can switch the space
   to "Only leaders can start posts" (`leaders_only`).
 
+**Reactions:** members react to posts and replies with one of 👍 ❤️ 🙏 😂 🎉 (`team_post_reactions`: `post_id`, nullable `reply_id`, `member_id`, `emoji`; tenant migration `CreateTeamPostReactions`). One per member, emoji and target, enforced by partial unique indexes `(post_id, member_id, emoji) WHERE reply_id IS NULL` and `(reply_id, member_id, emoji) WHERE reply_id IS NOT NULL`, which also serve the counts. Tapping again removes it. Anyone in the space can react, under-18s included; closed volunteering spaces refuse (403). Reactions never notify. Posts and replies in `open`, `feed` and `thread` carry `reactions: [{ emoji, count, mine }]` (in the order above), from one grouped query each for the page's posts and replies — about 3 ms for 20 posts and 50 replies with 400,000 reactions, no scans.
+
 **Volunteering spaces close:** they take posts, replies, polls and votes until `openDays` after the event (default 3),
 or until the opportunity is cancelled; after that they stay readable (`closed: true`, writes return 403). They're
 listed until `listedDays` after the event (default 14), and cancelled opportunities aren't listed. Leaders who
@@ -739,6 +741,10 @@ are never logged.
 | GET | /team-spaces/:kind/:refId/posts?cursor= | team | Feed page of 20 (pinned posts excluded) with `nextCursor` |
 | POST | /team-spaces/:kind/:refId/posts | team (not under 18; leaders only if `leadersOnly`) | `{ body }` |
 | PATCH | /team-spaces/:kind/:refId/settings | leaders | `{ leadersOnly }` |
+| POST | /team-spaces/posts/:postId/reactions | team | `{ emoji }`: adds it, or removes it if already given; returns `{ reactions }` |
+| GET | /team-spaces/posts/:postId/reactions | team | Who reacted: `{ reactions: [{ emoji, people: [{ id, name, photoUrl }] }] }` |
+| POST | /team-spaces/replies/:replyId/reactions | team | Same, for a reply |
+| GET | /team-spaces/replies/:replyId/reactions | team | Same, for a reply |
 | GET | /admin/team-spaces/volunteering-settings | `volunteer:read` | `{ openDays, listedDays }` for volunteering chats |
 | PUT | /admin/team-spaces/volunteering-settings | `volunteer:write` | `{ openDays, listedDays }`; 400 if `listedDays` < `openDays` |
 | GET | /team-spaces/posts/:postId?cursor= | team | Post with replies, 50 per page, oldest first |

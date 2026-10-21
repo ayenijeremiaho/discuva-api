@@ -110,6 +110,9 @@ describe('TeamSpaceService', () => {
     upcoming: jest.fn().mockResolvedValue([]),
   };
   const cache = { get: jest.fn().mockResolvedValue(undefined), set: jest.fn() };
+  const reactions = {
+    summaries: jest.fn().mockResolvedValue(new Map()),
+  };
   const service = new TeamSpaceService(
     spaceRepo as never,
     postRepo as never,
@@ -120,6 +123,7 @@ describe('TeamSpaceService', () => {
     audit as never,
     cache as never,
     extras as never,
+    reactions as never,
   );
 
   beforeEach(() => {

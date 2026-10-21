@@ -9,6 +9,8 @@ import { TeamMeetingRsvp } from './entity/team-meeting-rsvp.entity';
 import { TeamPoll } from './entity/team-poll.entity';
 import { TeamPollVote } from './entity/team-poll-vote.entity';
 import { TeamMeetingSeries } from './entity/team-meeting-series.entity';
+import { TeamPostReaction } from './entity/team-post-reaction.entity';
+import { TeamSpaceReactionService } from './service/team-space-reaction.service';
 import { TeamSpaceExtrasService } from './service/team-space-extras.service';
 import { TeamMeetingReminderScheduler } from './scheduler/team-meeting-reminder.scheduler';
 import { TeamSpaceAccessService } from './service/team-space-access.service';
@@ -31,6 +33,7 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
       TeamPoll,
       TeamPollVote,
       TeamMeetingSeries,
+      TeamPostReaction,
     ]),
   ],
   providers: [
@@ -41,6 +44,7 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
     TeamSpaceExtrasService,
     TeamMeetingReminderScheduler,
     VolunteerChatSettingsService,
+    TeamSpaceReactionService,
   ],
   exports: [TeamSpaceAccessService],
   controllers: [TeamSpaceController, VolunteerChatSettingsController],

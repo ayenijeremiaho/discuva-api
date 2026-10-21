@@ -18,6 +18,7 @@ import { RequiresModule } from '../../church-settings/decorator/requires-module.
 import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.guard';
 import { TeamSpaceService } from '../service/team-space.service';
 import { TeamSpaceExtrasService } from '../service/team-space-extras.service';
+import { TeamSpaceReactionService } from '../service/team-space-reaction.service';
 import { TeamSpaceKindEnum } from '../entity/team-space.entity';
 import {
   AttendanceDto,
@@ -29,6 +30,7 @@ import {
   VoteDto,
   PinPostDto,
   PostBodyDto,
+  ReactionDto,
   ReplyBodyDto,
   SpaceSettingsDto,
 } from '../dto/team-space.dto';
@@ -43,7 +45,42 @@ export class TeamSpaceController {
   constructor(
     private readonly spaces: TeamSpaceService,
     private readonly extras: TeamSpaceExtrasService,
+    private readonly reactions: TeamSpaceReactionService,
   ) {}
+
+  @Post('posts/:postId/reactions')
+  reactToPost(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: ReactionDto,
+  ) {
+    return this.reactions.toggle(user.id, { postId }, dto.emoji);
+  }
+
+  @Get('posts/:postId/reactions')
+  postReactions(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+  ) {
+    return this.reactions.who(user.id, { postId });
+  }
+
+  @Post('replies/:replyId/reactions')
+  reactToReply(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('replyId') replyId: string,
+    @Body() dto: ReactionDto,
+  ) {
+    return this.reactions.toggle(user.id, { replyId }, dto.emoji);
+  }
+
+  @Get('replies/:replyId/reactions')
+  replyReactions(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('replyId') replyId: string,
+  ) {
+    return this.reactions.who(user.id, { replyId });
+  }
 
   @Get('meetings/:postId')
   meeting(@CurrentUser() user: MemberAuth, @Uuid('postId') postId: string) {
