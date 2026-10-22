@@ -71,6 +71,19 @@ export class NotificationDispatchService {
     }
   }
 
+  // Members a Push-first category reaches by push alone, so their email can be skipped.
+  async pushCovered(
+    category: EmailCategory,
+    memberIds: string[],
+  ): Promise<Set<string>> {
+    if (
+      !memberIds.length ||
+      !(await this.emailCategorySettingsService.isPushFirst(category))
+    )
+      return new Set();
+    return this.pushNotificationService.membersWithSubscription(memberIds);
+  }
+
   // Push first: an address is dropped only when this same notification reaches its member by push.
   private async withoutPushCovered(
     category: EmailCategory,
@@ -84,13 +97,11 @@ export class NotificationDispatchService {
     if (!push || ids.length !== addresses.length) return email;
 
     const pushed = new Set(push.memberIds);
-    const candidates = ids.filter((id) => pushed.has(id));
-    if (!candidates.length) return email;
-    if (!(await this.emailCategorySettingsService.isPushFirst(category))) {
-      return email;
-    }
-    const subscribed =
-      await this.pushNotificationService.membersWithSubscription(candidates);
+    const subscribed = await this.pushCovered(
+      category,
+      ids.filter((id) => pushed.has(id)),
+    );
+    if (!subscribed.size) return email;
     const remaining = addresses.filter(
       (_, i) => !(pushed.has(ids[i]) && subscribed.has(ids[i])),
     );

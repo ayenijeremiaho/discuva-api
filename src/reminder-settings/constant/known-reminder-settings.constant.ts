@@ -75,4 +75,9 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: 'hours before a service, to everyone on the rota for it',
     defaultThresholds: [24, 2],
   },
+  [ReminderSettingKey.THANK_YOU]: {
+    label: 'Thank You After Service',
+    unit: 'minutes after the service ends, to everyone who checked in (0 sends it straight away)',
+    defaultThresholds: [20],
+  },
 };

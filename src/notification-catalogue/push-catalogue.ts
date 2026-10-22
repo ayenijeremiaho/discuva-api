@@ -23,6 +23,7 @@ export enum PushNotificationKey {
   SERVICE_SLOT_TEAM_ASSIGNED = 'SERVICE_SLOT_TEAM_ASSIGNED',
   SERVICE_SLOT_REMINDER = 'SERVICE_SLOT_REMINDER',
   SERVICE_REMINDER = 'SERVICE_REMINDER',
+  THANK_YOU_ATTENDANCE = 'THANK_YOU_ATTENDANCE',
   CHECKIN_NUDGE_WORKER = 'CHECKIN_NUDGE_WORKER',
   CHECKIN_NUDGE_MEMBER = 'CHECKIN_NUDGE_MEMBER',
   GOAL_CHANGES_REQUESTED = 'GOAL_CHANGES_REQUESTED',
@@ -303,10 +304,20 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     label: 'Service reminder',
     description:
       "Sent before each service to the people it's for: at the hours in Reminder Settings (Service Reminders), or at a service's own reminders when it has any.",
-    title: 'Service Reminder: {{service_name}}',
-    body: '{{service_name}} begins in {{time_until}}. Please make your way and check in on time.',
+    title: 'See you at {{service_name}}!',
+    body: 'Just {{time_until}} to go. Come expectant: worship, the Word and your church family are waiting. Bring someone along, and check in when you arrive.',
     url: '/events',
     placeholders: { service_name: 'Sunday Service', time_until: '1 hour' },
+  },
+  [PushNotificationKey.THANK_YOU_ATTENDANCE]: {
+    category: EmailCategory.FOLLOW_UP,
+    label: 'Thank you for attending',
+    description:
+      'Sent after a service to everyone who checked in, at the delay set in Attendance Settings.',
+    title: 'Thank you, {{first_name}}',
+    body: 'It was a blessing to have you at {{event_name}}. We look forward to seeing you again soon.',
+    url: '/events',
+    placeholders: { first_name: 'Ada', event_name: 'Sunday Service' },
   },
   [PushNotificationKey.CHECKIN_NUDGE_WORKER]: {
     category: EmailCategory.EVENT_REMINDER,

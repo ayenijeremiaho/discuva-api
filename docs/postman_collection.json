@@ -27808,7 +27808,7 @@
                 {
                   "key": "key",
                   "value": "pledge_reminder",
-                  "description": "One of: pledge_reminder, budget_alert, follow_up_stale, asset_maintenance, asset_warranty, vehicle_expiry"
+                  "description": "One of: pledge_reminder, budget_alert, follow_up_stale, asset_maintenance, asset_warranty, vehicle_expiry, assignment_due, class_session, fellowship_meeting, service_reminder, checkin_nudge, team_meeting, rota_duty, thank_you (minutes after a service ends before the thank-you push and email; default 20)"
                 }
               ]
             },
