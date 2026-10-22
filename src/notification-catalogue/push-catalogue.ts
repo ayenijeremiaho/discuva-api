@@ -305,7 +305,7 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     description:
       "Sent before each service to the people it's for: at the hours in Reminder Settings (Service Reminders), or at a service's own reminders when it has any.",
     title: 'See you at {{service_name}}!',
-    body: "Just {{time_until}} to go, and we can't wait to see you! Bring someone along, and remember to check in when you arrive.",
+    body: "Just {{time_until}} to go, and we can't wait to see you! Remember to check in when you arrive.",
     url: '/events',
     placeholders: { service_name: 'Sunday Service', time_until: '1 hour' },
   },

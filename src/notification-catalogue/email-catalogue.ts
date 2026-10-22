@@ -114,7 +114,6 @@ const CORE_EMAIL_CATALOGUE: Record<EmailTemplateKey, EmailTemplate> = {
     heading: "We can't wait to see you",
     message:
       "<p><strong>{{service_name}}</strong> begins in <strong>{{time_until}}</strong>, and we're looking forward to having you with us.</p>" +
-      "<p>It'll be all the better with you there, so why not bring a friend along?</p>" +
       '<p>Remember to check in on the app when you arrive.</p>',
     closing: '',
     signoff: 'God bless you,',
