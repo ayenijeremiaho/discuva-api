@@ -111,15 +111,15 @@ const CORE_EMAIL_CATALOGUE: Record<EmailTemplateKey, EmailTemplate> = {
       'Sent ahead of a service, at the times set in Event Reminders.',
     lockedNote: 'The service name and start time box is always included.',
     subject: 'See you at {{service_name}}!',
-    heading: 'Something good is waiting for you',
+    heading: "We can't wait to see you",
     message:
-      "<p><strong>{{service_name}}</strong> begins in <strong>{{time_until}}</strong>, and we can't wait to see you.</p>" +
-      "<p>Come expectant: there'll be worship, a word for your week and your church family ready to welcome you. Why not bring a friend along?</p>" +
+      "<p><strong>{{service_name}}</strong> begins in <strong>{{time_until}}</strong>, and we're looking forward to having you with us.</p>" +
+      "<p>It'll be all the better with you there, so why not bring a friend along?</p>" +
       '<p>Remember to check in on the app when you arrive.</p>',
     closing: '',
     signoff: 'God bless you,',
     signature: '{{church_name}} Team',
-    preheader: 'Just {{time_until}} to go. Come expectant!',
+    preheader: "Just {{time_until}} to go. We can't wait to see you!",
     placeholders: {
       service_name: 'Sunday Service',
       time_until: '1 hour',

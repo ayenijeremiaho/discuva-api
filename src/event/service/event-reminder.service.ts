@@ -229,7 +229,7 @@ export class EventReminderService {
         : `${minutesBefore} minutes`;
 
     const title = `See you at ${slot.name}!`;
-    const body = `<strong>${slot.name}</strong> begins in ${label}. Come expectant: worship, the Word and your church family are waiting. Bring someone along, and check in when you arrive.`;
+    const body = `<strong>${slot.name}</strong> begins in ${label}, and we can't wait to see you! Bring someone along, and remember to check in when you arrive.`;
 
     // An announcement has one audience, so a slot with its own (narrower) audience takes precedence.
     const target: AudienceTarget = slot.audience ? slot : (slot.event ?? {});

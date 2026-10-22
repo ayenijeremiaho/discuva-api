@@ -240,7 +240,7 @@ Finance, Administration, etc.) carry no `moduleKey` and are always shown.
 Members are reminded before every service without anyone adding reminders to each date, which repeating services
 never copied. `ServiceReminderScheduler` (every 15 minutes, Redis lock, gated job `service-reminders`, woken by writes
 to `events`, `service_slots`, `event_reminders` and `church_settings`) sends the `SERVICE_REMINDER` push (category
-`EVENT_REMINDER`, "See you at {{service_name}}! Just {{time_until}} to go. Come expectant…", editable in Notification
+`EVENT_REMINDER`, "See you at {{service_name}}! Just {{time_until}} to go, and we can't wait to see you…", editable in Notification
 Settings) at the hours in Reminder Settings → **Service Reminders** (`ReminderSettingKey.SERVICE_REMINDER`, hours
 before the service, default `[24, 2]`, on unless the church turns it off). Recipients are active members in the
 service's audience (event and slot audience, as check-in uses); push only, since an email to every member before
