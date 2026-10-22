@@ -240,7 +240,7 @@ Finance, Administration, etc.) carry no `moduleKey` and are always shown.
 Members are reminded before every service without anyone adding reminders to each date, which repeating services
 never copied. `ServiceReminderScheduler` (every 15 minutes, Redis lock, gated job `service-reminders`, woken by writes
 to `events`, `service_slots`, `event_reminders` and `church_settings`) sends the `SERVICE_REMINDER` push (category
-`EVENT_REMINDER`, "Service Reminder: {{service_name}} … begins in {{time_until}}", editable in Notification
+`EVENT_REMINDER`, "See you at {{service_name}}! Just {{time_until}} to go, and we can't wait to see you…", editable in Notification
 Settings) at the hours in Reminder Settings → **Service Reminders** (`ReminderSettingKey.SERVICE_REMINDER`, hours
 before the service, default `[24, 2]`, on unless the church turns it off). Recipients are active members in the
 service's audience (event and slot audience, as check-in uses); push only, since an email to every member before
@@ -5821,7 +5821,7 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 **Post-event jobs (Bull queue `follow-up`):**
 
 1. After `markAbsentees()` completes for an event, a `post-event` Bull job is dispatched.
-2. `PostEventProcessor.handlePostEvent` sends thank-you emails to all PRESENT/LATE members if `event.thankYouSentAt` is null, then sets `thankYouSentAt` — preventing duplicate sends on re-trigger.
+2. `PostEventProcessor.handlePostEvent`, if `event.thankYouSentAt` is null and Reminder Settings key `thank_you` (**Thank You After Service**) is on, queues one delayed `thank-you` job timed for the service's `endTime` plus the setting's minutes (default 20; the smallest non-negative value, capped at 180; 0 sends at once), with `jobId` `thank-you:{schema}:{eventId}` so a retried post-event job can't queue a second. The wait lives in Redis as a Bull delayed job: no polling and no database reads until it fires. `sendThankYou` then loads PRESENT/LATE attendances (so check-ins corrected in the meantime are included), sets `thankYouSentAt` before sending (a retry never thanks twice), sends the `THANK_YOU_ATTENDANCE` push (category `FOLLOW_UP`, "Thank you, {{first_name}}", editable in Notification Settings → Push Messages) to all of them in one dispatch, and queues the `thank-you-attendance` email to each, except members covered by push when the church has set Follow-up to Push first (`NotificationDispatchService.pushCovered`, one subscription query).
 3. If `event.onlineAttendanceEnabled = true`: sends online-confirm request emails to ABSENT members (button links to the service's page in the church's member app — `resolveMemberUrl('/events/:id')`; a signed-out member is returned there after sign-in), sets `event.onlineNotificationSentAt` and `event.onlineConfirmClosesAt`, and schedules a `online-window-closed` delayed job (`ONLINE_CHECKIN_WINDOW_HOURS` hours later, default 3).
 4. `handleOnlineWindowClosed` creates `ONLINE_NO_RESPONSE` follow-up tasks for all members still marked ABSENT.
 
@@ -19607,7 +19607,7 @@ When no active FOLLOW_UP worker exists to assign, this is **not** an error — `
 **Post-event jobs (Bull queue `follow-up`):**
 
 1. After `markAbsentees()` completes for an event, a `post-event` Bull job is dispatched.
-2. `PostEventProcessor.handlePostEvent` sends thank-you emails to all PRESENT/LATE members if `event.thankYouSentAt` is null, then sets `thankYouSentAt` — preventing duplicate sends on re-trigger.
+2. `PostEventProcessor.handlePostEvent`, if `event.thankYouSentAt` is null and Reminder Settings key `thank_you` (**Thank You After Service**) is on, queues one delayed `thank-you` job timed for the service's `endTime` plus the setting's minutes (default 20; the smallest non-negative value, capped at 180; 0 sends at once), with `jobId` `thank-you:{schema}:{eventId}` so a retried post-event job can't queue a second. The wait lives in Redis as a Bull delayed job: no polling and no database reads until it fires. `sendThankYou` then loads PRESENT/LATE attendances (so check-ins corrected in the meantime are included), sets `thankYouSentAt` before sending (a retry never thanks twice), sends the `THANK_YOU_ATTENDANCE` push (category `FOLLOW_UP`, "Thank you, {{first_name}}", editable in Notification Settings → Push Messages) to all of them in one dispatch, and queues the `thank-you-attendance` email to each, except members covered by push when the church has set Follow-up to Push first (`NotificationDispatchService.pushCovered`, one subscription query).
 3. If `event.onlineAttendanceEnabled = true`: sends online-confirm request emails to ABSENT members (button links to the service's page in the church's member app — `resolveMemberUrl('/events/:id')`; a signed-out member is returned there after sign-in), sets `event.onlineNotificationSentAt` and `event.onlineConfirmClosesAt`, and schedules a `online-window-closed` delayed job (`ONLINE_CHECKIN_WINDOW_HOURS` hours later, default 3).
 4. `handleOnlineWindowClosed` creates `ONLINE_NO_RESPONSE` follow-up tasks for all members still marked ABSENT.
 

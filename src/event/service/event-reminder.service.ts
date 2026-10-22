@@ -228,8 +228,8 @@ export class EventReminderService {
         ? `${hours} hour${hourSuffix}`
         : `${minutesBefore} minutes`;
 
-    const title = `Service Reminder: ${slot.name}`;
-    const body = `This is a reminder that <strong>${slot.name}</strong> begins in ${label}. Please make your way and check in on time. God bless you!`;
+    const title = `See you at ${slot.name}!`;
+    const body = `<strong>${slot.name}</strong> begins in ${label}, and we can't wait to see you! Remember to check in when you arrive.`;
 
     // An announcement has one audience, so a slot with its own (narrower) audience takes precedence.
     const target: AudienceTarget = slot.audience ? slot : (slot.event ?? {});

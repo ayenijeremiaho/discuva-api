@@ -7,7 +7,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue, OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Job, Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
@@ -24,10 +24,28 @@ import {
   TenantJobEnvelope,
 } from '../../tenant/utility/job-envelope';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
+import { NotificationDispatchService } from '../../utility/service/notification-dispatch.service';
+import { ReminderSettingsService } from '../../reminder-settings/service/reminder-settings.service';
+import { ReminderSettingKey } from '../../reminder-settings/enum/reminder-setting-key.enum';
+import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 export const FOLLOW_UP_QUEUE = 'follow-up';
 export const POST_EVENT_JOB = 'post-event';
 export const ONLINE_WINDOW_CLOSED_JOB = 'online-window-closed';
+export const THANK_YOU_JOB = 'thank-you';
+const THANK_YOU_MAX_DELAY_MINUTES = 180;
+
+export interface ThankYouJobData extends TenantJobEnvelope {
+  eventId: string;
+}
+
+// The earliest non-negative value set in Reminder Settings, capped at 3 hours.
+export function thankYouDelayMinutes(thresholds: number[]): number {
+  const valid = thresholds.filter((m) => Number.isFinite(m) && m >= 0);
+  return valid.length
+    ? Math.min(Math.min(...valid), THANK_YOU_MAX_DELAY_MINUTES)
+    : 0;
+}
 
 export interface PostEventJobData extends TenantJobEnvelope {
   eventId: string;
@@ -58,6 +76,8 @@ export class PostEventProcessor {
     private readonly settingRepo: Repository<ChurchSetting>,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly notifications: NotificationDispatchService,
+    private readonly reminderSettings: ReminderSettingsService,
   ) {
     this.defaultWindowHours =
       this.configService.get<number>('ONLINE_CHECKIN_WINDOW_HOURS') ?? 3;
@@ -86,34 +106,7 @@ export class PostEventProcessor {
       relations: ['member'],
     });
 
-    if (!event.thankYouSentAt) {
-      const presentMembers = attendances.filter(
-        (a) =>
-          a.status === AttendanceStatusEnum.PRESENT ||
-          a.status === AttendanceStatusEnum.LATE,
-      );
-
-      for (const record of presentMembers) {
-        if (!record.member?.email) continue;
-        this.emailQueueService.queueEmailWithTemplate(
-          record.member.email,
-          `Thank you for attending — ${event.name}`,
-          'thank-you-attendance',
-          {
-            name: record.member.firstname,
-            eventName: event.name,
-            churchName: this.churchName,
-          },
-          undefined,
-          EmailCategory.FOLLOW_UP,
-        );
-      }
-
-      await this.eventRepo.update(eventId, { thankYouSentAt: new Date() });
-      this.logger.log(
-        `Queued ${presentMembers.length} thank-you email(s) for event "${event.name}"`,
-      );
-    }
+    if (!event.thankYouSentAt) await this.scheduleThankYou(event);
 
     if (!event.onlineAttendanceEnabled || event.onlineNotificationSentAt)
       return;
@@ -169,6 +162,87 @@ export class PostEventProcessor {
       ONLINE_WINDOW_CLOSED_JOB,
       { eventId, ...buildJobEnvelope(this.cls) },
       { delay: delayMs, attempts: 3, backoff: { type: 'fixed', delay: 5000 } },
+    );
+  }
+
+  // Counted from the service's end, as services often run over and people should get it once they've left.
+  private async scheduleThankYou(event: Event): Promise<void> {
+    const { enabled, thresholds } = await this.reminderSettings.getConfig(
+      ReminderSettingKey.THANK_YOU,
+    );
+    if (!enabled) return;
+    const sendAt =
+      new Date(event.endTime).getTime() +
+      thankYouDelayMinutes(thresholds) * 60_000;
+    await this.followUpQueue.add(
+      THANK_YOU_JOB,
+      { eventId: event.id, ...buildJobEnvelope(this.cls) },
+      {
+        delay: Math.max(0, sendAt - Date.now()),
+        jobId: `thank-you:${this.cls.get('schemaName') ?? ''}:${event.id}`,
+        attempts: 2,
+        backoff: { type: 'fixed', delay: 5000 },
+      },
+    );
+  }
+
+  @Process(THANK_YOU_JOB)
+  async handleThankYou(job: Job<ThankYouJobData>): Promise<void> {
+    return runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.sendThankYou(job.data.eventId),
+    );
+  }
+
+  private async sendThankYou(eventId: string): Promise<void> {
+    const event = await this.eventRepo.findOne({ where: { id: eventId } });
+    if (!event || event.thankYouSentAt) return;
+
+    const attended = await this.attendanceRepo.find({
+      where: {
+        event: { id: eventId },
+        status: In([AttendanceStatusEnum.PRESENT, AttendanceStatusEnum.LATE]),
+      },
+      relations: ['member'],
+    });
+    const members = attended.map((a) => a.member).filter(Boolean);
+    // Marked before sending: a retry must not thank anyone twice.
+    await this.eventRepo.update(eventId, { thankYouSentAt: new Date() });
+    if (!members.length) return;
+
+    const ids = members.map((m) => m.id);
+    await this.notifications.notifyMember({
+      category: EmailCategory.FOLLOW_UP,
+      push: {
+        memberIds: ids,
+        key: PushNotificationKey.THANK_YOU_ATTENDANCE,
+        vars: { event_name: event.name },
+        url: `/events/${eventId}`,
+        idempotencyKey: `thank-you:${eventId}`,
+      },
+    });
+    const pushOnly = await this.notifications.pushCovered(
+      EmailCategory.FOLLOW_UP,
+      ids,
+    );
+    let emailed = 0;
+    for (const member of members) {
+      if (!member.email || pushOnly.has(member.id)) continue;
+      this.emailQueueService.queueEmailWithTemplate(
+        member.email,
+        `Thank you for attending — ${event.name}`,
+        'thank-you-attendance',
+        {
+          name: member.firstname,
+          eventName: event.name,
+          churchName: this.churchName,
+        },
+        undefined,
+        EmailCategory.FOLLOW_UP,
+      );
+      emailed++;
+    }
+    this.logger.log(
+      `Thanked ${members.length} attendee(s) of "${event.name}" (${emailed} email(s))`,
     );
   }
 

@@ -12,4 +12,5 @@ export enum ReminderSettingKey {
   CHECKIN_NUDGE = 'checkin_nudge',
   TEAM_MEETING = 'team_meeting',
   ROTA_DUTY = 'rota_duty',
+  THANK_YOU = 'thank_you',
 }
