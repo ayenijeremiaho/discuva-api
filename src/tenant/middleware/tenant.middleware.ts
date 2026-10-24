@@ -32,6 +32,8 @@ const REFRESH_COOKIE_NAME = 'refresh_token';
 // left to respond with. Caught and swallowed in use(), never rethrown.
 class RollbackSignal extends Error {}
 
+const ABANDONED_REQUEST_MS = 2 * 60_000;
+
 // Resolves the tenant from the Host header, writes it into CLS, AND wraps
 // the entire rest of the request — guards, interceptors, handler, all of
 // it — in one transaction with SET LOCAL search_path.
@@ -133,7 +135,13 @@ export class TenantMiddleware implements NestMiddleware {
         );
 
         await new Promise<void>((resolve, reject) => {
-          res.once('finish', () => {
+          let settled = false;
+          let closed = false;
+          let abandoned: NodeJS.Timeout | undefined;
+          const settle = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(abandoned);
             if (res.statusCode >= 400) {
               reject(
                 new RollbackSignal(
@@ -143,8 +151,24 @@ export class TenantMiddleware implements NestMiddleware {
             } else {
               resolve();
             }
+          };
+          // A client hanging up doesn't stop the handler: ending the transaction then would send its remaining queries to public.
+          const end = res.end.bind(res) as (...args: unknown[]) => Response;
+          res.end = ((...args: unknown[]) => {
+            const out = end(...args);
+            if (closed) settle();
+            return out;
+          }) as Response['end'];
+          res.once('finish', settle);
+          res.once('close', () => {
+            closed = true;
+            if (res.writableEnded) return settle();
+            abandoned = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              reject(new RollbackSignal('Client left; handler never finished'));
+            }, ABANDONED_REQUEST_MS);
           });
-          res.once('close', resolve);
           next();
         });
       });
