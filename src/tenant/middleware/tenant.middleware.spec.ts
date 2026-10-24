@@ -60,13 +60,19 @@ function makeReq(
 // once next() has run to let that promise resolve.
 function makeRes(statusCode = 200) {
   const handlers: Record<string, () => void> = {};
-  return {
+  const res: any = {
     statusCode,
+    writableEnded: false,
+    end: jest.fn(() => {
+      res.writableEnded = true;
+      return res;
+    }),
     once: jest.fn((event: string, cb: () => void) => {
       handlers[event] = cb;
     }),
     fire: (event: string) => handlers[event]?.(),
-  } as any;
+  };
+  return res;
 }
 
 describe('TenantMiddleware', () => {
@@ -469,6 +475,73 @@ describe('TenantMiddleware', () => {
       expect(mockTenantRepo.findOneBy).toHaveBeenCalledWith({
         subdomain: 'church-a',
       });
+    });
+  });
+
+  describe('when the client leaves before the response', () => {
+    const activeTenant = {
+      id: 't1',
+      subdomain: 'church-a',
+      schemaName: 'church_a',
+      clusterId: 'default',
+      isActive: true,
+      onboardingStatus: TenantOnboardingStatus.ACTIVE,
+    };
+
+    it('keeps the transaction open until the handler finishes', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+      const res = makeRes(200);
+      let done = false;
+      const next = jest.fn(() => res.fire('close'));
+
+      const pending = middleware
+        .use(makeReq('church-a.localhost'), res, next)
+        .then(() => (done = true));
+      await new Promise((r) => setImmediate(r));
+      expect(done).toBe(false);
+
+      res.end();
+      await pending;
+      expect(done).toBe(true);
+    });
+
+    it('rolls back when the unfinished handler fails', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+      mockTxHost.withTransaction.mockImplementationOnce(
+        async (fn: () => Promise<unknown>) => fn(),
+      );
+      const task = jest.fn();
+      const res = makeRes(500);
+      const next = jest.fn(() => {
+        (clsStore.afterCommit as Array<() => unknown>).push(task);
+        res.fire('close');
+        res.end();
+      });
+
+      await middleware.use(makeReq('church-a.localhost'), res, next);
+      expect(task).not.toHaveBeenCalled();
+    });
+
+    it('gives up after two minutes if the handler never finishes', async () => {
+      jest.useFakeTimers();
+      try {
+        mockTenantRepo.findOneBy.mockResolvedValue(activeTenant);
+        mockTxHost.withTransaction.mockImplementationOnce(
+          async (fn: () => Promise<unknown>) => fn(),
+        );
+        const res = makeRes(200);
+        const next = jest.fn(() => res.fire('close'));
+
+        const pending = middleware.use(
+          makeReq('church-a.localhost'),
+          res,
+          next,
+        );
+        await jest.advanceTimersByTimeAsync(2 * 60_000);
+        await expect(pending).resolves.toBeUndefined();
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });

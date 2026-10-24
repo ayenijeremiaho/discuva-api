@@ -11479,6 +11479,14 @@ no `/etc/hosts` changes), then wraps the entire rest of the request — guards, 
 DB transaction with `SET LOCAL search_path` set to that tenant's schema. Full design in
 `docs/MULTI_TENANT_MIGRATION.md` §4.3/§4.4.
 
+The transaction ends on the response's `finish` (commit, or roll back at status ≥ 400). If the client hangs up
+first (`close` before the response is written: navigating away, closing the app, a quiet update reload), it stays
+open until the handler itself calls `res.end()`, then commits or rolls back the same way; a handler still running 2
+minutes after the client left is rolled back. Ending it at `close` (as before 2026-10-24) cleared the transaction
+while the handler was still running, so its remaining queries fell back to the default `public` search path:
+`relation "…" does not exist` for tenant-only tables (seen on `bible_game_progress`), and a risk of writes landing in
+`public`.
+
 **Fallback resolution for a fixed, non-wildcard host (added 2026-08, extended to discuva-member 2026-08):**
 discuva-admin is deployed at a single `admin.discuva.org` origin shared by every tenant, not a per-tenant wildcard —
 `admin` is in `RESERVED_SUBDOMAINS` (`src/tenant/utility/extract-subdomain.ts`) specifically so no tenant could
