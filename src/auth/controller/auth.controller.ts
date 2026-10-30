@@ -21,6 +21,7 @@ import type {
 import { AuthService } from '../service/auth.service';
 import { WebauthnService } from '../service/webauthn.service';
 import { TwoFactorLoginDto } from '../../utility/two-factor/two-factor.dto';
+import { setRememberedDeviceCookie } from '../../utility/two-factor/remembered-device-cookie';
 import { Public } from '../decorator/public.decorator';
 import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check.decorator';
 import { LocalAuthGuard } from '../guard/local-auth.guard';
@@ -88,7 +89,7 @@ export class AuthController {
     @Request() req: any,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.authService.adminLogin(req.user);
+    const result = await this.authService.adminLogin(req.user, req.cookies);
     if ('challengeToken' in result) return result;
     const { refresh_token, ...body } = result;
     this.setRefreshCookie(res, refresh_token ?? '');
@@ -104,12 +105,21 @@ export class AuthController {
     @Body() dto: TwoFactorLoginDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<Omit<JwtResponse, 'refresh_token'>> {
-    const { refresh_token, ...body } =
+    const { refresh_token, deviceCookie, ...body } =
       await this.authService.completeAdminTwoFactorLogin(
         dto.challengeToken,
         dto.code,
+        dto.rememberDevice,
       );
     this.setRefreshCookie(res, refresh_token ?? '');
+    if (deviceCookie) {
+      setRememberedDeviceCookie(
+        res,
+        deviceCookie,
+        this.isSecureEnv(),
+        REFRESH_COOKIE_PATH,
+      );
+    }
     return body;
   }
 

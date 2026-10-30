@@ -69,6 +69,15 @@ export class PlatformAdmin extends BaseEntity {
   })
   twoFactorBackupCodes: string[] | null;
 
+  // Remembered devices from before this moment no longer skip the code.
+  @Column({
+    type: 'timestamptz',
+    name: 'two_factor_devices_valid_from',
+    nullable: true,
+    select: false,
+  })
+  twoFactorDevicesValidFrom: Date | null;
+
   @Index()
   @Column()
   platformAdminRoleId: string;

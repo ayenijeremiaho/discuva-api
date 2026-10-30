@@ -67,6 +67,15 @@ export class Admin extends BaseEntity {
   })
   twoFactorBackupCodes: string[] | null;
 
+  // Remembered devices from before this moment no longer skip the code.
+  @Column({
+    type: 'timestamptz',
+    name: 'two_factor_devices_valid_from',
+    nullable: true,
+    select: false,
+  })
+  twoFactorDevicesValidFrom: Date | null;
+
   // Admin-portal routes pinned to the dashboard's Quick Access, in the admin's own order.
   @Column({ type: 'jsonb', default: () => "'[]'" })
   favouritePages: string[];

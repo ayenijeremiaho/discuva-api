@@ -1,4 +1,11 @@
-import { IsNotEmpty, IsString, Length, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Length,
+  MaxLength,
+} from 'class-validator';
 
 export class TwoFactorLoginDto {
   @IsString()
@@ -10,6 +17,10 @@ export class TwoFactorLoginDto {
   @IsString()
   @Length(6, 24)
   code: string;
+
+  @IsOptional()
+  @IsBoolean()
+  rememberDevice?: boolean;
 }
 
 export class TwoFactorPasswordDto {

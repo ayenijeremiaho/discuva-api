@@ -71,4 +71,13 @@ export class PlatformAdminTwoFactorController {
       dto.code,
     );
   }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('forget-devices')
+  forgetDevices(
+    @Body() dto: TwoFactorConfirmDto,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+  ) {
+    return this.twoFactor.forgetDevices(admin.id, dto.password, dto.code);
+  }
 }

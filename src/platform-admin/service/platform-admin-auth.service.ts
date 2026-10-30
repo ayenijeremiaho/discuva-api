@@ -20,6 +20,7 @@ import {
 import { UtilityService } from '../../utility/service/utility.service';
 import { PlatformAdminResetPasswordDto } from '../dto/platform-admin-password-reset.dto';
 import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
+import { RememberedDeviceCookie } from '../../utility/two-factor/two-factor.base';
 
 export interface PlatformAdminTokens {
   accessToken: string;
@@ -78,6 +79,7 @@ export class PlatformAdminAuthService {
   async login(
     email: string,
     password: string,
+    cookies?: Record<string, string>,
   ): Promise<PlatformAdminLoginResult> {
     const admin = await this.platformAdminRepo
       .createQueryBuilder('admin')
@@ -90,7 +92,10 @@ export class PlatformAdminAuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
-    if (admin.twoFactorEnabledAt) {
+    if (
+      admin.twoFactorEnabledAt &&
+      !(await this.twoFactor.isRememberedDevice(admin.id, cookies))
+    ) {
       return {
         requiresTwoFactor: true,
         challengeToken: await this.twoFactor.createChallenge(admin.id),
@@ -104,12 +109,19 @@ export class PlatformAdminAuthService {
   async completeTwoFactorLogin(
     challengeToken: string,
     code: string,
-  ): Promise<PlatformAdminTokens> {
+    rememberDevice = false,
+  ): Promise<PlatformAdminTokens & { deviceCookie?: RememberedDeviceCookie }> {
     const adminId = await this.twoFactor.completeChallenge(
       challengeToken,
       code,
     );
-    return this.generateTokens(adminId);
+    const tokens = await this.generateTokens(adminId);
+    return rememberDevice
+      ? {
+          ...tokens,
+          deviceCookie: await this.twoFactor.rememberDevice(adminId),
+        }
+      : tokens;
   }
 
   // Called from POST /platform/auth/refresh once

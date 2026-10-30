@@ -221,8 +221,101 @@ describe('PlatformAdminTwoFactorService', () => {
         twoFactorEnabledAt: null,
         twoFactorLastStep: null,
         twoFactorBackupCodes: null,
+        twoFactorDevicesValidFrom: null,
       });
       expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('remembered devices', () => {
+    const cookies = (c: { name: string; value: string }) => ({
+      [c.name]: c.value,
+    });
+
+    beforeEach(() => {
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+      jest.setSystemTime(new Date('2026-10-30T10:00:00Z'));
+    });
+    afterEach(() => jest.useRealTimers());
+
+    it('recognises a remembered device', async () => {
+      const c = await service.rememberDevice('a1');
+      expect(c.maxAge).toBe(30 * 86_400_000);
+      await expect(service.isRememberedDevice('a1', cookies(c))).resolves.toBe(
+        true,
+      );
+    });
+
+    it("asks again with no cookie, and doesn't query the database for it", async () => {
+      await expect(service.isRememberedDevice('a1', {})).resolves.toBe(false);
+      await expect(service.isRememberedDevice('a1')).resolves.toBe(false);
+      expect(selectBuilder.getOne).not.toHaveBeenCalled();
+    });
+
+    it('asks again on a tampered cookie', async () => {
+      const c = await service.rememberDevice('a1');
+      mockEncryption.decrypt.mockImplementationOnce(() => {
+        throw new Error('bad auth tag');
+      });
+      await expect(service.isRememberedDevice('a1', cookies(c))).resolves.toBe(
+        false,
+      );
+    });
+
+    it('asks again after 30 days', async () => {
+      const c = await service.rememberDevice('a1');
+      jest.setSystemTime(new Date('2026-11-29T10:00:01Z'));
+      await expect(service.isRememberedDevice('a1', cookies(c))).resolves.toBe(
+        false,
+      );
+    });
+
+    it('asks again after a password change', async () => {
+      const c = await service.rememberDevice('a1');
+      admin = { ...enabledAdmin(), passwordHash: 'new-hash' };
+      await expect(service.isRememberedDevice('a1', cookies(c))).resolves.toBe(
+        false,
+      );
+    });
+
+    it('asks again once 2FA was turned off and on again', async () => {
+      const c = await service.rememberDevice('a1');
+      admin = {
+        ...enabledAdmin(),
+        twoFactorEnabledAt: new Date(Date.now() + 1),
+      };
+      await expect(service.isRememberedDevice('a1', cookies(c))).resolves.toBe(
+        false,
+      );
+    });
+
+    it("doesn't work for another admin or a deactivated one", async () => {
+      const c = await service.rememberDevice('a1');
+      await expect(
+        service.isRememberedDevice('a2', { [c.name]: c.value }),
+      ).resolves.toBe(false);
+      admin = { ...enabledAdmin(), isActive: false };
+      await expect(service.isRememberedDevice('a1', cookies(c))).resolves.toBe(
+        false,
+      );
+    });
+
+    it('forgetting devices ends earlier ones but not newer ones', async () => {
+      const old = await service.rememberDevice('a1');
+      jest.setSystemTime(new Date('2026-10-30T11:00:00Z'));
+      await service.forgetDevices('a1', 'pw', totpAt(SECRET, stepNow()));
+      const validFrom =
+        mockRepo.update.mock.calls[0][1].twoFactorDevicesValidFrom;
+      expect(validFrom).toBeInstanceOf(Date);
+      admin = { ...enabledAdmin(), twoFactorDevicesValidFrom: validFrom };
+
+      await expect(
+        service.isRememberedDevice('a1', cookies(old)),
+      ).resolves.toBe(false);
+      const fresh = await service.rememberDevice('a1');
+      await expect(
+        service.isRememberedDevice('a1', cookies(fresh)),
+      ).resolves.toBe(true);
     });
   });
 

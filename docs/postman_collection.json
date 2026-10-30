@@ -43129,6 +43129,37 @@
           }
         },
         {
+          "name": "Forget Remembered Devices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/users/me/2fa/forget-devices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "users",
+                "me",
+                "2fa",
+                "forget-devices"
+              ]
+            },
+            "description": "Remembered devices must enter a code again at the next sign-in.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"current-password\",\n  \"code\": \"123456\"\n}"
+            }
+          }
+        },
+        {
           "name": "Reset Another Admin",
           "request": {
             "method": "POST",
@@ -43332,6 +43363,36 @@
               ]
             },
             "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"current-password\",\n  \"code\": \"123456\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Forget Remembered Devices",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/platform/auth/2fa/forget-devices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "platform",
+                "auth",
+                "2fa",
+                "forget-devices"
+              ]
+            },
+            "description": "Remembered devices must enter a code again at the next sign-in.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"password\": \"current-password\",\n  \"code\": \"123456\"\n}"

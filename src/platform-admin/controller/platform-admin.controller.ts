@@ -17,6 +17,7 @@ import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
 import { TwoFactorLoginDto } from '../../utility/two-factor/two-factor.dto';
+import { setRememberedDeviceCookie } from '../../utility/two-factor/remembered-device-cookie';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 import { PlatformAdminRefreshJwtAuthGuard } from '../guard/platform-admin-refresh-jwt-auth.guard';
 import { PLATFORM_REFRESH_COOKIE_NAME } from '../strategy/platform-admin-refresh-jwt.strategy';
@@ -105,10 +106,12 @@ export class PlatformAdminController {
   async login(
     @Body() dto: PlatformAdminLoginDto,
     @Res({ passthrough: true }) res: Response,
+    @Request() req?: any,
   ) {
     const result = await this.platformAdminAuthService.login(
       dto.email,
       dto.password,
+      req?.cookies,
     );
     if ('challengeToken' in result) return result;
     const { refreshToken, ...body } = result;
@@ -124,12 +127,21 @@ export class PlatformAdminController {
     @Body() dto: TwoFactorLoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { refreshToken, ...body } =
+    const { refreshToken, deviceCookie, ...body } =
       await this.platformAdminAuthService.completeTwoFactorLogin(
         dto.challengeToken,
         dto.code,
+        dto.rememberDevice,
       );
     this.setRefreshCookie(res, refreshToken);
+    if (deviceCookie) {
+      setRememberedDeviceCookie(
+        res,
+        deviceCookie,
+        this.isSecureEnv(),
+        '/v1/platform/auth',
+      );
+    }
     return body;
   }
 

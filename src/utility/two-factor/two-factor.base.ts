@@ -21,6 +21,7 @@ const SETUP_TTL_SECONDS = 600;
 const ATTEMPT_WINDOW_MS = 15 * 60_000;
 const ATTEMPT_LIMIT = 10;
 const BACKUP_CODE_COUNT = 10;
+const DEVICE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function hashBackupCode(code: string): string {
   const normalised = code.toUpperCase().replace(/[^A-Z2-7]/g, '');
@@ -37,6 +38,7 @@ export interface TwoFactorColumns {
   twoFactorEnabledAt: Date | null;
   twoFactorLastStep: number | null;
   twoFactorBackupCodes: string[] | null;
+  twoFactorDevicesValidFrom: Date | null;
 }
 
 export interface TwoFactorAccount {
@@ -48,6 +50,13 @@ export interface TwoFactorAccount {
   enabledAt: Date | null;
   secret: string | null;
   backupCodes: string[] | null;
+  devicesValidFrom: Date | null;
+}
+
+export interface RememberedDeviceCookie {
+  name: string;
+  value: string;
+  maxAge: number;
 }
 
 export interface TwoFactorStatus {
@@ -56,7 +65,8 @@ export interface TwoFactorStatus {
   backupCodesRemaining: number;
 }
 
-export type TwoFactorEvent = 'ENABLED' | 'DISABLED' | 'BACKUP_CODES' | 'RESET';
+export type TwoFactorEvent =
+  'ENABLED' | 'DISABLED' | 'BACKUP_CODES' | 'DEVICES_FORGOTTEN' | 'RESET';
 
 export interface TwoFactorKeyStore {
   get(key: string): Promise<string | undefined>;
@@ -203,6 +213,77 @@ export abstract class TwoFactorServiceBase {
     return { backupCodes };
   }
 
+  // An encrypted cookie instead of a table, so remembering a device adds no rows or lookups beyond sign-in.
+  async rememberDevice(key: string): Promise<RememberedDeviceCookie> {
+    const account = await this.requireAccount(key);
+    const now = Date.now();
+    return {
+      name: this.deviceCookieName(key),
+      value: this.encryption.encrypt(
+        JSON.stringify({
+          key,
+          issuedAt: now,
+          expiresAt: now + DEVICE_TTL_MS,
+          fingerprint: this.deviceFingerprint(account),
+        }),
+      ),
+      maxAge: DEVICE_TTL_MS,
+    };
+  }
+
+  async isRememberedDevice(
+    key: string,
+    cookies?: Record<string, string>,
+  ): Promise<boolean> {
+    const token = cookies?.[this.deviceCookieName(key)];
+    if (!token) return false;
+    let device: {
+      key: string;
+      issuedAt: number;
+      expiresAt: number;
+      fingerprint: string;
+    };
+    try {
+      device = JSON.parse(this.encryption.decrypt(token));
+    } catch {
+      return false;
+    }
+    if (device.key !== key || device.expiresAt <= Date.now()) return false;
+    const account = await this.loadAccount(key);
+    if (!account?.active || !account.enabledAt) return false;
+    if (device.fingerprint !== this.deviceFingerprint(account)) return false;
+    return (
+      !account.devicesValidFrom ||
+      device.issuedAt >= new Date(account.devicesValidFrom).getTime()
+    );
+  }
+
+  async forgetDevices(
+    key: string,
+    password: string,
+    code: string,
+  ): Promise<void> {
+    const account = await this.confirmedAccount(key, password, code);
+    await this.repo.update(account.rowId, {
+      twoFactorDevicesValidFrom: new Date(),
+    });
+    this.onChange(account, 'DEVICES_FORGOTTEN');
+  }
+
+  private deviceCookieName(key: string): string {
+    const id = createHash('sha256').update(key).digest('hex').slice(0, 16);
+    return `${this.namespace}_2fa_device_${id}`;
+  }
+
+  // Changes with the password or a fresh 2FA setup, so either ends every remembered device.
+  private deviceFingerprint(account: TwoFactorAccount): string {
+    return createHash('sha256')
+      .update(
+        `${account.passwordHash}:${new Date(account.enabledAt!).getTime()}`,
+      )
+      .digest('hex');
+  }
+
   // For someone who has lost both their app and their backup codes.
   protected async resetAccount(key: string): Promise<void> {
     const account = await this.requireAccount(key);
@@ -318,6 +399,7 @@ export abstract class TwoFactorServiceBase {
       twoFactorEnabledAt: null,
       twoFactorLastStep: null,
       twoFactorBackupCodes: null,
+      twoFactorDevicesValidFrom: null,
     });
   }
 }
@@ -339,6 +421,10 @@ export function twoFactorNotice(
       BACKUP_CODES: {
         heading: 'New backup codes created',
         message: `New backup codes were created for your ${place} account. Your old backup codes no longer work.`,
+      },
+      DEVICES_FORGOTTEN: {
+        heading: 'Remembered devices forgotten',
+        message: `Every device remembered for your ${place} account will now be asked for a code at the next sign-in.`,
       },
       RESET: {
         heading: 'Two-factor sign-in was reset',

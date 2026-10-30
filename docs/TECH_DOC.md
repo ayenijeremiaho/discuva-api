@@ -7446,6 +7446,13 @@ Optional and recommended, never enforced: everything stays off until an admin op
   tokens or cookie. The challenge is a random Redis value (5 minutes). `POST /auth/admin-login/2fa` or
   `POST /platform/auth/2fa/verify` with `{ challengeToken, code }` then issues the normal session. A 6-digit code is
   checked against the app secret, anything else as a backup code.
+- **Remember this device:** sending `rememberDevice: true` with the code sets a 30-day httpOnly cookie, one per account
+  (`admin_2fa_device_*` on `/v1/auth`, `platform_2fa_device_*` on `/v1/platform/auth`). It's AES-GCM encrypted and holds the
+  account, issue and expiry times, and a fingerprint of the password hash and `two_factor_enabled_at`. So a password change,
+  or turning 2FA off and on, ends it, as does `POST .../2fa/forget-devices` (`{ password, code }`, sets
+  `two_factor_devices_valid_from`; migrations `AddAdminTwoFactorDevicesValidFrom`, `AddPlatformAdminTwoFactorDevicesValidFrom`).
+  No device table: a sign-in with the cookie does one extra primary-key lookup, and without it none. The password is still
+  required on a remembered device.
 - **Abuse limits:** 10 attempts per account per 15 minutes (`CacheService.hitWindow`, 429 after that), plus route throttles.
   Conditional `UPDATE`s reject a replayed time step or a reused backup code, even from concurrent requests.
 - **Opting in:** password → `setup` returns the secret and `otpauthUrl` (held encrypted in Redis for 10 minutes) → `enable`
@@ -7454,7 +7461,7 @@ Optional and recommended, never enforced: everything stays off until an admin op
   admin with no codes needs Discuva support, until Account Owner recovery ships.
 - **Notices:** each change emails `admin-security-notice` or `platform-admin-security-notice`, with no category so a church
   can't switch them off. Church admin changes are audited as `ADMIN_2FA_ENABLED`, `ADMIN_2FA_DISABLED`,
-  `ADMIN_2FA_BACKUP_CODES` and `ADMIN_2FA_RESET`.
+  `ADMIN_2FA_BACKUP_CODES`, `ADMIN_2FA_DEVICES_FORGOTTEN` and `ADMIN_2FA_RESET`.
 - **Database cost:** no scheduler or polling. It runs only at sign-in and on settings changes, using primary-key lookups
   and updates, so no new index is needed. Pending state lives in Redis.
 - **UI:** `components/security/` holds the same components in discuva-admin (Profile → Security) and discuva-platform
@@ -7469,9 +7476,10 @@ Optional and recommended, never enforced: everything stays off until an admin op
 | POST | `/admin/users/me/2fa/enable` | AdminGuard | `{ code }` → `{ backupCodes }` |
 | POST | `/admin/users/me/2fa/disable` | AdminGuard | `{ password, code }`, `204` |
 | POST | `/admin/users/me/2fa/backup-codes` | AdminGuard | `{ password, code }` → `{ backupCodes }` |
+| POST | `/admin/users/me/2fa/forget-devices` | AdminGuard | `{ password, code }`, `204`. Remembered devices must enter a code again |
 | POST | `/admin/users/:id/reset-2fa` | AdminGuard (ADMIN_WRITE) | Another admin's reset, `204` |
 | POST | `/platform/auth/2fa/verify` | Public, throttled | Second sign-in step, platform console |
-| GET, POST | `/platform/auth/2fa`, `/setup`, `/enable`, `/disable`, `/backup-codes` | PlatformAdminGuard | Same as the admin routes |
+| GET, POST | `/platform/auth/2fa`, `/setup`, `/enable`, `/disable`, `/backup-codes`, `/forget-devices` | PlatformAdminGuard | Same as the admin routes |
 | POST | `/platform/admins/:id/reset-2fa` | PlatformAdminGuard (PLATFORM_ADMINS_WRITE) | Another admin's reset |
 
 ### Platform Admin (Control Plane)

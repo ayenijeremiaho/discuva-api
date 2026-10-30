@@ -106,6 +106,7 @@ const mockTxHost = {
 
 const mockAdminTwoFactor = {
   createChallenge: jest.fn().mockResolvedValue('challenge-1'),
+  isRememberedDevice: jest.fn().mockResolvedValue(false),
   completeChallenge: jest.fn().mockResolvedValue('member-1'),
 };
 const mockAdminService = {
@@ -589,6 +590,35 @@ describe('AuthService', () => {
         challengeToken: 'challenge-1',
       });
       expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('skips the second step on a remembered device', async () => {
+      mockAdminService.findByMemberId.mockResolvedValue({
+        id: 'admin-1',
+        isActive: true,
+        twoFactorEnabledAt: new Date(),
+      });
+      mockAdminTwoFactor.isRememberedDevice.mockResolvedValueOnce(true);
+      mockJwtService.signAsync.mockResolvedValue('admin-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      const result = await service.adminLogin(
+        {
+          id: 'member-1',
+          role: MemberRoleEnum.MEMBER,
+          requiresPasswordChange: false,
+          surface: SessionSurface.MEMBER,
+        },
+        { c: 'v' },
+      );
+
+      expect(mockAdminTwoFactor.isRememberedDevice).toHaveBeenCalledWith(
+        'member-1',
+        { c: 'v' },
+      );
+      expect(result).toMatchObject({ access_token: 'admin-token' });
     });
 
     it('issues the admin session once the second step passes', async () => {

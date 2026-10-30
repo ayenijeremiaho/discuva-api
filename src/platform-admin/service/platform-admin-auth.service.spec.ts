@@ -36,6 +36,10 @@ const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
 const mockConfigService = { get: jest.fn().mockReturnValue('Discuva') };
 const mockTwoFactor = {
   createChallenge: jest.fn().mockResolvedValue('challenge-1'),
+  isRememberedDevice: jest.fn().mockResolvedValue(false),
+  rememberDevice: jest
+    .fn()
+    .mockResolvedValue({ name: 'n', value: 'v', maxAge: 1 }),
   completeChallenge: jest.fn().mockResolvedValue('admin-1'),
 };
 const mockRefreshJwtConfig = { secret: 'refresh-secret', expiresIn: '7d' };
@@ -98,6 +102,39 @@ describe('PlatformAdminAuthService', () => {
         challengeToken: 'challenge-1',
       });
       expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('skips the code on a remembered device', async () => {
+      mockPlatformAdminRepo.createQueryBuilder.mockReturnValue(
+        queryReturning({
+          id: 'admin-1',
+          passwordHash: 'h',
+          changedPassword: true,
+          twoFactorEnabledAt: new Date(),
+        }),
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+      mockTwoFactor.isRememberedDevice.mockResolvedValueOnce(true);
+
+      const result = await service.login('a@example.com', 'pw', { c: 'v' });
+
+      expect(mockTwoFactor.isRememberedDevice).toHaveBeenCalledWith('admin-1', {
+        c: 'v',
+      });
+      expect(result).toMatchObject({ accessToken: 'signed-access-jwt' });
+    });
+
+    it('returns a device cookie only when asked to remember', async () => {
+      const remembered = await service.completeTwoFactorLogin(
+        'c',
+        '123456',
+        true,
+      );
+      expect(remembered.deviceCookie).toEqual({
+        name: 'n',
+        value: 'v',
+        maxAge: 1,
+      });
     });
 
     it('never starts the second step on a wrong password', async () => {

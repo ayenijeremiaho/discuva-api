@@ -23,6 +23,7 @@ import { Cron } from '@nestjs/schedule';
 import { CacheService } from '../../utility/service/cache.service';
 import { AdminService } from '../../admin/service/admin.service';
 import { AdminTwoFactorService } from '../../admin/service/admin-two-factor.service';
+import { RememberedDeviceCookie } from '../../utility/two-factor/two-factor.base';
 import { MemberService } from '../../member/service/member.service';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
@@ -262,6 +263,7 @@ export class AuthService {
 
   async adminLogin(
     user: MemberAuth,
+    cookies?: Record<string, string>,
   ): Promise<
     JwtResponse | { requiresTwoFactor: true; challengeToken: string }
   > {
@@ -273,7 +275,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials.');
     }
 
-    if (admin.twoFactorEnabledAt) {
+    if (
+      admin.twoFactorEnabledAt &&
+      !(await this.adminTwoFactor.isRememberedDevice(user.id, cookies))
+    ) {
       return {
         requiresTwoFactor: true,
         challengeToken: await this.adminTwoFactor.createChallenge(user.id),
@@ -290,17 +295,24 @@ export class AuthService {
   async completeAdminTwoFactorLogin(
     challengeToken: string,
     code: string,
-  ): Promise<JwtResponse> {
+    rememberDevice = false,
+  ): Promise<JwtResponse & { deviceCookie?: RememberedDeviceCookie }> {
     const memberId = await this.adminTwoFactor.completeChallenge(
       challengeToken,
       code,
     );
     const member = await this.memberService.getById(memberId);
-    return this.issueAdminSession(
+    const tokens = await this.issueAdminSession(
       member.id,
       member.role,
       !member.changedPassword,
     );
+    return rememberDevice
+      ? {
+          ...tokens,
+          deviceCookie: await this.adminTwoFactor.rememberDevice(memberId),
+        }
+      : tokens;
   }
 
   private async issueAdminSession(

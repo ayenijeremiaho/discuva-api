@@ -60,4 +60,13 @@ export class AdminTwoFactorController {
       dto.code,
     );
   }
+
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('forget-devices')
+  forgetDevices(
+    @Body() dto: TwoFactorConfirmDto,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    return this.twoFactor.forgetDevices(user.id, dto.password, dto.code);
+  }
 }

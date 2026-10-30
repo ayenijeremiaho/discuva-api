@@ -59,6 +59,7 @@ export class AdminTwoFactorService extends TwoFactorServiceBase {
         'member.password',
         'admin.twoFactorSecret',
         'admin.twoFactorBackupCodes',
+        'admin.twoFactorDevicesValidFrom',
       ])
       .where('member.id = :key', { key })
       .getOne();
@@ -74,6 +75,7 @@ export class AdminTwoFactorService extends TwoFactorServiceBase {
       enabledAt: admin.twoFactorEnabledAt,
       secret: admin.twoFactorSecret,
       backupCodes: admin.twoFactorBackupCodes,
+      devicesValidFrom: admin.twoFactorDevicesValidFrom,
     };
   }
 

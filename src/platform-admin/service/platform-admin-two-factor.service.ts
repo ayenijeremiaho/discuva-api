@@ -52,6 +52,7 @@ export class PlatformAdminTwoFactorService extends TwoFactorServiceBase {
         'admin.passwordHash',
         'admin.twoFactorSecret',
         'admin.twoFactorBackupCodes',
+        'admin.twoFactorDevicesValidFrom',
       ])
       .where('admin.id = :key', { key })
       .getOne();
@@ -65,6 +66,7 @@ export class PlatformAdminTwoFactorService extends TwoFactorServiceBase {
       enabledAt: admin.twoFactorEnabledAt,
       secret: admin.twoFactorSecret,
       backupCodes: admin.twoFactorBackupCodes,
+      devicesValidFrom: admin.twoFactorDevicesValidFrom,
     };
   }
 
