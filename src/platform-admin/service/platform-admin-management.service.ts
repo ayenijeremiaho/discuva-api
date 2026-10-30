@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
 import { PlatformAdminPasswordResetOtp } from '../entity/platform-admin-password-reset-otp.entity';
 import { PlatformAdminRoleService } from './platform-admin-role.service';
@@ -41,6 +42,7 @@ export class PlatformAdminManagementService {
     private readonly roleService: PlatformAdminRoleService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly twoFactor: PlatformAdminTwoFactorService,
   ) {}
 
   async getAll(): Promise<PlatformAdmin[]> {
@@ -126,6 +128,18 @@ export class PlatformAdminManagementService {
 
     await this.platformAdminRepo.save(admin);
     this.logger.log(`Platform admin ${id} updated by actor ${actorId}`);
+    return this.getById(id);
+  }
+
+  async resetTwoFactor(id: string, actorId: string): Promise<PlatformAdmin> {
+    if (id === actorId) {
+      throw new ForbiddenException(
+        'Ask another platform admin to reset your two-factor sign-in.',
+      );
+    }
+    await this.getById(id);
+    await this.twoFactor.resetByAnotherAdmin(id);
+    this.logger.log(`Platform admin ${id} 2FA reset by actor ${actorId}`);
     return this.getById(id);
   }
 

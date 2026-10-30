@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 import { PlatformAdminManagementService } from './platform-admin-management.service';
 import { PlatformAdminRoleService } from './platform-admin-role.service';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
@@ -27,6 +28,8 @@ const mockConfigService = {
   ),
 };
 
+const mockTwoFactor = { resetByAnotherAdmin: jest.fn() };
+
 describe('PlatformAdminManagementService', () => {
   let service: PlatformAdminManagementService;
 
@@ -46,6 +49,10 @@ describe('PlatformAdminManagementService', () => {
         { provide: PlatformAdminRoleService, useValue: mockRoleService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
+        {
+          provide: PlatformAdminTwoFactorService,
+          useValue: mockTwoFactor,
+        },
       ],
     }).compile();
     service = module.get(PlatformAdminManagementService);
@@ -107,6 +114,22 @@ describe('PlatformAdminManagementService', () => {
           platformAdminRoleId: 'role-1',
         } as any),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('resetTwoFactor', () => {
+    it('refuses to reset your own', async () => {
+      await expect(service.resetTwoFactor('a1', 'a1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockTwoFactor.resetByAnotherAdmin).not.toHaveBeenCalled();
+    });
+
+    it('resets another admin', async () => {
+      const target = { id: 'a2', email: 'b@example.com' };
+      mockPlatformAdminRepo.findOne.mockResolvedValue(target);
+      await service.resetTwoFactor('a2', 'a1');
+      expect(mockTwoFactor.resetByAnotherAdmin).toHaveBeenCalledWith('a2');
     });
   });
 

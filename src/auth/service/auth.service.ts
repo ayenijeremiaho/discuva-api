@@ -22,6 +22,7 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { Cron } from '@nestjs/schedule';
 import { CacheService } from '../../utility/service/cache.service';
 import { AdminService } from '../../admin/service/admin.service';
+import { AdminTwoFactorService } from '../../admin/service/admin-two-factor.service';
 import { MemberService } from '../../member/service/member.service';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
@@ -77,6 +78,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly adminService: AdminService,
+    private readonly adminTwoFactor: AdminTwoFactorService,
     private readonly memberService: MemberService,
     private readonly sessionService: MemberSessionService,
     private readonly utilityService: UtilityService,
@@ -258,7 +260,11 @@ export class AuthService {
     return tokens;
   }
 
-  async adminLogin(user: MemberAuth): Promise<JwtResponse> {
+  async adminLogin(
+    user: MemberAuth,
+  ): Promise<
+    JwtResponse | { requiresTwoFactor: true; challengeToken: string }
+  > {
     const admin = await this.adminService.findByMemberId(user.id);
     if (!admin) {
       this.logger.warn(
@@ -267,14 +273,48 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials.');
     }
 
-    const tokens = await this.generateTokens(
+    if (admin.twoFactorEnabledAt) {
+      return {
+        requiresTwoFactor: true,
+        challengeToken: await this.adminTwoFactor.createChallenge(user.id),
+      };
+    }
+
+    return this.issueAdminSession(
       user.id,
       user.role,
       user.requiresPasswordChange,
+    );
+  }
+
+  async completeAdminTwoFactorLogin(
+    challengeToken: string,
+    code: string,
+  ): Promise<JwtResponse> {
+    const memberId = await this.adminTwoFactor.completeChallenge(
+      challengeToken,
+      code,
+    );
+    const member = await this.memberService.getById(memberId);
+    return this.issueAdminSession(
+      member.id,
+      member.role,
+      !member.changedPassword,
+    );
+  }
+
+  private async issueAdminSession(
+    memberId: string,
+    role: MemberRoleEnum,
+    requiresPasswordChange: boolean,
+  ): Promise<JwtResponse> {
+    const tokens = await this.generateTokens(
+      memberId,
+      role,
+      requiresPasswordChange,
       SessionSurface.ADMIN,
     );
-    this.auditLogService.log('ADMIN_LOGIN', { actorId: user.id });
-
+    this.auditLogService.log('ADMIN_LOGIN', { actorId: memberId });
     return tokens;
   }
 

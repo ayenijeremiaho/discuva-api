@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AdminService } from './admin.service';
+import { AdminTwoFactorService } from './admin-two-factor.service';
 import { Admin } from '../entity/admin.entity';
 import { AdminRoleService } from './admin-role.service';
 import { MemberService } from '../../member/service/member.service';
@@ -53,6 +54,8 @@ const mockAdmin: Admin = {
   isActive: true,
 } as any;
 
+const mockAdminTwoFactor = { resetByAnotherAdmin: jest.fn() };
+
 describe('AdminService', () => {
   let service: AdminService;
 
@@ -66,6 +69,7 @@ describe('AdminService', () => {
         { provide: MemberService, useValue: mockMemberService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: UtilityService, useValue: mockUtilityService },
+        { provide: AdminTwoFactorService, useValue: mockAdminTwoFactor },
         { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();
@@ -112,6 +116,31 @@ describe('AdminService', () => {
       );
       expect(result).toEqual(mockAdmin);
       expect(mockAdminRepo.save).toHaveBeenCalled();
+    });
+  });
+
+  describe('resetTwoFactor', () => {
+    it('refuses to reset your own', async () => {
+      mockAdminRepo.findOne.mockResolvedValue({
+        id: 'admin-1',
+        member: { id: 'actor-1' },
+      });
+      await expect(
+        service.resetTwoFactor('admin-1', 'actor-1'),
+      ).rejects.toThrow('Ask another admin');
+      expect(mockAdminTwoFactor.resetByAnotherAdmin).not.toHaveBeenCalled();
+    });
+
+    it('resets another admin by member id', async () => {
+      mockAdminRepo.findOne.mockResolvedValue({
+        id: 'admin-1',
+        member: { id: 'member-2' },
+      });
+      await service.resetTwoFactor('admin-1', 'actor-1');
+      expect(mockAdminTwoFactor.resetByAnotherAdmin).toHaveBeenCalledWith(
+        'member-2',
+        'actor-1',
+      );
     });
   });
 

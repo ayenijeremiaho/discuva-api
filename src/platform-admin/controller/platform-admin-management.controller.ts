@@ -57,6 +57,16 @@ export class PlatformAdminManagementController {
     return this.managementService.create(dto);
   }
 
+  // Another admin only: for someone who has lost their app and their backup codes.
+  @RequiresPlatformPermission(PlatformAdminPermission.PLATFORM_ADMINS_WRITE)
+  @Post(':id/reset-2fa')
+  resetTwoFactor(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+  ) {
+    return this.managementService.resetTwoFactor(id, admin.id);
+  }
+
   @RequiresPlatformPermission(PlatformAdminPermission.PLATFORM_ADMINS_WRITE)
   @Patch(':id')
   update(

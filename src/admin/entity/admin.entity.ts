@@ -32,6 +32,41 @@ export class Admin extends BaseEntity {
   @Column({ default: true })
   isActive: boolean;
 
+  // Encrypted with CREDENTIALS_ENCRYPTION_KEY; null until the admin opts in.
+  @Column({
+    type: 'text',
+    name: 'two_factor_secret',
+    nullable: true,
+    select: false,
+  })
+  twoFactorSecret: string | null;
+
+  @Column({
+    type: 'timestamptz',
+    name: 'two_factor_enabled_at',
+    nullable: true,
+  })
+  twoFactorEnabledAt: Date | null;
+
+  // Last accepted time step, so a code can't be replayed.
+  @Column({
+    type: 'int',
+    name: 'two_factor_last_step',
+    nullable: true,
+    select: false,
+  })
+  twoFactorLastStep: number | null;
+
+  // SHA-256 of each unused code; the codes carry 80 random bits, so no slow hash is needed.
+  @Column({
+    type: 'text',
+    array: true,
+    name: 'two_factor_backup_codes',
+    nullable: true,
+    select: false,
+  })
+  twoFactorBackupCodes: string[] | null;
+
   // Admin-portal routes pinned to the dashboard's Quick Access, in the admin's own order.
   @Column({ type: 'jsonb', default: () => "'[]'" })
   favouritePages: string[];

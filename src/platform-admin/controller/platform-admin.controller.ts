@@ -16,6 +16,7 @@ import {
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
+import { TwoFactorLoginDto } from '../../utility/two-factor/two-factor.dto';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 import { PlatformAdminRefreshJwtAuthGuard } from '../guard/platform-admin-refresh-jwt-auth.guard';
 import { PLATFORM_REFRESH_COOKIE_NAME } from '../strategy/platform-admin-refresh-jwt.strategy';
@@ -105,10 +106,29 @@ export class PlatformAdminController {
     @Body() dto: PlatformAdminLoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { refreshToken, ...body } = await this.platformAdminAuthService.login(
+    const result = await this.platformAdminAuthService.login(
       dto.email,
       dto.password,
     );
+    if ('challengeToken' in result) return result;
+    const { refreshToken, ...body } = result;
+    this.setRefreshCookie(res, refreshToken);
+    return body;
+  }
+
+  // Second sign-in step. Attempts are also limited per admin in the service.
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('auth/2fa/verify')
+  async verifyTwoFactor(
+    @Body() dto: TwoFactorLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { refreshToken, ...body } =
+      await this.platformAdminAuthService.completeTwoFactorLogin(
+        dto.challengeToken,
+        dto.code,
+      );
     this.setRefreshCookie(res, refreshToken);
     return body;
   }

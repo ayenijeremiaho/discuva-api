@@ -7430,6 +7430,50 @@ cancel-don't-delete one.
 
 ---
 
+### Two-factor sign-in (admin portal and platform console)
+
+Optional and recommended, never enforced: everything stays off until an admin opts in. Authenticator-app codes (RFC
+6238, SHA-1, 6 digits, 30 seconds, one step of drift) and 10 single-use backup codes, with no SMS or third-party cost.
+
+- **Shared core:** `src/utility/two-factor/` (`totp.ts`, `TwoFactorServiceBase`, DTOs). `AdminTwoFactorService` (keyed by
+  member id, church-scoped cache keys) and `PlatformAdminTwoFactorService` (keyed by admin id, global cache keys) only
+  supply the account lookup, cache scope and notices.
+- **Storage:** `admins` (tenant migration `AddAdminTwoFactor`) and `platform_admins` (root migration
+  `AddPlatformAdminTwoFactor`) gain `two_factor_secret` (AES-256-GCM with `CREDENTIALS_ENCRYPTION_KEY`),
+  `two_factor_enabled_at`, `two_factor_last_step` and `two_factor_backup_codes` (SHA-256; each code has 80 random bits).
+  Only `two_factor_enabled_at` is selected by default.
+- **Sign-in:** after the password check, an account with 2FA on gets `{ requiresTwoFactor: true, challengeToken }` and no
+  tokens or cookie. The challenge is a random Redis value (5 minutes). `POST /auth/admin-login/2fa` or
+  `POST /platform/auth/2fa/verify` with `{ challengeToken, code }` then issues the normal session. A 6-digit code is
+  checked against the app secret, anything else as a backup code.
+- **Abuse limits:** 10 attempts per account per 15 minutes (`CacheService.hitWindow`, 429 after that), plus route throttles.
+  Conditional `UPDATE`s reject a replayed time step or a reused backup code, even from concurrent requests.
+- **Opting in:** password → `setup` returns the secret and `otpauthUrl` (held encrypted in Redis for 10 minutes) → `enable`
+  with the first code saves it and returns backup codes once. Turning off and new backup codes need the password and a code.
+- **Lost phone:** a backup code, or another admin's reset (`ADMIN_WRITE` / `PLATFORM_ADMINS_WRITE`; never your own). A sole
+  admin with no codes needs Discuva support, until Account Owner recovery ships.
+- **Notices:** each change emails `admin-security-notice` or `platform-admin-security-notice`, with no category so a church
+  can't switch them off. Church admin changes are audited as `ADMIN_2FA_ENABLED`, `ADMIN_2FA_DISABLED`,
+  `ADMIN_2FA_BACKUP_CODES` and `ADMIN_2FA_RESET`.
+- **Database cost:** no scheduler or polling. It runs only at sign-in and on settings changes, using primary-key lookups
+  and updates, so no new index is needed. Pending state lives in Redis.
+- **UI:** `components/security/` holds the same components in discuva-admin (Profile → Security) and discuva-platform
+  (`/security`). The "Recommended" reminder reads the already-loaded profile (no extra request), and "Not now" hides it for
+  14 days on that device.
+
+| Method | Route | Guard | Description |
+|--------|-------|-------|-------------|
+| POST | `/auth/admin-login/2fa` | Public, throttled | Second sign-in step, church admin portal |
+| GET | `/admin/users/me/2fa` | AdminGuard | `{ enabled, enabledAt, backupCodesRemaining }` |
+| POST | `/admin/users/me/2fa/setup` | AdminGuard | `{ password }` → `{ secret, otpauthUrl }` |
+| POST | `/admin/users/me/2fa/enable` | AdminGuard | `{ code }` → `{ backupCodes }` |
+| POST | `/admin/users/me/2fa/disable` | AdminGuard | `{ password, code }`, `204` |
+| POST | `/admin/users/me/2fa/backup-codes` | AdminGuard | `{ password, code }` → `{ backupCodes }` |
+| POST | `/admin/users/:id/reset-2fa` | AdminGuard (ADMIN_WRITE) | Another admin's reset, `204` |
+| POST | `/platform/auth/2fa/verify` | Public, throttled | Second sign-in step, platform console |
+| GET, POST | `/platform/auth/2fa`, `/setup`, `/enable`, `/disable`, `/backup-codes` | PlatformAdminGuard | Same as the admin routes |
+| POST | `/platform/admins/:id/reset-2fa` | PlatformAdminGuard (PLATFORM_ADMINS_WRITE) | Another admin's reset |
+
 ### Platform Admin (Control Plane)
 
 The SaaS control plane for the multi-tenant/freemium platform — see `docs/MULTI_TENANT_MIGRATION.md` for the full

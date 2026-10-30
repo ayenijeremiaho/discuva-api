@@ -84,6 +84,17 @@ export class AdminController {
     return this.adminService.update(id, dto, user.id);
   }
 
+  // Another admin only: for someone who has lost their app and their backup codes.
+  @RequiresPermission(AdminPermission.ADMIN_WRITE)
+  @Post(':id/reset-2fa')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async resetTwoFactor(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    await this.adminService.resetTwoFactor(id, user.id);
+  }
+
   @RequiresPermission(AdminPermission.ADMIN_WRITE)
   @Post(':id/revoke')
   @HttpCode(HttpStatus.NO_CONTENT)

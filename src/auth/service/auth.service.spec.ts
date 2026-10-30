@@ -12,6 +12,7 @@ import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { AuthService } from './auth.service';
 import { AdminService } from '../../admin/service/admin.service';
+import { AdminTwoFactorService } from '../../admin/service/admin-two-factor.service';
 import { MemberService } from '../../member/service/member.service';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -103,6 +104,10 @@ const mockTxHost = {
   withTransaction: jest.fn((fn: () => unknown) => fn()),
 };
 
+const mockAdminTwoFactor = {
+  createChallenge: jest.fn().mockResolvedValue('challenge-1'),
+  completeChallenge: jest.fn().mockResolvedValue('member-1'),
+};
 const mockAdminService = {
   findByMemberId: jest.fn(),
 };
@@ -180,6 +185,7 @@ describe('AuthService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AdminService, useValue: mockAdminService },
+        { provide: AdminTwoFactorService, useValue: mockAdminTwoFactor },
         { provide: refreshJwtConfig.KEY, useValue: mockRefreshJwtConfig },
         {
           provide: getRepositoryToken(PasswordResetOtp),
@@ -561,6 +567,48 @@ describe('AuthService', () => {
           surface: SessionSurface.MEMBER,
         }),
       ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('asks for the second step and issues no session when 2FA is on', async () => {
+      mockAdminService.findByMemberId.mockResolvedValue({
+        id: 'admin-1',
+        isActive: true,
+        twoFactorEnabledAt: new Date(),
+      });
+      mockJwtService.signAsync.mockClear();
+
+      const result = await service.adminLogin({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        requiresPasswordChange: false,
+        surface: SessionSurface.MEMBER,
+      });
+
+      expect(result).toEqual({
+        requiresTwoFactor: true,
+        challengeToken: 'challenge-1',
+      });
+      expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('issues the admin session once the second step passes', async () => {
+      mockMemberService.getById.mockResolvedValueOnce({
+        id: 'member-1',
+        role: MemberRoleEnum.MEMBER,
+        changedPassword: true,
+      });
+      mockJwtService.signAsync.mockResolvedValue('admin-token');
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      mockConfigService.get.mockReturnValue('1h');
+
+      const result = await service.completeAdminTwoFactorLogin('c', '123456');
+
+      expect(result).toMatchObject({ access_token: 'admin-token' });
+      expect(mockAdminTwoFactor.completeChallenge).toHaveBeenCalledWith(
+        'c',
+        '123456',
+      );
     });
 
     it('should return tokens when member is an active admin', async () => {

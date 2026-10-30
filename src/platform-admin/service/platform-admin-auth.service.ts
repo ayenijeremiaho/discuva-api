@@ -19,11 +19,16 @@ import {
 } from '../interface/platform-admin-auth.interface';
 import { UtilityService } from '../../utility/service/utility.service';
 import { PlatformAdminResetPasswordDto } from '../dto/platform-admin-password-reset.dto';
+import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 
 export interface PlatformAdminTokens {
   accessToken: string;
   refreshToken: string;
 }
+
+export type PlatformAdminLoginResult =
+  | (PlatformAdminTokens & { requiresPasswordChange: boolean })
+  | { requiresTwoFactor: true; challengeToken: string };
 
 const FORGOT_PASSWORD_OTP_TTL_SECONDS = 900; // 15 min — same as the tenant-side forgot-password window
 
@@ -37,6 +42,7 @@ export class PlatformAdminAuthService {
     private readonly jwtService: JwtService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly twoFactor: PlatformAdminTwoFactorService,
     @Inject(platformAdminRefreshJwtConfig.KEY)
     private readonly refreshJwtConfig: ConfigType<
       typeof platformAdminRefreshJwtConfig
@@ -72,7 +78,7 @@ export class PlatformAdminAuthService {
   async login(
     email: string,
     password: string,
-  ): Promise<PlatformAdminTokens & { requiresPasswordChange: boolean }> {
+  ): Promise<PlatformAdminLoginResult> {
     const admin = await this.platformAdminRepo
       .createQueryBuilder('admin')
       .addSelect('admin.passwordHash')
@@ -84,8 +90,26 @@ export class PlatformAdminAuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
+    if (admin.twoFactorEnabledAt) {
+      return {
+        requiresTwoFactor: true,
+        challengeToken: await this.twoFactor.createChallenge(admin.id),
+      };
+    }
+
     const tokens = await this.generateTokens(admin.id);
     return { ...tokens, requiresPasswordChange: !admin.changedPassword };
+  }
+
+  async completeTwoFactorLogin(
+    challengeToken: string,
+    code: string,
+  ): Promise<PlatformAdminTokens> {
+    const adminId = await this.twoFactor.completeChallenge(
+      challengeToken,
+      code,
+    );
+    return this.generateTokens(adminId);
   }
 
   // Called from POST /platform/auth/refresh once

@@ -20,6 +20,7 @@ import type {
 } from '@simplewebauthn/server';
 import { AuthService } from '../service/auth.service';
 import { WebauthnService } from '../service/webauthn.service';
+import { TwoFactorLoginDto } from '../../utility/two-factor/two-factor.dto';
 import { Public } from '../decorator/public.decorator';
 import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check.decorator';
 import { LocalAuthGuard } from '../guard/local-auth.guard';
@@ -86,10 +87,28 @@ export class AuthController {
   async adminLogin(
     @Request() req: any,
     @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.adminLogin(req.user);
+    if ('challengeToken' in result) return result;
+    const { refresh_token, ...body } = result;
+    this.setRefreshCookie(res, refresh_token ?? '');
+    return body;
+  }
+
+  // Second sign-in step. Attempts are also limited per admin in the service.
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('admin-login/2fa')
+  async adminTwoFactorLogin(
+    @Body() dto: TwoFactorLoginDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<Omit<JwtResponse, 'refresh_token'>> {
-    const { refresh_token, ...body } = await this.authService.adminLogin(
-      req.user,
-    );
+    const { refresh_token, ...body } =
+      await this.authService.completeAdminTwoFactorLogin(
+        dto.challengeToken,
+        dto.code,
+      );
     this.setRefreshCookie(res, refresh_token ?? '');
     return body;
   }

@@ -10,6 +10,7 @@ import { PlatformAdmin } from '../entity/platform-admin.entity';
 import { PlatformAdminPasswordResetOtp } from '../entity/platform-admin-password-reset-otp.entity';
 import { UtilityService } from '../../utility/service/utility.service';
 import platformAdminRefreshJwtConfig from '../../config/platform-admin-refresh-jwt.config';
+import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 
 jest.mock('argon2');
 
@@ -33,6 +34,10 @@ const mockJwtService = {
 };
 const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
 const mockConfigService = { get: jest.fn().mockReturnValue('Discuva') };
+const mockTwoFactor = {
+  createChallenge: jest.fn().mockResolvedValue('challenge-1'),
+  completeChallenge: jest.fn().mockResolvedValue('admin-1'),
+};
 const mockRefreshJwtConfig = { secret: 'refresh-secret', expiresIn: '7d' };
 
 describe('PlatformAdminAuthService', () => {
@@ -58,6 +63,7 @@ describe('PlatformAdminAuthService', () => {
         { provide: JwtService, useValue: mockJwtService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
+        { provide: PlatformAdminTwoFactorService, useValue: mockTwoFactor },
         {
           provide: platformAdminRefreshJwtConfig.KEY,
           useValue: mockRefreshJwtConfig,
@@ -65,6 +71,75 @@ describe('PlatformAdminAuthService', () => {
       ],
     }).compile();
     service = module.get(PlatformAdminAuthService);
+  });
+
+  describe('two-factor login', () => {
+    const queryReturning = (admin: object) => ({
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(admin),
+    });
+
+    it('issues no tokens until the second step when 2FA is on', async () => {
+      mockPlatformAdminRepo.createQueryBuilder.mockReturnValue(
+        queryReturning({
+          id: 'admin-1',
+          passwordHash: 'h',
+          twoFactorEnabledAt: new Date(),
+        }),
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+
+      const result = await service.login('a@example.com', 'pw');
+
+      expect(result).toEqual({
+        requiresTwoFactor: true,
+        challengeToken: 'challenge-1',
+      });
+      expect(mockJwtService.signAsync).not.toHaveBeenCalled();
+    });
+
+    it('never starts the second step on a wrong password', async () => {
+      mockPlatformAdminRepo.createQueryBuilder.mockReturnValue(
+        queryReturning({
+          id: 'admin-1',
+          passwordHash: 'h',
+          twoFactorEnabledAt: new Date(),
+        }),
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login('a@example.com', 'bad')).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockTwoFactor.createChallenge).not.toHaveBeenCalled();
+    });
+
+    it('signs in straight away when 2FA is off', async () => {
+      mockPlatformAdminRepo.createQueryBuilder.mockReturnValue(
+        queryReturning({
+          id: 'admin-1',
+          passwordHash: 'h',
+          changedPassword: true,
+          twoFactorEnabledAt: null,
+        }),
+      );
+      (argon2.verify as jest.Mock).mockResolvedValue(true);
+
+      expect(await service.login('a@example.com', 'pw')).toEqual({
+        accessToken: 'signed-access-jwt',
+        refreshToken: 'signed-refresh-jwt',
+        requiresPasswordChange: false,
+      });
+    });
+
+    it('issues tokens once the second step passes', async () => {
+      expect(await service.completeTwoFactorLogin('c', '123456')).toEqual({
+        accessToken: 'signed-access-jwt',
+        refreshToken: 'signed-refresh-jwt',
+      });
+    });
   });
 
   describe('validateById', () => {
@@ -153,7 +228,7 @@ describe('PlatformAdminAuthService', () => {
       (argon2.verify as jest.Mock).mockResolvedValue(true);
 
       const result = await service.login('admin@example.com', 'password123');
-      expect(result.requiresPasswordChange).toBe(false);
+      expect(result).toMatchObject({ requiresPasswordChange: false });
     });
 
     it('throws UnauthorizedException for a wrong password', async () => {

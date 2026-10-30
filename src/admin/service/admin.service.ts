@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Admin } from '../entity/admin.entity';
 import { AdminRoleService } from './admin-role.service';
+import { AdminTwoFactorService } from './admin-two-factor.service';
 import { GrantAdminDto, UpdateAdminUserDto } from '../dto/admin-user.dto';
 import { MemberService } from '../../member/service/member.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -26,6 +27,7 @@ export class AdminService {
     private readonly memberService: MemberService,
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
+    private readonly twoFactor: AdminTwoFactorService,
   ) {}
 
   async grant(dto: GrantAdminDto, actorId: string): Promise<Admin> {
@@ -115,6 +117,16 @@ export class AdminService {
       },
     });
     return saved;
+  }
+
+  async resetTwoFactor(id: string, actorId: string): Promise<void> {
+    const admin = await this.findById(id);
+    if (admin.member?.id === actorId) {
+      throw new ForbiddenException(
+        'Ask another admin to reset your two-factor sign-in.',
+      );
+    }
+    await this.twoFactor.resetByAnotherAdmin(admin.member.id, actorId);
   }
 
   async revoke(id: string, actorId: string): Promise<void> {
