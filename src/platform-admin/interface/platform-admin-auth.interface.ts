@@ -1,6 +1,7 @@
 export interface PlatformAdminJwtPayload {
   sub: string;
   role: 'platform_admin';
+  iat?: number;
 }
 
 export interface PlatformAdminAuth {

@@ -129,7 +129,10 @@ describe('PlatformAdminManagementService', () => {
       const target = { id: 'a2', email: 'b@example.com' };
       mockPlatformAdminRepo.findOne.mockResolvedValue(target);
       await service.resetTwoFactor('a2', 'a1');
-      expect(mockTwoFactor.resetByAnotherAdmin).toHaveBeenCalledWith('a2');
+      expect(mockTwoFactor.resetByAnotherAdmin).toHaveBeenCalledWith(
+        'a2',
+        'a1',
+      );
     });
   });
 

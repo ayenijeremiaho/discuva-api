@@ -43046,15 +43046,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/v1/admin/users/me/2fa/enable",
+              "raw": "{{baseUrl}}/v1/auth/admin-login/2fa/enable",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "v1",
-                "admin",
-                "users",
-                "me",
+                "auth",
+                "admin-login",
                 "2fa",
                 "enable"
               ]
@@ -43397,6 +43396,27 @@
               "mode": "raw",
               "raw": "{\n  \"password\": \"current-password\",\n  \"code\": \"123456\"\n}"
             }
+          }
+        },
+        {
+          "name": "Security Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/platform/admins/:id/security-events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "platform",
+                "admins",
+                ":id",
+                "security-events"
+              ]
+            },
+            "description": "PLATFORM_ADMINS_READ. Latest 20 two-factor changes for this admin."
           }
         },
         {

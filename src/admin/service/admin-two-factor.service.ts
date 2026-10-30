@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Admin } from '../entity/admin.entity';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { MemberSessionService } from '../../member/service/member-session.service';
+import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { EncryptionService } from '../../utility/service/encryption.service';
@@ -24,6 +26,7 @@ export class AdminTwoFactorService extends TwoFactorServiceBase {
     encryption: EncryptionService,
     private readonly utilityService: UtilityService,
     private readonly auditLogService: AuditLogService,
+    private readonly sessionService: MemberSessionService,
   ) {
     super(
       adminRepository,
@@ -47,6 +50,13 @@ export class AdminTwoFactorService extends TwoFactorServiceBase {
     });
   }
 
+  protected endSessions(account: TwoFactorAccount): Promise<void> {
+    return this.sessionService.updateLogout(
+      account.memberId!,
+      SessionSurface.ADMIN,
+    );
+  }
+
   protected async issuer(): Promise<string> {
     return `${await this.utilityService.resolveChurchName()} Admin`;
   }
@@ -66,6 +76,7 @@ export class AdminTwoFactorService extends TwoFactorServiceBase {
     if (!admin) return null;
     return {
       rowId: admin.id,
+      memberId: admin.member.id,
       email: admin.member.email,
       name: UtilityService.capitalizeFirstLetter(
         admin.member.firstname ?? 'Admin',

@@ -9,6 +9,7 @@ import {
 import * as argon2 from 'argon2';
 import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
+import { PlatformAdminSecurityEvent } from '../entity/platform-admin-security-event.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -54,6 +55,11 @@ const mockRepo = {
   ),
 };
 
+const mockEvents = {
+  insert: jest.fn().mockResolvedValue({}),
+  find: jest.fn().mockResolvedValue([]),
+};
+
 const enabledAdmin = (): Partial<PlatformAdmin> => ({
   id: 'a1',
   email: 'a@example.com',
@@ -82,6 +88,10 @@ describe('PlatformAdminTwoFactorService', () => {
         { provide: EncryptionService, useValue: mockEncryption },
         { provide: UtilityService, useValue: mockUtility },
         { provide: ConfigService, useValue: { get: () => 'Discuva' } },
+        {
+          provide: getRepositoryToken(PlatformAdminSecurityEvent),
+          useValue: mockEvents,
+        },
       ],
     }).compile();
     service = module.get(PlatformAdminTwoFactorService);
@@ -127,6 +137,20 @@ describe('PlatformAdminTwoFactorService', () => {
         expect.objectContaining({
           hash: expect.stringMatching(/^[a-f0-9]{64}$/),
         }),
+      );
+    });
+
+    it('emails and records when a backup code is used', async () => {
+      const token = await service.createChallenge('a1');
+      await service.completeChallenge(token, 'abcd-efgh-ijkl-mnop');
+      expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'a@example.com',
+        expect.stringContaining('A backup code was used'),
+        'platform-admin-security-notice',
+        expect.anything(),
+      );
+      expect(mockEvents.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'BACKUP_CODE_USED' }),
       );
     });
 
@@ -187,6 +211,9 @@ describe('PlatformAdminTwoFactorService', () => {
       const saved = mockRepo.update.mock.calls[0][1];
       expect(saved.twoFactorSecret).toBe(`enc:${secret}`);
       expect(saved.twoFactorEnabledAt).toBeInstanceOf(Date);
+      expect(mockRepo.update).toHaveBeenCalledWith('a1', {
+        sessionsValidFrom: expect.any(Date),
+      });
       expect(saved.twoFactorBackupCodes).not.toContain(backupCodes[0]);
       expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
     });
@@ -337,7 +364,15 @@ describe('PlatformAdminTwoFactorService', () => {
   });
 
   it('a reset by another admin clears it and tells the admin', async () => {
-    await service.resetByAnotherAdmin('a1');
+    await service.resetByAnotherAdmin('a1', 'a2');
+    expect(mockRepo.update).toHaveBeenCalledWith('a1', {
+      sessionsValidFrom: expect.any(Date),
+    });
+    expect(mockEvents.insert).toHaveBeenCalledWith({
+      platformAdminId: 'a1',
+      action: 'RESET',
+      actorId: 'a2',
+    });
     expect(mockRepo.update).toHaveBeenCalled();
     expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledWith(
       'a@example.com',

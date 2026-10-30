@@ -34,6 +34,6 @@ export class PlatformAdminRefreshJwtStrategy extends PassportStrategy(
   }
 
   async validate(payload: PlatformAdminJwtPayload) {
-    return this.platformAdminAuthService.validateById(payload.sub);
+    return this.platformAdminAuthService.validateById(payload.sub, payload.iat);
   }
 }

@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
+import { PlatformAdminSecurityEvent } from '../entity/platform-admin-security-event.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { EncryptionService } from '../../utility/service/encryption.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -13,8 +14,12 @@ import {
   twoFactorNotice,
 } from '../../utility/two-factor/two-factor.base';
 
+const SECURITY_EVENTS_SHOWN = 20;
+
 @Injectable()
 export class PlatformAdminTwoFactorService extends TwoFactorServiceBase {
+  private readonly logger = new Logger(PlatformAdminTwoFactorService.name);
+
   constructor(
     @InjectRepository(PlatformAdmin)
     private readonly platformAdminRepo: Repository<PlatformAdmin>,
@@ -22,6 +27,8 @@ export class PlatformAdminTwoFactorService extends TwoFactorServiceBase {
     encryption: EncryptionService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    @InjectRepository(PlatformAdminSecurityEvent)
+    private readonly securityEventRepo: Repository<PlatformAdminSecurityEvent>,
   ) {
     super(
       platformAdminRepo,
@@ -37,8 +44,33 @@ export class PlatformAdminTwoFactorService extends TwoFactorServiceBase {
     );
   }
 
-  resetByAnotherAdmin(adminId: string): Promise<void> {
-    return this.resetAccount(adminId);
+  async resetByAnotherAdmin(adminId: string, actorId: string): Promise<void> {
+    await this.resetAccount(adminId);
+    this.record(adminId, 'RESET', actorId);
+  }
+
+  getSecurityEvents(adminId: string): Promise<PlatformAdminSecurityEvent[]> {
+    return this.securityEventRepo.find({
+      where: { platformAdminId: adminId },
+      order: { createdAt: 'DESC' },
+      take: SECURITY_EVENTS_SHOWN,
+    });
+  }
+
+  protected async endSessions(account: TwoFactorAccount): Promise<void> {
+    await this.platformAdminRepo.update(account.rowId, {
+      sessionsValidFrom: new Date(),
+    });
+  }
+
+  private record(adminId: string, action: string, actorId: string): void {
+    this.securityEventRepo
+      .insert({ platformAdminId: adminId, action, actorId })
+      .catch((err: Error) =>
+        this.logger.error(
+          `Could not record security event ${action} for ${adminId}: ${err.message}`,
+        ),
+      );
   }
 
   protected issuer(): string {
@@ -71,6 +103,7 @@ export class PlatformAdminTwoFactorService extends TwoFactorServiceBase {
   }
 
   protected onChange(account: TwoFactorAccount, event: TwoFactorEvent): void {
+    if (event !== 'RESET') this.record(account.rowId, event, account.rowId);
     const { heading, message } = twoFactorNotice(event, 'platform console');
     const product = this.configService.get<string>('PRODUCT_NAME');
     this.utilityService.sendEmailWithTemplate(

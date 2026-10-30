@@ -42,6 +42,10 @@ describe('totp', () => {
     ).toBeNull();
   });
 
+  it('rejects a code of the wrong length without throwing', () => {
+    expect(matchTotpStep(RFC_SECRET, '12345', 1234567890_000)).toBeNull();
+  });
+
   it('generates a 160-bit secret', () => {
     expect(generateTotpSecret()).toMatch(/^[A-Z2-7]{32}$/);
   });

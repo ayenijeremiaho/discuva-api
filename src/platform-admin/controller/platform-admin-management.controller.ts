@@ -57,6 +57,12 @@ export class PlatformAdminManagementController {
     return this.managementService.create(dto);
   }
 
+  @RequiresPlatformPermission(PlatformAdminPermission.PLATFORM_ADMINS_READ)
+  @Get(':id/security-events')
+  getSecurityEvents(@Param('id', ParseUUIDPipe) id: string) {
+    return this.managementService.getSecurityEvents(id);
+  }
+
   // Another admin only: for someone who has lost their app and their backup codes.
   @RequiresPlatformPermission(PlatformAdminPermission.PLATFORM_ADMINS_WRITE)
   @Post(':id/reset-2fa')

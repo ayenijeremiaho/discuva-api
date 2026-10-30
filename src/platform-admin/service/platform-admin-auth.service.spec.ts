@@ -9,6 +9,7 @@ import { PlatformAdminAuthService } from './platform-admin-auth.service';
 import { PlatformAdmin } from '../entity/platform-admin.entity';
 import { PlatformAdminPasswordResetOtp } from '../entity/platform-admin-password-reset-otp.entity';
 import { UtilityService } from '../../utility/service/utility.service';
+import { CacheService } from '../../utility/service/cache.service';
 import platformAdminRefreshJwtConfig from '../../config/platform-admin-refresh-jwt.config';
 import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 
@@ -34,7 +35,12 @@ const mockJwtService = {
 };
 const mockUtilityService = { sendEmailWithTemplate: jest.fn() };
 const mockConfigService = { get: jest.fn().mockReturnValue('Discuva') };
+const mockCache = {
+  hitWindow: jest.fn().mockResolvedValue({ hits: 1, blockMsLeft: 0 }),
+  delGlobal: jest.fn().mockResolvedValue(1),
+};
 const mockTwoFactor = {
+  enable: jest.fn().mockResolvedValue({ backupCodes: ['c1'] }),
   createChallenge: jest.fn().mockResolvedValue('challenge-1'),
   isRememberedDevice: jest.fn().mockResolvedValue(false),
   rememberDevice: jest
@@ -68,6 +74,7 @@ describe('PlatformAdminAuthService', () => {
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PlatformAdminTwoFactorService, useValue: mockTwoFactor },
+        { provide: CacheService, useValue: mockCache },
         {
           provide: platformAdminRefreshJwtConfig.KEY,
           useValue: mockRefreshJwtConfig,
@@ -122,6 +129,47 @@ describe('PlatformAdminAuthService', () => {
         c: 'v',
       });
       expect(result).toMatchObject({ accessToken: 'signed-access-jwt' });
+    });
+
+    it('blocks sign-in after too many attempts, before checking the password', async () => {
+      mockCache.hitWindow.mockResolvedValueOnce({
+        hits: 11,
+        blockMsLeft: 1000,
+      });
+      (argon2.verify as jest.Mock).mockClear();
+      await expect(service.login('a@example.com', 'pw')).rejects.toThrow(
+        'Too many sign-in attempts',
+      );
+      expect(argon2.verify).not.toHaveBeenCalled();
+    });
+
+    it('rejects a token issued before sessions were ended, and accepts a later one', async () => {
+      const now = Date.now();
+      mockPlatformAdminRepo.findOne.mockResolvedValue({
+        id: 'admin-1',
+        email: 'a@example.com',
+        sessionsValidFrom: new Date(now),
+        platformAdminRole: { permissions: [] },
+      });
+      const seconds = Math.floor(now / 1000);
+      await expect(
+        service.validateById('admin-1', seconds - 1),
+      ).rejects.toThrow(UnauthorizedException);
+      await expect(
+        service.validateById('admin-1', seconds),
+      ).resolves.toMatchObject({
+        id: 'admin-1',
+      });
+    });
+
+    it('gives the enabling session fresh tokens', async () => {
+      await expect(
+        service.enableTwoFactor('admin-1', '123456'),
+      ).resolves.toEqual({
+        backupCodes: ['c1'],
+        accessToken: 'signed-access-jwt',
+        refreshToken: 'signed-refresh-jwt',
+      });
     });
 
     it('returns a device cookie only when asked to remember', async () => {

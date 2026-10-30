@@ -7453,6 +7453,15 @@ Optional and recommended, never enforced: everything stays off until an admin op
   `two_factor_devices_valid_from`; migrations `AddAdminTwoFactorDevicesValidFrom`, `AddPlatformAdminTwoFactorDevicesValidFrom`).
   No device table: a sign-in with the cookie does one extra primary-key lookup, and without it none. The password is still
   required on a remembered device.
+- **Ending sessions:** turning 2FA on, or a reset, ends the account's sessions. Church admins: `MemberSessionService.updateLogout`
+  (the single admin session row). Platform admins: `platform_admins.sessions_valid_from`, checked against the JWT `iat` in
+  `validateById`, which already loads the admin on each request, so no extra query. Turning on goes through
+  `POST /auth/admin-login/2fa/enable` or `POST /platform/auth/2fa/enable`, which return fresh tokens so the current session carries on.
+- **Backup code use:** emails the admin, and is audited (`ADMIN_2FA_BACKUP_CODE_USED`).
+- **Platform audit trail:** `platform_admin_security_events` (indexed on admin + time, and actor) records each change, read by
+  `GET /platform/admins/:id/security-events` (`PLATFORM_ADMINS_READ`, latest 20). Written only on these rare changes.
+- **Platform password attempts:** `POST /platform/auth/login` is limited to 10 a minute per address and 10 per email per 15 minutes
+  (Redis, checked before the password). Church admin logins already have per-account lockout.
 - **Abuse limits:** 10 attempts per account per 15 minutes (`CacheService.hitWindow`, 429 after that), plus route throttles.
   Conditional `UPDATE`s reject a replayed time step or a reused backup code, even from concurrent requests.
 - **Opting in:** password → `setup` returns the secret and `otpauthUrl` (held encrypted in Redis for 10 minutes) → `enable`
@@ -7473,7 +7482,7 @@ Optional and recommended, never enforced: everything stays off until an admin op
 | POST | `/auth/admin-login/2fa` | Public, throttled | Second sign-in step, church admin portal |
 | GET | `/admin/users/me/2fa` | AdminGuard | `{ enabled, enabledAt, backupCodesRemaining }` |
 | POST | `/admin/users/me/2fa/setup` | AdminGuard | `{ password }` → `{ secret, otpauthUrl }` |
-| POST | `/admin/users/me/2fa/enable` | AdminGuard | `{ code }` → `{ backupCodes }` |
+| POST | `/auth/admin-login/2fa/enable` | AdminGuard | `{ code }` → `{ backupCodes, access_token, ... }`, re-sets the refresh cookie |
 | POST | `/admin/users/me/2fa/disable` | AdminGuard | `{ password, code }`, `204` |
 | POST | `/admin/users/me/2fa/backup-codes` | AdminGuard | `{ password, code }` → `{ backupCodes }` |
 | POST | `/admin/users/me/2fa/forget-devices` | AdminGuard | `{ password, code }`, `204`. Remembered devices must enter a code again |

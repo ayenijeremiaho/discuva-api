@@ -78,6 +78,10 @@ export class PlatformAdmin extends BaseEntity {
   })
   twoFactorDevicesValidFrom: Date | null;
 
+  // Console tokens issued before this moment stop working.
+  @Column({ type: 'timestamptz', name: 'sessions_valid_from', nullable: true })
+  sessionsValidFrom: Date | null;
+
   @Index()
   @Column()
   platformAdminRoleId: string;

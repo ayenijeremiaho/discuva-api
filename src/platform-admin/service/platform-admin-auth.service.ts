@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -18,6 +20,7 @@ import {
   PlatformAdminJwtPayload,
 } from '../interface/platform-admin-auth.interface';
 import { UtilityService } from '../../utility/service/utility.service';
+import { CacheService } from '../../utility/service/cache.service';
 import { PlatformAdminResetPasswordDto } from '../dto/platform-admin-password-reset.dto';
 import { PlatformAdminTwoFactorService } from './platform-admin-two-factor.service';
 import { RememberedDeviceCookie } from '../../utility/two-factor/two-factor.base';
@@ -31,6 +34,8 @@ export type PlatformAdminLoginResult =
   | (PlatformAdminTokens & { requiresPasswordChange: boolean })
   | { requiresTwoFactor: true; challengeToken: string };
 
+const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60_000;
+const LOGIN_ATTEMPT_LIMIT = 10;
 const FORGOT_PASSWORD_OTP_TTL_SECONDS = 900; // 15 min — same as the tenant-side forgot-password window
 
 @Injectable()
@@ -44,6 +49,7 @@ export class PlatformAdminAuthService {
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
     private readonly twoFactor: PlatformAdminTwoFactorService,
+    private readonly cacheService: CacheService,
     @Inject(platformAdminRefreshJwtConfig.KEY)
     private readonly refreshJwtConfig: ConfigType<
       typeof platformAdminRefreshJwtConfig
@@ -62,12 +68,22 @@ export class PlatformAdminAuthService {
     return { accessToken, refreshToken };
   }
 
-  async validateById(id: string): Promise<PlatformAdminAuth> {
+  async validateById(
+    id: string,
+    issuedAt?: number,
+  ): Promise<PlatformAdminAuth> {
     const admin = await this.platformAdminRepo.findOne({
       where: { id, isActive: true },
       relations: ['platformAdminRole'],
     });
     if (!admin) throw new UnauthorizedException();
+    if (
+      issuedAt !== undefined &&
+      admin.sessionsValidFrom &&
+      issuedAt < Math.floor(new Date(admin.sessionsValidFrom).getTime() / 1000)
+    ) {
+      throw new UnauthorizedException();
+    }
     return {
       id: admin.id,
       email: admin.email,
@@ -81,16 +97,32 @@ export class PlatformAdminAuthService {
     password: string,
     cookies?: Record<string, string>,
   ): Promise<PlatformAdminLoginResult> {
+    const normalisedEmail = email.toLowerCase().trim();
+    const attemptsKey = `platform-login-attempts:${normalisedEmail}`;
+    const { blockMsLeft } = await this.cacheService.hitWindow(
+      attemptsKey,
+      LOGIN_ATTEMPT_WINDOW_MS,
+      LOGIN_ATTEMPT_LIMIT,
+      LOGIN_ATTEMPT_WINDOW_MS,
+    );
+    if (blockMsLeft > 0) {
+      throw new HttpException(
+        'Too many sign-in attempts. Please wait 15 minutes and try again.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     const admin = await this.platformAdminRepo
       .createQueryBuilder('admin')
       .addSelect('admin.passwordHash')
-      .where('admin.email = :email', { email: email.toLowerCase().trim() })
+      .where('admin.email = :email', { email: normalisedEmail })
       .andWhere('admin.isActive = true')
       .getOne();
 
     if (!admin || !(await argon2.verify(admin.passwordHash, password))) {
       throw new UnauthorizedException('Invalid email or password.');
     }
+    this.cacheService.delGlobal(attemptsKey);
 
     if (
       admin.twoFactorEnabledAt &&
@@ -104,6 +136,15 @@ export class PlatformAdminAuthService {
 
     const tokens = await this.generateTokens(admin.id);
     return { ...tokens, requiresPasswordChange: !admin.changedPassword };
+  }
+
+  // Other sessions end when 2FA turns on, so this one gets fresh tokens to carry on.
+  async enableTwoFactor(
+    adminId: string,
+    code: string,
+  ): Promise<PlatformAdminTokens & { backupCodes: string[] }> {
+    const { backupCodes } = await this.twoFactor.enable(adminId, code);
+    return { backupCodes, ...(await this.generateTokens(adminId)) };
   }
 
   async completeTwoFactorLogin(

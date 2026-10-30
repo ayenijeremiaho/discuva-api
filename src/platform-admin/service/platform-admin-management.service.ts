@@ -131,6 +131,11 @@ export class PlatformAdminManagementService {
     return this.getById(id);
   }
 
+  async getSecurityEvents(id: string) {
+    await this.getById(id);
+    return this.twoFactor.getSecurityEvents(id);
+  }
+
   async resetTwoFactor(id: string, actorId: string): Promise<PlatformAdmin> {
     if (id === actorId) {
       throw new ForbiddenException(
@@ -138,7 +143,7 @@ export class PlatformAdminManagementService {
       );
     }
     await this.getById(id);
-    await this.twoFactor.resetByAnotherAdmin(id);
+    await this.twoFactor.resetByAnotherAdmin(id, actorId);
     this.logger.log(`Platform admin ${id} 2FA reset by actor ${actorId}`);
     return this.getById(id);
   }

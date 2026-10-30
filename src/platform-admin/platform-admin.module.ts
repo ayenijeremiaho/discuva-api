@@ -10,6 +10,7 @@ import { PlatformAnalyticsController } from './controller/platform-analytics.con
 import { PlatformAdminRoleController } from './controller/platform-admin-role.controller';
 import { PlatformAdminManagementController } from './controller/platform-admin-management.controller';
 import { PlatformAdminAuthService } from './service/platform-admin-auth.service';
+import { PlatformAdminSecurityEvent } from './entity/platform-admin-security-event.entity';
 import { PlatformAdminTwoFactorService } from './service/platform-admin-two-factor.service';
 import { PlatformAdminTwoFactorController } from './controller/platform-admin-two-factor.controller';
 import { PlatformTenantService } from './service/platform-tenant.service';
@@ -61,6 +62,7 @@ import { UtilityModule } from '../utility/utility.module';
     PassportModule,
     JwtModule.registerAsync(platformAdminJwtConfig.asProvider()),
     TypeOrmModule.forFeature([
+      PlatformAdminSecurityEvent,
       PlatformAdmin,
       PlatformAdminRole,
       PlatformAdminPasswordResetOtp,

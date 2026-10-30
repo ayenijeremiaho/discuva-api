@@ -1,3 +1,4 @@
+import { AdminGuard } from '../../admin/guard/admin.guard';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
@@ -41,7 +42,10 @@ describe('AuthController (WebAuthn routes)', () => {
         { provide: WebauthnService, useValue: mockWebauthnService },
         { provide: ConfigService, useValue: mockConfigService },
       ],
-    }).compile();
+    })
+      .overrideGuard(AdminGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
     controller = module.get(AuthController);
   });
 

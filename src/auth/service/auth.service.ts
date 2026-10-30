@@ -315,6 +315,21 @@ export class AuthService {
       : tokens;
   }
 
+  // Other sessions end when 2FA turns on, so this one gets fresh tokens to carry on.
+  async enableAdminTwoFactor(
+    user: MemberAuth,
+    code: string,
+  ): Promise<JwtResponse & { backupCodes: string[] }> {
+    const { backupCodes } = await this.adminTwoFactor.enable(user.id, code);
+    const tokens = await this.generateTokens(
+      user.id,
+      user.role,
+      user.requiresPasswordChange,
+      SessionSurface.ADMIN,
+    );
+    return { ...tokens, backupCodes };
+  }
+
   private async issueAdminSession(
     memberId: string,
     role: MemberRoleEnum,

@@ -11,7 +11,6 @@ import { Throttle } from '@nestjs/throttler';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 import {
-  TwoFactorCodeDto,
   TwoFactorConfirmDto,
   TwoFactorPasswordDto,
 } from '../../utility/two-factor/two-factor.dto';
@@ -34,12 +33,6 @@ export class AdminTwoFactorController {
   @Post('setup')
   setup(@Body() dto: TwoFactorPasswordDto, @CurrentUser() user: MemberAuth) {
     return this.twoFactor.startSetup(user.id, dto.password);
-  }
-
-  @HttpCode(HttpStatus.OK)
-  @Post('enable')
-  enable(@Body() dto: TwoFactorCodeDto, @CurrentUser() user: MemberAuth) {
-    return this.twoFactor.enable(user.id, dto.code);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)

@@ -20,7 +20,11 @@ import type {
 } from '@simplewebauthn/server';
 import { AuthService } from '../service/auth.service';
 import { WebauthnService } from '../service/webauthn.service';
-import { TwoFactorLoginDto } from '../../utility/two-factor/two-factor.dto';
+import {
+  TwoFactorCodeDto,
+  TwoFactorLoginDto,
+} from '../../utility/two-factor/two-factor.dto';
+import { AdminGuard } from '../../admin/guard/admin.guard';
 import { setRememberedDeviceCookie } from '../../utility/two-factor/remembered-device-cookie';
 import { Public } from '../decorator/public.decorator';
 import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check.decorator';
@@ -92,6 +96,21 @@ export class AuthController {
     const result = await this.authService.adminLogin(req.user, req.cookies);
     if ('challengeToken' in result) return result;
     const { refresh_token, ...body } = result;
+    this.setRefreshCookie(res, refresh_token ?? '');
+    return body;
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(AdminGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('admin-login/2fa/enable')
+  async enableAdminTwoFactor(
+    @Request() req: any,
+    @Body() dto: TwoFactorCodeDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { refresh_token, ...body } =
+      await this.authService.enableAdminTwoFactor(req.user, dto.code);
     this.setRefreshCookie(res, refresh_token ?? '');
     return body;
   }

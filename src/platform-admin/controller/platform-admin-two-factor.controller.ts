@@ -11,7 +11,6 @@ import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../auth/decorator/public.decorator';
 import { CurrentPlatformAdmin } from '../decorator/current-platform-admin.decorator';
 import {
-  TwoFactorCodeDto,
   TwoFactorConfirmDto,
   TwoFactorPasswordDto,
 } from '../../utility/two-factor/two-factor.dto';
@@ -39,15 +38,6 @@ export class PlatformAdminTwoFactorController {
     @CurrentPlatformAdmin() admin: PlatformAdminAuth,
   ) {
     return this.twoFactor.startSetup(admin.id, dto.password);
-  }
-
-  @HttpCode(HttpStatus.OK)
-  @Post('enable')
-  enable(
-    @Body() dto: TwoFactorCodeDto,
-    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
-  ) {
-    return this.twoFactor.enable(admin.id, dto.code);
   }
 
   @HttpCode(HttpStatus.NO_CONTENT)

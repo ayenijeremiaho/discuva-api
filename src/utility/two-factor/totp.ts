@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const BASE32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const PERIOD_SECONDS = 30;
@@ -61,8 +61,13 @@ export function matchTotpStep(
   now = Date.now(),
 ): number | null {
   const current = Math.floor(now / 1000 / PERIOD_SECONDS);
+  const given = Buffer.from(code);
   for (const step of [current, current - 1, current + 1]) {
-    if (step >= 0 && totpAt(secret, step) === code) return step;
+    if (step < 0) continue;
+    const expected = Buffer.from(totpAt(secret, step));
+    if (expected.length === given.length && timingSafeEqual(expected, given)) {
+      return step;
+    }
   }
   return null;
 }

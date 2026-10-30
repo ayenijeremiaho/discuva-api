@@ -5,6 +5,7 @@ import * as argon2 from 'argon2';
 import { AdminTwoFactorService } from './admin-two-factor.service';
 import { Admin } from '../entity/admin.entity';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { MemberSessionService } from '../../member/service/member-session.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { EncryptionService } from '../../utility/service/encryption.service';
@@ -52,6 +53,7 @@ const mockUtility = {
   resolveChurchName: jest.fn().mockResolvedValue('Grace'),
 };
 const mockAudit = { log: jest.fn() };
+const mockSessions = { updateLogout: jest.fn().mockResolvedValue(undefined) };
 
 const enabledAdmin = (status = MemberStatusEnum.ACTIVE, isActive = true) =>
   ({
@@ -91,6 +93,7 @@ describe('AdminTwoFactorService', () => {
         },
         { provide: UtilityService, useValue: mockUtility },
         { provide: AuditLogService, useValue: mockAudit },
+        { provide: MemberSessionService, useValue: mockSessions },
       ],
     }).compile();
     service = module.get(AdminTwoFactorService);
@@ -155,5 +158,6 @@ describe('AdminTwoFactorService', () => {
       targetId: 'member-1',
     });
     expect(mockAudit.log).toHaveBeenCalledTimes(1);
+    expect(mockSessions.updateLogout).toHaveBeenCalledWith('member-1', 'ADMIN');
   });
 });

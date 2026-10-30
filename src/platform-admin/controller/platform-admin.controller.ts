@@ -16,7 +16,10 @@ import {
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
-import { TwoFactorLoginDto } from '../../utility/two-factor/two-factor.dto';
+import {
+  TwoFactorCodeDto,
+  TwoFactorLoginDto,
+} from '../../utility/two-factor/two-factor.dto';
 import { setRememberedDeviceCookie } from '../../utility/two-factor/remembered-device-cookie';
 import { PlatformAdminGuard } from '../guard/platform-admin.guard';
 import { PlatformAdminRefreshJwtAuthGuard } from '../guard/platform-admin-refresh-jwt-auth.guard';
@@ -101,6 +104,7 @@ export class PlatformAdminController {
     private readonly configService: ConfigService,
   ) {}
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('auth/login')
   async login(
@@ -115,6 +119,21 @@ export class PlatformAdminController {
     );
     if ('challengeToken' in result) return result;
     const { refreshToken, ...body } = result;
+    this.setRefreshCookie(res, refreshToken);
+    return body;
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @UseGuards(PlatformAdminGuard)
+  @HttpCode(HttpStatus.OK)
+  @Post('auth/2fa/enable')
+  async enableTwoFactor(
+    @Body() dto: TwoFactorCodeDto,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { refreshToken, ...body } =
+      await this.platformAdminAuthService.enableTwoFactor(admin.id, dto.code);
     this.setRefreshCookie(res, refreshToken);
     return body;
   }

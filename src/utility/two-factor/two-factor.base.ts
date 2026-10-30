@@ -43,6 +43,7 @@ export interface TwoFactorColumns {
 
 export interface TwoFactorAccount {
   rowId: string;
+  memberId?: string;
   email: string;
   name: string;
   active: boolean;
@@ -66,7 +67,12 @@ export interface TwoFactorStatus {
 }
 
 export type TwoFactorEvent =
-  'ENABLED' | 'DISABLED' | 'BACKUP_CODES' | 'DEVICES_FORGOTTEN' | 'RESET';
+  | 'ENABLED'
+  | 'DISABLED'
+  | 'BACKUP_CODES'
+  | 'DEVICES_FORGOTTEN'
+  | 'BACKUP_CODE_USED'
+  | 'RESET';
 
 export interface TwoFactorKeyStore {
   get(key: string): Promise<string | undefined>;
@@ -87,6 +93,8 @@ export abstract class TwoFactorServiceBase {
 
   protected abstract loadAccount(key: string): Promise<TwoFactorAccount | null>;
   protected abstract issuer(): Promise<string> | string;
+  // Called when 2FA is turned on or reset, so a session that predates it can't carry on.
+  protected abstract endSessions(account: TwoFactorAccount): Promise<void>;
   protected abstract onChange(
     account: TwoFactorAccount,
     event: TwoFactorEvent,
@@ -187,6 +195,7 @@ export abstract class TwoFactorServiceBase {
       twoFactorLastStep: step,
       twoFactorBackupCodes: backupCodes.map(hashBackupCode),
     });
+    await this.endSessions(account);
     this.store.del(this.setupKey(key));
     this.cacheService.delGlobal(this.attemptsKey(key));
     this.onChange(account, 'ENABLED');
@@ -288,6 +297,7 @@ export abstract class TwoFactorServiceBase {
   protected async resetAccount(key: string): Promise<void> {
     const account = await this.requireAccount(key);
     await this.clear(account.rowId);
+    await this.endSessions(account);
     this.onChange(account, 'RESET');
   }
 
@@ -329,7 +339,9 @@ export abstract class TwoFactorServiceBase {
       );
       return step !== null && this.consumeStep(account.rowId, step);
     }
-    return this.consumeBackupCode(account.rowId, trimmed);
+    const used = await this.consumeBackupCode(account.rowId, trimmed);
+    if (used) this.onChange(account, 'BACKUP_CODE_USED');
+    return used;
   }
 
   // Conditional updates, so a code can't be used twice, even by two requests at once.
@@ -425,6 +437,10 @@ export function twoFactorNotice(
       DEVICES_FORGOTTEN: {
         heading: 'Remembered devices forgotten',
         message: `Every device remembered for your ${place} account will now be asked for a code at the next sign-in.`,
+      },
+      BACKUP_CODE_USED: {
+        heading: 'A backup code was used',
+        message: `A backup code was just used on your ${place} account. If this was you, there is nothing more to do, though you may want to create new codes when you can.`,
       },
       RESET: {
         heading: 'Two-factor sign-in was reset',
