@@ -109,6 +109,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     max: 1,
     type: 'boolean',
   },
+  [PlatformSettingKey.REQUEST_REVIEW_HOURS]: {
+    label: 'Promised Review Time for Requests',
+    unit: 'hours, shown on the sign-up form and in its emails',
+    defaultValue: 24,
+    min: 1,
+    max: 168,
+  },
 };
 
 // Multer parses to memory before our own dynamic per-setting check can run

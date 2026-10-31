@@ -43504,6 +43504,25 @@
           }
         },
         {
+          "name": "Sign-up Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "settings"
+              ]
+            },
+            "description": "Public. { reviewHours }."
+          }
+        },
+        {
           "name": "Confirm Email",
           "request": {
             "method": "POST",

@@ -7435,7 +7435,7 @@ cancel-don't-delete one.
 `POST /signup` no longer starts provisioning for a normal signup. A branch invite still does, since a parent church vetted it.
 
 - **Flow:** the form creates the tenant as `AWAITING_CONFIRMATION` with `tenants.org_type` (`CHURCH`, `MINISTRY`, `GROUP`) and
-  `tenants.request_details` (jsonb: location, size, locations, website, role, phone, requester email, contact email). A confirmation
+  `tenants.request_details` (jsonb: location, size, locations, website, role, requester email, contact email). A confirmation
   link goes to each address, or one if they match. `POST /signup/confirm` (`{ token }`) records each confirmation with an atomic jsonb
   merge. Once both are in, the request moves to `AWAITING_APPROVAL` and platform admins are told, or to provisioning if approval is off
   or auto-approve passes. Conditional updates mean only one request makes that move. `POST /signup/:tenantId/resend-confirmation`
@@ -7448,9 +7448,11 @@ cancel-don't-delete one.
   never fetched by the server, so a reviewer opens it from the review panel, which avoids server-side requests to user-supplied URLs.
 - **Review:** `GET /platform/tenants/:id/request-review` (`TENANTS_READ`) returns the details and checks, including possible
   duplicates by same name or contact domain.
-- **Several locations:** a church is identified by its one account, not a location. With more than one location the form asks how they're organised (`locationStructure`: `ONE_CHURCH` becomes campuses, `NETWORK` separate linked accounts, `NOT_SURE` a setup call), takes the main location and an optional `otherLocations` note. Someone setting up one location of a larger church is told to ask the main church and can't continue. Small groups can tick `meetsOnline`, which keeps country only.
+- **Several locations:** a church is identified by its one account, not a location. The form asks one location or more than one (`locationCount` 1 or 2). A church with more asks how they're organised (`locationStructure`: `ONE_CHURCH` becomes campuses, `NETWORK` separate linked accounts, `NOT_SURE` a setup call) and takes the main location. Someone setting up one location of a larger church is told to ask the main church and can't continue. Small groups give a country, with state and city optional, so a group meeting online needs nothing more.
+- **Review time:** platform setting `request_review_hours` (default 24, 1 to 168) sets the time promised on the form, the confirmation page and the confirmation email. `GET /signup/settings` is public and cached, and returns `{ reviewHours }`.
+- **After first login:** other locations and phone numbers aren't asked on the form. They belong in the setup wizard.
 - **Address check:** `GET /signup/subdomain-availability?subdomain=` (public, 60 a minute) returns `{ available, reason? }` (`INVALID`, `RESERVED`, `TAKEN`), debounced by the form and using the unique subdomain index. An unconfirmed request doesn't hold an address. Submitting applies the same rules.
-- **Location:** the form uses a chain of searchable lists: country, then state or region, then a city or town filtered by the state, all required. They're static files in discuva-web `public/geo`, built from GeoNames (CC BY 4.0) by `scripts/build-geo-data.mjs`, so there's no API or database load, and only the chosen country's file loads. A town that isn't listed can be typed. Codes are saved with the names (`countryCode`, `stateCode`), and countries with no region data skip the state.
+- **Location:** the form uses a chain of searchable lists: country, then state or region, then a city or town filtered by the state. All are required, except state and city for small groups. They're static files in discuva-web `public/geo`, built from GeoNames (CC BY 4.0) by `scripts/build-geo-data.mjs`, so there's no API or database load, and only the chosen country's file loads. A town that isn't listed can be typed. Codes are saved with the names (`countryCode`, `stateCode`), and countries with no region data skip the state.
 - **Indexes:** `IDX_tenants_lower_name` on `lower(name)` and partial `IDX_tenants_contact_domain` on
   `request_details->>'contactDomain'`, both used by the duplicate check.
 - **Database cost:** no scheduler or polling. Writes happen only on signup and confirmation, and the settings read is cached. The

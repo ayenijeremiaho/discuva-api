@@ -20,6 +20,7 @@ import { BranchInviteService } from '../../branch/service/branch-invite.service'
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
 import { ChurchRequestService } from '../service/church-request.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 
 // Public, unauthenticated, rate-limited by IP — the primary entry point
@@ -38,6 +39,7 @@ export class SignupController {
     private readonly provisioningService: TenantProvisioningService,
     private readonly branchInviteService: BranchInviteService,
     private readonly churchRequests: ChurchRequestService,
+    private readonly settingsService: PlatformSettingsService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
@@ -110,6 +112,12 @@ export class SignupController {
       message:
         "Account is being created — check back in a moment. We'll email you a link to set your password once it's ready.",
     };
+  }
+
+  @Public()
+  @Get('signup/settings')
+  async settings() {
+    return { reviewHours: await this.settingsService.getRequestReviewHours() };
   }
 
   // Called as someone types, after a short pause. A single lookup on the unique subdomain index.

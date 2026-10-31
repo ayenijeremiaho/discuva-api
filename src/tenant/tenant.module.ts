@@ -167,6 +167,7 @@ export class TenantModule implements NestModule {
         // exclude doesn't cover this distinct sub-path.
         { path: 'v1/signup/:tenantId/status', method: RequestMethod.GET },
         { path: 'v1/signup/confirm', method: RequestMethod.POST },
+        { path: 'v1/signup/settings', method: RequestMethod.GET },
         { path: 'v1/signup/subdomain-availability', method: RequestMethod.GET },
         {
           path: 'v1/signup/:tenantId/resend-confirmation',

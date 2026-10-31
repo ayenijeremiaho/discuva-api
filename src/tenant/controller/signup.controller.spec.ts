@@ -8,6 +8,7 @@ import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
 import { ChurchRequestService } from '../service/church-request.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 
 const mockProvisioningService = {
   ensurePendingTenant: jest.fn(),
@@ -19,6 +20,9 @@ const mockProvisioningService = {
 const mockBranchInviteService = {
   resolveInvite: jest.fn(),
   markAccepted: jest.fn(),
+};
+const mockSettings = {
+  getRequestReviewHours: jest.fn().mockResolvedValue(12),
 };
 const mockChurchRequests = {
   submit: jest.fn(),
@@ -60,6 +64,7 @@ describe('SignupController', () => {
         },
         { provide: BranchInviteService, useValue: mockBranchInviteService },
         { provide: ChurchRequestService, useValue: mockChurchRequests },
+        { provide: PlatformSettingsService, useValue: mockSettings },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
       ],
     }).compile();
@@ -179,6 +184,10 @@ describe('SignupController', () => {
     });
     await controller.checkSubdomain(undefined as unknown as string);
     expect(mockProvisioningService.checkSubdomain).toHaveBeenCalledWith('');
+  });
+
+  it('shares the promised review time', async () => {
+    await expect(controller.settings()).resolves.toEqual({ reviewHours: 12 });
   });
 
   it('confirm passes the token through', async () => {

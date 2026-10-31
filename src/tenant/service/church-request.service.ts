@@ -35,11 +35,8 @@ export interface ChurchRequestDetails {
   size?: string;
   locationCount?: number;
   locationStructure?: string;
-  otherLocations?: string;
-  meetsOnline?: boolean;
   website?: string;
   requesterRole?: string;
-  requesterPhone?: string;
   adminEmail: string;
   contactEmail: string;
   contactDomain: string | null;
@@ -102,11 +99,8 @@ export class ChurchRequestService {
       size: dto.size,
       locationCount: dto.locationCount,
       locationStructure: dto.locationStructure,
-      otherLocations: dto.otherLocations,
-      meetsOnline: dto.meetsOnline,
       website: dto.website,
       requesterRole: dto.requesterRole,
-      requesterPhone: dto.requesterPhone,
       adminEmail: dto.adminEmail,
       contactEmail,
       contactDomain: isPersonalEmail(contactEmail)
@@ -131,7 +125,7 @@ export class ChurchRequestService {
       'AWAITING_CONFIRMATION',
       TenantOnboardingActorType.SELF_SERVE,
     );
-    this.sendConfirmations(tenant.id, dto.churchName, details);
+    await this.sendConfirmations(tenant.id, dto.churchName, details);
   }
 
   async resendConfirmations(tenantId: string): Promise<void> {
@@ -144,7 +138,7 @@ export class ChurchRequestService {
     ) {
       return;
     }
-    this.sendConfirmations(
+    await this.sendConfirmations(
       tenant.id,
       tenant.name,
       tenant.requestDetails as unknown as ChurchRequestDetails,
@@ -303,11 +297,12 @@ export class ChurchRequestService {
     );
   }
 
-  private sendConfirmations(
+  private async sendConfirmations(
     tenantId: string,
     churchName: string,
     details: ChurchRequestDetails,
-  ): void {
+  ): Promise<void> {
+    const reviewHours = await this.settingsService.getRequestReviewHours();
     const emails = new Map<string, boolean>();
     if (!details.adminEmailConfirmedAt) emails.set(details.adminEmail, false);
     if (!details.contactEmailConfirmedAt) {
@@ -335,6 +330,7 @@ export class ChurchRequestService {
         {
           organisation_name: churchName,
           is_church_address: isChurchAddress,
+          review_hours: reviewHours,
           confirm_url: `${baseUrl}/signup/confirm?token=${token}`,
         },
       );

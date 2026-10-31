@@ -41,6 +41,7 @@ const mockProvisioning = {
 const mockSettings = {
   getSelfServeRequiresApproval: jest.fn(),
   getSelfServeAutoApprove: jest.fn(),
+  getRequestReviewHours: jest.fn().mockResolvedValue(12),
 };
 const mockUtility = { sendEmailWithTemplate: jest.fn() };
 const encryption = {
@@ -139,6 +140,9 @@ describe('ChurchRequestService', () => {
       );
       expect(saved.requestDetails.contactDomain).toBe('hope.example');
       expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(2);
+      expect(
+        mockUtility.sendEmailWithTemplate.mock.calls[0][3].review_hours,
+      ).toBe(12);
       expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
     });
 

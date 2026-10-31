@@ -1,5 +1,4 @@
 import {
-  IsBoolean,
   IsEmail,
   IsIn,
   IsEnum,
@@ -103,15 +102,6 @@ export class SignupDto {
 
   @IsOptional()
   @IsString()
-  @MaxLength(300)
-  otherLocations?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  meetsOnline?: boolean;
-
-  @IsOptional()
-  @IsString()
   @MaxLength(200)
   website?: string;
 
@@ -119,11 +109,6 @@ export class SignupDto {
   @IsString()
   @MaxLength(100)
   requesterRole?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(30)
-  requesterPhone?: string;
 
   // Present only when this signup is completing a branch invite
   // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the

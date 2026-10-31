@@ -28,4 +28,6 @@ export enum PlatformSettingKey {
   SELF_SERVE_REQUIRES_APPROVAL = 'self_serve_requires_approval',
   // Lets a request skip review when every check passes. Off by default.
   SELF_SERVE_AUTO_APPROVE = 'self_serve_auto_approve',
+  // The review time promised on the website and in emails.
+  REQUEST_REVIEW_HOURS = 'request_review_hours',
 }
