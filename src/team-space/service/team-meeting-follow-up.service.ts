@@ -18,6 +18,8 @@ import { ChurchTimezoneService } from '../../utility/service/church-timezone.ser
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 import { plainText } from '../util/mentions';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { addDays, localDate } from '../../event/types/slot-blueprint';
 import { SaveMeetingActionDto } from '../dto/team-space.dto';
 
 const NAME_SQL = `NULLIF(TRIM(COALESCE(m.firstname, '') || ' ' || COALESCE(m.lastname, '')), '')`;
@@ -131,10 +133,15 @@ export class TeamMeetingFollowUpService {
     if (!member.isLeader)
       throw new ForbiddenException('Only leaders can change actions.');
     await this.assertInTeam(meeting.space, dto.assigneeId);
+    const newDue = dto.dueDate ?? null;
     await this.actions.update(actionId, {
       text: dto.text.trim(),
       assignee: dto.assigneeId ? ({ id: dto.assigneeId } as Member) : null,
-      dueDate: dto.dueDate ?? null,
+      dueDate: newDue,
+      // A new date or a new person should be reminded afresh.
+      ...(newDue !== action.dueDate || dto.assigneeId !== action.assignee?.id
+        ? { dueRemindedAt: null }
+        : {}),
     });
     if (
       meeting.summarySentAt &&
@@ -171,6 +178,63 @@ export class TeamMeetingFollowUpService {
       throw new ForbiddenException('Only leaders can remove actions.');
     await this.actions.delete(actionId);
     return { ok: true };
+  }
+
+  // Due tomorrow or sooner, once per action. Returns when the next one needs a reminder, so a church with none costs nothing.
+  async remindDue(now = new Date()): Promise<Date | null> {
+    const timezone = await this.churchTimezone.get();
+    const today = localDate(now, timezone);
+    // Sent from 9am, so nobody is woken by it.
+    const sendFrom = (date: string) =>
+      fromZonedTime(`${addDays(date, -1)}T09:00:00`, timezone);
+    const hour = Number(formatInTimeZone(now, timezone, 'H'));
+    const horizon = hour >= 9 ? addDays(today, 1) : today;
+    const due = (await this.actions.query(
+      `SELECT a.id, a.text, a.assignee_id, a.due_date::text AS due_date, a.meeting_id, tm.title
+       FROM team_meeting_actions a JOIN team_meetings tm ON tm.post_id = a.meeting_id
+       WHERE a.done_at IS NULL AND a.due_reminded_at IS NULL AND a.due_date IS NOT NULL
+         AND a.assignee_id IS NOT NULL AND a.due_date <= $1::date AND a.due_date >= $2::date
+         AND tm.cancelled_at IS NULL`,
+      [horizon, today],
+    )) as {
+      id: string;
+      text: string;
+      assignee_id: string;
+      due_date: string;
+      meeting_id: string;
+      title: string;
+    }[];
+    if (due.length) {
+      await this.actions.query(
+        `UPDATE team_meeting_actions SET due_reminded_at = $2 WHERE id = ANY($1)`,
+        [due.map((row) => row.id), now],
+      );
+      for (const row of due) {
+        this.notifications
+          .notifyMember({
+            category: EmailCategory.TEAM_SPACES,
+            push: {
+              memberIds: [row.assignee_id],
+              key: PushNotificationKey.TEAM_SPACE_ACTION_DUE,
+              vars: {
+                text: row.text,
+                title: row.title,
+                when: row.due_date === today ? 'today' : 'tomorrow',
+              },
+              url: `/team-spaces/meeting/${row.meeting_id}`,
+              idempotencyKey: `team-action-due:${row.id}:${row.due_date}`,
+            },
+          })
+          .catch(() => undefined);
+      }
+    }
+    const next = (await this.actions.query(
+      `SELECT min(due_date)::text AS next FROM team_meeting_actions
+       WHERE done_at IS NULL AND due_reminded_at IS NULL AND due_date IS NOT NULL
+         AND assignee_id IS NOT NULL AND due_date > $1::date`,
+      [horizon],
+    )) as { next: string | null }[];
+    return next[0]?.next ? sendFrom(next[0].next) : null;
   }
 
   async mine(memberId: string) {

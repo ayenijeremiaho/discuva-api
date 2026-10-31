@@ -353,10 +353,11 @@ export class EmailQueueService {
   }
 
   private async resolveBrandingBase(): Promise<Record<string, string>> {
+    // With no church in context (sign-up, platform emails) it comes from the product, not any one church.
     const fallback = {
-      church_name: this.config.get<string>('CHURCH_NAME'),
-      church_address: this.config.get<string>('CHURCH_ADDRESS'),
-      logo_url: this.config.get<string>('LOGO_URL'),
+      church_name: this.config.get<string>('PRODUCT_NAME'),
+      church_address: '',
+      logo_url: this.config.get<string>('PRODUCT_LOGO_URL'),
       product_name: this.config.get<string>('PRODUCT_NAME'),
       login_url: this.config.get<string>('LOGIN_URL'),
       admin_login_url: this.config.get<string>('ADMIN_LOGIN_URL'),
@@ -369,7 +370,7 @@ export class EmailQueueService {
 
     return {
       church_name: tenant.name || fallback.church_name,
-      church_address: tenant.address || fallback.church_address,
+      church_address: tenant.address || '',
       logo_url: tenant.logoUrl || fallback.logo_url,
       product_name: fallback.product_name,
       support_email: tenant.supportEmail ?? '',

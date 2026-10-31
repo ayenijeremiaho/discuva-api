@@ -183,6 +183,11 @@ export class UpdateMeetingDto {
   @IsBoolean()
   cancel?: boolean;
 
+  // Moving a meeting always tells the team; smaller edits only when the leader asks.
+  @IsOptional()
+  @IsBoolean()
+  notifyTeam?: boolean;
+
   @IsOptional()
   @IsBoolean()
   stopRepeating?: boolean;

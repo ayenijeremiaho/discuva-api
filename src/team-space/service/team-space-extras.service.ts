@@ -394,7 +394,7 @@ export class TeamSpaceExtrasService {
         postId,
         `team-meeting-move:${postId}:${startsAt.getTime()}`,
       );
-    if (moved || dto.agenda !== undefined) {
+    if (moved || dto.notifyTeam) {
       const post = await this.postRepo.findOneBy({ id: postId });
       const title = dto.title?.trim() || meeting.title;
       await this.followUp.sendInvite(

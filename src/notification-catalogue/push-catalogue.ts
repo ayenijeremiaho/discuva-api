@@ -55,6 +55,7 @@ export enum PushNotificationKey {
   TEAM_SPACE_MENTION = 'TEAM_SPACE_MENTION',
   TEAM_SPACE_MEETING_SUMMARY = 'TEAM_SPACE_MEETING_SUMMARY',
   TEAM_SPACE_MEETING_ACTION = 'TEAM_SPACE_MEETING_ACTION',
+  TEAM_SPACE_ACTION_DUE = 'TEAM_SPACE_ACTION_DUE',
   TEAM_SPACE_DIGEST = 'TEAM_SPACE_DIGEST',
   TEAM_SPACE_MEETING = 'TEAM_SPACE_MEETING',
   TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
@@ -633,6 +634,20 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       title: 'Planning meeting',
       space_name: 'Choir',
       actions: 'You have 2 actions.',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_ACTION_DUE]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Meeting action due',
+    description:
+      'Sent once to the person responsible, from 9am the day before a meeting action is due.',
+    title: 'Due {{when}}: {{text}}',
+    body: 'From {{title}}. Tap to mark it done.',
+    url: '/team-spaces',
+    placeholders: {
+      when: 'tomorrow',
+      text: 'Book the hall for Saturday',
+      title: 'Planning meeting',
     },
   },
   [PushNotificationKey.TEAM_SPACE_MEETING_ACTION]: {

@@ -170,4 +170,49 @@ describe('TeamMeetingFollowUpService', () => {
       ForbiddenException,
     );
   });
+
+  describe('due reminders', () => {
+    const LATER = '2026-11-20';
+    const at9 = new Date('2026-11-01T09:30:00Z'); // 10:30 in Lagos
+    const before9 = new Date('2026-11-01T06:00:00Z'); // 7:00 in Lagos
+
+    it('reminds once for what is due tomorrow, then sleeps until the next one', async () => {
+      actions.query.mockImplementation((sql: string) => {
+        if (sql.includes('JOIN team_meetings tm'))
+          return Promise.resolve([
+            {
+              id: 'a1',
+              text: 'Book',
+              assignee_id: 'm2',
+              due_date: '2026-11-02',
+              meeting_id: 'p1',
+              title: 'Planning',
+            },
+          ]);
+        if (sql.includes('min(due_date)'))
+          return Promise.resolve([{ next: LATER }]);
+        return Promise.resolve([]);
+      });
+      const next = await service.remindDue(at9);
+      expect(calls()[0].push.vars.when).toBe('tomorrow');
+      const update = actions.query.mock.calls.find((c) =>
+        (c[0] as string).startsWith('UPDATE team_meeting_actions'),
+      );
+      expect(update?.[1][0]).toEqual(['a1']);
+      expect(next?.toISOString()).toBe('2026-11-19T08:00:00.000Z');
+    });
+
+    it('waits until 9am before reminding about tomorrow', async () => {
+      actions.query.mockResolvedValue([]);
+      await service.remindDue(before9);
+      const select = actions.query.mock.calls[0];
+      expect(select[1]).toEqual(['2026-11-01', '2026-11-01']);
+    });
+
+    it('costs nothing further when nothing is due', async () => {
+      actions.query.mockResolvedValue([{ next: null }].slice(1));
+      await expect(service.remindDue(at9)).resolves.toBeNull();
+      expect(notifications.notifyMember).not.toHaveBeenCalled();
+    });
+  });
 });

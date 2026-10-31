@@ -215,7 +215,8 @@ export class TenantInfoController {
       // logo-consuming surface (favicon swap, PWA manifest icon) stayed
       // stuck on the bundled placeholder for any tenant that never visited
       // the branding page, instead of at least showing the platform default.
-      logoUrl: tenant.logoUrl ?? this.config.get<string>('LOGO_URL') ?? null,
+      logoUrl:
+        tenant.logoUrl ?? this.config.get<string>('PRODUCT_LOGO_URL') ?? null,
       tagline: tenant.tagline,
       address: tenant.address,
       supportEmail: tenant.supportEmail,

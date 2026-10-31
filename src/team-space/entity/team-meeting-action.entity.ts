@@ -32,6 +32,9 @@ export class TeamMeetingAction extends BaseEntity {
   @Column({ name: 'done_at', type: 'timestamptz', nullable: true })
   doneAt: Date | null;
 
+  @Column({ name: 'due_reminded_at', type: 'timestamptz', nullable: true })
+  dueRemindedAt: Date | null;
+
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'created_by_id' })
   createdBy: Member | null;

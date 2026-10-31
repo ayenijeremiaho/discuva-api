@@ -22,6 +22,7 @@ const mockCls = { get: jest.fn() };
 
 const ENV_DEFAULTS: Record<string, string | number> = {
   CHURCH_NAME: 'Env Default Church',
+  PRODUCT_NAME: 'Env Product',
   CHURCH_ADDRESS: '1 Env Default Rd',
   CHURCH_TAGLINE: 'Env default tagline',
   CURRENCY_CODE: 'USD',
@@ -92,18 +93,18 @@ describe('PdfService', () => {
       expect(text).not.toContain(ENV_DEFAULTS.CHURCH_NAME);
     });
 
-    it('falls back to env defaults when there is no tenant CLS context', async () => {
+    it('uses the product name when there is no tenant context', async () => {
       mockCls.get.mockReturnValue(undefined);
 
       const buffer = await service.generateSessionReport(baseSessionReport);
       const text = pdfText(buffer);
 
       expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
-      expect(text).toContain(ENV_DEFAULTS.CHURCH_NAME as string);
-      expect(text).toContain(ENV_DEFAULTS.CHURCH_ADDRESS as string);
+      expect(text).toContain('Env Product');
+      expect(text).not.toContain(ENV_DEFAULTS.CHURCH_ADDRESS as string);
     });
 
-    it('falls back to the env default only for a field the tenant left unset', async () => {
+    it("never shows another church's address for a field the tenant left unset", async () => {
       mockCls.get.mockReturnValue('tenant-1');
       mockTenantRepo.findOneBy.mockResolvedValue({
         id: 'tenant-1',
@@ -117,7 +118,7 @@ describe('PdfService', () => {
       const text = pdfText(buffer);
 
       expect(text).toContain('St. Example Church');
-      expect(text).toContain(ENV_DEFAULTS.CHURCH_ADDRESS as string);
+      expect(text).not.toContain(ENV_DEFAULTS.CHURCH_ADDRESS as string);
     });
   });
 

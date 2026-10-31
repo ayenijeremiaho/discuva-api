@@ -127,9 +127,9 @@ export class PdfService {
   // equivalent (Tenant has no locale column) and stays a pure global default.
   private async resolveBranding(): Promise<PdfBranding> {
     const fallback: PdfBranding = {
-      churchName: this.config.get<string>('CHURCH_NAME'),
-      churchAddress: this.config.get<string>('CHURCH_ADDRESS'),
-      churchTagline: this.config.get<string>('CHURCH_TAGLINE'),
+      churchName: this.config.get<string>('PRODUCT_NAME'),
+      churchAddress: '',
+      churchTagline: '',
       currencyCode: this.config.get<string>('CURRENCY_CODE'),
       currencyLocale: this.config.get<string>('CURRENCY_LOCALE'),
       logoImage: null,
@@ -153,8 +153,8 @@ export class PdfService {
 
     return {
       churchName: tenant.name || fallback.churchName,
-      churchAddress: tenant.address || fallback.churchAddress,
-      churchTagline: tenant.tagline || fallback.churchTagline,
+      churchAddress: tenant.address || '',
+      churchTagline: tenant.tagline || '',
       currencyCode: tenant.currency || fallback.currencyCode,
       currencyLocale: fallback.currencyLocale,
       logoImage,

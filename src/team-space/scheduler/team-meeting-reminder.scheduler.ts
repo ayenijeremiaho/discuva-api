@@ -1,3 +1,4 @@
+import { TeamMeetingFollowUpService } from '../service/team-meeting-follow-up.service';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -52,6 +53,7 @@ export class TeamMeetingReminderScheduler {
     private readonly dateService: DateService,
     private readonly notifications: NotificationDispatchService,
     private readonly extras: TeamSpaceExtrasService,
+    private readonly followUp: TeamMeetingFollowUpService,
   ) {}
 
   @Cron('*/15 * * * *')
@@ -80,7 +82,10 @@ export class TeamMeetingReminderScheduler {
     if (!(await this.churchSettings.isEnabled('team_spaces'))) return null;
     const nextRoll = await this.extras.rollSeries(now);
     const nextReminder = await this.reminders(now);
-    const times = [nextRoll, nextReminder].filter((t): t is Date => !!t);
+    const nextAction = await this.followUp.remindDue(now);
+    const times = [nextRoll, nextReminder, nextAction].filter(
+      (t): t is Date => !!t,
+    );
     return times.length
       ? new Date(Math.min(...times.map((t) => t.getTime())))
       : null;

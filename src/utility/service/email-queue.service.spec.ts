@@ -47,6 +47,7 @@ const mockCls = {
 
 const ENV_DEFAULTS: Record<string, string | number> = {
   CHURCH_NAME: 'Env Default Church',
+  PRODUCT_LOGO_URL: 'https://product.test/logo.png',
   CHURCH_ADDRESS: '1 Env Default Rd',
   LOGO_URL: 'https://env.example.com/logo.png',
   PRODUCT_NAME: 'Discuva',
@@ -140,7 +141,7 @@ describe('EmailQueueService', () => {
     expect(html).toContain('https://tenant.example.com/logo.png');
   });
 
-  it('falls back to the env default only for a field the tenant left unset', async () => {
+  it('uses the product logo and no address for a field the tenant left unset', async () => {
     mockCls.get.mockReturnValue('tenant-1');
     mockTenantRepo.findOneBy.mockResolvedValue({
       id: 'tenant-1',
@@ -153,19 +154,20 @@ describe('EmailQueueService', () => {
 
     const html = sentHtml();
     expect(html).toContain('St. Example Church');
-    expect(html).toContain(ENV_DEFAULTS.LOGO_URL);
+    expect(html).toContain(String(ENV_DEFAULTS.PRODUCT_LOGO_URL));
+    expect(html).not.toContain(String(ENV_DEFAULTS.LOGO_URL));
   });
 
-  it('falls back entirely to env defaults when there is no tenant CLS context', async () => {
+  it("never shows any one church's details when there is no tenant context", async () => {
     mockCls.get.mockReturnValue(undefined);
 
     await service.queueEmailWithTemplate('a@b.com', 'Subject', 'welcome', {});
 
     expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
     const html = sentHtml();
-    expect(html).toContain(ENV_DEFAULTS.CHURCH_NAME);
-    expect(html).toContain(ENV_DEFAULTS.CHURCH_ADDRESS);
-    expect(html).toContain(ENV_DEFAULTS.LOGO_URL);
+    expect(html).not.toContain(String(ENV_DEFAULTS.CHURCH_NAME));
+    expect(html).not.toContain(String(ENV_DEFAULTS.CHURCH_ADDRESS));
+    expect(html).toContain(String(ENV_DEFAULTS.PRODUCT_LOGO_URL));
   });
 
   it('always renders product_name from env, regardless of tenant', async () => {
@@ -182,13 +184,13 @@ describe('EmailQueueService', () => {
     expect(sentHtml()).toContain(ENV_DEFAULTS.PRODUCT_NAME);
   });
 
-  it('falls back to env defaults when the tenant row cannot be found', async () => {
+  it('uses the product details when the tenant row cannot be found', async () => {
     mockCls.get.mockReturnValue('tenant-missing');
     mockTenantRepo.findOneBy.mockResolvedValue(null);
 
     await service.queueEmailWithTemplate('a@b.com', 'Subject', 'welcome', {});
 
-    expect(sentHtml()).toContain(ENV_DEFAULTS.CHURCH_NAME);
+    expect(sentHtml()).not.toContain(String(ENV_DEFAULTS.CHURCH_NAME));
   });
 
   it("renders the tenant's support email when set", async () => {

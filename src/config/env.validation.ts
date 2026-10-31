@@ -114,6 +114,9 @@ export const envValidationSchema = Joi.object({
       'https://res.cloudinary.com/dap7jwvms/image/upload/v1781539923/DC_LOGO_aswzgi.png',
     ),
 
+  PRODUCT_LOGO_URL: Joi.string()
+    .uri()
+    .default('https://discuva.org/discuva-logo.png'),
   PRODUCT_NAME: Joi.string().default('Discuva'),
   CHURCH_NAME: Joi.string().default('RCCG Discovery Centre'),
   CHURCH_TAGLINE: Joi.string().default(

@@ -298,7 +298,9 @@ export class PageService {
     return {
       name: tenant?.name ?? this.configService.get<string>('CHURCH_NAME'),
       logoUrl:
-        tenant?.logoUrl ?? this.configService.get<string>('LOGO_URL') ?? null,
+        tenant?.logoUrl ??
+        this.configService.get<string>('PRODUCT_LOGO_URL') ??
+        null,
       address: tenant?.address ?? null,
       supportEmail: tenant?.supportEmail ?? null,
     };
