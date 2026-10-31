@@ -29,6 +29,9 @@ const CONFIRM_PURPOSE = 'church-request';
 export interface ChurchRequestDetails {
   city?: string;
   country?: string;
+  countryCode?: string;
+  state?: string;
+  stateCode?: string;
   size?: string;
   locationCount?: number;
   website?: string;
@@ -90,6 +93,9 @@ export class ChurchRequestService {
     const details: ChurchRequestDetails = {
       city: dto.city,
       country: dto.country,
+      countryCode: dto.countryCode,
+      state: dto.state,
+      stateCode: dto.stateCode,
       size: dto.size,
       locationCount: dto.locationCount,
       website: dto.website,

@@ -7448,6 +7448,8 @@ cancel-don't-delete one.
   never fetched by the server, so a reviewer opens it from the review panel, which avoids server-side requests to user-supplied URLs.
 - **Review:** `GET /platform/tenants/:id/request-review` (`TENANTS_READ`) returns the details and checks, including possible
   duplicates by same name or contact domain.
+- **Address check:** `GET /signup/subdomain-availability?subdomain=` (public, 60 a minute) returns `{ available, reason? }` (`INVALID`, `RESERVED`, `TAKEN`), debounced by the form and using the unique subdomain index. An unconfirmed request doesn't hold an address. Submitting applies the same rules.
+- **Location:** the form uses a chain of searchable lists: country, then state or region, then a city or town filtered by the state, all required. They're static files in discuva-web `public/geo`, built from GeoNames (CC BY 4.0) by `scripts/build-geo-data.mjs`, so there's no API or database load, and only the chosen country's file loads. A town that isn't listed can be typed. Codes are saved with the names (`countryCode`, `stateCode`), and countries with no region data skip the state.
 - **Indexes:** `IDX_tenants_lower_name` on `lower(name)` and partial `IDX_tenants_contact_domain` on
   `request_details->>'contactDomain'`, both used by the duplicate check.
 - **Database cost:** no scheduler or polling. Writes happen only on signup and confirmation, and the settings read is cached. The

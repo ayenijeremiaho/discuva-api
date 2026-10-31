@@ -195,6 +195,34 @@ export class TenantProvisioningService {
       });
   }
 
+  // For the sign-up form's live check. Submitting still applies the same rules.
+  async checkSubdomain(subdomain: string): Promise<{
+    available: boolean;
+    reason?: 'INVALID' | 'RESERVED' | 'TAKEN';
+  }> {
+    const normalized = subdomain.toLowerCase();
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(normalized)) {
+      return { available: false, reason: 'INVALID' };
+    }
+    if (
+      RESERVED_SUBDOMAINS.has(normalized) ||
+      GENERIC_OR_ABUSE_PRONE_SUBDOMAINS.has(normalized)
+    ) {
+      return { available: false, reason: 'RESERVED' };
+    }
+    const existing = await this.tenantRepo.findOne({
+      select: { id: true, onboardingStatus: true, isActive: true },
+      where: { subdomain: normalized },
+    });
+    // An unconfirmed request doesn't hold an address, so someone can't reserve it without confirming.
+    const held =
+      existing &&
+      (existing.isActive ||
+        existing.onboardingStatus !==
+          TenantOnboardingStatus.AWAITING_CONFIRMATION);
+    return held ? { available: false, reason: 'TAKEN' } : { available: true };
+  }
+
   // Find-or-create the Tenant row only — split out of provision() so the
   // two HTTP callers (SignupController, PlatformTenantService.createTenant)
   // can get a real tenant.id + onboardingStatus back immediately, before

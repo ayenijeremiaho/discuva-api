@@ -43479,6 +43479,31 @@
           }
         },
         {
+          "name": "Check Address",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/subdomain-availability?subdomain=grace-chapel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "subdomain-availability"
+              ],
+              "query": [
+                {
+                  "key": "subdomain",
+                  "value": "grace-chapel"
+                }
+              ]
+            },
+            "description": "Public, throttled. { available, reason? } with reason INVALID, RESERVED or TAKEN."
+          }
+        },
+        {
           "name": "Confirm Email",
           "request": {
             "method": "POST",

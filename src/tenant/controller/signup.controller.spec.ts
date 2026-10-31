@@ -11,6 +11,7 @@ import { ChurchRequestService } from '../service/church-request.service';
 
 const mockProvisioningService = {
   ensurePendingTenant: jest.fn(),
+  checkSubdomain: jest.fn(),
   recordEvent: jest.fn(),
   enqueueProvisioning: jest.fn(),
   holdForApproval: jest.fn(),
@@ -170,6 +171,14 @@ describe('SignupController', () => {
       expect(mockChurchRequests.submit).not.toHaveBeenCalled();
       expect(mockProvisioningService.enqueueProvisioning).toHaveBeenCalled();
     });
+  });
+
+  it('checks an address, treating a missing one as empty', async () => {
+    mockProvisioningService.checkSubdomain.mockResolvedValue({
+      available: true,
+    });
+    await controller.checkSubdomain(undefined as unknown as string);
+    expect(mockProvisioningService.checkSubdomain).toHaveBeenCalledWith('');
   });
 
   it('confirm passes the token through', async () => {

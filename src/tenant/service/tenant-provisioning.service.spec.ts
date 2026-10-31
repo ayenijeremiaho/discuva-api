@@ -20,6 +20,7 @@ import { PlatformAdmin } from '../../platform-admin/entity/platform-admin.entity
 import { PlatformAdminPermission } from '../../platform-admin/enum/platform-admin-permission.enum';
 
 const mockTenantRepo = {
+  findOne: jest.fn(),
   find: jest.fn(),
   findOneBy: jest.fn(),
   save: jest.fn(),
@@ -445,6 +446,47 @@ describe('TenantProvisioningService', () => {
       await expect(
         service.holdForApproval(baseTenant, pendingParams),
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe('checkSubdomain', () => {
+    it.each([
+      ['Bad_Name!', 'INVALID'],
+      ['-grace', 'INVALID'],
+      ['admin', 'RESERVED'],
+    ])('rejects %s as %s', async (subdomain, reason) => {
+      await expect(service.checkSubdomain(subdomain)).resolves.toEqual({
+        available: false,
+        reason,
+      });
+    });
+
+    it('reports a free address as available', async () => {
+      mockTenantRepo.findOne.mockResolvedValue(null);
+      await expect(service.checkSubdomain('grace')).resolves.toEqual({
+        available: true,
+      });
+    });
+
+    it('reports an active or approved account as taken', async () => {
+      mockTenantRepo.findOne.mockResolvedValue({
+        isActive: false,
+        onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
+      });
+      await expect(service.checkSubdomain('grace')).resolves.toEqual({
+        available: false,
+        reason: 'TAKEN',
+      });
+    });
+
+    it("doesn't let an unconfirmed request hold an address", async () => {
+      mockTenantRepo.findOne.mockResolvedValue({
+        isActive: false,
+        onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
+      });
+      await expect(service.checkSubdomain('grace')).resolves.toEqual({
+        available: true,
+      });
     });
   });
 });

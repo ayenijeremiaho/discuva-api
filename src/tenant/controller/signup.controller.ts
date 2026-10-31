@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -109,6 +110,14 @@ export class SignupController {
       message:
         "Account is being created — check back in a moment. We'll email you a link to set your password once it's ready.",
     };
+  }
+
+  // Called as someone types, after a short pause. A single lookup on the unique subdomain index.
+  @Public()
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Get('signup/subdomain-availability')
+  checkSubdomain(@Query('subdomain') subdomain: string) {
+    return this.provisioningService.checkSubdomain(subdomain ?? '');
   }
 
   @Public()

@@ -71,6 +71,21 @@ export class SignupDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^[A-Z]{2}$/, { message: 'countryCode must be a two-letter code' })
+  countryCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  state?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  stateCode?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(30)
   size?: string;
 
