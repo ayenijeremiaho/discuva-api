@@ -57,6 +57,26 @@ export class SaveSharedSpaceDto {
   leaderIds: string[];
 }
 
+export class SaveMeetingActionDto {
+  @Transform(trim)
+  @IsString()
+  @Length(1, 300)
+  text: string;
+
+  @IsOptional()
+  @IsUUID()
+  assigneeId?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dueDate?: string;
+}
+
+export class MeetingActionDoneDto {
+  @IsBoolean()
+  done: boolean;
+}
+
 export class ReactionDto {
   @IsString()
   @MaxLength(16)

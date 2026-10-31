@@ -1,3 +1,8 @@
+import { TeamMeetingFollowUpService } from '../service/team-meeting-follow-up.service';
+import {
+  MeetingActionDoneDto,
+  SaveMeetingActionDto,
+} from '../dto/team-space.dto';
 import {
   Body,
   Controller,
@@ -43,6 +48,7 @@ const Uuid = (name: string) => Param(name, ParseUUIDPipe);
 @Controller('team-spaces')
 export class TeamSpaceController {
   constructor(
+    private readonly followUp: TeamMeetingFollowUpService,
     private readonly spaces: TeamSpaceService,
     private readonly extras: TeamSpaceExtrasService,
     private readonly reactions: TeamSpaceReactionService,
@@ -112,6 +118,51 @@ export class TeamSpaceController {
     @Body() dto: MinutesDto,
   ) {
     return this.extras.saveMinutes(user.id, postId, dto.minutes);
+  }
+
+  @Get('my-actions')
+  myActions(@CurrentUser() user: MemberAuth) {
+    return this.followUp.mine(user.id);
+  }
+
+  @Post('meetings/:postId/actions')
+  addAction(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: SaveMeetingActionDto,
+  ) {
+    return this.followUp.create(user.id, postId, dto);
+  }
+
+  @Patch('actions/:actionId')
+  updateAction(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('actionId') actionId: string,
+    @Body() dto: SaveMeetingActionDto,
+  ) {
+    return this.followUp.update(user.id, actionId, dto);
+  }
+
+  @Patch('actions/:actionId/done')
+  actionDone(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('actionId') actionId: string,
+    @Body() dto: MeetingActionDoneDto,
+  ) {
+    return this.followUp.setDone(user.id, actionId, dto.done);
+  }
+
+  @Delete('actions/:actionId')
+  removeAction(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('actionId') actionId: string,
+  ) {
+    return this.followUp.remove(user.id, actionId);
+  }
+
+  @Post('meetings/:postId/summary')
+  sendSummary(@CurrentUser() user: MemberAuth, @Uuid('postId') postId: string) {
+    return this.followUp.sendSummary(user.id, postId);
   }
 
   @Patch('meetings/:postId/attendance')

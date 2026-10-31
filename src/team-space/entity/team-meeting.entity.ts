@@ -54,6 +54,9 @@ export class TeamMeeting extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   cancelledAt: Date | null;
 
+  @Column({ name: 'summary_sent_at', type: 'timestamptz', nullable: true })
+  summarySentAt: Date | null;
+
   @ManyToOne(() => TeamMeetingSeries, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'series_id' })
   series: TeamMeetingSeries | null;

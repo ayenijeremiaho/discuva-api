@@ -1,3 +1,4 @@
+import { TeamMeetingFollowUpService } from './team-meeting-follow-up.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -107,6 +108,7 @@ export class TeamSpaceExtrasService {
     private readonly notifications: NotificationDispatchService,
     private readonly dateService: DateService,
     private readonly churchTimezone: ChurchTimezoneService,
+    private readonly followUp: TeamMeetingFollowUpService,
   ) {}
 
   async details(
@@ -281,6 +283,20 @@ export class TeamSpaceExtrasService {
       post.id,
       `team-meeting:${post.id}`,
     );
+    await this.followUp.sendInvite(
+      {
+        postId: post.id,
+        title: dto.title.trim(),
+        startsAt,
+        location: dto.location?.trim() || null,
+        onlineLink: dto.onlineLink?.trim() || null,
+        agenda: dto.agenda?.trim() || null,
+      },
+      acc.space,
+      acc.name,
+      'new',
+      memberId,
+    );
     return { id: post.id };
   }
 
@@ -324,6 +340,13 @@ export class TeamSpaceExtrasService {
         },
         postId,
         `team-meeting-cancel:${postId}`,
+      );
+      await this.followUp.sendInvite(
+        { ...meeting, agenda: null },
+        acc.space,
+        acc.name,
+        'cancelled',
+        memberId,
       );
       return { ok: true };
     }
@@ -371,6 +394,30 @@ export class TeamSpaceExtrasService {
         postId,
         `team-meeting-move:${postId}:${startsAt.getTime()}`,
       );
+    if (moved || dto.agenda !== undefined) {
+      const post = await this.postRepo.findOneBy({ id: postId });
+      const title = dto.title?.trim() || meeting.title;
+      await this.followUp.sendInvite(
+        {
+          postId,
+          title,
+          startsAt,
+          location:
+            dto.location === undefined
+              ? meeting.location
+              : dto.location?.trim() || null,
+          onlineLink:
+            dto.onlineLink === undefined
+              ? meeting.onlineLink
+              : dto.onlineLink?.trim() || null,
+          agenda: post && post.body !== title ? post.body : null,
+        },
+        acc.space,
+        acc.name,
+        'changed',
+        memberId,
+      );
+    }
     return { ok: true };
   }
 
@@ -457,6 +504,10 @@ export class TeamSpaceExtrasService {
       minutesBy: meeting.minutesBy
         ? `${meeting.minutesBy.firstname ?? ''} ${meeting.minutesBy.lastname ?? ''}`.trim()
         : null,
+      actions: await this.followUp.list(postId),
+      summarySentAt: meeting.summarySentAt,
+      team: rows.filter((r) => roster.includes(r.id)).map(person),
+      myId: memberId,
     };
   }
 
@@ -765,10 +816,39 @@ export class TeamSpaceExtrasService {
           series: { id: series.id } as TeamMeetingSeries,
         });
         await this.spaceRepo.update(series.space.id, { lastActivityAt: now });
+        const names = await this.spaceNames(series.space);
+        await this.followUp.sendInvite(
+          {
+            postId: post.id,
+            title: series.title,
+            startsAt: at,
+            location: series.location,
+            onlineLink: series.onlineLink,
+            agenda: series.agenda || null,
+          },
+          series.space,
+          names,
+          'new',
+          null,
+        );
         later.push(at.getTime());
       }
     }
     return later.length ? new Date(Math.min(...later)) : null;
+  }
+
+  private async spaceNames(space: TeamSpace): Promise<string> {
+    const table =
+      space.kind === TeamSpaceKindEnum.DEPARTMENT
+        ? 'departments'
+        : space.kind === TeamSpaceKindEnum.FELLOWSHIP
+          ? 'small_groups'
+          : 'shared_spaces';
+    const rows = (await this.spaceRepo.query(
+      `SELECT name FROM ${table} WHERE id = $1`,
+      [space.refId],
+    )) as { name: string }[];
+    return rows[0]?.name ?? 'your team';
   }
 
   private minutes(hhmm: string): number {

@@ -1,3 +1,5 @@
+import { TeamMeetingAction } from './entity/team-meeting-action.entity';
+import { TeamMeetingFollowUpService } from './service/team-meeting-follow-up.service';
 import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { TeamSpace } from './entity/team-space.entity';
@@ -33,6 +35,7 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
       TeamPostReply,
       TeamSpaceRead,
       TeamMeeting,
+      TeamMeetingAction,
       TeamMeetingRsvp,
       TeamPoll,
       TeamPollVote,
@@ -42,6 +45,7 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
   ],
   providers: [
     SharedSpaceService,
+    TeamMeetingFollowUpService,
     TeamSpaceAccessService,
     TeamSpaceService,
     TeamSpaceDigestService,

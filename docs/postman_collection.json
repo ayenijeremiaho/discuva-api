@@ -44965,6 +44965,193 @@
           }
         }
       ]
+    },
+    {
+      "name": "Team Spaces - Meeting Actions and Summary",
+      "item": [
+        {
+          "name": "My Open Actions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/my-actions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "my-actions"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Action",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/meetings/{{post_id}}/actions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "meetings",
+                "{{post_id}}",
+                "actions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Book the hall\",\n  \"assigneeId\": \"{{member_id}}\",\n  \"dueDate\": \"2026-11-14\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Action",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/actions/{{action_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "actions",
+                "{{action_id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Book the hall\",\n  \"assigneeId\": \"{{member_id}}\",\n  \"dueDate\": \"2026-11-14\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Mark Action Done",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/actions/{{action_id}}/done",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "actions",
+                "{{action_id}}",
+                "done"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"done\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Remove Action",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/actions/{{action_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "actions",
+                "{{action_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Send Summary",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/meetings/{{post_id}}/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "meetings",
+                "{{post_id}}",
+                "summary"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

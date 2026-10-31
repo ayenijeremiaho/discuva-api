@@ -23,6 +23,7 @@ describe('TeamSpaceExtrasService', () => {
     update: jest.fn(),
   };
   const postRepo = {
+    findOneBy: jest.fn().mockResolvedValue(null),
     save: jest.fn((p) => Promise.resolve({ id: 'p-new', ...p })),
     create: jest.fn((p) => p),
     update: jest.fn(),
@@ -42,6 +43,10 @@ describe('TeamSpaceExtrasService', () => {
   const notifications = {
     notifyMember: jest.fn().mockResolvedValue(undefined),
   };
+  const followUp = {
+    sendInvite: jest.fn().mockResolvedValue(undefined),
+    list: jest.fn().mockResolvedValue([]),
+  };
   const service = new TeamSpaceExtrasService(
     spaceRepo as never,
     postRepo as never,
@@ -57,6 +62,7 @@ describe('TeamSpaceExtrasService', () => {
           : 'Sat 24 Oct at 5:00 PM',
     } as never,
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
+    followUp as never,
   );
 
   beforeEach(() => {

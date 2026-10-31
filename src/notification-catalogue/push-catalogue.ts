@@ -53,6 +53,8 @@ export enum PushNotificationKey {
   TEAM_SPACE_LEADER_POST = 'TEAM_SPACE_LEADER_POST',
   TEAM_SPACE_REPLY = 'TEAM_SPACE_REPLY',
   TEAM_SPACE_MENTION = 'TEAM_SPACE_MENTION',
+  TEAM_SPACE_MEETING_SUMMARY = 'TEAM_SPACE_MEETING_SUMMARY',
+  TEAM_SPACE_MEETING_ACTION = 'TEAM_SPACE_MEETING_ACTION',
   TEAM_SPACE_DIGEST = 'TEAM_SPACE_DIGEST',
   TEAM_SPACE_MEETING = 'TEAM_SPACE_MEETING',
   TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
@@ -617,6 +619,34 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       space_name: 'Choir',
       author_name: 'Deacon Femi',
       excerpt: 'Rehearsal moves to 5pm on Saturday. Please bring your folders.',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING_SUMMARY]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Meeting summary',
+    description:
+      'Sent to the team when a leader sends the summary and actions after a meeting.',
+    title: 'Summary: {{title}}',
+    body: '{{space_name}}. {{actions}}',
+    url: '/team-spaces',
+    placeholders: {
+      title: 'Planning meeting',
+      space_name: 'Choir',
+      actions: 'You have 2 actions.',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MEETING_ACTION]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'New meeting action',
+    description:
+      "Sent to someone given an action after a meeting's summary has gone out.",
+    title: 'New action: {{title}}',
+    body: '{{text}}',
+    url: '/team-spaces',
+    placeholders: {
+      title: 'Planning meeting',
+      space_name: 'Choir',
+      text: 'Book the hall for Saturday',
     },
   },
   [PushNotificationKey.TEAM_SPACE_MENTION]: {

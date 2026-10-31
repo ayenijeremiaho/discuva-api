@@ -1,0 +1,26 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+{{#if my_actions.length}}
+<p style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">Your actions</p>
+<ul>
+  {{#each my_actions}}<li><strong>{{ this.text }}</strong>{{#if this.due}} (by {{ this.due }}){{/if}}</li>{{/each}}
+</ul>
+{{/if}}
+{{#if meeting_minutes}}
+<p style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">Summary</p>
+<p style="white-space: pre-wrap;">{{ meeting_minutes }}</p>
+{{/if}}
+{{#if other_actions.length}}
+<p style="font-weight: 600; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: #8A817C; margin-top: 25px;">Other actions</p>
+<ul>
+  {{#each other_actions}}<li>{{ this.text }}{{#if this.who}}: {{ this.who }}{{/if}}{{#if this.due}} (by {{ this.due }}){{/if}}</li>{{/each}}
+</ul>
+{{/if}}
+<table class="body-action" align="center" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+  <tr>
+    <td align="center">
+      <a href="{{ meeting_url }}" class="button" target="_blank">Open the meeting</a>
+    </td>
+  </tr>
+</table>
+{{{ closing_html }}}
