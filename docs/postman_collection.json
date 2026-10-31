@@ -43523,6 +43523,88 @@
           }
         },
         {
+          "name": "Verification Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verification"
+              ]
+            },
+            "description": "AdminGuard."
+          }
+        },
+        {
+          "name": "Ask To Be Verified",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "verification"
+              ]
+            },
+            "description": "AdminGuard, owner only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"website\": \"gracechapel.example\",\n  \"contactEmail\": \"office@gracechapel.example\",\n  \"seniorLeader\": \"Rev. Sam\",\n  \"requesterRole\": \"Administrator\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Decide Verification",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/platform/tenants/:id/verification",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "platform",
+                "tenants",
+                ":id",
+                "verification"
+              ]
+            },
+            "description": "PlatformAdminGuard (TENANTS_WRITE).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approved\": true,\n  \"note\": \"Optional note\"\n}"
+            }
+          }
+        },
+        {
           "name": "Confirm Email",
           "request": {
             "method": "POST",

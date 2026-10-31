@@ -1,3 +1,4 @@
+import { EmailAllowanceService } from './email-allowance.service';
 import { fetchLogoBytes, fitLogo, measureLogo } from '../util/logo-size';
 import { churchThemeColors } from '../../tenant/constants/church-theme-palette';
 import { Injectable, Logger } from '@nestjs/common';
@@ -56,6 +57,7 @@ export class EmailQueueService {
     private readonly emailCategorySettingsService: EmailCategorySettingsService,
     private readonly notificationTemplates: NotificationTemplateService,
     private readonly recipients: NotificationRecipientService,
+    private readonly allowance: EmailAllowanceService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
@@ -69,6 +71,11 @@ export class EmailQueueService {
     attachments?: EmailAttachment[],
     category?: EmailCategory,
   ): Promise<string> {
+    const recipients = Array.isArray(to) ? to.length : 1;
+    if (category && !(await this.allowance.allows(category, recipients))) {
+      this.logger.debug(`Email suppressed (daily limit): "${subject}"`);
+      return '';
+    }
     if (category && !(await this.isCategoryEnabled(category))) {
       this.logger.debug(
         `Email suppressed (category ${category} disabled): "${subject}"`,

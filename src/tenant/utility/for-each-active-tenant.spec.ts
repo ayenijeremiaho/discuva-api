@@ -34,7 +34,7 @@ describe('forEachActiveTenant', () => {
     );
 
     expect(mockTenantRepo.find).toHaveBeenCalledWith({
-      where: { isActive: true },
+      where: expect.objectContaining({ isActive: true }),
     });
     expect(fn).toHaveBeenCalledTimes(2);
     expect(fn).toHaveBeenCalledWith(

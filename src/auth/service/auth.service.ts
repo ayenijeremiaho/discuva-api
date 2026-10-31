@@ -1057,12 +1057,31 @@ export class AuthService {
     return randomInt(0, 1000000).toString().padStart(6, '0');
   }
 
+  // At most one write a day per church: the lock stops the rest of the day's sign-ins reaching the database.
+  private async recordActivity(): Promise<void> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return;
+    const first = await this.cacheService.acquireLock(
+      `tenant-active:${tenantId}`,
+      24 * 60 * 60,
+    );
+    if (!first) return;
+    await this.tenantRepo.update(tenantId, {
+      lastActiveAt: new Date(),
+      inactivityWarnedAt: null,
+      archivedAt: null,
+    });
+  }
+
   private async generateTokens(
     memberId: string,
     role: MemberRoleEnum,
     requiresPasswordChange: boolean,
     surface: SessionSurface,
   ): Promise<JwtResponse> {
+    this.recordActivity().catch((err: Error) =>
+      this.logger.warn(`Could not record activity: ${err.message}`),
+    );
     const payload: JwtPayload = {
       sub: memberId,
       role,

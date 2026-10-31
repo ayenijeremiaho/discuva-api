@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -77,6 +78,7 @@ export class GivingCheckoutService {
   }
 
   constructor(
+    private readonly verification: TenantVerificationService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly configService: ConfigService,
     private readonly encryptionService: EncryptionService,
@@ -232,6 +234,7 @@ export class GivingCheckoutService {
     memberId: string,
     dto: InitiateGivingCheckoutDto,
   ): Promise<{ checkoutUrl: string; reference: string }> {
+    await this.verification.assertVerified('accept online giving');
     const tenantId = this.currentTenantId();
     const config = await this.resolveActiveConfig(tenantId);
     if (!config) {

@@ -1,3 +1,5 @@
+import { AdminVerificationController } from '../admin/controller/admin-verification.controller';
+import { AccountLifecycleScheduler } from './scheduler/account-lifecycle.scheduler';
 import { ChurchRequestService } from './service/church-request.service';
 import {
   MiddlewareConsumer,
@@ -131,8 +133,13 @@ import { BranchModule } from '../branch/branch.module';
     JwtModule.registerAsync(jwtConfig.asProvider()),
     ConfigModule.forFeature(refreshJwtConfig),
   ],
-  controllers: [TenantInfoController, SignupController],
+  controllers: [
+    TenantInfoController,
+    SignupController,
+    AdminVerificationController,
+  ],
   providers: [
+    AccountLifecycleScheduler,
     ChurchRequestService,
     TenantMiddleware,
     TenantProvisioningService,

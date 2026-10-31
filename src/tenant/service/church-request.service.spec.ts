@@ -1,14 +1,16 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ChurchRequestService } from './church-request.service';
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { Tenant } from '../entity/tenant.entity';
 import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
+import { TenantVerificationStatus } from '../enum/tenant-verification-status.enum';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { EncryptionService } from '../../utility/service/encryption.service';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { UtilityService } from '../../utility/service/utility.service';
 
 const execute = jest.fn().mockResolvedValue({ affected: 1 });
@@ -40,10 +42,10 @@ const mockProvisioning = {
 };
 const mockSettings = {
   getSelfServeRequiresApproval: jest.fn(),
-  getSelfServeAutoApprove: jest.fn(),
-  getRequestReviewHours: jest.fn().mockResolvedValue(12),
+  getNumber: jest.fn().mockResolvedValue(24),
 };
 const mockUtility = { sendEmailWithTemplate: jest.fn() };
+const mockVerification = { clear: jest.fn() };
 const encryption = {
   encrypt: (v: string) => `enc:${v}`,
   decrypt: (v: string) => {
@@ -58,15 +60,8 @@ const dto = {
   adminFirstname: 'Ada',
   adminLastname: 'Obi',
   adminEmail: 'ada@example.com',
-  contactEmail: 'office@hope.example',
-  website: 'hope.example',
 };
-const details = {
-  adminEmail: 'ada@example.com',
-  contactEmail: 'office@hope.example',
-  contactDomain: 'hope.example',
-  website: 'hope.example',
-};
+const details = { adminEmail: 'ada@example.com' };
 const tenantWith = (over: object = {}) =>
   ({
     id: 't1',
@@ -74,6 +69,8 @@ const tenantWith = (over: object = {}) =>
     subdomain: 'hope',
     orgType: OrganisationTypeEnum.CHURCH,
     onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
+    verificationStatus: TenantVerificationStatus.NONE,
+    verifiedAt: null,
     requestDetails: details,
     pendingSignupParams: {
       adminFirstname: 'Ada',
@@ -98,10 +95,11 @@ function tokenFor(email: string, over: object = {}): string {
   ).toString('base64url');
 }
 
-const confirmed = {
-  ...details,
-  adminEmailConfirmedAt: 'now',
-  contactEmailConfirmedAt: 'now',
+const verificationDto = {
+  website: 'hope.example',
+  contactEmail: 'office@hope.example',
+  seniorLeader: 'Rev. Sam',
+  requesterRole: 'Administrator',
 };
 
 describe('ChurchRequestService', () => {
@@ -111,8 +109,7 @@ describe('ChurchRequestService', () => {
     jest.clearAllMocks();
     mockRepo.update.mockResolvedValue({ affected: 1 });
     selectBuilder.getMany.mockResolvedValue([]);
-    mockSettings.getSelfServeRequiresApproval.mockResolvedValue(true);
-    mockSettings.getSelfServeAutoApprove.mockResolvedValue(false);
+    mockSettings.getSelfServeRequiresApproval.mockResolvedValue(false);
     const module = await Test.createTestingModule({
       providers: [
         ChurchRequestService,
@@ -120,6 +117,7 @@ describe('ChurchRequestService', () => {
         { provide: TenantProvisioningService, useValue: mockProvisioning },
         { provide: PlatformSettingsService, useValue: mockSettings },
         { provide: EncryptionService, useValue: encryption },
+        { provide: TenantVerificationService, useValue: mockVerification },
         { provide: UtilityService, useValue: mockUtility },
         {
           provide: ConfigService,
@@ -131,40 +129,17 @@ describe('ChurchRequestService', () => {
   });
 
   describe('submit', () => {
-    it('stores the request and emails both addresses', async () => {
+    it('emails the requester and creates no account yet', async () => {
       await service.submit(tenantWith({ onboardingStatus: 'PENDING' }), dto);
 
-      const saved = mockRepo.update.mock.calls[0][1];
-      expect(saved.onboardingStatus).toBe(
+      expect(mockRepo.update.mock.calls[0][1].onboardingStatus).toBe(
         TenantOnboardingStatus.AWAITING_CONFIRMATION,
       );
-      expect(saved.requestDetails.contactDomain).toBe('hope.example');
-      expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(2);
-      expect(
-        mockUtility.sendEmailWithTemplate.mock.calls[0][3].review_hours,
-      ).toBe(12);
+      expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
       expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
     });
 
-    it('emails once when only one address is given', async () => {
-      await service.submit(tenantWith({ onboardingStatus: 'PENDING' }), {
-        ...dto,
-        contactEmail: undefined,
-      });
-      expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
-    });
-
-    it('records no contact domain for a personal address', async () => {
-      await service.submit(tenantWith({ onboardingStatus: 'PENDING' }), {
-        ...dto,
-        contactEmail: 'church@gmail.com',
-      });
-      expect(
-        mockRepo.update.mock.calls[0][1].requestDetails.contactDomain,
-      ).toBe(null);
-    });
-
-    it("can't replace a request already under review", async () => {
+    it("can't replace a confirmed request", async () => {
       await expect(
         service.submit(
           tenantWith({
@@ -173,59 +148,16 @@ describe('ChurchRequestService', () => {
           dto,
         ),
       ).rejects.toThrow(ConflictException);
-      expect(mockRepo.update).not.toHaveBeenCalled();
     });
   });
 
   describe('confirm', () => {
-    it('waits for the second address', async () => {
+    it('creates the account straight away', async () => {
       mockRepo.findOneBy.mockResolvedValue(tenantWith());
-      mockRepo.findOneByOrFail.mockResolvedValue(
-        tenantWith({
-          requestDetails: { ...details, adminEmailConfirmedAt: 'now' },
-        }),
-      );
 
-      await service.confirm(tokenFor('ada@example.com'));
+      const result = await service.confirm(tokenFor('ada@example.com'));
 
-      expect(mockProvisioning.holdForApproval).not.toHaveBeenCalled();
-      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
-    });
-
-    it('holds for review once both are confirmed', async () => {
-      mockRepo.findOneBy.mockResolvedValue(tenantWith());
-      mockRepo.findOneByOrFail.mockResolvedValue(
-        tenantWith({ requestDetails: confirmed }),
-      );
-
-      const result = await service.confirm(tokenFor('office@hope.example'));
-
-      expect(result.status).toBe(TenantOnboardingStatus.AWAITING_APPROVAL);
-      expect(mockProvisioning.holdForApproval).toHaveBeenCalledTimes(1);
-      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
-    });
-
-    it('tells reviewers once when both confirm together', async () => {
-      mockRepo.findOneBy.mockResolvedValue(tenantWith());
-      mockRepo.findOneByOrFail.mockResolvedValue(
-        tenantWith({ requestDetails: confirmed }),
-      );
-      mockRepo.update.mockResolvedValue({ affected: 0 });
-
-      await service.confirm(tokenFor('office@hope.example'));
-
-      expect(mockProvisioning.holdForApproval).not.toHaveBeenCalled();
-    });
-
-    it('provisions straight away when approval is off', async () => {
-      mockSettings.getSelfServeRequiresApproval.mockResolvedValue(false);
-      mockRepo.findOneBy.mockResolvedValue(tenantWith());
-      mockRepo.findOneByOrFail.mockResolvedValue(
-        tenantWith({ requestDetails: confirmed }),
-      );
-
-      await service.confirm(tokenFor('office@hope.example'));
-
+      expect(result.status).toBe(TenantOnboardingStatus.PENDING);
       expect(mockProvisioning.enqueueProvisioning).toHaveBeenCalledWith(
         expect.objectContaining({
           tenantId: 't1',
@@ -234,50 +166,45 @@ describe('ChurchRequestService', () => {
       );
     });
 
-    describe('auto-approve', () => {
-      beforeEach(() => {
-        mockSettings.getSelfServeAutoApprove.mockResolvedValue(true);
-        mockRepo.findOneBy.mockResolvedValue(tenantWith());
-      });
+    it('holds for review only when the off switch is used', async () => {
+      mockSettings.getSelfServeRequiresApproval.mockResolvedValue(true);
+      mockRepo.findOneBy.mockResolvedValue(tenantWith());
 
-      it('skips review when every check passes', async () => {
-        mockRepo.findOneByOrFail.mockResolvedValue(
-          tenantWith({ requestDetails: confirmed }),
-        );
-        await service.confirm(tokenFor('office@hope.example'));
-        expect(mockProvisioning.enqueueProvisioning).toHaveBeenCalled();
-        expect(mockProvisioning.holdForApproval).not.toHaveBeenCalled();
-      });
+      const result = await service.confirm(tokenFor('ada@example.com'));
 
-      it('still holds a possible duplicate', async () => {
-        selectBuilder.getMany.mockResolvedValue([{ id: 't2' }]);
-        mockRepo.findOneByOrFail.mockResolvedValue(
-          tenantWith({ requestDetails: confirmed }),
-        );
-        await service.confirm(tokenFor('office@hope.example'));
-        expect(mockProvisioning.holdForApproval).toHaveBeenCalled();
-      });
-
-      it('still holds a personal email', async () => {
-        mockRepo.findOneByOrFail.mockResolvedValue(
-          tenantWith({
-            requestDetails: { ...confirmed, contactEmail: 'c@gmail.com' },
-          }),
-        );
-        await service.confirm(tokenFor('office@hope.example'));
-        expect(mockProvisioning.holdForApproval).toHaveBeenCalled();
-      });
+      expect(result.status).toBe(TenantOnboardingStatus.AWAITING_APPROVAL);
+      expect(mockProvisioning.holdForApproval).toHaveBeenCalledTimes(1);
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
     });
 
-    it('changes nothing when a link is opened again later', async () => {
+    it('creates one account when the link is opened twice at once', async () => {
+      mockRepo.findOneBy.mockResolvedValue(tenantWith());
+      mockRepo.update.mockResolvedValue({ affected: 0 });
+
+      await service.confirm(tokenFor('ada@example.com'));
+
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
+    });
+
+    it('changes nothing when opened again later', async () => {
       mockRepo.findOneBy.mockResolvedValue(
-        tenantWith({
-          onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
-        }),
+        tenantWith({ onboardingStatus: TenantOnboardingStatus.ACTIVE }),
       );
       const result = await service.confirm(tokenFor('ada@example.com'));
-      expect(result.status).toBe(TenantOnboardingStatus.AWAITING_APPROVAL);
-      expect(execute).not.toHaveBeenCalled();
+      expect(result.status).toBe(TenantOnboardingStatus.ACTIVE);
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
+    });
+
+    it('records a confirmed church address on a live account', async () => {
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({
+          onboardingStatus: TenantOnboardingStatus.ACTIVE,
+          requestDetails: { ...details, contactEmail: 'office@hope.example' },
+        }),
+      );
+      await service.confirm(tokenFor('office@hope.example'));
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -288,32 +215,64 @@ describe('ChurchRequestService', () => {
       await expect(service.confirm(token)).rejects.toThrow(ConflictException);
     });
 
-    it('rejects an address that is no longer on the request', async () => {
+    it('rejects an address that is not on the request', async () => {
       mockRepo.findOneBy.mockResolvedValue(tenantWith());
       await expect(
         service.confirm(tokenFor('old@example.com')),
       ).rejects.toThrow(ConflictException);
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
     });
   });
 
-  it('resends only what is unconfirmed, and only while waiting', async () => {
-    mockRepo.findOneBy.mockResolvedValueOnce(
-      tenantWith({
-        requestDetails: { ...details, adminEmailConfirmedAt: 'now' },
-      }),
-    );
-    await service.resendConfirmations('t1');
-    expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
-    expect(mockUtility.sendEmailWithTemplate.mock.calls[0][0]).toBe(
-      'office@hope.example',
-    );
+  describe('verification', () => {
+    it('marks the request pending and confirms the church address', async () => {
+      mockRepo.findOneByOrFail.mockResolvedValue(
+        tenantWith({ onboardingStatus: TenantOnboardingStatus.ACTIVE }),
+      );
 
-    mockUtility.sendEmailWithTemplate.mockClear();
-    mockRepo.findOneBy.mockResolvedValueOnce(
-      tenantWith({ onboardingStatus: TenantOnboardingStatus.ACTIVE }),
-    );
-    await service.resendConfirmations('t1');
-    expect(mockUtility.sendEmailWithTemplate).not.toHaveBeenCalled();
+      await service.requestVerification('t1', verificationDto);
+
+      expect(mockRepo.update).toHaveBeenCalledWith('t1', {
+        verificationStatus: TenantVerificationStatus.PENDING,
+      });
+      expect(mockUtility.sendEmailWithTemplate.mock.calls[0][0]).toBe(
+        'office@hope.example',
+      );
+    });
+
+    it("won't ask again once verified", async () => {
+      mockRepo.findOneByOrFail.mockResolvedValue(
+        tenantWith({ verificationStatus: TenantVerificationStatus.VERIFIED }),
+      );
+      await expect(
+        service.requestVerification('t1', verificationDto),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('approving sets the date, clears the cache and tells the church', async () => {
+      mockRepo.findOneBy.mockResolvedValue(tenantWith());
+
+      await service.decideVerification('t1', true);
+
+      const saved = mockRepo.update.mock.calls[0][1];
+      expect(saved.verificationStatus).toBe(TenantVerificationStatus.VERIFIED);
+      expect(saved.verifiedAt).toBeInstanceOf(Date);
+      expect(mockVerification.clear).toHaveBeenCalledWith('t1');
+      expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'ada@example.com',
+        expect.stringContaining('verified'),
+        'tenant-verification-result',
+        expect.objectContaining({ approved: true }),
+      );
+    });
+
+    it('declining removes any verified date', async () => {
+      mockRepo.findOneBy.mockResolvedValue(tenantWith());
+      await service.decideVerification('t1', false, 'Needs a document');
+      const saved = mockRepo.update.mock.calls[0][1];
+      expect(saved.verificationStatus).toBe(TenantVerificationStatus.REJECTED);
+      expect(saved.verifiedAt).toBeNull();
+    });
   });
 
   it('reports the review checks', async () => {
@@ -321,10 +280,18 @@ describe('ChurchRequestService', () => {
       { id: 't2', name: 'Hope Assembly', subdomain: 'hope2' },
     ]);
     const review = await service.review(
-      tenantWith({ requestDetails: confirmed }),
+      tenantWith({
+        requestDetails: {
+          ...details,
+          website: 'hope.example',
+          contactEmail: 'office@hope.example',
+          contactDomain: 'hope.example',
+          contactEmailConfirmedAt: 'now',
+        },
+      }),
     );
     expect(review.checks).toEqual({
-      bothEmailsConfirmed: true,
+      contactEmailConfirmed: true,
       emailMatchesWebsite: true,
       personalEmail: false,
       socialPageOnly: false,

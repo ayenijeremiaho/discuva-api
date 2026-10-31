@@ -21,6 +21,7 @@ import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
 import { ChurchRequestService } from '../service/church-request.service';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 
 // Public, unauthenticated, rate-limited by IP — the primary entry point
@@ -117,7 +118,11 @@ export class SignupController {
   @Public()
   @Get('signup/settings')
   async settings() {
-    return { reviewHours: await this.settingsService.getRequestReviewHours() };
+    return {
+      reviewHours: await this.settingsService.getNumber(
+        PlatformSettingKey.REQUEST_REVIEW_HOURS,
+      ),
+    };
   }
 
   // Called as someone types, after a short pause. A single lookup on the unique subdomain index.

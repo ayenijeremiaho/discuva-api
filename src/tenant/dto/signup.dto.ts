@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEmail,
   IsIn,
   IsEnum,
@@ -54,12 +55,6 @@ export class SignupDto {
   @IsEnum(OrganisationTypeEnum)
   orgType?: OrganisationTypeEnum;
 
-  // The organisation's own address, for billing and important notices. Defaults to adminEmail.
-  @IsOptional()
-  @NormalizeEmail()
-  @IsEmail({}, { message: 'Invalid contact email format' })
-  contactEmail?: string;
-
   @IsOptional()
   @IsString()
   @MaxLength(100)
@@ -100,16 +95,6 @@ export class SignupDto {
   @IsIn(['ONE_CHURCH', 'NETWORK', 'NOT_SURE'])
   locationStructure?: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  website?: string;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  requesterRole?: string;
-
   // Present only when this signup is completing a branch invite
   // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the
   // invited church by BranchInviteService.createInvite. Omitted entirely
@@ -125,4 +110,45 @@ export class ConfirmSignupDto {
   @IsNotEmpty()
   @MaxLength(2000)
   token: string;
+}
+
+export class VerificationRequestDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  website: string;
+
+  @NormalizeEmail()
+  @IsEmail({}, { message: 'Invalid contact email format' })
+  contactEmail: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  seniorLeader: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  requesterRole: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  registrationNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+}
+
+export class VerificationDecisionDto {
+  @IsBoolean()
+  approved: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
 }

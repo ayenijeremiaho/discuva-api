@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -97,6 +98,10 @@ describe('GivingCheckoutService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: TenantVerificationService,
+          useValue: { assertVerified: jest.fn().mockResolvedValue(undefined) },
+        },
         GivingCheckoutService,
         { provide: ClsService, useValue: mockCls },
         { provide: ConfigService, useValue: { get: jest.fn(() => 'NGN') } },

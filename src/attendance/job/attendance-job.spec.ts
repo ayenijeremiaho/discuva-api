@@ -67,7 +67,9 @@ describe('AttendanceJobService', () => {
     await service.scheduledMarkAbsentees();
 
     expect(mockTenantRepo.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { isActive: true } }),
+      expect.objectContaining({
+        where: expect.objectContaining({ isActive: true }),
+      }),
     );
     expect(mockAttendanceService.markAbsentees).toHaveBeenCalledTimes(2);
     expect(mockTxHost.tx.query).toHaveBeenCalledWith(

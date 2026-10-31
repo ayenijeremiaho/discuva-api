@@ -1,3 +1,4 @@
+import { VerificationDecisionDto } from '../../tenant/dto/signup.dto';
 import {
   Body,
   Controller,
@@ -355,6 +356,16 @@ export class PlatformAdminController {
   @Get('tenants/:id/request-review')
   getRequestReview(@Param('id', ParseUUIDPipe) id: string) {
     return this.tenantService.getRequestReview(id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Patch('tenants/:id/verification')
+  decideVerification(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VerificationDecisionDto,
+  ) {
+    return this.tenantService.decideVerification(id, dto.approved, dto.note);
   }
 
   @UseGuards(PlatformAdminGuard)

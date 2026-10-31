@@ -1,3 +1,5 @@
+import { EmailAllowanceService } from './email-allowance.service';
+const mockAllowance = { allows: jest.fn().mockResolvedValue(true) };
 import * as fs from 'node:fs';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
@@ -95,6 +97,10 @@ describe('EmailQueueService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: EmailAllowanceService,
+          useValue: mockAllowance,
+        },
         EmailQueueService,
         { provide: getQueueToken('email'), useValue: mockQueue },
         { provide: ConfigService, useValue: mockConfigService },

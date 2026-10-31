@@ -1,3 +1,4 @@
+import { TenantVerificationStatus } from '../../tenant/enum/tenant-verification-status.enum';
 import {
   ChurchRequestReview,
   ChurchRequestService,
@@ -51,6 +52,8 @@ export interface TenantAdminContact {
 
 export interface TenantWithHealth {
   id: string;
+  verificationStatus: TenantVerificationStatus;
+  archivedAt: Date | null;
   subdomain: string;
   name: string;
   logoUrl: string | null;
@@ -619,6 +622,16 @@ export class PlatformTenantService {
   // not been required. Stays async (queued, not run inline like
   // createTenant()) — this is still fundamentally a self-serve signup being
   // released, not a platform admin directly creating a tenant.
+  async decideVerification(
+    id: string,
+    approved: boolean,
+    note?: string,
+  ): Promise<ChurchRequestReview> {
+    await this.findTenantOrThrow(id);
+    await this.churchRequests.decideVerification(id, approved, note);
+    return this.getRequestReview(id);
+  }
+
   async getRequestReview(id: string): Promise<ChurchRequestReview> {
     return this.churchRequests.review(await this.findTenantOrThrow(id));
   }
@@ -733,6 +746,8 @@ export class PlatformTenantService {
     ]);
     return {
       id: tenant.id,
+      verificationStatus: tenant.verificationStatus,
+      archivedAt: tenant.archivedAt,
       subdomain: tenant.subdomain,
       name: tenant.name,
       logoUrl: tenant.logoUrl,

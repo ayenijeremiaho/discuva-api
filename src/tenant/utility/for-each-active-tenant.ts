@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -29,7 +29,9 @@ export async function forEachActiveTenant(
   logger: Logger,
   fn: (tenant: Tenant) => Promise<void>,
 ): Promise<TenantLoopResult> {
-  const tenants = await tenantRepo.find({ where: { isActive: true } });
+  const tenants = await tenantRepo.find({
+    where: { isActive: true, archivedAt: IsNull() },
+  });
   let failed = 0;
 
   for (const tenant of tenants) {

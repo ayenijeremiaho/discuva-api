@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
@@ -86,7 +86,7 @@ export class SchedulerGateService {
       // Redis unavailable: fall through to the database
     }
     const tenants = await this.tenantRepo.find({
-      where: { isActive: true },
+      where: { isActive: true, archivedAt: IsNull() },
       select: { id: true, schemaName: true, subdomain: true, timezone: true },
     });
     const list = tenants.map(({ id, schemaName, subdomain, timezone }) => ({

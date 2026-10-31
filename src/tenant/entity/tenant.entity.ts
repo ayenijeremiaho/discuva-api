@@ -1,3 +1,4 @@
+import { TenantVerificationStatus } from '../enum/tenant-verification-status.enum';
 import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
@@ -91,6 +92,31 @@ export class Tenant extends BaseEntity {
   // What the requester told us, kept after approval for reference. Holds a church contact address.
   @Column({ type: 'jsonb', name: 'request_details', nullable: true })
   requestDetails: Record<string, unknown> | null;
+
+  @Column({
+    name: 'verification_status',
+    default: TenantVerificationStatus.NONE,
+  })
+  verificationStatus: TenantVerificationStatus;
+
+  // Unlocks giving, higher sending limits and public listing, and exempts the account from inactivity deletion.
+  @Column({ type: 'timestamptz', name: 'verified_at', nullable: true })
+  verifiedAt: Date | null;
+
+  // Refreshed at most once a day, on sign-in.
+  @Column({
+    type: 'timestamptz',
+    name: 'last_active_at',
+    default: () => 'now()',
+  })
+  lastActiveAt: Date;
+
+  @Column({ type: 'timestamptz', name: 'inactivity_warned_at', nullable: true })
+  inactivityWarnedAt: Date | null;
+
+  // Archived accounts skip scheduled work. Signing in restores them.
+  @Column({ type: 'timestamptz', name: 'archived_at', nullable: true })
+  archivedAt: Date | null;
 
   // Set exactly once, the moment onboardingStatus first reaches ACTIVE
   // (TenantProvisioningProcessor.handle() for the async path,

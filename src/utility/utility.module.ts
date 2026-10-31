@@ -8,6 +8,8 @@ import { CacheService } from './service/cache.service';
 import { SanitizationService } from './service/sanitization.service';
 import { EmailQueueService } from './service/email-queue.service';
 import { NotificationDispatchService } from './service/notification-dispatch.service';
+import { TenantVerificationService } from './service/tenant-verification.service';
+import { EmailAllowanceService } from './service/email-allowance.service';
 import { AuditLogService } from './service/audit-log.service';
 import { EmailLogService } from './service/email-log.service';
 import { AuditLog } from './entity/audit-log.entity';
@@ -97,6 +99,8 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     ExcelService,
     EncryptionService,
     NotificationDispatchService,
+    TenantVerificationService,
+    EmailAllowanceService,
   ],
   controllers: [UtilityController, AuditLogController, EmailLogController],
   exports: [
@@ -114,6 +118,8 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     ExcelService,
     EncryptionService,
     NotificationDispatchService,
+    TenantVerificationService,
+    EmailAllowanceService,
   ],
 })
 export class UtilityModule {}

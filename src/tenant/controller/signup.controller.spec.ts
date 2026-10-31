@@ -22,7 +22,7 @@ const mockBranchInviteService = {
   markAccepted: jest.fn(),
 };
 const mockSettings = {
-  getRequestReviewHours: jest.fn().mockResolvedValue(12),
+  getNumber: jest.fn().mockResolvedValue(12),
 };
 const mockChurchRequests = {
   submit: jest.fn(),

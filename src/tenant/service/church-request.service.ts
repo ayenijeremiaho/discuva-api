@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -6,16 +7,19 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Tenant } from '../entity/tenant.entity';
 import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
+import { TenantVerificationStatus } from '../enum/tenant-verification-status.enum';
 import { TenantProvisioningService } from './tenant-provisioning.service';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { EncryptionService } from '../../utility/service/encryption.service';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { UtilityService } from '../../utility/service/utility.service';
-import { SignupDto } from '../dto/signup.dto';
+import { SignupDto, VerificationRequestDto } from '../dto/signup.dto';
 import {
   emailDomain,
   emailMatchesWebsite,
@@ -27,21 +31,25 @@ const CONFIRM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CONFIRM_PURPOSE = 'church-request';
 
 export interface ChurchRequestDetails {
-  city?: string;
   country?: string;
   countryCode?: string;
   state?: string;
   stateCode?: string;
+  city?: string;
   size?: string;
   locationCount?: number;
   locationStructure?: string;
-  website?: string;
-  requesterRole?: string;
   adminEmail: string;
-  contactEmail: string;
-  contactDomain: string | null;
   adminEmailConfirmedAt?: string;
+  website?: string;
+  contactEmail?: string;
+  contactDomain?: string | null;
   contactEmailConfirmedAt?: string;
+  seniorLeader?: string;
+  requesterRole?: string;
+  registrationNumber?: string;
+  note?: string;
+  decisionNote?: string;
 }
 
 interface PendingParams {
@@ -53,15 +61,36 @@ interface PendingParams {
 
 export interface ChurchRequestReview {
   orgType: OrganisationTypeEnum;
+  verificationStatus: TenantVerificationStatus;
   details: ChurchRequestDetails | null;
   checks: {
-    bothEmailsConfirmed: boolean;
+    contactEmailConfirmed: boolean;
     emailMatchesWebsite: boolean;
     personalEmail: boolean;
     socialPageOnly: boolean;
     possibleDuplicates: { id: string; name: string; subdomain: string }[];
   };
 }
+
+export interface VerificationState {
+  status: TenantVerificationStatus;
+  verifiedAt: Date | null;
+  reviewHours: number;
+  details: Pick<
+    ChurchRequestDetails,
+    | 'website'
+    | 'contactEmail'
+    | 'contactEmailConfirmedAt'
+    | 'seniorLeader'
+    | 'requesterRole'
+    | 'registrationNumber'
+    | 'note'
+    | 'decisionNote'
+  >;
+}
+
+const detailsOf = (tenant: Tenant) =>
+  tenant.requestDetails as unknown as ChurchRequestDetails | null;
 
 @Injectable()
 export class ChurchRequestService {
@@ -73,39 +102,33 @@ export class ChurchRequestService {
     private readonly provisioningService: TenantProvisioningService,
     private readonly settingsService: PlatformSettingsService,
     private readonly encryption: EncryptionService,
+    private readonly verification: TenantVerificationService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
   ) {}
 
-  // A request that has been through both confirmations or review can't be replaced by a fresh form.
-  assertCanSubmit(tenant: Tenant): void {
+  // A confirmed request can't be replaced by a fresh form.
+  private assertCanSubmit(tenant: Tenant): void {
     if (
       tenant.onboardingStatus === TenantOnboardingStatus.AWAITING_APPROVAL ||
       tenant.onboardingStatus === TenantOnboardingStatus.PROVISIONING
     ) {
-      throw new ConflictException('This address is already being reviewed.');
+      throw new ConflictException('This address is already in use.');
     }
   }
 
   async submit(tenant: Tenant, dto: SignupDto): Promise<void> {
     this.assertCanSubmit(tenant);
-    const contactEmail = dto.contactEmail ?? dto.adminEmail;
     const details: ChurchRequestDetails = {
-      city: dto.city,
       country: dto.country,
       countryCode: dto.countryCode,
       state: dto.state,
       stateCode: dto.stateCode,
+      city: dto.city,
       size: dto.size,
       locationCount: dto.locationCount,
       locationStructure: dto.locationStructure,
-      website: dto.website,
-      requesterRole: dto.requesterRole,
       adminEmail: dto.adminEmail,
-      contactEmail,
-      contactDomain: isPersonalEmail(contactEmail)
-        ? null
-        : emailDomain(contactEmail),
     };
     const pending: PendingParams = {
       adminFirstname: dto.adminFirstname,
@@ -125,24 +148,21 @@ export class ChurchRequestService {
       'AWAITING_CONFIRMATION',
       TenantOnboardingActorType.SELF_SERVE,
     );
-    await this.sendConfirmations(tenant.id, dto.churchName, details);
+    this.sendConfirmation(tenant.id, dto.churchName, dto.adminEmail, false);
   }
 
   async resendConfirmations(tenantId: string): Promise<void> {
     const tenant = await this.tenantRepo.findOneBy({ id: tenantId });
     if (!tenant) throw new NotFoundException('Request not found');
+    const details = detailsOf(tenant);
     if (
       tenant.onboardingStatus !==
         TenantOnboardingStatus.AWAITING_CONFIRMATION ||
-      !tenant.requestDetails
+      !details
     ) {
       return;
     }
-    await this.sendConfirmations(
-      tenant.id,
-      tenant.name,
-      tenant.requestDetails as unknown as ChurchRequestDetails,
-    );
+    this.sendConfirmation(tenant.id, tenant.name, details.adminEmail, false);
   }
 
   // Idempotent, because people click email links twice and mail scanners may open them.
@@ -171,48 +191,117 @@ export class ChurchRequestService {
       throw invalid;
     }
     const tenant = await this.tenantRepo.findOneBy({ id: payload.tenantId });
-    const details = tenant?.requestDetails as unknown as
-      ChurchRequestDetails | undefined;
+    const details = tenant && detailsOf(tenant);
     if (!tenant || !details) throw invalid;
+
+    const now = new Date().toISOString();
+    if (payload.email === details.contactEmail) {
+      await this.mergeDetails(tenant.id, { contactEmailConfirmedAt: now });
+    }
     if (
       tenant.onboardingStatus !== TenantOnboardingStatus.AWAITING_CONFIRMATION
     ) {
       return { status: tenant.onboardingStatus, name: tenant.name };
     }
+    if (payload.email !== details.adminEmail) throw invalid;
+    await this.mergeDetails(tenant.id, { adminEmailConfirmedAt: now });
+    return this.release(tenant);
+  }
 
-    const patch: Partial<ChurchRequestDetails> = {};
-    const now = new Date().toISOString();
-    if (payload.email === details.adminEmail) patch.adminEmailConfirmedAt = now;
-    if (payload.email === details.contactEmail) {
-      patch.contactEmailConfirmedAt = now;
-    }
-    if (!Object.keys(patch).length) throw invalid;
+  async getVerification(tenantId: string): Promise<VerificationState> {
+    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
+    const details = detailsOf(tenant);
+    return {
+      status: tenant.verificationStatus,
+      verifiedAt: tenant.verifiedAt,
+      reviewHours: await this.settingsService.getNumber(
+        PlatformSettingKey.REQUEST_REVIEW_HOURS,
+      ),
+      details: {
+        website: details?.website,
+        contactEmail: details?.contactEmail,
+        contactEmailConfirmedAt: details?.contactEmailConfirmedAt,
+        seniorLeader: details?.seniorLeader,
+        requesterRole: details?.requesterRole,
+        registrationNumber: details?.registrationNumber,
+        note: details?.note,
+        decisionNote: details?.decisionNote,
+      },
+    };
+  }
 
-    // Merged in SQL, so the two people confirming at once can't overwrite each other.
-    await this.tenantRepo
-      .createQueryBuilder()
-      .update(Tenant)
-      .set({ requestDetails: () => `request_details || :patch::jsonb` })
-      .where('id = :id', { id: tenant.id, patch: JSON.stringify(patch) })
-      .execute();
-    const fresh = await this.tenantRepo.findOneByOrFail({ id: tenant.id });
-    const merged = fresh.requestDetails as unknown as ChurchRequestDetails;
-    if (!merged.adminEmailConfirmedAt || !merged.contactEmailConfirmedAt) {
-      return { status: fresh.onboardingStatus, name: fresh.name };
+  async requestVerification(
+    tenantId: string,
+    dto: VerificationRequestDto,
+  ): Promise<VerificationState> {
+    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
+    if (tenant.verificationStatus === TenantVerificationStatus.VERIFIED) {
+      throw new BadRequestException('This account is already verified.');
     }
-    return this.release(fresh);
+    const details = detailsOf(tenant);
+    const sameEmail = details?.contactEmail === dto.contactEmail;
+    await this.mergeDetails(tenant.id, {
+      website: dto.website,
+      contactEmail: dto.contactEmail,
+      contactDomain: isPersonalEmail(dto.contactEmail)
+        ? null
+        : emailDomain(dto.contactEmail),
+      seniorLeader: dto.seniorLeader,
+      requesterRole: dto.requesterRole,
+      registrationNumber: dto.registrationNumber,
+      note: dto.note,
+      ...(sameEmail ? {} : { contactEmailConfirmedAt: undefined }),
+    });
+    await this.tenantRepo.update(tenant.id, {
+      verificationStatus: TenantVerificationStatus.PENDING,
+    });
+    if (!sameEmail || !details?.contactEmailConfirmedAt) {
+      this.sendConfirmation(tenant.id, tenant.name, dto.contactEmail, true);
+    }
+    return this.getVerification(tenant.id);
+  }
+
+  async decideVerification(
+    tenantId: string,
+    approved: boolean,
+    note?: string,
+  ): Promise<void> {
+    const tenant = await this.tenantRepo.findOneBy({ id: tenantId });
+    if (!tenant) throw new NotFoundException('Tenant not found');
+    await this.tenantRepo.update(tenant.id, {
+      verificationStatus: approved
+        ? TenantVerificationStatus.VERIFIED
+        : TenantVerificationStatus.REJECTED,
+      verifiedAt: approved ? new Date() : null,
+    });
+    await this.mergeDetails(tenant.id, { decisionNote: note });
+    this.verification.clear(tenant.id);
+    const details = detailsOf(tenant);
+    const to = details?.adminEmail;
+    if (to) {
+      this.utilityService.sendEmailWithTemplate(
+        to,
+        approved
+          ? `${tenant.name} is verified`
+          : `We couldn't verify ${tenant.name} yet`,
+        'tenant-verification-result',
+        {
+          organisation_name: tenant.name,
+          approved,
+          note: note ?? '',
+        },
+      );
+    }
   }
 
   async review(tenant: Tenant): Promise<ChurchRequestReview> {
-    const details =
-      tenant.requestDetails as unknown as ChurchRequestDetails | null;
+    const details = detailsOf(tenant);
     return {
       orgType: tenant.orgType,
+      verificationStatus: tenant.verificationStatus,
       details,
       checks: {
-        bothEmailsConfirmed:
-          !!details?.adminEmailConfirmedAt &&
-          !!details?.contactEmailConfirmedAt,
+        contactEmailConfirmed: !!details?.contactEmailConfirmedAt,
         emailMatchesWebsite: emailMatchesWebsite(
           details?.contactEmail,
           details?.website,
@@ -245,20 +334,32 @@ export class ChurchRequestService {
     return qb.getMany();
   }
 
+  // Merged in SQL, so two people confirming at once can't overwrite each other.
+  private async mergeDetails(
+    tenantId: string,
+    patch: Partial<ChurchRequestDetails>,
+  ): Promise<void> {
+    await this.tenantRepo
+      .createQueryBuilder()
+      .update(Tenant)
+      .set({ requestDetails: () => `request_details || :patch::jsonb` })
+      .where('id = :id', { id: tenantId, patch: JSON.stringify(patch) })
+      .execute();
+  }
+
+  // The account is only created now, so an unconfirmed email costs no schema.
   private async release(
     tenant: Tenant,
   ): Promise<{ status: TenantOnboardingStatus; name: string }> {
     const pending = tenant.pendingSignupParams as unknown as PendingParams;
-    const clean = await this.passesAutoApproval(tenant);
-    if (!clean && (await this.settingsService.getSelfServeRequiresApproval())) {
-      const moved = await this.tenantRepo.update(
-        {
-          id: tenant.id,
-          onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
-        },
-        { onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL },
-      );
-      // Only the request that made the move tells the reviewers.
+    const fromConfirmation = {
+      id: tenant.id,
+      onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
+    };
+    if (await this.settingsService.getSelfServeRequiresApproval()) {
+      const moved = await this.tenantRepo.update(fromConfirmation, {
+        onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
+      });
       if (moved.affected) {
         await this.provisioningService.holdForApproval(tenant, pending);
       }
@@ -267,13 +368,9 @@ export class ChurchRequestService {
         name: tenant.name,
       };
     }
-    const moved = await this.tenantRepo.update(
-      {
-        id: tenant.id,
-        onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
-      },
-      { onboardingStatus: TenantOnboardingStatus.PENDING },
-    );
+    const moved = await this.tenantRepo.update(fromConfirmation, {
+      onboardingStatus: TenantOnboardingStatus.PENDING,
+    });
     if (moved.affected) {
       await this.provisioningService.enqueueProvisioning({
         tenantId: tenant.id,
@@ -286,55 +383,33 @@ export class ChurchRequestService {
     return { status: TenantOnboardingStatus.PENDING, name: tenant.name };
   }
 
-  private async passesAutoApproval(tenant: Tenant): Promise<boolean> {
-    if (!(await this.settingsService.getSelfServeAutoApprove())) return false;
-    const { checks } = await this.review(tenant);
-    return (
-      checks.bothEmailsConfirmed &&
-      checks.emailMatchesWebsite &&
-      !checks.personalEmail &&
-      !checks.possibleDuplicates.length
-    );
-  }
-
-  private async sendConfirmations(
+  private sendConfirmation(
     tenantId: string,
-    churchName: string,
-    details: ChurchRequestDetails,
-  ): Promise<void> {
-    const reviewHours = await this.settingsService.getRequestReviewHours();
-    const emails = new Map<string, boolean>();
-    if (!details.adminEmailConfirmedAt) emails.set(details.adminEmail, false);
-    if (!details.contactEmailConfirmedAt) {
-      emails.set(
-        details.contactEmail,
-        details.contactEmail !== details.adminEmail,
-      );
-    }
+    name: string,
+    email: string,
+    isChurchAddress: boolean,
+  ): void {
     const baseUrl = this.configService.get<string>('WEB_APP_URL');
-    for (const [email, isChurchAddress] of emails) {
-      const token = Buffer.from(
-        this.encryption.encrypt(
-          JSON.stringify({
-            purpose: CONFIRM_PURPOSE,
-            tenantId,
-            email,
-            expiresAt: Date.now() + CONFIRM_TTL_MS,
-          }),
-        ),
-      ).toString('base64url');
-      this.utilityService.sendEmailWithTemplate(
-        email,
-        `Confirm your email to continue with ${churchName}`,
-        'church-request-confirm',
-        {
-          organisation_name: churchName,
-          is_church_address: isChurchAddress,
-          review_hours: reviewHours,
-          confirm_url: `${baseUrl}/signup/confirm?token=${token}`,
-        },
-      );
-    }
-    this.logger.log(`Sent ${emails.size} confirmation(s) for ${tenantId}`);
+    const token = Buffer.from(
+      this.encryption.encrypt(
+        JSON.stringify({
+          purpose: CONFIRM_PURPOSE,
+          tenantId,
+          email,
+          expiresAt: Date.now() + CONFIRM_TTL_MS,
+        }),
+      ),
+    ).toString('base64url');
+    this.utilityService.sendEmailWithTemplate(
+      email,
+      `Confirm your email to continue with ${name}`,
+      'church-request-confirm',
+      {
+        organisation_name: name,
+        is_church_address: isChurchAddress,
+        confirm_url: `${baseUrl}/signup/confirm?token=${token}`,
+      },
+    );
+    this.logger.log(`Sent a confirmation for ${tenantId}`);
   }
 }

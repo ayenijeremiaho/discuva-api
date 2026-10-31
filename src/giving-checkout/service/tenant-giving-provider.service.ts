@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   ForbiddenException,
   Injectable,
@@ -28,6 +29,7 @@ export interface GivingProviderConfigSummary {
 @Injectable()
 export class TenantGivingProviderService {
   constructor(
+    private readonly verification: TenantVerificationService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly encryptionService: EncryptionService,
     private readonly cacheService: CacheService,
@@ -114,6 +116,7 @@ export class TenantGivingProviderService {
     providerId: string,
     dto: UpsertGivingProviderConfigDto,
   ): Promise<GivingProviderConfigSummary> {
+    await this.verification.assertVerified('set up online giving');
     const tenantId = this.currentTenantId();
 
     const provider = await this.providerRepo.findOneBy({ id: providerId });

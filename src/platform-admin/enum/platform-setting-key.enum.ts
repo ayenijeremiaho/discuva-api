@@ -26,8 +26,10 @@ export enum PlatformSettingKey {
   // today's behavior — auto-provision immediately. See
   // TenantProvisioningService.holdForApproval/PlatformTenantService.approveTenant.
   SELF_SERVE_REQUIRES_APPROVAL = 'self_serve_requires_approval',
-  // Lets a request skip review when every check passes. Off by default.
-  SELF_SERVE_AUTO_APPROVE = 'self_serve_auto_approve',
-  // The review time promised on the website and in emails.
+  // The verification review time promised to churches.
   REQUEST_REVIEW_HOURS = 'request_review_hours',
+  UNVERIFIED_DAILY_EMAIL_LIMIT = 'unverified_daily_email_limit',
+  ACCOUNT_ARCHIVE_AFTER_DAYS = 'account_archive_after_days',
+  ACCOUNT_DELETE_AFTER_DAYS = 'account_delete_after_days',
+  ACCOUNT_AUTO_DELETE = 'account_auto_delete',
 }

@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
@@ -44,6 +45,10 @@ describe('TenantGivingProviderService', () => {
     mockCls.get.mockReturnValue('tenant-1');
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: TenantVerificationService,
+          useValue: { assertVerified: jest.fn().mockResolvedValue(undefined) },
+        },
         TenantGivingProviderService,
         { provide: ClsService, useValue: mockCls },
         { provide: EncryptionService, useValue: mockEncryptionService },

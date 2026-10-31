@@ -7430,35 +7430,27 @@ cancel-don't-delete one.
 
 ---
 
-### Church requests (self-serve signup)
+### Signing up, verification and inactive accounts
 
-`POST /signup` no longer starts provisioning for a normal signup. A branch invite still does, since a parent church vetted it.
+**Sign-up is instant after email confirmation.** `POST /signup` stores the request as `AWAITING_CONFIRMATION` with `tenants.org_type` (`CHURCH`, `MINISTRY`, `GROUP`) and `tenants.request_details` (location, size, locations, requester email), and emails one link. `POST /signup/confirm` (`{ token }`) then provisions the account, so an unconfirmed email costs no schema. A branch invite still provisions straight away. `self_serve_requires_approval` (off) is an off switch: when on, confirmed sign-ups wait for manual approval. `POST /signup/:tenantId/resend-confirmation` resends.
 
-- **Flow:** the form creates the tenant as `AWAITING_CONFIRMATION` with `tenants.org_type` (`CHURCH`, `MINISTRY`, `GROUP`) and
-  `tenants.request_details` (jsonb: location, size, locations, website, role, requester email, contact email). A confirmation
-  link goes to each address, or one if they match. `POST /signup/confirm` (`{ token }`) records each confirmation with an atomic jsonb
-  merge. Once both are in, the request moves to `AWAITING_APPROVAL` and platform admins are told, or to provisioning if approval is off
-  or auto-approve passes. Conditional updates mean only one request makes that move. `POST /signup/:tenantId/resend-confirmation`
-  resends what's unconfirmed.
-- **Tokens:** stateless, AES-GCM encrypted, 7 days. The email links to `{WEB_APP_URL}/signup/confirm`, a page that POSTs, so mail
-  scanners opening the link don't confirm anything.
-- **Settings:** `self_serve_requires_approval` now defaults to on; a value already saved keeps applying. `self_serve_auto_approve`
-  (off) skips review only when both emails are confirmed, the contact email isn't personal and matches the website, and no duplicate is found.
-- **Identity:** `tenants.id` is permanent and the subdomain is the unique public address. The name is only a clue. The website is
-  never fetched by the server, so a reviewer opens it from the review panel, which avoids server-side requests to user-supplied URLs.
-- **Review:** `GET /platform/tenants/:id/request-review` (`TENANTS_READ`) returns the details and checks, including possible
-  duplicates by same name or contact domain.
-- **Several locations:** a church is identified by its one account, not a location. The form asks one location or more than one (`locationCount` 1 or 2). A church with more asks how they're organised (`locationStructure`: `ONE_CHURCH` becomes campuses, `NETWORK` separate linked accounts, `NOT_SURE` a setup call) and takes the main location. Someone setting up one location of a larger church is told to ask the main church and can't continue. Small groups give a country, with state and city optional, so a group meeting online needs nothing more.
-- **Review time:** platform setting `request_review_hours` (default 24, 1 to 168) sets the time promised on the form, the confirmation page and the confirmation email. `GET /signup/settings` is public and cached, and returns `{ reviewHours }`.
-- **After first login:** other locations and phone numbers aren't asked on the form. They belong in the setup wizard.
+- **Tokens:** stateless, AES-GCM encrypted, 7 days. The email links to `{WEB_APP_URL}/signup/confirm`, a page that POSTs, so mail scanners opening the link don't confirm anything. A conditional update stops a double click creating two jobs.
+- **Identity:** `tenants.id` is permanent and the subdomain is the unique public address. The name is only a clue.
 - **Address check:** `GET /signup/subdomain-availability?subdomain=` (public, 60 a minute) returns `{ available, reason? }` (`INVALID`, `RESERVED`, `TAKEN`), debounced by the form and using the unique subdomain index. An unconfirmed request doesn't hold an address. Submitting applies the same rules.
-- **Location:** the form uses a chain of searchable lists: country, then state or region, then a city or town filtered by the state. All are required, except state and city for small groups. They're static files in discuva-web `public/geo`, built from GeoNames (CC BY 4.0) by `scripts/build-geo-data.mjs`, so there's no API or database load, and only the chosen country's file loads. A town that isn't listed can be typed. Codes are saved with the names (`countryCode`, `stateCode`), and countries with no region data skip the state.
-- **Indexes:** `IDX_tenants_lower_name` on `lower(name)` and partial `IDX_tenants_contact_domain` on
-  `request_details->>'contactDomain'`, both used by the duplicate check.
-- **Database cost:** no scheduler or polling. Writes happen only on signup and confirmation, and the settings read is cached. The
-  signup page no longer polls `GET /signup/:tenantId/status`.
-- **Isolation:** group and ministry accounts stay separate, and the form makes independent groups acknowledge that. Someone whose
-  group is part of a church is told to ask the church and can't continue.
+- **Location:** a chain of searchable lists: country, then state or region, then city or town filtered by the state. They're static files in discuva-web `public/geo`, built from GeoNames (CC BY 4.0) by `scripts/build-geo-data.mjs`, so there's no API or database load. A town that isn't listed can be typed. Countries with no region data skip the state. Small groups only need a country.
+- **Several locations:** a church is one account, whatever its locations. `locationCount` is 1 or 2 (more than one). A church with more than one sets `locationStructure`: `ONE_CHURCH` becomes campuses, `NETWORK` separate linked accounts, `NOT_SURE` a setup call. Someone setting up one location of a larger church is told to ask the main church and can't continue.
+
+**Verification** (`tenants.verification_status`: `NONE`, `PENDING`, `VERIFIED`, `REJECTED`; `verified_at`). Accounts live when this shipped were marked verified by migration. An owner asks through `POST /admin/verification` (`GET` shows status), giving the website, contact email, senior leader, role and optional registration number. The contact address gets its own confirmation link. A platform admin reviews via `GET /platform/tenants/:id/request-review` (checks: contact email confirmed, email matches website, personal email, social page only, possible duplicates by name or contact domain) and decides with `PATCH /platform/tenants/:id/verification` (`{ approved, note }`). The website is never fetched by the server, which avoids requests to user-supplied URLs; a reviewer opens it. `request_review_hours` (default 24) sets the time shown on the Verification tab; `GET /signup/settings` exposes it publicly.
+
+Unverified accounts:
+- **Giving:** `TenantVerificationService.assertVerified` blocks setting up a giving provider and starting a checkout.
+- **Email:** `EmailAllowanceService` limits categorised email through Discuva's provider to `unverified_daily_email_limit` (default 20) a day per account, counted in Redis per recipient. Uncategorised email such as password resets, sign-in alerts and receipts aren't limited, nor is an account using its own provider.
+- **Public listing:** Discover must only list verified accounts.
+
+**Inactive accounts** (`AccountLifecycleScheduler`, daily, Redis lock, public tables only). Only unverified, free, standalone, active accounts qualify. `last_active_at` is refreshed on sign-in or token refresh, at most once a day per account through a Redis lock, and clears any warning or archive. A warning goes 7 days before archiving. `account_archive_after_days` (90) sets `archived_at`, and archived accounts skip scheduled work (`forEachActiveTenant`, the scheduler gate) but can still sign in, which restores them. `account_delete_after_days` (100) drops the schema and deletes the tenant row in one transaction, but only when `account_auto_delete` is on (off by default). Uploaded files on Cloudinary aren't removed by this.
+
+- **Indexes:** `IDX_tenants_lower_name`, partial `IDX_tenants_contact_domain`, partial `IDX_tenants_unverified_last_active` and `IDX_tenants_verification_pending`.
+- **Database cost:** no polling. The daily job reads a partial index. The verified check is cached for 5 minutes. Activity writes are limited to one a day per account.
 - **Env:** `WEB_APP_URL` (API, defaults to `https://discuva.org`); `NEXT_PUBLIC_ONBOARDING_CALL_URL` (discuva-web, optional).
 
 ### Account Owners
