@@ -246,4 +246,87 @@ describe('TeamSpaceService', () => {
       );
     });
   });
+
+  describe('tagging', () => {
+    const IN = '2e8857e4-35ca-4218-8dcd-623479c64e07';
+    const OUT = '11111111-35ca-4218-8dcd-623479c64e07';
+    const AUTHOR = '22222222-35ca-4218-8dcd-623479c64e07';
+    const OTHER = '33333333-35ca-4218-8dcd-623479c64e07';
+    const pushed = () =>
+      notifications.notifyMember.mock.calls.map(
+        (c) => c[0] as { push: { key: string; memberIds: string[] } },
+      );
+
+    beforeEach(() => {
+      access.memberIds.mockResolvedValue([IN, AUTHOR, OTHER]);
+      spaceRepo.query.mockImplementation((_sql: string, args: string[][]) =>
+        Promise.resolve(
+          [args?.[0] ?? []].flat().map((id) => ({
+            id,
+            email: `${id}@x.org`,
+            name: id === IN ? 'Ada Obi' : 'Author',
+          })),
+        ),
+      );
+    });
+
+    afterEach(() => {
+      access.memberIds.mockResolvedValue(['m1', 'm2', 'm3']);
+      spaceRepo.query.mockResolvedValue([{ name: 'Deacon Femi' }]);
+    });
+
+    it('keeps the real name and tells the person tagged', async () => {
+      await service.createPost(AUTHOR, DEPT, 'd1', `Hi @[Fake](${IN})`);
+      expect(postRepo.save.mock.calls[0][0].body).toBe(`Hi @[Ada Obi](${IN})`);
+      expect(pushed()[0].push.memberIds).toEqual([IN]);
+      expect(pushed()[0].push.key).toBe('TEAM_SPACE_MENTION');
+    });
+
+    it("won't notify someone outside the space", async () => {
+      await service.createPost(AUTHOR, DEPT, 'd1', `Hi @[Bob](${OUT})`);
+      expect(postRepo.save.mock.calls[0][0].body).toBe('Hi @Bob');
+      expect(notifications.notifyMember).not.toHaveBeenCalled();
+    });
+
+    it('only lets a leader tag the team', async () => {
+      await service.createPost(AUTHOR, DEPT, 'd1', 'All @[team](team)');
+      expect(postRepo.save.mock.calls[0][0].body).toBe('All @team');
+      expect(notifications.notifyMember).not.toHaveBeenCalled();
+    });
+
+    it('notifies a leader post once per person', async () => {
+      acc.isLeader = true;
+      await service.createPost(AUTHOR, DEPT, 'd1', `Hi @[Ada](${IN})`);
+      const calls = pushed();
+      expect(calls.map((c) => c.push.memberIds)).toEqual([[IN], [OTHER]]);
+    });
+
+    it('limits how many people can be tagged', async () => {
+      const many = Array.from(
+        { length: 11 },
+        (_, i) =>
+          `@[P](${String(i).padStart(8, '0')}-35ca-4218-8dcd-623479c64e07)`,
+      ).join(' ');
+      await expect(
+        service.createPost(AUTHOR, DEPT, 'd1', many),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('counts visible text against the length limit', async () => {
+      await expect(
+        service.createPost(AUTHOR, DEPT, 'd1', 'x'.repeat(2001)),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('tells only people newly tagged when a post is edited', async () => {
+      postRepo.findOne.mockResolvedValue({
+        id: 'p1',
+        body: `Hi @[Ada Obi](${IN})`,
+        author: { id: AUTHOR },
+        space,
+      });
+      await service.editPost(AUTHOR, 'p1', `Hi again @[Ada Obi](${IN})`);
+      expect(notifications.notifyMember).not.toHaveBeenCalled();
+    });
+  });
 });

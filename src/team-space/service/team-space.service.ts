@@ -1,4 +1,14 @@
 import {
+  POST_MAX_LENGTH,
+  REPLY_MAX_LENGTH,
+} from '../constant/team-space.constant';
+import {
+  MAX_TAGGED_PEOPLE,
+  parseMentions,
+  plainText,
+  rewriteMentions,
+} from '../util/mentions';
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -84,8 +94,17 @@ export function decodeCursor(cursor?: string): { at: Date; id: string } | null {
 }
 
 export function excerpt(text: string, max = 120): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
+  const flat = plainText(text).replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+const NAME_SQL = `NULLIF(TRIM(COALESCE(firstname, '') || ' ' || COALESCE(lastname, '')), '')`;
+const PEOPLE_SHOWN = 500;
+
+interface TaggedBody {
+  body: string;
+  memberIds: string[];
+  team: boolean;
 }
 
 const AUTHOR_SQL = `a.id AS author_id, NULLIF(TRIM(COALESCE(a.firstname, '') || ' ' || COALESCE(a.lastname, '')), '') AS author_name, a.photo_url AS author_photo`;
@@ -240,11 +259,12 @@ export class TeamSpaceService {
       throw new ForbiddenException(
         'Only leaders can start posts in this space. You can reply to any post.',
       );
+    const tagged = await this.prepareTags(acc, body, POST_MAX_LENGTH);
     const post = await this.postRepo.save(
       this.postRepo.create({
         space: { id: acc.space.id } as TeamSpace,
         author: { id: memberId } as Member,
-        body,
+        body: tagged.body,
         lastActivityAt: now,
       }),
     );
@@ -253,7 +273,11 @@ export class TeamSpaceService {
       this.markRead(memberId, acc.space.id, now),
     ]);
     // Leaders' posts go out straight away; everyone else's wait for the evening summary.
-    if (acc.isLeader) await this.pushLeaderPost(acc, post, memberId);
+    const notified = await this.notifyTagged(acc, tagged, memberId, {
+      url: `/team-spaces/post/${post.id}`,
+      dedupe: `team-post-tag:${post.id}`,
+    });
+    if (acc.isLeader) await this.pushLeaderPost(acc, post, memberId, notified);
     return { id: post.id };
   }
 
@@ -266,7 +290,13 @@ export class TeamSpaceService {
     const post = await this.findPost(postId);
     if (post.author?.id !== memberId)
       throw new ForbiddenException('You can only edit your own posts.');
-    await this.postRepo.update(postId, { body, editedAt: now });
+    const acc = await this.editAccess(memberId, post.space, body);
+    const tagged = await this.prepareTags(acc, body, POST_MAX_LENGTH);
+    await this.postRepo.update(postId, { body: tagged.body, editedAt: now });
+    await this.notifyNewTags(acc, tagged, post.body, memberId, {
+      url: `/team-spaces/post/${postId}`,
+      dedupe: `team-post-tag:${postId}:${now.getTime()}`,
+    });
     return { ok: true };
   }
 
@@ -378,11 +408,12 @@ export class TeamSpaceService {
     const post = await this.findPost(postId);
     const acc = await this.access.accessBySpace(memberId, post.space);
     this.access.assertOpen(acc);
+    const tagged = await this.prepareTags(acc, body, REPLY_MAX_LENGTH);
     const reply = await this.replyRepo.save(
       this.replyRepo.create({
         post: { id: postId } as TeamPost,
         author: { id: memberId } as Member,
-        body,
+        body: tagged.body,
       }),
     );
     await Promise.all([
@@ -395,8 +426,12 @@ export class TeamSpaceService {
       this.spaceRepo.update(acc.space.id, { lastActivityAt: now }),
       this.markRead(memberId, acc.space.id, now),
     ]);
+    const notified = await this.notifyTagged(acc, tagged, memberId, {
+      url: `/team-spaces/post/${postId}`,
+      dedupe: `team-reply-tag:${reply.id}`,
+    });
     const authorId = post.author?.id;
-    if (authorId && authorId !== memberId)
+    if (authorId && authorId !== memberId && !notified.has(authorId))
       await this.pushReply(acc, post, reply, memberId, authorId);
     return { id: reply.id };
   }
@@ -409,13 +444,19 @@ export class TeamSpaceService {
   ) {
     const reply = await this.replyRepo.findOne({
       where: { id: replyId },
-      relations: { author: true },
+      relations: { author: true, post: { space: true } },
     });
     if (!reply || reply.removedAt)
       throw new NotFoundException('Reply not found');
     if (reply.author?.id !== memberId)
       throw new ForbiddenException('You can only edit your own replies.');
-    await this.replyRepo.update(replyId, { body, editedAt: now });
+    const acc = await this.editAccess(memberId, reply.post.space, body);
+    const tagged = await this.prepareTags(acc, body, REPLY_MAX_LENGTH);
+    await this.replyRepo.update(replyId, { body: tagged.body, editedAt: now });
+    await this.notifyNewTags(acc, tagged, reply.body, memberId, {
+      url: `/team-spaces/post/${reply.post.id}`,
+      dedupe: `team-reply-tag:${replyId}:${now.getTime()}`,
+    });
     return { ok: true };
   }
 
@@ -559,10 +600,163 @@ export class TeamSpaceService {
       .execute();
   }
 
+  // Who can be tagged here. Read once when someone first types @, not on every keystroke.
+  async people(memberId: string, kind: TeamSpaceKindEnum, refId: string) {
+    const acc = await this.access.access(memberId, kind, refId);
+    const ids = await this.access.memberIds(acc.space);
+    const rows = (await this.spaceRepo.query(
+      `SELECT id, ${NAME_SQL} AS name, photo_url FROM members
+       WHERE id = ANY($1) AND id <> $2 ORDER BY firstname, lastname LIMIT ${PEOPLE_SHOWN}`,
+      [ids, memberId],
+    )) as { id: string; name: string | null; photo_url: string | null }[];
+    return {
+      canTagTeam: acc.isLeader,
+      people: rows
+        .filter((r) => r.name)
+        .map((r) => ({ id: r.id, name: r.name, photoUrl: r.photo_url })),
+    };
+  }
+
+  // Text with no tags costs no queries. Editing only needs the space when tags are involved.
+  private async editAccess(
+    memberId: string,
+    space: TeamSpace,
+    body: string,
+  ): Promise<SpaceAccess> {
+    const { memberIds, team } = parseMentions(body);
+    return memberIds.length || team
+      ? this.access.accessBySpace(memberId, space)
+      : ({ space, name: '', isLeader: false } as unknown as SpaceAccess);
+  }
+
+  private async prepareTags(
+    acc: SpaceAccess,
+    body: string,
+    max: number,
+  ): Promise<TaggedBody> {
+    if (plainText(body).length > max)
+      throw new BadRequestException(
+        `Please keep this under ${max} characters.`,
+      );
+    const { memberIds, team } = parseMentions(body);
+    if (memberIds.length > MAX_TAGGED_PEOPLE)
+      throw new BadRequestException(
+        `You can tag up to ${MAX_TAGGED_PEOPLE} people at a time.`,
+      );
+    if (!memberIds.length && !team) return { body, memberIds: [], team: false };
+    const inSpace = new Set(await this.access.memberIds(acc.space));
+    const allowed = memberIds.filter((id) => inSpace.has(id));
+    const rows = (
+      allowed.length
+        ? await this.spaceRepo.query(
+            `SELECT id, ${NAME_SQL} AS name FROM members WHERE id = ANY($1)`,
+            [allowed],
+          )
+        : []
+    ) as { id: string; name: string | null }[];
+    const names = new Map(
+      rows.filter((r) => r.name).map((r) => [r.id, r.name as string]),
+    );
+    const allowTeam = team && acc.isLeader;
+    return {
+      body: rewriteMentions(body, names, allowTeam),
+      memberIds: [...names.keys()],
+      team: allowTeam,
+    };
+  }
+
+  // Returns who was told, so nobody also gets the ordinary notification for the same message.
+  private async notifyTagged(
+    acc: SpaceAccess,
+    tagged: TaggedBody,
+    authorId: string,
+    link: { url: string; dedupe: string },
+  ): Promise<Set<string>> {
+    if (!tagged.team && !tagged.memberIds.length) return new Set();
+    const named = tagged.memberIds.filter((id) => id !== authorId);
+    const everyone = tagged.team
+      ? (await this.access.memberIds(acc.space)).filter((id) => id !== authorId)
+      : [];
+    const rows = (await this.spaceRepo.query(
+      `SELECT id, email, ${NAME_SQL} AS name FROM members WHERE id = ANY($1)`,
+      [[...named, authorId]],
+    )) as { id: string; email: string; name: string | null }[];
+    const authorName = rows.find((r) => r.id === authorId)?.name ?? 'Someone';
+    const text = excerpt(tagged.body);
+    const push = {
+      key: PushNotificationKey.TEAM_SPACE_MENTION,
+      vars: {
+        author_name: authorName,
+        space_name: acc.name,
+        excerpt: text,
+      },
+      url: link.url,
+    };
+    for (const row of rows) {
+      if (row.id === authorId) continue;
+      const heading = `${authorName} tagged you in ${acc.name}`;
+      this.notifications
+        .notifyMember({
+          category: EmailCategory.TEAM_SPACES,
+          email: {
+            to: row.email,
+            subject: heading,
+            template: 'account-lifecycle-notice',
+            data: { heading, message: text },
+            recipientMemberId: row.id,
+          },
+          push: {
+            ...push,
+            memberIds: [row.id],
+            idempotencyKey: `${link.dedupe}:${row.id}`,
+          },
+        })
+        .catch(() => undefined);
+    }
+    // Push only, because emailing a whole team for one message is too easy to overdo.
+    const rest = everyone.filter((id) => !named.includes(id));
+    if (rest.length) {
+      this.notifications
+        .notifyMember({
+          category: EmailCategory.TEAM_SPACES,
+          push: {
+            ...push,
+            memberIds: rest,
+            idempotencyKey: `${link.dedupe}:team`,
+          },
+        })
+        .catch(() => undefined);
+    }
+    return new Set([...named, ...everyone]);
+  }
+
+  private async notifyNewTags(
+    acc: SpaceAccess,
+    tagged: TaggedBody,
+    previousBody: string,
+    authorId: string,
+    link: { url: string; dedupe: string },
+  ): Promise<void> {
+    const before = parseMentions(previousBody);
+    await this.notifyTagged(
+      acc,
+      {
+        body: tagged.body,
+        memberIds: tagged.memberIds.filter(
+          (id) => !before.memberIds.includes(id),
+        ),
+        team: tagged.team && !before.team,
+      },
+      authorId,
+      link,
+    );
+  }
+
   private async pushLeaderPost(
     acc: SpaceAccess,
     post: TeamPost,
     authorId: string,
+    alreadyTold: Set<string>,
   ) {
     const [memberIds, author] = await Promise.all([
       this.access.memberIds(acc.space),
@@ -571,7 +765,9 @@ export class TeamSpaceService {
         [authorId],
       ) as Promise<{ name: string | null }[]>,
     ]);
-    const recipients = memberIds.filter((id) => id !== authorId);
+    const recipients = memberIds.filter(
+      (id) => id !== authorId && !alreadyTold.has(id),
+    );
     if (!recipients.length) return;
     // Lookups above run in the request; only the send itself is left to finish on its own.
     this.notifications

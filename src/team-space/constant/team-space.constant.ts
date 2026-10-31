@@ -1,5 +1,7 @@
 export const POST_MAX_LENGTH = 2000;
 export const REPLY_MAX_LENGTH = 1000;
+// Room for stored tags; the visible text is checked against the limits above.
+export const TAG_ALLOWANCE = 800;
 export const FEED_PAGE_SIZE = 20;
 export const REPLY_PAGE_SIZE = 50;
 export const MAX_PINNED = 3;

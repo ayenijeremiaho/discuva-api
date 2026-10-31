@@ -52,6 +52,7 @@ export enum PushNotificationKey {
   TEAM_PULSE_REMINDER = 'TEAM_PULSE_REMINDER',
   TEAM_SPACE_LEADER_POST = 'TEAM_SPACE_LEADER_POST',
   TEAM_SPACE_REPLY = 'TEAM_SPACE_REPLY',
+  TEAM_SPACE_MENTION = 'TEAM_SPACE_MENTION',
   TEAM_SPACE_DIGEST = 'TEAM_SPACE_DIGEST',
   TEAM_SPACE_MEETING = 'TEAM_SPACE_MEETING',
   TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
@@ -615,6 +616,20 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       space_name: 'Choir',
       author_name: 'Deacon Femi',
       excerpt: 'Rehearsal moves to 5pm on Saturday. Please bring your folders.',
+    },
+  },
+  [PushNotificationKey.TEAM_SPACE_MENTION]: {
+    category: EmailCategory.TEAM_SPACES,
+    label: 'Tagged in a team space',
+    description:
+      'Sent to someone tagged in a team space post or reply, and to the whole team when a leader tags @team.',
+    title: '{{author_name}} tagged you in {{space_name}}',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      author_name: 'Ada',
+      space_name: 'Choir',
+      excerpt: '@Femi can you bring the folders on Saturday?',
     },
   },
   [PushNotificationKey.TEAM_SPACE_REPLY]: {

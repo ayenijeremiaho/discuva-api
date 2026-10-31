@@ -44094,6 +44094,36 @@
           }
         }
       ]
+    },
+    {
+      "name": "Team Spaces - Tagging",
+      "item": [
+        {
+          "name": "People You Can Tag",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/team-spaces/{{kind}}/{{ref_id}}/people",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "team-spaces",
+                "{{kind}}",
+                "{{ref_id}}",
+                "people"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

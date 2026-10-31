@@ -209,6 +209,15 @@ export class TeamSpaceController {
     return this.spaces.open(user.id, kind, refId);
   }
 
+  @Get(':kind/:refId/people')
+  people(
+    @CurrentUser() user: MemberAuth,
+    @Kind() kind: TeamSpaceKindEnum,
+    @Uuid('refId') refId: string,
+  ) {
+    return this.spaces.people(user.id, kind, refId);
+  }
+
   @Get(':kind/:refId/posts')
   feed(
     @CurrentUser() user: MemberAuth,

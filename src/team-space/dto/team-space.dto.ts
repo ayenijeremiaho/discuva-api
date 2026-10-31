@@ -17,6 +17,7 @@ import { Transform } from 'class-transformer';
 import {
   POST_MAX_LENGTH,
   REPLY_MAX_LENGTH,
+  TAG_ALLOWANCE,
 } from '../constant/team-space.constant';
 
 const trim = ({ value }: { value: unknown }) =>
@@ -31,14 +32,14 @@ export class ReactionDto {
 export class PostBodyDto {
   @Transform(trim)
   @IsString()
-  @Length(1, POST_MAX_LENGTH)
+  @Length(1, POST_MAX_LENGTH + TAG_ALLOWANCE)
   body: string;
 }
 
 export class ReplyBodyDto {
   @Transform(trim)
   @IsString()
-  @Length(1, REPLY_MAX_LENGTH)
+  @Length(1, REPLY_MAX_LENGTH + TAG_ALLOWANCE)
   body: string;
 }
 
