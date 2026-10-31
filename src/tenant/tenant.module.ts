@@ -21,6 +21,8 @@ import { PlatformAdminRole } from '../platform-admin/entity/platform-admin-role.
 import { TenantMiddleware } from './middleware/tenant.middleware';
 import { TenantInfoController } from './controller/tenant-info.controller';
 import { SignupController } from './controller/signup.controller';
+import { TenantReport } from './entity/tenant-report.entity';
+import { TenantReportService } from './service/tenant-report.service';
 import {
   ACCOUNT_FILE_CLEANUP_QUEUE,
   AccountFileCleanupProcessor,
@@ -115,6 +117,7 @@ import { BranchModule } from '../branch/branch.module';
       Tenant,
       TenantAssetOverride,
       TenantOnboardingEvent,
+      TenantReport,
       // Read-only here — just to find who to email when a signup needs
       // approval (TenantProvisioningService.holdForApproval). Registering
       // the entities directly avoids importing PlatformAdminModule wholesale
@@ -145,6 +148,7 @@ import { BranchModule } from '../branch/branch.module';
   ],
   providers: [
     AccountFileCleanupProcessor,
+    TenantReportService,
     AccountLifecycleScheduler,
     ChurchRequestService,
     TenantMiddleware,
@@ -154,7 +158,12 @@ import { BranchModule } from '../branch/branch.module';
     TenantProvisioningProcessor,
     FounderWelcomeEmailScheduler,
   ],
-  exports: [TenantMiddleware, TenantProvisioningService, ChurchRequestService],
+  exports: [
+    TenantMiddleware,
+    TenantProvisioningService,
+    ChurchRequestService,
+    TenantReportService,
+  ],
 })
 export class TenantModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

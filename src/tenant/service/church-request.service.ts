@@ -25,6 +25,7 @@ import {
   emailMatchesWebsite,
   isPersonalEmail,
   isSocialPage,
+  soundsLikeChurch,
 } from '../util/church-request-checks';
 
 const CONFIRM_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -68,6 +69,7 @@ export interface ChurchRequestReview {
     emailMatchesWebsite: boolean;
     personalEmail: boolean;
     socialPageOnly: boolean;
+    groupNamedLikeChurch: boolean;
     possibleDuplicates: { id: string; name: string; subdomain: string }[];
   };
 }
@@ -309,6 +311,13 @@ export class ChurchRequestService {
   ): Promise<void> {
     const tenant = await this.tenantRepo.findOneBy({ id: tenantId });
     if (!tenant) throw new NotFoundException('Tenant not found');
+    // Clearing a badge would also make the account eligible for auto-delete, so it isn't done by accident.
+    if (
+      !approved &&
+      tenant.verificationStatus === TenantVerificationStatus.VERIFIED
+    ) {
+      throw new ConflictException('A verified account cannot be declined.');
+    }
     await this.tenantRepo.update(tenant.id, {
       verificationStatus: approved
         ? TenantVerificationStatus.VERIFIED
@@ -347,7 +356,13 @@ export class ChurchRequestService {
 
   // Approving a held church or NGO is its verification, so it gets one review and no second step.
   async markVerifiedOnApproval(tenant: Tenant): Promise<void> {
-    if (!reviewedFirst(tenant.orgType)) return;
+    // A group held for its name still starts private, so approval isn't its badge.
+    if (!reviewedFirst(tenant.orgType)) {
+      await this.tenantRepo.update(tenant.id, {
+        verificationStatus: TenantVerificationStatus.NONE,
+      });
+      return;
+    }
     await this.tenantRepo.update(tenant.id, {
       verificationStatus: TenantVerificationStatus.VERIFIED,
       verifiedAt: new Date(),
@@ -369,6 +384,9 @@ export class ChurchRequestService {
         ),
         personalEmail: isPersonalEmail(details?.contactEmail),
         socialPageOnly: isSocialPage(details?.website),
+        groupNamedLikeChurch:
+          tenant.orgType === OrganisationTypeEnum.GROUP &&
+          soundsLikeChurch(tenant.name),
         possibleDuplicates: await this.findDuplicates(tenant, details),
       },
     };
@@ -417,7 +435,8 @@ export class ChurchRequestService {
       id: tenant.id,
       onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
     };
-    const review = reviewedFirst(tenant.orgType);
+    const review =
+      reviewedFirst(tenant.orgType) || soundsLikeChurch(tenant.name);
     if (review || (await this.settingsService.getSelfServeRequiresApproval())) {
       const moved = await this.tenantRepo.update(fromConfirmation, {
         onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,

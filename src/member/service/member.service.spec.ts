@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -106,6 +107,13 @@ describe('MemberService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: TenantVerificationService,
+          useValue: {
+            assertRoomForMembers: jest.fn().mockResolvedValue(undefined),
+            assertNotPrivateGroup: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         MemberService,
         { provide: getRepositoryToken(Member), useValue: mockMemberRepo },
         {

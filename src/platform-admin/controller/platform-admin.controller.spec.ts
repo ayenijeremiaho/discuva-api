@@ -1,3 +1,4 @@
+import { TenantReportService } from '../../tenant/service/tenant-report.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { PlatformAdminController } from './platform-admin.controller';
@@ -67,6 +68,14 @@ describe('PlatformAdminController (billing support routes)', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PlatformAdminController],
       providers: [
+        {
+          provide: TenantReportService,
+          useValue: {
+            create: jest.fn(),
+            listOpen: jest.fn(),
+            markReviewed: jest.fn(),
+          },
+        },
         { provide: PlatformAdminAuthService, useValue: mockAuthService },
         { provide: PlatformTenantService, useValue: {} },
         { provide: PlatformPlanService, useValue: {} },

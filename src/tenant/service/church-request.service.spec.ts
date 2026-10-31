@@ -186,7 +186,10 @@ describe('ChurchRequestService', () => {
   describe('confirm', () => {
     it('creates a group account straight away', async () => {
       mockRepo.findOneBy.mockResolvedValue(
-        tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
+        tenantWith({
+          orgType: OrganisationTypeEnum.GROUP,
+          name: 'Friday Prayer',
+        }),
       );
 
       const result = await service.confirm(tokenFor('ada@example.com'));
@@ -229,10 +232,27 @@ describe('ChurchRequestService', () => {
       expect(mockProvisioning.holdForApproval).not.toHaveBeenCalled();
     });
 
+    it('holds a group whose name sounds like a church', async () => {
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({
+          orgType: OrganisationTypeEnum.GROUP,
+          name: 'Grace Church',
+        }),
+      );
+
+      const result = await service.confirm(tokenFor('ada@example.com'));
+
+      expect(result.status).toBe(TenantOnboardingStatus.AWAITING_APPROVAL);
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
+    });
+
     it('holds a group for review only when the off switch is used', async () => {
       mockSettings.getSelfServeRequiresApproval.mockResolvedValue(true);
       mockRepo.findOneBy.mockResolvedValue(
-        tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
+        tenantWith({
+          orgType: OrganisationTypeEnum.GROUP,
+          name: 'Friday Prayer',
+        }),
       );
 
       const result = await service.confirm(tokenFor('ada@example.com'));
@@ -362,6 +382,19 @@ describe('ChurchRequestService', () => {
       await service.markVerifiedOnApproval(
         tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
       );
+      expect(mockRepo.update).toHaveBeenCalledWith('t1', {
+        verificationStatus: TenantVerificationStatus.NONE,
+      });
+    });
+
+    it("won't decline an already verified account", async () => {
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({ verificationStatus: TenantVerificationStatus.VERIFIED }),
+      );
+
+      await expect(service.decideVerification('t1', false)).rejects.toThrow(
+        ConflictException,
+      );
       expect(mockRepo.update).not.toHaveBeenCalled();
     });
 
@@ -394,6 +427,7 @@ describe('ChurchRequestService', () => {
       emailMatchesWebsite: true,
       personalEmail: false,
       socialPageOnly: false,
+      groupNamedLikeChurch: false,
       possibleDuplicates: [
         { id: 't2', name: 'Hope Assembly', subdomain: 'hope2' },
       ],

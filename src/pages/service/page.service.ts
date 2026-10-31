@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   BadRequestException,
   Injectable,
@@ -41,6 +42,7 @@ export class PageService {
   private readonly cacheTtl: number;
 
   constructor(
+    private readonly verification: TenantVerificationService,
     @InjectRepository(Page)
     private readonly pageRepo: Repository<Page>,
     @InjectRepository(Form)
@@ -537,6 +539,7 @@ export class PageService {
   // publishing swaps it for a different one (safe here — nothing else
   // could still be pointing at it once this save commits).
   async publish(id: string): Promise<Page> {
+    await this.verification.assertNotPrivateGroup('publish a public page');
     const page = await this.getById(id);
     await this.assertValidSections(page.draftSections);
 

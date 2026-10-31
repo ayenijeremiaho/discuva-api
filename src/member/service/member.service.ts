@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   AudienceTarget,
   scopeToAudience,
@@ -48,6 +49,7 @@ export class MemberService {
   private readonly churchAddress: string;
 
   constructor(
+    private readonly verification: TenantVerificationService,
     @InjectRepository(Member)
     private readonly memberRepository: Repository<Member>,
     @InjectRepository(WorkerProfile)
@@ -95,6 +97,9 @@ export class MemberService {
   }
 
   private async createMemberRecord(dto: SignupDto): Promise<Member> {
+    await this.verification.assertRoomForMembers(() =>
+      this.memberRepository.count(),
+    );
     await this.assertEmailUnique(dto.email);
 
     const tempPassword = UtilityService.generateRandomPassword();

@@ -1,3 +1,4 @@
+import { TenantReportService } from '../service/tenant-report.service';
 /// <reference types="jest" />
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -87,6 +88,14 @@ describe('TenantInfoController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TenantInfoController],
       providers: [
+        {
+          provide: TenantReportService,
+          useValue: {
+            create: jest.fn(),
+            listOpen: jest.fn(),
+            markReviewed: jest.fn(),
+          },
+        },
         { provide: ClsService, useValue: mockCls },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: CacheService, useValue: mockCacheService },
@@ -115,6 +124,7 @@ describe('TenantInfoController', () => {
 
       expect(result).toEqual({
         name: 'Test Church',
+        privateGroup: false,
         subdomain: 'test-church',
         logoUrl: 'https://cdn.example.com/platform-default-logo.png',
         tagline: null,

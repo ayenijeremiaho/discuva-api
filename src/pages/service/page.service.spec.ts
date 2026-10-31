@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -94,6 +95,10 @@ const mockGalleryFolderSyncService = {
   listImages: jest.fn().mockResolvedValue([]),
 };
 
+const mockVerification = {
+  assertNotPrivateGroup: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('PageService', () => {
   let service: PageService;
 
@@ -112,6 +117,7 @@ describe('PageService', () => {
     mockGalleryFolderSyncService.listImages.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        { provide: TenantVerificationService, useValue: mockVerification },
         PageService,
         { provide: getRepositoryToken(Page), useValue: mockPageRepo },
         { provide: getRepositoryToken(Form), useValue: mockFormRepo },
@@ -1043,6 +1049,15 @@ describe('PageService', () => {
   });
 
   describe('publish', () => {
+    it('refuses a private group before touching the page', async () => {
+      mockVerification.assertNotPrivateGroup.mockRejectedValueOnce(
+        new Error('Please verify your group'),
+      );
+      await expect(service.publish('page-1')).rejects.toThrow(
+        'verify your group',
+      );
+    });
+
     it('copies every draft* field onto its live counterpart and sets isPublished', async () => {
       mockPageRepo.findOneBy.mockResolvedValue(
         makeExistingPage({

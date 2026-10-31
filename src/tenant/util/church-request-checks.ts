@@ -1,3 +1,10 @@
+const CHURCH_WORDS =
+  /\b(church|cathedral|parish|chapel|diocese|tabernacle|assembly|basilica)\b/i;
+
+// A simple filter: someone could reword a name, which is why private groups also have no giving or public pages.
+export const soundsLikeChurch = (name: string): boolean =>
+  CHURCH_WORDS.test(name);
+
 const PERSONAL_EMAIL_DOMAINS = new Set([
   'gmail.com',
   'googlemail.com',

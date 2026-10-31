@@ -29,6 +29,7 @@ export enum PlatformSettingKey {
   // The verification review time promised to churches.
   REQUEST_REVIEW_HOURS = 'request_review_hours',
   UNVERIFIED_DAILY_EMAIL_LIMIT = 'unverified_daily_email_limit',
+  UNVERIFIED_GROUP_MEMBER_LIMIT = 'unverified_group_member_limit',
   ACCOUNT_ARCHIVE_AFTER_DAYS = 'account_archive_after_days',
   ACCOUNT_DELETE_AFTER_DAYS = 'account_delete_after_days',
   ACCOUNT_AUTO_DELETE = 'account_auto_delete',

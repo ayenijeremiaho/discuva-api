@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   BadRequestException,
   Injectable,
@@ -79,6 +80,7 @@ export class MemberImportService {
   private readonly defaultPhoneRegion: CountryCode;
 
   constructor(
+    private readonly verification: TenantVerificationService,
     @InjectRepository(MemberImportJob)
     private readonly jobRepository: Repository<MemberImportJob>,
     @InjectRepository(MemberImportRow)
@@ -452,6 +454,10 @@ export class MemberImportService {
       order: { rowNumber: 'ASC' },
     });
     const validRows = rows.filter((r) => r.errors.length === 0);
+    await this.verification.assertRoomForMembers(
+      () => this.memberRepository.count(),
+      validRows.length,
+    );
 
     // Batched instead of a per-row email lookup + per-row department lookup
     // + per-row transaction — this fetches everything needed to validate

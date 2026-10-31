@@ -199,17 +199,18 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return count;
   }
 
-  async incr(rawKey: string, ttlSeconds: number): Promise<number> {
+  async incr(rawKey: string, ttlSeconds: number, by = 1): Promise<number> {
     const key = this.scopedKey(rawKey);
     // Lua script makes INCR + EXPIRE atomic — prevents a key with no TTL
     // if the process crashes between the two commands.
     const result = await this.redis.eval(
-      `local n = redis.call('INCR', KEYS[1])
-       if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+      `local n = redis.call('INCRBY', KEYS[1], ARGV[2])
+       if n == tonumber(ARGV[2]) then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
        return n`,
       1,
       key,
       ttlSeconds,
+      by,
     );
     return result as number;
   }

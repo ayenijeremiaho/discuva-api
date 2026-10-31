@@ -1,3 +1,4 @@
+import { TenantReportService } from '../../tenant/service/tenant-report.service';
 import { VerificationDecisionDto } from '../../tenant/dto/signup.dto';
 import {
   Body,
@@ -92,6 +93,7 @@ import { SocialPlatform } from '../../social-media/enum/social-media.enum';
 @Controller('platform')
 export class PlatformAdminController {
   constructor(
+    private readonly tenantReports: TenantReportService,
     private readonly platformAdminAuthService: PlatformAdminAuthService,
     private readonly tenantService: PlatformTenantService,
     private readonly planService: PlatformPlanService,
@@ -372,6 +374,21 @@ export class PlatformAdminController {
       admin.id,
       dto.note,
     );
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('tenant-reports')
+  listTenantReports() {
+    return this.tenantReports.listOpen();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Patch('tenant-reports/:id/reviewed')
+  markTenantReportReviewed(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tenantReports.markReviewed(id);
   }
 
   @UseGuards(PlatformAdminGuard)

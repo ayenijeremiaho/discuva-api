@@ -39,10 +39,11 @@ export class EmailAllowanceService {
     );
     const day = new Date().toISOString().slice(0, 10);
     const key = `email-allowance:${tenantId}:${day}`;
-    let used = 0;
-    for (let i = 0; i < recipients; i++) {
-      used = await this.cacheService.incr(key, TWO_DAYS_SECONDS);
-    }
+    const used = await this.cacheService.incr(
+      key,
+      TWO_DAYS_SECONDS,
+      recipients,
+    );
     if (used > limit) {
       this.logger.warn(`Daily email limit reached for tenant ${tenantId}`);
       return false;

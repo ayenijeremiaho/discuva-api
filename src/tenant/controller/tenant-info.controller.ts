@@ -10,6 +10,8 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import 'multer';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -29,6 +31,10 @@ import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
 import { phoneRegionFromLocale } from '../../utility/decorators/normalize-phone.decorator';
 import { TenantProfileService } from '../service/tenant-profile.service';
+import { TenantReportService } from '../service/tenant-report.service';
+import { CreateTenantReportDto } from '../dto/tenant-report.dto';
+import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
+import { Throttle } from '@nestjs/throttler';
 import { CurrentAdmin } from '../../admin/decorator/current-admin.decorator';
 import { Admin } from '../../admin/entity/admin.entity';
 
@@ -56,7 +62,18 @@ export class TenantInfoController {
     private readonly tenantRepository: Repository<Tenant>,
     private readonly tenantAssetService: TenantAssetService,
     private readonly tenantProfileService: TenantProfileService,
+    private readonly tenantReports: TenantReportService,
   ) {}
+
+  // Open to anyone, so someone being misled can report without an account.
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 3_600_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('report')
+  async report(@Body() dto: CreateTenantReportDto) {
+    const tenant = await this.currentTenantOrThrow();
+    await this.tenantReports.create(tenant, dto.reason, dto.reporterEmail);
+  }
 
   @Public()
   @Get('info')
@@ -191,6 +208,8 @@ export class TenantInfoController {
       // JWT to read it from and no per-tenant subdomain of its own to
       // resolve it from either.
       subdomain: tenant.subdomain,
+      privateGroup:
+        tenant.orgType === OrganisationTypeEnum.GROUP && !tenant.verifiedAt,
       // Same fallback EmailQueueService/PdfService already apply when a
       // tenant hasn't uploaded its own logo — without this, every
       // logo-consuming surface (favicon swap, PWA manifest icon) stayed

@@ -129,6 +129,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 8,
     max: 3650,
   },
+  [PlatformSettingKey.UNVERIFIED_GROUP_MEMBER_LIMIT]: {
+    label: 'Private Group Member Limit',
+    unit: 'people, until a small group is verified',
+    defaultValue: 50,
+    min: 5,
+    max: 1000,
+  },
   [PlatformSettingKey.ACCOUNT_AUTO_DELETE]: {
     label: 'Permanently Delete Inactive Accounts',
     unit: 'off = archive only; on = permanently delete the data — 0 = off, 1 = on',

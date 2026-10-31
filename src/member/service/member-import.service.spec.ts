@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException } from '@nestjs/common';
@@ -97,6 +98,13 @@ describe('MemberImportService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: TenantVerificationService,
+          useValue: {
+            assertRoomForMembers: jest.fn().mockResolvedValue(undefined),
+            assertNotPrivateGroup: jest.fn().mockResolvedValue(undefined),
+          },
+        },
         MemberImportService,
         {
           provide: getRepositoryToken(MemberImportJob),

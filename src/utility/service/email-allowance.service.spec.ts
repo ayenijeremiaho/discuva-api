@@ -9,7 +9,7 @@ import { EmailCategory } from '../email-provider/email-category.enum';
 
 let count = 0;
 const mockCache = {
-  incr: jest.fn(async () => ++count),
+  incr: jest.fn(async (_k: string, _t: number, by = 1) => (count += by)),
 };
 const mockVerification = { isVerified: jest.fn() };
 const mockCredentials = { resolveConfig: jest.fn() };
