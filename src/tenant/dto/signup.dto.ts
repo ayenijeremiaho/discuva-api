@@ -1,5 +1,7 @@
 import {
+  IsBoolean,
   IsEmail,
+  IsIn,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -94,6 +96,19 @@ export class SignupDto {
   @Min(1)
   @Max(1000)
   locationCount?: number;
+
+  @IsOptional()
+  @IsIn(['ONE_CHURCH', 'NETWORK', 'NOT_SURE'])
+  locationStructure?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  otherLocations?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  meetsOnline?: boolean;
 
   @IsOptional()
   @IsString()

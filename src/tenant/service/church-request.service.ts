@@ -34,6 +34,9 @@ export interface ChurchRequestDetails {
   stateCode?: string;
   size?: string;
   locationCount?: number;
+  locationStructure?: string;
+  otherLocations?: string;
+  meetsOnline?: boolean;
   website?: string;
   requesterRole?: string;
   requesterPhone?: string;
@@ -98,6 +101,9 @@ export class ChurchRequestService {
       stateCode: dto.stateCode,
       size: dto.size,
       locationCount: dto.locationCount,
+      locationStructure: dto.locationStructure,
+      otherLocations: dto.otherLocations,
+      meetsOnline: dto.meetsOnline,
       website: dto.website,
       requesterRole: dto.requesterRole,
       requesterPhone: dto.requesterPhone,
