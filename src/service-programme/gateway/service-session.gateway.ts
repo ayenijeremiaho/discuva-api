@@ -176,6 +176,16 @@ export class ServiceSessionGateway
       .emit('session:state', state);
   }
 
+  // Works across servers, through the Redis adapter.
+  async hasOpenScreens(sessionCode: string): Promise<boolean> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return false;
+    const sockets = await this.server
+      .in(this.roomKey(tenantId, sessionCode))
+      .fetchSockets();
+    return sockets.length > 0;
+  }
+
   broadcastActiveSessionsChanged(
     tenantId: string,
     sessions: ActiveSessionSummary,

@@ -229,6 +229,7 @@ function teamOnSlot(slot: ServiceSessionSlot): Department | null {
 
 const SESSION_TTL_LIVE = 86400 * 2;
 const SESSION_TTL_COMPLETED = 86400 * 2;
+const REOPEN_WITHIN_MS = 12 * 3_600_000;
 const ANALYTICS_TTL = 1800;
 
 // Live controls mirrored into the church-wide audit log (session action names → audit actions).
@@ -1284,6 +1285,7 @@ export class ServiceSessionService {
     sessionCode: string,
     memberId: string | null,
     actorLabel: string | null = null,
+    endedAt?: Date,
   ): Promise<ServiceSession> {
     if (memberId) await this.assertCanControlSession(memberId);
 
@@ -1294,7 +1296,7 @@ export class ServiceSessionService {
       'programme.serviceSlot',
     ]);
 
-    const now = Date.now();
+    const now = endedAt?.getTime() ?? Date.now();
     const currentActualSeconds = this.calcElapsed(anchor, now);
 
     // this.txHost.tx, not this.dataSource.transaction() — see
@@ -1372,6 +1374,97 @@ export class ServiceSessionService {
     );
     this.cacheService.flushNamespace('session:analytics');
 
+    return this.sessionRepo.findOne({ where: { id: session.id } });
+  }
+
+  // Undoes an end, whether by mistake or by the auto-end: carries on from the item that was running.
+  async reopen(
+    sessionCode: string,
+    memberId: string,
+    now = new Date(),
+  ): Promise<ServiceSession> {
+    await this.assertCanControlSession(memberId);
+    const session = await this.getSessionOrThrow(sessionCode, [
+      'programme',
+      'programme.serviceSlot',
+      'programme.serviceSlot.event',
+      'sessionSlots',
+    ]);
+    if (session.status !== ServiceSessionStatusEnum.COMPLETED)
+      throw new ConflictException('This service is still running.');
+    if (
+      !session.endedAt ||
+      now.getTime() - session.endedAt.getTime() > REOPEN_WITHIN_MS
+    )
+      throw new ConflictException('This service ended too long ago to reopen.');
+    const eventId = session.programme.serviceSlot?.event?.id;
+    const manager = this.txHost.tx;
+    const live = (await manager.query(
+      `SELECT 1 FROM service_sessions s
+       JOIN service_programmes p ON p.id = s.programme_id
+       JOIN service_slots ss ON ss.id = p.service_slot_id
+       WHERE s.status = 'LIVE' AND ss.event_id = $1 AND s.id <> $2 LIMIT 1`,
+      [eventId, session.id],
+    )) as unknown[];
+    if (live.length)
+      throw new ConflictException(
+        'The next service has already started. End it first to reopen this one.',
+      );
+    const last = [...(session.sessionSlots ?? [])]
+      .filter((slot) => slot.completedAt)
+      .sort((a, b) => b.completedAt!.getTime() - a.completedAt!.getTime())[0];
+    const position = last?.position ?? 0;
+    await manager.update(
+      ServiceSessionSlot,
+      { session: { id: session.id }, position },
+      {
+        status: ServiceSessionSlotStatusEnum.IN_PROGRESS,
+        completedAt: null,
+      },
+    );
+    await manager
+      .createQueryBuilder()
+      .update(ServiceSessionSlot)
+      .set({ status: ServiceSessionSlotStatusEnum.PENDING })
+      .where(
+        'session_id = :sid AND position > :position AND status = :skipped',
+        {
+          sid: session.id,
+          position,
+          skipped: ServiceSessionSlotStatusEnum.SKIPPED,
+        },
+      )
+      .execute();
+    await manager.update(
+      ServiceSession,
+      { id: session.id },
+      { status: ServiceSessionStatusEnum.LIVE, endedAt: null },
+    );
+    await this.programmeSvc.setProgrammeStatus(
+      session.programme.id,
+      ServiceProgrammeStatusEnum.LIVE,
+    );
+    const anchor: SessionAnchor = {
+      currentSlotPosition: position,
+      slotStartedAt: now.getTime(),
+      slotBaseSeconds: last?.actualSeconds ?? 0,
+      status: ServiceSessionStatusEnum.LIVE,
+      isPaused: false,
+      pausedAt: null,
+    };
+    this.cacheService.set(
+      this.anchorKey(sessionCode),
+      anchor,
+      SESSION_TTL_LIVE,
+    );
+    await this.logAction(
+      session.id,
+      ServiceActionRoleEnum.WORKER,
+      'SESSION_REOPENED',
+      null,
+      memberId,
+      null,
+    );
     return this.sessionRepo.findOne({ where: { id: session.id } });
   }
 

@@ -75,6 +75,11 @@ export const KNOWN_REMINDER_SETTINGS: Record<
     unit: 'hours before a service, to everyone on the rota for it',
     defaultThresholds: [24, 2],
   },
+  [ReminderSettingKey.PROGRAMME_AUTO_END]: {
+    label: 'End Forgotten Programmes',
+    unit: 'minutes after the service ends and the last action, for a live programme nobody ended',
+    defaultThresholds: [60],
+  },
   [ReminderSettingKey.THANK_YOU]: {
     label: 'Thank You After Service',
     unit: 'minutes after the service ends, to everyone who checked in (0 sends it straight away)',

@@ -22,6 +22,7 @@ import { ServiceSessionGateway } from './gateway/service-session.gateway';
 import { ShareTokenGuard } from './guard/share-token.guard';
 import { NamedAccessGuard } from './guard/named-access.guard';
 import { ServiceProgrammeReminderScheduler } from './scheduler/service-programme-reminder.scheduler';
+import { ProgrammeAutoEndScheduler } from './scheduler/programme-auto-end.scheduler';
 import { ProgrammeAutoStartScheduler } from './scheduler/programme-auto-start.scheduler';
 import { UtilityModule } from '../utility/utility.module';
 import { DepartmentModule } from '../department/department.module';
@@ -79,6 +80,7 @@ import { ProgrammePlannerGuard } from './guard/programme-planner.guard';
     NamedAccessGuard,
     ServiceProgrammeReminderScheduler,
     ProgrammeAutoStartScheduler,
+    ProgrammeAutoEndScheduler,
   ],
   exports: [ServiceProgrammeService, ServiceSessionService],
 })

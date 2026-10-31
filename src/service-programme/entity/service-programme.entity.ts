@@ -28,6 +28,10 @@ export class ServiceProgramme extends BaseEntity {
   @Column({ default: ServiceProgrammeStatusEnum.DRAFT })
   status: ServiceProgrammeStatusEnum;
 
+  // Null while it's a draft: nobody is told about a programme until it's published.
+  @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
+  publishedAt: Date | null;
+
   @Column({ name: 'save_as_template', default: false })
   saveAsTemplate: boolean;
 

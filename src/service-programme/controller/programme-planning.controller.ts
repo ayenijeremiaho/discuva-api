@@ -119,6 +119,38 @@ export class ProgrammePlanningController {
   }
 
   @UseGuards(ProgrammePlannerGuard)
+  @Post('programmes/:id/publish')
+  async publish(
+    @CurrentUser() user: MemberAuth,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.programmes.publish([id]);
+    const programme = await this.planning.view(id);
+    this.planning.audit(
+      'PROGRAMME_PUBLISHED',
+      user.id,
+      ProgrammePlanningService.nameOf(programme),
+    );
+    return programme;
+  }
+
+  @UseGuards(ProgrammePlannerGuard)
+  @Post('programmes/:id/unpublish')
+  async unpublish(
+    @CurrentUser() user: MemberAuth,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    await this.programmes.unpublish(id);
+    const programme = await this.planning.view(id);
+    this.planning.audit(
+      'PROGRAMME_UNPUBLISHED',
+      user.id,
+      ProgrammePlanningService.nameOf(programme),
+    );
+    return programme;
+  }
+
+  @UseGuards(ProgrammePlannerGuard)
   @Post('programmes/:id/items')
   async addItem(
     @CurrentUser() user: MemberAuth,

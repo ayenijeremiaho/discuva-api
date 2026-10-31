@@ -1,3 +1,4 @@
+import { PublishProgrammesDto } from '../dto/publish-programmes.dto';
 import {
   Body,
   Controller,
@@ -189,6 +190,43 @@ export class ServiceProgrammeController {
     const result = await this.programmeSvc.remove(id);
     await this.audit('PROGRAMME_DELETED', admin, id, {}, label);
     return result;
+  }
+
+  @Post('publish')
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_WRITE)
+  async publish(
+    @Body() dto: PublishProgrammesDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    const result = await this.programmeSvc.publish(dto.programmeIds);
+    for (const id of dto.programmeIds)
+      await this.audit(
+        'PROGRAMME_PUBLISHED',
+        admin,
+        id,
+        {},
+        await this.programmeSvc.labelOf(id),
+      );
+    return result;
+  }
+
+  @Post(':id/unpublish')
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_WRITE)
+  async unpublish(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    await this.programmeSvc.unpublish(id);
+    await this.audit(
+      'PROGRAMME_UNPUBLISHED',
+      admin,
+      id,
+      {},
+      await this.programmeSvc.labelOf(id),
+    );
+    return { ok: true };
   }
 
   @Post(':id/slots')

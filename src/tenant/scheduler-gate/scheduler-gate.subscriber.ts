@@ -31,7 +31,7 @@ import { RotaAssignment } from '../../serving-rota/entity/rota-assignment.entity
 // Which gated jobs depend on each table. Any insert/update/delete, through any code path, wakes them for that church.
 export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   [ServiceProgramme, ['programme-auto-start']],
-  [ServiceSession, ['programme-auto-start']],
+  [ServiceSession, ['programme-auto-start', 'programme-auto-end']],
   [
     EventConfig,
     ['programme-auto-start', 'service-reminders', 'checkin-nudges'],
@@ -50,6 +50,7 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
     ServiceSlot,
     [
       'programme-auto-start',
+      'programme-auto-end',
       'absence-marking',
       'event-reminders',
       'social-live',
@@ -66,6 +67,7 @@ export const JOBS_BY_ENTITY = new Map<unknown, GatedJob[]>([
   [
     ChurchSetting,
     [
+      'programme-auto-end',
       'class-session-reminders',
       'fellowship-reminders',
       'social-live',

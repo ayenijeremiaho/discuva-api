@@ -83,6 +83,7 @@ export class ServiceProgrammeReminderScheduler {
       .where('programme.status = :status', {
         status: ServiceProgrammeStatusEnum.DRAFT,
       })
+      .andWhere('programme.publishedAt IS NOT NULL')
       .andWhere('slot.reminder_sent_at IS NULL')
       .andWhere(
         '(slot.member_id IS NOT NULL OR slot.department_id IS NOT NULL)',

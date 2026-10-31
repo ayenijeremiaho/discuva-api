@@ -115,6 +115,7 @@ describe('ProgrammePlanningService', () => {
         {
           id: 'p1',
           status: 'DRAFT',
+          publishedAt: null,
           serviceSlot: { id: 's1' },
           slots: [{ allocatedMinutes: 30 }, { allocatedMinutes: 45 }],
         },
@@ -128,6 +129,7 @@ describe('ProgrammePlanningService', () => {
           programme: {
             id: 'p1',
             status: 'DRAFT',
+            publishedAt: null,
             itemCount: 2,
             totalMinutes: 75,
           },

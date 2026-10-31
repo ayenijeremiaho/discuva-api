@@ -13,4 +13,5 @@ export enum ReminderSettingKey {
   TEAM_MEETING = 'team_meeting',
   ROTA_DUTY = 'rota_duty',
   THANK_YOU = 'thank_you',
+  PROGRAMME_AUTO_END = 'programme_auto_end',
 }

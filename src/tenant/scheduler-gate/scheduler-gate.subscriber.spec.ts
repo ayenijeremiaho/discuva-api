@@ -39,6 +39,7 @@ describe('SchedulerGateSubscriber', () => {
       ServiceSlot,
       [
         'programme-auto-start',
+        'programme-auto-end',
         'absence-marking',
         'event-reminders',
         'social-live',
@@ -51,13 +52,14 @@ describe('SchedulerGateSubscriber', () => {
     [
       'a live service session (unblocks the next auto-start)',
       ServiceSession,
-      ['programme-auto-start'],
+      ['programme-auto-start', 'programme-auto-end'],
     ],
     ['a class session', ClassSession, ['class-session-reminders']],
     [
       'reminder settings',
       ChurchSetting,
       [
+        'programme-auto-end',
         'class-session-reminders',
         'fellowship-reminders',
         'social-live',

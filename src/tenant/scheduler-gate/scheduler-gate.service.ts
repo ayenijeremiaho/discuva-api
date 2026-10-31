@@ -12,6 +12,7 @@ import { runInTenantContext } from '../utility/run-in-tenant-context';
 // Frequent background jobs that can skip a church until their next piece of work is due.
 export type GatedJob =
   | 'programme-auto-start'
+  | 'programme-auto-end'
   | 'absence-marking'
   | 'rental-status'
   | 'event-reminders'
@@ -27,6 +28,7 @@ export type GatedJob =
 
 export const ALL_GATED_JOBS: GatedJob[] = [
   'programme-auto-start',
+  'programme-auto-end',
   'absence-marking',
   'rental-status',
   'event-reminders',

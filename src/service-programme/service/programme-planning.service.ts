@@ -40,6 +40,7 @@ export interface PlanningService {
   programme: {
     id: string;
     status: string;
+    publishedAt: Date | null;
     itemCount: number;
     totalMinutes: number;
   } | null;
@@ -65,6 +66,7 @@ export interface PlanningItem {
 export interface PlanningProgramme {
   id: string;
   status: string;
+  publishedAt: Date | null;
   event: { id: string; name: string; eventDate: Date } | null;
   service: { id: string; name: string; startTime: Date; endTime: Date } | null;
   items: PlanningItem[];
@@ -187,6 +189,7 @@ export class ProgrammePlanningService {
           ? {
               id: programme.id,
               status: programme.status,
+              publishedAt: programme.publishedAt ?? null,
               itemCount: programme.slots.length,
               totalMinutes: programme.slots.reduce(
                 (sum, s) => sum + s.allocatedMinutes,
@@ -251,6 +254,7 @@ export class ProgrammePlanningService {
     return {
       id: p.id,
       status: p.status,
+      publishedAt: p.publishedAt ?? null,
       event: p.event ?? null,
       service: p.serviceSlotDetail
         ? {

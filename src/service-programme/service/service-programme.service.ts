@@ -330,58 +330,7 @@ export class ServiceProgrammeService {
       ? await this.slotRepo.save(slotsToSave)
       : [];
 
-    // Conflict-warning is a non-blocking, per-slot advisory that the create()
-    // path has never surfaced to the caller (its return value was discarded
-    // even before this method was batched) — skipped here entirely rather
-    // than computed-and-thrown-away, unlike addSlot()/updateSlot() which do
-    // return it.
-    const assignmentItems: {
-      programme: ServiceProgramme;
-      slot: ServiceProgrammeSlot;
-      member: Member;
-      isBackup: boolean;
-    }[] = [];
-    for (const slot of savedSlots) {
-      if (slot.member)
-        assignmentItems.push({
-          programme: slot.programme,
-          slot,
-          member: slot.member,
-          isBackup: false,
-        });
-      if (slot.backupMember)
-        assignmentItems.push({
-          programme: slot.programme,
-          slot,
-          member: slot.backupMember,
-          isBackup: true,
-        });
-    }
-    if (assignmentItems.length) {
-      this.notifyBulkSlotAssignments(assignmentItems);
-    }
-    const audiences = new Map<string, Promise<DepartmentAudience>>();
-    for (const slot of savedSlots) {
-      if (slot.department) {
-        this.notifyDepartmentAssignment(
-          slot.department,
-          slot.programme,
-          slot,
-          false,
-          audiences,
-        );
-      }
-      if (slot.backupDepartment) {
-        this.notifyDepartmentAssignment(
-          slot.backupDepartment,
-          slot.programme,
-          slot,
-          true,
-          audiences,
-        );
-      }
-    }
-
+    // A new programme is a draft, so nobody hears about it until it's published.
     const summaries = await this.findManyWithSummary(
       savedProgrammes.map((p) => p.id),
     );
@@ -445,6 +394,7 @@ export class ServiceProgrammeService {
         { memberId, departmentIds },
       )
       .andWhere('serviceSlot.start_time >= :now', { now: new Date() })
+      .andWhere('programme.publishedAt IS NOT NULL')
       .andWhere('programme.status IN (:...statuses)', {
         statuses: [
           ServiceProgrammeStatusEnum.DRAFT,
@@ -491,7 +441,7 @@ export class ServiceProgrammeService {
       .leftJoinAndSelect('slots.department', 'department')
       .leftJoinAndSelect('slots.backupDepartment', 'backupDepartment')
       .where(
-        `(programme.status = :live OR (programme.status = :draft AND serviceSlot.start_time >= :now))`,
+        `programme.publishedAt IS NOT NULL AND (programme.status = :live OR (programme.status = :draft AND serviceSlot.start_time >= :now)))`,
         {
           live: ServiceProgrammeStatusEnum.LIVE,
           draft: ServiceProgrammeStatusEnum.DRAFT,
@@ -708,15 +658,22 @@ export class ServiceProgrammeService {
       `Slot added to programme ${programme.id} at position ${position}`,
     );
 
-    if (member) this.notifySlotAssignment(member, programme, saved);
-    if (backupMember) {
-      this.notifySlotAssignment(backupMember, programme, saved, true);
-    }
-    if (department) {
-      this.notifyDepartmentAssignment(department, programme, saved);
-    }
-    if (backupDepartment) {
-      this.notifyDepartmentAssignment(backupDepartment, programme, saved, true);
+    if (programme.publishedAt) {
+      if (member) this.notifySlotAssignment(member, programme, saved);
+      if (backupMember) {
+        this.notifySlotAssignment(backupMember, programme, saved, true);
+      }
+      if (department) {
+        this.notifyDepartmentAssignment(department, programme, saved);
+      }
+      if (backupDepartment) {
+        this.notifyDepartmentAssignment(
+          backupDepartment,
+          programme,
+          saved,
+          true,
+        );
+      }
     }
 
     const conflictWarning = member
@@ -779,7 +736,8 @@ export class ServiceProgrammeService {
       saved.member &&
       saved.member.id !== previousMemberId;
 
-    if (isNewAssignment) {
+    const announced = !!slot.programme.publishedAt;
+    if (isNewAssignment && announced) {
       this.notifySlotAssignment(saved.member, slot.programme, saved);
     }
 
@@ -788,7 +746,7 @@ export class ServiceProgrammeService {
       saved.backupMember &&
       saved.backupMember.id !== previousBackupMemberId;
 
-    if (isNewBackupAssignment) {
+    if (isNewBackupAssignment && announced) {
       this.notifySlotAssignment(
         saved.backupMember,
         slot.programme,
@@ -797,10 +755,15 @@ export class ServiceProgrammeService {
       );
     }
 
-    if (saved.department && saved.department.id !== previousDepartmentId) {
+    if (
+      announced &&
+      saved.department &&
+      saved.department.id !== previousDepartmentId
+    ) {
       this.notifyDepartmentAssignment(saved.department, slot.programme, saved);
     }
     if (
+      announced &&
       saved.backupDepartment &&
       saved.backupDepartment.id !== previousBackupDepartmentId
     ) {
@@ -1162,22 +1125,33 @@ export class ServiceProgrammeService {
     }
 
     for (const { member, items: memberItems } of byMember.values()) {
-      for (const { programme, slot, isBackup } of memberItems) {
-        const line = this.buildAssignmentLine(
-          programme,
-          slot,
-          isBackup,
-          timeZone,
-        );
-        this.notificationDispatchService.notifyMember({
-          category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
-          push: {
-            memberIds: [member.id],
-            ...slotAssignmentPush(line, isBackup),
-            idempotencyKey: `service-slot-assigned:${slot.id}:${member.id}`,
-          },
-        });
-      }
+      // One push per person, naming the single part or counting several.
+      const lines = memberItems.map(({ programme, slot, isBackup }) =>
+        this.buildAssignmentLine(programme, slot, isBackup, timeZone),
+      );
+      const services = new Set(lines.map((line) => line.serviceSlotName));
+      const push =
+        lines.length === 1
+          ? slotAssignmentPush(lines[0], memberItems[0].isBackup)
+          : {
+              key: PushNotificationKey.SERVICE_SLOT_ASSIGNED,
+              vars: {
+                service_name:
+                  services.size === 1
+                    ? lines[0].serviceSlotName
+                    : 'several services',
+                slot_type: `${lines.length} parts`,
+                when: '',
+              },
+            };
+      this.notificationDispatchService.notifyMember({
+        category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+        push: {
+          memberIds: [member.id],
+          ...push,
+          idempotencyKey: `service-slot-assigned:${memberItems.map((item) => item.slot.id).join(',')}:${member.id}`,
+        },
+      });
 
       if (!member.email) continue;
 
@@ -1344,16 +1318,18 @@ export class ServiceProgrammeService {
     );
     programme.slots = await manager.save(ServiceProgrammeSlot, newSlots);
     const result = await manager.save(ServiceProgramme, programme);
-    const audiences = new Map<string, Promise<DepartmentAudience>>();
-    for (const slot of programme.slots) {
-      if (slot.department) {
-        this.notifyDepartmentAssignment(
-          slot.department,
-          programme,
-          slot,
-          false,
-          audiences,
-        );
+    if (programme.publishedAt) {
+      const audiences = new Map<string, Promise<DepartmentAudience>>();
+      for (const slot of programme.slots) {
+        if (slot.department) {
+          this.notifyDepartmentAssignment(
+            slot.department,
+            programme,
+            slot,
+            false,
+            audiences,
+          );
+        }
       }
     }
     this.logger.log(
@@ -1627,6 +1603,88 @@ export class ServiceProgrammeService {
       );
   }
 
+  // Tells everyone in one go, so each person gets one message however many parts they have.
+  async publish(
+    ids: string[],
+    now = new Date(),
+  ): Promise<{ published: number }> {
+    const programmes = await this.programmeRepo.find({
+      where: { id: In(ids) },
+      relations: [
+        'slots',
+        'slots.member',
+        'slots.backupMember',
+        'slots.department',
+        'slots.backupDepartment',
+        'serviceSlot',
+        'serviceSlot.event',
+      ],
+    });
+    if (programmes.length !== new Set(ids).size)
+      throw new NotFoundException('Programme not found');
+    const toPublish = programmes.filter((p) => !p.publishedAt);
+    for (const programme of toPublish) {
+      if (programme.status !== ServiceProgrammeStatusEnum.DRAFT)
+        throw new BadRequestException('This programme has already started.');
+      if (!programme.slots?.length)
+        throw new BadRequestException(
+          'Add at least one item before publishing.',
+        );
+    }
+    if (!toPublish.length) return { published: 0 };
+    await this.programmeRepo.update(
+      { id: In(toPublish.map((p) => p.id)) },
+      { publishedAt: now },
+    );
+    const items: {
+      programme: ServiceProgramme;
+      slot: ServiceProgrammeSlot;
+      member: Member;
+      isBackup: boolean;
+    }[] = [];
+    const audiences = new Map<string, Promise<DepartmentAudience>>();
+    for (const programme of toPublish) {
+      for (const slot of programme.slots) {
+        if (slot.member)
+          items.push({ programme, slot, member: slot.member, isBackup: false });
+        if (slot.backupMember)
+          items.push({
+            programme,
+            slot,
+            member: slot.backupMember,
+            isBackup: true,
+          });
+        if (slot.department)
+          this.notifyDepartmentAssignment(
+            slot.department,
+            programme,
+            slot,
+            false,
+            audiences,
+          );
+        if (slot.backupDepartment)
+          this.notifyDepartmentAssignment(
+            slot.backupDepartment,
+            programme,
+            slot,
+            true,
+            audiences,
+          );
+      }
+    }
+    if (items.length) this.notifyBulkSlotAssignments(items);
+    return { published: toPublish.length };
+  }
+
+  // Back to a draft to rework it. People already told aren't told again until it's republished.
+  async unpublish(id: string): Promise<void> {
+    const programme = await this.programmeRepo.findOneBy({ id });
+    if (!programme) throw new NotFoundException('Programme not found');
+    if (programme.status !== ServiceProgrammeStatusEnum.DRAFT)
+      throw new BadRequestException('This programme has already started.');
+    await this.programmeRepo.update(id, { publishedAt: null });
+  }
+
   async assertProgrammeIsDraft(id: string): Promise<ServiceProgramme> {
     const programme = await this.programmeRepo.findOne({
       where: { id },
@@ -1650,6 +1708,15 @@ export class ServiceProgrammeService {
     id: string,
     status: ServiceProgrammeStatusEnum,
   ): Promise<void> {
-    await this.programmeRepo.update(id, { status });
+    // A service that starts is out in the open, so it stops being a draft, without anyone being told.
+    await this.programmeRepo
+      .createQueryBuilder()
+      .update(ServiceProgramme)
+      .set({
+        status,
+        publishedAt: () => 'COALESCE(published_at, now())',
+      })
+      .where('id = :id', { id })
+      .execute();
   }
 }

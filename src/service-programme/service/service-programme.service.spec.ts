@@ -112,6 +112,7 @@ const mockAdmin = {
 const mockServiceSlot = { id: 'slot-1', name: 'First Service' };
 
 const draftProgramme = {
+  publishedAt: new Date('2026-01-01T00:00:00Z'),
   id: 'prog-1',
   status: ServiceProgrammeStatusEnum.DRAFT,
   saveAsTemplate: false,
@@ -378,186 +379,120 @@ describe('ServiceProgrammeService', () => {
       ]);
     });
 
-    describe('assignment notifications', () => {
-      it('sends one consolidated email (not one per slot) when the same member is assigned to multiple parts', async () => {
-        mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
-        mockProgrammeRepo.find
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([draftProgramme]);
-        mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
-        mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
-        const memberA = {
+    it('tells nobody when a programme is created, because it starts as a draft', async () => {
+      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
+      mockProgrammeRepo.find
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([draftProgramme]);
+      mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
+      mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
+      mockMemberRepo.find.mockResolvedValue([
+        {
           id: 'member-a',
           firstname: 'A',
           lastname: 'A',
           email: 'a@example.com',
-        };
-        mockMemberRepo.find.mockResolvedValue([memberA]);
-        mockSlotRepo.create.mockImplementation((d) => d);
-        mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
+        },
+      ]);
+      mockSlotRepo.create.mockImplementation((d) => d);
+      mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
 
-        await service.create(
-          {
-            programmes: [
-              {
-                serviceSlotId: 'slot-1',
-                slots: [
-                  {
-                    type: ServiceSlotTypeEnum.WORSHIP,
-                    allocatedMinutes: 20,
-                    memberId: 'member-a',
-                  },
-                  {
-                    type: ServiceSlotTypeEnum.SPEAKER,
-                    allocatedMinutes: 40,
-                    memberId: 'member-a',
-                  },
-                ],
-              },
-            ],
-          },
-          mockAdmin,
-        );
+      await service.create(
+        {
+          programmes: [
+            {
+              serviceSlotId: 'slot-1',
+              slots: [
+                {
+                  type: ServiceSlotTypeEnum.WORSHIP,
+                  allocatedMinutes: 20,
+                  memberId: 'member-a',
+                },
+              ],
+            },
+          ],
+        },
+        mockAdmin,
+      );
+      await new Promise((resolve) => setImmediate(resolve));
 
-        const emailCalls =
-          mockNotificationDispatchService.notifyMember.mock.calls.filter(
-            ([opts]: any) => opts.email,
-          );
-        expect(emailCalls).toHaveLength(1);
-        expect(emailCalls[0][0]).toMatchObject({
-          email: expect.objectContaining({
-            to: 'a@example.com',
-            template: 'service-programme-assignments',
-            data: expect.objectContaining({ count: 2, multiple: true }),
-          }),
+      expect(
+        mockNotificationDispatchService.notifyMember,
+      ).not.toHaveBeenCalled();
+    });
+
+    describe('publishing', () => {
+      const member = {
+        id: 'member-a',
+        firstname: 'A',
+        lastname: 'A',
+        email: 'a@example.com',
+      };
+      const unpublished = (slots: object[]) => ({
+        ...draftProgramme,
+        publishedAt: null,
+        serviceSlot: mockServiceSlot,
+        slots,
+      });
+
+      beforeEach(() => {
+        mockProgrammeRepo.update = jest.fn().mockResolvedValue({});
+      });
+
+      it('sends one message per person, however many parts they have', async () => {
+        mockProgrammeRepo.find.mockReset();
+        mockProgrammeRepo.find.mockResolvedValue([
+          unpublished([
+            {
+              id: 's1',
+              type: ServiceSlotTypeEnum.WORSHIP,
+              allocatedMinutes: 20,
+              member,
+            },
+            {
+              id: 's2',
+              type: ServiceSlotTypeEnum.SPEAKER,
+              allocatedMinutes: 40,
+              member,
+            },
+          ]),
+        ]);
+        await expect(service.publish(['prog-1'])).resolves.toEqual({
+          published: 1,
         });
-        expect(emailCalls[0][0].email.data.assignments).toHaveLength(2);
-
-        // Push is unaffected — still one per assignment.
-        const pushCalls =
-          mockNotificationDispatchService.notifyMember.mock.calls.filter(
-            ([opts]: any) => opts.push,
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(mockProgrammeRepo.update).toHaveBeenCalled();
+        const calls =
+          mockNotificationDispatchService.notifyMember.mock.calls.map(
+            (c) => c[0],
           );
-        expect(pushCalls).toHaveLength(2);
+        const pushes = calls.filter((c) => c.push);
+        const emails = calls.filter((c) => c.email);
+        expect(pushes).toHaveLength(1);
+        expect(pushes[0].push.vars.slot_type).toBe('2 parts');
+        expect(emails).toHaveLength(1);
+        expect(emails[0].email.data.count).toBe(2);
       });
 
-      it('sends separate emails to different members assigned in the same create() call', async () => {
-        mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
-        mockProgrammeRepo.find
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([draftProgramme]);
-        mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
-        mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
-        const memberA = {
-          id: 'member-a',
-          firstname: 'A',
-          lastname: 'A',
-          email: 'a@example.com',
-        };
-        const memberB = {
-          id: 'member-b',
-          firstname: 'B',
-          lastname: 'B',
-          email: 'b@example.com',
-        };
-        mockMemberRepo.find.mockResolvedValue([memberA, memberB]);
-        mockSlotRepo.create.mockImplementation((d) => d);
-        mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
-
-        await service.create(
-          {
-            programmes: [
-              {
-                serviceSlotId: 'slot-1',
-                slots: [
-                  {
-                    type: ServiceSlotTypeEnum.WORSHIP,
-                    allocatedMinutes: 20,
-                    memberId: 'member-a',
-                  },
-                  {
-                    type: ServiceSlotTypeEnum.SPEAKER,
-                    allocatedMinutes: 40,
-                    memberId: 'member-b',
-                  },
-                ],
-              },
-            ],
-          },
-          mockAdmin,
-        );
-
-        const emailCalls =
-          mockNotificationDispatchService.notifyMember.mock.calls.filter(
-            ([opts]: any) => opts.email,
-          );
-        expect(emailCalls).toHaveLength(2);
-        expect(emailCalls.map(([opts]: any) => opts.email.to).sort()).toEqual([
-          'a@example.com',
-          'b@example.com',
+      it("doesn't tell anyone twice when it's already published", async () => {
+        mockProgrammeRepo.find.mockReset();
+        mockProgrammeRepo.find.mockResolvedValue([
+          { ...unpublished([]), publishedAt: new Date() },
         ]);
-        expect(emailCalls[0][0].email.data.count).toBe(1);
-        expect(emailCalls[1][0].email.data.count).toBe(1);
+        await expect(service.publish(['prog-1'])).resolves.toEqual({
+          published: 0,
+        });
+        expect(
+          mockNotificationDispatchService.notifyMember,
+        ).not.toHaveBeenCalled();
       });
 
-      it('combines a primary assignment and a backup assignment for the same member into one email', async () => {
-        mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
-        mockProgrammeRepo.find
-          .mockResolvedValueOnce([])
-          .mockResolvedValueOnce([draftProgramme]);
-        mockProgrammeRepo.create.mockReturnValue([draftProgramme]);
-        mockProgrammeRepo.save.mockResolvedValue([draftProgramme]);
-        const memberA = {
-          id: 'member-a',
-          firstname: 'A',
-          lastname: 'A',
-          email: 'a@example.com',
-        };
-        const memberB = {
-          id: 'member-b',
-          firstname: 'B',
-          lastname: 'B',
-          email: 'b@example.com',
-        };
-        mockMemberRepo.find.mockResolvedValue([memberA, memberB]);
-        mockSlotRepo.create.mockImplementation((d) => d);
-        mockSlotRepo.save.mockImplementation((d) => Promise.resolve(d));
-
-        await service.create(
-          {
-            programmes: [
-              {
-                serviceSlotId: 'slot-1',
-                slots: [
-                  {
-                    type: ServiceSlotTypeEnum.WORSHIP,
-                    allocatedMinutes: 20,
-                    memberId: 'member-a',
-                  },
-                  {
-                    type: ServiceSlotTypeEnum.SPEAKER,
-                    allocatedMinutes: 40,
-                    memberId: 'member-b',
-                    backupMemberId: 'member-a',
-                  },
-                ],
-              },
-            ],
-          },
-          mockAdmin,
+      it('refuses an empty programme', async () => {
+        mockProgrammeRepo.find.mockReset();
+        mockProgrammeRepo.find.mockResolvedValue([unpublished([])]);
+        await expect(service.publish(['prog-1'])).rejects.toThrow(
+          'Add at least one item',
         );
-
-        const emailCalls =
-          mockNotificationDispatchService.notifyMember.mock.calls.filter(
-            ([opts]: any) => opts.email?.to === 'a@example.com',
-          );
-        expect(emailCalls).toHaveLength(1);
-        const assignments = emailCalls[0][0].email.data.assignments;
-        expect(assignments).toHaveLength(2);
-        expect(assignments.map((a: any) => a.isBackup).sort()).toEqual([
-          false,
-          true,
-        ]);
       });
     });
 
@@ -1747,35 +1682,31 @@ describe('ServiceProgrammeService', () => {
     });
 
     it('looks a department up once when it holds several slots in one programme', async () => {
-      mockServiceSlotRepo.find.mockResolvedValue([mockServiceSlot]);
-      mockProgrammeRepo.find.mockResolvedValue([]);
-      mockProgrammeRepo.create.mockImplementation((v) => v);
-      mockProgrammeRepo.save.mockImplementation((v) =>
-        Promise.resolve(v.map((p: object) => ({ id: 'prog-1', ...p }))),
-      );
-      mockDepartmentRepo.find.mockResolvedValue([choir]);
-      mockSlotRepo.save.mockImplementation((v) =>
-        Promise.resolve(
-          v.map((slot: object, i: number) => ({ id: `slot-${i}`, ...slot })),
-        ),
-      );
+      mockProgrammeRepo.update = jest.fn().mockResolvedValue({});
+      mockProgrammeRepo.find.mockReset();
+      mockProgrammeRepo.find.mockResolvedValue([
+        {
+          ...draftProgramme,
+          publishedAt: null,
+          serviceSlot: mockServiceSlot,
+          slots: [
+            {
+              id: 's1',
+              department: choir,
+              type: 'WORSHIP',
+              allocatedMinutes: 10,
+            },
+            {
+              id: 's2',
+              department: choir,
+              type: 'WORSHIP',
+              allocatedMinutes: 10,
+            },
+          ],
+        },
+      ]);
 
-      await service
-        .create(
-          {
-            programmes: [
-              {
-                serviceSlotId: mockServiceSlot.id,
-                slots: [
-                  { ...dto, departmentId: 'dept-choir' },
-                  { ...dto, departmentId: 'dept-choir' },
-                ],
-              },
-            ],
-          } as never,
-          mockAdmin as never,
-        )
-        .catch(() => undefined);
+      await service.publish(['prog-1']);
       await flush();
 
       expect(

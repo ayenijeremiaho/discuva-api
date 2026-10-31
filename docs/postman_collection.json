@@ -45152,6 +45152,156 @@
           }
         }
       ]
+    },
+    {
+      "name": "Service Programme - Publishing and Reopen",
+      "item": [
+        {
+          "name": "Publish Programmes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-programme/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-programme",
+                "publish"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"programmeIds\": [\n    \"{{programme_id}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Back to Draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-programme/{{programme_id}}/unpublish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-programme",
+                "{{programme_id}}",
+                "unpublish"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Planner Publish",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/programme-planning/programmes/{{programme_id}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "programme-planning",
+                "programmes",
+                "{{programme_id}}",
+                "publish"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Planner Back to Draft",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/programme-planning/programmes/{{programme_id}}/unpublish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "programme-planning",
+                "programmes",
+                "{{programme_id}}",
+                "unpublish"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reopen Session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-session/{{session_code}}/reopen",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-session",
+                "{{session_code}}",
+                "reopen"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

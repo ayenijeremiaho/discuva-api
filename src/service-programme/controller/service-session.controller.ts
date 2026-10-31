@@ -243,6 +243,21 @@ export class ServiceSessionController {
     return session;
   }
 
+  @Post(':sessionCode/reopen')
+  @UseGuards(JwtAuthGuard)
+  async reopen(
+    @Param('sessionCode') sessionCode: string,
+    @CurrentUser() user: MemberAuth,
+  ) {
+    const session = await this.sessionSvc.reopen(sessionCode, user.id);
+    this.gateway.broadcastState(
+      sessionCode,
+      await this.sessionSvc.getState(sessionCode),
+    );
+    await this.broadcastActiveSessionsChanged();
+    return session;
+  }
+
   // ── Public Programme Manager routes — gated by the share token (has the
   // link) plus a named, individually-revocable access grant (who they are) ──
 

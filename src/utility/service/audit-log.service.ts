@@ -106,6 +106,8 @@ export type AuditAction =
   // Service programmes (admin app and the member app's planner)
   | 'PROGRAMME_CREATED'
   | 'PROGRAMME_DELETED'
+  | 'PROGRAMME_PUBLISHED'
+  | 'PROGRAMME_UNPUBLISHED'
   | 'PROGRAMME_ITEM_ADDED'
   | 'PROGRAMME_ITEM_UPDATED'
   | 'PROGRAMME_ITEM_REMOVED'
