@@ -1,3 +1,4 @@
+import { getQueueToken } from '@nestjs/bull';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { AccountLifecycleScheduler } from './account-lifecycle.scheduler';
@@ -6,6 +7,7 @@ import { PlatformSettingsService } from '../../platform-admin/service/platform-s
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
+import { ACCOUNT_FILE_CLEANUP_QUEUE } from '../processor/account-file-cleanup.processor';
 
 const clauses: string[] = [];
 let results: Partial<Tenant>[][];
@@ -39,7 +41,11 @@ let settings: Record<string, number>;
 const mockSettings = {
   getNumber: jest.fn(async (key: string) => settings[key]),
 };
-const mockCache = { acquireLock: jest.fn().mockResolvedValue(true) };
+const mockCache = {
+  acquireLock: jest.fn().mockResolvedValue(true),
+  flushTenant: jest.fn().mockResolvedValue(undefined),
+};
+const mockQueue = { add: jest.fn().mockResolvedValue(undefined) };
 const mockUtility = { sendEmailWithTemplate: jest.fn() };
 
 const tenant = (over: object = {}) => ({
@@ -59,6 +65,7 @@ describe('AccountLifecycleScheduler', () => {
     clauses.length = 0;
     results = [[], [], []];
     managerQuery.mockReset();
+    managerQuery.mockResolvedValue([]);
     settings = {
       [PlatformSettingKey.ACCOUNT_ARCHIVE_AFTER_DAYS]: 90,
       [PlatformSettingKey.ACCOUNT_DELETE_AFTER_DAYS]: 100,
@@ -73,6 +80,10 @@ describe('AccountLifecycleScheduler', () => {
         { provide: PlatformSettingsService, useValue: mockSettings },
         { provide: CacheService, useValue: mockCache },
         { provide: UtilityService, useValue: mockUtility },
+        {
+          provide: getQueueToken(ACCOUNT_FILE_CLEANUP_QUEUE),
+          useValue: mockQueue,
+        },
       ],
     }).compile();
     scheduler = module.get(AccountLifecycleScheduler);
@@ -116,6 +127,43 @@ describe('AccountLifecycleScheduler', () => {
     );
     expect(managerDelete).toHaveBeenCalledWith(Tenant, { id: 't1' });
     expect(clauses.join(' ')).toContain('t.archivedAt IS NOT NULL');
+  });
+
+  it('also removes records outside the schema, and reads file ids before the drop', async () => {
+    managerQuery.mockResolvedValueOnce([{ id: 'tithes/1' }]);
+    results = [[], [], [tenant()]];
+    await scheduler.run(new Date());
+    const sql = managerQuery.mock.calls.map((c) => c[0] as string);
+    const drop = sql.findIndex((q) => q.includes('DROP SCHEMA'));
+    expect(
+      sql.findIndex((q) => q.includes('tenant_friday".members')),
+    ).toBeLessThan(drop);
+    expect(sql.some((q) => q.includes('feature_usages'))).toBe(true);
+    expect(managerQuery).toHaveBeenCalledWith(
+      expect.stringContaining('public.email_logs'),
+      [['a@example.com'], 'Friday Prayer'],
+    );
+    expect(mockQueue.add).toHaveBeenCalledWith(
+      { tenantId: 't1', legacyPublicIds: ['tithes/1'] },
+      expect.objectContaining({ attempts: 8 }),
+    );
+    expect(mockCache.flushTenant).toHaveBeenCalledWith('t1');
+  });
+
+  it('queues no file cleanup when the database delete fails', async () => {
+    managerQuery.mockRejectedValue(new Error('locked'));
+    results = [[], [], [tenant()]];
+    await scheduler.run(new Date());
+    expect(mockQueue.add).not.toHaveBeenCalled();
+    expect(mockCache.flushTenant).not.toHaveBeenCalled();
+  });
+
+  it('keeps the delete when queueing the file cleanup fails', async () => {
+    mockQueue.add.mockRejectedValueOnce(new Error('redis down'));
+    results = [[], [], [tenant()]];
+    await scheduler.run(new Date());
+    expect(managerDelete).toHaveBeenCalled();
+    expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalled();
   });
 
   it('never deletes while the setting is off', async () => {

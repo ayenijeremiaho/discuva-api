@@ -22,6 +22,10 @@ import { TenantMiddleware } from './middleware/tenant.middleware';
 import { TenantInfoController } from './controller/tenant-info.controller';
 import { SignupController } from './controller/signup.controller';
 import {
+  ACCOUNT_FILE_CLEANUP_QUEUE,
+  AccountFileCleanupProcessor,
+} from './processor/account-file-cleanup.processor';
+import {
   TENANT_PROVISIONING_QUEUE,
   TenantProvisioningService,
 } from './service/tenant-provisioning.service';
@@ -121,6 +125,7 @@ import { BranchModule } from '../branch/branch.module';
       PlatformAdminRole,
     ]),
     BullModule.registerQueue({ name: TENANT_PROVISIONING_QUEUE }),
+    BullModule.registerQueue({ name: ACCOUNT_FILE_CLEANUP_QUEUE }),
     BranchModule,
     // Independent registration from AuthModule's own (same jwtConfig/
     // refreshJwtConfig factories, same secrets) — TenantMiddleware needs to
@@ -139,6 +144,7 @@ import { BranchModule } from '../branch/branch.module';
     AdminVerificationController,
   ],
   providers: [
+    AccountFileCleanupProcessor,
     AccountLifecycleScheduler,
     ChurchRequestService,
     TenantMiddleware,

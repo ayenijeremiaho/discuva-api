@@ -254,6 +254,10 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     this.logger.log('Cache flushed');
   }
 
+  async flushTenant(tenantId: string): Promise<void> {
+    await this.delByPattern(`tenant:${tenantId}:*`);
+  }
+
   async flushNamespace(namespace: string): Promise<void> {
     await this.delByPattern(this.scopedKey(`${namespace}:*`));
   }

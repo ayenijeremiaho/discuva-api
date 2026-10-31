@@ -7,6 +7,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { UploadApiResponse, v2 as cloudinary } from 'cloudinary';
 import { Readable } from 'node:stream';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 
 export type CloudinaryFolder =
   | 'tithes'
@@ -25,6 +27,10 @@ export type CloudinaryFolder =
   | 'page-images'
   | 'church-calendar-images';
 
+const FILE_TYPES = ['image', 'video', 'raw'];
+const DELETE_BATCH = 100;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface CloudinaryUploadResult {
   secureUrl: string;
   publicId: string;
@@ -39,7 +45,10 @@ export interface CloudinaryUploadResult {
 export class CloudinaryService implements OnModuleInit {
   private readonly logger = new Logger(CloudinaryService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly cls: ClsService<AppClsStore>,
+  ) {}
 
   onModuleInit(): void {
     const cloudName = this.configService.get<string>('CLOUDINARY_CLOUD_NAME');
@@ -75,11 +84,12 @@ export class CloudinaryService implements OnModuleInit {
   ): Promise<CloudinaryUploadResult> {
     const resourceType = this.resolveResourceType(mimeType);
     return new Promise((resolve, reject) => {
-      const publicId = filename
-        ? `${folder}/${filename}`
-        : `${folder}/${Date.now()}`;
+      // Each church's own folder is what lets deleting an account remove exactly its files.
+      const tenantId = this.cls.get('tenantId');
+      const path = tenantId ? `tenants/${tenantId}/${folder}` : folder;
+      const publicId = `${path}/${filename ?? Date.now()}`;
       const stream = cloudinary.uploader.upload_stream(
-        { folder, public_id: publicId, resource_type: resourceType },
+        { public_id: publicId, resource_type: resourceType },
         (error, result: UploadApiResponse) => {
           if (error) {
             this.logger.error(`Cloudinary upload failed: ${error.message}`);
@@ -99,6 +109,33 @@ export class CloudinaryService implements OnModuleInit {
       );
       Readable.from(buffer).pipe(stream);
     });
+  }
+
+  // Throws on failure so the caller can retry. Older files predate church folders, so they go by id.
+  async deleteTenantFiles(
+    tenantId: string,
+    legacyPublicIds: string[],
+  ): Promise<void> {
+    if (!UUID.test(tenantId)) {
+      throw new Error(`Refusing to delete files for "${tenantId}"`);
+    }
+    const legacy = legacyPublicIds.filter((id) => !id.startsWith('tenants/'));
+    for (const resource_type of FILE_TYPES) {
+      let next_cursor: string | undefined;
+      do {
+        const page = await cloudinary.api.delete_resources_by_prefix(
+          `tenants/${tenantId}/`,
+          { resource_type, type: 'upload', next_cursor },
+        );
+        next_cursor = page.next_cursor;
+      } while (next_cursor);
+      for (let i = 0; i < legacy.length; i += DELETE_BATCH) {
+        await cloudinary.api.delete_resources(
+          legacy.slice(i, i + DELETE_BATCH),
+          { resource_type, type: 'upload' },
+        );
+      }
+    }
   }
 
   async deleteByPublicId(

@@ -1312,7 +1312,7 @@ describe('ClassesService', () => {
         id: 'class-2',
         name: 'Cohort 2',
       });
-      mockMaterialRepo.count.mockResolvedValue(0);
+      mockMaterialRepo.count.mockResolvedValue(1);
       mockMaterialRepo.create.mockImplementation((v) => v);
       mockMaterialRepo.save.mockImplementation((v) =>
         Promise.resolve({ id: 'material-2', ...v }),
@@ -1329,6 +1329,22 @@ describe('ClassesService', () => {
       expect(mockMaterialRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ publicId: 'class-materials/123' }),
       );
+    });
+
+    it('rejects a file that is not already in this church', async () => {
+      mockClassRepo.findOne.mockResolvedValue({ id: 'class-2' });
+      mockMaterialRepo.count.mockResolvedValue(0);
+      mockMaterialRepo.save.mockClear();
+
+      await expect(
+        service.reuseClassMaterial('class-2', {
+          title: 'Syllabus',
+          url: 'https://res.cloudinary.com/x/other.pdf',
+          publicId: 'other-church/file',
+          resourceType: 'raw',
+        }),
+      ).rejects.toThrow('not in your library');
+      expect(mockMaterialRepo.save).not.toHaveBeenCalled();
     });
   });
 

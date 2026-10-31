@@ -973,6 +973,13 @@ export class ClassesService {
     dto: ReuseClassMaterialDto,
   ): Promise<ClassMaterial> {
     const churchClass = await this.getClassOrThrow(classId);
+    // Otherwise a church could point at, and then delete, another church's file.
+    if (
+      dto.publicId &&
+      !(await this.materialRepo.count({ where: { publicId: dto.publicId } }))
+    ) {
+      throw new BadRequestException('That file is not in your library.');
+    }
 
     const nextOrder = await this.getNextMaterialOrder(classId);
     const material = this.materialRepo.create({
