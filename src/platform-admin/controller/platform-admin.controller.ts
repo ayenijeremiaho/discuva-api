@@ -364,8 +364,14 @@ export class PlatformAdminController {
   decideVerification(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: VerificationDecisionDto,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
   ) {
-    return this.tenantService.decideVerification(id, dto.approved, dto.note);
+    return this.tenantService.decideVerification(
+      id,
+      dto.approved,
+      admin.id,
+      dto.note,
+    );
   }
 
   @UseGuards(PlatformAdminGuard)

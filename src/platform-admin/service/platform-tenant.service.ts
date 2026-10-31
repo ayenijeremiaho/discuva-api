@@ -625,10 +625,18 @@ export class PlatformTenantService {
   async decideVerification(
     id: string,
     approved: boolean,
+    actorId: string,
     note?: string,
   ): Promise<ChurchRequestReview> {
-    await this.findTenantOrThrow(id);
-    await this.churchRequests.decideVerification(id, approved, note);
+    const tenant = await this.findTenantOrThrow(id);
+    if (
+      approved &&
+      tenant.onboardingStatus === TenantOnboardingStatus.AWAITING_APPROVAL
+    ) {
+      await this.approveTenant(id, actorId);
+    } else {
+      await this.churchRequests.decideVerification(id, approved, note);
+    }
     return this.getRequestReview(id);
   }
 
@@ -671,6 +679,7 @@ export class PlatformTenantService {
       ...pending,
       actorType: TenantOnboardingActorType.SELF_SERVE,
     });
+    await this.churchRequests.markVerifiedOnApproval(tenant);
 
     return this.toHealthShape(tenant);
   }

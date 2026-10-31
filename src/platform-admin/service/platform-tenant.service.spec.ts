@@ -92,7 +92,10 @@ describe('PlatformTenantService', () => {
         },
         {
           provide: ChurchRequestService,
-          useValue: { review: jest.fn() },
+          useValue: {
+            review: jest.fn(),
+            markVerifiedOnApproval: jest.fn(),
+          },
         },
         {
           provide: TenantProvisioningService,

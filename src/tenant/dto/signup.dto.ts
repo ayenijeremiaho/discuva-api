@@ -95,6 +95,36 @@ export class SignupDto {
   @IsIn(['ONE_CHURCH', 'NETWORK', 'NOT_SURE'])
   locationStructure?: string;
 
+  // Churches and NGOs give these at sign-up, because they're reviewed before the account exists.
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  website?: string;
+
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  seniorLeader?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  requesterRole?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  registrationNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+
   // Present only when this signup is completing a branch invite
   // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the
   // invited church by BranchInviteService.createInvite. Omitted entirely

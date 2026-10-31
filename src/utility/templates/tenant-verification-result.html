@@ -215,7 +215,7 @@
                 <td class="content-cell">
                   <div>
                     <h1>{{#if approved}}{{ organisation_name }} is verified{{else}}We couldn't verify {{ organisation_name }} yet{{/if}}</h1>
-                    <p>{{#if approved}}Online giving, higher sending limits and public listing are now available to you.{{else}}Please check your details and try again from the admin portal.{{/if}}</p>
+                    <p>{{#if approved}}Online giving, higher sending limits and public listing are now available to you.{{else}}{{#if apply_again}}Please check your details and apply again.{{else}}Please check your details and try again from the admin portal.{{/if}}{{/if}}</p>
                     {{#if note}}<p>{{ note }}</p>{{/if}}
                     <p style="margin-top: 35px; color: #8A817C;">Warmly,<br><span
                       style="color: #121212; font-weight: 500;">The {{ product_name }} Team</span></p>

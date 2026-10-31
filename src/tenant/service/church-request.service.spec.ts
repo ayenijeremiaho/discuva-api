@@ -130,13 +130,45 @@ describe('ChurchRequestService', () => {
 
   describe('submit', () => {
     it('emails the requester and creates no account yet', async () => {
-      await service.submit(tenantWith({ onboardingStatus: 'PENDING' }), dto);
+      await service.submit(tenantWith({ onboardingStatus: 'PENDING' }), {
+        ...dto,
+        orgType: OrganisationTypeEnum.GROUP,
+      });
 
       expect(mockRepo.update.mock.calls[0][1].onboardingStatus).toBe(
         TenantOnboardingStatus.AWAITING_CONFIRMATION,
       );
       expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
       expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      undefined,
+      OrganisationTypeEnum.CHURCH,
+      OrganisationTypeEnum.MINISTRY,
+    ])('requires the proof details for %s', async (orgType) => {
+      await expect(
+        service.submit(tenantWith(), { ...dto, orgType }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('confirms both addresses when a church gives its proof', async () => {
+      await service.submit(tenantWith(), {
+        ...dto,
+        orgType: OrganisationTypeEnum.CHURCH,
+        website: 'https://hope.org',
+        contactEmail: 'office@hope.org',
+        seniorLeader: 'Rev Obi',
+        requesterRole: 'Administrator',
+        note: 'Listed on Maps',
+      });
+
+      expect(mockUtility.sendEmailWithTemplate).toHaveBeenCalledTimes(2);
+      expect(mockRepo.update.mock.calls[0][1].requestDetails).toMatchObject({
+        contactDomain: 'hope.org',
+        note: 'Listed on Maps',
+      });
     });
 
     it("can't replace a confirmed request", async () => {
@@ -152,8 +184,10 @@ describe('ChurchRequestService', () => {
   });
 
   describe('confirm', () => {
-    it('creates the account straight away', async () => {
-      mockRepo.findOneBy.mockResolvedValue(tenantWith());
+    it('creates a group account straight away', async () => {
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
+      );
 
       const result = await service.confirm(tokenFor('ada@example.com'));
 
@@ -166,9 +200,40 @@ describe('ChurchRequestService', () => {
       );
     });
 
-    it('holds for review only when the off switch is used', async () => {
+    it.each([OrganisationTypeEnum.CHURCH, OrganisationTypeEnum.MINISTRY])(
+      'holds a %s for review and creates nothing',
+      async (orgType) => {
+        mockRepo.findOneBy.mockResolvedValue(tenantWith({ orgType }));
+
+        const result = await service.confirm(tokenFor('ada@example.com'));
+
+        expect(result.status).toBe(TenantOnboardingStatus.AWAITING_APPROVAL);
+        expect(mockProvisioning.holdForApproval).toHaveBeenCalledTimes(1);
+        expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
+        expect(mockRepo.update).toHaveBeenCalledWith('t1', {
+          verificationStatus: TenantVerificationStatus.PENDING,
+        });
+      },
+    );
+
+    it('tells the church address it was confirmed when clicked first', async () => {
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({
+          requestDetails: { ...details, contactEmail: 'office@hope.org' },
+        }),
+      );
+
+      const result = await service.confirm(tokenFor('office@hope.org'));
+
+      expect(result.status).toBe(TenantOnboardingStatus.AWAITING_CONFIRMATION);
+      expect(mockProvisioning.holdForApproval).not.toHaveBeenCalled();
+    });
+
+    it('holds a group for review only when the off switch is used', async () => {
       mockSettings.getSelfServeRequiresApproval.mockResolvedValue(true);
-      mockRepo.findOneBy.mockResolvedValue(tenantWith());
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
+      );
 
       const result = await service.confirm(tokenFor('ada@example.com'));
 
@@ -178,7 +243,9 @@ describe('ChurchRequestService', () => {
     });
 
     it('creates one account when the link is opened twice at once', async () => {
-      mockRepo.findOneBy.mockResolvedValue(tenantWith());
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
+      );
       mockRepo.update.mockResolvedValue({ affected: 0 });
 
       await service.confirm(tokenFor('ada@example.com'));
@@ -264,6 +331,38 @@ describe('ChurchRequestService', () => {
         'tenant-verification-result',
         expect.objectContaining({ approved: true }),
       );
+    });
+
+    it('declining a held request frees the address to apply again', async () => {
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({
+          onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
+        }),
+      );
+
+      await service.decideVerification('t1', false);
+
+      expect(mockRepo.update).toHaveBeenCalledWith('t1', {
+        onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
+      });
+      expect(
+        mockUtility.sendEmailWithTemplate.mock.calls[0][3].apply_again,
+      ).toBe(true);
+    });
+
+    it('marks a held church verified on approval, but not a group', async () => {
+      await service.markVerifiedOnApproval(tenantWith());
+      expect(mockRepo.update).toHaveBeenCalledWith(
+        't1',
+        expect.objectContaining({
+          verificationStatus: TenantVerificationStatus.VERIFIED,
+        }),
+      );
+      mockRepo.update.mockClear();
+      await service.markVerifiedOnApproval(
+        tenantWith({ orgType: OrganisationTypeEnum.GROUP }),
+      );
+      expect(mockRepo.update).not.toHaveBeenCalled();
     });
 
     it('declining removes any verified date', async () => {

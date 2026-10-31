@@ -89,6 +89,10 @@ export interface VerificationState {
   >;
 }
 
+// Churches and NGOs reach strangers and handle money, so they're reviewed before the account exists.
+const reviewedFirst = (orgType: OrganisationTypeEnum) =>
+  orgType !== OrganisationTypeEnum.GROUP;
+
 const detailsOf = (tenant: Tenant) =>
   tenant.requestDetails as unknown as ChurchRequestDetails | null;
 
@@ -119,6 +123,21 @@ export class ChurchRequestService {
 
   async submit(tenant: Tenant, dto: SignupDto): Promise<void> {
     this.assertCanSubmit(tenant);
+    const orgType = dto.orgType ?? OrganisationTypeEnum.CHURCH;
+    if (
+      reviewedFirst(orgType) &&
+      !(
+        dto.website &&
+        dto.contactEmail &&
+        dto.seniorLeader &&
+        dto.requesterRole &&
+        dto.note
+      )
+    ) {
+      throw new BadRequestException(
+        'Please complete the verification details.',
+      );
+    }
     const details: ChurchRequestDetails = {
       country: dto.country,
       countryCode: dto.countryCode,
@@ -129,6 +148,16 @@ export class ChurchRequestService {
       locationCount: dto.locationCount,
       locationStructure: dto.locationStructure,
       adminEmail: dto.adminEmail,
+      website: dto.website,
+      contactEmail: dto.contactEmail,
+      contactDomain:
+        dto.contactEmail && !isPersonalEmail(dto.contactEmail)
+          ? emailDomain(dto.contactEmail)
+          : null,
+      seniorLeader: dto.seniorLeader,
+      requesterRole: dto.requesterRole,
+      registrationNumber: dto.registrationNumber,
+      note: dto.note,
     };
     const pending: PendingParams = {
       adminFirstname: dto.adminFirstname,
@@ -138,7 +167,8 @@ export class ChurchRequestService {
     };
     await this.tenantRepo.update(tenant.id, {
       name: dto.churchName,
-      orgType: dto.orgType ?? OrganisationTypeEnum.CHURCH,
+      orgType,
+      verificationStatus: TenantVerificationStatus.NONE,
       requestDetails: { ...details },
       pendingSignupParams: { ...pending },
       onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
@@ -149,6 +179,9 @@ export class ChurchRequestService {
       TenantOnboardingActorType.SELF_SERVE,
     );
     this.sendConfirmation(tenant.id, dto.churchName, dto.adminEmail, false);
+    if (dto.contactEmail && dto.contactEmail !== dto.adminEmail) {
+      this.sendConfirmation(tenant.id, dto.churchName, dto.contactEmail, true);
+    }
   }
 
   async resendConfirmations(tenantId: string): Promise<void> {
@@ -163,6 +196,9 @@ export class ChurchRequestService {
       return;
     }
     this.sendConfirmation(tenant.id, tenant.name, details.adminEmail, false);
+    if (details.contactEmail && details.contactEmail !== details.adminEmail) {
+      this.sendConfirmation(tenant.id, tenant.name, details.contactEmail, true);
+    }
   }
 
   // Idempotent, because people click email links twice and mail scanners may open them.
@@ -203,7 +239,12 @@ export class ChurchRequestService {
     ) {
       return { status: tenant.onboardingStatus, name: tenant.name };
     }
-    if (payload.email !== details.adminEmail) throw invalid;
+    if (payload.email !== details.adminEmail) {
+      if (payload.email === details.contactEmail) {
+        return { status: tenant.onboardingStatus, name: tenant.name };
+      }
+      throw invalid;
+    }
     await this.mergeDetails(tenant.id, { adminEmailConfirmedAt: now });
     return this.release(tenant);
   }
@@ -274,6 +315,15 @@ export class ChurchRequestService {
         : TenantVerificationStatus.REJECTED,
       verifiedAt: approved ? new Date() : null,
     });
+    // Nothing was created yet, so a declined request frees its address and can apply again.
+    const applyAgain =
+      !approved &&
+      tenant.onboardingStatus === TenantOnboardingStatus.AWAITING_APPROVAL;
+    if (applyAgain) {
+      await this.tenantRepo.update(tenant.id, {
+        onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
+      });
+    }
     await this.mergeDetails(tenant.id, { decisionNote: note });
     this.verification.clear(tenant.id);
     const details = detailsOf(tenant);
@@ -288,10 +338,21 @@ export class ChurchRequestService {
         {
           organisation_name: tenant.name,
           approved,
+          apply_again: applyAgain,
           note: note ?? '',
         },
       );
     }
+  }
+
+  // Approving a held church or NGO is its verification, so it gets one review and no second step.
+  async markVerifiedOnApproval(tenant: Tenant): Promise<void> {
+    if (!reviewedFirst(tenant.orgType)) return;
+    await this.tenantRepo.update(tenant.id, {
+      verificationStatus: TenantVerificationStatus.VERIFIED,
+      verifiedAt: new Date(),
+    });
+    this.verification.clear(tenant.id);
   }
 
   async review(tenant: Tenant): Promise<ChurchRequestReview> {
@@ -356,12 +417,18 @@ export class ChurchRequestService {
       id: tenant.id,
       onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
     };
-    if (await this.settingsService.getSelfServeRequiresApproval()) {
+    const review = reviewedFirst(tenant.orgType);
+    if (review || (await this.settingsService.getSelfServeRequiresApproval())) {
       const moved = await this.tenantRepo.update(fromConfirmation, {
         onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
       });
       if (moved.affected) {
         await this.provisioningService.holdForApproval(tenant, pending);
+        if (review) {
+          await this.tenantRepo.update(tenant.id, {
+            verificationStatus: TenantVerificationStatus.PENDING,
+          });
+        }
       }
       return {
         status: TenantOnboardingStatus.AWAITING_APPROVAL,
