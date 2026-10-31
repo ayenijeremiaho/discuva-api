@@ -16,6 +16,7 @@ export type TenantOnboardingEventType =
   // Self-serve only, and only when PlatformSettingKey.SELF_SERVE_REQUIRES_APPROVAL
   // is on — recorded instead of enqueueing provisioning immediately.
   | 'AWAITING_APPROVAL'
+  | 'AWAITING_CONFIRMATION'
   // A platform admin released a held signup — actorType is always
   // PLATFORM_ADMIN here, distinct from PLATFORM_ADMIN_INITIATED (that one
   // means the admin created the tenant themselves; this one means they

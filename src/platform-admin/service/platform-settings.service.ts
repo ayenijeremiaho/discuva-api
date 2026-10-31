@@ -160,6 +160,20 @@ export class PlatformSettingsService {
 
   // Gates SignupController.signup() — awaited, since (per this codebase's
   // Redis conventions) a get() that gates request flow must be.
+  async getSelfServeAutoApprove(): Promise<boolean> {
+    const key = PlatformSettingKey.SELF_SERVE_AUTO_APPROVE;
+    const cacheKey = this.cacheKey(key);
+    const cached = await this.cacheService.getGlobal<number>(cacheKey);
+    if (cached !== undefined) return cached === 1;
+
+    const row = await this.settingRepo.findOne({ where: { key } });
+    const value =
+      (row?.value as { value: number } | undefined)?.value ??
+      this.resolveDefault(key);
+    this.cacheService.setGlobal(cacheKey, value, this.CACHE_TTL);
+    return value === 1;
+  }
+
   async getSelfServeRequiresApproval(): Promise<boolean> {
     const key = PlatformSettingKey.SELF_SERVE_REQUIRES_APPROVAL;
     const cacheKey = this.cacheKey(key);

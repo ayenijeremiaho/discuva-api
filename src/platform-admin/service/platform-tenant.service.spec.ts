@@ -13,6 +13,7 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { Subscription } from '../../billing/entity/subscription.entity';
 import { Plan } from '../../billing/entity/plan.entity';
 import { TenantProvisioningService } from '../../tenant/service/tenant-provisioning.service';
+import { ChurchRequestService } from '../../tenant/service/church-request.service';
 import { TenantOnboardingEvent } from '../../tenant/entity/tenant-onboarding-event.entity';
 import { TenantOnboardingStatus } from '../../tenant/enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../../tenant/enum/tenant-onboarding-actor-type.enum';
@@ -88,6 +89,10 @@ describe('PlatformTenantService', () => {
         {
           provide: getRepositoryToken(TenantOnboardingEvent),
           useValue: mockOnboardingEventRepo,
+        },
+        {
+          provide: ChurchRequestService,
+          useValue: { review: jest.fn() },
         },
         {
           provide: TenantProvisioningService,

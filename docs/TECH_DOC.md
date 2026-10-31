@@ -7430,6 +7430,32 @@ cancel-don't-delete one.
 
 ---
 
+### Church requests (self-serve signup)
+
+`POST /signup` no longer starts provisioning for a normal signup. A branch invite still does, since a parent church vetted it.
+
+- **Flow:** the form creates the tenant as `AWAITING_CONFIRMATION` with `tenants.org_type` (`CHURCH`, `MINISTRY`, `GROUP`) and
+  `tenants.request_details` (jsonb: location, size, locations, website, role, phone, requester email, contact email). A confirmation
+  link goes to each address, or one if they match. `POST /signup/confirm` (`{ token }`) records each confirmation with an atomic jsonb
+  merge. Once both are in, the request moves to `AWAITING_APPROVAL` and platform admins are told, or to provisioning if approval is off
+  or auto-approve passes. Conditional updates mean only one request makes that move. `POST /signup/:tenantId/resend-confirmation`
+  resends what's unconfirmed.
+- **Tokens:** stateless, AES-GCM encrypted, 7 days. The email links to `{WEB_APP_URL}/signup/confirm`, a page that POSTs, so mail
+  scanners opening the link don't confirm anything.
+- **Settings:** `self_serve_requires_approval` now defaults to on; a value already saved keeps applying. `self_serve_auto_approve`
+  (off) skips review only when both emails are confirmed, the contact email isn't personal and matches the website, and no duplicate is found.
+- **Identity:** `tenants.id` is permanent and the subdomain is the unique public address. The name is only a clue. The website is
+  never fetched by the server, so a reviewer opens it from the review panel, which avoids server-side requests to user-supplied URLs.
+- **Review:** `GET /platform/tenants/:id/request-review` (`TENANTS_READ`) returns the details and checks, including possible
+  duplicates by same name or contact domain.
+- **Indexes:** `IDX_tenants_lower_name` on `lower(name)` and partial `IDX_tenants_contact_domain` on
+  `request_details->>'contactDomain'`, both used by the duplicate check.
+- **Database cost:** no scheduler or polling. Writes happen only on signup and confirmation, and the settings read is cached. The
+  signup page no longer polls `GET /signup/:tenantId/status`.
+- **Isolation:** group and ministry accounts stay separate, and the form makes independent groups acknowledge that. Someone whose
+  group is part of a church is told to ask the church and can't continue.
+- **Env:** `WEB_APP_URL` (API, defaults to `https://discuva.org`); `NEXT_PUBLIC_ONBOARDING_CALL_URL` (discuva-web, optional).
+
 ### Two-factor sign-in (admin portal and platform console)
 
 Optional and recommended, never enforced: everything stays off until an admin opts in. Authenticator-app codes (RFC

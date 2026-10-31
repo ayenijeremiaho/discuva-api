@@ -261,12 +261,12 @@ describe('PlatformSettingsService', () => {
       expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
     });
 
-    it('defaults to off (0) when no cache or DB row exists', async () => {
+    it('defaults to on (1) when no cache or DB row exists', async () => {
       mockSettingRepo.findOne.mockResolvedValue(null);
 
       const result = await service.getSelfServeRequiresApproval();
 
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     it('reflects a platform admin turning it on', async () => {

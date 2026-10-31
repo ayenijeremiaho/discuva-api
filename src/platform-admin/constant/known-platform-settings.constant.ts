@@ -96,6 +96,14 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
   [PlatformSettingKey.SELF_SERVE_REQUIRES_APPROVAL]: {
     label: 'Require Manual Approval for Signups',
     unit: 'off = auto-provision self-serve signups immediately; on = hold for a platform admin to approve — 0 = off, 1 = on',
+    defaultValue: 1,
+    min: 0,
+    max: 1,
+    type: 'boolean',
+  },
+  [PlatformSettingKey.SELF_SERVE_AUTO_APPROVE]: {
+    label: 'Auto-approve When Every Check Passes',
+    unit: 'skips review only when both emails are confirmed, the church email matches its website, and no duplicate is found — 0 = off, 1 = on',
     defaultValue: 0,
     min: 0,
     max: 1,

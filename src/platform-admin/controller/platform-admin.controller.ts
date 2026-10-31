@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Put,
@@ -347,6 +348,13 @@ export class PlatformAdminController {
   @Delete('tenants/:id')
   async deleteTenant(@Param('id') id: string) {
     await this.tenantService.deleteTenant(id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('tenants/:id/request-review')
+  getRequestReview(@Param('id', ParseUUIDPipe) id: string) {
+    return this.tenantService.getRequestReview(id);
   }
 
   @UseGuards(PlatformAdminGuard)

@@ -7,7 +7,7 @@ import { BranchInviteService } from '../../branch/service/branch-invite.service'
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
-import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { ChurchRequestService } from '../service/church-request.service';
 
 const mockProvisioningService = {
   ensurePendingTenant: jest.fn(),
@@ -19,7 +19,11 @@ const mockBranchInviteService = {
   resolveInvite: jest.fn(),
   markAccepted: jest.fn(),
 };
-const mockSettingsService = { getSelfServeRequiresApproval: jest.fn() };
+const mockChurchRequests = {
+  submit: jest.fn(),
+  confirm: jest.fn(),
+  resendConfirmations: jest.fn(),
+};
 const mockTenantRepo = { findOneBy: jest.fn() };
 
 const baseDto = {
@@ -45,7 +49,6 @@ describe('SignupController', () => {
     mockProvisioningService.ensurePendingTenant.mockResolvedValue(
       pendingTenant,
     );
-    mockSettingsService.getSelfServeRequiresApproval.mockResolvedValue(false);
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SignupController],
@@ -55,7 +58,7 @@ describe('SignupController', () => {
           useValue: mockProvisioningService,
         },
         { provide: BranchInviteService, useValue: mockBranchInviteService },
-        { provide: PlatformSettingsService, useValue: mockSettingsService },
+        { provide: ChurchRequestService, useValue: mockChurchRequests },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
       ],
     }).compile();
@@ -63,7 +66,7 @@ describe('SignupController', () => {
   });
 
   describe('signup', () => {
-    it('creates a pending tenant, enqueues provisioning, and returns immediately with PENDING status', async () => {
+    it('starts email confirmation for a normal signup, without provisioning', async () => {
       const result = await controller.signup(baseDto);
 
       expect(mockBranchInviteService.resolveInvite).not.toHaveBeenCalled();
@@ -72,23 +75,15 @@ describe('SignupController', () => {
         baseDto.churchName,
         undefined,
       );
-      expect(mockProvisioningService.recordEvent).toHaveBeenCalledWith(
-        'tenant-1',
-        'SIGNUP_INITIATED',
-        TenantOnboardingActorType.SELF_SERVE,
+      expect(mockChurchRequests.submit).toHaveBeenCalledWith(
+        pendingTenant,
+        baseDto,
       );
-      expect(mockProvisioningService.holdForApproval).not.toHaveBeenCalled();
-      expect(mockProvisioningService.enqueueProvisioning).toHaveBeenCalledWith(
-        expect.objectContaining({
-          tenantId: 'tenant-1',
-          parentTenantId: undefined,
-          sponsoredPlanId: undefined,
-          actorType: TenantOnboardingActorType.SELF_SERVE,
-        }),
-      );
-      expect(mockBranchInviteService.markAccepted).not.toHaveBeenCalled();
+      expect(
+        mockProvisioningService.enqueueProvisioning,
+      ).not.toHaveBeenCalled();
       expect(result.tenant.onboardingStatus).toBe(
-        TenantOnboardingStatus.PENDING,
+        TenantOnboardingStatus.AWAITING_CONFIRMATION,
       );
     });
 
@@ -164,26 +159,7 @@ describe('SignupController', () => {
       ).not.toHaveBeenCalled();
     });
 
-    it('holds a cold self-serve signup for approval instead of enqueueing when the toggle is on', async () => {
-      mockSettingsService.getSelfServeRequiresApproval.mockResolvedValue(true);
-
-      const result = await controller.signup(baseDto);
-
-      expect(mockProvisioningService.holdForApproval).toHaveBeenCalledWith(
-        pendingTenant,
-        expect.objectContaining({
-          adminFirstname: baseDto.adminFirstname,
-          adminEmail: baseDto.adminEmail,
-        }),
-      );
-      expect(
-        mockProvisioningService.enqueueProvisioning,
-      ).not.toHaveBeenCalled();
-      expect(result.tenant.onboardingStatus).toBe('AWAITING_APPROVAL');
-    });
-
-    it('never holds a branch-invite signup for approval, even when the toggle is on — an invite is already vetted', async () => {
-      mockSettingsService.getSelfServeRequiresApproval.mockResolvedValue(true);
+    it('sends a branch invite straight to provisioning, as a parent church vetted it', async () => {
       mockBranchInviteService.resolveInvite.mockResolvedValue({
         parentTenantId: 'parent-tenant-1',
         sponsoredPlanId: null,
@@ -191,9 +167,15 @@ describe('SignupController', () => {
 
       await controller.signup({ ...baseDto, branchInviteToken: 'the-token' });
 
-      expect(mockProvisioningService.holdForApproval).not.toHaveBeenCalled();
+      expect(mockChurchRequests.submit).not.toHaveBeenCalled();
       expect(mockProvisioningService.enqueueProvisioning).toHaveBeenCalled();
     });
+  });
+
+  it('confirm passes the token through', async () => {
+    mockChurchRequests.confirm.mockResolvedValue({ status: 'PENDING' });
+    await controller.confirm({ token: 't' });
+    expect(mockChurchRequests.confirm).toHaveBeenCalledWith('t');
   });
 
   describe('getStatus', () => {

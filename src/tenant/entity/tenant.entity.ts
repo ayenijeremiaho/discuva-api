@@ -1,3 +1,4 @@
+import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
 import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
@@ -83,6 +84,13 @@ export class Tenant extends BaseEntity {
   // enqueues real provisioning — nothing reads this once ACTIVE.
   @Column({ type: 'jsonb', nullable: true })
   pendingSignupParams: Record<string, unknown> | null;
+
+  @Column({ name: 'org_type', default: OrganisationTypeEnum.CHURCH })
+  orgType: OrganisationTypeEnum;
+
+  // What the requester told us, kept after approval for reference. Holds a church contact address.
+  @Column({ type: 'jsonb', name: 'request_details', nullable: true })
+  requestDetails: Record<string, unknown> | null;
 
   // Set exactly once, the moment onboardingStatus first reaches ACTIVE
   // (TenantProvisioningProcessor.handle() for the async path,

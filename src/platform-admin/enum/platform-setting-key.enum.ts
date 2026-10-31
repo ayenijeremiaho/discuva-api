@@ -26,4 +26,6 @@ export enum PlatformSettingKey {
   // today's behavior — auto-provision immediately. See
   // TenantProvisioningService.holdForApproval/PlatformTenantService.approveTenant.
   SELF_SERVE_REQUIRES_APPROVAL = 'self_serve_requires_approval',
+  // Lets a request skip review when every check passes. Off by default.
+  SELF_SERVE_AUTO_APPROVE = 'self_serve_auto_approve',
 }

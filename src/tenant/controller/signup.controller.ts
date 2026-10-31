@@ -14,11 +14,12 @@ import { Repository } from 'typeorm';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../auth/decorator/public.decorator';
 import { TenantProvisioningService } from '../service/tenant-provisioning.service';
-import { SignupDto } from '../dto/signup.dto';
+import { ConfirmSignupDto, SignupDto } from '../dto/signup.dto';
 import { BranchInviteService } from '../../branch/service/branch-invite.service';
 import { Tenant } from '../entity/tenant.entity';
 import { TenantOnboardingActorType } from '../enum/tenant-onboarding-actor-type.enum';
-import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { ChurchRequestService } from '../service/church-request.service';
+import { TenantOnboardingStatus } from '../enum/tenant-onboarding-status.enum';
 
 // Public, unauthenticated, rate-limited by IP — the primary entry point
 // into the self-serve freemium funnel (docs/MULTI_TENANT_MIGRATION.md §4.8).
@@ -35,7 +36,7 @@ export class SignupController {
   constructor(
     private readonly provisioningService: TenantProvisioningService,
     private readonly branchInviteService: BranchInviteService,
-    private readonly settingsService: PlatformSettingsService,
+    private readonly churchRequests: ChurchRequestService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
@@ -76,24 +77,17 @@ export class SignupController {
       branchInviteToken: dto.branchInviteToken,
     };
 
-    // A branch invite is already a vetted, invitation-only path (a parent
-    // tenant's own admin had to generate the token) — gating it behind a
-    // second, generic approval step would be redundant friction on top of
-    // vetting that already happened. Only a cold, anonymous signup is held.
-    if (
-      !resolvedInvite &&
-      (await this.settingsService.getSelfServeRequiresApproval())
-    ) {
-      await this.provisioningService.holdForApproval(tenant, pendingParams);
+    // A branch invite is already vetted, because a parent church's admin issued it. Everything else confirms and is reviewed.
+    if (!resolvedInvite) {
+      await this.churchRequests.submit(tenant, dto);
       return {
         tenant: {
           id: tenant.id,
           subdomain: tenant.subdomain,
-          name: tenant.name,
-          onboardingStatus: 'AWAITING_APPROVAL',
+          name: dto.churchName,
+          onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
         },
-        message:
-          "Thanks for signing up! Your request is being reviewed by our team — we'll email you once it's approved.",
+        message: 'Please check your email to confirm your request.',
       };
     }
 
@@ -115,6 +109,24 @@ export class SignupController {
       message:
         "Account is being created — check back in a moment. We'll email you a link to set your password once it's ready.",
     };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('signup/confirm')
+  confirm(@Body() dto: ConfirmSignupDto) {
+    return this.churchRequests.confirm(dto.token);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Post('signup/:tenantId/resend-confirmation')
+  async resendConfirmation(
+    @Param('tenantId', ParseUUIDPipe) tenantId: string,
+  ): Promise<void> {
+    await this.churchRequests.resendConfirmations(tenantId);
   }
 
   @Public()

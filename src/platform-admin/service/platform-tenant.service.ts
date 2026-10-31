@@ -1,3 +1,7 @@
+import {
+  ChurchRequestReview,
+  ChurchRequestService,
+} from '../../tenant/service/church-request.service';
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
@@ -102,6 +106,7 @@ export class PlatformTenantService {
     @InjectRepository(TenantOnboardingEvent)
     private readonly onboardingEventRepo: Repository<TenantOnboardingEvent>,
     private readonly provisioningService: TenantProvisioningService,
+    private readonly churchRequests: ChurchRequestService,
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
@@ -587,6 +592,7 @@ export class PlatformTenantService {
     new Set([
       TenantOnboardingStatus.PENDING,
       TenantOnboardingStatus.AWAITING_APPROVAL,
+      TenantOnboardingStatus.AWAITING_CONFIRMATION,
       TenantOnboardingStatus.FAILED,
     ]);
 
@@ -613,6 +619,10 @@ export class PlatformTenantService {
   // not been required. Stays async (queued, not run inline like
   // createTenant()) — this is still fundamentally a self-serve signup being
   // released, not a platform admin directly creating a tenant.
+  async getRequestReview(id: string): Promise<ChurchRequestReview> {
+    return this.churchRequests.review(await this.findTenantOrThrow(id));
+  }
+
   async approveTenant(id: string, actorId: string): Promise<TenantWithHealth> {
     const tenant = await this.findTenantOrThrow(id);
     if (tenant.onboardingStatus !== TenantOnboardingStatus.AWAITING_APPROVAL) {

@@ -77,6 +77,7 @@ export const envValidationSchema = Joi.object({
   LOGIN_URL: Joi.string().uri().required(),
   ADMIN_LOGIN_URL: Joi.string().uri().required(),
   PLATFORM_LOGIN_URL: Joi.string().uri().required(),
+  WEB_APP_URL: Joi.string().uri().default('https://discuva.org'),
   SUPPORT_FORM_URL: Joi.string().uri().allow('').optional(),
   EXPLAINER_VIDEO_ANDROID_URL: Joi.string().uri().allow('').optional(),
   EXPLAINER_VIDEO_IOS_URL: Joi.string().uri().allow('').optional(),

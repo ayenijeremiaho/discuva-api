@@ -1,11 +1,16 @@
 import {
   IsEmail,
+  IsEnum,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
+import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
 import { NormalizeEmail } from '../../utility/decorators/normalize-email.decorator';
 
 // No password field, deliberately — the first admin never types a password
@@ -44,6 +49,52 @@ export class SignupDto {
   @IsEmail({}, { message: 'Invalid email format' })
   adminEmail: string;
 
+  @IsOptional()
+  @IsEnum(OrganisationTypeEnum)
+  orgType?: OrganisationTypeEnum;
+
+  // The organisation's own address, for billing and important notices. Defaults to adminEmail.
+  @IsOptional()
+  @NormalizeEmail()
+  @IsEmail({}, { message: 'Invalid contact email format' })
+  contactEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  country?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  size?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  locationCount?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  website?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  requesterRole?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  requesterPhone?: string;
+
   // Present only when this signup is completing a branch invite
   // (docs/MULTI_TENANT_MIGRATION.md §11.1) — the code emailed to the
   // invited church by BranchInviteService.createInvite. Omitted entirely
@@ -52,4 +103,11 @@ export class SignupDto {
   @IsString()
   @IsNotEmpty()
   branchInviteToken?: string;
+}
+
+export class ConfirmSignupDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(2000)
+  token: string;
 }

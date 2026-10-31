@@ -1,3 +1,4 @@
+import { ChurchRequestService } from './service/church-request.service';
 import {
   MiddlewareConsumer,
   Module,
@@ -132,6 +133,7 @@ import { BranchModule } from '../branch/branch.module';
   ],
   controllers: [TenantInfoController, SignupController],
   providers: [
+    ChurchRequestService,
     TenantMiddleware,
     TenantProvisioningService,
     TenantAssetService,
@@ -139,7 +141,7 @@ import { BranchModule } from '../branch/branch.module';
     TenantProvisioningProcessor,
     FounderWelcomeEmailScheduler,
   ],
-  exports: [TenantMiddleware, TenantProvisioningService],
+  exports: [TenantMiddleware, TenantProvisioningService, ChurchRequestService],
 })
 export class TenantModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
@@ -164,6 +166,11 @@ export class TenantModule implements NestModule {
         // site) — same reasoning as v1/signup itself, and an exact-path
         // exclude doesn't cover this distinct sub-path.
         { path: 'v1/signup/:tenantId/status', method: RequestMethod.GET },
+        { path: 'v1/signup/confirm', method: RequestMethod.POST },
+        {
+          path: 'v1/signup/:tenantId/resend-confirmation',
+          method: RequestMethod.POST,
+        },
         { path: 'v1/integrations/youtube/callback', method: RequestMethod.ALL },
         { path: 'v1/webhooks/billing', method: RequestMethod.ALL },
         { path: 'v1/webhooks/giving/{*path}', method: RequestMethod.ALL },

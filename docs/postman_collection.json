@@ -43446,6 +43446,118 @@
           }
         }
       ]
+    },
+    {
+      "name": "Church Requests",
+      "description": "Self-serve requests: submit, confirm both emails, then review.",
+      "item": [
+        {
+          "name": "Submit Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup"
+              ]
+            },
+            "description": "Public. Starts email confirmation, unless completing a branch invite.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orgType\": \"CHURCH\",\n  \"churchName\": \"Grace Chapel\",\n  \"subdomain\": \"grace-chapel\",\n  \"city\": \"Ikeja\",\n  \"country\": \"Nigeria\",\n  \"size\": \"300 to 1,000\",\n  \"locationCount\": 1,\n  \"website\": \"gracechapel.example\",\n  \"contactEmail\": \"office@gracechapel.example\",\n  \"adminFirstname\": \"Ada\",\n  \"adminLastname\": \"Obi\",\n  \"adminEmail\": \"ada@example.com\",\n  \"requesterRole\": \"Administrator\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Confirm Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                "confirm"
+              ]
+            },
+            "description": "Public. Idempotent.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"from-email-link\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Resend Confirmation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/signup/:tenantId/resend-confirmation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "signup",
+                ":tenantId",
+                "resend-confirmation"
+              ]
+            },
+            "description": "Public, throttled. 204."
+          }
+        },
+        {
+          "name": "Request Review",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/platform/tenants/:id/request-review",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "platform",
+                "tenants",
+                ":id",
+                "request-review"
+              ]
+            },
+            "description": "PlatformAdminGuard (TENANTS_READ)."
+          }
+        }
+      ]
     }
   ]
 }
