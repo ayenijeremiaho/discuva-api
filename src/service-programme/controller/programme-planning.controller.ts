@@ -119,6 +119,17 @@ export class ProgrammePlanningController {
   }
 
   @UseGuards(ProgrammePlannerGuard)
+  @Post('events/:eventId/publish')
+  async publishEvent(
+    @CurrentUser() user: MemberAuth,
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+  ) {
+    const result = await this.programmes.publishEvent(eventId);
+    this.planning.auditEvent(user.id, eventId, result.published);
+    return result;
+  }
+
+  @UseGuards(ProgrammePlannerGuard)
   @Post('programmes/:id/publish')
   async publish(
     @CurrentUser() user: MemberAuth,

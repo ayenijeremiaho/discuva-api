@@ -70,6 +70,7 @@ export class ProgrammeAutoStartScheduler {
       .where('programme.status = :status', {
         status: ServiceProgrammeStatusEnum.DRAFT,
       })
+      .andWhere('programme.publishedAt IS NOT NULL')
       .andWhere('config.auto_start_session = true')
       .andWhere('slot.start_time BETWEEN :windowStart AND :now', {
         windowStart,
@@ -92,6 +93,7 @@ export class ProgrammeAutoStartScheduler {
       .where('programme.status = :status', {
         status: ServiceProgrammeStatusEnum.DRAFT,
       })
+      .andWhere('programme.publishedAt IS NOT NULL')
       .andWhere('config.auto_start_session = true')
       .andWhere('slot.start_time >= :windowStart', { windowStart, now })
       .getRawOne<{ next: Date | string | null; waiting: string }>();

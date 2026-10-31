@@ -45300,6 +45300,81 @@
               ]
             }
           }
+        },
+        {
+          "name": "Day's Drafts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-programme/event/{{event_id}}/drafts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-programme",
+                "event",
+                "{{event_id}}",
+                "drafts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Publish Whole Day",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/service-programme/event/{{event_id}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "service-programme",
+                "event",
+                "{{event_id}}",
+                "publish"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Planner Publish Whole Day",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{member_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/programme-planning/events/{{event_id}}/publish",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "programme-planning",
+                "events",
+                "{{event_id}}",
+                "publish"
+              ]
+            }
+          }
         }
       ]
     }

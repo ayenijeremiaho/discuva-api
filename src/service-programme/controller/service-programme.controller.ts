@@ -192,6 +192,25 @@ export class ServiceProgrammeController {
     return result;
   }
 
+  @Get('event/:eventId/drafts')
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_READ)
+  eventDrafts(@Param('eventId', ParseUUIDPipe) eventId: string) {
+    return this.programmeSvc.draftsForEvent(eventId);
+  }
+
+  @Post('event/:eventId/publish')
+  @UseGuards(AdminGuard)
+  @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_WRITE)
+  async publishEvent(
+    @Param('eventId', ParseUUIDPipe) eventId: string,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    const result = await this.programmeSvc.publishEvent(eventId);
+    await this.audit('PROGRAMME_PUBLISHED', admin, eventId, result);
+    return result;
+  }
+
   @Post('publish')
   @UseGuards(AdminGuard)
   @RequiresPermission(AdminPermission.SERVICE_PROGRAMME_WRITE)

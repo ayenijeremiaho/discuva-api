@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Repository, IsNull } from 'typeorm';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { ServiceProgramme } from '../entity/service-programme.entity';
@@ -1594,6 +1594,7 @@ export class ServiceProgrammeService {
       .filter(
         (p) =>
           p.status === ServiceProgrammeStatusEnum.DRAFT &&
+          !!p.publishedAt &&
           p.slots &&
           p.slots.length > 0,
       )
@@ -1676,6 +1677,38 @@ export class ServiceProgrammeService {
     return { published: toPublish.length };
   }
 
+  // A day's services still waiting to go out. Empty ones are left for the planner to finish.
+  async draftsForEvent(
+    eventId: string,
+  ): Promise<{ id: string; name: string; items: number }[]> {
+    const programmes = await this.programmeRepo.find({
+      where: {
+        status: ServiceProgrammeStatusEnum.DRAFT,
+        publishedAt: IsNull(),
+        serviceSlot: { event: { id: eventId } },
+      },
+      relations: ['serviceSlot', 'slots'],
+    });
+    return programmes
+      .filter((p) => p.slots?.length)
+      .sort(
+        (a, b) =>
+          a.serviceSlot.startTime.getTime() - b.serviceSlot.startTime.getTime(),
+      )
+      .map((p) => ({
+        id: p.id,
+        name: p.serviceSlot.name,
+        items: p.slots.length,
+      }));
+  }
+
+  async publishEvent(eventId: string): Promise<{ published: number }> {
+    const drafts = await this.draftsForEvent(eventId);
+    if (!drafts.length)
+      throw new BadRequestException('There is nothing ready to publish.');
+    return this.publish(drafts.map((draft) => draft.id));
+  }
+
   // Back to a draft to rework it. People already told aren't told again until it's republished.
   async unpublish(id: string): Promise<void> {
     const programme = await this.programmeRepo.findOneBy({ id });
@@ -1700,6 +1733,11 @@ export class ServiceProgrammeService {
     if (!programme) throw new NotFoundException('Programme not found');
     if (programme.status !== ServiceProgrammeStatusEnum.DRAFT) {
       throw new ForbiddenException('Programme is not in DRAFT status');
+    }
+    if (!programme.publishedAt) {
+      throw new BadRequestException(
+        'Publish this programme before starting it.',
+      );
     }
     return programme;
   }

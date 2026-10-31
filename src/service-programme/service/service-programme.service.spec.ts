@@ -487,6 +487,58 @@ describe('ServiceProgrammeService', () => {
         ).not.toHaveBeenCalled();
       });
 
+      it("publishes a day's services together, skipping empty ones", async () => {
+        mockProgrammeRepo.find.mockReset();
+        const filled = {
+          ...unpublished([
+            {
+              id: 's1',
+              type: ServiceSlotTypeEnum.WORSHIP,
+              allocatedMinutes: 20,
+              member,
+            },
+          ]),
+          id: 'first',
+          serviceSlot: {
+            ...mockServiceSlot,
+            startTime: new Date(),
+            name: 'First',
+          },
+        };
+        const second = {
+          ...filled,
+          id: 'second',
+          slots: [
+            {
+              id: 's2',
+              type: ServiceSlotTypeEnum.SPEAKER,
+              allocatedMinutes: 40,
+              member,
+            },
+          ],
+        };
+        const empty = { ...filled, id: 'empty', slots: [] };
+        mockProgrammeRepo.find
+          .mockResolvedValueOnce([filled, second, empty])
+          .mockResolvedValueOnce([filled, second]);
+        await expect(service.publishEvent('event-1')).resolves.toEqual({
+          published: 2,
+        });
+        await new Promise((resolve) => setImmediate(resolve));
+        const pushes = mockNotificationDispatchService.notifyMember.mock.calls
+          .map((c) => c[0])
+          .filter((c) => c.push);
+        expect(pushes).toHaveLength(1);
+        expect(pushes[0].push.vars.slot_type).toBe('2 parts');
+      });
+
+      it('refuses to start an unpublished programme', async () => {
+        mockProgrammeRepo.findOne.mockResolvedValue(unpublished([]));
+        await expect(service.assertProgrammeIsDraft('prog-1')).rejects.toThrow(
+          'Publish this programme',
+        );
+      });
+
       it('refuses an empty programme', async () => {
         mockProgrammeRepo.find.mockReset();
         mockProgrammeRepo.find.mockResolvedValue([unpublished([])]);

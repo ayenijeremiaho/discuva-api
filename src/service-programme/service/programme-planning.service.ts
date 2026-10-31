@@ -224,6 +224,14 @@ export class ProgrammePlanningService {
     return this.view(programme.id);
   }
 
+  auditEvent(memberId: string, eventId: string, published: number): void {
+    this.auditLog.log('PROGRAMME_PUBLISHED', {
+      actorId: memberId,
+      targetId: eventId,
+      metadata: { published },
+    });
+  }
+
   async view(id: string, warning?: string): Promise<PlanningProgramme> {
     const p = await this.programmes.findOne(id);
     const person = (
