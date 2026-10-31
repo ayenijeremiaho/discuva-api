@@ -458,6 +458,7 @@ export class TenantProvisioningService {
 
           await tx.save(
             tx.create(Admin, {
+              isOwner: true,
               member,
               adminRole: superAdminRole,
               isActive: true,

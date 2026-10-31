@@ -6,6 +6,10 @@ import { AdminService } from './service/admin.service';
 import { AdminRoleService } from './service/admin-role.service';
 import { AdminTwoFactorService } from './service/admin-two-factor.service';
 import { AdminTwoFactorController } from './controller/admin-two-factor.controller';
+import { AdminOwnerController } from './controller/admin-owner.controller';
+import { AdminOwnerService } from './service/admin-owner.service';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { Tenant } from '../tenant/entity/tenant.entity';
 import { AdminController } from './controller/admin.controller';
 import { AdminRoleController } from './controller/admin-role.controller';
 import { AdminGuard } from './guard/admin.guard';
@@ -17,14 +21,21 @@ import { UtilityModule } from '../utility/utility.module';
 @Module({
   imports: [
     TenantTypeOrmModule.forFeature([Admin, AdminRole]),
+    TypeOrmModule.forFeature([Tenant]),
     MemberModule,
     UtilityModule,
   ],
-  controllers: [AdminTwoFactorController, AdminController, AdminRoleController],
+  controllers: [
+    AdminTwoFactorController,
+    AdminOwnerController,
+    AdminController,
+    AdminRoleController,
+  ],
   providers: [
     AdminService,
     AdminRoleService,
     AdminTwoFactorService,
+    AdminOwnerService,
     AdminGuard,
     DefaultAdminSeed,
   ],

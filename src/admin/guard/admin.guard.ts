@@ -1,3 +1,4 @@
+import { REQUIRES_OWNER_KEY } from '../decorator/requires-owner.decorator';
 import {
   CanActivate,
   ExecutionContext,
@@ -48,6 +49,14 @@ export class AdminGuard implements CanActivate {
 
     if (required && !admin.adminRole.permissions.includes(required)) {
       throw new ForbiddenException(`Missing required permission: ${required}`);
+    }
+
+    const ownerOnly = this.reflector.getAllAndOverride<boolean>(
+      REQUIRES_OWNER_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (ownerOnly && !admin.isOwner) {
+      throw new ForbiddenException('Only an account owner can do this.');
     }
 
     if (admin.member) {

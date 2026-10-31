@@ -4,6 +4,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AdminService } from './admin.service';
 import { AdminTwoFactorService } from './admin-two-factor.service';
+import { AdminOwnerService } from './admin-owner.service';
 import { Admin } from '../entity/admin.entity';
 import { AdminRoleService } from './admin-role.service';
 import { MemberService } from '../../member/service/member.service';
@@ -55,6 +56,10 @@ const mockAdmin: Admin = {
 } as any;
 
 const mockAdminTwoFactor = { resetByAnotherAdmin: jest.fn() };
+const mockOwners = {
+  assertCanChange: jest.fn().mockResolvedValue(undefined),
+  assertNotLastOwner: jest.fn().mockResolvedValue(undefined),
+};
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -70,6 +75,7 @@ describe('AdminService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: AdminTwoFactorService, useValue: mockAdminTwoFactor },
+        { provide: AdminOwnerService, useValue: mockOwners },
         { provide: ConfigService, useValue: mockConfigService },
       ],
     }).compile();

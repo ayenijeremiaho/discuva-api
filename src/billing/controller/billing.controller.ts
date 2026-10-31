@@ -1,3 +1,4 @@
+import { RequiresOwner } from '../../admin/decorator/requires-owner.decorator';
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -39,6 +40,7 @@ export class BillingController {
     return this.checkoutService.listPaymentProviders();
   }
 
+  @RequiresOwner()
   @RequiresPermission(AdminPermission.BILLING_WRITE)
   @Post('checkout/subscribe')
   initiateSubscriptionCheckout(
@@ -59,6 +61,7 @@ export class BillingController {
   // active paid period left to honor, otherwise keeps access until
   // currentPeriodEnd and lets SubscriptionLapseScheduler complete the
   // downgrade — see CheckoutService.cancelSubscription for the full split.
+  @RequiresOwner()
   @RequiresPermission(AdminPermission.BILLING_WRITE)
   @Post('cancel')
   cancelSubscription() {

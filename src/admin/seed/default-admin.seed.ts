@@ -70,6 +70,7 @@ export class DefaultAdminSeed {
         member,
         adminRole: superAdminRole,
         isActive: true,
+        isOwner: true,
       }),
     );
 

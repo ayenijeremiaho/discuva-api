@@ -32,6 +32,18 @@ export class Admin extends BaseEntity {
   @Column({ default: true })
   isActive: boolean;
 
+  // Holds the account for the church: billing, admins, handover.
+  @Column({ name: 'is_owner', default: false })
+  isOwner: boolean;
+
+  @Column({ type: 'timestamptz', name: 'owner_invited_at', nullable: true })
+  ownerInvitedAt: Date | null;
+
+  @Index()
+  @ManyToOne(() => Admin, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'owner_invited_by_id' })
+  ownerInvitedBy: Admin | null;
+
   // Encrypted with CREDENTIALS_ENCRYPTION_KEY; null until the admin opts in.
   @Column({
     type: 'text',

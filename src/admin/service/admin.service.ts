@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import { Admin } from '../entity/admin.entity';
 import { AdminRoleService } from './admin-role.service';
 import { AdminTwoFactorService } from './admin-two-factor.service';
+import { AdminOwnerService } from './admin-owner.service';
 import { GrantAdminDto, UpdateAdminUserDto } from '../dto/admin-user.dto';
 import { MemberService } from '../../member/service/member.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -28,6 +29,7 @@ export class AdminService {
     private readonly auditLogService: AuditLogService,
     private readonly utilityService: UtilityService,
     private readonly twoFactor: AdminTwoFactorService,
+    private readonly owners: AdminOwnerService,
   ) {}
 
   async grant(dto: GrantAdminDto, actorId: string): Promise<Admin> {
@@ -91,6 +93,9 @@ export class AdminService {
       throw new ForbiddenException('You cannot modify your own admin record.');
     }
 
+    await this.owners.assertCanChange(admin, actorId);
+    if (dto.isActive === false) await this.owners.assertNotLastOwner(admin);
+
     const previousRoleName = admin.adminRole?.name;
 
     if (dto.adminRoleId) {
@@ -126,11 +131,14 @@ export class AdminService {
         'Ask another admin to reset your two-factor sign-in.',
       );
     }
+    await this.owners.assertCanChange(admin, actorId);
     await this.twoFactor.resetByAnotherAdmin(admin.member.id, actorId);
   }
 
   async revoke(id: string, actorId: string): Promise<void> {
     const admin = await this.findById(id);
+    await this.owners.assertCanChange(admin, actorId);
+    await this.owners.assertNotLastOwner(admin);
     admin.isActive = false;
     await this.adminRepository.save(admin);
     this.logger.log(

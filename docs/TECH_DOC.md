@@ -7456,6 +7456,29 @@ cancel-don't-delete one.
   group is part of a church is told to ask the church and can't continue.
 - **Env:** `WEB_APP_URL` (API, defaults to `https://discuva.org`); `NEXT_PUBLIC_ONBOARDING_CALL_URL` (discuva-web, optional).
 
+### Account Owners
+
+Owners hold the account for the organisation, on `admins.is_owner`. A tenant migration (`AddAdminOwners`) makes the earliest active
+SuperAdmin the first owner, and new accounts seed their first admin as an owner.
+
+- **Handover:** an owner invites another admin (`owner_invited_at`, `owner_invited_by_id`). That admin accepts or declines, then the old
+  owner can step down. Becoming an owner always needs acceptance, and other owners are emailed.
+- **Rules:** the last owner can't step down or be deactivated, enforced with a conditional update so two owners can't both leave at
+  once. Only an owner can change, revoke or reset 2FA for another owner. `@RequiresOwner()` (checked in `AdminGuard`) limits plan changes and cancelling to owners.
+- **Second owner:** required wording for churches and ministries, a recommendation for small groups (`tenants.org_type`). The Owners
+  tab shows this. Prompting at first login comes with the setup wizard.
+- **Database cost:** no polling. `is_owner` is read on the admin row `AdminGuard` already loads. `GET /admin/owners` only runs on the Owners tab. Partial indexes `IDX_admins_is_owner` and `IDX_admins_owner_invited`, plus `IDX_admins_owner_invited_by_id`.
+- **Recovery:** when owners are gone, follow `docs/OWNERSHIP_RECOVERY.md`.
+
+| Method | Route | Guard | Description |
+|--------|-------|-------|-------------|
+| GET | `/admin/owners` | AdminGuard | `{ owners, pendingInvites, secondOwnerRequired }` |
+| POST | `/admin/owners/:id/invite` | AdminGuard, owner | Invite an admin. `204` |
+| DELETE | `/admin/owners/:id/invite` | AdminGuard, owner | Cancel an invite. `204` |
+| POST | `/admin/owners/accept` | AdminGuard | Accept your invite. `204` |
+| POST | `/admin/owners/decline` | AdminGuard | Decline your invite. `204` |
+| POST | `/admin/owners/step-down` | AdminGuard, owner | Step down, if another owner remains. `204` |
+
 ### Two-factor sign-in (admin portal and platform console)
 
 Optional and recommended, never enforced: everything stays off until an admin opts in. Authenticator-app codes (RFC
