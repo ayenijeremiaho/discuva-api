@@ -53,6 +53,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
     spaceRepo.query
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         {
           id: 'o1',
@@ -80,7 +81,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
       }),
       expect.objectContaining({ refId: 'o2', isLeader: true, closed: true }),
     ]);
-    const [sql, params] = spaceRepo.query.mock.calls[2];
+    const [sql, params] = spaceRepo.query.mock.calls[3];
     expect(sql).toContain("s.status = 'CONFIRMED'");
     expect(params).toEqual([
       'm1',
@@ -94,7 +95,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
     volunteeringOn = false;
     spaceRepo.query.mockResolvedValue([]);
     await service.memberships('m1', now);
-    expect(spaceRepo.query).toHaveBeenCalledTimes(2);
+    expect(spaceRepo.query).toHaveBeenCalledTimes(3);
     await expect(
       service.access('m1', TeamSpaceKindEnum.VOLUNTEERING, 'o1'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -103,6 +104,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
   it("uses the church's own chat lifespan", async () => {
     chat = { openDays: 1, listedDays: 30 };
     spaceRepo.query
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
@@ -118,7 +120,7 @@ describe('TeamSpaceAccessService (volunteering)', () => {
     expect(space).toEqual(
       expect.objectContaining({ refId: 'o1', closed: true }),
     );
-    expect(spaceRepo.query.mock.calls[2][1]).toEqual([
+    expect(spaceRepo.query.mock.calls[3][1]).toEqual([
       'm1',
       new Date(now.getTime() - 30 * day),
       new Date(now.getTime() + 30 * day),

@@ -96,13 +96,14 @@ export class TeamMeetingReminderScheduler {
 
     const meetings = (await this.spaceRepo.query(
       `SELECT m.post_id, m.title, m.starts_at, m.location, s.id AS space_id, s.kind, s.ref_id,
-         COALESCE(d.name, g.name) AS space_name
+         COALESCE(d.name, g.name, ss.name) AS space_name
        FROM team_meetings m
        JOIN team_posts p ON p.id = m.post_id AND p.removed_at IS NULL
        JOIN team_spaces s ON s.id = m.space_id
        LEFT JOIN departments d ON s.kind = 'DEPARTMENT' AND d.id = s.ref_id
        LEFT JOIN small_groups g ON s.kind = 'FELLOWSHIP' AND g.id = s.ref_id
-       WHERE m.cancelled_at IS NULL AND m.starts_at > $1 AND m.starts_at <= $2
+       LEFT JOIN shared_spaces ss ON s.kind = 'SHARED' AND ss.id = s.ref_id
+       WHERE ss.archived_at IS NULL AND m.cancelled_at IS NULL AND m.starts_at > $1 AND m.starts_at <= $2
        ORDER BY m.starts_at`,
       [now, new Date(now.getTime() + furthest + SEND_WINDOW_MS)],
     )) as MeetingRow[];

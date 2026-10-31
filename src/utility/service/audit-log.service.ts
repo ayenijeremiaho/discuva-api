@@ -327,6 +327,10 @@ export type AuditAction =
   | 'TEAM_PULSE_REMINDER_SENT'
   // Team Spaces (post contents are never logged)
   | 'TEAM_POST_REMOVED'
+  | 'SHARED_SPACE_CREATED'
+  | 'SHARED_SPACE_UPDATED'
+  | 'SHARED_SPACE_ARCHIVED'
+  | 'SHARED_SPACE_RESTORED'
   | 'TEAM_SPACE_SETTINGS_UPDATED'
   | 'VOLUNTEER_CHAT_SETTINGS_UPDATED'
   // Serving Rota

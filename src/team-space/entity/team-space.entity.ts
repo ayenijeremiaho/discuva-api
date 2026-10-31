@@ -5,6 +5,7 @@ export enum TeamSpaceKindEnum {
   DEPARTMENT = 'DEPARTMENT',
   FELLOWSHIP = 'FELLOWSHIP',
   VOLUNTEERING = 'VOLUNTEERING',
+  SHARED = 'SHARED',
 }
 
 // A department's, fellowship's or volunteering opportunity's shared space. Membership isn't stored: it follows the roster.

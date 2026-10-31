@@ -44124,6 +44124,164 @@
           }
         }
       ]
+    },
+    {
+      "name": "Team Spaces - Shared Spaces (Admin)",
+      "item": [
+        {
+          "name": "List Shared Spaces",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/team-spaces/shared",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "team-spaces",
+                "shared"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Shared Space",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/team-spaces/shared",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "team-spaces",
+                "shared"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Easter Outreach\",\n  \"audience\": \"CUSTOM\",\n  \"leadersOnly\": false,\n  \"departmentIds\": [\n    \"{{department_id}}\"\n  ],\n  \"groupIds\": [],\n  \"memberIds\": [],\n  \"leaderIds\": [\n    \"{{member_id}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Update Shared Space",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/team-spaces/shared/{{shared_space_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "team-spaces",
+                "shared",
+                "{{shared_space_id}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Easter Outreach\",\n  \"audience\": \"CUSTOM\",\n  \"leadersOnly\": false,\n  \"departmentIds\": [\n    \"{{department_id}}\"\n  ],\n  \"groupIds\": [],\n  \"memberIds\": [],\n  \"leaderIds\": [\n    \"{{member_id}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Archive Shared Space",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/team-spaces/shared/{{shared_space_id}}/archive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "team-spaces",
+                "shared",
+                "{{shared_space_id}}",
+                "archive"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Restore Shared Space",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/team-spaces/shared/{{shared_space_id}}/restore",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "team-spaces",
+                "shared",
+                "{{shared_space_id}}",
+                "restore"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

@@ -41,6 +41,29 @@ export function volunteerSpaceClosed(
   );
 }
 
+// The member's shared spaces: named directly, in a chosen team, or in an automatic audience. $1 is the member.
+const SHARED_FOR_MEMBER_SQL = `
+  SELECT sp.id, sp.name, COALESCE(p.is_leader, false) AS is_leader
+  FROM shared_spaces sp
+  LEFT JOIN shared_space_people p ON p.shared_space_id = sp.id AND p.member_id = $1
+  WHERE sp.archived_at IS NULL AND (
+    p.member_id IS NOT NULL
+    OR (sp.audience = 'ALL_WORKERS' AND EXISTS (
+      SELECT 1 FROM worker_profiles wp WHERE wp.member_id = $1 AND wp.status = 'ACTIVE'))
+    OR (sp.audience = 'LEADERS' AND (
+      EXISTS (SELECT 1 FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id WHERE lw.member_id = $1)
+      OR EXISTS (SELECT 1 FROM small_groups g WHERE g.leader_id = $1)))
+    OR (sp.audience = 'CUSTOM' AND EXISTS (
+      SELECT 1 FROM shared_space_sources s WHERE s.shared_space_id = sp.id AND (
+        (s.kind = 'DEPARTMENT' AND s.ref_id IN (
+          SELECT wp.department_id FROM worker_profiles wp WHERE wp.member_id = $1 AND wp.status = 'ACTIVE'
+          UNION SELECT wp.secondary_department_id FROM worker_profiles wp WHERE wp.member_id = $1 AND wp.status = 'ACTIVE'
+          UNION SELECT l.department_id FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id WHERE lw.member_id = $1))
+        OR (s.kind = 'FELLOWSHIP' AND s.ref_id IN (
+          SELECT m.group_id FROM small_group_members m WHERE m.member_id = $1
+          UNION SELECT g.id FROM small_groups g WHERE g.leader_id = $1)))))
+  )`;
+
 export interface SpaceAccess extends SpaceMembership {
   space: TeamSpace;
 }
@@ -76,7 +99,7 @@ export class TeamSpaceAccessService {
     memberId: string,
     now = new Date(),
   ): Promise<SpaceMembership[]> {
-    const [departments, fellowships, volunteering] = await Promise.all([
+    const [departments, fellowships, volunteering, shared] = await Promise.all([
       this.spaceRepo.query(
         `SELECT d.id, d.name,
            EXISTS (SELECT 1 FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id
@@ -99,6 +122,9 @@ export class TeamSpaceAccessService {
         [memberId],
       ) as Promise<{ id: string; name: string; is_leader: boolean }[]>,
       this.volunteerMemberships(memberId, now),
+      this.spaceRepo.query(SHARED_FOR_MEMBER_SQL, [memberId]) as Promise<
+        { id: string; name: string; is_leader: boolean }[]
+      >,
     ]);
     return [
       ...departments.map((d) => ({
@@ -114,6 +140,12 @@ export class TeamSpaceAccessService {
         isLeader: !!g.is_leader,
       })),
       ...volunteering,
+      ...shared.map((s) => ({
+        kind: TeamSpaceKindEnum.SHARED,
+        refId: s.id,
+        name: s.name,
+        isLeader: !!s.is_leader,
+      })),
     ];
   }
 
@@ -169,6 +201,8 @@ export class TeamSpaceAccessService {
   ): Promise<SpaceAccess> {
     if (kind === TeamSpaceKindEnum.VOLUNTEERING)
       return this.volunteerAccess(memberId, refId);
+    if (kind === TeamSpaceKindEnum.SHARED)
+      return this.sharedAccess(memberId, refId);
     const rows = (await (kind === TeamSpaceKindEnum.DEPARTMENT
       ? this.spaceRepo.query(
           `SELECT d.name,
@@ -195,6 +229,24 @@ export class TeamSpaceAccessService {
       name: row.name,
       isLeader: !!row.is_leader,
       space: await this.ensureSpace(kind, refId),
+    };
+  }
+
+  private async sharedAccess(
+    memberId: string,
+    refId: string,
+  ): Promise<SpaceAccess> {
+    const rows = (await this.spaceRepo.query(
+      `SELECT * FROM (${SHARED_FOR_MEMBER_SQL}) mine WHERE mine.id = $2`,
+      [memberId, refId],
+    )) as { id: string; name: string; is_leader: boolean }[];
+    if (!rows[0]) throw new ForbiddenException("This isn't one of your teams.");
+    return {
+      kind: TeamSpaceKindEnum.SHARED,
+      refId,
+      name: rows[0].name,
+      isLeader: !!rows[0].is_leader,
+      space: await this.ensureSpace(TeamSpaceKindEnum.SHARED, refId),
     };
   }
 
@@ -269,6 +321,38 @@ export class TeamSpaceAccessService {
 
   // Everyone a space reaches: the active roster plus its leaders.
   async memberIds(space: Pick<TeamSpace, 'kind' | 'refId'>): Promise<string[]> {
+    if (space.kind === TeamSpaceKindEnum.SHARED) {
+      const rows = (await this.spaceRepo.query(
+        `SELECT m.id FROM members m
+         WHERE m.status = 'ACTIVE' AND m.id IN (
+           SELECT p.member_id FROM shared_space_people p WHERE p.shared_space_id = $1
+           UNION SELECT wp.member_id FROM worker_profiles wp JOIN shared_spaces sp ON sp.id = $1 AND sp.audience = 'ALL_WORKERS'
+             WHERE wp.status = 'ACTIVE'
+           UNION SELECT lw.member_id FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id
+             JOIN shared_spaces sp ON sp.id = $1 AND sp.audience = 'LEADERS'
+           UNION SELECT g.leader_id FROM small_groups g JOIN shared_spaces sp ON sp.id = $1 AND sp.audience = 'LEADERS'
+             WHERE g.leader_id IS NOT NULL
+           UNION SELECT wp.member_id FROM shared_space_sources s
+             JOIN shared_spaces sp ON sp.id = s.shared_space_id AND sp.audience = 'CUSTOM'
+             JOIN worker_profiles wp ON wp.status = 'ACTIVE' AND (wp.department_id = s.ref_id OR wp.secondary_department_id = s.ref_id)
+             WHERE s.shared_space_id = $1 AND s.kind = 'DEPARTMENT'
+           UNION SELECT lw.member_id FROM shared_space_sources s
+             JOIN shared_spaces sp ON sp.id = s.shared_space_id AND sp.audience = 'CUSTOM'
+             JOIN department_leads l ON l.department_id = s.ref_id JOIN worker_profiles lw ON lw.id = l.worker_profile_id
+             WHERE s.shared_space_id = $1 AND s.kind = 'DEPARTMENT'
+           UNION SELECT sm.member_id FROM shared_space_sources s
+             JOIN shared_spaces sp ON sp.id = s.shared_space_id AND sp.audience = 'CUSTOM'
+             JOIN small_group_members sm ON sm.group_id = s.ref_id
+             WHERE s.shared_space_id = $1 AND s.kind = 'FELLOWSHIP'
+           UNION SELECT g.leader_id FROM shared_space_sources s
+             JOIN shared_spaces sp ON sp.id = s.shared_space_id AND sp.audience = 'CUSTOM'
+             JOIN small_groups g ON g.id = s.ref_id
+             WHERE s.shared_space_id = $1 AND s.kind = 'FELLOWSHIP' AND g.leader_id IS NOT NULL
+         )`,
+        [space.refId],
+      )) as { id: string }[];
+      return rows.map((r) => r.id);
+    }
     if (space.kind === TeamSpaceKindEnum.VOLUNTEERING) {
       const rows = (await this.spaceRepo.query(
         `SELECT m.id FROM members m

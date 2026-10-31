@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { TeamSpace } from './entity/team-space.entity';
+import { SharedSpace } from './entity/shared-space.entity';
+import { SharedSpaceService } from './service/shared-space.service';
+import { SharedSpaceController } from './controller/shared-space.controller';
 import { TeamPost } from './entity/team-post.entity';
 import { TeamPostReply } from './entity/team-post-reply.entity';
 import { TeamSpaceRead } from './entity/team-space-read.entity';
@@ -25,6 +28,7 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
   imports: [
     TenantTypeOrmModule.forFeature([
       TeamSpace,
+      SharedSpace,
       TeamPost,
       TeamPostReply,
       TeamSpaceRead,
@@ -37,6 +41,7 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
     ]),
   ],
   providers: [
+    SharedSpaceService,
     TeamSpaceAccessService,
     TeamSpaceService,
     TeamSpaceDigestService,
@@ -47,6 +52,10 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
     TeamSpaceReactionService,
   ],
   exports: [TeamSpaceAccessService],
-  controllers: [TeamSpaceController, VolunteerChatSettingsController],
+  controllers: [
+    SharedSpaceController,
+    TeamSpaceController,
+    VolunteerChatSettingsController,
+  ],
 })
 export class TeamSpaceModule {}

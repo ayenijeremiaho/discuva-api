@@ -13,6 +13,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { RsvpResponseEnum } from '../entity/team-meeting-rsvp.entity';
+import { SharedSpaceAudienceEnum } from '../entity/shared-space.entity';
 import { Transform } from 'class-transformer';
 import {
   POST_MAX_LENGTH,
@@ -22,6 +23,39 @@ import {
 
 const trim = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
+
+export class SaveSharedSpaceDto {
+  @Transform(trim)
+  @IsString()
+  @Length(1, 100)
+  name: string;
+
+  @IsEnum(SharedSpaceAudienceEnum)
+  audience: SharedSpaceAudienceEnum;
+
+  @IsBoolean()
+  leadersOnly: boolean;
+
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  departmentIds: string[];
+
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  groupIds: string[];
+
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  memberIds: string[];
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID('all', { each: true })
+  leaderIds: string[];
+}
 
 export class ReactionDto {
   @IsString()
