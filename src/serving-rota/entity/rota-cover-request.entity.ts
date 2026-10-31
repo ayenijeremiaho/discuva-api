@@ -10,6 +10,7 @@ import { BaseEntity } from '../../utility/entity/base.entity';
 import { Department } from '../../department/entity/department.entity';
 import { Member } from '../../member/entity/member.entity';
 import { RotaAssignment } from './rota-assignment.entity';
+import { RotaCustomAssignment } from './rota-custom-assignment.entity';
 
 export enum CoverStatusEnum {
   OPEN = 'OPEN',
@@ -23,9 +24,17 @@ export class RotaCoverRequest extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @ManyToOne(() => RotaAssignment, { nullable: false, onDelete: 'CASCADE' })
+  @ManyToOne(() => RotaAssignment, { nullable: true, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'assignment_id' })
-  assignment: RotaAssignment;
+  assignment: RotaAssignment | null;
+
+  // Set instead of assignment for a department's own serving times.
+  @ManyToOne(() => RotaCustomAssignment, {
+    nullable: true,
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'custom_assignment_id' })
+  customAssignment: RotaCustomAssignment | null;
 
   @ManyToOne(() => Department, { nullable: false, onDelete: 'CASCADE' })
   @JoinColumn({ name: 'department_id' })

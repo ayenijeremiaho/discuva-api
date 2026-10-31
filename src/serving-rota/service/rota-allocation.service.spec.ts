@@ -24,7 +24,13 @@ describe('RotaAllocationService', () => {
       { is_leader: false, subteam_ids: [], all_scope: false },
     ]);
     await expect(
-      service.generate('member', 'department', 'slot', [], new Date('2030-01-01')),
+      service.generate(
+        'member',
+        'department',
+        'slot',
+        [],
+        new Date('2030-01-01'),
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -34,7 +40,11 @@ describe('RotaAllocationService', () => {
         { is_leader: true, subteam_ids: [], all_scope: false },
       ])
       .mockResolvedValueOnce([
-        { id: 'slot', start_time: future, end_time: new Date('2030-06-09T11:00:00Z') },
+        {
+          id: 'slot',
+          start_time: future,
+          end_time: new Date('2030-06-09T11:00:00Z'),
+        },
       ])
       .mockResolvedValueOnce([
         {

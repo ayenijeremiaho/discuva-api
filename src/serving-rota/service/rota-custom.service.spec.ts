@@ -1,3 +1,4 @@
+import { RotaAccessService } from './rota-access.service';
 import { ForbiddenException } from '@nestjs/common';
 import { RotaCustomService } from './rota-custom.service';
 
@@ -15,6 +16,8 @@ describe('RotaCustomService', () => {
     notifications as never,
     audit as never,
     gate as never,
+    new RotaAccessService(assignments as never),
+    { format: () => 'Sun 25 Oct, 8:00 AM' } as never,
   );
 
   beforeEach(() => {
@@ -76,13 +79,7 @@ describe('RotaCustomService', () => {
     });
 
     await expect(
-      service.save(
-        'planner',
-        'department',
-        'schedule',
-        '2030-06-09',
-        [],
-      ),
+      service.save('planner', 'department', 'schedule', '2030-06-09', []),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

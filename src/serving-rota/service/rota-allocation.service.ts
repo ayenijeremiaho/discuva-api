@@ -8,11 +8,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { RotaAssignment } from '../entity/rota-assignment.entity';
 import { RotaUnavailability } from '../entity/rota-unavailability.entity';
-import { RotaEntryDto, SaveRotaUnavailabilityDto } from '../dto/serving-rota.dto';
+import {
+  RotaEntryDto,
+  SaveRotaUnavailabilityDto,
+} from '../dto/serving-rota.dto';
 import { RotaAllocationMode } from '../enum/rota-allocation-mode.enum';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { localDate } from '../../event/types/slot-blueprint';
-import { fromZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 
 interface CandidateRow {
   responsibility_id: string;
@@ -55,10 +58,8 @@ export class RotaAllocationService {
     if (!slot) throw new NotFoundException('Service not found.');
     if (new Date(slot.start_time) <= now)
       throw new BadRequestException('This service has already started.');
-    const date = localDate(
-      new Date(slot.start_time),
-      await this.churchTimezone.get(),
-    );
+    const timezone = await this.churchTimezone.get();
+    const date = localDate(new Date(slot.start_time), timezone);
     const scopeIds = scopes.all ? null : scopes.subteamIds;
     const rows = (await this.assignments.query(
       `SELECT r.id AS responsibility_id, r.name AS responsibility_name, r.required_count,
@@ -68,15 +69,27 @@ export class RotaAllocationService {
             AND $3::date BETWEEN rl.date_from AND rl.date_to
           ORDER BY (rl.status = 'APPROVED') DESC LIMIT 1) AS leave,
          EXISTS (SELECT 1 FROM rota_unavailability u WHERE u.member_id = rm.member_id AND u.date = $3::date) AS unavailable,
-         (SELECT string_agg(d.name, ', ' ORDER BY d.name) FROM rota_assignments other
-          JOIN departments d ON d.id = other.department_id
-          WHERE other.service_slot_id = $2 AND other.member_id = rm.member_id AND other.department_id <> $1) AS conflict,
-         (SELECT count(*)::int FROM rota_assignments recent JOIN service_slots rs ON rs.id = recent.service_slot_id
-          WHERE recent.member_id = rm.member_id AND rs.start_time >= $4 AND rs.start_time < $5) AS workload,
+         (SELECT string_agg(DISTINCT conflict.name, ', ' ORDER BY conflict.name) FROM (
+            SELECT d.name FROM rota_assignments other JOIN service_slots os ON os.id = other.service_slot_id
+            JOIN departments d ON d.id = other.department_id
+            WHERE other.member_id = rm.member_id AND os.start_time < $8 AND os.end_time > $5
+              AND NOT (other.service_slot_id = $2 AND other.department_id = $1)
+            UNION ALL
+            SELECT cs.name FROM rota_custom_assignments ca JOIN rota_schedules cs ON cs.id = ca.schedule_id
+            WHERE ca.member_id = rm.member_id AND ca.occurrence_date = $3::date
+              AND cs.start_time < $10::time AND cs.end_time > $9::time
+          ) conflict) AS conflict,
+         ((SELECT count(*) FROM rota_assignments recent JOIN service_slots rs ON rs.id = recent.service_slot_id
+           WHERE recent.member_id = rm.member_id AND rs.start_time >= $4 AND rs.start_time < $5) +
+          (SELECT count(*) FROM rota_custom_assignments recent
+           WHERE recent.member_id = rm.member_id AND recent.occurrence_date >= $7::date AND recent.occurrence_date < $3::date))::int AS workload,
          (SELECT max(rs.start_time) FROM rota_assignments recent JOIN service_slots rs ON rs.id = recent.service_slot_id
           WHERE recent.member_id = rm.member_id AND rs.start_time < $5) AS last_served
        FROM rota_responsibilities r
        LEFT JOIN rota_responsibility_members rm ON rm.responsibility_id = r.id
+         AND EXISTS (SELECT 1 FROM worker_profiles wp JOIN members m ON m.id = wp.member_id
+                     WHERE wp.member_id = rm.member_id AND wp.status = 'ACTIVE' AND m.status = 'ACTIVE'
+                       AND (wp.department_id = $1 OR wp.secondary_department_id = $1))
        WHERE r.department_id = $1 AND ($6::uuid[] IS NULL OR r.subteam_id = ANY($6))
        ORDER BY r.position, r.name, rm.is_fixed DESC, workload, last_served NULLS FIRST, rm.member_id`,
       [
@@ -86,6 +99,13 @@ export class RotaAllocationService {
         new Date(new Date(slot.start_time).getTime() - 56 * 24 * 3600 * 1000),
         slot.start_time,
         scopeIds,
+        localDate(
+          new Date(new Date(slot.start_time).getTime() - 56 * 24 * 3600 * 1000),
+          timezone,
+        ),
+        slot.end_time,
+        formatInTimeZone(new Date(slot.start_time), timezone, 'HH:mm:ss'),
+        formatInTimeZone(new Date(slot.end_time), timezone, 'HH:mm:ss'),
       ],
     )) as CandidateRow[];
     if (!rows.length)
@@ -133,7 +153,9 @@ export class RotaAllocationService {
       timezone,
     );
     if (start <= now)
-      throw new BadRequestException('This serving session has already started.');
+      throw new BadRequestException(
+        'This serving session has already started.',
+      );
     const scopeIds = scopes.all ? null : scopes.subteamIds;
     const rows = (await this.assignments.query(
       `SELECT r.id AS responsibility_id, r.name AS responsibility_name, r.required_count,
@@ -159,6 +181,9 @@ export class RotaAllocationService {
          NULL::timestamptz AS last_served
        FROM rota_responsibilities r
        LEFT JOIN rota_responsibility_members rm ON rm.responsibility_id = r.id
+         AND EXISTS (SELECT 1 FROM worker_profiles wp JOIN members m ON m.id = wp.member_id
+                     WHERE wp.member_id = rm.member_id AND wp.status = 'ACTIVE' AND m.status = 'ACTIVE'
+                       AND (wp.department_id = $1 OR wp.secondary_department_id = $1))
        WHERE r.department_id = $1 AND ($10::uuid[] IS NULL OR r.subteam_id = ANY($10))
        ORDER BY r.position, r.name, rm.is_fixed DESC, workload, rm.member_id`,
       [
@@ -191,7 +216,12 @@ export class RotaAllocationService {
     );
     const chosen = new Set(locked.keys());
     const entries = lockedEntries.map((entry) => ({ ...entry, locked: true }));
-    const gaps: { responsibilityId: string; responsibility: string; count: number; reason: string }[] = [];
+    const gaps: {
+      responsibilityId: string;
+      responsibility: string;
+      count: number;
+      reason: string;
+    }[] = [];
     const grouped = new Map<string, CandidateRow[]>();
     for (const row of rows)
       grouped.set(row.responsibility_id, [
@@ -250,10 +280,12 @@ export class RotaAllocationService {
 
   async mine(memberId: string, now = new Date()) {
     const today = localDate(now, await this.churchTimezone.get());
-    return this.unavailability.find({
-      where: { member: { id: memberId } },
-      order: { date: 'ASC' },
-    }).then((rows) => rows.filter((row) => row.date >= today));
+    return this.unavailability
+      .find({
+        where: { member: { id: memberId } },
+        order: { date: 'ASC' },
+      })
+      .then((rows) => rows.filter((row) => row.date >= today));
   }
 
   async saveUnavailable(
@@ -271,7 +303,13 @@ export class RotaAllocationService {
        SET reason = EXCLUDED.reason, updated_at = now()`,
       [memberId, dto.date, dto.reason?.trim() || null],
     );
-    return { ok: true };
+    const duties = (await this.unavailability.query(
+      `SELECT (SELECT count(*) FROM rota_custom_assignments c WHERE c.member_id = $1 AND c.occurrence_date = $2::date)
+         + (SELECT count(*) FROM rota_assignments a JOIN service_slots ss ON ss.id = a.service_slot_id
+            WHERE a.member_id = $1 AND (ss.start_time AT TIME ZONE $3)::date = $2::date) AS n`,
+      [memberId, dto.date, await this.churchTimezone.get()],
+    )) as { n: string }[];
+    return { ok: true, dutiesThatDay: Number(duties[0]?.n ?? 0) };
   }
 
   async removeUnavailable(memberId: string, date: string) {

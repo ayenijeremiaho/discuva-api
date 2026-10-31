@@ -104,10 +104,7 @@ describe('RotaSetupService', () => {
 
     await expect(
       service.saveEligibility('leader', 'department', 'responsibility', {
-        members: [
-          { memberId: 'm1', isFixed: true },
-          { memberId: 'm2' },
-        ],
+        members: [{ memberId: 'm1', isFixed: true }, { memberId: 'm2' }],
       }),
     ).resolves.toEqual({ count: 2 });
     expect(manager.query).toHaveBeenCalledTimes(2);

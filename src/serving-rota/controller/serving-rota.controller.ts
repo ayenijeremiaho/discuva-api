@@ -1,3 +1,6 @@
+import { RotaDraftService } from '../service/rota-draft.service';
+import { RotaCoverService } from '../service/rota-cover.service';
+import { PublishRotaDraftsDto } from '../dto/serving-rota.dto';
 import {
   Body,
   Controller,
@@ -39,6 +42,8 @@ const Uuid = (name: string) => Param(name, ParseUUIDPipe);
 @Controller('rota')
 export class ServingRotaController {
   constructor(
+    private readonly drafts_: RotaDraftService,
+    private readonly cover_: RotaCoverService,
     private readonly rota: ServingRotaService,
     private readonly setup: RotaSetupService,
     private readonly allocation: RotaAllocationService,
@@ -110,7 +115,13 @@ export class ServingRotaController {
     @Param('date') date: string,
     @Body() dto: SaveRotaDto,
   ) {
-    return this.custom.save(user.id, departmentId, scheduleId, date, dto.entries);
+    return this.custom.save(
+      user.id,
+      departmentId,
+      scheduleId,
+      date,
+      dto.entries,
+    );
   }
 
   @Post('departments/:departmentId/custom-sessions/:scheduleId/:date/generate')
@@ -128,6 +139,93 @@ export class ServingRotaController {
       date,
       dto.lockedEntries,
     );
+  }
+
+  @Get('departments/:departmentId/drafts')
+  drafts(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+  ) {
+    return this.drafts_.list(user.id, departmentId);
+  }
+
+  @Post('departments/:departmentId/drafts/publish')
+  publishDrafts(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+    @Body() dto: PublishRotaDraftsDto,
+  ) {
+    return this.drafts_.publish(user.id, departmentId, dto.draftIds);
+  }
+
+  @Put('departments/:departmentId/drafts/services/:slotId')
+  saveSlotDraft(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+    @Uuid('slotId') slotId: string,
+    @Body() dto: SaveRotaDto,
+  ) {
+    return this.drafts_.save(user.id, departmentId, { slotId }, dto.entries);
+  }
+
+  @Delete('departments/:departmentId/drafts/services/:slotId')
+  discardSlotDraft(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+    @Uuid('slotId') slotId: string,
+  ) {
+    return this.drafts_.discard(user.id, departmentId, { slotId });
+  }
+
+  @Put('departments/:departmentId/drafts/custom/:scheduleId/:date')
+  saveCustomDraft(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+    @Uuid('scheduleId') scheduleId: string,
+    @Param('date') date: string,
+    @Body() dto: SaveRotaDto,
+  ) {
+    return this.drafts_.save(
+      user.id,
+      departmentId,
+      { scheduleId, date },
+      dto.entries,
+    );
+  }
+
+  @Delete('departments/:departmentId/drafts/custom/:scheduleId/:date')
+  discardCustomDraft(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('departmentId') departmentId: string,
+    @Uuid('scheduleId') scheduleId: string,
+    @Param('date') date: string,
+  ) {
+    return this.drafts_.discard(user.id, departmentId, { scheduleId, date });
+  }
+
+  @Get('assignments/:assignmentId/cover-options')
+  coverOptions(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('assignmentId') assignmentId: string,
+  ) {
+    return this.rota.coverOptions(user.id, assignmentId);
+  }
+
+  @Get('custom-assignments/:assignmentId/cover-options')
+  customCoverOptions(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('assignmentId') assignmentId: string,
+  ) {
+    return this.cover_.customOptions(user.id, assignmentId);
+  }
+
+  @Post('custom-assignments/:assignmentId/cover')
+  requestCustomCover(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('assignmentId') assignmentId: string,
+    @Body() dto: RequestCoverDto,
+  ) {
+    return this.cover_.requestCustom(user.id, assignmentId, dto);
   }
 
   @Post('custom-assignments/:assignmentId/absent')

@@ -38,8 +38,8 @@ export class RotaCustomAssignment extends BaseEntity {
   @JoinColumn({ name: 'responsibility_id' })
   responsibility: RotaResponsibility | null;
 
-  @Column({ type: 'varchar', length: 80 })
-  role: string;
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  role: string | null;
 
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'assigned_by_id' })

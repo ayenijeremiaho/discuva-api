@@ -28,6 +28,15 @@ export class SaveRotaDto {
   entries: RotaEntryDto[];
 }
 
+export class PublishRotaDraftsDto {
+  // Leave out to publish every draft.
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('all', { each: true })
+  draftIds?: string[];
+}
+
 export class RequestCoverDto {
   @IsOptional()
   @IsUUID()

@@ -1,3 +1,6 @@
+import { RotaAccessService } from './rota-access.service';
+import type { RotaChange } from './rota-draft.service';
+import { DateService } from '../../utility/service/date.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -42,10 +45,15 @@ export class RotaCustomService {
     private readonly notifications: NotificationDispatchService,
     private readonly audit: AuditLogService,
     private readonly gate: SchedulerGateService,
+    private readonly planAccess: RotaAccessService,
+    private readonly dateService: DateService,
   ) {}
 
   async list(memberId: string, departmentId: string, now = new Date()) {
     const access = await this.access(memberId, departmentId);
+    const drafts = access.canPlan
+      ? await this.planAccess.draftKeys(departmentId)
+      : new Set<string>();
     const timezone = await this.churchTimezone.get();
     const from = localDate(now, timezone);
     const until = addDays(from, PLAN_DAYS);
@@ -59,8 +67,10 @@ export class RotaCustomService {
       ) as Promise<ScheduleRow[]>,
       this.assignments.query(
         `SELECT a.schedule_id, a.occurrence_date::text AS occurrence_date, count(*)::int AS assigned,
-           bool_or(a.member_id = $2) AS mine
+           bool_or(a.member_id = $2) AS mine,
+           count(c.id)::int AS open_cover
          FROM rota_custom_assignments a JOIN rota_schedules s ON s.id = a.schedule_id
+         LEFT JOIN rota_cover_requests c ON c.custom_assignment_id = a.id AND c.status = 'OPEN'
          WHERE s.department_id = $1 AND a.occurrence_date BETWEEN $3::date AND $4::date
          GROUP BY a.schedule_id, a.occurrence_date`,
         [departmentId, memberId, from, until],
@@ -70,14 +80,12 @@ export class RotaCustomService {
           occurrence_date: string;
           assigned: number;
           mine: boolean;
+          open_cover: number;
         }[]
       >,
     ]);
     const countMap = new Map(
-      counts.map((row) => [
-        `${row.schedule_id}:${row.occurrence_date}`,
-        row,
-      ]),
+      counts.map((row) => [`${row.schedule_id}:${row.occurrence_date}`, row]),
     );
     const sessions = [];
     for (const schedule of schedules) {
@@ -102,6 +110,8 @@ export class RotaCustomService {
           endTime: end,
           assigned: count?.assigned ?? 0,
           mine: !!count?.mine,
+          openCover: count?.open_cover ?? 0,
+          hasDraft: drafts.has(`${schedule.id}:${date}`),
         });
       }
     }
@@ -122,8 +132,10 @@ export class RotaCustomService {
       this.assignments.query(
         `SELECT a.id, a.member_id, a.role, ${NAME_SQL('m')} AS name, m.photo_url,
            EXISTS (SELECT 1 FROM rota_unavailability u
-                   WHERE u.member_id = a.member_id AND u.date = a.occurrence_date) AS unavailable
+                   WHERE u.member_id = a.member_id AND u.date = a.occurrence_date) AS unavailable,
+           c.id AS cover_id, c.reason AS cover_reason, c.target_member_id AS cover_target
          FROM rota_custom_assignments a JOIN members m ON m.id = a.member_id
+         LEFT JOIN rota_cover_requests c ON c.custom_assignment_id = a.id AND c.status = 'OPEN'
          WHERE a.schedule_id = $1 AND a.occurrence_date = $2::date
          ORDER BY a.role, name`,
         [scheduleId, date],
@@ -135,6 +147,9 @@ export class RotaCustomService {
           name: string | null;
           photo_url: string | null;
           unavailable: boolean;
+          cover_id: string | null;
+          cover_reason: string | null;
+          cover_target: string | null;
         }[]
       >,
       this.assignments.query(
@@ -184,6 +199,10 @@ export class RotaCustomService {
       isLeader: access.isLeader,
       canPlan: access.canPlan,
       canPublish: access.canPublish,
+      planRoles: access.planRoles,
+      draft: access.canPlan
+        ? await this.planAccess.draft(departmentId, { scheduleId, date })
+        : null,
       assigned: assigned.map((row) => ({
         assignmentId: row.id,
         member: {
@@ -195,9 +214,15 @@ export class RotaCustomService {
         mine: row.member_id === memberId,
         leave: null,
         checkin: null,
-        openCover: row.unavailable
-          ? { id: `absence:${row.id}`, reason: null, forSomeone: false }
-          : null,
+        openCover: row.cover_id
+          ? {
+              id: row.cover_id,
+              reason: row.cover_reason,
+              forSomeone: !!row.cover_target,
+            }
+          : row.unavailable
+            ? { id: `absence:${row.id}`, reason: null, forSomeone: false }
+            : null,
       })),
       team: team.map((row) => ({
         id: row.id,
@@ -222,98 +247,178 @@ export class RotaCustomService {
     entries: RotaEntryDto[],
     now = new Date(),
   ) {
-    const access = await this.access(memberId, departmentId);
+    const access = await this.planAccess.of(memberId, departmentId);
     if (!access.canPublish)
       throw new ForbiddenException(
         'Only a department lead or planner allowed to publish can save this rota.',
       );
+    const current = (await this.assignments.query(
+      `SELECT member_id, role FROM rota_custom_assignments WHERE schedule_id = $1 AND occurrence_date = $2::date`,
+      [scheduleId, date],
+    )) as { member_id: string; role: string | null }[];
+    const merged = this.planAccess.merge(
+      access.publishRoles,
+      current.map((row) => ({ memberId: row.member_id, role: row.role })),
+      entries,
+    );
+    await this.applySession(
+      memberId,
+      departmentId,
+      scheduleId,
+      date,
+      merged,
+      now,
+      true,
+    );
+    if (!access.publishRoles)
+      await this.planAccess.clearDraft(departmentId, { scheduleId, date });
+    return this.detail(memberId, departmentId, scheduleId, date);
+  }
+
+  // Keeps rows for people who stay, so their open cover requests survive an edit.
+  async applySession(
+    memberId: string,
+    departmentId: string,
+    scheduleId: string,
+    date: string,
+    entries: { memberId: string; role?: string | null }[],
+    now = new Date(),
+    notify = false,
+  ): Promise<RotaChange> {
     const schedule = await this.schedule(scheduleId, departmentId);
     const { start } = await this.occurrence(schedule, date);
     if (start <= now)
-      throw new BadRequestException('This serving session has already started.');
-    const ids = [...new Set(entries.map((entry) => entry.memberId))];
-    if (ids.length !== entries.length)
-      throw new BadRequestException('Each person can only serve once in this session.');
-    const valid = entries.length
-      ? ((await this.assignments.query(
-          `SELECT rm.member_id, r.id AS responsibility_id, r.name
-           FROM rota_responsibility_members rm JOIN rota_responsibilities r ON r.id = rm.responsibility_id
-           JOIN worker_profiles wp ON wp.member_id = rm.member_id JOIN members m ON m.id = rm.member_id
-           WHERE r.department_id = $1 AND rm.member_id = ANY($2) AND r.name = ANY($3)
-             AND wp.status = 'ACTIVE' AND m.status = 'ACTIVE'
-             AND (wp.department_id = $1 OR wp.secondary_department_id = $1)`,
-          [departmentId, ids, entries.map((entry) => entry.role ?? '')],
-        )) as { member_id: string; responsibility_id: string; name: string }[])
-      : [];
-    const byPair = new Map(
-      valid.map((row) => [`${row.member_id}:${row.name}`, row]),
-    );
-    if (
-      entries.some(
-        (entry) => !byPair.has(`${entry.memberId}:${entry.role ?? ''}`),
-      )
-    )
       throw new BadRequestException(
-        'Choose an eligible person for each responsibility.',
+        'This serving session has already started.',
+      );
+    const wanted = new Map(
+      entries.map((entry) => [
+        entry.memberId,
+        entry.role?.trim().slice(0, 80) || null,
+      ]),
+    );
+    if (wanted.size !== entries.length)
+      throw new BadRequestException(
+        'Each person can only serve once in this session.',
+      );
+    const team = wanted.size
+      ? ((await this.assignments.query(
+          `SELECT wp.member_id FROM worker_profiles wp JOIN members m ON m.id = wp.member_id
+           WHERE wp.status = 'ACTIVE' AND m.status = 'ACTIVE' AND wp.member_id = ANY($2)
+             AND (wp.department_id = $1 OR wp.secondary_department_id = $1)`,
+          [departmentId, [...wanted.keys()]],
+        )) as { member_id: string }[])
+      : [];
+    if (team.length !== wanted.size)
+      throw new BadRequestException(
+        'Only active workers in this department can be on its rota.',
       );
     const existing = (await this.assignments.query(
-      `SELECT id, member_id FROM rota_custom_assignments WHERE schedule_id = $1 AND occurrence_date = $2::date`,
+      `SELECT id, member_id, role FROM rota_custom_assignments WHERE schedule_id = $1 AND occurrence_date = $2::date`,
       [scheduleId, date],
-    )) as { id: string; member_id: string }[];
-    const before = new Set(existing.map((row) => row.member_id));
-    const after = new Set(ids);
-    const added = ids.filter((id) => !before.has(id));
-    const removed = existing
-      .filter((row) => !after.has(row.member_id))
-      .map((row) => row.member_id);
-    const manager = this.txHost.tx;
-    await manager.query(
-      `DELETE FROM rota_custom_assignments WHERE schedule_id = $1 AND occurrence_date = $2::date`,
-      [scheduleId, date],
+    )) as { id: string; member_id: string; role: string | null }[];
+    const current = new Set(existing.map((row) => row.member_id));
+    const removed = existing.filter((row) => !wanted.has(row.member_id));
+    const added = [...wanted.keys()].filter((id) => !current.has(id));
+    const changed = existing.filter(
+      (row) =>
+        wanted.has(row.member_id) &&
+        (wanted.get(row.member_id) ?? null) !== (row.role ?? null),
     );
-    if (entries.length)
+    const manager = this.txHost.tx;
+    if (removed.length)
+      await manager.query(
+        `DELETE FROM rota_custom_assignments WHERE id = ANY($1)`,
+        [removed.map((row) => row.id)],
+      );
+    if (added.length)
       await manager.query(
         `INSERT INTO rota_custom_assignments
            (schedule_id, occurrence_date, member_id, responsibility_id, role, assigned_by_id)
-         SELECT $1, $2::date, x.member_id, x.responsibility_id, x.role, $6
-         FROM unnest($3::uuid[], $4::uuid[], $5::varchar[]) AS x(member_id, responsibility_id, role)`,
+         SELECT $1, $2::date, x.member_id,
+           (SELECT r.id FROM rota_responsibilities r WHERE r.department_id = $5 AND r.name = x.role),
+           x.role, $6
+         FROM unnest($3::uuid[], $4::varchar[]) AS x(member_id, role)`,
         [
           scheduleId,
           date,
-          entries.map((entry) => entry.memberId),
-          entries.map(
-            (entry) =>
-              byPair.get(`${entry.memberId}:${entry.role ?? ''}`)!
-                .responsibility_id,
-          ),
-          entries.map((entry) => entry.role ?? ''),
+          added,
+          added.map((id) => wanted.get(id) ?? null),
+          departmentId,
           memberId,
         ],
       );
+    if (changed.length)
+      await manager.query(
+        `UPDATE rota_custom_assignments a SET role = x.role, updated_at = now(),
+           responsibility_id = (SELECT r.id FROM rota_responsibilities r WHERE r.department_id = $3 AND r.name = x.role)
+         FROM unnest($1::uuid[], $2::varchar[]) AS x(id, role) WHERE a.id = x.id`,
+        [
+          changed.map((row) => row.id),
+          changed.map((row) => wanted.get(row.member_id) ?? null),
+          departmentId,
+        ],
+      );
     if (added.length) void this.gate.wake(['rota-reminders']);
-    this.notify(
-      added,
-      PushNotificationKey.ROTA_ASSIGNED,
-      schedule.name,
-      start,
-      `/rota/department/${departmentId}/custom/${scheduleId}/${date}`,
-      `custom-rota-added:${scheduleId}:${date}:${now.getTime()}`,
-    );
-    this.notify(
-      removed,
-      PushNotificationKey.ROTA_REMOVED,
-      schedule.name,
-      start,
-      '/rota',
-      `custom-rota-removed:${scheduleId}:${date}:${now.getTime()}`,
-    );
     this.audit.log('ROTA_UPDATED', {
       actorId: memberId,
       targetId: scheduleId,
       targetName: `${schedule.name}: ${date}`,
-      metadata: { departmentId, custom: true, added: added.length, removed: removed.length },
+      metadata: {
+        departmentId,
+        custom: true,
+        added: added.length,
+        removed: removed.length,
+      },
     });
-    return this.detail(memberId, departmentId, scheduleId, date);
+    const change: RotaChange = {
+      label: schedule.name,
+      start,
+      added: added.map((id) => ({
+        memberId: id,
+        role: wanted.get(id) ?? null,
+      })),
+      removed: removed.map((row) => row.member_id),
+    };
+    if (!notify) return change;
+    const vars = await this.pushVars(schedule.name, start, departmentId);
+    const byRole = new Map<string, string[]>();
+    for (const person of change.added) {
+      const role = person.role ?? '';
+      byRole.set(role, [...(byRole.get(role) ?? []), person.memberId]);
+    }
+    for (const [role, ids] of byRole)
+      this.notify(
+        ids,
+        PushNotificationKey.ROTA_ASSIGNED,
+        { ...vars, role: role ? ` · ${role}` : '' },
+        `/rota/department/${departmentId}/custom/${scheduleId}/${date}`,
+        `custom-rota-added:${scheduleId}:${date}:${role}:${now.getTime()}`,
+      );
+    this.notify(
+      change.removed,
+      PushNotificationKey.ROTA_REMOVED,
+      { ...vars, role: '' },
+      '/rota',
+      `custom-rota-removed:${scheduleId}:${date}:${now.getTime()}`,
+    );
+    return change;
+  }
+
+  private async pushVars(name: string, start: Date, departmentId: string) {
+    const departments = (await this.assignments.query(
+      `SELECT name FROM departments WHERE id = $1`,
+      [departmentId],
+    )) as { name: string }[];
+    return {
+      service_name: name,
+      when: this.dateService.format(
+        start,
+        'EEE d MMM, h:mm a',
+        await this.churchTimezone.get(),
+      ),
+      department_name: departments[0]?.name ?? 'your department',
+    };
   }
 
   async markAbsent(memberId: string, assignmentId: string) {
@@ -360,7 +465,14 @@ export class RotaCustomService {
           vars: {
             requester: row.member_name ?? 'A teammate',
             service_name: row.name,
-            when: `${row.occurrence_date} ${row.start_time.slice(0, 5)}`,
+            when: this.dateService.format(
+              fromZonedTime(
+                `${row.occurrence_date}T${row.start_time.slice(0, 8)}`,
+                await this.churchTimezone.get(),
+              ),
+              'EEE d MMM, h:mm a',
+              await this.churchTimezone.get(),
+            ),
             role: '',
           },
           url: `/rota/department/${row.department_id}/custom/${row.schedule_id}/${row.occurrence_date}`,
@@ -372,31 +484,10 @@ export class RotaCustomService {
   }
 
   private async access(memberId: string, departmentId: string) {
-    const rows = (await this.assignments.query(
-      `SELECT
-         EXISTS (SELECT 1 FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id
-                 WHERE l.department_id = $2 AND lw.member_id = $1) AS is_leader,
-         EXISTS (SELECT 1 FROM worker_profiles wp WHERE wp.member_id = $1 AND wp.status = 'ACTIVE'
-                 AND (wp.department_id = $2 OR wp.secondary_department_id = $2)) AS is_member,
-         EXISTS (SELECT 1 FROM rota_planner_grants p
-                 WHERE p.department_id = $2 AND p.member_id = $1 AND p.subteam_id IS NULL) AS can_plan,
-         EXISTS (SELECT 1 FROM rota_planner_grants p
-                 WHERE p.department_id = $2 AND p.member_id = $1 AND p.subteam_id IS NULL AND p.can_publish) AS can_publish`,
-      [memberId, departmentId],
-    )) as {
-      is_leader: boolean;
-      is_member: boolean;
-      can_plan: boolean;
-      can_publish: boolean;
-    }[];
-    const row = rows[0];
-    if (!row?.is_leader && !row?.is_member && !row?.can_plan)
+    const access = await this.planAccess.of(memberId, departmentId);
+    if (!access.isLeader && !access.isMember && !access.canPlan)
       throw new ForbiddenException("This isn't one of your departments.");
-    return {
-      isLeader: !!row.is_leader,
-      canPlan: !!row.is_leader || !!row.can_plan,
-      canPublish: !!row.is_leader || !!row.can_publish,
-    };
+    return access;
   }
 
   private async schedule(id: string, departmentId: string) {
@@ -411,11 +502,19 @@ export class RotaCustomService {
   }
 
   private async occurrence(schedule: ScheduleRow, date: string) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || this.weekday(date) !== schedule.day_of_week)
-      throw new BadRequestException("That date doesn't match this serving schedule.");
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      this.weekday(date) !== schedule.day_of_week
+    )
+      throw new BadRequestException(
+        "That date doesn't match this serving schedule.",
+      );
     const timezone = await this.churchTimezone.get();
     return {
-      start: fromZonedTime(`${date}T${schedule.start_time.slice(0, 8)}`, timezone),
+      start: fromZonedTime(
+        `${date}T${schedule.start_time.slice(0, 8)}`,
+        timezone,
+      ),
       end: fromZonedTime(`${date}T${schedule.end_time.slice(0, 8)}`, timezone),
     };
   }
@@ -427,8 +526,7 @@ export class RotaCustomService {
   private notify(
     memberIds: string[],
     key: PushNotificationKey,
-    name: string,
-    start: Date,
+    vars: Record<string, string>,
     url: string,
     idempotencyKey: string,
   ) {
@@ -436,18 +534,7 @@ export class RotaCustomService {
     this.notifications
       .notifyMember({
         category: EmailCategory.SERVING_ROTA,
-        push: {
-          memberIds,
-          key,
-          vars: {
-            service_name: name,
-            when: start.toISOString(),
-            department_name: '',
-            role: '',
-          },
-          url,
-          idempotencyKey,
-        },
+        push: { memberIds, key, vars, url, idempotencyKey },
       })
       .catch(() => undefined);
   }

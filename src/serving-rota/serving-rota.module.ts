@@ -1,3 +1,7 @@
+import { RotaDraft } from './entity/rota-draft.entity';
+import { RotaAccessService } from './service/rota-access.service';
+import { RotaCoverService } from './service/rota-cover.service';
+import { RotaDraftService } from './service/rota-draft.service';
 import { Module } from '@nestjs/common';
 import { TenantTypeOrmModule } from '../tenant/utility/tenant-typeorm.module';
 import { RotaAssignment } from './entity/rota-assignment.entity';
@@ -28,6 +32,7 @@ import { RotaCustomService } from './service/rota-custom.service';
       RotaSchedule,
       RotaUnavailability,
       RotaCustomAssignment,
+      RotaDraft,
     ]),
   ],
   providers: [
@@ -35,6 +40,9 @@ import { RotaCustomService } from './service/rota-custom.service';
     RotaSetupService,
     RotaAllocationService,
     RotaCustomService,
+    RotaAccessService,
+    RotaCoverService,
+    RotaDraftService,
     RotaReminderScheduler,
   ],
   controllers: [ServingRotaController],

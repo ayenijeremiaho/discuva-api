@@ -12,7 +12,6 @@ import { Member } from '../../member/entity/member.entity';
 
 @Entity({ name: 'rota_unavailability' })
 @Unique(['member', 'date'])
-@Index(['date', 'member'])
 export class RotaUnavailability extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;

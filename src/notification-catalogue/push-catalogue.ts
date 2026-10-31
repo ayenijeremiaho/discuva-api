@@ -59,6 +59,7 @@ export enum PushNotificationKey {
   TEAM_SPACE_MEETING_REMINDER = 'TEAM_SPACE_MEETING_REMINDER',
   TEAM_SPACE_POLL = 'TEAM_SPACE_POLL',
   ROTA_ASSIGNED = 'ROTA_ASSIGNED',
+  ROTA_PUBLISHED = 'ROTA_PUBLISHED',
   ROTA_REMOVED = 'ROTA_REMOVED',
   ROTA_REMINDER = 'ROTA_REMINDER',
   ROTA_COVER_NEEDED = 'ROTA_COVER_NEEDED',
@@ -726,6 +727,20 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       when: 'Sun 25 Oct, 8:00 AM',
       role: ' · Main door',
       department_name: 'Ushering',
+    },
+  },
+  [PushNotificationKey.ROTA_PUBLISHED]: {
+    category: EmailCategory.SERVING_ROTA,
+    label: 'Rota published',
+    description:
+      'One notification per worker when a department publishes its rota drafts, listing all their changes together.',
+    title: '{{department_name}} rota is out',
+    body: '{{summary}}',
+    url: '/rota',
+    placeholders: {
+      department_name: 'Ushering',
+      summary:
+        "You're serving: Sun 25 Oct, 8:00 AM · Main door, Sun 8 Nov, 8:00 AM.",
     },
   },
   [PushNotificationKey.ROTA_REMOVED]: {

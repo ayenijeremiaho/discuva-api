@@ -1,3 +1,4 @@
+import { RotaAccessService } from './rota-access.service';
 import {
   BadRequestException,
   ConflictException,
@@ -110,6 +111,10 @@ describe('ServingRotaService', () => {
   const cache = { get: jest.fn().mockResolvedValue(undefined), set: jest.fn() };
   const audit = { log: jest.fn() };
   const gate = { wake: jest.fn().mockResolvedValue(undefined) };
+  const cover = {
+    options: jest.fn(),
+    acceptCustom: jest.fn(),
+  };
   const service = new ServingRotaService(
     assignmentRepo as never,
     coverRepo as never,
@@ -120,12 +125,15 @@ describe('ServingRotaService', () => {
     { get: jest.fn().mockResolvedValue('Africa/Lagos') } as never,
     cache as never,
     gate as never,
+    new RotaAccessService(assignmentRepo as never),
+    cover as never,
   );
   const pushes = () =>
     notifications.notifyMember.mock.calls.map((c) => c[0].push);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    cover.options.mockResolvedValue([{ id: 'm2' }, { id: 'm3' }]);
     role = { is_leader: true, is_member: true };
     existing = [];
     eligible = [];
@@ -250,11 +258,14 @@ describe('ServingRotaService', () => {
 
     it('leaves people on approved leave out when asking the whole department', async () => {
       await service.requestCover('m1', 'a1', {}, now);
-      const recipients = query.mock.calls.find((c) =>
-        (c[0] as string).includes('AND wp.member_id <> $2'),
+      expect(cover.options).toHaveBeenCalledWith(
+        expect.objectContaining({
+          departmentId: 'd1',
+          role: 'Main door',
+          date: '2026-10-25',
+        }),
       );
-      expect(recipients?.[0]).toContain("IS DISTINCT FROM 'APPROVED'");
-      expect(recipients?.[1]).toEqual(['d1', 'm1', 's1', '2026-10-25']);
+      expect(pushes()[0].memberIds).toEqual(['m2', 'm3']);
     });
   });
 

@@ -191,9 +191,7 @@ export class RotaSetupService {
     const row = await this.responsibilities.save(
       this.responsibilities.create({
         department: { id: departmentId } as Department,
-        subteam: dto.subteamId
-          ? ({ id: dto.subteamId } as RotaSubteam)
-          : null,
+        subteam: dto.subteamId ? ({ id: dto.subteamId } as RotaSubteam) : null,
         name: dto.name.trim(),
         requiredCount: dto.requiredCount,
         allocationMode: dto.allocationMode,
@@ -221,9 +219,7 @@ export class RotaSetupService {
     const row = await this.responsibility(id, departmentId);
     Object.assign(row, {
       name: dto.name.trim(),
-      subteam: dto.subteamId
-        ? ({ id: dto.subteamId } as RotaSubteam)
-        : null,
+      subteam: dto.subteamId ? ({ id: dto.subteamId } as RotaSubteam) : null,
       requiredCount: dto.requiredCount,
       allocationMode: dto.allocationMode,
       position: dto.position ?? row.position,
@@ -311,11 +307,14 @@ export class RotaSetupService {
     await Promise.all(subteamIds.map((id) => this.subteam(id, departmentId)));
     const keys = entries.map((p) => `${p.memberId}:${p.subteamId ?? ''}`);
     if (new Set(keys).size !== keys.length)
-      throw new BadRequestException('Each planner scope can only be added once.');
+      throw new BadRequestException(
+        'Each planner scope can only be added once.',
+      );
     const manager = this.txHost.tx;
-    await manager.query(`DELETE FROM rota_planner_grants WHERE department_id = $1`, [
-      departmentId,
-    ]);
+    await manager.query(
+      `DELETE FROM rota_planner_grants WHERE department_id = $1`,
+      [departmentId],
+    );
     if (entries.length)
       await manager.query(
         `INSERT INTO rota_planner_grants (department_id, member_id, subteam_id, can_publish)
@@ -450,7 +449,10 @@ export class RotaSetupService {
       );
   }
 
-  private async assertSubteam(id: string | null | undefined, departmentId: string) {
+  private async assertSubteam(
+    id: string | null | undefined,
+    departmentId: string,
+  ) {
     if (id) await this.subteam(id, departmentId);
   }
 
