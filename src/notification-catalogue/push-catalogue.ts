@@ -622,7 +622,7 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     category: EmailCategory.TEAM_SPACES,
     label: 'Tagged in a team space',
     description:
-      'Sent to someone tagged in a team space post or reply, and to the whole team when a leader tags @team.',
+      'Sent to someone tagged in a team space post or reply, and to the whole team when someone tags @team.',
     title: '{{author_name}} tagged you in {{space_name}}',
     body: '{{excerpt}}',
     url: '/team-spaces',

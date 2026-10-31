@@ -24,12 +24,9 @@ export function parseMentions(body: string): {
 export function rewriteMentions(
   body: string,
   names: Map<string, string>,
-  allowTeam: boolean,
 ): string {
   return body.replace(TOKEN, (_all, label: string, target: string) => {
-    if (target === TEAM_TAG) {
-      return allowTeam ? `@[${TEAM_TAG}](${TEAM_TAG})` : `@${TEAM_TAG}`;
-    }
+    if (target === TEAM_TAG) return `@[${TEAM_TAG}](${TEAM_TAG})`;
     const name = names.get(target.toLowerCase())?.replace(/[[\]()]/g, '');
     return name ? `@[${name}](${target.toLowerCase()})` : `@${label}`;
   });

@@ -288,10 +288,10 @@ describe('TeamSpaceService', () => {
       expect(notifications.notifyMember).not.toHaveBeenCalled();
     });
 
-    it('only lets a leader tag the team', async () => {
+    it('lets anyone in the space tag the team', async () => {
       await service.createPost(AUTHOR, DEPT, 'd1', 'All @[team](team)');
-      expect(postRepo.save.mock.calls[0][0].body).toBe('All @team');
-      expect(notifications.notifyMember).not.toHaveBeenCalled();
+      expect(postRepo.save.mock.calls[0][0].body).toBe('All @[team](team)');
+      expect(pushed()[0].push.memberIds).toEqual([IN, OTHER]);
     });
 
     it('notifies a leader post once per person', async () => {

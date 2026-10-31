@@ -610,7 +610,6 @@ export class TeamSpaceService {
       [ids, memberId],
     )) as { id: string; name: string | null; photo_url: string | null }[];
     return {
-      canTagTeam: acc.isLeader,
       people: rows
         .filter((r) => r.name)
         .map((r) => ({ id: r.id, name: r.name, photoUrl: r.photo_url })),
@@ -657,11 +656,10 @@ export class TeamSpaceService {
     const names = new Map(
       rows.filter((r) => r.name).map((r) => [r.id, r.name as string]),
     );
-    const allowTeam = team && acc.isLeader;
     return {
-      body: rewriteMentions(body, names, allowTeam),
+      body: rewriteMentions(body, names),
       memberIds: [...names.keys()],
-      team: allowTeam,
+      team,
     };
   }
 

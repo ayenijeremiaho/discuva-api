@@ -16,20 +16,15 @@ describe('mentions', () => {
 
   it('replaces a faked name with the real one', () => {
     expect(
-      rewriteMentions(`@[Pastor](${ADA})`, new Map([[ADA, 'Ada Obi']]), false),
+      rewriteMentions(`@[Pastor](${ADA})`, new Map([[ADA, 'Ada Obi']])),
     ).toBe(`@[Ada Obi](${ADA})`);
   });
 
   it('turns a tag for someone outside the space into plain text', () => {
-    expect(rewriteMentions(`@[Bob](${OUTSIDER})`, new Map(), false)).toBe(
-      '@Bob',
-    );
+    expect(rewriteMentions(`@[Bob](${OUTSIDER})`, new Map())).toBe('@Bob');
   });
 
-  it('only keeps @team for those allowed', () => {
-    expect(rewriteMentions('@[team](team)', new Map(), false)).toBe('@team');
-    expect(rewriteMentions('@[team](team)', new Map(), true)).toBe(
-      '@[team](team)',
-    );
+  it('keeps @team', () => {
+    expect(rewriteMentions('@[team](team)', new Map())).toBe('@[team](team)');
   });
 });
