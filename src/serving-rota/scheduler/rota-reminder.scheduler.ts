@@ -79,24 +79,31 @@ export class RotaReminderScheduler {
     const hours = [...new Set(thresholds)].filter((h) => h > 0);
     if (!enabled || !hours.length) return null;
     const furthest = Math.max(...hours) * HOUR_MS;
+    const timezone = await this.churchTimezone.get();
 
     // Services with anyone on the rota, in reach of the furthest reminder; the slot start-time index finds them.
     const duties = (await this.assignmentRepo.query(
-      `SELECT ss.id AS slot_id, ss.name, e.name AS event_name, ss.start_time, a.member_id, a.role, d.name AS department_name
-       FROM service_slots ss
-       JOIN rota_assignments a ON a.service_slot_id = ss.id
-       JOIN events e ON e.id = ss.event_id
-       JOIN departments d ON d.id = a.department_id
+      `SELECT ss.id::text AS slot_id, ss.name, e.name AS event_name, ss.start_time, a.member_id, a.role, d.name AS department_name
+       FROM service_slots ss JOIN rota_assignments a ON a.service_slot_id = ss.id
+       JOIN events e ON e.id = ss.event_id JOIN departments d ON d.id = a.department_id
        JOIN members m ON m.id = a.member_id AND m.status = 'ACTIVE'
-       WHERE ss.start_time > $1 AND ss.start_time <= $2`,
-      [now, new Date(now.getTime() + furthest + SEND_WINDOW_MS)],
+       WHERE ss.start_time > $1 AND ss.start_time <= $2
+       UNION ALL
+       SELECT 'custom:' || s.id::text || ':' || a.occurrence_date::text AS slot_id,
+         s.name, s.name AS event_name, (a.occurrence_date + s.start_time) AT TIME ZONE $3 AS start_time,
+         a.member_id, a.role, d.name AS department_name
+       FROM rota_custom_assignments a JOIN rota_schedules s ON s.id = a.schedule_id
+       JOIN departments d ON d.id = s.department_id
+       JOIN members m ON m.id = a.member_id AND m.status = 'ACTIVE'
+       WHERE (a.occurrence_date + s.start_time) AT TIME ZONE $3 > $1
+         AND (a.occurrence_date + s.start_time) AT TIME ZONE $3 <= $2`,
+      [now, new Date(now.getTime() + furthest + SEND_WINDOW_MS), timezone],
     )) as DutyRow[];
 
     const bySlot = new Map<string, DutyRow[]>();
     for (const d of duties)
       bySlot.set(d.slot_id, [...(bySlot.get(d.slot_id) ?? []), d]);
     const upcoming: number[] = [];
-    let timezone: string | null = null;
     for (const [slotId, rows] of bySlot) {
       const start = new Date(rows[0].start_time).getTime();
       for (const h of hours) {
@@ -109,16 +116,20 @@ export class RotaReminderScheduler {
         const sentKey = `rota-reminder:${slotId}:${h}`;
         if (await this.cacheService.get(sentKey)) continue;
         this.cacheService.set(sentKey, true, 3 * 24 * 3600);
-        timezone ??= await this.churchTimezone.get();
         this.remind(rows, h, timezone);
       }
     }
     if (upcoming.length) return new Date(Math.min(...upcoming));
     const next = (await this.assignmentRepo.query(
-      `SELECT ss.start_time FROM service_slots ss
-       WHERE ss.start_time > $1 AND EXISTS (SELECT 1 FROM rota_assignments a WHERE a.service_slot_id = ss.id)
-       ORDER BY ss.start_time LIMIT 1`,
-      [new Date(now.getTime() + furthest + SEND_WINDOW_MS)],
+      `SELECT start_time FROM (
+         SELECT ss.start_time FROM service_slots ss
+         WHERE ss.start_time > $1 AND EXISTS (SELECT 1 FROM rota_assignments a WHERE a.service_slot_id = ss.id)
+         UNION ALL
+         SELECT (a.occurrence_date + s.start_time) AT TIME ZONE $2
+         FROM rota_custom_assignments a JOIN rota_schedules s ON s.id = a.schedule_id
+         WHERE (a.occurrence_date + s.start_time) AT TIME ZONE $2 > $1
+       ) upcoming ORDER BY start_time LIMIT 1`,
+      [new Date(now.getTime() + furthest + SEND_WINDOW_MS), timezone],
     )) as { start_time: Date }[];
     return next[0]
       ? new Date(new Date(next[0].start_time).getTime() - furthest)

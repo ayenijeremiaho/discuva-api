@@ -24,6 +24,7 @@ import { RotaEntryDto, RequestCoverDto } from '../dto/serving-rota.dto';
 import { localDate } from '../../event/types/slot-blueprint';
 import { SchedulerGateService } from '../../tenant/scheduler-gate/scheduler-gate.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { fromZonedTime } from 'date-fns-tz';
 
 const DAY_MS = 24 * 3600 * 1000;
 // How far ahead leaders plan and workers see their duties.
@@ -125,6 +126,8 @@ export class ServingRotaService {
     )) as (SlotRow & { assigned: number; open_cover: number; mine: boolean })[];
     return {
       isLeader: role === 'leader',
+      canPlan: role !== 'member',
+      canPublish: role !== 'member',
       services: rows.map((r) => ({
         ...this.slot(r),
         assigned: r.assigned,
@@ -172,7 +175,7 @@ export class ServingRotaService {
       >,
       // Everyone in the department sees the team, so a worker can ask one teammate for cover.
       this.team(departmentId, slotId, date),
-      role === 'leader'
+      role !== 'member'
         ? (this.assignmentRepo.query(
             `SELECT a.member_id, a.role FROM rota_assignments a
              WHERE a.department_id = $1 AND a.service_slot_id = (
@@ -186,6 +189,8 @@ export class ServingRotaService {
     return {
       service: this.slot(slot),
       isLeader: role === 'leader',
+      canPlan: role !== 'member',
+      canPublish: role !== 'member',
       assigned: assigned.map((a) => ({
         assignmentId: a.id,
         member: {
@@ -223,7 +228,7 @@ export class ServingRotaService {
     entries: RotaEntryDto[],
     now = new Date(),
   ) {
-    if ((await this.role(memberId, departmentId)) !== 'leader')
+    if ((await this.role(memberId, departmentId)) === 'member')
       throw new ForbiddenException(
         "Only the department's HOD or Assistant HOD can change the rota.",
       );
@@ -340,7 +345,8 @@ export class ServingRotaService {
   // The member's own duties ahead, and cover requests they could take.
   async mine(memberId: string, now = new Date()) {
     const until = new Date(now.getTime() + PLAN_AHEAD_DAYS * DAY_MS);
-    const [duties, requests] = await Promise.all([
+    const timezone = await this.churchTimezone.get();
+    const [duties, requests, customDuties] = await Promise.all([
       this.assignmentRepo.query(
         `SELECT a.id AS assignment_id, a.role, d.id AS department_id, d.name AS department_name,
            c.id AS cover_id, c.reason AS cover_reason, ${SLOT_COLS}
@@ -380,7 +386,7 @@ export class ServingRotaService {
            AND NOT EXISTS (SELECT 1 FROM rota_assignments o WHERE o.service_slot_id = a.service_slot_id AND o.department_id = a.department_id AND o.member_id = $1)
            AND ${LEAVE_SQL('$1', '(ss.start_time AT TIME ZONE $3)')} IS DISTINCT FROM 'APPROVED'
          ORDER BY ss.start_time`,
-        [memberId, now, await this.churchTimezone.get()],
+        [memberId, now, timezone],
       ) as Promise<
         (SlotRow & {
           id: string;
@@ -392,9 +398,34 @@ export class ServingRotaService {
           requester: string | null;
         })[]
       >,
+      this.assignmentRepo.query(
+        `SELECT a.id AS assignment_id, a.role, a.occurrence_date::text AS occurrence_date,
+           s.id AS schedule_id, s.name, s.start_time::text, s.end_time::text,
+           d.id AS department_id, d.name AS department_name,
+           EXISTS (SELECT 1 FROM rota_unavailability u
+                   WHERE u.member_id = a.member_id AND u.date = a.occurrence_date) AS needs_replacement
+         FROM rota_custom_assignments a JOIN rota_schedules s ON s.id = a.schedule_id
+         JOIN departments d ON d.id = s.department_id
+         WHERE a.member_id = $1 AND a.occurrence_date BETWEEN $2::date AND $3::date
+         ORDER BY a.occurrence_date, s.start_time`,
+        [memberId, localDate(now, timezone), localDate(until, timezone)],
+      ) as Promise<
+        {
+          assignment_id: string;
+          role: string;
+          occurrence_date: string;
+          schedule_id: string;
+          name: string;
+          start_time: string;
+          end_time: string;
+          department_id: string;
+          department_name: string;
+          needs_replacement: boolean;
+        }[]
+      >,
     ]);
-    return {
-      duties: duties.map((d) => ({
+    const allDuties = [
+      ...duties.map((d) => ({
         assignmentId: d.assignment_id,
         role: d.role,
         department: { id: d.department_id, name: d.department_name },
@@ -403,6 +434,34 @@ export class ServingRotaService {
           ? { id: d.cover_id, reason: d.cover_reason }
           : null,
       })),
+      ...customDuties.map((d) => ({
+        assignmentId: d.assignment_id,
+        role: d.role,
+        department: { id: d.department_id, name: d.department_name },
+        service: {
+          id: `${d.schedule_id}:${d.occurrence_date}`,
+          name: d.name,
+          startTime: fromZonedTime(
+            `${d.occurrence_date}T${d.start_time.slice(0, 8)}`,
+            timezone,
+          ),
+          endTime: fromZonedTime(
+            `${d.occurrence_date}T${d.end_time.slice(0, 8)}`,
+            timezone,
+          ),
+          venue: null,
+        },
+        openCover: null,
+        custom: true,
+        needsReplacement: !!d.needs_replacement,
+      })),
+    ].sort(
+      (a, b) =>
+        new Date(a.service.startTime).getTime() -
+        new Date(b.service.startTime).getTime(),
+    );
+    return {
+      duties: allDuties,
       coverRequests: requests.map((r) => ({
         id: r.id,
         reason: r.reason,
@@ -507,7 +566,7 @@ export class ServingRotaService {
     if (!request || request.status !== CoverStatusEnum.OPEN)
       throw new NotFoundException('Cover request not found');
     const own = request.requestedBy?.id === memberId;
-    if (!own && (await this.role(memberId, request.department.id)) !== 'leader')
+    if (!own && (await this.role(memberId, request.department.id)) === 'member')
       throw new ForbiddenException(
         'Only the person who asked, or a leader, can cancel this.',
       );
@@ -650,16 +709,19 @@ export class ServingRotaService {
   private async role(
     memberId: string,
     departmentId: string,
-  ): Promise<'leader' | 'member'> {
+  ): Promise<'leader' | 'planner' | 'member'> {
     const rows = (await this.assignmentRepo.query(
       `SELECT
          EXISTS (SELECT 1 FROM department_leads l JOIN worker_profiles lw ON lw.id = l.worker_profile_id
                  WHERE l.department_id = $2 AND lw.member_id = $1) AS is_leader,
          EXISTS (SELECT 1 FROM worker_profiles wp WHERE wp.member_id = $1 AND wp.status = 'ACTIVE'
-                 AND (wp.department_id = $2 OR wp.secondary_department_id = $2)) AS is_member`,
+                 AND (wp.department_id = $2 OR wp.secondary_department_id = $2)) AS is_member,
+         EXISTS (SELECT 1 FROM rota_planner_grants p WHERE p.department_id = $2 AND p.member_id = $1
+                 AND p.subteam_id IS NULL AND p.can_publish = true) AS is_planner`,
       [memberId, departmentId],
-    )) as { is_leader: boolean; is_member: boolean }[];
+    )) as { is_leader: boolean; is_member: boolean; is_planner: boolean }[];
     if (rows[0]?.is_leader) return 'leader';
+    if (rows[0]?.is_planner) return 'planner';
     if (rows[0]?.is_member) return 'member';
     throw new ForbiddenException("This isn't one of your departments.");
   }
@@ -684,7 +746,7 @@ export class ServingRotaService {
     slotId: string,
     now = new Date(),
   ) {
-    if ((await this.role(memberId, departmentId)) !== 'leader')
+    if ((await this.role(memberId, departmentId)) === 'member')
       throw new ForbiddenException(
         "Only the department's HOD or Assistant HOD can do this.",
       );

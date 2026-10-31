@@ -28283,6 +28283,150 @@
           }
         },
         {
+          "name": "Get rota setup",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup",
+            "description": "Department workers and delegated planners. Leads also receive planner grants."
+          }
+        },
+        {
+          "name": "My unavailable rota dates",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/availability/absent",
+            "description": "Optional future dates the current worker cannot serve."
+          }
+        },
+        {
+          "name": "Mark a rota date unavailable",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/availability/absent",
+            "body": { "mode": "raw", "raw": "{\n  \"date\": \"2030-06-09\",\n  \"reason\": \"Away that weekend\"\n}" },
+            "description": "Reason is optional. Replaces the note when the date already exists."
+          }
+        },
+        {
+          "name": "Remove a rota unavailable date",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/availability/absent/2030-06-09",
+            "description": "Date path parameter uses YYYY-MM-DD."
+          }
+        },
+        {
+          "name": "Create rota subteam",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/subteams",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Vocals\",\n  \"position\": 0\n}" },
+            "description": "HOD or Deputy HOD only."
+          }
+        },
+        {
+          "name": "Update rota subteam",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/subteams/{{subteamId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Vocals\",\n  \"position\": 0\n}" },
+            "description": "HOD or Deputy HOD only."
+          }
+        },
+        {
+          "name": "Delete rota subteam",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/subteams/{{subteamId}}",
+            "description": "HOD or Deputy HOD only. Responsibilities become ungrouped."
+          }
+        },
+        {
+          "name": "Create rota responsibility",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/responsibilities",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Lead vocalist\",\n  \"subteamId\": \"{{subteamId}}\",\n  \"requiredCount\": 1,\n  \"allocationMode\": \"AUTOMATIC\",\n  \"position\": 0\n}" },
+            "description": "HOD or Deputy HOD only. allocationMode: MANUAL, FIXED or AUTOMATIC."
+          }
+        },
+        {
+          "name": "Update rota responsibility",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/responsibilities/{{responsibilityId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Lead vocalist\",\n  \"subteamId\": \"{{subteamId}}\",\n  \"requiredCount\": 1,\n  \"allocationMode\": \"AUTOMATIC\",\n  \"position\": 0\n}" },
+            "description": "HOD or Deputy HOD only."
+          }
+        },
+        {
+          "name": "Delete rota responsibility",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/responsibilities/{{responsibilityId}}",
+            "description": "HOD or Deputy HOD only."
+          }
+        },
+        {
+          "name": "Set responsibility eligibility",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/responsibilities/{{responsibilityId}}/members",
+            "body": { "mode": "raw", "raw": "{\n  \"members\": [\n    { \"memberId\": \"{{memberId}}\", \"isFixed\": false }\n  ]\n}" },
+            "description": "HOD or Deputy HOD only. Replaces the complete eligible list in bulk."
+          }
+        },
+        {
+          "name": "Set delegated rota planners",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/planners",
+            "body": { "mode": "raw", "raw": "{\n  \"planners\": [\n    { \"memberId\": \"{{memberId}}\", \"subteamId\": \"{{subteamId}}\", \"canPublish\": false }\n  ]\n}" },
+            "description": "HOD or Deputy HOD only. Leave out subteamId for department-wide scope."
+          }
+        },
+        {
+          "name": "Create rota schedule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/schedules",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Church services\",\n  \"scheduleType\": \"SERVICE_SLOTS\",\n  \"allocationMode\": \"AUTOMATIC\",\n  \"active\": true\n}" },
+            "description": "HOD or Deputy HOD only. CUSTOM schedules also require dayOfWeek (0-6), startTime and endTime (HH:mm)."
+          }
+        },
+        {
+          "name": "Update rota schedule",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/schedules/{{scheduleId}}",
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Weekly classes\",\n  \"scheduleType\": \"CUSTOM\",\n  \"allocationMode\": \"FIXED\",\n  \"dayOfWeek\": 0,\n  \"startTime\": \"10:00\",\n  \"endTime\": \"10:45\",\n  \"active\": true\n}" },
+            "description": "HOD or Deputy HOD only."
+          }
+        },
+        {
+          "name": "Delete rota schedule",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/setup/schedules/{{scheduleId}}",
+            "description": "HOD or Deputy HOD only."
+          }
+        },
+        {
           "name": "Upcoming services for a department",
           "request": {
             "method": "GET",
@@ -28331,6 +28475,63 @@
               ]
             },
             "description": ""
+          }
+        },
+        {
+          "name": "Generate a suggested service rota",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/services/{{slotId}}/generate",
+            "body": { "mode": "raw", "raw": "{\n  \"lockedEntries\": []\n}" },
+            "description": "Lead or delegated planner. Returns a draft and explained gaps; does not save or notify."
+          }
+        },
+        {
+          "name": "Upcoming independent rota sessions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/custom-sessions",
+            "description": "Weekly occurrences from active department-owned schedules for the next 8 weeks."
+          }
+        },
+        {
+          "name": "Independent rota session",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/custom-sessions/{{scheduleId}}/2030-06-09",
+            "description": "Assignments, eligible team and previous occurrence for one independent session."
+          }
+        },
+        {
+          "name": "Generate an independent rota session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/custom-sessions/{{scheduleId}}/2030-06-09/generate",
+            "body": { "mode": "raw", "raw": "{\n  \"lockedEntries\": []\n}" },
+            "description": "Returns a draft and gaps without saving or notifying."
+          }
+        },
+        {
+          "name": "Publish an independent rota session",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/rota/departments/{{departmentId}}/custom-sessions/{{scheduleId}}/2030-06-09",
+            "body": { "mode": "raw", "raw": "{\n  \"entries\": [\n    { \"memberId\": \"{{memberId}}\", \"role\": \"Class teacher\" }\n  ]\n}" },
+            "description": "Lead or department-wide planner with publish permission."
+          }
+        },
+        {
+          "name": "Report absence from an independent duty",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{memberToken}}" }],
+            "url": "{{baseUrl}}/rota/custom-assignments/{{assignmentId}}/absent",
+            "description": "The assigned worker marks the date unavailable and alerts rota leaders/publishers."
           }
         },
         {

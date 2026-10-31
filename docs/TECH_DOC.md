@@ -614,20 +614,61 @@ Who serves with each department at each service, and swapping when someone can't
 (root migration `AddServingRotaToPlans` adds it to every plan that has `departments`). Everything is in the member app
 under More → Serving Rota.
 
-**Tables** (tenant migration `CreateServingRota`):
+**Tables** (tenant migrations `CreateServingRota` and `CreateSmartRotaSetup`):
 - `rota_assignments`: department, `service_slot_id`, member, optional `role` (≤ 80 characters, e.g. "Main door") and
   `assigned_by_id`. Unique on `(service_slot_id, department_id, member_id)`; indexes on `member_id` and
   `(department_id, service_slot_id)`.
 - `rota_cover_requests`: assignment, department, `requested_by_id`, optional `target_member_id` (null means anyone in
   the department), reason, and `status` `OPEN`/`ACCEPTED`/`CANCELLED`, plus `accepted_by_id` and `resolved_at`. A
   partial unique index allows one open request per duty; a partial index covers each department's open requests.
+- `rota_schedules`: a department's generic serving schedules. `SERVICE_SLOTS` follows church service slots;
+  `CUSTOM` has its own weekday/start/end time. Each schedule has `MANUAL`, `FIXED` or `AUTOMATIC` allocation. Indexed
+  by `(department_id, active, position, name)` for the setup and future planning views.
+- `rota_subteams`: optional one-level groups within a department. Unique by department/name and indexed by
+  `(department_id, position, name)`.
+- `rota_responsibilities`: reusable duties with a required headcount, allocation mode and optional subteam. Unique by
+  department/name and indexed by `(department_id, subteam_id, position, name)`.
+- `rota_responsibility_members`: the active workers eligible for a responsibility, including whether their assignment
+  is fixed. Unique by responsibility/member; the reverse `(member_id, responsibility_id)` index supports conflict and
+  member-eligibility checks.
+- `rota_planner_grants`: delegated department-wide or subteam-scoped planners, separately controlling publication.
+  Partial unique indexes handle department-wide grants (`subteam_id IS NULL`) and subteam grants; the
+  `(member_id, department_id)` index supports access checks.
+- `rota_unavailability`: optional dates a member says they cannot serve, with a private optional note. Unique by
+  member/date; `(date, member_id)` supports one-date candidate exclusion during generation.
+- `rota_custom_assignments`: published duties for weekly department-owned sessions, keyed by schedule/date/member and
+  linked to the reusable responsibility. `(schedule_id, occurrence_date)` loads one session;
+  `(member_id, occurrence_date)` loads a person's duties and detects clashes. Partial indexes cover responsibility and
+  assigner audit joins.
 
 **Rules:**
+- **Setup:** a department lead chooses schedules, optional subteams, required responsibilities, eligible/fixed people
+  and delegated planners. Structural changes remain HOD/Deputy-only. Any active department worker can read the setup;
+  planner grants expose `canPlan` and `canPublish`, while the planner list itself is returned only to leads. Independent
+  schedules require a weekday and an end time after the start time. All selected eligible workers and planners must be
+  active workers in that department. Writes use small focused endpoints so mobile autosave never replaces unrelated
+  setup. Eligibility and planner replacement use two bulk statements inside the request transaction, not per-person
+  writes. These setup tables do not add polling or recurring work.
 - **Planning:** HODs and Assistant HODs plan up to 8 weeks ahead. They pick a service and tick the department's active
   workers (primary or secondary department), with an optional role each. "Copy last rota" pre-fills the previous rota.
   The picker shows anyone already serving with another department at the same service. Saving sends the whole list:
   removals, additions and role changes are applied as a diff. Only the people added (`ROTA_ASSIGNED`, one send per
   role) or removed (`ROTA_REMOVED`) are told. Started services can't be changed. Audit: `ROTA_UPDATED` with counts.
+- **Suggested draft:** leads and delegated planners can generate a service draft on demand. One batched candidate query
+  loads each responsibility's eligible people, approved/pending leave, optional unavailability, same-slot duties with
+  other departments, prior 8-week workload and last service. `MANUAL` responsibilities stay as explained gaps;
+  `FIXED` uses only people marked fixed; `AUTOMATIC` chooses available people in lowest-workload/least-recent order.
+  A person is used at most once in the department's generated service. Locked entries supplied by the client remain
+  unchanged. Generation returns `{ entries, gaps, date }`; it does not write assignments or send notifications. The
+  existing save action remains the explicit publication step.
+- **Independent sessions:** active `CUSTOM` schedules create virtual weekly occurrences for the next 8 weeks without a
+  polling job or stored empty rows. Assignments are stored only when a planner publishes a non-empty rota. The same
+  responsibilities, fixed/automatic/manual allocation, leave, unavailability, workload and overlap checks apply.
+  Published custom duties appear in My Rota. If a worker says they cannot make a published custom duty, their existing
+  assignment is retained as needing replacement and department leads/publishers are notified; replacing them is an
+  explicit planner action.
+- **Optional absence:** `rota_unavailability` lets a worker add or remove future dates they cannot serve. A reason is
+  optional and is not returned to other workers. No response is treated as available; there is no confirmation burden.
 - **Asking for cover:** a worker asks for cover on their own future duty, from everyone in the department who isn't
   already serving then, or from one chosen teammate (`ROTA_COVER_NEEDED`). The asker or a leader can cancel it.
 - **Accepting cover:** the first eligible teammate to accept takes the duty. The request row is locked
@@ -636,7 +677,8 @@ under More → Serving Rota.
   in the department, and they aren't already on the rota then. The asker and the department leads are told
   (`ROTA_COVER_TAKEN`). Audit: `ROTA_COVER_ACCEPTED`.
 - **Reminders:** gated job `rota-reminders`, every 15 minutes; it sleeps until the next reminder. Saving a rota
-  that adds people wakes it, since those writes use raw SQL and skip the entity subscriber. Hours come from
+  that adds people, including an independent-session rota, wakes it since those writes use raw SQL and skip the entity
+  subscriber. Its indexed candidate query unions service-slot and stored custom duties. Hours come from
   Reminder Settings key `rota_duty` (default 24 and 2). There's one send per department and role at each service, and
   each is sent once (Redis key `rota-reminder:{slotId}:{hours}`). Writes to `rota_assignments`, `service_slots` or
   church settings wake it.
@@ -653,14 +695,33 @@ under More → Serving Rota.
 **Query cost** (two years of services: 315 services, 3,000 workers, 40 departments, about 118,000 duties, about 3,500
 cover requests): the leader's 8-week list 13 ms, one service's rota 4.6 ms, the team picker 4.6 ms, my duties 3.4 ms,
 cover I could take 9 ms, reminders 3.8 ms. All are index-driven, with no full scans.
+Smart setup adds six bounded parallel reads only when its setup screen opens. An independent-session list uses one access
+check plus two bounded reads; one session uses one access check plus three parallel indexed reads. Generation uses an
+access check, one occurrence read and one batched candidate query, regardless of team size. Publishing uses one
+eligibility read and bulk delete/insert statements. No new recurring query or scheduler was added.
 
 | Method | Path | Who | What |
 |---|---|---|---|
 | GET | /rota/mine | any worker | My duties for the next 8 weeks (with my open cover request), and cover requests I could take |
 | GET | /rota/departments | any worker | Departments I serve in or lead (`isLeader`) |
+| GET | /rota/departments/:departmentId/setup | that department or delegated planner | Schedules, subteams, responsibilities/eligibility and caller access; leads also receive planner grants |
+| POST/PUT/DELETE | /rota/departments/:departmentId/setup/subteams[/:id] | department leads | Create, replace or remove one subteam |
+| POST/PUT/DELETE | /rota/departments/:departmentId/setup/responsibilities[/:id] | department leads | Create, replace or remove one responsibility |
+| PUT | /rota/departments/:departmentId/setup/responsibilities/:id/members | department leads | Replace eligibility in bulk: `{ members: [{ memberId, isFixed? }] }` |
+| PUT | /rota/departments/:departmentId/setup/planners | department leads | Replace scoped grants: `{ planners: [{ memberId, subteamId?, canPublish }] }` |
+| POST/PUT/DELETE | /rota/departments/:departmentId/setup/schedules[/:id] | department leads | Create, replace or remove one generic serving schedule |
 | GET | /rota/departments/:departmentId/services | that department | Next 8 weeks of services with `assigned`, `openCover` and `mine` |
+| GET | /rota/departments/:departmentId/custom-sessions | that department | Next 8 weeks of independent schedule occurrences, generated on read |
+| GET | /rota/departments/:departmentId/custom-sessions/:scheduleId/:date | that department | One independent session's assignments and team |
+| POST | /rota/departments/:departmentId/custom-sessions/:scheduleId/:date/generate | leads or scoped planners | Generate an independent-session draft |
+| PUT | /rota/departments/:departmentId/custom-sessions/:scheduleId/:date | leads or department-wide publishers | Publish `{ entries }` in bulk |
+| POST | /rota/custom-assignments/:assignmentId/absent | assigned worker | Marks the date unavailable and tells rota leads/publishers that replacement is needed |
 | GET | /rota/departments/:departmentId/services/:slotId | that department | The rota for one service and the department's `team` (with `servingElsewhere`); leaders also get `previous` |
+| POST | /rota/departments/:departmentId/services/:slotId/generate | leads or scoped planners | Generates a reviewable draft; optional `{ lockedEntries: [{ memberId, role? }] }` |
 | PUT | /rota/departments/:departmentId/services/:slotId | leads | `{ entries: [{ memberId, role? }] }`, the whole list |
+| GET | /rota/availability/absent | any worker | My future unavailable dates |
+| POST | /rota/availability/absent | any worker | Upsert `{ date: "YYYY-MM-DD", reason? }` |
+| DELETE | /rota/availability/absent/:date | any worker | Remove one unavailable date |
 | POST | /rota/assignments/:assignmentId/cover | the person serving | `{ targetMemberId?, reason? }` |
 | POST | /rota/cover/:requestId/accept | eligible teammates | Takes the duty; 409 if someone was quicker |
 | DELETE | /rota/cover/:requestId | asker or leads | Cancels the request |
