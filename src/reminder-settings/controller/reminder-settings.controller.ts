@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -43,14 +42,7 @@ export class ReminderSettingsController {
     @Body() dto: UpdateReminderSettingDto,
     @CurrentAdmin() admin: Admin,
   ) {
-    if (dto.smsEnabled !== undefined && !admin.isOwner) {
-      const current = await this.reminderSettingsService.findOne(key);
-      if (current.smsEnabled !== dto.smsEnabled) {
-        throw new ForbiddenException(
-          'Only an account owner can change text messages.',
-        );
-      }
-    }
+    await this.reminderSettingsService.assertCanChangeSms(key, dto, admin);
     return this.reminderSettingsService.upsert(key, dto, admin.member?.id);
   }
 }

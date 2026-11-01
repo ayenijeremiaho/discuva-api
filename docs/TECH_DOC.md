@@ -7949,9 +7949,10 @@ outside the requested `?months=` window).
 
 Owner-facing overview of everything a church sends. `GET /v1/admin/notification-centre` (`AdminGuard`, `admin:read`)
 returns, per category: delivery mode, `essential`, `group`, `includes` (message names from the email and push
-catalogues), `smsReminderKey`/`smsEnabled`, `optedOut` (members who muted it), `usage` and `lastMonth`. Also `totals`,
+catalogues), `smsReminderKey`, `optedOut` (active members who muted it), `usage` and `lastMonth`. Also `totals`,
 `lastMonthTotals`, `fixedTypes` (`ACCOUNT` uncategorised emails, `ANNOUNCEMENTS`; counted, no switch) and `blocks`
-(`emailLimit`, `sms` provider, balance and stopped count).
+(`emailLimit`, `sms` provider, balance and stopped count). `balance` needs `sms:read`, the same permission as
+`GET /admin/sms/balance`, and is `null` otherwise. The SMS switches themselves come from `GET /admin/reminder-settings`.
 
 **Who can change what:** delivery (`PATCH /admin/email-category-settings/:category`) and the `smsEnabled` value on
 `PATCH /admin/reminder-settings/:key` are owner-only. Reminder timing and on/off, and wording, stay under `admin:write`.
@@ -7962,9 +7963,14 @@ catalogues), `smsReminderKey`/`smsEnabled`, `optedOut` (members who muted it), `
 recipient; SMS counts in `SmsService.send`, by recipient rather than segment. A Redis failure never affects a send.
 Counts start at release, members' own opt-outs aren't counted as stopped, and a Redis data loss resets them.
 
-**Database cost:** no new tables or indexes and no writes per send. Opening the page reads settings plus one
-`unnest(muted_notifications)` count over `members`, cached 5 minutes, which reads the whole table by design.
-The SMS balance is fetched from the provider on page open, with a 3-second limit. No scheduled work.
+**Off counts:** `off` is recorded per channel, so a type on Email only also counts its skipped pushes. The admin page
+therefore shows `off` as "not sent" only while the type is fully off.
+
+**Database cost:** no new tables and no writes per send. Opening the page reads the category settings plus one
+`unnest(muted_notifications)` count, cached 5 minutes. That count uses the tenant partial index
+`IDX_members_muted_notifications` (`members (status) WHERE cardinality(muted_notifications) > 0`), so it reads only
+members who muted something, and only those rows add index writes. The SMS balance is a provider call with a 3-second
+limit, cached 60 seconds; a failure or timeout isn't cached. No scheduled work.
 
 **Also changed:** a switched-off type no longer uses up the unverified daily email limit, because the switch is now
 checked first.

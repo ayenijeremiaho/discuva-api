@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
@@ -10,6 +14,7 @@ import { ReminderSettingKey } from '../enum/reminder-setting-key.enum';
 import { KNOWN_REMINDER_SETTINGS } from '../constant/known-reminder-settings.constant';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
+import { Admin } from '../../admin/entity/admin.entity';
 
 type ReminderSettingValue = {
   enabled: boolean;
@@ -76,6 +81,21 @@ export class ReminderSettingsService {
       thresholds: value?.thresholds ?? known.defaultThresholds,
       smsEnabled: value?.smsEnabled ?? false,
     };
+  }
+
+  // Timing stays under admin:write; only turning texts on or off is owner-only.
+  async assertCanChangeSms(
+    key: ReminderSettingKey,
+    dto: UpdateReminderSettingDto,
+    admin: Admin,
+  ): Promise<void> {
+    if (admin.isOwner) return;
+    const current = await this.findOne(key);
+    if (current.smsEnabled !== dto.smsEnabled) {
+      throw new ForbiddenException(
+        'Only an account owner can change text messages.',
+      );
+    }
   }
 
   async upsert(

@@ -21,6 +21,9 @@ import { Clergy } from './clergy.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 
 @Entity({ name: 'members' })
+@Index('IDX_members_muted_notifications', ['status'], {
+  where: 'cardinality(muted_notifications) > 0',
+})
 export class Member extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;

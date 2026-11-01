@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ReminderSettingsService } from './reminder-settings.service';
 import { ChurchSetting } from '../../church-settings/entity/church-setting.entity';
 import { ReminderSettingKey } from '../enum/reminder-setting-key.enum';
@@ -45,6 +45,41 @@ describe('ReminderSettingsService', () => {
     }).compile();
 
     service = module.get<ReminderSettingsService>(ReminderSettingsService);
+  });
+
+  describe('text message switch', () => {
+    const key = Object.values(ReminderSettingKey)[0];
+    const stored = (smsEnabled: boolean) =>
+      mockSettingRepo.findOne.mockResolvedValue({
+        key,
+        value: { enabled: true, thresholds: [1], smsEnabled },
+      });
+    const dto = (smsEnabled: boolean) => ({
+      enabled: true,
+      thresholds: [1],
+      smsEnabled,
+    });
+
+    it('stops a non-owner changing it', async () => {
+      stored(false);
+      await expect(
+        service.assertCanChangeSms(key, dto(true), { isOwner: false } as any),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('lets a non-owner save timing with it unchanged', async () => {
+      stored(true);
+      await expect(
+        service.assertCanChangeSms(key, dto(true), { isOwner: false } as any),
+      ).resolves.toBeUndefined();
+    });
+
+    it('lets an owner change it without reading the current value', async () => {
+      await service.assertCanChangeSms(key, dto(true), {
+        isOwner: true,
+      } as any);
+      expect(mockSettingRepo.findOne).not.toHaveBeenCalled();
+    });
   });
 
   describe('findAll', () => {

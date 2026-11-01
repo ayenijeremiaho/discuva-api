@@ -5,7 +5,6 @@ import { ClsService } from 'nestjs-cls';
 import { AppClsStore } from '../tenant/interface/tenant-cls-store.interface';
 import { queryTenant } from '../tenant/utility/query-tenant';
 import { EmailCategorySettingsService } from '../email-category-settings/service/email-category-settings.service';
-import { ReminderSettingsService } from '../reminder-settings/service/reminder-settings.service';
 import { EmailAllowanceService } from '../utility/service/email-allowance.service';
 import { CacheService } from '../utility/service/cache.service';
 import {
@@ -23,12 +22,15 @@ import { SmsCredentialResolverService } from '../communication-provider/service/
 import { SmsService } from '../sms/service/sms.service';
 import { SmsBalance } from '../sms/interface/sms-provider.interface';
 import { EmailCategory } from '../utility/email-provider/email-category.enum';
+import { Admin } from '../admin/entity/admin.entity';
+import { AdminPermission } from '../admin/enum/admin-permission.enum';
 import {
   NOTIFICATION_GROUPS,
   SMS_REMINDER_KEYS,
 } from './notification-centre.constant';
 
 const OPT_OUTS_TTL_SECONDS = 300;
+const BALANCE_TTL_SECONDS = 60;
 const BALANCE_TIMEOUT_MS = 3000;
 
 // What each type contains, from the catalogues, so new messages list themselves.
@@ -83,7 +85,6 @@ export class NotificationCentreService {
 
   constructor(
     private readonly categories: EmailCategorySettingsService,
-    private readonly reminders: ReminderSettingsService,
     private readonly usage: NotificationUsageService,
     private readonly allowance: EmailAllowanceService,
     private readonly smsCredentials: SmsCredentialResolverService,
@@ -93,37 +94,32 @@ export class NotificationCentreService {
     private readonly cls: ClsService<AppClsStore>,
   ) {}
 
-  async overview() {
+  async overview(admin: Admin) {
     const now = new Date();
     const lastMonthDate = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
     );
-    const [settings, reminders, thisMonth, lastMonth, optOuts, limit, sms] =
+    const [settings, thisMonth, lastMonth, optOuts, limit, sms] =
       await Promise.all([
         this.categories.findAll(),
-        this.reminders.findAll(),
         this.usage.forMonth(now),
         this.usage.forMonth(lastMonthDate),
         this.optOutCounts(),
         this.allowance.status(),
-        this.smsStatus(),
+        this.smsStatus(
+          admin.adminRole.permissions.includes(AdminPermission.SMS_READ),
+        ),
       ]);
 
-    const smsOn = new Map(reminders.map((r) => [r.key, r.smsEnabled]));
-    const types = settings.map((s) => {
-      const smsReminderKey =
-        SMS_REMINDER_KEYS[s.category as EmailCategory] ?? null;
-      return {
-        ...s,
-        group: NOTIFICATION_GROUPS[s.category as EmailCategory],
-        includes: INCLUDED.get(s.category) ?? [],
-        smsReminderKey,
-        smsEnabled: smsReminderKey ? !!smsOn.get(smsReminderKey) : false,
-        optedOut: optOuts[s.category] ?? 0,
-        usage: usageOf(s.category, thisMonth),
-        lastMonth: usageOf(s.category, lastMonth),
-      };
-    });
+    const types = settings.map((s) => ({
+      ...s,
+      group: NOTIFICATION_GROUPS[s.category as EmailCategory],
+      includes: INCLUDED.get(s.category) ?? [],
+      smsReminderKey: SMS_REMINDER_KEYS[s.category as EmailCategory] ?? null,
+      optedOut: optOuts[s.category] ?? 0,
+      usage: usageOf(s.category, thisMonth),
+      lastMonth: usageOf(s.category, lastMonth),
+    }));
 
     return {
       month: now.toISOString().slice(0, 7),
@@ -162,7 +158,6 @@ export class NotificationCentreService {
           : null,
         sms: {
           ...sms,
-          textRemindersOn: types.some((t) => t.smsEnabled),
           stoppedThisMonth: this.sumOutcome(thisMonth, 'sms', 'no_provider'),
         },
       },
@@ -179,7 +174,7 @@ export class NotificationCentreService {
       .reduce((n, [, v]) => n + v, 0);
   }
 
-  // Only the page reads this; cached, because it counts across all members.
+  // Only the page reads this. Partial index IDX_members_muted_notifications keeps it to members who muted something.
   private optOutCounts(): Promise<Record<string, number>> {
     return this.cacheService.getOrSet(
       'notification-centre:opt-outs',
@@ -188,7 +183,7 @@ export class NotificationCentreService {
           this.dataSource,
           this.cls.get('schemaName'),
           (schema) =>
-            `SELECT unnest(muted_notifications) AS category, COUNT(*) AS count FROM ${schema}.members GROUP BY 1`,
+            `SELECT unnest(muted_notifications) AS category, COUNT(*) AS count FROM ${schema}.members WHERE cardinality(muted_notifications) > 0 AND status = 'ACTIVE' GROUP BY 1`,
         );
         return Object.fromEntries(
           rows.map((r) => [r.category, Number(r.count)]),
@@ -198,26 +193,38 @@ export class NotificationCentreService {
     );
   }
 
-  private async smsStatus(): Promise<{
+  private async smsStatus(canSeeBalance: boolean): Promise<{
     providerConfigured: boolean;
     balance: SmsBalance | null;
   }> {
     if (!(await this.smsCredentials.resolveConfig())) {
       return { providerConfigured: false, balance: null };
     }
-    let timer: NodeJS.Timeout | undefined;
-    // A slow provider shouldn't hold up the page.
-    const balance = await Promise.race([
-      this.sms.getBalance(),
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), BALANCE_TIMEOUT_MS);
-      }),
-    ])
+    if (!canSeeBalance) return { providerConfigured: true, balance: null };
+    const balance = await this.cacheService
+      .getOrSet(
+        'notification-centre:sms-balance',
+        () => this.balanceWithinLimit(),
+        BALANCE_TTL_SECONDS,
+      )
       .catch((err: Error) => {
         this.logger.warn(`SMS balance unavailable: ${err.message}`);
         return null;
-      })
-      .finally(() => clearTimeout(timer));
+      });
     return { providerConfigured: true, balance };
+  }
+
+  // A slow provider shouldn't hold up the page. Rejects, so a timeout is never cached.
+  private balanceWithinLimit(): Promise<SmsBalance> {
+    let timer: NodeJS.Timeout | undefined;
+    return Promise.race([
+      this.sms.getBalance(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('timed out')),
+          BALANCE_TIMEOUT_MS,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
   }
 }
