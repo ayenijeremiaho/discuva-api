@@ -105,8 +105,19 @@ describe('AccountTypeService', () => {
   };
   const service = new AccountTypeService(repo as any, cache as any);
 
-  const audit = { log: jest.fn() };
-  const admin = new AccountTypeAdminService(repo as any, service, audit as any);
+  const changeRepo = { find: jest.fn() };
+  const tx = {
+    save: jest.fn(),
+    create: jest.fn((_entity, value) => value),
+  };
+  Object.assign(repo, {
+    manager: { transaction: (fn: (m: typeof tx) => unknown) => fn(tx) },
+  });
+  const admin = new AccountTypeAdminService(
+    repo as any,
+    service,
+    changeRepo as any,
+  );
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -148,15 +159,16 @@ describe('AccountTypeService', () => {
       { modules: { notes: 'hidden' } },
       'admin-1',
     );
-    expect(repo.save.mock.calls[0][0].value.modules).toEqual({
+    expect(tx.save.mock.calls[0][0].value.modules).toEqual({
       prayer: 'off',
       notes: 'hidden',
     });
     expect(cache.delGlobal).toHaveBeenCalled();
-    expect(audit.log).toHaveBeenCalledWith(
-      'ACCOUNT_TYPE_UPDATED',
-      expect.objectContaining({ actorId: 'admin-1', targetId: 'GROUP' }),
-    );
+    expect(tx.save.mock.calls[1][0]).toMatchObject({
+      accountType: 'GROUP',
+      actorId: 'admin-1',
+      changes: { modules: { notes: 'hidden' } },
+    });
   });
 
   it.each([
@@ -169,7 +181,7 @@ describe('AccountTypeService', () => {
     await expect(
       admin.update(OrganisationTypeEnum.GROUP, dto as any, 'admin-1'),
     ).rejects.toThrow(BadRequestException);
-    expect(repo.save).not.toHaveBeenCalled();
+    expect(tx.save).not.toHaveBeenCalled();
   });
 
   it('opens sign-up per type, with NGO closed until opened', async () => {

@@ -43577,6 +43577,35 @@
           }
         },
         {
+          "name": "Account Type Changes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/account-types/MINISTRY/changes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "account-types",
+                "MINISTRY",
+                "changes"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "Update Account Type",
           "request": {
             "method": "PATCH",

@@ -684,6 +684,16 @@ export class PlatformAdminController {
   }
 
   @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('account-types/:type/changes')
+  accountTypeChanges(
+    @Param('type', new ParseEnumPipe(OrganisationTypeEnum))
+    type: OrganisationTypeEnum,
+  ) {
+    return this.accountTypeAdmin.recentChanges(type);
+  }
+
+  @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
   @HttpCode(HttpStatus.OK)
   @Patch('account-types/:type')

@@ -23154,13 +23154,14 @@ security-critical auth flows) always send regardless, by design.
 ## Account Types: Dictionary and Features
 
 Church, NGO (`MINISTRY`) and Group accounts run the same product. `AccountTypeService` reads, per type, a word dictionary
-and each module's availability; `AccountTypeAdminService` edits them and writes the audit log. They're separate because
-email needs the reads, while audit logging depends on email, so one class would form an import cycle. Stored in `platform_settings` under `account_type:{TYPE}` over code defaults in
+and each module's availability; `AccountTypeAdminService` edits them. Reads stay separate because email and PDFs use them on
+send paths, which must not pull in the console's dependencies. Stored in `platform_settings` under `account_type:{TYPE}` over code defaults in
 `account-type.constant.ts`, cached globally for 5 minutes, and read live, so a change reaches every account of that type.
 
 **Console:** `GET /v1/platform/account-types` (`billing:read`) and `PATCH /v1/platform/account-types/:type`
-(`billing:write`) with `{ terms?: { key: { one, many } }, modules?: { key: 'on' | 'off' | 'hidden' } }`. Fields merge, and
-each change is audited as `ACCOUNT_TYPE_UPDATED`, with the platform admin as actor.
+(`billing:write`) with `{ terms?: { key: { one, many } }, modules?: { key: 'on' | 'off' | 'hidden' } }`. Fields merge. Each change is stored in the root table `account_type_changes`, in the same
+transaction as the setting, because the tenant audit log needs a church schema and a member actor. `GET
+/v1/platform/account-types/:type/changes` (`billing:read`) returns the latest 20, using `IDX_account_type_changes_type_created`.
 
 **Features:** `ChurchSettingsService` resolves a module as: `hidden` is always off and can't be enabled (400); otherwise
 the account's own saved choice, otherwise the type's `on`/`off`. A module is only `required` when it is `on` for the type.
@@ -23183,6 +23184,6 @@ wording is sent as written.
 
 **Beyond words:** a new non-church account starts with `STARTER_LEADERSHIP_TITLES` instead of pastoral titles. In discuva-member, `useAssetUrl` swaps bundled church-building and worship pictures for neutral ones, unless the account uploaded its own. Devotional loading lines and worship-only programme items (`isChurchAccount()`) don't show.
 
-**Database cost:** no new tables or indexes. A module cache miss adds two cached lookups (the tenant's type and the type's
+**Database cost:** one small root table written only on console saves. A module cache miss adds two cached lookups (the tenant's type and the type's
 profile), each reading the database at most once per 5 minutes.
 

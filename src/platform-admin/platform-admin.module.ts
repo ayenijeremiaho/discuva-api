@@ -33,6 +33,7 @@ import { PlatformAdminRole } from './entity/platform-admin-role.entity';
 import { PlatformAdminPasswordResetOtp } from './entity/platform-admin-password-reset-otp.entity';
 import { PlatformSetting } from './entity/platform-setting.entity';
 import { PlatformSettingsService } from './service/platform-settings.service';
+import { AccountTypeChange } from '../account-type/account-type-change.entity';
 import { AccountTypeService } from '../account-type/account-type.service';
 import { AccountTypeAdminService } from '../account-type/account-type-admin.service';
 import { CommunicationProvider } from './entity/communication-provider.entity';
@@ -69,6 +70,7 @@ import { UtilityModule } from '../utility/utility.module';
       PlatformAdminRole,
       PlatformAdminPasswordResetOtp,
       PlatformSetting,
+      AccountTypeChange,
       Tenant,
       Plan,
       Subscription,

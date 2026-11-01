@@ -2,7 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlatformSetting } from '../platform-admin/entity/platform-setting.entity';
-import { AuditLogService } from '../utility/service/audit-log.service';
+import { AccountTypeChange } from './account-type-change.entity';
 import { OrganisationTypeEnum } from '../tenant/enum/organisation-type.enum';
 import { KNOWN_MODULES } from '../church-settings/constants/known-modules.constant';
 import {
@@ -18,6 +18,7 @@ import {
 } from './account-type.service';
 
 const MAX_TERM_LENGTH = 40;
+const RECENT_CHANGES = 20;
 const LABELS: Record<OrganisationTypeEnum, string> = {
   [OrganisationTypeEnum.CHURCH]: 'Church',
   [OrganisationTypeEnum.MINISTRY]: 'NGO or nonprofit',
@@ -25,14 +26,15 @@ const LABELS: Record<OrganisationTypeEnum, string> = {
 };
 const AVAILABILITY: ModuleAvailability[] = ['on', 'off', 'hidden'];
 
-// Console side: edits the dictionary and features, and audits each change.
+// Console side: edits the dictionary and features, keeping a record of who changed what.
 @Injectable()
 export class AccountTypeAdminService {
   constructor(
     @InjectRepository(PlatformSetting)
     private readonly settingRepo: Repository<PlatformSetting>,
     private readonly accountTypes: AccountTypeService,
-    private readonly auditLogService: AuditLogService,
+    @InjectRepository(AccountTypeChange)
+    private readonly changeRepo: Repository<AccountTypeChange>,
   ) {}
 
   async listForConsole() {
@@ -85,14 +87,33 @@ export class AccountTypeAdminService {
         key: accountTypeStorageKey(type),
         value,
       });
-    await this.settingRepo.save(row);
-    this.accountTypes.clearCache(type);
-    this.auditLogService.log('ACCOUNT_TYPE_UPDATED', {
-      actorId,
-      targetId: type,
-      metadata: { ...dto },
+    await this.settingRepo.manager.transaction(async (tx) => {
+      await tx.save(row);
+      await tx.save(
+        tx.create(AccountTypeChange, {
+          accountType: type,
+          actorId,
+          changes: { ...dto },
+        }),
+      );
     });
+    this.accountTypes.clearCache(type);
     return this.view(type);
+  }
+
+  async recentChanges(type: OrganisationTypeEnum) {
+    const rows = await this.changeRepo.find({
+      where: { accountType: type },
+      relations: { actor: true },
+      order: { createdAt: 'DESC' },
+      take: RECENT_CHANGES,
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      at: r.createdAt,
+      by: r.actor?.email ?? null,
+      changes: r.changes,
+    }));
   }
 
   private assertValid(dto: UpdateAccountTypeDto): void {
