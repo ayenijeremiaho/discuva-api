@@ -165,7 +165,9 @@ export class PdfService {
       logoImage,
       timezone: tenant.timezone || fallback.timezone,
       theme: churchThemeColors(tenant.themePreset),
-      wording: await this.accountTypes.wordingFor(tenant.orgType),
+      wording: await this.accountTypes
+        .wordingFor(tenant.orgType)
+        .catch(() => []),
     };
   }
 

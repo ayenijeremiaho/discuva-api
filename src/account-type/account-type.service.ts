@@ -1,10 +1,9 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlatformSetting } from '../platform-admin/entity/platform-setting.entity';
 import { CacheService } from '../utility/service/cache.service';
 import { OrganisationTypeEnum } from '../tenant/enum/organisation-type.enum';
-import { KNOWN_MODULES } from '../church-settings/constants/known-modules.constant';
 import {
   ACCOUNT_TERMS,
   ModuleAvailability,
@@ -14,18 +13,10 @@ import {
   defaultAvailability,
 } from './account-type.constant';
 import { WordingRule } from './apply-wording';
-import { UpdateAccountTypeDto } from './account-type.dto';
 
 const CACHE_TTL_SECONDS = 300;
-const MAX_TERM_LENGTH = 40;
-const LABELS: Record<OrganisationTypeEnum, string> = {
-  [OrganisationTypeEnum.CHURCH]: 'Church',
-  [OrganisationTypeEnum.MINISTRY]: 'NGO or nonprofit',
-  [OrganisationTypeEnum.GROUP]: 'Small group',
-};
-const AVAILABILITY: ModuleAvailability[] = ['on', 'off', 'hidden'];
 
-interface StoredProfile {
+export interface StoredProfile {
   terms?: Record<string, Term>;
   modules?: Record<string, ModuleAvailability>;
   signupOpen?: boolean;
@@ -37,7 +28,8 @@ export interface AccountTypeProfile {
   wording: WordingRule[];
 }
 
-const storageKey = (type: OrganisationTypeEnum) => `account_type:${type}`;
+export const accountTypeStorageKey = (type: OrganisationTypeEnum) =>
+  `account_type:${type}`;
 
 // The word rules the apps and emails apply, in source (church) wording order. Unchanged words are left out.
 function wordingRules(terms: Record<string, Term>): WordingRule[] {
@@ -58,7 +50,8 @@ function wordingRules(terms: Record<string, Term>): WordingRule[] {
   ];
 }
 
-// Each account type's dictionary and feature availability. Read live, so a change reaches every account of the type.
+// Read side, used on send paths: keep it free of audit logging, which depends on email and would form an import cycle.
+// Read live, so a change reaches every account of the type.
 @Injectable()
 export class AccountTypeService {
   constructor(
@@ -69,6 +62,10 @@ export class AccountTypeService {
 
   private cacheKey(type: OrganisationTypeEnum) {
     return `account-type-profile:${type}`;
+  }
+
+  clearCache(type: OrganisationTypeEnum): void {
+    this.cacheService.delGlobal(this.cacheKey(type));
   }
 
   private build(
@@ -99,7 +96,7 @@ export class AccountTypeService {
     );
     if (cached) return cached;
     const row = await this.settingRepo.findOne({
-      where: { key: storageKey(type) },
+      where: { key: accountTypeStorageKey(type) },
     });
     const profile = this.build(type, row?.value as StoredProfile | undefined);
     this.cacheService.setGlobal(
@@ -114,74 +111,5 @@ export class AccountTypeService {
     const types = Object.values(OrganisationTypeEnum);
     const profiles = await Promise.all(types.map((t) => this.getProfile(t)));
     return types.filter((_, i) => profiles[i].signupOpen);
-  }
-
-  async listForConsole() {
-    return Promise.all(
-      Object.values(OrganisationTypeEnum).map((type) => this.view(type)),
-    );
-  }
-
-  private async view(type: OrganisationTypeEnum) {
-    const profile = await this.getProfile(type);
-    const defaults = defaultAvailability(type);
-    return {
-      type,
-      label: LABELS[type],
-      signupOpen: profile.signupOpen,
-      terms: ACCOUNT_TERMS.map((t) => ({
-        key: t.key,
-        label: t.label,
-        source: t.words[OrganisationTypeEnum.CHURCH],
-        value: profile.terms[t.key],
-        suggested: t.words[type],
-      })),
-      modules: KNOWN_MODULES.map((m) => ({
-        key: m.key,
-        name: m.moduleName,
-        availability: profile.modules[m.key],
-        suggested: defaults[m.key],
-      })),
-    };
-  }
-
-  async update(type: OrganisationTypeEnum, dto: UpdateAccountTypeDto) {
-    this.assertValid(dto);
-    let row = await this.settingRepo.findOne({
-      where: { key: storageKey(type) },
-    });
-    const current = (row?.value ?? {}) as StoredProfile;
-    const value = {
-      terms: { ...current.terms, ...dto.terms },
-      modules: { ...current.modules, ...dto.modules },
-      signupOpen: dto.signupOpen ?? current.signupOpen,
-    };
-    if (row) row.value = value;
-    else row = this.settingRepo.create({ key: storageKey(type), value });
-    await this.settingRepo.save(row);
-    this.cacheService.delGlobal(this.cacheKey(type));
-    return this.view(type);
-  }
-
-  private assertValid(dto: UpdateAccountTypeDto): void {
-    const termKeys = new Set(ACCOUNT_TERMS.map((t) => t.key));
-    for (const [key, term] of Object.entries(dto.terms ?? {})) {
-      const clean = [term?.one, term?.many].every(
-        (w) =>
-          typeof w === 'string' &&
-          w.trim().length > 0 &&
-          w.length <= MAX_TERM_LENGTH &&
-          !/[<>{}]/.test(w),
-      );
-      if (!termKeys.has(key) || !clean) {
-        throw new BadRequestException(`Check the wording for '${key}'.`);
-      }
-    }
-    const moduleKeys = new Set<string>(KNOWN_MODULES.map((m) => m.key));
-    for (const [key, state] of Object.entries(dto.modules ?? {})) {
-      if (!moduleKeys.has(key) || !AVAILABILITY.includes(state)) {
-        throw new BadRequestException(`Check the setting for '${key}'.`);
-      }
-    }
   }
 }

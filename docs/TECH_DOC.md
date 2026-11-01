@@ -23153,13 +23153,14 @@ security-critical auth flows) always send regardless, by design.
 
 ## Account Types: Dictionary and Features
 
-Church, NGO (`MINISTRY`) and Group accounts run the same product. `AccountTypeService` holds, per type, a word dictionary
-and each module's availability. Stored in `platform_settings` under `account_type:{TYPE}` over code defaults in
+Church, NGO (`MINISTRY`) and Group accounts run the same product. `AccountTypeService` reads, per type, a word dictionary
+and each module's availability; `AccountTypeAdminService` edits them and writes the audit log. They're separate because
+email needs the reads, while audit logging depends on email, so one class would form an import cycle. Stored in `platform_settings` under `account_type:{TYPE}` over code defaults in
 `account-type.constant.ts`, cached globally for 5 minutes, and read live, so a change reaches every account of that type.
 
 **Console:** `GET /v1/platform/account-types` (`billing:read`) and `PATCH /v1/platform/account-types/:type`
 (`billing:write`) with `{ terms?: { key: { one, many } }, modules?: { key: 'on' | 'off' | 'hidden' } }`. Fields merge, and
-each change is audited as `ACCOUNT_TYPE_UPDATED`.
+each change is audited as `ACCOUNT_TYPE_UPDATED`, with the platform admin as actor.
 
 **Features:** `ChurchSettingsService` resolves a module as: `hidden` is always off and can't be enabled (400); otherwise
 the account's own saved choice, otherwise the type's `on`/`off`. A module is only `required` when it is `on` for the type.

@@ -1,5 +1,6 @@
 import { AccountTypeService } from '../../account-type/account-type.service';
 import {
+  WordingRule,
   applyWordingAround,
   applyWordingToHtml,
 } from '../../account-type/apply-wording';
@@ -282,9 +283,7 @@ export class EmailQueueService {
     templateData: Record<string, any>,
     to: string | string[],
   ): Promise<{ subject: string; html: string }> {
-    const rules = await this.accountTypes.wordingFor(
-      await this.verification.orgType(),
-    );
+    const rules = await this.accountWording();
     const branding = await this.resolveBrandingData();
     subject = applyWordingAround(
       subject,
@@ -333,6 +332,18 @@ export class EmailQueueService {
       subject,
       html: await this.compileTemplate(template, templateData),
     };
+  }
+
+  // Wording must never stop an email: on any failure it goes out in the default words.
+  private async accountWording(): Promise<WordingRule[]> {
+    try {
+      return await this.accountTypes.wordingFor(
+        await this.verification.orgType(),
+      );
+    } catch (error) {
+      this.logger.warn(`Using default wording: ${error}`);
+      return [];
+    }
   }
 
   // Only a single-recipient email can be personalised; a failed lookup leaves the details blank.

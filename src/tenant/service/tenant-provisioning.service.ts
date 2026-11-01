@@ -425,7 +425,9 @@ export class TenantProvisioningService {
 
           const titles = STARTER_LEADERSHIP_TITLES[tenant.orgType];
           if (titles) {
-            await tx.query('DELETE FROM clergy_titles');
+            await tx.query(
+              'DELETE FROM clergy_titles WHERE id NOT IN (SELECT clergy_title_id FROM clergy WHERE clergy_title_id IS NOT NULL)',
+            );
             await tx.query(
               'INSERT INTO clergy_titles (name) SELECT unnest($1::varchar[])',
               [titles],

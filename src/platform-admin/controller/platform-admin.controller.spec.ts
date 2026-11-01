@@ -1,5 +1,4 @@
-import { AuditLogService } from '../../utility/service/audit-log.service';
-import { AccountTypeService } from '../../account-type/account-type.service';
+import { AccountTypeAdminService } from '../../account-type/account-type-admin.service';
 import { TenantReportService } from '../../tenant/service/tenant-report.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
@@ -103,8 +102,7 @@ describe('PlatformAdminController (billing support routes)', () => {
           provide: TenantBroadcastService,
           useValue: mockTenantBroadcastService,
         },
-        { provide: AccountTypeService, useValue: {} },
-        { provide: AuditLogService, useValue: { log: jest.fn() } },
+        { provide: AccountTypeAdminService, useValue: {} },
         {
           provide: PlatformSettingsService,
           useValue: mockPlatformSettingsService,

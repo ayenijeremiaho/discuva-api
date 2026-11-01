@@ -3,6 +3,7 @@ import { BadRequestException } from '@nestjs/common';
 import { OrganisationTypeEnum } from '../tenant/enum/organisation-type.enum';
 import { KNOWN_MODULES } from '../church-settings/constants/known-modules.constant';
 import { AccountTypeService } from './account-type.service';
+import { AccountTypeAdminService } from './account-type-admin.service';
 import { defaultAvailability } from './account-type.constant';
 import {
   applyWording,
@@ -104,6 +105,9 @@ describe('AccountTypeService', () => {
   };
   const service = new AccountTypeService(repo as any, cache as any);
 
+  const audit = { log: jest.fn() };
+  const admin = new AccountTypeAdminService(repo as any, service, audit as any);
+
   beforeEach(() => {
     jest.clearAllMocks();
     repo.findOne.mockResolvedValue(null);
@@ -139,14 +143,20 @@ describe('AccountTypeService', () => {
     repo.findOne.mockResolvedValue({
       value: { modules: { prayer: 'off' } },
     });
-    await service.update(OrganisationTypeEnum.GROUP, {
-      modules: { notes: 'hidden' },
-    });
+    await admin.update(
+      OrganisationTypeEnum.GROUP,
+      { modules: { notes: 'hidden' } },
+      'admin-1',
+    );
     expect(repo.save.mock.calls[0][0].value.modules).toEqual({
       prayer: 'off',
       notes: 'hidden',
     });
     expect(cache.delGlobal).toHaveBeenCalled();
+    expect(audit.log).toHaveBeenCalledWith(
+      'ACCOUNT_TYPE_UPDATED',
+      expect.objectContaining({ actorId: 'admin-1', targetId: 'GROUP' }),
+    );
   });
 
   it.each([
@@ -157,7 +167,7 @@ describe('AccountTypeService', () => {
     [{ modules: { prayer: 'maybe' } }],
   ])('rejects %j', async (dto) => {
     await expect(
-      service.update(OrganisationTypeEnum.GROUP, dto as any),
+      admin.update(OrganisationTypeEnum.GROUP, dto as any, 'admin-1'),
     ).rejects.toThrow(BadRequestException);
     expect(repo.save).not.toHaveBeenCalled();
   });
