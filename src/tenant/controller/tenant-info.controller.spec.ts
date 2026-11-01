@@ -1,3 +1,4 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
 import { TenantReportService } from '../service/tenant-report.service';
 /// <reference types="jest" />
 
@@ -98,6 +99,12 @@ describe('TenantInfoController', () => {
         },
         { provide: ClsService, useValue: mockCls },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
+        {
+          provide: AccountTypeService,
+          useValue: {
+            getProfile: jest.fn().mockResolvedValue({ wording: [] }),
+          },
+        },
         { provide: CacheService, useValue: mockCacheService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
@@ -126,6 +133,8 @@ describe('TenantInfoController', () => {
         name: 'Test Church',
         privateGroup: false,
         subdomain: 'test-church',
+        orgType: undefined,
+        wording: [],
         logoUrl: 'https://cdn.example.com/platform-default-logo.png',
         tagline: null,
         address: null,

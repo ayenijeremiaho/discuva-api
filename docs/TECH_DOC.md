@@ -23150,3 +23150,35 @@ See "Email Category Settings Module" above — every category-tagged email check
 per-tenant `EmailCategorySettingsService` gate, before `EmailQueueService.queueEmail` enqueues the job
 (`GET/PATCH /admin/email-category-settings`). Emails sent with no category (OTP, password reset, account-locked —
 security-critical auth flows) always send regardless, by design.
+
+## Account Types: Dictionary and Features
+
+Church, NGO (`MINISTRY`) and Group accounts run the same product. `AccountTypeService` holds, per type, a word dictionary
+and each module's availability. Stored in `platform_settings` under `account_type:{TYPE}` over code defaults in
+`account-type.constant.ts`, cached globally for 5 minutes, and read live, so a change reaches every account of that type.
+
+**Console:** `GET /v1/platform/account-types` (`billing:read`) and `PATCH /v1/platform/account-types/:type`
+(`billing:write`) with `{ terms?: { key: { one, many } }, modules?: { key: 'on' | 'off' | 'hidden' } }`. Fields merge, and
+each change is audited as `ACCOUNT_TYPE_UPDATED`.
+
+**Features:** `ChurchSettingsService` resolves a module as: `hidden` is always off and can't be enabled (400); otherwise
+the account's own saved choice, otherwise the type's `on`/`off`. A module is only `required` when it is `on` for the type.
+Responses add `available`; admin Module Settings leaves out unavailable modules. Plans still apply on top. Church
+defaults are all `on`, so existing church behaviour is unchanged. A saved choice, including one saved by renaming a
+module, stays pinned when the type's default later changes. Per-account module caches mean a change can take 5 minutes.
+
+**Wording:** `GET /v1/tenant/info` adds `orgType` and `wording`, a list of `{ from, to }` rules; it is empty when a type uses
+the church words. Source text stays in church wording. `utils/wording.ts` in discuva-admin and discuva-member exposes
+`w(text)`, which keeps case and fixes a/an, and is set by `TenantProvider`. `w` must only receive fixed text, never a
+church's name or anything typed by a person. Each app has a test that fails when JSX text or a display attribute uses a
+dictionary word without `w`. Module-level labels use getters so they read the current wording at render.
+
+**Emails and pushes:** `NotificationTemplateService` applies the rules to catalogue default wording only. A church's edited
+wording is sent as written.
+
+**Not yet converted:** static text inside email HTML files, subjects built by senders, API error messages and PDF text
+stay in church wording. The admin template editor also shows the church-word defaults.
+
+**Database cost:** no new tables or indexes. A module cache miss adds two cached lookups (the tenant's type and the type's
+profile), each reading the database at most once per 5 minutes.
+

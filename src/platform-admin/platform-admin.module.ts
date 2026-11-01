@@ -33,6 +33,7 @@ import { PlatformAdminRole } from './entity/platform-admin-role.entity';
 import { PlatformAdminPasswordResetOtp } from './entity/platform-admin-password-reset-otp.entity';
 import { PlatformSetting } from './entity/platform-setting.entity';
 import { PlatformSettingsService } from './service/platform-settings.service';
+import { AccountTypeService } from '../account-type/account-type.service';
 import { CommunicationProvider } from './entity/communication-provider.entity';
 import { TenantCommunicationProviderConfig } from './entity/tenant-communication-provider-config.entity';
 import { SocialPlatformApp } from './entity/social-platform-app.entity';
@@ -111,7 +112,12 @@ import { UtilityModule } from '../utility/utility.module';
     TenantBroadcastService,
     DefaultPlatformAdminSeed,
     PlatformSettingsService,
+    AccountTypeService,
   ],
-  exports: [PlatformSettingsService, PlatformSocialAppService],
+  exports: [
+    PlatformSettingsService,
+    PlatformSocialAppService,
+    AccountTypeService,
+  ],
 })
 export class PlatformAdminModule {}

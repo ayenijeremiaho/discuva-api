@@ -43548,6 +43548,70 @@
               "body": "{\n  \"key\": \"subscription_grace_period_days\",\n  \"label\": \"Subscription Grace Period\",\n  \"unit\": \"days after payment lapse before downgrade to Free\",\n  \"value\": 10,\n  \"min\": 0,\n  \"max\": 365\n}"
             }
           ]
+        },
+        {
+          "name": "List Account Types",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/account-types",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "account-types"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Account Type",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/platform/account-types/MINISTRY",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "account-types",
+                "MINISTRY"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{platformAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"terms\": {\n    \"worker\": {\n      \"one\": \"Team member\",\n      \"many\": \"Team members\"\n    }\n  },\n  \"modules\": {\n    \"sermons\": \"off\",\n    \"prayer\": \"on\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     },

@@ -15,5 +15,7 @@ export class ChurchSettingResponseDto {
   moduleName: string;
   enabled: boolean;
   required: boolean;
+  // False when the church's account type doesn't offer this module.
+  available: boolean;
   displayName?: string;
 }

@@ -43,6 +43,9 @@ import { AuditLogService } from '../../utility/service/audit-log.service';
 import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
+import { WordingRule, applyWording } from '../../account-type/apply-wording';
 
 type PushOverrides = Record<
   string,
@@ -107,6 +110,8 @@ export class NotificationTemplateService {
     private readonly auditLogService: AuditLogService,
     private readonly planFeatureResolver: PlanFeatureResolverService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly accountTypes: AccountTypeService,
+    private readonly verification: TenantVerificationService,
   ) {}
 
   async isCustomizationAvailable(): Promise<boolean> {
@@ -145,7 +150,7 @@ export class NotificationTemplateService {
   // Wording to send: the church's override while its plan includes customization, else the default.
   // Never blocks a send: any lookup failure falls back to the default wording.
   async resolvePushTemplate(key: PushNotificationKey): Promise<PushTemplate> {
-    const template = PUSH_CATALOGUE[key];
+    const template = await this.typedPushDefaults(key);
     try {
       if (!(await this.isCustomizationAvailable())) return template;
       const override = (await this.pushOverrides())[key];
@@ -266,9 +271,37 @@ export class NotificationTemplateService {
     return map;
   }
 
+  private async accountWording(): Promise<WordingRule[]> {
+    const type = await this.verification.orgType();
+    return (await this.accountTypes.getProfile(type)).wording;
+  }
+
+  // Default wording in the account type's own terms. A church's own edits are left exactly as written.
+  private async typedEmailDefaults(key: string): Promise<EmailWording> {
+    const defaults = defaultWording(key);
+    const rules = await this.accountWording().catch(() => []);
+    if (!rules.length) return defaults;
+    return Object.fromEntries(
+      EMAIL_FIELDS.map((f) => [f, applyWording(defaults[f], rules)]),
+    ) as unknown as EmailWording;
+  }
+
+  private async typedPushDefaults(
+    key: PushNotificationKey,
+  ): Promise<PushTemplate> {
+    const template = PUSH_CATALOGUE[key];
+    const rules = await this.accountWording().catch(() => []);
+    if (!rules.length) return template;
+    return {
+      ...template,
+      title: applyWording(template.title, rules),
+      body: applyWording(template.body, rules),
+    };
+  }
+
   // Wording to send: church edits (while the plan includes customization) over the defaults, field by field.
   async resolveEmailWording(key: string): Promise<EmailWording> {
-    const defaults = defaultWording(key);
+    const defaults = await this.typedEmailDefaults(key);
     try {
       if (!(await this.isCustomizationAvailable())) return defaults;
       const override = (await this.emailOverrides())[key];

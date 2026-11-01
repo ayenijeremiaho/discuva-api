@@ -1,6 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { ChurchSettingsService } from './church-settings.service';
 import { ChurchSetting } from '../entity/church-setting.entity';
 import { KNOWN_MODULES } from '../constants/known-modules.constant';
@@ -24,10 +26,24 @@ const mockAuditLogService = {
   log: jest.fn(),
 };
 
+const profile = (
+  modules: Record<string, string> = {},
+  wording: object[] = [],
+) => ({
+  terms: {},
+  modules: new Proxy(modules, { get: (m, k: string) => m[k] ?? 'on' }),
+  wording,
+});
+const mockAccountTypes = { getProfile: jest.fn() };
+const mockVerification = {
+  orgType: jest.fn().mockResolvedValue('CHURCH'),
+};
+
 describe('ChurchSettingsService', () => {
   let service: ChurchSettingsService;
 
   beforeEach(async () => {
+    mockAccountTypes.getProfile.mockResolvedValue(profile());
     jest.clearAllMocks();
     mockCacheService.get.mockResolvedValue(undefined);
 
@@ -40,6 +56,8 @@ describe('ChurchSettingsService', () => {
         },
         { provide: CacheService, useValue: mockCacheService },
         { provide: AuditLogService, useValue: mockAuditLogService },
+        { provide: AccountTypeService, useValue: mockAccountTypes },
+        { provide: TenantVerificationService, useValue: mockVerification },
       ],
     }).compile();
 
@@ -293,6 +311,50 @@ describe('ChurchSettingsService', () => {
         enabled: false,
         displayName: 'Outreach',
       });
+    });
+  });
+
+  describe('account type availability', () => {
+    it('uses the type default until the church chooses', async () => {
+      mockAccountTypes.getProfile.mockResolvedValue(
+        profile({ sermons: 'off' }),
+      );
+      mockSettingRepo.findOne.mockResolvedValueOnce(null);
+      expect(await service.isEnabled('sermons')).toBe(false);
+
+      mockCacheService.get.mockResolvedValue(undefined);
+      mockSettingRepo.findOne.mockResolvedValueOnce({
+        value: { enabled: true },
+      });
+      expect(await service.isEnabled('sermons')).toBe(true);
+    });
+
+    it('never enables a hidden module, even with an old choice', async () => {
+      mockAccountTypes.getProfile.mockResolvedValue(
+        profile({ sermons: 'hidden' }),
+      );
+      mockSettingRepo.findOne.mockResolvedValue({ value: { enabled: true } });
+      expect(await service.isEnabled('sermons')).toBe(false);
+      await expect(
+        service.upsert('sermons', { enabled: true }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('stops requiring a module the type starts without', async () => {
+      mockAccountTypes.getProfile.mockResolvedValue(
+        profile({ departments: 'off' }),
+      );
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      const view = await service.findOne('departments');
+      expect(view).toMatchObject({ required: false, enabled: false });
+    });
+
+    it('names modules in the type wording', async () => {
+      mockAccountTypes.getProfile.mockResolvedValue(
+        profile({}, [{ from: 'Departments', to: 'Teams' }]),
+      );
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      expect((await service.findOne('departments')).moduleName).toBe('Teams');
     });
   });
 });

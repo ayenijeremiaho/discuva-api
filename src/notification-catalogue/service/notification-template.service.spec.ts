@@ -54,6 +54,8 @@ describe('NotificationTemplateService', () => {
     audit as any,
     plans as any,
     cls as any,
+    { getProfile: jest.fn().mockResolvedValue({ wording: [] }) } as any,
+    { orgType: jest.fn().mockResolvedValue('CHURCH') } as any,
   );
   const KEY = PushNotificationKey.PRAYER_ASSIGNED;
 

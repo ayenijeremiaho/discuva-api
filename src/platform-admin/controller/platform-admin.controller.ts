@@ -15,6 +15,7 @@ import {
   Request,
   Res,
   UseGuards,
+  ParseEnumPipe,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
@@ -45,6 +46,9 @@ import { PlatformGivingProviderService } from '../service/platform-giving-provid
 import { PlatformPaymentProviderService } from '../service/platform-payment-provider.service';
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { PlatformSettingsService } from '../service/platform-settings.service';
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { UpdateAccountTypeDto } from '../../account-type/account-type.dto';
+import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
 import {
   PlatformAdminForgotPasswordDto,
@@ -105,6 +109,7 @@ export class PlatformAdminController {
     private readonly checkoutService: CheckoutService,
     private readonly tenantBroadcastService: TenantBroadcastService,
     private readonly platformSettingsService: PlatformSettingsService,
+    private readonly accountTypeService: AccountTypeService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -669,6 +674,25 @@ export class PlatformAdminController {
     @Body() dto: UpdatePlatformSettingDto,
   ) {
     return this.platformSettingsService.upsert(key, dto);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_READ)
+  @Get('account-types')
+  listAccountTypes() {
+    return this.accountTypeService.listForConsole();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @Patch('account-types/:type')
+  updateAccountType(
+    @Param('type', new ParseEnumPipe(OrganisationTypeEnum))
+    type: OrganisationTypeEnum,
+    @Body() dto: UpdateAccountTypeDto,
+  ) {
+    return this.accountTypeService.update(type, dto);
   }
 
   // Plain text only, not raw HTML — see BroadcastDto's own comment and

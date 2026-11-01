@@ -12,6 +12,7 @@ import { CacheService } from './cache.service';
 const CACHE_TTL_SECONDS = 300;
 const cacheKey = (tenantId: string) => `tenant-verified:${tenantId}`;
 const groupKey = (tenantId: string) => `tenant-is-group:${tenantId}`;
+const orgTypeKey = (tenantId: string) => `tenant-org-type:${tenantId}`;
 
 // Cached, because the email path asks this for every unverified send.
 @Injectable()
@@ -64,6 +65,22 @@ export class TenantVerificationService {
     const isGroup = tenant?.orgType === OrganisationTypeEnum.GROUP;
     this.cacheService.setGlobal(key, isGroup, CACHE_TTL_SECONDS);
     return isGroup;
+  }
+
+  async orgType(
+    tenantId = this.cls.get('tenantId'),
+  ): Promise<OrganisationTypeEnum> {
+    if (!tenantId) return OrganisationTypeEnum.CHURCH;
+    const key = orgTypeKey(tenantId);
+    const cached = await this.cacheService.getGlobal<OrganisationTypeEnum>(key);
+    if (cached) return cached;
+    const tenant = await this.tenantRepo.findOne({
+      select: { id: true, orgType: true },
+      where: { id: tenantId },
+    });
+    const type = tenant?.orgType ?? OrganisationTypeEnum.CHURCH;
+    this.cacheService.setGlobal(key, type, CACHE_TTL_SECONDS);
+    return type;
   }
 
   async assertNotPrivateGroup(action: string): Promise<void> {

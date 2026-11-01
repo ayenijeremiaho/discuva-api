@@ -27,6 +27,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { Tenant } from '../entity/tenant.entity';
 import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { AccountTypeService } from '../../account-type/account-type.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
 import { phoneRegionFromLocale } from '../../utility/decorators/normalize-phone.decorator';
@@ -57,6 +58,7 @@ export class TenantInfoController {
   constructor(
     private readonly cloudinaryService: CloudinaryService,
     private readonly cacheService: CacheService,
+    private readonly accountTypes: AccountTypeService,
     private readonly config: ConfigService,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
@@ -208,6 +210,8 @@ export class TenantInfoController {
       // JWT to read it from and no per-tenant subdomain of its own to
       // resolve it from either.
       subdomain: tenant.subdomain,
+      orgType: tenant.orgType,
+      wording: (await this.accountTypes.getProfile(tenant.orgType)).wording,
       privateGroup:
         tenant.orgType === OrganisationTypeEnum.GROUP && !tenant.verifiedAt,
       // Same fallback EmailQueueService/PdfService already apply when a
