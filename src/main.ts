@@ -1,3 +1,5 @@
+import { AccountTypeService } from './account-type/account-type.service';
+import { TenantVerificationService } from './utility/service/tenant-verification.service';
 import './instrument';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
@@ -72,7 +74,13 @@ function registerGlobalPipes(app: INestApplication) {
 }
 
 function registerGlobalFilters(app: INestApplication) {
-  app.useGlobalFilters(new HttpExceptionFilter());
+  const accountTypes = app.get(AccountTypeService);
+  const verification = app.get(TenantVerificationService);
+  app.useGlobalFilters(
+    new HttpExceptionFilter(async () =>
+      accountTypes.wordingFor(await verification.orgType()),
+    ),
+  );
 }
 
 function registerGlobalInterceptors(app: INestApplication) {

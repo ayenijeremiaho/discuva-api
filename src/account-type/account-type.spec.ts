@@ -1,9 +1,14 @@
+import { renderInLayout } from '../notification-catalogue/email-catalogue';
 import { BadRequestException } from '@nestjs/common';
 import { OrganisationTypeEnum } from '../tenant/enum/organisation-type.enum';
 import { KNOWN_MODULES } from '../church-settings/constants/known-modules.constant';
 import { AccountTypeService } from './account-type.service';
 import { defaultAvailability } from './account-type.constant';
-import { applyWording } from './apply-wording';
+import {
+  applyWording,
+  applyWordingAround,
+  applyWordingToHtml,
+} from './apply-wording';
 
 describe('applyWording', () => {
   const rules = [
@@ -37,6 +42,55 @@ describe('applyWording', () => {
   });
 });
 
+describe('applyWordingToHtml', () => {
+  const rules = [{ from: 'Service', to: 'Meeting' }];
+
+  it('changes visible text only', () => {
+    expect(
+      applyWordingToHtml(
+        '<style>.service{}</style><p class="service">Your service {{service}}</p>',
+        rules,
+      ),
+    ).toBe(
+      '<style>.service{}</style><p class="service">Your meeting {{service}}</p>',
+    );
+  });
+});
+
+describe('applyWordingAround', () => {
+  const rules = [{ from: 'Church', to: 'Organisation' }];
+
+  it('keeps names as written', () => {
+    expect(
+      applyWordingAround(
+        'Grace Church: your church update',
+        ['Grace Church'],
+        rules,
+      ),
+    ).toBe('Grace Church: your organisation update');
+  });
+});
+
+describe('email templates in an account type words', () => {
+  it('words fixed template text and keeps the church name', () => {
+    const rules = [
+      { from: 'Service', to: 'Meeting' },
+      { from: 'Church', to: 'Organisation' },
+    ];
+    const { html } = renderInLayout(
+      'service-session-report',
+      { serviceName: 'Grace Church Gathering', date: '1 Nov' } as any,
+      { church_name: 'Grace Church' } as any,
+      'Report',
+      rules,
+    );
+    expect(html).toContain('Grace Church Gathering');
+    expect(html.replace(/<style[\s\S]*?<\/style>/g, '')).not.toMatch(
+      />[^<]*\bService\b[^<]*</,
+    );
+  });
+});
+
 describe('AccountTypeService', () => {
   const repo = {
     findOne: jest.fn(),
@@ -48,12 +102,7 @@ describe('AccountTypeService', () => {
     setGlobal: jest.fn(),
     delGlobal: jest.fn(),
   };
-  const audit = { log: jest.fn() };
-  const service = new AccountTypeService(
-    repo as any,
-    cache as any,
-    audit as any,
-  );
+  const service = new AccountTypeService(repo as any, cache as any);
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -98,7 +147,6 @@ describe('AccountTypeService', () => {
       notes: 'hidden',
     });
     expect(cache.delGlobal).toHaveBeenCalled();
-    expect(audit.log).toHaveBeenCalled();
   });
 
   it.each([
@@ -112,6 +160,16 @@ describe('AccountTypeService', () => {
       service.update(OrganisationTypeEnum.GROUP, dto as any),
     ).rejects.toThrow(BadRequestException);
     expect(repo.save).not.toHaveBeenCalled();
+  });
+
+  it('opens sign-up per type, with NGO closed until opened', async () => {
+    expect(await service.openSignupTypes()).toEqual(
+      expect.not.arrayContaining([OrganisationTypeEnum.MINISTRY]),
+    );
+    repo.findOne.mockResolvedValue({ value: { signupOpen: true } });
+    expect(await service.openSignupTypes()).toContain(
+      OrganisationTypeEnum.MINISTRY,
+    );
   });
 
   it('covers every module for every type', () => {

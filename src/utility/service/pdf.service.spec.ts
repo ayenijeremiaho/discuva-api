@@ -1,3 +1,4 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -60,6 +61,10 @@ describe('PdfService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: AccountTypeService,
+          useValue: { wordingFor: jest.fn().mockResolvedValue([]) },
+        },
         PdfService,
         { provide: ConfigService, useValue: mockConfigService },
         { provide: ClsService, useValue: mockCls },

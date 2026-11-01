@@ -1,3 +1,6 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { TenantVerificationService } from './tenant-verification.service';
+const mockAccountTypes = { wordingFor: jest.fn().mockResolvedValue([]) };
 import { NotificationUsageService } from './notification-usage.service';
 import { EmailAllowanceService } from './email-allowance.service';
 const mockAllowance = { allows: jest.fn().mockResolvedValue(true) };
@@ -99,6 +102,14 @@ describe('EmailQueueService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: AccountTypeService,
+          useValue: mockAccountTypes,
+        },
+        {
+          provide: TenantVerificationService,
+          useValue: { orgType: jest.fn().mockResolvedValue('CHURCH') },
+        },
         {
           provide: EmailAllowanceService,
           useValue: mockAllowance,

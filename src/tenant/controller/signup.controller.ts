@@ -1,3 +1,5 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { OrganisationTypeEnum } from '../enum/organisation-type.enum';
 import {
   Body,
   Controller,
@@ -9,6 +11,7 @@ import {
   ParseUUIDPipe,
   Post,
   Query,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -41,6 +44,7 @@ export class SignupController {
     private readonly branchInviteService: BranchInviteService,
     private readonly churchRequests: ChurchRequestService,
     private readonly settingsService: PlatformSettingsService,
+    private readonly accountTypes: AccountTypeService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
@@ -50,6 +54,12 @@ export class SignupController {
   @HttpCode(HttpStatus.CREATED)
   @Post('signup')
   async signup(@Body() dto: SignupDto) {
+    const open = await this.accountTypes.openSignupTypes();
+    if (!open.includes(dto.orgType ?? OrganisationTypeEnum.CHURCH)) {
+      throw new ForbiddenException(
+        "Sign-up for this kind of account isn't open yet.",
+      );
+    }
     // Validated (pending, not expired) before provisioning so a bad/expired
     // code fails fast without creating a tenant row first. Consumed by
     // TenantProvisioningProcessor once provisioning actually succeeds, not
@@ -122,6 +132,7 @@ export class SignupController {
       reviewHours: await this.settingsService.getNumber(
         PlatformSettingKey.REQUEST_REVIEW_HOURS,
       ),
+      openTypes: await this.accountTypes.openSignupTypes(),
     };
   }
 

@@ -35,3 +35,37 @@ export function applyWording(text: string, rules: WordingRule[]): string {
     },
   );
 }
+
+const NOT_WORDS = /(<style[\s\S]*?<\/style>|<[^>]+>|\{\{\{?[^}]*\}?\}\})/g;
+
+// Template source: only the visible text changes, never tags, styles or placeholders.
+export function applyWordingToHtml(
+  source: string,
+  rules: WordingRule[],
+): string {
+  if (!rules.length) return source;
+  return source
+    .split(NOT_WORDS)
+    .map((part, i) => (i % 2 ? part : applyWording(part, rules)))
+    .join('');
+}
+
+// Text mixing fixed wording with people's values: the values are kept out of the change.
+export function applyWordingAround(
+  text: string,
+  values: string[],
+  rules: WordingRule[],
+): string {
+  if (!rules.length || !text) return text;
+  const kept = values
+    .filter((v) => v && text.includes(v))
+    .sort((x, y) => y.length - x.length);
+  if (!kept.length) return applyWording(text, rules);
+  const pattern = new RegExp(
+    `(${kept.map((v) => v.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&')).join('|')})`,
+  );
+  return text
+    .split(pattern)
+    .map((part, i) => (i % 2 ? part : applyWording(part, rules)))
+    .join('');
+}

@@ -47,6 +47,7 @@ import { PlatformPaymentProviderService } from '../service/platform-payment-prov
 import { TenantBroadcastService } from '../service/tenant-broadcast.service';
 import { PlatformSettingsService } from '../service/platform-settings.service';
 import { AccountTypeService } from '../../account-type/account-type.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
 import { UpdateAccountTypeDto } from '../../account-type/account-type.dto';
 import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
 import { PlatformAdminLoginDto } from '../dto/platform-admin-login.dto';
@@ -110,6 +111,7 @@ export class PlatformAdminController {
     private readonly tenantBroadcastService: TenantBroadcastService,
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly accountTypeService: AccountTypeService,
+    private readonly auditLogService: AuditLogService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -687,12 +689,17 @@ export class PlatformAdminController {
   @RequiresPlatformPermission(PlatformAdminPermission.BILLING_WRITE)
   @HttpCode(HttpStatus.OK)
   @Patch('account-types/:type')
-  updateAccountType(
+  async updateAccountType(
     @Param('type', new ParseEnumPipe(OrganisationTypeEnum))
     type: OrganisationTypeEnum,
     @Body() dto: UpdateAccountTypeDto,
   ) {
-    return this.accountTypeService.update(type, dto);
+    const updated = await this.accountTypeService.update(type, dto);
+    this.auditLogService.log('ACCOUNT_TYPE_UPDATED', {
+      targetId: type,
+      metadata: { ...dto },
+    });
+    return updated;
   }
 
   // Plain text only, not raw HTML — see BroadcastDto's own comment and

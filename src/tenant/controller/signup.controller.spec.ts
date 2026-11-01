@@ -1,3 +1,7 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
+const mockAccountTypes = {
+  openSignupTypes: jest.fn().mockResolvedValue(['CHURCH', 'MINISTRY', 'GROUP']),
+};
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { NotFoundException } from '@nestjs/common';
@@ -58,6 +62,7 @@ describe('SignupController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [SignupController],
       providers: [
+        { provide: AccountTypeService, useValue: mockAccountTypes },
         {
           provide: TenantProvisioningService,
           useValue: mockProvisioningService,
@@ -187,7 +192,10 @@ describe('SignupController', () => {
   });
 
   it('shares the promised review time', async () => {
-    await expect(controller.settings()).resolves.toEqual({ reviewHours: 12 });
+    await expect(controller.settings()).resolves.toEqual({
+      reviewHours: 12,
+      openTypes: ['CHURCH', 'MINISTRY', 'GROUP'],
+    });
   });
 
   it('confirm passes the token through', async () => {
@@ -221,5 +229,12 @@ describe('SignupController', () => {
         NotFoundException,
       );
     });
+  });
+
+  it('refuses sign-up for a closed account type', async () => {
+    mockAccountTypes.openSignupTypes.mockResolvedValueOnce(['CHURCH']);
+    await expect(
+      controller.signup({ orgType: 'MINISTRY' } as any),
+    ).rejects.toThrow('Sign-up for this kind of account');
   });
 });

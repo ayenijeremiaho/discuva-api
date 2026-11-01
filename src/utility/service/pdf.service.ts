@@ -1,3 +1,5 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { WordingRule, applyWording } from '../../account-type/apply-wording';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -50,6 +52,7 @@ interface PdfBranding {
   timezone: string;
   // The church's theme preset; Classic reproduces the original black and gold.
   theme: ChurchThemeColors;
+  wording: WordingRule[];
 }
 
 // The HOD's own department, at the visibility rules already applied by
@@ -117,6 +120,7 @@ export class PdfService {
     private readonly cacheService: CacheService,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
+    private readonly accountTypes: AccountTypeService,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
@@ -135,6 +139,7 @@ export class PdfService {
       logoImage: null,
       timezone: this.config.get<string>('TIMEZONE') ?? 'Africa/Lagos',
       theme: churchThemeColors(null),
+      wording: [],
     };
 
     const tenantId = this.cls.get('tenantId');
@@ -160,6 +165,7 @@ export class PdfService {
       logoImage,
       timezone: tenant.timezone || fallback.timezone,
       theme: churchThemeColors(tenant.themePreset),
+      wording: await this.accountTypes.wordingFor(tenant.orgType),
     };
   }
 
@@ -389,7 +395,11 @@ export class PdfService {
     report: SessionReport,
     branding: PdfBranding,
   ): void {
-    let y = this.drawPageHeader(doc, 'Service Session Report', branding);
+    let y = this.drawPageHeader(
+      doc,
+      applyWording('Service Session Report', branding.wording),
+      branding,
+    );
 
     y = this.drawAccentBand(
       doc,
@@ -712,7 +722,11 @@ export class PdfService {
       { day: '2-digit', month: 'long', year: 'numeric' },
     );
 
-    let y = this.drawPageHeader(doc, 'Sunday Service Report', branding);
+    let y = this.drawPageHeader(
+      doc,
+      applyWording('Sunday Service Report', branding.wording),
+      branding,
+    );
     y = this.drawAccentBand(
       doc,
       branding.theme,
@@ -765,7 +779,14 @@ export class PdfService {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
       head: [
-        ['Service', 'Allocated', 'Duration', 'Pauses', 'Slot Var.', 'Cmpl.'],
+        [
+          applyWording('Service', branding.wording),
+          'Allocated',
+          'Duration',
+          'Pauses',
+          'Slot Var.',
+          'Cmpl.',
+        ],
       ],
       body: overviewBody,
       foot: overviewFoot,
@@ -1225,7 +1246,7 @@ export class PdfService {
 
     const y = this.drawOrderOfServiceHeader(
       doc,
-      slot?.name ?? 'Service Programme',
+      slot?.name ?? applyWording('Service Programme', branding.wording),
       dateLabel,
       branding,
     );
@@ -1233,7 +1254,7 @@ export class PdfService {
       doc,
       branding.theme,
       y,
-      slot?.name ?? 'Service',
+      slot?.name ?? applyWording('Service', branding.wording),
       slot?.startTime ?? null,
       sorted,
       branding.timezone,
@@ -1926,7 +1947,11 @@ export class PdfService {
     report: DepartmentGoalPdfReport,
     branding: PdfBranding,
   ): void {
-    let y = this.drawPageHeader(doc, 'Department Goals', branding);
+    let y = this.drawPageHeader(
+      doc,
+      applyWording('Department Goals', branding.wording),
+      branding,
+    );
     y = this.drawAccentBand(
       doc,
       branding.theme,
@@ -1941,7 +1966,13 @@ export class PdfService {
     autoTable(doc, {
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
-      head: [['Goal', 'Self Rating', 'Church Rating']],
+      head: [
+        [
+          'Goal',
+          'Self Rating',
+          applyWording('Church Rating', branding.wording),
+        ],
+      ],
       body: report.goals.map((g) => [
         [
           g.title,

@@ -174,8 +174,9 @@ export class NotificationTemplateService {
       this.pushOverrides(),
       this.isCustomizationAvailable(),
     ]);
+    const rules = await this.accountWording().catch(() => []);
     const items = (Object.keys(PUSH_CATALOGUE) as PushNotificationKey[]).map(
-      (key) => this.toView(key, overrides[key]),
+      (key) => this.toView(key, overrides[key], rules),
     );
     return { customizationAvailable, items };
   }
@@ -197,8 +198,9 @@ export class NotificationTemplateService {
       channel: NotificationChannel.PUSH,
       templateKey: key,
     });
-    row.title = title === template.title ? null : title;
-    row.body = body === template.body ? null : body;
+    const typed = await this.typedPushDefaults(key as PushNotificationKey);
+    row.title = title === typed.title ? null : title;
+    row.body = body === typed.body ? null : body;
     row.updatedBy = actorMemberId ? ({ id: actorMemberId } as never) : null;
 
     if (!row.title && !row.body) {
@@ -228,7 +230,11 @@ export class NotificationTemplateService {
             updatedAt: new Date().toISOString(),
           }
         : undefined;
-    return this.toView(key as PushNotificationKey, saved);
+    return this.toView(
+      key as PushNotificationKey,
+      saved,
+      await this.accountWording().catch(() => []),
+    );
   }
 
   async resetPush(
@@ -253,7 +259,11 @@ export class NotificationTemplateService {
       targetId: key,
       metadata: { channel: NotificationChannel.PUSH },
     });
-    return this.toView(key as PushNotificationKey, undefined);
+    return this.toView(
+      key as PushNotificationKey,
+      undefined,
+      await this.accountWording().catch(() => []),
+    );
   }
 
   private async emailOverrides(): Promise<EmailOverrides> {
@@ -320,8 +330,9 @@ export class NotificationTemplateService {
       this.emailOverrides(),
       this.isCustomizationAvailable(),
     ]);
+    const rules = await this.accountWording().catch(() => []);
     const items = Object.keys(EMAIL_CATALOGUE).map((key) =>
-      this.toEmailView(key, overrides[key]),
+      this.toEmailView(key, overrides[key], rules),
     );
     return { customizationAvailable, items };
   }
@@ -335,7 +346,7 @@ export class NotificationTemplateService {
   ): Promise<EmailTemplateView> {
     const template = this.assertEmailKey(key);
     const wording = this.validateEmailWording(dto, template, sanitizeHtml);
-    const defaults = defaultWording(key);
+    const defaults = await this.typedEmailDefaults(key);
     const changed: Partial<EmailWording> = {};
     for (const field of EMAIL_FIELDS) {
       if (wording[field] !== defaults[field]) changed[field] = wording[field];
@@ -379,6 +390,7 @@ export class NotificationTemplateService {
       Object.keys(changed).length
         ? { content: changed, updatedAt: new Date().toISOString() }
         : undefined,
+      await this.accountWording().catch(() => []),
     );
   }
 
@@ -404,7 +416,11 @@ export class NotificationTemplateService {
       targetId: key,
       metadata: { channel: NotificationChannel.EMAIL },
     });
-    return this.toEmailView(key, undefined);
+    return this.toEmailView(
+      key,
+      undefined,
+      await this.accountWording().catch(() => []),
+    );
   }
 
   // Cleans and checks a draft; the HTML sanitizer is passed in so this service (loaded by EmailQueueService) stays free of jsdom.
@@ -570,9 +586,15 @@ export class NotificationTemplateService {
   private toEmailView(
     key: string,
     override?: { content: Partial<EmailWording>; updatedAt: string },
+    rules: WordingRule[] = [],
   ): EmailTemplateView {
     const template = EMAIL_CATALOGUE[key];
-    const defaults = defaultWording(key);
+    const defaults = Object.fromEntries(
+      Object.entries(defaultWording(key)).map(([f, text]) => [
+        f,
+        applyWording(text, rules),
+      ]),
+    ) as unknown as EmailWording;
     return {
       key,
       category: template.category,
@@ -622,8 +644,11 @@ export class NotificationTemplateService {
   private toView(
     key: PushNotificationKey,
     override?: { title: string | null; body: string | null; updatedAt: string },
+    rules: WordingRule[] = [],
   ): PushTemplateView {
     const template = PUSH_CATALOGUE[key];
+    const defaultTitle = applyWording(template.title, rules);
+    const defaultBody = applyWording(template.body, rules);
     return {
       key,
       category: template.category,
@@ -631,10 +656,10 @@ export class NotificationTemplateService {
       label: template.label,
       description: template.description,
       placeholders: { ...RECIPIENT_PLACEHOLDERS, ...template.placeholders },
-      defaultTitle: template.title,
-      defaultBody: template.body,
-      title: override?.title || template.title,
-      body: override?.body || template.body,
+      defaultTitle,
+      defaultBody,
+      title: override?.title || defaultTitle,
+      body: override?.body || defaultBody,
       customized: !!(override?.title || override?.body),
       updatedAt: override ? new Date(override.updatedAt) : null,
     };

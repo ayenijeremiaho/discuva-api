@@ -1,3 +1,8 @@
+import {
+  WordingRule,
+  applyWording,
+  applyWordingToHtml,
+} from '../account-type/apply-wording';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as Handlebars from 'handlebars';
@@ -346,13 +351,22 @@ function extraStyles(key: string, vars: Record<string, unknown>): string {
   return css ? css(vars) : '';
 }
 
-function compileFile(relative: string): Handlebars.TemplateDelegate {
-  let template = compiled.get(relative);
+function compileFile(
+  relative: string,
+  rules: WordingRule[] = [],
+): Handlebars.TemplateDelegate {
+  const cacheKey = rules.length
+    ? `${relative}:${JSON.stringify(rules)}`
+    : relative;
+  let template = compiled.get(cacheKey);
   if (!template) {
     template = Handlebars.compile(
-      fs.readFileSync(path.join(TEMPLATE_DIR, relative), 'utf-8'),
+      applyWordingToHtml(
+        fs.readFileSync(path.join(TEMPLATE_DIR, relative), 'utf-8'),
+        rules,
+      ),
     );
-    compiled.set(relative, template);
+    compiled.set(cacheKey, template);
   }
   return template;
 }
@@ -375,15 +389,21 @@ export function renderInLayout(
   data: TemplateData,
   branding: Record<string, string>,
   subject: string,
+  rules: WordingRule[] = [],
 ): { subject: string; html: string } {
   const base = { ...branding, ...data };
-  const html = compileFile('layouts/base.html')({
+  const html = compileFile(
+    'layouts/base.html',
+    rules,
+  )({
     ...base,
     subject,
-    preheader: Handlebars.compile(LAYOUT_EMAILS[name])(base),
+    preheader: Handlebars.compile(applyWording(LAYOUT_EMAILS[name], rules))(
+      base,
+    ),
     show_signoff: false,
     extra_styles: extraStyles(name, base),
-    content: compileFile(`content/${name}.html`)(base),
+    content: compileFile(`content/${name}.html`, rules)(base),
   });
   return { subject, html };
 }
@@ -398,6 +418,7 @@ export function renderCatalogueEmail(
   recipient: Record<string, string> = {},
   // Test sends: the admin's own details replace the sample ones.
   recipientWins = false,
+  rules: WordingRule[] = [],
 ): { subject: string; html: string } {
   const template = EMAIL_CATALOGUE[key];
   const own = {
@@ -410,7 +431,10 @@ export function renderCatalogueEmail(
     : withRecipient(own, recipient);
   const subject = fillText(wording.subject, vars) || vars.default_subject;
   const base = { ...branding, ...data };
-  const content = compileFile(`content/${key}.html`)({
+  const content = compileFile(
+    `content/${key}.html`,
+    rules,
+  )({
     ...base,
     heading: fillText(wording.heading, vars),
     message_html: fillHtml(wording.message, vars),
@@ -418,10 +442,13 @@ export function renderCatalogueEmail(
   });
   const signoff = fillText(wording.signoff, vars);
   const signature = fillText(wording.signature, vars);
-  const html = compileFile('layouts/base.html')({
+  const html = compileFile(
+    'layouts/base.html',
+    rules,
+  )({
     ...base,
     subject,
-    preheader: fillText(template.preheader, vars),
+    preheader: fillText(applyWording(template.preheader, rules), vars),
     signoff,
     signature,
     show_signoff: !!(signoff || signature),

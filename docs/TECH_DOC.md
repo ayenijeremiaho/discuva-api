@@ -23176,8 +23176,11 @@ dictionary word without `w`. Module-level labels use getters so they read the cu
 **Emails and pushes:** `NotificationTemplateService` applies the rules to catalogue default wording only. A church's edited
 wording is sent as written.
 
-**Not yet converted:** static text inside email HTML files, subjects built by senders, API error messages and PDF text
-stay in church wording. The admin template editor also shows the church-word defaults.
+**Rest of the product:** `EmailQueueService` applies the rules to fixed text in email template files (`applyWordingToHtml`, only text between tags and placeholders) and to sender-built subjects, keeping template values and the church name unchanged (`applyWordingAround`). `HttpExceptionFilter` applies them to messages below 500; a name inside such a message could change, and this affects only that error's text. PDF report titles and headings use them through `PdfBranding.wording`. The template editors show defaults in the account's words, so saving an untouched default isn't stored as an edit.
+
+**Sign-up:** each type has `signupOpen` (console `PATCH`, default on for Church and Group, off for NGO). `GET /v1/signup/settings` adds `openTypes`, which the sign-up page lists, and `POST /v1/signup` returns 403 for a closed type. This replaces `NEXT_PUBLIC_SHOW_NGO_SIGNUP`.
+
+**Beyond words:** a new non-church account starts with `STARTER_LEADERSHIP_TITLES` instead of pastoral titles. In discuva-member, `useAssetUrl` swaps bundled church-building and worship pictures for neutral ones, unless the account uploaded its own. Devotional loading lines and worship-only programme items (`isChurchAccount()`) don't show.
 
 **Database cost:** no new tables or indexes. A module cache miss adds two cached lookups (the tenant's type and the type's
 profile), each reading the database at most once per 5 minutes.

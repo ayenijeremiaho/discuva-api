@@ -3,13 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlatformSetting } from '../platform-admin/entity/platform-setting.entity';
 import { CacheService } from '../utility/service/cache.service';
-import { AuditLogService } from '../utility/service/audit-log.service';
 import { OrganisationTypeEnum } from '../tenant/enum/organisation-type.enum';
 import { KNOWN_MODULES } from '../church-settings/constants/known-modules.constant';
 import {
   ACCOUNT_TERMS,
   ModuleAvailability,
   PROTECTED_PHRASES,
+  SIGNUP_OPEN_BY_DEFAULT,
   Term,
   defaultAvailability,
 } from './account-type.constant';
@@ -28,8 +28,10 @@ const AVAILABILITY: ModuleAvailability[] = ['on', 'off', 'hidden'];
 interface StoredProfile {
   terms?: Record<string, Term>;
   modules?: Record<string, ModuleAvailability>;
+  signupOpen?: boolean;
 }
 export interface AccountTypeProfile {
+  signupOpen: boolean;
   terms: Record<string, Term>;
   modules: Record<string, ModuleAvailability>;
   wording: WordingRule[];
@@ -63,7 +65,6 @@ export class AccountTypeService {
     @InjectRepository(PlatformSetting)
     private readonly settingRepo: Repository<PlatformSetting>,
     private readonly cacheService: CacheService,
-    private readonly auditLogService: AuditLogService,
   ) {}
 
   private cacheKey(type: OrganisationTypeEnum) {
@@ -81,10 +82,15 @@ export class AccountTypeService {
       ]),
     );
     return {
+      signupOpen: stored?.signupOpen ?? SIGNUP_OPEN_BY_DEFAULT[type],
       terms,
       modules: { ...defaultAvailability(type), ...stored?.modules },
       wording: wordingRules(terms),
     };
+  }
+
+  async wordingFor(type: OrganisationTypeEnum): Promise<WordingRule[]> {
+    return (await this.getProfile(type)).wording;
   }
 
   async getProfile(type: OrganisationTypeEnum): Promise<AccountTypeProfile> {
@@ -104,6 +110,12 @@ export class AccountTypeService {
     return profile;
   }
 
+  async openSignupTypes(): Promise<OrganisationTypeEnum[]> {
+    const types = Object.values(OrganisationTypeEnum);
+    const profiles = await Promise.all(types.map((t) => this.getProfile(t)));
+    return types.filter((_, i) => profiles[i].signupOpen);
+  }
+
   async listForConsole() {
     return Promise.all(
       Object.values(OrganisationTypeEnum).map((type) => this.view(type)),
@@ -116,6 +128,7 @@ export class AccountTypeService {
     return {
       type,
       label: LABELS[type],
+      signupOpen: profile.signupOpen,
       terms: ACCOUNT_TERMS.map((t) => ({
         key: t.key,
         label: t.label,
@@ -132,11 +145,7 @@ export class AccountTypeService {
     };
   }
 
-  async update(
-    type: OrganisationTypeEnum,
-    dto: UpdateAccountTypeDto,
-    actorId?: string,
-  ) {
+  async update(type: OrganisationTypeEnum, dto: UpdateAccountTypeDto) {
     this.assertValid(dto);
     let row = await this.settingRepo.findOne({
       where: { key: storageKey(type) },
@@ -145,16 +154,12 @@ export class AccountTypeService {
     const value = {
       terms: { ...current.terms, ...dto.terms },
       modules: { ...current.modules, ...dto.modules },
+      signupOpen: dto.signupOpen ?? current.signupOpen,
     };
     if (row) row.value = value;
     else row = this.settingRepo.create({ key: storageKey(type), value });
     await this.settingRepo.save(row);
     this.cacheService.delGlobal(this.cacheKey(type));
-    this.auditLogService.log('ACCOUNT_TYPE_UPDATED', {
-      actorId,
-      targetId: type,
-      metadata: { terms: dto.terms, modules: dto.modules },
-    });
     return this.view(type);
   }
 

@@ -1,3 +1,9 @@
+import { AccountTypeService } from '../../account-type/account-type.service';
+import {
+  applyWordingAround,
+  applyWordingToHtml,
+} from '../../account-type/apply-wording';
+import { TenantVerificationService } from './tenant-verification.service';
 import { EmailAllowanceService } from './email-allowance.service';
 import { NotificationUsageService } from './notification-usage.service';
 import { fetchLogoBytes, fitLogo, measureLogo } from '../util/logo-size';
@@ -60,6 +66,8 @@ export class EmailQueueService {
     private readonly recipients: NotificationRecipientService,
     private readonly allowance: EmailAllowanceService,
     private readonly usage: NotificationUsageService,
+    private readonly accountTypes: AccountTypeService,
+    private readonly verification: TenantVerificationService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
@@ -274,11 +282,23 @@ export class EmailQueueService {
     templateData: Record<string, any>,
     to: string | string[],
   ): Promise<{ subject: string; html: string }> {
+    const rules = await this.accountTypes.wordingFor(
+      await this.verification.orgType(),
+    );
+    const branding = await this.resolveBrandingData();
+    subject = applyWordingAround(
+      subject,
+      [
+        ...Object.values(templateData).filter(
+          (v): v is string => typeof v === 'string',
+        ),
+        branding.church_name,
+      ],
+      rules,
+    );
     if (isCatalogueEmail(templateName)) {
-      const [wording, branding] = await Promise.all([
-        this.notificationTemplates.resolveEmailWording(templateName),
-        this.resolveBrandingData(),
-      ]);
+      const wording =
+        await this.notificationTemplates.resolveEmailWording(templateName);
       return renderCatalogueEmail(
         templateName,
         wording,
@@ -286,14 +306,17 @@ export class EmailQueueService {
         branding,
         subject,
         await this.recipientFor(templateName, wording, templateData, to),
+        false,
+        rules,
       );
     }
     if (usesSharedLayout(templateName)) {
       return renderInLayout(
         templateName,
         templateData,
-        await this.resolveBrandingData(),
+        branding,
         subject,
+        rules,
       );
     }
     const templatePath = path.resolve(
@@ -302,7 +325,10 @@ export class EmailQueueService {
       'templates',
       `${templateName}.html`,
     );
-    const template = fs.readFileSync(templatePath, 'utf-8');
+    const template = applyWordingToHtml(
+      fs.readFileSync(templatePath, 'utf-8'),
+      rules,
+    );
     return {
       subject,
       html: await this.compileTemplate(template, templateData),

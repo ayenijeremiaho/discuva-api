@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import * as Sentry from '@sentry/node';
+import { WordingRule, applyWording } from '../../account-type/apply-wording';
 
 const MULTER_FILE_TOO_LARGE_MESSAGE = 'File too large';
 
@@ -16,7 +17,19 @@ const MULTER_FILE_TOO_LARGE_MESSAGE = 'File too large';
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
-  catch(exception: unknown, host: ArgumentsHost) {
+  // Absent in unit tests and on routes with no tenant.
+  constructor(private readonly accountWording?: () => Promise<WordingRule[]>) {}
+
+  // Names inside a message are rare and only ever affect this one error's text; wording must never replace the error.
+  private async inAccountWords(message: string): Promise<string> {
+    try {
+      return applyWording(message, (await this.accountWording?.()) ?? []);
+    } catch {
+      return message;
+    }
+  }
+
+  async catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
@@ -82,6 +95,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
           : JSON.stringify(exception);
       this.logger.error('Unhandled exception', stack);
       Sentry.captureException(exception);
+    }
+
+    if (status < 500 && typeof message === 'string') {
+      message = await this.inAccountWords(message);
     }
 
     response.status(status).json({

@@ -31,6 +31,14 @@ export const ACCOUNT_TERMS: {
     ]),
   },
   {
+    key: 'worship',
+    label: 'Music in a programme',
+    words: same('Praise & Worship', 'Praise & Worship', [
+      term('Music', 'Music'),
+      term('Praise & Worship', 'Praise & Worship'),
+    ]),
+  },
+  {
     key: 'church_settings',
     label: 'Settings menu',
     words: same('Church Settings', 'Church Settings', [
@@ -194,3 +202,22 @@ export function defaultAvailability(
     KNOWN_MODULES.map((m) => [m.key, off.includes(m.key) ? 'off' : 'on']),
   );
 }
+
+// Sign-up for a type stays closed until someone opens it from the console.
+export const SIGNUP_OPEN_BY_DEFAULT: Record<OrganisationTypeEnum, boolean> = {
+  [OrganisationTypeEnum.CHURCH]: true,
+  [OrganisationTypeEnum.MINISTRY]: false,
+  [OrganisationTypeEnum.GROUP]: true,
+};
+
+// Replaces the pastoral starter titles when an account of another type is created. Admins can edit them.
+export const STARTER_LEADERSHIP_TITLES: Partial<
+  Record<OrganisationTypeEnum, string[]>
+> = {
+  [OrganisationTypeEnum.MINISTRY]: [
+    'Executive Director',
+    'Programme Director',
+    'Coordinator',
+  ],
+  [OrganisationTypeEnum.GROUP]: ['Leader', 'Co-leader'],
+};

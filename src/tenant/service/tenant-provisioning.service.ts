@@ -1,3 +1,4 @@
+import { STARTER_LEADERSHIP_TITLES } from '../../account-type/account-type.constant';
 import * as path from 'node:path';
 import { randomInt } from 'node:crypto';
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
@@ -421,6 +422,15 @@ export class TenantProvisioningService {
             'SELECT count(*)::int AS c FROM admins',
           );
           if (adminCount > 0) return null;
+
+          const titles = STARTER_LEADERSHIP_TITLES[tenant.orgType];
+          if (titles) {
+            await tx.query('DELETE FROM clergy_titles');
+            await tx.query(
+              'INSERT INTO clergy_titles (name) SELECT unnest($1::varchar[])',
+              [titles],
+            );
+          }
 
           // TenantSchemaGenesis (the schema-genesis migration every new
           // tenant runs before this code executes) still seeds a legacy
