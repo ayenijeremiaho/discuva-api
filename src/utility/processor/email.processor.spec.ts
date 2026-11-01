@@ -1,3 +1,4 @@
+import { NotificationUsageService } from '../service/notification-usage.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -99,6 +100,7 @@ describe('EmailProcessor', () => {
         { provide: MailgunProvider, useValue: mockMailgunProvider },
         { provide: EmailCredentialResolverService, useValue: mockResolver },
         { provide: ClsService, useValue: mockCls },
+        { provide: NotificationUsageService, useValue: { record: jest.fn() } },
         { provide: TransactionHost, useValue: mockTxHost },
       ],
     }).compile();

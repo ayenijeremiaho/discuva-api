@@ -83,7 +83,7 @@ describe('EmailCategorySettingsService', () => {
         result.find((r) => r.category === EmailCategory.BIRTHDAY),
       ).toMatchObject({ enabled: false });
       expect(
-        result.find((r) => r.category === EmailCategory.LOGIN_ALERT),
+        result.find((r) => r.category === EmailCategory.EVENT_REMINDER),
       ).toMatchObject({ enabled: true });
     });
   });
@@ -92,18 +92,18 @@ describe('EmailCategorySettingsService', () => {
     it('returns enabled: true when no DB row exists', async () => {
       mockSettingRepo.findOne.mockResolvedValue(null);
 
-      const result = await service.findOne(EmailCategory.GIVING_RECEIPT);
+      const result = await service.findOne(EmailCategory.BIRTHDAY);
 
       expect(result.enabled).toBe(true);
     });
 
     it('returns the DB value when a row exists', async () => {
       mockSettingRepo.findOne.mockResolvedValue({
-        key: 'email_category:GIVING_RECEIPT',
+        key: 'email_category:BIRTHDAY',
         value: { enabled: false },
       });
 
-      const result = await service.findOne(EmailCategory.GIVING_RECEIPT);
+      const result = await service.findOne(EmailCategory.BIRTHDAY);
 
       expect(result.enabled).toBe(false);
     });
@@ -319,14 +319,14 @@ describe('EmailCategorySettingsService', () => {
     it('returns the cached value without hitting the DB', async () => {
       mockCacheService.get.mockResolvedValue(false);
 
-      const result = await service.isEnabled(EmailCategory.LOGIN_ALERT);
+      const result = await service.isEnabled(EmailCategory.BIRTHDAY);
 
       expect(result).toBe(false);
       expect(mockDataSource.query).not.toHaveBeenCalled();
     });
 
     it('defaults to enabled when there is no cache or DB row', async () => {
-      const result = await service.isEnabled(EmailCategory.LOGIN_ALERT);
+      const result = await service.isEnabled(EmailCategory.BIRTHDAY);
 
       expect(result).toBe(true);
     });
@@ -334,15 +334,15 @@ describe('EmailCategorySettingsService', () => {
     it("reads the DB value from the church's own schema and caches it on a miss", async () => {
       mockDataSource.query.mockResolvedValue([{ value: { enabled: false } }]);
 
-      const result = await service.isEnabled(EmailCategory.LOGIN_ALERT);
+      const result = await service.isEnabled(EmailCategory.BIRTHDAY);
 
       expect(result).toBe(false);
       expect(mockDataSource.query).toHaveBeenCalledWith(
         'SELECT value FROM "church_demo".church_settings WHERE key = $1',
-        ['email_category:LOGIN_ALERT'],
+        ['email_category:BIRTHDAY'],
       );
       expect(mockCacheService.set).toHaveBeenCalledWith(
-        'email-category-settings:LOGIN_ALERT',
+        'email-category-settings:BIRTHDAY',
         false,
         300,
       );
@@ -351,10 +351,24 @@ describe('EmailCategorySettingsService', () => {
     it('treats a call with no church context as enabled, without querying', async () => {
       mockCls.get.mockReturnValue(undefined);
 
-      await expect(service.isEnabled(EmailCategory.LOGIN_ALERT)).resolves.toBe(
+      await expect(service.isEnabled(EmailCategory.BIRTHDAY)).resolves.toBe(
         true,
       );
       expect(mockDataSource.query).not.toHaveBeenCalled();
     });
+  });
+
+  describe('essential categories', () => {
+    it.each([EmailCategory.LOGIN_ALERT, EmailCategory.GIVING_RECEIPT])(
+      'always sends %s, whatever was saved before',
+      async (category) => {
+        await expect(service.isEnabled(category)).resolves.toBe(true);
+        await expect(service.isPushEnabled(category)).resolves.toBe(true);
+        await expect(service.isPushFirst(category)).resolves.toBe(false);
+        await expect(service.upsert(category, { mode: 'OFF' })).rejects.toThrow(
+          'always sent',
+        );
+      },
+    );
   });
 });

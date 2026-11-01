@@ -15,7 +15,10 @@ import {
   UpdateEmailCategorySettingDto,
 } from '../dto/email-category-setting.dto';
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
-import { KNOWN_EMAIL_CATEGORIES } from '../constant/known-email-categories.constant';
+import {
+  ESSENTIAL_EMAIL_CATEGORIES,
+  KNOWN_EMAIL_CATEGORIES,
+} from '../constant/known-email-categories.constant';
 import { CacheService } from '../../utility/service/cache.service';
 import { PUSH_CATALOGUE } from '../../notification-catalogue/push-catalogue';
 import { AuditLogService } from '../../utility/service/audit-log.service';
@@ -108,14 +111,17 @@ export class EmailCategorySettingsService {
   ): EmailCategorySettingResponseDto {
     const known = KNOWN_EMAIL_CATEGORIES[category];
     const hasPush = PUSH_CATEGORIES.has(category);
-    const enabled = value?.enabled ?? true;
-    const pushEnabled = hasPush ? pushEnabledOf(value) : false;
-    const pushFirst = enabled && pushEnabled && !!value?.pushFirst;
+    const essential = ESSENTIAL_EMAIL_CATEGORIES.has(category);
+    const enabled = essential || (value?.enabled ?? true);
+    const pushEnabled = hasPush && (essential || pushEnabledOf(value));
+    const pushFirst =
+      !essential && enabled && pushEnabled && !!value?.pushFirst;
     return {
       category,
       label: known.label,
       description: known.description,
       enabled,
+      essential,
       hasPush,
       pushEnabled,
       pushFirst,
@@ -158,6 +164,10 @@ export class EmailCategorySettingsService {
     this.assertKnownCategory(category);
     const known = KNOWN_EMAIL_CATEGORIES[category];
     const storageKey = this.storageKey(category);
+
+    if (ESSENTIAL_EMAIL_CATEGORIES.has(category)) {
+      throw new BadRequestException(`${known.label} are always sent`);
+    }
 
     if (
       dto.mode &&
@@ -209,6 +219,7 @@ export class EmailCategorySettingsService {
   // Called by EmailQueueService before every category-tagged send — cached
   // so this doesn't add a DB round trip to every queued email.
   async isEnabled(category: EmailCategory): Promise<boolean> {
+    if (ESSENTIAL_EMAIL_CATEGORIES.has(category)) return true;
     const cacheKey = this.cacheKey(category);
     const cached = await this.cacheService.get<boolean>(cacheKey);
     if (cached !== undefined) return cached;
@@ -221,6 +232,7 @@ export class EmailCategorySettingsService {
 
   // Checked before every catalogue push — cached like isEnabled.
   async isPushEnabled(category: EmailCategory): Promise<boolean> {
+    if (ESSENTIAL_EMAIL_CATEGORIES.has(category)) return true;
     const cacheKey = this.pushCacheKey(category);
     const cached = await this.cacheService.get<boolean>(cacheKey);
     if (cached !== undefined) return cached;
@@ -232,6 +244,7 @@ export class EmailCategorySettingsService {
 
   // Push first only means something while both email and push are on.
   async isPushFirst(category: EmailCategory): Promise<boolean> {
+    if (ESSENTIAL_EMAIL_CATEGORIES.has(category)) return false;
     const cacheKey = this.pushFirstCacheKey(category);
     const cached = await this.cacheService.get<boolean>(cacheKey);
     if (cached !== undefined) return cached;

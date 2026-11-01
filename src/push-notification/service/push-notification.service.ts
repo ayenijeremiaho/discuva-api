@@ -21,6 +21,7 @@ import {
   withRecipient,
 } from '../../notification-catalogue/recipient';
 import { EmailCategorySettingsService } from '../../email-category-settings/service/email-category-settings.service';
+import { NotificationUsageService } from '../../utility/service/notification-usage.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { buildJobEnvelope } from '../../tenant/utility/job-envelope';
 import { queryTenant } from '../../tenant/utility/query-tenant';
@@ -38,11 +39,15 @@ export class PushNotificationService implements OnModuleInit {
     private readonly categorySettings: EmailCategorySettingsService,
     private readonly templates: NotificationTemplateService,
     private readonly recipients: NotificationRecipientService,
+    private readonly usage: NotificationUsageService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {}
 
   // Null when the church has switched this category's push off. personal = wording uses recipient details.
-  private async resolve(push: DispatchPush): Promise<{
+  private async resolve(
+    push: DispatchPush,
+    recipients: number,
+  ): Promise<{
     personal: boolean;
     category?: string;
     build: (recipient?: Record<string, string>) => PushPayload;
@@ -50,6 +55,7 @@ export class PushNotificationService implements OnModuleInit {
     if (!('key' in push)) return { personal: false, build: () => push };
     const template = await this.templates.resolvePushTemplate(push.key);
     if (!(await this.categorySettings.isPushEnabled(template.category))) {
+      this.usage.record('push', template.category, 'off', recipients);
       return null;
     }
     const vars = Object.fromEntries(
@@ -140,7 +146,7 @@ export class PushNotificationService implements OnModuleInit {
     push: DispatchPush,
   ): Promise<void> {
     if (!memberIds.length) return;
-    const resolved = await this.resolve(push);
+    const resolved = await this.resolve(push, memberIds.length);
     if (!resolved) return;
     // Members who turned this kind off are left out in the same query.
     const mutable =
@@ -178,6 +184,7 @@ export class PushNotificationService implements OnModuleInit {
             p256dh: sub.p256dh,
             auth: sub.auth,
             payload,
+            category: resolved.category,
             ...envelope,
           },
           opts: {

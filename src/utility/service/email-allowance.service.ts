@@ -5,15 +5,11 @@ import { PlatformSettingsService } from '../../platform-admin/service/platform-s
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { EmailCategory } from '../email-provider/email-category.enum';
 import { CacheService } from './cache.service';
+import { ESSENTIAL_EMAIL_CATEGORIES } from '../../email-category-settings/constant/known-email-categories.constant';
 import { EmailCredentialResolverService } from '../../communication-provider/service/email-credential-resolver.service';
 import { TenantVerificationService } from './tenant-verification.service';
 
 const TWO_DAYS_SECONDS = 2 * 24 * 60 * 60;
-// Sign-in alerts and receipts always go out, as do uncategorised emails such as password resets.
-const ALWAYS_SENT = new Set([
-  EmailCategory.LOGIN_ALERT,
-  EmailCategory.GIVING_RECEIPT,
-]);
 
 // Limits what an unverified account can send through Discuva's own email provider each day.
 @Injectable()
@@ -30,17 +26,16 @@ export class EmailAllowanceService {
 
   async allows(category: EmailCategory, recipients: number): Promise<boolean> {
     const tenantId = this.cls.get('tenantId');
-    if (!tenantId || ALWAYS_SENT.has(category)) return true;
+    // Uncategorised emails such as password resets never reach this check.
+    if (!tenantId || ESSENTIAL_EMAIL_CATEGORIES.has(category)) return true;
     if (await this.verification.isVerified(tenantId)) return true;
     if (await this.credentials.resolveConfig()) return true;
 
     const limit = await this.settings.getNumber(
       PlatformSettingKey.UNVERIFIED_DAILY_EMAIL_LIMIT,
     );
-    const day = new Date().toISOString().slice(0, 10);
-    const key = `email-allowance:${tenantId}:${day}`;
     const used = await this.cacheService.incr(
-      key,
+      this.todayKey(tenantId),
       TWO_DAYS_SECONDS,
       recipients,
     );
@@ -49,5 +44,22 @@ export class EmailAllowanceService {
       return false;
     }
     return true;
+  }
+
+  // Null when no limit applies to this church.
+  async status(): Promise<{ limit: number; usedToday: number } | null> {
+    const tenantId = this.cls.get('tenantId');
+    if (!tenantId) return null;
+    if (await this.verification.isVerified(tenantId)) return null;
+    if (await this.credentials.resolveConfig()) return null;
+    const [limit, used] = await Promise.all([
+      this.settings.getNumber(PlatformSettingKey.UNVERIFIED_DAILY_EMAIL_LIMIT),
+      this.cacheService.get<number>(this.todayKey(tenantId)),
+    ]);
+    return { limit, usedToday: Number(used ?? 0) };
+  }
+
+  private todayKey(tenantId: string): string {
+    return `email-allowance:${tenantId}:${new Date().toISOString().slice(0, 10)}`;
   }
 }

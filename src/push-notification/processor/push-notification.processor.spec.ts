@@ -16,6 +16,7 @@ describe('PushNotificationProcessor', () => {
     cacheService as any,
     {} as any,
     {} as any,
+    { record: jest.fn() } as any,
   );
   const job = {
     memberId: 'member-1',

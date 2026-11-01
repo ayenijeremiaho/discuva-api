@@ -20,6 +20,11 @@ import { CHURCH_TIMEZONE } from '../../utility/constants/app.constants';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SmsDeliveryLog } from '../entity/sms-delivery-log.entity';
+import { EmailCategory } from '../../utility/email-provider/email-category.enum';
+import {
+  ANNOUNCEMENT_USAGE,
+  NotificationUsageService,
+} from '../../utility/service/notification-usage.service';
 import type { CountryCode } from 'libphonenumber-js';
 import {
   normalizePhoneNumber,
@@ -54,6 +59,12 @@ export interface SmsSendOutcome {
   failures: string[];
 }
 
+const usageTypeOf = (sourceType?: string): string =>
+  ({
+    assignment_reminder: EmailCategory.ASSIGNMENT_REMINDER,
+    class_session_reminder: EmailCategory.CLASS_SESSION_REMINDER,
+  })[sourceType ?? ''] ?? ANNOUNCEMENT_USAGE;
+
 function chunk<T>(items: T[], size: number): T[][] {
   const batches: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -73,6 +84,7 @@ export class SmsService {
     @InjectRepository(SmsDeliveryLog)
     private readonly deliveryLogRepo: Repository<SmsDeliveryLog>,
     configService: ConfigService,
+    private readonly usage: NotificationUsageService,
   ) {
     this.defaultPhoneRegion = phoneRegionFromLocale(
       configService.get<string>('CURRENCY_LOCALE', 'en-NG'),
@@ -116,7 +128,14 @@ export class SmsService {
     message: string,
     context: SmsSendContext = {},
   ): Promise<SmsSendOutcome> {
-    const config = await this.resolveConfigOrThrow();
+    const usageType = usageTypeOf(context.sourceType);
+    let config: ResolvedSmsConfig;
+    try {
+      config = await this.resolveConfigOrThrow();
+    } catch (err) {
+      this.usage.record('sms', usageType, 'no_provider', to.length);
+      throw err;
+    }
 
     const provider = this.smsProviderRegistry.get(config.providerId);
     const { encoding } = this.calculateSegments(message);
@@ -212,7 +231,10 @@ export class SmsService {
       }
     }
 
-    return { acceptedCount, failedCount: to.length - acceptedCount, failures };
+    const failedCount = to.length - acceptedCount;
+    this.usage.record('sms', usageType, 'sent', acceptedCount);
+    this.usage.record('sms', usageType, 'failed', failedCount);
+    return { acceptedCount, failedCount, failures };
   }
 
   private assertSendingWindowOpen(now = new Date()): void {

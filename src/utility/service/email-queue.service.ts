@@ -1,4 +1,5 @@
 import { EmailAllowanceService } from './email-allowance.service';
+import { NotificationUsageService } from './notification-usage.service';
 import { fetchLogoBytes, fitLogo, measureLogo } from '../util/logo-size';
 import { churchThemeColors } from '../../tenant/constants/church-theme-palette';
 import { Injectable, Logger } from '@nestjs/common';
@@ -58,6 +59,7 @@ export class EmailQueueService {
     private readonly notificationTemplates: NotificationTemplateService,
     private readonly recipients: NotificationRecipientService,
     private readonly allowance: EmailAllowanceService,
+    private readonly usage: NotificationUsageService,
     @InjectDataSource() private readonly dataSource: DataSource,
   ) {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
@@ -72,14 +74,17 @@ export class EmailQueueService {
     category?: EmailCategory,
   ): Promise<string> {
     const recipients = Array.isArray(to) ? to.length : 1;
-    if (category && !(await this.allowance.allows(category, recipients))) {
-      this.logger.debug(`Email suppressed (daily limit): "${subject}"`);
-      return '';
-    }
+    // Switched off first, so an email nobody will get doesn't use up the daily limit.
     if (category && !(await this.isCategoryEnabled(category))) {
       this.logger.debug(
         `Email suppressed (category ${category} disabled): "${subject}"`,
       );
+      this.usage.record('email', category, 'off', recipients);
+      return '';
+    }
+    if (category && !(await this.allowance.allows(category, recipients))) {
+      this.logger.debug(`Email suppressed (daily limit): "${subject}"`);
+      this.usage.record('email', category, 'limited', recipients);
       return '';
     }
     if (category && MUTABLE_CATEGORIES.has(category)) {
@@ -94,7 +99,15 @@ export class EmailQueueService {
     }
     const job = await this.emailQueue.add(
       'send',
-      { to, cc, subject, html, attachments, ...buildJobEnvelope(this.cls) },
+      {
+        to,
+        cc,
+        subject,
+        html,
+        attachments,
+        category,
+        ...buildJobEnvelope(this.cls),
+      },
       {
         attempts: 5,
         backoff: { type: 'fixed', delay: 5000 },

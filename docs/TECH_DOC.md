@@ -425,8 +425,10 @@ other settings mechanism in this codebase uses).
 `env.validation.ts`/`.env.example` — harmless while true (`undefined !== false`), but meant the var could never
 actually be set without Joi's `forbidNonWhitelisted` rejecting it. Now registered like the other 14.
 
-**Routes:** `GET/PATCH /admin/email-category-settings`, `GET/PATCH /admin/email-category-settings/:category` — same
-`AdminGuard` + `AdminPermission.ADMIN_WRITE`-on-write pattern as `/admin/reminder-settings`.
+**Routes:** `GET /admin/email-category-settings`, `GET/PATCH /admin/email-category-settings/:category`. Any admin may
+read; `PATCH` is owner-only (`@RequiresOwner()`). `LOGIN_ALERT` and `GIVING_RECEIPT` are essential
+(`ESSENTIAL_EMAIL_CATEGORIES`): always sent whatever is stored, exempt from the daily limit, and `PATCH` returns 400.
+See "Notification Control Centre".
 
 **Separate Email and Push switches:** the stored value is `{ enabled, pushEnabled }` — `enabled` gates email,
 `pushEnabled` gates push. `PATCH` accepts either or both (at least one). Responses add `hasPush` (whether any push in
@@ -7943,6 +7945,30 @@ outside the requested `?months=` window).
 
 ---
 
+## Notification Control Centre
+
+Owner-facing overview of everything a church sends. `GET /v1/admin/notification-centre` (`AdminGuard`, `admin:read`)
+returns, per category: delivery mode, `essential`, `group`, `includes` (message names from the email and push
+catalogues), `smsReminderKey`/`smsEnabled`, `optedOut` (members who muted it), `usage` and `lastMonth`. Also `totals`,
+`lastMonthTotals`, `fixedTypes` (`ACCOUNT` uncategorised emails, `ANNOUNCEMENTS`; counted, no switch) and `blocks`
+(`emailLimit`, `sms` provider, balance and stopped count).
+
+**Who can change what:** delivery (`PATCH /admin/email-category-settings/:category`) and the `smsEnabled` value on
+`PATCH /admin/reminder-settings/:key` are owner-only. Reminder timing and on/off, and wording, stay under `admin:write`.
+
+**Usage counts:** `NotificationUsageService` keeps one Redis hash per church per month
+(`notification-usage:YYYY-MM`, fields `channel:type:outcome`, kept 14 months). Outcomes: `sent`, `failed`, `limited`
+(daily email limit), `off` (type switched off), `no_provider` (SMS). Email and push count on the queue processors, by
+recipient; SMS counts in `SmsService.send`, by recipient rather than segment. A Redis failure never affects a send.
+Counts start at release, members' own opt-outs aren't counted as stopped, and a Redis data loss resets them.
+
+**Database cost:** no new tables or indexes and no writes per send. Opening the page reads settings plus one
+`unnest(muted_notifications)` count over `members`, cached 5 minutes, which reads the whole table by design.
+The SMS balance is fetched from the provider on page open, with a 3-second limit. No scheduled work.
+
+**Also changed:** a switched-off type no longer uses up the unverified daily email limit, because the switch is now
+checked first.
+
 ## 6. API Endpoints Quick Reference
 
 > All routes are prefixed with `/v1/` via NestJS URI versioning (`defaultVersion: '1'`). For example, `POST /auth/login` is accessed as `POST /v1/auth/login`. Future endpoint versions can be declared with `@Version('2')` at the controller or method level without affecting existing routes.
@@ -14825,8 +14851,10 @@ other settings mechanism in this codebase uses).
 `env.validation.ts`/`.env.example` — harmless while true (`undefined !== false`), but meant the var could never
 actually be set without Joi's `forbidNonWhitelisted` rejecting it. Now registered like the other 14.
 
-**Routes:** `GET/PATCH /admin/email-category-settings`, `GET/PATCH /admin/email-category-settings/:category` — same
-`AdminGuard` + `AdminPermission.ADMIN_WRITE`-on-write pattern as `/admin/reminder-settings`.
+**Routes:** `GET /admin/email-category-settings`, `GET/PATCH /admin/email-category-settings/:category`. Any admin may
+read; `PATCH` is owner-only (`@RequiresOwner()`). `LOGIN_ALERT` and `GIVING_RECEIPT` are essential
+(`ESSENTIAL_EMAIL_CATEGORIES`): always sent whatever is stored, exempt from the daily limit, and `PATCH` returns 400.
+See "Notification Control Centre".
 
 **Separate Email and Push switches:** the stored value is `{ enabled, pushEnabled }` — `enabled` gates email,
 `pushEnabled` gates push. `PATCH` accepts either or both (at least one). Responses add `hasPush` (whether any push in

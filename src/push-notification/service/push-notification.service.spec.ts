@@ -1,3 +1,4 @@
+import { NotificationUsageService } from '../../utility/service/notification-usage.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
@@ -96,6 +97,7 @@ describe('PushNotificationService', () => {
           useValue: mockCategorySettings,
         },
         { provide: NotificationTemplateService, useValue: mockTemplates },
+        { provide: NotificationUsageService, useValue: { record: jest.fn() } },
         { provide: NotificationRecipientService, useValue: mockRecipients },
       ],
     }).compile();

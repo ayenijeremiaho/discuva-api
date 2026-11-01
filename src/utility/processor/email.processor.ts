@@ -13,6 +13,7 @@ import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { EmailLog, EmailLogSource } from '../entity/email-log.entity';
+import { EmailCategory } from '../email-provider/email-category.enum';
 import { IEmailProvider } from '../email-provider/email-provider.interface';
 import { EMAIL_PROVIDER_TOKEN } from '../email-provider/email-provider.token';
 import { GmailProvider } from '../email-provider/gmail.provider';
@@ -20,6 +21,10 @@ import { ResendProvider } from '../email-provider/resend.provider';
 import { SmtpProvider } from '../email-provider/smtp.provider';
 import { SendGridProvider } from '../email-provider/sendgrid.provider';
 import { MailgunProvider } from '../email-provider/mailgun.provider';
+import {
+  ACCOUNT_USAGE,
+  NotificationUsageService,
+} from '../service/notification-usage.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { TenantJobEnvelope } from '../../tenant/utility/job-envelope';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
@@ -37,6 +42,7 @@ export interface EmailJobData extends TenantJobEnvelope {
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  category?: EmailCategory;
   // Set via job.update() inside handleSend, *before* the send is attempted —
   // not just returned on success. onFailed has no return value to read (the
   // function throws before reaching its `return` statement), so this is the
@@ -76,6 +82,7 @@ export class EmailProcessor {
     private readonly emailCredentialResolverService: EmailCredentialResolverService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly usage: NotificationUsageService,
   ) {
     this.defaultFromAddress =
       this.configService.get<string>('EMAIL_FROM') ??
@@ -140,6 +147,15 @@ export class EmailProcessor {
     }
   }
 
+  private recordUsage(data: EmailJobData, outcome: 'sent' | 'failed'): void {
+    this.usage.record(
+      'email',
+      data.category ?? ACCOUNT_USAGE,
+      outcome,
+      Array.isArray(data.to) ? data.to.length : 1,
+    );
+  }
+
   @OnQueueCompleted()
   async onCompleted(
     job: Job<EmailJobData>,
@@ -153,6 +169,7 @@ export class EmailProcessor {
       await runInTenantContext(this.cls, this.txHost, job.data, async () => {
         const { to, subject } = job.data;
         const recipient = Array.isArray(to) ? to.join(', ') : to;
+        this.recordUsage(job.data, 'sent');
         await this.emailLogRepository.save(
           this.emailLogRepository.create({
             recipient,
@@ -191,6 +208,7 @@ export class EmailProcessor {
       await runInTenantContext(this.cls, this.txHost, job.data, async () => {
         const { to, subject } = job.data;
         const recipient = Array.isArray(to) ? to.join(', ') : to;
+        this.recordUsage(job.data, 'failed');
         // Was previously hardcoded to the platform default's name — wrong
         // whenever the failure happened on the tenant's own BYOK provider.
         // job.data.resolvedProviderName/resolvedSource (set by handleSend via

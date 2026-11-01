@@ -215,6 +215,28 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return result as number;
   }
 
+  async hashIncr(
+    rawKey: string,
+    field: string,
+    ttlSeconds: number,
+    by = 1,
+  ): Promise<void> {
+    const key = this.scopedKey(rawKey);
+    await this.redis.eval(
+      `redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
+       redis.call('EXPIRE', KEYS[1], ARGV[3])`,
+      1,
+      key,
+      field,
+      by,
+      ttlSeconds,
+    );
+  }
+
+  async hashGetAll(rawKey: string): Promise<Record<string, string>> {
+    return this.redis.hgetall(this.scopedKey(rawKey));
+  }
+
   async del(rawKey: string): Promise<number> {
     const key = this.scopedKey(rawKey);
     const count = await this.redis.del(key);

@@ -49,6 +49,7 @@ import { ServiceHeadcountModule } from './service-headcount/service-headcount.mo
 import { ChurchSettingsModule } from './church-settings/church-settings.module';
 import { ReminderSettingsModule } from './reminder-settings/reminder-settings.module';
 import { EmailCategorySettingsModule } from './email-category-settings/email-category-settings.module';
+import { NotificationCentreModule } from './notification-centre/notification-centre.module';
 import { NotificationPreferencesModule } from './notification-preferences/notification-preferences.module';
 import { MyWeekModule } from './my-week/my-week.module';
 import { TeamPulseModule } from './team-pulse/team-pulse.module';
@@ -269,6 +270,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     ChurchSettingsModule,
     ReminderSettingsModule,
     EmailCategorySettingsModule,
+    NotificationCentreModule,
     NotificationPreferencesModule,
     MyWeekModule,
     TeamPulseModule,

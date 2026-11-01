@@ -30022,6 +30022,30 @@
       "name": "Email Category Settings",
       "item": [
         {
+          "name": "Notification control centre overview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "description": "Usage, delivery, opt-outs and what is held back. Any admin with admin:read. Delivery PATCH is owner-only.",
+            "url": {
+              "raw": "{{baseUrl}}/v1/admin/notification-centre",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "notification-centre"
+              ]
+            }
+          }
+        },
+        {
           "name": "List all email category settings",
           "request": {
             "method": "GET",

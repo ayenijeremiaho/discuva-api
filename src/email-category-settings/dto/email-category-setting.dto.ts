@@ -39,6 +39,8 @@ export class EmailCategorySettingResponseDto {
   label: string;
   description: string;
   enabled: boolean;
+  // Always sent; the church can't change it.
+  essential: boolean;
   // Whether any push notification belongs to this category.
   hasPush: boolean;
   pushEnabled: boolean;

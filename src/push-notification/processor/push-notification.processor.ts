@@ -10,6 +10,10 @@ import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-t
 import { PushSubscription } from '../entity/push-subscription.entity';
 import { PushJobData } from '../dto/push-notification.dto';
 import { CacheService } from '../../utility/service/cache.service';
+import {
+  ANNOUNCEMENT_USAGE,
+  NotificationUsageService,
+} from '../../utility/service/notification-usage.service';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { runInTenantContext } from '../../tenant/utility/run-in-tenant-context';
 
@@ -31,6 +35,7 @@ export class PushNotificationProcessor {
     private readonly cacheService: CacheService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
+    private readonly usage: NotificationUsageService,
   ) {}
 
   @Process('send')
@@ -57,6 +62,7 @@ export class PushNotificationProcessor {
         }),
       );
       this.cacheService.set(idempotencyKey, '1', 86_400);
+      this.usage.record('push', data.category ?? ANNOUNCEMENT_USAGE, 'sent');
     } catch (err: any) {
       const status: number | undefined = err?.statusCode;
       const body = String(err?.body ?? '').slice(0, 300);
@@ -74,9 +80,20 @@ export class PushNotificationProcessor {
   }
 
   @OnQueueFailed()
-  onFailed(job: Job<PushJobData>, error: Error): void {
+  async onFailed(job: Job<PushJobData>, error: Error): Promise<void> {
     this.logger.error(
       `Push job failed for member ${job.data.memberId} (attempt ${job.attemptsMade}): ${error.message}`,
+    );
+    if (job.attemptsMade < (job.opts.attempts ?? 1)) return;
+    await runInTenantContext(this.cls, this.txHost, job.data, () => {
+      this.usage.record(
+        'push',
+        job.data.category ?? ANNOUNCEMENT_USAGE,
+        'failed',
+      );
+      return Promise.resolve();
+    }).catch((err: Error) =>
+      this.logger.warn(`Could not count failed push: ${err.message}`),
     );
   }
 }

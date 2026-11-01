@@ -1,3 +1,4 @@
+import { NotificationUsageService } from '../../utility/service/notification-usage.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -55,6 +56,7 @@ describe('SmsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SmsService,
+        { provide: NotificationUsageService, useValue: { record: jest.fn() } },
         { provide: SmsProviderRegistryService, useValue: mockRegistry },
         {
           provide: SmsCredentialResolverService,

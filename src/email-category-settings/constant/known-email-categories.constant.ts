@@ -1,5 +1,11 @@
 import { EmailCategory } from '../../utility/email-provider/email-category.enum';
 
+// Always sent: no switch for the church, no opt-out for the member, no daily limit.
+export const ESSENTIAL_EMAIL_CATEGORIES: ReadonlySet<EmailCategory> = new Set([
+  EmailCategory.LOGIN_ALERT,
+  EmailCategory.GIVING_RECEIPT,
+]);
+
 export interface KnownEmailCategory {
   label: string;
   description: string;
@@ -147,7 +153,7 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
     [EmailCategory.TEAM_SPACES]: {
       label: 'Team Spaces',
       description:
-        "App notifications from department and fellowship spaces: a leader's new post, a reply to your post, and one evening summary of anything you haven't read.",
+        "Messages from team spaces: a leader's new post, a reply, an @tag, one evening summary of anything unread, and meeting invitations, summaries and action reminders.",
     },
     [EmailCategory.SERVING_ROTA]: {
       label: 'Serving Rota',

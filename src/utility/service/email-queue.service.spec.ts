@@ -1,3 +1,4 @@
+import { NotificationUsageService } from './notification-usage.service';
 import { EmailAllowanceService } from './email-allowance.service';
 const mockAllowance = { allows: jest.fn().mockResolvedValue(true) };
 import * as fs from 'node:fs';
@@ -113,6 +114,7 @@ describe('EmailQueueService', () => {
           useValue: mockEmailCategorySettingsService,
         },
         { provide: NotificationTemplateService, useValue: mockTemplates },
+        { provide: NotificationUsageService, useValue: { record: jest.fn() } },
         { provide: NotificationRecipientService, useValue: mockRecipients },
         { provide: getDataSourceToken(), useValue: mockDataSource },
       ],
@@ -329,6 +331,7 @@ describe('EmailQueueService', () => {
       expect(mockEmailCategorySettingsService.isEnabled).toHaveBeenCalledWith(
         EmailCategory.BIRTHDAY,
       );
+      expect(mockAllowance.allows).not.toHaveBeenCalled();
     });
 
     it('sends when both the env flag and the tenant setting are enabled', async () => {

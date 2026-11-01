@@ -10,6 +10,7 @@ import { EmailQueueService } from './service/email-queue.service';
 import { NotificationDispatchService } from './service/notification-dispatch.service';
 import { TenantVerificationService } from './service/tenant-verification.service';
 import { EmailAllowanceService } from './service/email-allowance.service';
+import { NotificationUsageService } from './service/notification-usage.service';
 import { AuditLogService } from './service/audit-log.service';
 import { EmailLogService } from './service/email-log.service';
 import { AuditLog } from './entity/audit-log.entity';
@@ -101,6 +102,7 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     NotificationDispatchService,
     TenantVerificationService,
     EmailAllowanceService,
+    NotificationUsageService,
   ],
   controllers: [UtilityController, AuditLogController, EmailLogController],
   exports: [
@@ -120,6 +122,7 @@ import { CommunicationProviderModule } from '../communication-provider/communica
     NotificationDispatchService,
     TenantVerificationService,
     EmailAllowanceService,
+    NotificationUsageService,
   ],
 })
 export class UtilityModule {}

@@ -44,4 +44,6 @@ export interface PushJobData extends TenantJobEnvelope {
   p256dh: string;
   auth: string;
   payload: PushPayload;
+  // For usage counts; announcements have none.
+  category?: string;
 }
