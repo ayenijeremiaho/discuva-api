@@ -288,7 +288,7 @@ describe('CampusService', () => {
     it('needs somewhere for its members to go', async () => {
       tx.find.mockResolvedValue([{ id: 'm1' }]);
       await expect(service.update('c1', { isActive: false })).rejects.toThrow(
-        BadRequestException,
+        "Choose where this campus's 1 member should go first.",
       );
     });
 

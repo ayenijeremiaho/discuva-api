@@ -336,7 +336,7 @@ export class CampusService {
     if (members.length) {
       if (!moveMembersTo) {
         throw new BadRequestException(
-          `Choose where this campus's ${members.length} members should go first.`,
+          `Choose where this campus's ${members.length} ${members.length === 1 ? 'member' : 'members'} should go first.`,
         );
       }
       const target = await tx.findOneBy(Campus, {
