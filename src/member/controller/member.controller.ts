@@ -1,3 +1,4 @@
+import { ScopedMember } from '../../campus/campus-scope';
 import {
   BadRequestException,
   Body,
@@ -46,6 +47,7 @@ import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 import { CurrentUser } from '../../auth/decorator/current-user.decorator';
 import { MemberAuth } from '../../auth/interface/auth.interface';
 
+@ScopedMember()
 @Controller('members')
 export class MemberController {
   constructor(

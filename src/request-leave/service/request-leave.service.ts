@@ -1,3 +1,4 @@
+import { currentCampusScope } from '../../campus/campus-scope';
 import {
   BadRequestException,
   Injectable,
@@ -5,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In, IsNull } from 'typeorm';
 import { RequestLeave } from '../enitity/request-leave.entity';
 import { CreateRequestLeaveDto } from '../dto/create-request-leave.dto';
 import { LeaveStatusEnum } from '../enums/leave-status.enum';
@@ -223,8 +224,15 @@ export class RequestLeaveService {
   ): Promise<PaginationResponseDto<RequestLeave>> {
     if (page < 1) throw new BadRequestException('Page must be greater than 0');
 
+    const base = status ? { status } : {};
+    const scope = currentCampusScope();
     const [leaves, total] = await this.repo.findAndCount({
-      where: status ? { status } : {},
+      where: scope
+        ? [
+            { ...base, workerProfile: { member: { homeCampusId: IsNull() } } },
+            { ...base, workerProfile: { member: { homeCampusId: In(scope) } } },
+          ]
+        : base,
       skip: (page - 1) * limit,
       take: limit,
       order: { createdAt: 'DESC' },

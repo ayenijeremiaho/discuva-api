@@ -35,6 +35,7 @@ import { ModuleEnabledGuard } from '../../church-settings/guard/module-enabled.g
 import { PlanGuard } from '../../billing/guard/plan.guard';
 import { RequiresPlan } from '../../billing/decorator/requires-plan.decorator';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { ChurchWideOnly } from '../../campus/campus-scope';
 
 @RequiresModule('evangelism')
 @UseGuards(AdminGuard, ModuleEnabledGuard)
@@ -173,6 +174,7 @@ export class ConvertAdminController {
   @RequiresPermission(AdminPermission.EVANGELISM_READ)
   @RequiresPlan(PlanFeature.BULK_EXPORT)
   @UseGuards(PlanGuard)
+  @ChurchWideOnly()
   @Get('export')
   async export(@Query() query: ExportQueryDto, @Res() res: Response) {
     const { type, ...filters } = query;

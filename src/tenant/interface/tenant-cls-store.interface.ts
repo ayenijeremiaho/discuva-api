@@ -11,4 +11,6 @@ export interface AppClsStore extends ClsStore {
   afterCommit?: Array<() => unknown>;
   // Tasks to run in a fresh transaction after the request's transaction rolls back.
   afterRollback?: Array<() => unknown>;
+  // Campuses the signed-in admin looks after; unset for church-wide admins and everyone else.
+  campusScope?: string[];
 }

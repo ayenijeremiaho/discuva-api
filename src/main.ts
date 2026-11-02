@@ -1,3 +1,4 @@
+import { CampusPrivacyInterceptor } from './campus/campus-privacy.interceptor';
 import { AccountTypeService } from './account-type/account-type.service';
 import { TenantVerificationService } from './utility/service/tenant-verification.service';
 import './instrument';
@@ -84,7 +85,11 @@ function registerGlobalFilters(app: INestApplication) {
 }
 
 function registerGlobalInterceptors(app: INestApplication) {
-  app.useGlobalInterceptors(new TransformInterceptor());
+  // Order matters: the privacy pass sees the handler's raw result before it is wrapped.
+  app.useGlobalInterceptors(
+    new TransformInterceptor(),
+    app.get(CampusPrivacyInterceptor),
+  );
 }
 
 function corsOptions() {

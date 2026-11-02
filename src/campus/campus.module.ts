@@ -11,6 +11,7 @@ import {
 import { CampusAdminController, CampusController } from './campus.controller';
 import { CampusService } from './campus.service';
 import { CampusNotifier } from './campus-notifier.service';
+import { CampusPrivacyInterceptor } from './campus-privacy.interceptor';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { CampusNotifier } from './campus-notifier.service';
     ]),
   ],
   controllers: [CampusController, CampusAdminController],
-  providers: [CampusService, CampusNotifier],
-  exports: [CampusService],
+  providers: [CampusService, CampusNotifier, CampusPrivacyInterceptor],
+  exports: [CampusService, CampusPrivacyInterceptor],
 })
 export class CampusModule {}

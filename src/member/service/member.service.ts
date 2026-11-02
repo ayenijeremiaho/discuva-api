@@ -1,5 +1,6 @@
 import { Campus } from '../../campus/campus.entity';
 import { CAMPUSES_NEEDED_TO_CHOOSE } from '../../campus/campus.constant';
+import { scopeToCampuses } from '../../campus/campus-scope';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   AudienceTarget,
@@ -1367,6 +1368,7 @@ export class MemberService {
       );
     }
 
+    scopeToCampuses(qb, 'member');
     const [members, total] = await qb.getManyAndCount();
     return UtilityService.createPaginationResponse(members, page, limit, total);
   }
@@ -1458,6 +1460,7 @@ export class MemberService {
       );
     }
 
+    scopeToCampuses(qb, 'member');
     const [members, total] = await qb
       .skip((page - 1) * limit)
       .take(limit)

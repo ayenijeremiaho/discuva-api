@@ -1,3 +1,4 @@
+import { currentCampusScope } from '../../campus/campus-scope';
 import {
   BadRequestException,
   HttpException,
@@ -252,6 +253,12 @@ export class BirthdayService implements OnApplicationBootstrap {
       ])
       .where(`(${conditions})`, params)
       .andWhere('m.status = :status', { status: MemberStatusEnum.ACTIVE })
+      .andWhere(
+        currentCampusScope()
+          ? '(m.home_campus_id IS NULL OR m.home_campus_id = ANY(:campusScopeIds))'
+          : '1=1',
+        { campusScopeIds: currentCampusScope() },
+      )
       .orderBy('m.birthMonth', 'ASC')
       .addOrderBy('m.birthDay', 'ASC')
       .getMany();

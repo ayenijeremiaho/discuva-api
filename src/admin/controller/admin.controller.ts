@@ -10,6 +10,7 @@ import {
   Post,
   Put,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { AdminService } from '../service/admin.service';
 import {
@@ -37,9 +38,12 @@ export class AdminController {
     return this.adminService.getAll();
   }
 
+  // Reports what this admin can really do: a campus admin's role is capped (see AdminGuard).
   @Get('me')
-  getMe(@CurrentAdmin() admin: Admin) {
-    return this.adminService.getMyProfile(admin.id);
+  async getMe(@CurrentAdmin() admin: Admin, @Request() req: any) {
+    const profile = await this.adminService.getMyProfile(admin.id);
+    profile.adminRole.permissions = admin.adminRole.permissions;
+    return { ...profile, campusScope: req.campusScope ?? [] };
   }
 
   @Patch('me/appearance')

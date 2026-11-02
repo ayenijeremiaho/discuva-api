@@ -1,3 +1,4 @@
+import { ChurchWideOnly } from '../../campus/campus-scope';
 import {
   Controller,
   Body,
@@ -26,6 +27,7 @@ const MEMBER_IMPORT_MAX_BYTES =
   5 * 1024 * 1024;
 
 @UseGuards(AdminGuard)
+@ChurchWideOnly()
 @Controller('members/bulk-import')
 export class MemberImportController {
   constructor(private readonly memberImportService: MemberImportService) {}

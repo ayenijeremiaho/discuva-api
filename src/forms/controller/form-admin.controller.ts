@@ -41,6 +41,7 @@ import { FormVisibility } from '../enum/form.enum';
 import { BuilderTemplateService } from '../../builder-template/service/builder-template.service';
 import { BuilderTemplateKind } from '../../builder-template/enum/builder-template-kind.enum';
 import { SaveBuilderTemplateDto } from '../../builder-template/dto/save-builder-template.dto';
+import { ChurchWideOnly } from '../../campus/campus-scope';
 
 function imageOnlyFilter(
   _req: Express.Request,
@@ -286,6 +287,7 @@ export class FormAdminController {
   }
 
   @RequiresPermission(AdminPermission.FORMS_READ)
+  @ChurchWideOnly()
   @Get(':id/submissions/export')
   async exportSubmissions(
     @Param('id', ParseUUIDPipe) id: string,

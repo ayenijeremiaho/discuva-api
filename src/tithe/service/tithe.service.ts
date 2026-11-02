@@ -1339,6 +1339,10 @@ export class TitheService {
       .leftJoinAndSelect('a.member', 'm')
       .leftJoinAndSelect('a.adminRole', 'role')
       .where('a.isActive = true')
+      // Finance is church-wide only, so campus admins never get these.
+      .andWhere(
+        '(a.isOwner = true OR NOT EXISTS (SELECT 1 FROM campus_admins ca WHERE ca.admin_id = a.id))',
+      )
       .getMany();
 
     const recipients = admins

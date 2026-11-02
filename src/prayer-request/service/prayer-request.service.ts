@@ -1,10 +1,11 @@
+import { currentCampusScope } from '../../campus/campus-scope';
 import {
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, Repository, In, IsNull } from 'typeorm';
 import { PrayerRequest } from '../entity/prayer-request.entity';
 import { Testimony } from '../entity/testimony.entity';
 import { PregnancyPrayerCase } from '../entity/pregnancy-prayer-case.entity';
@@ -191,8 +192,19 @@ export class PrayerRequestService {
     const where: FindOptionsWhere<PrayerRequest> = {};
     if (status) where.status = status;
 
+    const scope = currentCampusScope();
+    // A campus admin sees anonymous requests and their own campuses' people (or people with no campus yet).
+    const scoped:
+      FindOptionsWhere<PrayerRequest>[] | FindOptionsWhere<PrayerRequest> =
+      scope
+        ? [
+            { ...where, member: IsNull() },
+            { ...where, member: { homeCampusId: IsNull() } },
+            { ...where, member: { homeCampusId: In(scope) } },
+          ]
+        : where;
     const [data, total] = await this.prayerRequestRepo.findAndCount({
-      where,
+      where: scoped,
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
