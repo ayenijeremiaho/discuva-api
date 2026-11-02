@@ -23193,7 +23193,7 @@ One church meeting in several places, inside one tenant. The Church Network (bra
 
 **Tables (tenant):** `campuses`, `venues.campus_id`, `members.home_campus_id`, `member_campus_moves` (one row per move, for joined and left views), `worker_campus_move_requests`.
 
-**Rules:** when a second active campus is added, every member and venue without a campus joins the first. Members move themselves (`PATCH /v1/campuses/me`). A worker's move creates a request (one pending per worker, partial unique index) unless they're choosing a first campus. Closing a campus with members needs `moveMembersTo`, and each move is recorded. Nobody can decide their own move.
+**Rules:** when a second active campus is added, every member and venue without a campus joins the first. Members move themselves (`PATCH /v1/campuses/me`). A worker's move creates a request (one pending per worker, partial unique index) unless they're choosing a first campus. Closing a campus with members needs `moveMembersTo`, and each move is recorded; pending requests into the closed campus, or already granted by the close, are dropped. Changing a campus's venues clears the venue list cache. Nobody can decide their own move.
 
 **Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `POST /v1/auth/signup` accepts `homeCampusId`.
 

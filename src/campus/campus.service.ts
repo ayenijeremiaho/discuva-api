@@ -12,6 +12,7 @@ import { AuditLogService } from '../utility/service/audit-log.service';
 import { Member } from '../member/entity/member.entity';
 import { MemberRoleEnum } from '../member/enums/member-role.enum';
 import { Venue } from '../venue/entity/venue.entity';
+import { VenueService } from '../venue/service/venue.service';
 import {
   Campus,
   CampusMoveStatus,
@@ -286,6 +287,12 @@ export class CampusService {
           toCampusId: target.id,
         })),
       );
+      // The close just took these workers where they asked to go.
+      await tx.delete(WorkerCampusMoveRequest, {
+        fromCampusId: campus.id,
+        toCampusId: target.id,
+        status: CampusMoveStatus.PENDING,
+      });
     }
     await tx.delete(WorkerCampusMoveRequest, {
       toCampusId: campus.id,
@@ -304,6 +311,7 @@ export class CampusService {
         await tx.update(Venue, { id: In(venueIds) }, { campusId: id });
       }
     });
+    this.cacheService.del(VenueService.CACHE_KEY);
     return { venueIds };
   }
 
@@ -385,12 +393,14 @@ export class CampusService {
           select: { id: true, homeCampusId: true },
           where: { id: request.memberId },
         });
-        await this.applyMove(
-          tx,
-          request.memberId,
-          member.homeCampusId,
-          request.toCampusId,
-        );
+        if (member.homeCampusId !== request.toCampusId) {
+          await this.applyMove(
+            tx,
+            request.memberId,
+            member.homeCampusId,
+            request.toCampusId,
+          );
+        }
       }
     });
     this.auditLogService.log('CAMPUS_MOVE_DECIDED', {

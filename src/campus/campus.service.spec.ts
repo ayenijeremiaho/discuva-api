@@ -181,6 +181,25 @@ describe('CampusService', () => {
         { memberId: 'm2', fromCampusId: 'c1', toCampusId: 'c2' },
       ]);
     });
+
+    it('drops requests the close already granted', async () => {
+      tx.find.mockResolvedValue([{ id: 'm1' }]);
+      tx.findOneBy.mockResolvedValue({ id: 'c2', isActive: true });
+      await service.update('c1', { isActive: false, moveMembersTo: 'c2' });
+      expect(tx.delete).toHaveBeenCalledWith(expect.anything(), {
+        fromCampusId: 'c1',
+        toCampusId: 'c2',
+        status: CampusMoveStatus.PENDING,
+      });
+    });
+  });
+
+  describe('venues', () => {
+    it('clears the venue list cache', async () => {
+      campusRepo.existsBy.mockResolvedValue(true);
+      await service.setVenues('c1', ['v1']);
+      expect(cache.del).toHaveBeenCalledWith('venues:all');
+    });
   });
 
   describe('deciding a worker move', () => {
@@ -198,6 +217,13 @@ describe('CampusService', () => {
       expect(tx.update).toHaveBeenCalledWith(Member, 'm1', {
         homeCampusId: 'c2',
       });
+    });
+
+    it('records no move when they are already there', async () => {
+      requestRepo.findOneBy.mockResolvedValue(pending);
+      tx.findOneOrFail.mockResolvedValue({ homeCampusId: 'c2' });
+      await service.decideRequest('r1', true, 'a1');
+      expect(tx.save).not.toHaveBeenCalled();
     });
 
     it('leaves them where they are when declined', async () => {
