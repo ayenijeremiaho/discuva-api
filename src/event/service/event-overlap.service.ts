@@ -29,6 +29,8 @@ export interface OverlapCandidate {
   startTime: Date;
   endTime: Date;
   venueId: string | null;
+  // Services at two different campuses never clash, unless they share a venue.
+  campusId?: string | null;
   forEveryone: boolean;
 }
 
@@ -119,8 +121,8 @@ export class EventOverlapService {
       `SELECT DISTINCT ON (n.i) n.i::int AS "i", e.name AS "eventName", ss.name AS "slotName",
               ss.start_time AS "startTime", ss.end_time AS "endTime", v.name AS "venueName",
               COALESCE(ss.audience, e.audience) = '${EventAudienceEnum.EVERYONE}' AS "theirsForEveryone"
-         FROM unnest($1::timestamptz[], $2::timestamptz[], $3::uuid[], $4::boolean[])
-              WITH ORDINALITY AS n(s, en, venue, everyone, i)
+         FROM unnest($1::timestamptz[], $2::timestamptz[], $3::uuid[], $4::boolean[], $10::uuid[])
+              WITH ORDINALITY AS n(s, en, venue, everyone, campus, i)
          JOIN service_slots ss ON ss.end_time > n.s AND ss.start_time < n.en
          JOIN events e ON e.id = ss.event_id
          LEFT JOIN event_config c ON c.id = ss.config_id
@@ -128,6 +130,8 @@ export class EventOverlapService {
         WHERE ss.end_time > $8 AND ss.start_time < $9
           AND ($5::uuid IS NULL OR e.id <> $5::uuid)
           AND ($6::varchar IS NULL OR e.recurring_event_id IS DISTINCT FROM $6::varchar)
+          AND (n.campus IS NULL OR e.campus_id IS NULL OR e.campus_id = n.campus
+               OR COALESCE(ss.venue_override_id, c.default_venue_id) = n.venue)
           AND ($7 = '${EventOverlapRule.BLOCK_ALL}'
                OR n.everyone
                OR COALESCE(ss.audience, e.audience) = '${EventAudienceEnum.EVERYONE}'
@@ -146,6 +150,7 @@ export class EventOverlapService {
         // The overall window lets the end_time index skip every service that finished before it.
         new Date(Math.min(...slots.map((s) => s.startTime.getTime()))),
         new Date(Math.max(...slots.map((s) => s.endTime.getTime()))),
+        slots.map((s) => s.campusId ?? null),
       ],
     )) as (Omit<OverlapClash, 'slot'> & { i: number })[];
     return rows.map(({ i, ...clash }) => ({
@@ -253,8 +258,9 @@ export function overlapKey(
     audience?: string;
   }[],
   audience: string | undefined,
+  campusId?: string | null,
 ): string {
-  return `${audience ?? ''}#${slots
+  return `${audience ?? ''}@${campusId ?? ''}#${slots
     .map((s) =>
       [
         s.name ?? '',
@@ -283,6 +289,9 @@ export function servicesClash(
 ): boolean {
   if (rule === EventOverlapRule.ALLOW) return false;
   if (!(a.startTime < b.endTime && b.startTime < a.endTime)) return false;
+  const sameVenue = !!a.venueId && a.venueId === b.venueId;
+  if (a.campusId && b.campusId && a.campusId !== b.campusId && !sameVenue)
+    return false;
   if (rule === EventOverlapRule.BLOCK_ALL) return true;
   return (
     a.forEveryone || b.forEveryone || (!!a.venueId && a.venueId === b.venueId)

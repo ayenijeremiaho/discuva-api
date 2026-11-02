@@ -23,6 +23,7 @@ const mockEventRepo = {
   create: jest.fn(),
   remove: jest.fn(),
   createQueryBuilder: jest.fn(),
+  manager: { existsBy: jest.fn().mockResolvedValue(true) },
 };
 
 const mockSlotRepo = {
@@ -152,6 +153,24 @@ describe('EventService', () => {
     }).compile();
 
     service = module.get<EventService>(EventService);
+  });
+
+  describe('campus', () => {
+    it('keeps an event for the whole church when none is chosen', async () => {
+      expect(await service.resolveCampus(undefined)).toBeNull();
+      expect(await service.resolveCampus(null)).toBeNull();
+    });
+
+    it('refuses a closed or unknown campus', async () => {
+      mockEventRepo.manager.existsBy.mockResolvedValueOnce(false);
+      await expect(service.resolveCampus('gone')).rejects.toThrow(
+        'Choose one of the open campuses.',
+      );
+    });
+
+    it('accepts an open campus', async () => {
+      await expect(service.resolveCampus('c1')).resolves.toBe('c1');
+    });
   });
 
   describe('create', () => {
@@ -344,7 +363,7 @@ describe('EventService', () => {
       const result = await service.create(dto, 'actor-1');
 
       expect(mockSeriesService.createFromEvent).toHaveBeenCalledWith(
-        { ...dto, audience: 'EVERYONE', audienceGroupId: null },
+        { ...dto, audience: 'EVERYONE', audienceGroupId: null, campusId: null },
         'actor-1',
       );
       expect(result).toHaveLength(2);

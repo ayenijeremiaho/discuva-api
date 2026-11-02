@@ -1,3 +1,4 @@
+import { Campus } from '../../campus/campus.entity';
 import { EventAudienceEnum } from '../enums/event-audience.enum';
 import { Group } from '../../group/entity/group.entity';
 import {
@@ -82,6 +83,15 @@ export class Event extends BaseEntity {
   @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'audience_group_id' })
   audienceGroup?: Group | null;
+
+  // Null: the whole church. Otherwise shown to and reminding only that campus; anyone may still check in.
+  @Index('IDX_events_campus_id')
+  @Column({ type: 'uuid', name: 'campus_id', nullable: true })
+  campusId: string | null;
+
+  @ManyToOne(() => Campus, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'campus_id' })
+  campus?: Campus | null;
 
   @OneToMany(() => ServiceSlot, (slot) => slot.event, { cascade: true })
   serviceSlots: ServiceSlot[];

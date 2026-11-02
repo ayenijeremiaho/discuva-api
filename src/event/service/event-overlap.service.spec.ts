@@ -1,5 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
-import { EventOverlapService } from './event-overlap.service';
+import {
+  EventOverlapService,
+  overlapKey,
+  servicesClash,
+} from './event-overlap.service';
 import { EventOverlapRule } from '../enums/event-overlap-rule.enum';
 
 describe('EventOverlapService', () => {
@@ -119,7 +123,19 @@ describe('EventOverlapService', () => {
       EventOverlapRule.BLOCK_ALL,
       new Date('2026-11-01T09:00:00Z'),
       new Date('2026-11-08T11:00:00Z'),
+      [null, null],
     ]);
+  });
+
+  it("sends each service's campus so other campuses never clash", async () => {
+    tx.query.mockResolvedValue([]);
+    await service.findClashes(
+      [{ ...slot('A'), campusId: 'c1' }],
+      EventOverlapRule.BLOCK_ALL,
+    );
+    const [sql, params] = tx.query.mock.calls[0];
+    expect(sql).toContain('e.campus_id = n.campus');
+    expect(params[9]).toEqual(['c1']);
   });
 
   it('returns the first clash for each service that has one', async () => {
@@ -215,5 +231,43 @@ describe('EventOverlapService', () => {
         'its Choir (h:mm a–h:mm a) overlaps "Sunday Service" (First Service, h:mm a–h:mm a)',
       );
     });
+  });
+});
+
+describe('campuses and overlap', () => {
+  const at = (campusId: string | null, venueId: string | null = null) => ({
+    name: 'S',
+    startTime: new Date('2026-11-01T09:00:00Z'),
+    endTime: new Date('2026-11-01T11:00:00Z'),
+    venueId,
+    campusId,
+    forEveryone: true,
+  });
+
+  it('lets two campuses hold a service at the same time', () => {
+    expect(
+      servicesClash(at('c1', 'v1'), at('c2', 'v2'), EventOverlapRule.BLOCK_ALL),
+    ).toBe(false);
+  });
+
+  it('still clashes a whole-church service with a campus one', () => {
+    expect(servicesClash(at(null), at('c2'), EventOverlapRule.BLOCK_ALL)).toBe(
+      true,
+    );
+  });
+
+  it('still clashes two campuses sharing a venue', () => {
+    expect(
+      servicesClash(at('c1', 'v1'), at('c2', 'v1'), EventOverlapRule.BLOCK_ALL),
+    ).toBe(true);
+  });
+
+  it('treats a campus change as a scheduling change', () => {
+    const slots = [
+      { startTime: '2026-11-01T09:00:00Z', endTime: '2026-11-01T11:00:00Z' },
+    ];
+    expect(overlapKey(slots, 'EVERYONE', 'c1')).not.toBe(
+      overlapKey(slots, 'EVERYONE', null),
+    );
   });
 });

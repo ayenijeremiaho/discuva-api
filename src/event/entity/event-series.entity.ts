@@ -1,3 +1,4 @@
+import { Campus } from '../../campus/campus.entity';
 import { EventAudienceEnum } from '../enums/event-audience.enum';
 import { Group } from '../../group/entity/group.entity';
 import {
@@ -6,6 +7,7 @@ import {
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
+  Index,
 } from 'typeorm';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { Member } from '../../member/entity/member.entity';
@@ -63,6 +65,15 @@ export class EventSeries extends BaseEntity {
   @ManyToOne(() => Group, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'audience_group_id' })
   audienceGroup?: Group | null;
+
+  // Null: the whole church. Otherwise shown to and reminding only that campus; anyone may still check in.
+  @Index('IDX_event_series_campus_id')
+  @Column({ type: 'uuid', name: 'campus_id', nullable: true })
+  campusId: string | null;
+
+  @ManyToOne(() => Campus, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'campus_id' })
+  campus?: Campus | null;
 
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'created_by' })

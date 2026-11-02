@@ -167,8 +167,20 @@ export class EventSeriesService {
       autoProgramme: dto.autoProgramme ?? true,
       audience: dto.audience ?? EventAudienceEnum.EVERYONE,
       audienceGroupId: dto.audienceGroupId ?? null,
+      campusId: dto.campusId ?? null,
       ...(actorId && { createdBy: { id: actorId } as Member }),
     });
+  }
+
+  // Keeping a campus that has since closed is fine; a new choice must be open.
+  private async applyCampus(
+    series: EventSeries,
+    campusId: string | null | undefined,
+  ): Promise<void> {
+    if (campusId === undefined || (campusId ?? null) === series.campusId)
+      return;
+    series.campusId = await this.eventService.resolveCampus(campusId);
+    series.campus = undefined;
   }
 
   // What creating this series would do, date by date, without saving anything.
@@ -209,6 +221,7 @@ export class EventSeriesService {
     if (dto.name !== undefined) series.name = dto.name;
     if (dto.audience !== undefined)
       Object.assign(series, await this.eventService.resolveAudience(dto));
+    await this.applyCampus(series, dto.campusId);
     const blueprint = dto.slotBlueprint as SlotBlueprint[] | undefined;
     if (blueprint) series.slotBlueprint = blueprint;
 
@@ -316,8 +329,8 @@ export class EventSeriesService {
         slotDtos,
         current,
         changes:
-          overlapKey(slotDtos, series.audience) !==
-          overlapKey(current, occ.audience),
+          overlapKey(slotDtos, series.audience, series.campusId) !==
+          overlapKey(current, occ.audience, occ.campusId),
       };
     });
   }
@@ -481,6 +494,7 @@ export class EventSeriesService {
         occ.slotDtos,
         series.audience,
         venues,
+        series.campusId,
       );
       mine.forEach((c) => dateOf.set(c, occ.date));
       candidates.push(...mine);
@@ -570,6 +584,7 @@ export class EventSeriesService {
           blueprintToSlotDtos(series.slotBlueprint, date, timezone),
           series.audience,
           venues,
+          series.campusId,
         );
         let pair: [OverlapCandidate, OverlapCandidate] | undefined;
         for (const t of theirs) {
@@ -616,6 +631,7 @@ export class EventSeriesService {
         seriesOccurrenceDate: date,
         audience: series.audience,
         audienceGroupId: series.audienceGroupId,
+        campusId: series.campusId,
       },
       slotDtos,
     );
@@ -683,6 +699,7 @@ export class EventSeriesService {
       Object.assign(series, await this.eventService.resolveAudience(dto));
       series.audienceGroup = undefined;
     }
+    await this.applyCampus(series, dto.campusId);
     const blueprint = dto.slotBlueprint as SlotBlueprint[] | undefined;
     if (blueprint) series.slotBlueprint = blueprint;
 
@@ -743,6 +760,8 @@ export class EventSeriesService {
       occ.audience = series.audience;
       occ.audienceGroupId = series.audienceGroupId;
       occ.audienceGroup = undefined;
+      occ.campusId = series.campusId;
+      occ.campus = undefined;
       if (!blueprint) {
         await this.eventRepo.save(occ);
         result.updated++;

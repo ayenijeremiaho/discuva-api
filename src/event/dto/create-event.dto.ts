@@ -74,6 +74,11 @@ export class CreateEventDto {
   @IsUUID()
   audienceGroupId?: string;
 
+  // Null or omitted: the whole church.
+  @IsOptional()
+  @IsUUID()
+  campusId?: string | null;
+
   @ValidateIf((o) => o.isRecurring)
   @ValidateNested()
   @Type(() => RecurrenceDto)

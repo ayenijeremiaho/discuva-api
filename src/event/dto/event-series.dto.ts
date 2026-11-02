@@ -67,6 +67,11 @@ export class UpdateEventSeriesDto {
   @IsUUID()
   audienceGroupId?: string;
 
+  // Null or omitted: the whole church.
+  @IsOptional()
+  @IsUUID()
+  campusId?: string | null;
+
   @IsOptional()
   @IsArray()
   @ArrayMinSize(1)
@@ -149,4 +154,9 @@ export class UpsertEventTemplateDto {
   @ValidateIf((o) => o.audience === EventAudienceEnum.GROUP)
   @IsUUID()
   audienceGroupId?: string;
+
+  // Null or omitted: the whole church.
+  @IsOptional()
+  @IsUUID()
+  campusId?: string | null;
 }

@@ -5488,7 +5488,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5545,7 +5545,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Mid-week Service\",\n  \"description\": \"Wednesday evening service\",\n  \"eventDate\": \"2026-06-18\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Service\",\n      \"startTime\": \"2026-06-18T18:00:00.000Z\",\n      \"endTime\": \"2026-06-18T20:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Mid-week Service\",\n  \"description\": \"Wednesday evening service\",\n  \"eventDate\": \"2026-06-18\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Service\",\n      \"startTime\": \"2026-06-18T18:00:00.000Z\",\n      \"endTime\": \"2026-06-18T20:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5602,7 +5602,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true\n  },\n  \"autoProgramme\": true,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-10-11T07:00:00.000Z\",\n      \"endTime\": \"2026-10-11T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-10-11T09:30:00.000Z\",\n      \"endTime\": \"2026-10-11T11:30:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true\n  },\n  \"autoProgramme\": true,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-10-11T07:00:00.000Z\",\n      \"endTime\": \"2026-10-11T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-10-11T09:30:00.000Z\",\n      \"endTime\": \"2026-10-11T11:30:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5641,7 +5641,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Weekly Sunday service\",\n  \"eventDate\": \"2026-07-06\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"recurrenceEndDate\": \"2026-12-31\"\n  },\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-07-06T07:00:00.000Z\",\n      \"endTime\": \"2026-07-06T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-07-06T10:00:00.000Z\",\n      \"endTime\": \"2026-07-06T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Weekly Sunday service\",\n  \"eventDate\": \"2026-07-06\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"recurrenceEndDate\": \"2026-12-31\"\n  },\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-07-06T07:00:00.000Z\",\n      \"endTime\": \"2026-07-06T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-07-06T10:00:00.000Z\",\n      \"endTime\": \"2026-07-06T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5686,7 +5686,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service \\u2014 Updated\",\n  \"description\": \"Updated description\",\n  \"eventDate\": \"2026-06-22\",\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-22T07:00:00.000Z\",\n      \"endTime\": \"2026-06-22T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Sunday Service \\u2014 Updated\",\n  \"description\": \"Updated description\",\n  \"eventDate\": \"2026-06-22\",\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-22T07:00:00.000Z\",\n      \"endTime\": \"2026-06-22T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6007,7 +6007,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"09:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"11:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"effectiveFrom\": \"2026-11-01\"\n}",
+              "raw": "{\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"09:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"11:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"effectiveFrom\": \"2026-11-01\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6091,7 +6091,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Easter Conference\",\n  \"description\": \"\",\n  \"onlineAttendanceEnabled\": false,\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2027-04-05T09:00:00.000Z\",\n      \"endTime\": \"2027-04-05T11:00:00.000Z\",\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Easter Conference\",\n  \"description\": \"\",\n  \"onlineAttendanceEnabled\": false,\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2027-04-05T09:00:00.000Z\",\n      \"endTime\": \"2027-04-05T11:00:00.000Z\",\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6119,7 +6119,7 @@
             "header": [],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"effectiveFrom\": \"2026-10-25\",\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"09:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"effectiveFrom\": \"2026-10-25\",\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"09:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{eventConfigId}}\"\n    }\n  ],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6228,7 +6228,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true,\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -6274,7 +6274,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": null,\n  \"onlineAttendanceEnabled\": false,\n  \"slotBlueprint\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"08:00\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"10:30\",\n      \"durationMinutes\": 120,\n      \"dayOffset\": 0,\n      \"configId\": \"{{configId}}\"\n    }\n  ],\n  \"defaultRecurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"ongoing\": true,\n    \"weekday\": 0\n  },\n  \"autoProgramme\": true,\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19315,7 +19315,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"intervalPreset\": \"1h\",\n  \"audience\": \"ALL\"\n}",
+              "raw": "{\n  \"intervalPreset\": \"1h\",\n  \"audience\": \"ALL\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -19381,7 +19381,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"intervalPreset\": \"24h\",\n  \"audience\": \"DEPARTMENT\",\n  \"departmentId\": \"{{departmentId}}\"\n}",
+              "raw": "{\n  \"intervalPreset\": \"24h\",\n  \"audience\": \"DEPARTMENT\",\n  \"departmentId\": \"{{departmentId}}\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"

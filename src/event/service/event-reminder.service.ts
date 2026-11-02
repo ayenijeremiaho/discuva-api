@@ -245,6 +245,7 @@ export class EventReminderService {
           ? ({ id: target.audienceGroupId } as Group)
           : null,
       targetMember: null,
+      campusId: slot.event?.campusId ?? null,
       publishedAt: now,
       expiresAt: slot.startTime,
     });

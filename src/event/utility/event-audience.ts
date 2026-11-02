@@ -5,6 +5,8 @@ import { MemberRoleEnum } from '../../member/enums/member-role.enum';
 export interface AudienceTarget {
   audience?: EventAudienceEnum | null;
   audienceGroupId?: string | null;
+  // Events only: narrows reminders, absences and lists to one campus. Never limits who can check in.
+  campusId?: string | null;
 }
 
 // A group audience whose group was deleted falls back to everyone.
@@ -33,6 +35,11 @@ export function scopeToAudience<T extends ObjectLiteral>(
       { [`${key}GroupId`]: target.audienceGroupId },
     );
   }
+  if (target.campusId) {
+    qb.andWhere(`${memberAlias}.home_campus_id = :${key}CampusId`, {
+      [`${key}CampusId`]: target.campusId,
+    });
+  }
   return qb;
 }
 
@@ -49,9 +56,12 @@ export function slotIsForViewer(
 }
 
 // SQL condition for "this event is for the viewer"; needs :viewerId and :viewerIsWorker.
+// A campus event shows only to that campus; the viewer's campus is a primary-key lookup in the same query.
 export function eventVisibleToViewerSql(eventAlias: string): string {
-  return `(${eventAlias}.audience = '${EventAudienceEnum.EVERYONE}'
+  return `((${eventAlias}.audience = '${EventAudienceEnum.EVERYONE}'
     OR (${eventAlias}.audience = '${EventAudienceEnum.WORKERS}' AND :viewerIsWorker = true)
     OR (${eventAlias}.audience = '${EventAudienceEnum.GROUP}' AND (${eventAlias}.audience_group_id IS NULL
-      OR EXISTS (SELECT 1 FROM group_members viewer_gm WHERE viewer_gm.group_id = ${eventAlias}.audience_group_id AND viewer_gm.member_id = :viewerId))))`;
+      OR EXISTS (SELECT 1 FROM group_members viewer_gm WHERE viewer_gm.group_id = ${eventAlias}.audience_group_id AND viewer_gm.member_id = :viewerId))))
+    AND (${eventAlias}.campus_id IS NULL
+      OR ${eventAlias}.campus_id = (SELECT viewer_m.home_campus_id FROM members viewer_m WHERE viewer_m.id = :viewerId)))`;
 }

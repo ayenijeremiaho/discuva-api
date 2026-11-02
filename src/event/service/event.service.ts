@@ -21,6 +21,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull, MoreThanOrEqual, Repository } from 'typeorm';
+import { Campus } from '../../campus/campus.entity';
 import { Event } from '../entity/event.entity';
 import { ServiceSlot } from '../entity/service-slot.entity';
 import { EventConfig } from '../entity/event-config.entity';
@@ -128,7 +129,11 @@ export class EventService {
     dto: CreateEventDto,
     actorId: string,
   ): Promise<ScheduledEvent | ScheduledEvent[]> {
-    dto = { ...dto, ...(await this.resolveAudience(dto)) };
+    dto = {
+      ...dto,
+      ...(await this.resolveAudience(dto)),
+      campusId: await this.resolveCampus(dto.campusId),
+    };
     if (dto.isRecurring) {
       if (!dto.recurrence)
         throw new BadRequestException(
@@ -178,6 +183,12 @@ export class EventService {
     const event = await this.getById(id);
     let notes: string[] = [];
 
+    // Keeping a campus that has since closed is fine; a new choice must be open.
+    const campusChanging =
+      dto.campusId !== undefined && (dto.campusId ?? null) !== event.campusId;
+    const campusId = campusChanging
+      ? await this.resolveCampus(dto.campusId)
+      : event.campusId;
     if (dto.name) event.name = dto.name;
     if (dto.description !== undefined) event.description = dto.description;
 
@@ -194,12 +205,15 @@ export class EventService {
           'This event has recorded session or attendance history — its schedule can no longer be edited',
         );
       }
-      if (this.schedulingChanges(event, dto.serviceSlots, dto.audience))
+      if (
+        this.schedulingChanges(event, dto.serviceSlots, dto.audience, campusId)
+      )
         notes = await this.assertNoClash(
           dto.serviceSlots,
           dto.audience ?? event.audience,
           dto.name || event.name,
           { eventId: id },
+          campusId,
         );
       await this.slotRepository.delete({ event: { id } });
       const slots = await this.buildSlots(dto.serviceSlots);
@@ -215,17 +229,24 @@ export class EventService {
     if (dto.onlineAttendanceEnabled !== undefined)
       event.onlineAttendanceEnabled = dto.onlineAttendanceEnabled;
 
-    if (dto.audience !== undefined) {
-      // Opening an event to everyone can clash with what's already at that time.
-      if (!dto.serviceSlots?.length && dto.audience !== event.audience)
+    if (dto.audience !== undefined || campusChanging) {
+      // Opening an event to everyone, or to the whole church, can clash with what's already at that time.
+      const audienceChanging =
+        dto.audience !== undefined && dto.audience !== event.audience;
+      if (!dto.serviceSlots?.length && (audienceChanging || campusChanging))
         notes = await this.assertNoClash(
           event.serviceSlots.map((s) => this.toSlotDto(s)),
-          dto.audience,
+          dto.audience ?? event.audience,
           dto.name || event.name,
           { eventId: id },
+          campusId,
         );
-      Object.assign(event, await this.resolveAudience(dto));
-      event.audienceGroup = undefined;
+      if (dto.audience !== undefined) {
+        Object.assign(event, await this.resolveAudience(dto));
+        event.audienceGroup = undefined;
+      }
+      event.campusId = campusId;
+      event.campus = undefined;
     }
 
     const saved: ScheduledEvent = await this.eventRepository.save(event);
@@ -601,10 +622,16 @@ export class EventService {
     let unchanged = false;
     if (eventId) {
       const event = await this.getById(eventId);
+      input.campusId =
+        rest.campusId === undefined ||
+        (rest.campusId ?? null) === event.campusId
+          ? event.campusId
+          : await this.resolveCampus(rest.campusId);
       unchanged = !this.schedulingChanges(
         event,
         input.serviceSlots,
         input.audience,
+        input.campusId,
       );
       if (await this.hasRecordedHistory(eventId)) {
         throw new BadRequestException(
@@ -613,6 +640,7 @@ export class EventService {
       }
     } else {
       this.validateFutureSlots(input.serviceSlots);
+      input.campusId = await this.resolveCampus(rest.campusId);
     }
     await this.buildSlots(input.serviceSlots);
 
@@ -628,6 +656,8 @@ export class EventService {
     const candidates = await this.toCandidates(
       input.serviceSlots,
       input.audience,
+      undefined,
+      input.campusId ?? null,
     );
     // One date of a series is checked against its own series' other dates too.
     const clashes = unchanged
@@ -664,12 +694,18 @@ export class EventService {
     eventAudience: EventAudienceEnum | undefined,
     eventName: string,
     exclude: OverlapExclusion = {},
+    campusId: string | null = null,
   ): Promise<string[]> {
     if (!slotDtos.length) return [];
     const rule = await this.overlapService.getRule();
     if (rule === EventOverlapRule.ALLOW) return [];
     await this.overlapService.lockSchedule();
-    const candidates = await this.toCandidates(slotDtos, eventAudience);
+    const candidates = await this.toCandidates(
+      slotDtos,
+      eventAudience,
+      undefined,
+      campusId,
+    );
     await this.overlapService.assertNoClash(candidates, rule, exclude);
     return this.seriesService.datesGivingWay(
       candidates,
@@ -679,17 +715,19 @@ export class EventService {
     );
   }
 
-  // Whether an edit changes anything a clash depends on: times, venue, format or who it's for.
+  // Whether an edit changes anything a clash depends on: times, venue, format, who it's for or its campus.
   private schedulingChanges(
     event: Event,
     slotDtos: CreateServiceSlotDto[],
     audience: EventAudienceEnum | undefined,
+    campusId: string | null | undefined,
   ): boolean {
     return (
-      overlapKey(slotDtos, audience ?? event.audience) !==
+      overlapKey(slotDtos, audience ?? event.audience, campusId) !==
       overlapKey(
         event.serviceSlots.map((s) => this.toSlotDto(s)),
         event.audience,
+        event.campusId,
       )
     );
   }
@@ -699,6 +737,7 @@ export class EventService {
     slotDtos: CreateServiceSlotDto[],
     eventAudience: EventAudienceEnum | undefined,
     venues = new Map<string, Promise<string | null>>(),
+    campusId: string | null = null,
   ): Promise<OverlapCandidate[]> {
     const venueOf = (s: CreateServiceSlotDto) => {
       const key = `${s.configId}|${s.venueOverrideId ?? ''}|${s.formatOverride ?? ''}`;
@@ -711,6 +750,7 @@ export class EventService {
         startTime: new Date(s.startTime),
         endTime: new Date(s.endTime),
         venueId: await venueOf(s),
+        campusId,
         forEveryone:
           (s.audience ?? eventAudience ?? EventAudienceEnum.EVERYONE) ===
           EventAudienceEnum.EVERYONE,
@@ -754,6 +794,8 @@ export class EventService {
       dto.serviceSlots,
       dto.audience,
       dto.name,
+      {},
+      dto.campusId ?? null,
     );
     const slots = await this.buildSlots(dto.serviceSlots);
     const { eventDate, endDate, startTime, endTime } =
@@ -768,6 +810,7 @@ export class EventService {
       onlineAttendanceEnabled: dto.onlineAttendanceEnabled ?? false,
       audience: dto.audience ?? EventAudienceEnum.EVERYONE,
       audienceGroupId: dto.audienceGroupId ?? null,
+      campusId: dto.campusId ?? null,
     });
     event.serviceSlots = slots;
     const saved: ScheduledEvent = await this.eventRepository.save(event);
@@ -781,6 +824,18 @@ export class EventService {
       select: ['id', 'name'],
       order: { name: 'ASC' },
     });
+  }
+
+  // Null keeps an event for the whole church; a campus must be open.
+  async resolveCampus(campusId?: string | null): Promise<string | null> {
+    if (!campusId) return null;
+    const open = await this.eventRepository.manager.existsBy(Campus, {
+      id: campusId,
+      isActive: true,
+    });
+    if (!open)
+      throw new BadRequestException('Choose one of the open campuses.');
+    return campusId;
   }
 
   // Validates the group for a GROUP audience; any other audience carries no group.
@@ -847,6 +902,7 @@ export class EventService {
           | 'seriesOccurrenceDate'
           | 'audience'
           | 'audienceGroupId'
+          | 'campusId'
         >
       >,
     slotDtos: CreateServiceSlotDto[],
