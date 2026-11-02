@@ -23218,8 +23218,9 @@ One church meeting in several places, inside one tenant. The Church Network (bra
 **What a campus admin sees (central guard, not RLS):** an admin with `campus_admins` rows (and not an owner) is a campus admin.
 - **Permission ceiling:** `AdminGuard` removes `CHURCH_WIDE_ONLY_PERMISSIONS` (admins and roles, audit and email logs, finance, giving, communication providers, YouTube, church profile, billing, Church Network, social media, public pages, SMS logs) from their role for every check, and `GET /v1/admin/users/me` reports the capped list plus `campusScope`, so the admin app hides those screens. Finance alert emails skip campus admins.
 - **Other campuses' people:** `CampusPrivacyInterceptor` (global, after the handler) finds every object in an admin response with an id or member id plus a name, looks them up in `members` once per response, and trims anyone whose `home_campus_id` is another campus to id, name, photo and role (`otherCampus: true`). People with no campus and the admin themselves stay whole.
-- **Single-person routes:** `@ScopedMember()` (on `MembersController`) makes `AdminGuard` refuse a campus admin acting on another campus's member (403).
+- **Single-person routes:** `@ScopedMember()` (on `MemberController`) makes `AdminGuard` refuse a campus admin acting on another campus's member (403).
 - **Lists:** members, workers, upcoming birthdays, prayer requests and leave history list only the admin's campuses plus people with no campus (`scopeToCampuses` / `currentCampusScope`, read from CLS).
+- **Admin app:** adds a virtual `church:wide` permission only for admins with no `campusScope`; church-wide screens without a role permission (Church Profile) require it, so campus admins never see them.
 - **Bulk routes:** `@ChurchWideOnly()` keeps form-submission and convert exports and member import for church-wide admins.
 - **Proof:** `scripts/campus-leak-check.py` signs in as a campus admin on a local test account, calls every admin GET route logged at startup and fails if the other campus's member's email, phone or birthday appears (334 routes, none found).
 
