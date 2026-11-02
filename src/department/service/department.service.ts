@@ -112,8 +112,9 @@ export class DepartmentService {
   ): Promise<Department> {
     const department = await this.getDepartmentOrThrow(id);
 
+    // Keeping a department on a campus that has since closed is fine; only a new choice is checked.
     const campusId =
-      'campusId' in dto
+      'campusId' in dto && (dto.campusId ?? null) !== department.campusId
         ? await this.resolveCampus(dto.campusId)
         : department.campusId;
     const name = dto.name ?? department.name;

@@ -732,6 +732,24 @@ describe('DepartmentService', () => {
       expect(result.campusId).toBeNull();
     });
 
+    it('keeps a department on a campus that has since closed', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'd1',
+        name: 'Choir',
+        campusId: 'closed',
+      });
+      mockDepartmentRepo.manager.existsBy.mockResolvedValue(false);
+      mockDepartmentRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+      await expect(
+        service.update(
+          'd1',
+          { description: 'New', campusId: 'closed' },
+          'actor-1',
+        ),
+      ).resolves.toMatchObject({ campusId: 'closed' });
+    });
+
     it('allows renaming to its own current name', async () => {
       mockDepartmentRepo.findOneBy.mockResolvedValue({
         id: 'd1',
