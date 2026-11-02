@@ -1,4 +1,10 @@
-import { IsArray, IsEnum, IsNotEmpty, IsOptional } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsUUID,
+} from 'class-validator';
 import { DepartmentCapability } from '../enums/department-capability.enum';
 
 export class CreateDepartmentDto {
@@ -12,4 +18,9 @@ export class CreateDepartmentDto {
   @IsArray()
   @IsEnum(DepartmentCapability, { each: true })
   capabilities?: DepartmentCapability[];
+
+  // Omit or null for a church-wide department.
+  @IsOptional()
+  @IsUUID()
+  campusId?: string | null;
 }

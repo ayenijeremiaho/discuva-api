@@ -6,7 +6,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThanOrEqual, Repository } from 'typeorm';
+import { MoreThanOrEqual, Repository, IsNull } from 'typeorm';
+import { Campus } from '../../campus/campus.entity';
 import { Department } from '../entity/department.entity';
 import { DepartmentLead } from '../entity/department-lead.entity';
 import { DepartmentLeadTypeEnum } from '../enums/department-lead-type.enum';
@@ -73,8 +74,9 @@ export class DepartmentService {
   private readonly logger = new Logger(DepartmentService.name);
 
   async create(dto: CreateDepartmentDto, actorId: string): Promise<Department> {
-    await this.assertNameUnique(dto.name);
-    const dept = await this.departmentRepository.save({ ...dto });
+    const campusId = await this.resolveCampus(dto.campusId);
+    await this.assertNameUnique(dto.name, campusId);
+    const dept = await this.departmentRepository.save({ ...dto, campusId });
     this.cacheService.del(DepartmentService.CACHE_KEY);
     this.auditLogService.log('DEPARTMENT_CREATED', {
       actorId,
@@ -95,6 +97,7 @@ export class DepartmentService {
     );
     if (!all) {
       all = await this.departmentRepository.find({
+        relations: { campus: true },
         order: { createdAt: 'DESC' },
       });
       this.cacheService.set(DepartmentService.CACHE_KEY, all, this.cacheTtl);
@@ -109,9 +112,15 @@ export class DepartmentService {
   ): Promise<Department> {
     const department = await this.getDepartmentOrThrow(id);
 
-    if (dto.name && dto.name !== department.name) {
-      await this.assertNameUnique(dto.name);
-      department.name = dto.name;
+    const campusId =
+      'campusId' in dto
+        ? await this.resolveCampus(dto.campusId)
+        : department.campusId;
+    const name = dto.name ?? department.name;
+    if (name !== department.name || campusId !== department.campusId) {
+      await this.assertNameUnique(name, campusId, id);
+      department.name = name;
+      department.campusId = campusId;
     }
     if (dto.description) department.description = dto.description;
     if ('capabilities' in dto) department.capabilities = dto.capabilities ?? [];
@@ -618,9 +627,35 @@ export class DepartmentService {
     return dept;
   }
 
-  private async assertNameUnique(name: string): Promise<void> {
-    if (await this.departmentRepository.existsBy({ name })) {
-      throw new BadRequestException('Department name already exists');
+  private async assertNameUnique(
+    name: string,
+    campusId: string | null,
+    exceptId?: string,
+  ): Promise<void> {
+    const clash = await this.departmentRepository.findOne({
+      select: { id: true },
+      where: { name, campusId: campusId ?? IsNull() },
+    });
+    if (clash && clash.id !== exceptId) {
+      throw new BadRequestException(
+        campusId
+          ? 'This campus already has a department with that name'
+          : 'Department name already exists',
+      );
     }
+  }
+
+  // A department can only be tied to an open campus; null keeps it church-wide.
+  private async resolveCampus(
+    campusId?: string | null,
+  ): Promise<string | null> {
+    if (!campusId) return null;
+    const open = await this.departmentRepository.manager.existsBy(Campus, {
+      id: campusId,
+      isActive: true,
+    });
+    if (!open)
+      throw new BadRequestException('Choose one of the open campuses.');
+    return campusId;
   }
 }

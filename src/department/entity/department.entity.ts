@@ -1,15 +1,34 @@
-import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
+import { Campus } from '../../campus/campus.entity';
 import { WorkerProfile } from '../../member/entity/worker-profile.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { DepartmentCapability } from '../enums/department-capability.enum';
 
+// Unique per campus: UQ_departments_name_campus is an expression index (name, COALESCE(campus_id, nil uuid)).
 @Entity({ name: 'departments' })
 export class Department extends BaseEntity {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ unique: true })
+  @Column()
   name: string;
+
+  // Null: church-wide.
+  @Index('IDX_departments_campus_id')
+  @Column({ type: 'uuid', name: 'campus_id', nullable: true })
+  campusId: string | null;
+
+  @ManyToOne(() => Campus, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'campus_id' })
+  campus: Campus | null;
 
   @Column()
   description: string;

@@ -23199,6 +23199,8 @@ One church meeting in several places, inside one tenant. The Church Network (bra
 
 **Notifications (category `CAMPUSES`, group People and care, env `EMAIL_CAMPUSES_ENABLED`):** on a worker's request, email `campus-move-requested` to the current campus's admins with `members:write` (church-wide ones if the campus has none) and push `CAMPUS_MOVE_REQUESTED` to the worker's department heads and deputies. On a decision, email `campus-move-decided` and push `CAMPUS_MOVE_APPROVED`/`CAMPUS_MOVE_DECLINED` to the worker; on approval also email `campus-worker-joining` to the new campus's own admins and push `CAMPUS_WORKER_MOVED` to the leads. Recipient lookups run in the request; sending never fails it.
 
+**Departments by campus:** `departments.campus_id` (null = church-wide, partial index). `POST/PATCH /v1/departments` accept `campusId` (open campuses only; `null` makes it church-wide). Names are unique per campus and church-wide (`UQ_departments_name_campus` on `(name, COALESCE(campus_id, nil uuid))`, replacing `UQ_departments_name`), so two campuses can each have a Choir. `GET /v1/departments` includes `campusId` and `campus`. Assigning workers is not restricted by campus: people can serve at another campus.
+
 **Wording:** the account-type dictionary has a `campus` term (Campus/Campuses; NGO and group: Location/Locations).
 
 **Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `GET /v1/tenant/info` returns `campusesEnabled` (from the cached list) and `GET /v1/auth/me` returns `homeCampusId`, so the member app asks for a campus without an extra request. `POST /v1/auth/signup` accepts `homeCampusId`.

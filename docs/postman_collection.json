@@ -6699,7 +6699,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Technical Media\",\n  \"description\": \"Manages sound, projection and live streaming\",\n  \"capabilities\": []\n}",
+              "raw": "{\n  \"name\": \"Technical Media\",\n  \"description\": \"Manages sound, projection and live streaming\",\n  \"capabilities\": [],\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"

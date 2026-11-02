@@ -49,7 +49,9 @@ const makeQb = () => ({
 
 const mockDepartmentRepo = {
   save: jest.fn(),
+  findOne: jest.fn(),
   findOneBy: jest.fn(),
+  manager: { existsBy: jest.fn() },
   findAndCount: jest.fn(),
   existsBy: jest.fn(),
   delete: jest.fn(),
@@ -647,7 +649,7 @@ describe('DepartmentService', () => {
 
   describe('create', () => {
     it('should throw BadRequestException if department name already exists', async () => {
-      mockDepartmentRepo.existsBy.mockResolvedValue(true);
+      mockDepartmentRepo.findOne.mockResolvedValue({ id: 'other' });
 
       await expect(
         service.create({ name: 'Media', description: '' }, 'actor-1'),
@@ -656,7 +658,7 @@ describe('DepartmentService', () => {
 
     it('should create and return a new department', async () => {
       const dept = { id: 'dept-1', name: 'Media' };
-      mockDepartmentRepo.existsBy.mockResolvedValue(false);
+      mockDepartmentRepo.findOne.mockResolvedValue(null);
       mockDepartmentRepo.save.mockResolvedValue(dept);
 
       const result = await service.create(
@@ -665,6 +667,84 @@ describe('DepartmentService', () => {
       );
 
       expect(result).toEqual(dept);
+      expect(mockDepartmentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ campusId: null }),
+      );
+    });
+
+    it('checks the name within the chosen campus only', async () => {
+      mockDepartmentRepo.manager.existsBy.mockResolvedValue(true);
+      mockDepartmentRepo.findOne.mockResolvedValue(null);
+      mockDepartmentRepo.save.mockResolvedValue({ id: 'd2' });
+
+      await service.create(
+        { name: 'Choir', description: '', campusId: 'c1' },
+        'actor-1',
+      );
+
+      expect(mockDepartmentRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { name: 'Choir', campusId: 'c1' } }),
+      );
+      expect(mockDepartmentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ campusId: 'c1' }),
+      );
+    });
+
+    it('refuses a closed or unknown campus', async () => {
+      mockDepartmentRepo.manager.existsBy.mockResolvedValue(false);
+
+      await expect(
+        service.create(
+          { name: 'Choir', description: '', campusId: 'gone' },
+          'actor-1',
+        ),
+      ).rejects.toThrow('Choose one of the open campuses.');
+    });
+  });
+
+  describe('update campus', () => {
+    it('moves a department to a campus, rechecking the name there', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'd1',
+        name: 'Choir',
+        campusId: null,
+      });
+      mockDepartmentRepo.manager.existsBy.mockResolvedValue(true);
+      mockDepartmentRepo.findOne.mockResolvedValue(null);
+      mockDepartmentRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+      const result = await service.update('d1', { campusId: 'c1' }, 'actor-1');
+
+      expect(result.campusId).toBe('c1');
+    });
+
+    it('makes a department church-wide again', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'd1',
+        name: 'Choir',
+        campusId: 'c1',
+      });
+      mockDepartmentRepo.findOne.mockResolvedValue(null);
+      mockDepartmentRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+      const result = await service.update('d1', { campusId: null }, 'actor-1');
+
+      expect(result.campusId).toBeNull();
+    });
+
+    it('allows renaming to its own current name', async () => {
+      mockDepartmentRepo.findOneBy.mockResolvedValue({
+        id: 'd1',
+        name: 'Choir',
+        campusId: 'c1',
+      });
+      mockDepartmentRepo.manager.existsBy.mockResolvedValue(true);
+      mockDepartmentRepo.findOne.mockResolvedValue({ id: 'd1' });
+      mockDepartmentRepo.save.mockImplementation((d) => Promise.resolve(d));
+
+      await expect(
+        service.update('d1', { name: 'Choir', campusId: 'c2' }, 'actor-1'),
+      ).resolves.toMatchObject({ campusId: 'c2' });
     });
   });
 
