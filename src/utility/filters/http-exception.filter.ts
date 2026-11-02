@@ -13,6 +13,8 @@ import { WordingRule, applyWording } from '../../account-type/apply-wording';
 
 const MULTER_FILE_TOO_LARGE_MESSAGE = 'File too large';
 
+const UNKNOWN_ROUTE = /^Cannot [A-Z]+ \//;
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -97,7 +99,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
       Sentry.captureException(exception);
     }
 
-    if (status < 500 && typeof message === 'string') {
+    // An unknown route's "Cannot GET /v1/departments/…" quotes the URL, which must stay as typed.
+    if (
+      status < 500 &&
+      typeof message === 'string' &&
+      !UNKNOWN_ROUTE.test(message)
+    ) {
       message = await this.inAccountWords(message);
     }
 

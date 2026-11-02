@@ -5488,7 +5488,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"eventDate\": \"2026-06-15\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Regular Sunday morning service\",\n  \"onlineAttendanceEnabled\": true,\n  \"audience\": \"EVERYONE\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Workers Meeting\",\n      \"startTime\": \"2026-06-15T06:00:00.000Z\",\n      \"endTime\": \"2026-06-15T06:45:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"audience\": \"WORKERS\"\n    },\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-06-15T07:00:00.000Z\",\n      \"endTime\": \"2026-06-15T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-06-15T10:00:00.000Z\",\n      \"endTime\": \"2026-06-15T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\",\n      \"venueOverrideId\": \"{{venueId}}\",\n      \"formatOverride\": \"IN_PERSON\"\n    }\n  ],\n  \"endDate\": \"2026-06-15\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5545,7 +5545,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Mid-week Service\",\n  \"description\": \"Wednesday evening service\",\n  \"eventDate\": \"2026-06-18\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Service\",\n      \"startTime\": \"2026-06-18T18:00:00.000Z\",\n      \"endTime\": \"2026-06-18T20:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Mid-week Service\",\n  \"description\": \"Wednesday evening service\",\n  \"isRecurring\": false,\n  \"serviceSlots\": [\n    {\n      \"name\": \"Service\",\n      \"startTime\": \"2026-06-18T18:00:00.000Z\",\n      \"endTime\": \"2026-06-18T20:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5641,7 +5641,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Weekly Sunday service\",\n  \"eventDate\": \"2026-07-06\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"recurrenceEndDate\": \"2026-12-31\"\n  },\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-07-06T07:00:00.000Z\",\n      \"endTime\": \"2026-07-06T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-07-06T10:00:00.000Z\",\n      \"endTime\": \"2026-07-06T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
+              "raw": "{\n  \"name\": \"Sunday Service\",\n  \"description\": \"Weekly Sunday service\",\n  \"isRecurring\": true,\n  \"recurrence\": {\n    \"recurrencePattern\": \"weekly\",\n    \"recurrenceInterval\": 1,\n    \"recurrenceEndDate\": \"2026-12-31\"\n  },\n  \"serviceSlots\": [\n    {\n      \"name\": \"First Service\",\n      \"startTime\": \"2026-07-06T07:00:00.000Z\",\n      \"endTime\": \"2026-07-06T09:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    },\n    {\n      \"name\": \"Second Service\",\n      \"startTime\": \"2026-07-06T10:00:00.000Z\",\n      \"endTime\": \"2026-07-06T12:00:00.000Z\",\n      \"configId\": \"{{configId}}\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
