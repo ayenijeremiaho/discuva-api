@@ -23207,7 +23207,7 @@ One church meeting in several places, inside one tenant. The Church Network (bra
 
 **Game boards by campus:** `GET /v1/bible-games/scoreboard` and `GET /v1/bible-characters/scoreboard` accept `scope=church|campus` (default `church`). Cached board rows now carry each player's campus (cache key `bible-scoreboard:v2`), so a campus board filters and re-ranks the cached church board after one primary-key lookup of the viewer's campus; no extra board query. Someone without a campus gets an empty campus board. Monthly champions stay church-wide.
 
-**Wording:** the account-type dictionary has a `campus` term (Campus/Campuses; NGO and group: Location/Locations).
+**Wording:** the account-type dictionary has a `campus` term (Campus/Campuses; NGO and group: Location/Locations) and a `workforce` term (Workforce; NGO: Team, group: Helpers), found missing in a real NGO email.
 
 **Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `GET /v1/tenant/info` returns `campusesEnabled` (from the cached list) and `GET /v1/auth/me` returns `homeCampusId`, so the member app asks for a campus without an extra request. `POST /v1/auth/signup` accepts `homeCampusId`.
 

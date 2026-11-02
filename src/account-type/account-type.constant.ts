@@ -87,6 +87,14 @@ export const ACCOUNT_TERMS: {
     words: same('Department', 'Departments', [term('Team'), term('Team')]),
   },
   {
+    key: 'workforce',
+    label: 'Everyone who serves',
+    words: same('Workforce', 'Workforces', [
+      term('Team', 'Teams'),
+      term('Helpers', 'Helpers'),
+    ]),
+  },
+  {
     key: 'worker',
     label: 'Person who serves',
     words: same('Worker', 'Workers', [term('Team member'), term('Helper')]),

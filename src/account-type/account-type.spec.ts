@@ -138,6 +138,13 @@ describe('AccountTypeService', () => {
     expect(profile.modules.prayer).toBe('on');
   });
 
+  it('calls the workforce the team outside churches', async () => {
+    const profile = await service.getProfile(OrganisationTypeEnum.MINISTRY);
+    expect(
+      applyWording('Welcome to Hope Relief Trust Workforce', profile.wording),
+    ).toBe('Welcome to Hope Relief Trust Team');
+  });
+
   it('calls campuses locations outside churches', async () => {
     const profile = await service.getProfile(OrganisationTypeEnum.MINISTRY);
     expect(applyWording('Add Campus · 2 campuses', profile.wording)).toBe(
