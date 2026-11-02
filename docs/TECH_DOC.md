@@ -23201,6 +23201,8 @@ One church meeting in several places, inside one tenant. The Church Network (bra
 
 **Departments by campus:** `departments.campus_id` (null = church-wide, partial index). `POST/PATCH /v1/departments` accept `campusId` (open campuses only; `null` makes it church-wide). Names are unique per campus and church-wide (`UQ_departments_name_campus` on `(name, COALESCE(campus_id, nil uuid))`, replacing `UQ_departments_name`), so two campuses can each have a Choir. `GET /v1/departments` includes `campusId` and `campus`. Assigning workers is not restricted by campus: people can serve at another campus.
 
+**Announcements by campus:** `announcements.campus_id` (null = whole church, partial index). `POST/PATCH /v1/announcements` and `POST /v1/announcements/sms-broadcast` accept `campusId` for the Everyone, Members, Workers and Department audiences (400 for the others, which already name their people; open campuses only, an existing closed campus is kept on edit). The member feed shows whole-church posts plus the member's own campus (one PK lookup for the home campus); pushes and texts go only to that campus's active members. The admin list includes `campus`.
+
 **Wording:** the account-type dictionary has a `campus` term (Campus/Campuses; NGO and group: Location/Locations).
 
 **Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `GET /v1/tenant/info` returns `campusesEnabled` (from the cached list) and `GET /v1/auth/me` returns `homeCampusId`, so the member app asks for a campus without an extra request. `POST /v1/auth/signup` accepts `homeCampusId`.

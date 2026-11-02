@@ -1,6 +1,7 @@
 import {
   IsEnum,
   IsNotEmpty,
+  IsOptional,
   IsString,
   IsUUID,
   ValidateIf,
@@ -26,6 +27,10 @@ export class SendSmsBroadcastDto {
   @ValidateIf((o) => o.audience === AnnouncementAudienceEnum.CLASS)
   @IsUUID()
   classId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  campusId?: string;
 
   @IsNotEmpty()
   @IsString()

@@ -39,6 +39,11 @@ export class CreateAnnouncementDto {
   @IsUUID()
   classId?: string;
 
+  // Limits everyone, members, workers or a department to one campus.
+  @IsOptional()
+  @IsUUID()
+  campusId?: string | null;
+
   @IsOptional()
   @IsISO8601()
   publishedAt?: string;
@@ -90,6 +95,11 @@ export class UpdateAnnouncementDto {
   @IsOptional()
   @IsUUID()
   classId?: string;
+
+  // null makes it whole-church again.
+  @IsOptional()
+  @IsUUID()
+  campusId?: string | null;
 
   @IsOptional()
   @IsISO8601()

@@ -12,6 +12,7 @@ import { Department } from '../../department/entity/department.entity';
 import { Group } from '../../group/entity/group.entity';
 import { ChurchClass } from '../../classes/entity/church-class.entity';
 import { BaseEntity } from '../../utility/entity/base.entity';
+import { Campus } from '../../campus/campus.entity';
 
 @Entity('announcements')
 export class Announcement extends BaseEntity {
@@ -30,6 +31,15 @@ export class Announcement extends BaseEntity {
   @Index()
   @Column({ default: AnnouncementAudienceEnum.ALL })
   audience: AnnouncementAudienceEnum;
+
+  // Null: the whole church. Otherwise only that campus's members see and receive it.
+  @Index('IDX_announcements_campus_id')
+  @Column({ type: 'uuid', name: 'campus_id', nullable: true })
+  campusId: string | null;
+
+  @ManyToOne(() => Campus, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'campus_id' })
+  campus: Campus | null;
 
   @Index()
   @ManyToOne(() => Department, { nullable: true, onDelete: 'SET NULL' })

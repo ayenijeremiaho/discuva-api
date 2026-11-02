@@ -10987,7 +10987,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Church Picnic — July 20th\",\n  \"body\": \"Join us for our annual church picnic at Tarkwa Bay Beach. Bring your family!\",\n  \"audience\": \"ALL\",\n  \"publishedAt\": \"2026-07-10T08:00:00.000Z\",\n  \"expiresAt\": \"2026-07-21T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\"\n}",
+              "raw": "{\n  \"title\": \"Church Picnic \\u2014 July 20th\",\n  \"body\": \"Join us for our annual church picnic at Tarkwa Bay Beach. Bring your family!\",\n  \"audience\": \"ALL\",\n  \"publishedAt\": \"2026-07-10T08:00:00.000Z\",\n  \"expiresAt\": \"2026-07-21T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11044,7 +11044,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"audience\": \"ALL\",\n  \"message\": \"Reminder: Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\"\n}",
+              "raw": "{\n  \"audience\": \"ALL\",\n  \"message\": \"Reminder: Church Picnic July 20th at Tarkwa Bay Beach. Bring your family!\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11096,7 +11096,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Ushering Team Meeting\",\n  \"body\": \"Mandatory meeting for all ushers this Saturday at 7am.\",\n  \"audience\": \"DEPARTMENT\",\n  \"departmentId\": \"{{departmentId}}\"\n}",
+              "raw": "{\n  \"title\": \"Ushering Team Meeting\",\n  \"body\": \"Mandatory meeting for all ushers this Saturday at 7am.\",\n  \"audience\": \"DEPARTMENT\",\n  \"departmentId\": \"{{departmentId}}\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11140,7 +11140,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Session Moved to 6pm\",\n  \"body\": \"This week's session has moved to 6pm — same link.\",\n  \"audience\": \"CLASS\",\n  \"classId\": \"{{classId}}\"\n}",
+              "raw": "{\n  \"title\": \"Session Moved to 6pm\",\n  \"body\": \"This week's session has moved to 6pm \\u2014 same link.\",\n  \"audience\": \"CLASS\",\n  \"classId\": \"{{classId}}\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11184,7 +11184,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Pastoral Follow-up\",\n  \"body\": \"The pastor would like to meet with you after Sunday service. Please see the office.\",\n  \"audience\": \"INDIVIDUAL\",\n  \"targetMemberId\": \"{{memberId}}\"\n}",
+              "raw": "{\n  \"title\": \"Pastoral Follow-up\",\n  \"body\": \"The pastor would like to meet with you after Sunday service. Please see the office.\",\n  \"audience\": \"INDIVIDUAL\",\n  \"targetMemberId\": \"{{memberId}}\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -11238,7 +11238,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Workers Meeting This Saturday\",\n  \"body\": \"Mandatory workers meeting at 7am. All departments must be represented.\",\n  \"audience\": \"WORKERS_ONLY\"\n}"
+              "raw": "{\n  \"title\": \"Workers Meeting This Saturday\",\n  \"body\": \"Mandatory workers meeting at 7am. All departments must be represented.\",\n  \"audience\": \"WORKERS_ONLY\",\n  \"campusId\": null\n}"
             }
           },
           "response": [
@@ -11271,7 +11271,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"New Members Class\",\n  \"body\": \"A new members orientation class starts next Sunday. Please sign up at the information desk.\",\n  \"audience\": \"MEMBERS_ONLY\"\n}"
+              "raw": "{\n  \"title\": \"New Members Class\",\n  \"body\": \"A new members orientation class starts next Sunday. Please sign up at the information desk.\",\n  \"audience\": \"MEMBERS_ONLY\",\n  \"campusId\": null\n}"
             }
           },
           "response": [
@@ -11295,7 +11295,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Updated Title\",\n  \"expiresAt\": \"2026-08-01T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Reminder: updated details for this event — check the app.\"\n}",
+              "raw": "{\n  \"title\": \"Updated Title\",\n  \"expiresAt\": \"2026-08-01T00:00:00.000Z\",\n  \"sendViaSms\": true,\n  \"smsBody\": \"Reminder: updated details for this event \\u2014 check the app.\",\n  \"campusId\": null\n}",
               "options": {
                 "raw": {
                   "language": "json"

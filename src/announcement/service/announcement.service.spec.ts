@@ -76,6 +76,7 @@ const mockAnnouncementRepo = {
   remove: jest.fn(),
   update: jest.fn(),
   createQueryBuilder: jest.fn(),
+  manager: { existsBy: jest.fn().mockResolvedValue(true) },
 };
 
 const mockReactionRepo = {
@@ -96,6 +97,7 @@ const mockMemberQb = {
 const mockMemberRepo = {
   createQueryBuilder: jest.fn().mockReturnValue(mockMemberQb),
   find: jest.fn().mockResolvedValue([]),
+  findOne: jest.fn().mockResolvedValue({ id: 'member-1', homeCampusId: null }),
 };
 
 const mockSmsService = {
@@ -233,6 +235,101 @@ describe('AnnouncementService', () => {
 
       expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ publishedAt: new Date(publishDate) }),
+      );
+    });
+  });
+
+  describe('campus', () => {
+    it('shows campus announcements only to that campus', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAnnouncementRepo.createQueryBuilder.mockReturnValue(qb);
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'member-1',
+        homeCampusId: 'c1',
+      });
+
+      await service.getForMember('member-1', MemberRoleEnum.MEMBER, null);
+
+      expect(qb.andWhere).toHaveBeenCalledWith(
+        '(a.campusId IS NULL OR a.campusId = :homeCampusId)',
+        { homeCampusId: 'c1' },
+      );
+    });
+
+    it('shows only whole-church announcements to someone without a campus', async () => {
+      const qb = makeQb();
+      qb.getManyAndCount.mockResolvedValue([[], 0]);
+      mockAnnouncementRepo.createQueryBuilder.mockReturnValue(qb);
+
+      await service.getForMember('member-1', MemberRoleEnum.MEMBER, null);
+
+      expect(qb.andWhere).toHaveBeenCalledWith('a.campusId IS NULL', {
+        homeCampusId: null,
+      });
+    });
+
+    it('saves the campus for a whole-audience announcement', async () => {
+      mockAnnouncementRepo.create.mockImplementation((a) => a);
+      mockAnnouncementRepo.save.mockImplementation((a) =>
+        Promise.resolve({ id: 'ann-1', ...a }),
+      );
+
+      await service.create(
+        { title: 'T', body: 'B', campusId: 'c1' } as any,
+        'author-1',
+        noSmsAdmin,
+      );
+
+      expect(mockAnnouncementRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ campusId: 'c1' }),
+      );
+    });
+
+    it('refuses a campus on audiences that already name their people', async () => {
+      await expect(
+        service.create(
+          {
+            title: 'T',
+            body: 'B',
+            audience: AnnouncementAudienceEnum.INDIVIDUAL,
+            targetMemberId: 'm1',
+            campusId: 'c1',
+          } as any,
+          'author-1',
+          noSmsAdmin,
+        ),
+      ).rejects.toThrow('A campus can only narrow');
+    });
+
+    it('refuses a closed campus', async () => {
+      mockAnnouncementRepo.manager.existsBy.mockResolvedValueOnce(false);
+      await expect(
+        service.create(
+          { title: 'T', body: 'B', campusId: 'gone' } as any,
+          'author-1',
+          noSmsAdmin,
+        ),
+      ).rejects.toThrow('Choose one of the open campuses.');
+    });
+
+    it("pushes only to the campus's members", async () => {
+      mockAnnouncementRepo.create.mockImplementation((a) => a);
+      mockAnnouncementRepo.save.mockImplementation((a) =>
+        Promise.resolve({ id: 'ann-1', ...a }),
+      );
+      mockMemberQb.andWhere.mockClear();
+
+      await service.create(
+        { title: 'T', body: 'B', campusId: 'c1' } as any,
+        'author-1',
+        noSmsAdmin,
+      );
+      await new Promise((r) => setImmediate(r));
+
+      expect(mockMemberQb.andWhere).toHaveBeenCalledWith(
+        'm.homeCampusId = :campusId',
+        { campusId: 'c1' },
       );
     });
   });

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository } from 'typeorm';
+import { Campus } from '../../campus/campus.entity';
 import { Announcement } from '../entity/announcement.entity';
 import { AnnouncementReaction } from '../entity/announcement-reaction.entity';
 import {
@@ -60,6 +61,13 @@ function pushText(html: string): string {
     .trim();
 }
 
+const CAMPUS_AUDIENCES: ReadonlySet<AnnouncementAudienceEnum> = new Set([
+  AnnouncementAudienceEnum.ALL,
+  AnnouncementAudienceEnum.MEMBERS_ONLY,
+  AnnouncementAudienceEnum.WORKERS_ONLY,
+  AnnouncementAudienceEnum.DEPARTMENT,
+]);
+
 @Injectable()
 export class AnnouncementService {
   constructor(
@@ -112,8 +120,10 @@ export class AnnouncementService {
   ): Promise<Announcement & { smsDispatch?: AnnouncementSmsDispatchResult }> {
     this.assertAudienceTargetProvided(dto);
     await this.assertCanSendViaSms(dto.sendViaSms, admin);
+    const campusId = await this.resolveCampus(dto.audience, dto.campusId);
 
     const announcement = this.announcementRepo.create({
+      campusId,
       title: dto.title,
       body: this.sanitizationService.sanitizeForEmail(dto.body),
       audience: dto.audience ?? AnnouncementAudienceEnum.ALL,
@@ -153,6 +163,7 @@ export class AnnouncementService {
   // appeared in the feed but never triggered a push notification.
   private dispatchPushNotification(announcement: Announcement): void {
     this.resolveMemberIdsForAudience({
+      campusId: announcement.campusId,
       audience: announcement.audience,
       departmentId: announcement.department?.id,
       targetMemberId: announcement.targetMember?.id,
@@ -176,6 +187,7 @@ export class AnnouncementService {
   }
 
   private async resolveMemberIdsForAudience(target: {
+    campusId?: string | null;
     audience: AnnouncementAudienceEnum;
     departmentId?: string;
     targetMemberId?: string;
@@ -219,6 +231,9 @@ export class AnnouncementService {
         break;
     }
 
+    if (target.campusId) {
+      qb.andWhere('m.homeCampusId = :campusId', { campusId: target.campusId });
+    }
     const members = await qb.getMany();
     return members.map((m) => m.id);
   }
@@ -290,6 +305,20 @@ export class AnnouncementService {
     if (dto.body !== undefined)
       announcement.body = this.sanitizationService.sanitizeForEmail(dto.body);
     if (dto.audience !== undefined) announcement.audience = dto.audience;
+    if (dto.campusId !== undefined || dto.audience !== undefined) {
+      const wanted =
+        dto.campusId !== undefined
+          ? (dto.campusId ?? null)
+          : announcement.campusId;
+      // Keeping a campus that has since closed is fine; a new choice must be open.
+      const kept =
+        !!wanted &&
+        wanted === announcement.campusId &&
+        CAMPUS_AUDIENCES.has(announcement.audience);
+      announcement.campusId = kept
+        ? wanted
+        : await this.resolveCampus(announcement.audience, wanted);
+    }
     if (dto.departmentId !== undefined)
       announcement.department = toNullableRef<Department>(dto.departmentId);
     if (dto.targetMemberId !== undefined)
@@ -352,7 +381,9 @@ export class AnnouncementService {
   ): Promise<{ sentCount: number; failedCount?: number; failures?: string[] }> {
     this.assertAudienceTargetProvided(dto);
 
+    const campusId = await this.resolveCampus(dto.audience, dto.campusId);
     const phoneNumbers = await this.resolvePhoneNumbers({
+      campusId,
       audience: dto.audience,
       departmentId: dto.departmentId,
       targetMemberId: dto.targetMemberId,
@@ -405,6 +436,7 @@ export class AnnouncementService {
         return { status: 'skipped', message: 'No SMS message was provided.' };
       }
       const phoneNumbers = await this.resolvePhoneNumbers({
+        campusId: announcement.campusId,
         audience: announcement.audience,
         departmentId: announcement.department?.id,
         targetMemberId: announcement.targetMember?.id,
@@ -445,6 +477,7 @@ export class AnnouncementService {
   }
 
   private async resolvePhoneNumbers(target: {
+    campusId?: string | null;
     audience: AnnouncementAudienceEnum;
     departmentId?: string;
     targetMemberId?: string;
@@ -490,6 +523,9 @@ export class AnnouncementService {
         break;
     }
 
+    if (target.campusId) {
+      qb.andWhere('m.homeCampusId = :campusId', { campusId: target.campusId });
+    }
     const members = await qb.getMany();
     return members.map((m) => m.phoneNumber).filter((p): p is string => !!p);
   }
@@ -576,6 +612,12 @@ export class AnnouncementService {
       '(a.audience = :group AND EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = grp.id AND gm.member_id = :memberId))';
     const inMemberClass = `(a.audience = :class AND EXISTS (SELECT 1 FROM class_enrollments ce WHERE ce.church_class_id = cls.id AND ce.member_id = :memberId AND ce.status IN ('${EnrollmentStatusEnum.IN_PROGRESS}', '${EnrollmentStatusEnum.COMPLETED}')))`;
 
+    const me = await this.memberRepo.findOne({
+      select: { id: true, homeCampusId: true },
+      where: { id: memberId },
+    });
+    const homeCampusId = me?.homeCampusId ?? null;
+
     const qb = this.announcementRepo
       .createQueryBuilder('a')
       .leftJoinAndSelect('a.author', 'author')
@@ -584,6 +626,12 @@ export class AnnouncementService {
       .leftJoinAndSelect('a.group', 'grp')
       .leftJoinAndSelect('a.churchClass', 'cls')
       .where('(a.publishedAt IS NULL OR a.publishedAt <= :now)', { now })
+      .andWhere(
+        homeCampusId
+          ? '(a.campusId IS NULL OR a.campusId = :homeCampusId)'
+          : 'a.campusId IS NULL',
+        { homeCampusId },
+      )
       .andWhere('(a.expiresAt IS NULL OR a.expiresAt > :now)', { now })
       .orderBy('a.publishedAt', 'DESC')
       .skip((page - 1) * limit)
@@ -651,6 +699,7 @@ export class AnnouncementService {
       .leftJoinAndSelect('a.targetMember', 'targetMember')
       .leftJoinAndSelect('a.group', 'grp')
       .leftJoinAndSelect('a.churchClass', 'cls')
+      .leftJoinAndSelect('a.campus', 'campus')
       .orderBy('a.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit);
@@ -741,6 +790,27 @@ export class AnnouncementService {
     }
 
     return { summary, myReaction };
+  }
+
+  // A campus narrows everyone, members, workers or a department; the other audiences already name their people.
+  private async resolveCampus(
+    audience: AnnouncementAudienceEnum | undefined,
+    campusId?: string | null,
+  ): Promise<string | null> {
+    if (!campusId) return null;
+    if (!CAMPUS_AUDIENCES.has(audience ?? AnnouncementAudienceEnum.ALL)) {
+      throw new BadRequestException(
+        'A campus can only narrow everyone, members, workers or a department.',
+      );
+    }
+    const open = await this.announcementRepo.manager.existsBy(Campus, {
+      id: campusId,
+      isActive: true,
+    });
+    if (!open) {
+      throw new BadRequestException('Choose one of the open campuses.');
+    }
+    return campusId;
   }
 
   private async getOrThrow(id: string): Promise<Announcement> {
