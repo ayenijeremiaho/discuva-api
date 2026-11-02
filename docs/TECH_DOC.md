@@ -23171,7 +23171,7 @@ Responses add `available`; admin Module Settings leaves out unavailable modules.
 defaults are all `on`, so existing church behaviour is unchanged. A saved choice, including one saved by renaming a
 module, stays pinned when the type's default later changes. Per-account module caches mean a change can take 5 minutes.
 
-**Wording:** `GET /v1/tenant/info` adds `orgType` and `wording`, a list of `{ from, to }` rules; it is empty when a type uses
+**Wording:** the dictionary includes a `workforce` term (Workforce; NGO: Team, group: Helpers). `GET /v1/tenant/info` adds `orgType` and `wording`, a list of `{ from, to }` rules; it is empty when a type uses
 the church words. Source text stays in church wording. `utils/wording.ts` in discuva-admin and discuva-member exposes
 `w(text)`, which keeps case and fixes a/an, and is set by `TenantProvider`. `w` must only receive fixed text, never a
 church's name or anything typed by a person. Each app has a test that fails when JSX text or a display attribute uses a
