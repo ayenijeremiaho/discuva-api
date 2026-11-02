@@ -61,6 +61,9 @@ export class MemberDto {
   role: MemberRoleEnum;
 
   @Expose()
+  homeCampusId: string | null;
+
+  @Expose()
   status: MemberStatusEnum;
 
   @Expose()

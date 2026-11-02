@@ -23201,7 +23201,7 @@ One church meeting in several places, inside one tenant. The Church Network (bra
 
 **Wording:** the account-type dictionary has a `campus` term (Campus/Campuses; NGO and group: Location/Locations).
 
-**Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `POST /v1/auth/signup` accepts `homeCampusId`.
+**Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `GET /v1/tenant/info` returns `campusesEnabled` (from the cached list) and `GET /v1/auth/me` returns `homeCampusId`, so the member app asks for a campus without an extra request. `POST /v1/auth/signup` accepts `homeCampusId`.
 
 **Admin routes (`/v1/admin/campuses`):** `GET /` (`members:read`), `POST /` and `PATCH /:id` (`admin:write`), `PUT /:id/venues` (`venues:write`), `GET /moves` (`members:read`, paginated, `campusId`, `direction`), `GET /move-requests` (`members:read`), `POST /move-requests/:id/approve|decline` (`members:write`, plus the campus rule above), `POST /move-member` (`members:write`), `PUT /:id/admins` (`admin:write`, active admins only). `GET /` also returns each campus's `admins` and `withoutCampus` (active members with no campus, while choosing is on; members are counted only when active).
 

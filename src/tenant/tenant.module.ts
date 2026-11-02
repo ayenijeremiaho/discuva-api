@@ -1,3 +1,4 @@
+import { CampusModule } from '../campus/campus.module';
 import { AdminVerificationController } from '../admin/controller/admin-verification.controller';
 import { AccountLifecycleScheduler } from './scheduler/account-lifecycle.scheduler';
 import { ChurchRequestService } from './service/church-request.service';
@@ -130,6 +131,7 @@ import { BranchModule } from '../branch/branch.module';
     BullModule.registerQueue({ name: TENANT_PROVISIONING_QUEUE }),
     BullModule.registerQueue({ name: ACCOUNT_FILE_CLEANUP_QUEUE }),
     BranchModule,
+    CampusModule,
     // Independent registration from AuthModule's own (same jwtConfig/
     // refreshJwtConfig factories, same secrets) — TenantMiddleware needs to
     // verify a JWT's tenant claim itself, before any guard runs, so it

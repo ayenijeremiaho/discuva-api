@@ -29,6 +29,7 @@ import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { AccountTypeService } from '../../account-type/account-type.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { CampusService } from '../../campus/campus.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
 import { phoneRegionFromLocale } from '../../utility/decorators/normalize-phone.decorator';
 import { TenantProfileService } from '../service/tenant-profile.service';
@@ -58,6 +59,7 @@ export class TenantInfoController {
   constructor(
     private readonly cloudinaryService: CloudinaryService,
     private readonly cacheService: CacheService,
+    private readonly campuses: CampusService,
     private readonly accountTypes: AccountTypeService,
     private readonly config: ConfigService,
     @InjectRepository(Tenant)
@@ -212,6 +214,8 @@ export class TenantInfoController {
       subdomain: tenant.subdomain,
       orgType: tenant.orgType,
       wording: (await this.accountTypes.getProfile(tenant.orgType)).wording,
+      // Members are asked to choose only once 2+ campuses are open (cached list).
+      campusesEnabled: (await this.campuses.publicChoices()).length > 0,
       privateGroup:
         tenant.orgType === OrganisationTypeEnum.GROUP && !tenant.verifiedAt,
       // Same fallback EmailQueueService/PdfService already apply when a

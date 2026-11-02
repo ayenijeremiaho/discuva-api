@@ -2,6 +2,7 @@ import { AccountTypeService } from '../../account-type/account-type.service';
 import { TenantReportService } from '../service/tenant-report.service';
 /// <reference types="jest" />
 
+import { CampusService } from '../../campus/campus.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -71,6 +72,10 @@ const baseTenant = {
   timezone: 'UTC',
 };
 
+const mockCampusService = {
+  publicChoices: jest.fn().mockResolvedValue([]),
+};
+
 describe('TenantInfoController', () => {
   let controller: TenantInfoController;
   let tenantProfileService: TenantProfileService;
@@ -106,6 +111,7 @@ describe('TenantInfoController', () => {
           },
         },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: CampusService, useValue: mockCampusService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
         { provide: TenantAssetService, useValue: mockTenantAssetService },
@@ -131,6 +137,7 @@ describe('TenantInfoController', () => {
 
       expect(result).toEqual({
         name: 'Test Church',
+        campusesEnabled: false,
         privateGroup: false,
         subdomain: 'test-church',
         orgType: undefined,
@@ -150,6 +157,15 @@ describe('TenantInfoController', () => {
       expect(mockTenantAssetService.getOverrides).toHaveBeenCalledWith(
         'tenant-1',
       );
+    });
+
+    it('says when members can choose a campus', async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
+      mockCampusService.publicChoices.mockResolvedValueOnce([
+        { id: 'c1', name: 'North' },
+        { id: 'c2', name: 'South' },
+      ]);
+      expect((await controller.getInfo()).campusesEnabled).toBe(true);
     });
 
     it("prefers the tenant's own uploaded logo over the LOGO_URL default", async () => {
