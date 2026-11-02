@@ -119,6 +119,7 @@ export interface ScoreboardEntry {
 export interface Scoreboard {
   period: Period;
   board: Board;
+  scope: BoardScope;
   entries: ScoreboardEntry[];
   me: {
     rank: number | null;
@@ -131,8 +132,11 @@ export interface Scoreboard {
 
 const BOARDS: Board[] = ['all', 'levels', 'daily', 'characters'];
 
+export type BoardScope = 'church' | 'campus';
+
 interface BoardRow {
   memberId: string;
+  campusId: string | null;
   name: string;
   highestPassed: number;
   dailyStreak: number;
@@ -479,6 +483,7 @@ export class BibleGamesService {
     period: Period,
     limit = 50,
     board: Board = 'all',
+    scope: BoardScope = 'church',
   ): Promise<Scoreboard> {
     const timezone = await this.churchTimezone.get();
     const key = this.scoreboardKey(period, timezone, board);
@@ -486,6 +491,15 @@ export class BibleGamesService {
     if (!totals) {
       totals = await this.boardRows(period, board, timezone);
       this.cacheService.set(key, totals, SCOREBOARD_TTL_SECONDS);
+    }
+    // A campus board ranks the cached church board's own campus rows, so it costs no extra board query.
+    if (scope === 'campus' && memberId) {
+      const [viewer] = (await this.txHost.tx.query(
+        'SELECT home_campus_id AS "campusId" FROM members WHERE id = $1',
+        [memberId],
+      )) as { campusId: string | null }[];
+      const campusId = viewer?.campusId ?? null;
+      totals = campusId ? totals.filter((t) => t.campusId === campusId) : [];
     }
 
     const today = this.localDate(timezone);
@@ -498,6 +512,7 @@ export class BibleGamesService {
     return {
       period,
       board,
+      scope,
       entries: ranked.slice(0, limit).map((t) => ({
         rank: t.rank,
         memberId: t.memberId,
@@ -538,6 +553,7 @@ export class BibleGamesService {
     timezone: string,
   ): Promise<BoardRow[]> {
     const player = (alias: string) => `${alias}.member_id AS "memberId",
+      m.home_campus_id AS "campusId",
       trim(concat_ws(' ', m.firstname, m.lastname)) AS name,
       COALESCE(g.highest_passed, 0)::int AS "highestPassed",
       COALESCE(g.daily_streak, 0)::int AS "dailyStreak",
@@ -940,8 +956,9 @@ export class BibleGamesService {
     timezone: string,
     board: Board = 'all',
   ): string {
+    // v2: rows carry each player's campus.
     return this.cacheService.key(
-      'bible-scoreboard',
+      'bible-scoreboard:v2',
       board,
       period === 'month' ? `month:${this.monthKey(timezone)}` : 'all',
     );

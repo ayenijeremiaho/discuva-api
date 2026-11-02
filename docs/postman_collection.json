@@ -31710,6 +31710,12 @@
                   "key": "limit",
                   "value": "50",
                   "disabled": true
+                },
+                {
+                  "key": "scope",
+                  "value": "church",
+                  "description": "church (default) or campus",
+                  "disabled": true
                 }
               ]
             },
@@ -31913,6 +31919,12 @@
                 {
                   "key": "limit",
                   "value": "50"
+                },
+                {
+                  "key": "scope",
+                  "value": "church",
+                  "description": "church (default) or campus",
+                  "disabled": true
                 }
               ]
             },
@@ -32199,6 +32211,12 @@
                   "key": "board",
                   "value": "all",
                   "description": "all | levels | daily"
+                },
+                {
+                  "key": "scope",
+                  "value": "church",
+                  "description": "church (default) or campus",
+                  "disabled": true
                 }
               ]
             },

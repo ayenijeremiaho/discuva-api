@@ -639,6 +639,47 @@ describe('BibleGamesService', () => {
       expect(board.me).toMatchObject({ rank: 2, behind: null });
     });
 
+    it("ranks a campus board among that campus's players only", async () => {
+      query
+        .mockResolvedValueOnce([
+          row({ memberId: 'a', name: 'Ada', points: 900, campusId: 'c2' }),
+          row({ memberId: 'b', name: 'Ben', points: 500, campusId: 'c1' }),
+          row({ memberId: 'm1', name: 'Tunde', points: 300, campusId: 'c1' }),
+        ])
+        .mockResolvedValueOnce([{ campusId: 'c1' }])
+        .mockResolvedValueOnce([]);
+      const board = await service.scoreboard(
+        'm1',
+        'month',
+        50,
+        'all',
+        'campus',
+      );
+      expect(board.scope).toBe('campus');
+      expect(board.entries.map((e) => [e.name, e.rank])).toEqual([
+        ['Ben', 1],
+        ['Tunde', 2],
+      ]);
+      expect(board.me).toMatchObject({ rank: 2, behind: 200 });
+    });
+
+    it('shows an empty campus board to someone without a campus', async () => {
+      query
+        .mockResolvedValueOnce([
+          row({ memberId: 'a', points: 900, campusId: 'c1' }),
+        ])
+        .mockResolvedValueOnce([{ campusId: null }])
+        .mockResolvedValueOnce([]);
+      const board = await service.scoreboard(
+        'm1',
+        'month',
+        50,
+        'all',
+        'campus',
+      );
+      expect(board.entries).toEqual([]);
+    });
+
     it('ranks all-time Levels by highest level, then level points', async () => {
       query.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       await service.scoreboard(null, 'all', 50, 'levels');

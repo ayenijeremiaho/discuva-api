@@ -37,6 +37,7 @@ export class BibleGamesController {
       query.period ?? 'month',
       query.limit ?? 50,
       query.board ?? 'all',
+      query.scope ?? 'church',
     );
   }
 

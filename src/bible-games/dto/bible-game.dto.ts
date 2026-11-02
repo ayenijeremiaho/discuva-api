@@ -63,6 +63,11 @@ export class ScoreboardQueryDto {
   @Min(5)
   @Max(100)
   limit?: number = 50;
+
+  // The whole church, or only the viewer's campus.
+  @IsOptional()
+  @IsIn(['church', 'campus'])
+  scope?: 'church' | 'campus' = 'church';
 }
 
 export class CharacterScoreboardQueryDto {
@@ -76,6 +81,11 @@ export class CharacterScoreboardQueryDto {
   @Min(5)
   @Max(100)
   limit?: number = 50;
+
+  // The whole church, or only the viewer's campus.
+  @IsOptional()
+  @IsIn(['church', 'campus'])
+  scope?: 'church' | 'campus' = 'church';
 }
 
 export class PreviewQueryDto {

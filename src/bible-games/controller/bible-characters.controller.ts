@@ -48,6 +48,7 @@ export class BibleCharactersController {
       query.period ?? 'month',
       query.limit ?? 50,
       'characters',
+      query.scope ?? 'church',
     );
   }
 
