@@ -32,6 +32,7 @@ import { ClassesModule } from './classes/classes.module';
 import { PastorFeedbackModule } from './pastor-feedback/pastor-feedback.module';
 import { AnnouncementModule } from './announcement/announcement.module';
 import { VenueModule } from './venue/venue.module';
+import { CampusModule } from './campus/campus.module';
 import { SundaySchoolModule } from './sunday-school/sunday-school.module';
 import { ChildrenChurchModule } from './children-church/children-church.module';
 import { BirthdayModule } from './birthday/birthday.module';
@@ -232,6 +233,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     MemberModule,
     DepartmentModule,
     ClergyTitleModule,
+    CampusModule,
     EventModule,
     AttendanceModule,
     DashboardModule,

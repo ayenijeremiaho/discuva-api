@@ -6,6 +6,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -20,6 +21,11 @@ import {
 } from '../../utility/decorators/normalize-phone.decorator';
 
 export class SignupDto {
+  // Offered only when the church has 2+ active campuses.
+  @IsOptional()
+  @IsUUID()
+  homeCampusId?: string;
+
   @IsString()
   @IsNotEmpty()
   @MaxLength(50)

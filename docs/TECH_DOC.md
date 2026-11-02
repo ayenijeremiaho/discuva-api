@@ -23187,3 +23187,19 @@ wording is sent as written.
 **Database cost:** one small root table written only on console saves. A module cache miss adds two cached lookups (the tenant's type and the type's
 profile), each reading the database at most once per 5 minutes.
 
+## Campuses (Phase 1 foundation)
+
+One church meeting in several places, inside one tenant. The Church Network (branch) feature stays for separate churches. Nothing campus-related shows until a church has 2+ active campuses.
+
+**Tables (tenant):** `campuses`, `venues.campus_id`, `members.home_campus_id`, `member_campus_moves` (one row per move, for joined and left views), `worker_campus_move_requests`.
+
+**Rules:** when a second active campus is added, every member and venue without a campus joins the first. Members move themselves (`PATCH /v1/campuses/me`). A worker's move creates a request (one pending per worker, partial unique index) unless they're choosing a first campus. Closing a campus with members needs `moveMembersTo`, and each move is recorded. Nobody can decide their own move.
+
+**Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `POST /v1/auth/signup` accepts `homeCampusId`.
+
+**Admin routes (`/v1/admin/campuses`):** `GET /` (`members:read`), `POST /` and `PATCH /:id` (`admin:write`), `PUT /:id/venues` (`venues:write`), `GET /moves` (`members:read`, paginated, `campusId`, `direction`), `GET /move-requests` (`members:read`), `POST /move-requests/:id/approve|decline` (`members:write`).
+
+**Database cost:** active campuses are cached for 5 minutes, so a church without campuses costs one cached lookup. Partial indexes on `home_campus_id` and `venues.campus_id` skip churches with none. Moves are indexed on destination, origin and date; requests on status and date.
+
+**Not in this slice:** content by campus, departments by campus, notifying the new campus and heads of department about worker moves, campus admin restrictions (Row Level Security). Approval currently sits with any admin holding `members:write`.
+

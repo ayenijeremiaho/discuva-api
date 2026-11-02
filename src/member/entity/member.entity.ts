@@ -116,6 +116,10 @@ export class Member extends BaseEntity {
   @Column({ nullable: true })
   photoPublicId: string | null;
 
+  // Null until the church has campuses. Moves are recorded in member_campus_moves.
+  @Column({ type: 'uuid', name: 'home_campus_id', nullable: true })
+  homeCampusId: string | null;
+
   // Notification kinds this member turned off (MEMBER_NOTIFICATION_CHOICES categories).
   @Column({ type: 'varchar', array: true, default: '{}' })
   mutedNotifications: string[];

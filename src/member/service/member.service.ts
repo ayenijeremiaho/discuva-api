@@ -1,3 +1,4 @@
+import { Campus } from '../../campus/campus.entity';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   AudienceTarget,
@@ -101,11 +102,21 @@ export class MemberService {
       this.memberRepository.count(),
     );
     await this.assertEmailUnique(dto.email);
+    if (
+      dto.homeCampusId &&
+      !(await this.memberRepository.manager.existsBy(Campus, {
+        id: dto.homeCampusId,
+        isActive: true,
+      }))
+    ) {
+      throw new BadRequestException('Choose one of the active campuses.');
+    }
 
     const tempPassword = UtilityService.generateRandomPassword();
     const password = await UtilityService.hashValue(tempPassword);
 
     const member = this.memberRepository.create({
+      homeCampusId: dto.homeCampusId ?? null,
       firstname: dto.firstname,
       lastname: dto.lastname,
       email: dto.email,

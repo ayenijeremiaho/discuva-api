@@ -45494,6 +45494,245 @@
           }
         }
       ]
+    },
+    {
+      "name": "Campuses",
+      "item": [
+        {
+          "name": "Campus Choices (public)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/campuses/public",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "campuses",
+                "public"
+              ]
+            }
+          }
+        },
+        {
+          "name": "My Campus",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/campuses/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "campuses",
+                "me"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Move My Campus",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/campuses/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "campuses",
+                "me"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"campusId\": \"uuid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Admin List Campuses",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin Create Campus",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"North\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Admin Update Campus",
+          "request": {
+            "method": "PATCH",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/:id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                ":id"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"North\",\n  \"isActive\": false,\n  \"moveMembersTo\": \"uuid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Admin Set Campus Venues",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/:id/venues",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                ":id",
+                "venues"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"venueIds\": [\n    \"uuid\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Admin Campus Moves",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/moves?direction=joined&page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                "moves?direction=joined&page=1&limit=20"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin Move Requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/move-requests",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                "move-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin Approve Move",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/move-requests/:id/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                "move-requests",
+                ":id",
+                "approve"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Admin Decline Move",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/move-requests/:id/decline",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                "move-requests",
+                ":id",
+                "decline"
+              ]
+            }
+          }
+        }
+      ]
     }
   ]
 }

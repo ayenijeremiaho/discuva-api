@@ -18,4 +18,7 @@ export class Venue extends BaseEntity {
 
   @Column({ type: 'float' })
   longitude: number;
+
+  @Column({ type: 'uuid', name: 'campus_id', nullable: true })
+  campusId: string | null;
 }
