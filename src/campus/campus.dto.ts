@@ -41,6 +41,19 @@ export class SetCampusVenuesDto {
   venueIds: string[];
 }
 
+export class SetCampusAdminsDto {
+  @IsUUID('all', { each: true })
+  adminIds: string[];
+}
+
+export class MoveMemberCampusDto {
+  @IsUUID()
+  memberId: string;
+
+  @IsUUID()
+  campusId: string;
+}
+
 export class MoveMyCampusDto {
   @IsUUID()
   campusId: string;

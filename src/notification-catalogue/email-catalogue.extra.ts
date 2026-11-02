@@ -875,6 +875,103 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ form_title: 'formTitle', submission_id: 'submissionId' }),
     sampleData: { formTitle: 'Volunteer Sign-up', submissionId: 'SUB-381' },
   },
+  'campus-move-requested': {
+    category: EmailCategory.CAMPUSES,
+    label: 'Campus move to approve',
+    description:
+      "Sent to a campus's admins when one of its workers asks to move campus.",
+    lockedNote: 'The worker and both campuses are always included.',
+    subject: '{{default_subject}}',
+    heading: 'A campus move to approve',
+    message:
+      '<p>{{worker_name}} has asked to move from {{from_campus}} to {{to_campus}}.</p><p>Their rota and department leads may need to plan for it. Approve or decline under Campuses in the admin portal.</p>',
+    closing: '',
+    signoff: 'Regards,',
+    signature: '{{church_name}}',
+    preheader: '{{worker_name}} asked to move to {{to_campus}}.',
+    placeholders: {
+      default_subject: 'A campus move to approve',
+      worker_name: 'Fiona Adeyemi',
+      from_campus: 'North',
+      to_campus: 'City Centre',
+    },
+    toVars: pick({
+      worker_name: 'workerName',
+      from_campus: 'fromCampus',
+      to_campus: 'toCampus',
+    }),
+    sampleData: {
+      workerName: 'Fiona Adeyemi',
+      fromCampus: 'North',
+      toCampus: 'City Centre',
+    },
+  },
+  'campus-move-decided': {
+    category: EmailCategory.CAMPUSES,
+    label: 'Campus move decided',
+    description:
+      'Sent to a worker when their campus move is approved or declined.',
+    lockedNote: 'The decision and campuses are always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your campus move was {{decision}}, {{first_name}}',
+    message:
+      '<p>Your request to move from {{from_campus}} to {{to_campus}} was {{decision}}.</p>',
+    closing:
+      '<p>You can see your campus any time under My Account in the app.</p>',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'Your campus move was {{decision}}.',
+    placeholders: {
+      default_subject: 'Your campus move',
+      decision: 'approved',
+      first_name: 'Fiona',
+      from_campus: 'North',
+      to_campus: 'City Centre',
+    },
+    toVars: pick({
+      decision: 'decision',
+      first_name: 'name',
+      from_campus: 'fromCampus',
+      to_campus: 'toCampus',
+    }),
+    sampleData: {
+      decision: 'approved',
+      name: 'Fiona',
+      fromCampus: 'North',
+      toCampus: 'City Centre',
+    },
+  },
+  'campus-worker-joining': {
+    category: EmailCategory.CAMPUSES,
+    label: 'Worker joining your campus',
+    description:
+      "Sent to a campus's admins when a worker's move there is approved.",
+    lockedNote: 'The worker and both campuses are always included.',
+    subject: '{{default_subject}}',
+    heading: '{{worker_name}} is joining {{to_campus}}',
+    message:
+      '<p>{{worker_name}} has moved from {{from_campus}} to {{to_campus}}. You may want to add them to your rota.</p>',
+    closing: '',
+    signoff: 'Regards,',
+    signature: '{{church_name}}',
+    preheader: 'A worker is joining {{to_campus}}.',
+    placeholders: {
+      default_subject: 'A worker is joining your campus',
+      worker_name: 'Fiona Adeyemi',
+      from_campus: 'North',
+      to_campus: 'City Centre',
+    },
+    toVars: pick({
+      worker_name: 'workerName',
+      from_campus: 'fromCampus',
+      to_campus: 'toCampus',
+    }),
+    sampleData: {
+      workerName: 'Fiona Adeyemi',
+      fromCampus: 'North',
+      toCampus: 'City Centre',
+    },
+  },
   'incident-report-new': {
     category: EmailCategory.INCIDENT_REPORT,
     label: 'New incident report',

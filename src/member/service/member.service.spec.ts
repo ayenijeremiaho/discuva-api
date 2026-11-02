@@ -38,6 +38,7 @@ const mockMemberRepo = {
   createQueryBuilder: jest.fn(),
   manager: {
     transaction: jest.fn(),
+    find: jest.fn().mockResolvedValue([]),
   },
 };
 
@@ -145,6 +146,55 @@ describe('MemberService', () => {
   });
 
   describe('signup', () => {
+    describe('campus', () => {
+      const base = { email: 'new@test.com', firstname: 'a', lastname: 'b' };
+      beforeEach(() => {
+        mockMemberRepo.exists.mockResolvedValue(false);
+        jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('h');
+        mockMemberRepo.create.mockImplementation((m) => m);
+        mockMemberRepo.save.mockImplementation((m) =>
+          Promise.resolve({ id: 'uuid-1', ...m }),
+        );
+      });
+      afterEach(() => mockMemberRepo.manager.find.mockResolvedValue([]));
+
+      it('needs no campus while the church has one', async () => {
+        mockMemberRepo.manager.find.mockResolvedValue([{ id: 'c1' }]);
+        await service.signup(base as any);
+        expect(mockMemberRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ homeCampusId: null }),
+        );
+      });
+
+      it('requires one once members can choose', async () => {
+        mockMemberRepo.manager.find.mockResolvedValue([
+          { id: 'c1' },
+          { id: 'c2' },
+        ]);
+        await expect(service.signup(base as any)).rejects.toThrow(
+          'Choose your campus.',
+        );
+      });
+
+      it('saves the chosen campus', async () => {
+        mockMemberRepo.manager.find.mockResolvedValue([
+          { id: 'c1' },
+          { id: 'c2' },
+        ]);
+        await service.signup({ ...base, homeCampusId: 'c2' } as any);
+        expect(mockMemberRepo.create).toHaveBeenCalledWith(
+          expect.objectContaining({ homeCampusId: 'c2' }),
+        );
+      });
+
+      it('refuses a closed or unknown campus', async () => {
+        mockMemberRepo.manager.find.mockResolvedValue([{ id: 'c1' }]);
+        await expect(
+          service.signup({ ...base, homeCampusId: 'gone' } as any),
+        ).rejects.toThrow('Choose one of the active campuses.');
+      });
+    });
+
     it('should throw ConflictException when email already exists', async () => {
       mockMemberRepo.exists.mockResolvedValue(true);
 

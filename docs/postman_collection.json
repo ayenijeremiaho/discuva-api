@@ -45731,6 +45731,61 @@
               ]
             }
           }
+        },
+        {
+          "name": "Admin Set Campus Admins",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/:id/admins",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                ":id",
+                "admins"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adminIds\": [\n    \"{{adminId}}\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "Admin Move Member Campus",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/admin/campuses/move-member",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "admin",
+                "campuses",
+                "move-member"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"campusId\": \"{{campusId}}\"\n}"
+            }
+          }
         }
       ]
     }

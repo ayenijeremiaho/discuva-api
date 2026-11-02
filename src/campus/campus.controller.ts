@@ -25,7 +25,9 @@ import { CampusService } from './campus.service';
 import {
   CampusMovesQueryDto,
   CreateCampusDto,
+  MoveMemberCampusDto,
   MoveMyCampusDto,
+  SetCampusAdminsDto,
   SetCampusVenuesDto,
   UpdateCampusDto,
 } from './campus.dto';
@@ -79,8 +81,15 @@ export class CampusAdminController {
 
   @RequiresPermission(AdminPermission.MEMBERS_READ)
   @Get('move-requests')
-  moveRequests() {
-    return this.campuses.moveRequests();
+  moveRequests(@CurrentAdmin() admin: Admin) {
+    return this.campuses.moveRequests(admin);
+  }
+
+  @RequiresPermission(AdminPermission.MEMBERS_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @Post('move-member')
+  moveMember(@Body() dto: MoveMemberCampusDto, @CurrentAdmin() admin: Admin) {
+    return this.campuses.moveMember(dto.memberId, dto.campusId, admin);
   }
 
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)
@@ -90,7 +99,7 @@ export class CampusAdminController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentAdmin() admin: Admin,
   ) {
-    return this.campuses.decideRequest(id, true, admin.member.id);
+    return this.campuses.decideRequest(id, true, admin);
   }
 
   @RequiresPermission(AdminPermission.MEMBERS_WRITE)
@@ -100,7 +109,7 @@ export class CampusAdminController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentAdmin() admin: Admin,
   ) {
-    return this.campuses.decideRequest(id, false, admin.member.id);
+    return this.campuses.decideRequest(id, false, admin);
   }
 
   @RequiresPermission(AdminPermission.ADMIN_WRITE)
@@ -111,6 +120,16 @@ export class CampusAdminController {
     @CurrentAdmin() admin: Admin,
   ) {
     return this.campuses.update(id, dto, admin.member?.id);
+  }
+
+  @RequiresPermission(AdminPermission.ADMIN_WRITE)
+  @Put(':id/admins')
+  setAdmins(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetCampusAdminsDto,
+    @CurrentAdmin() admin: Admin,
+  ) {
+    return this.campuses.setAdmins(id, dto.adminIds, admin.member?.id);
   }
 
   @RequiresPermission(AdminPermission.VENUES_WRITE)

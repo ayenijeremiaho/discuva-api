@@ -138,6 +138,13 @@ describe('AccountTypeService', () => {
     expect(profile.modules.prayer).toBe('on');
   });
 
+  it('calls campuses locations outside churches', async () => {
+    const profile = await service.getProfile(OrganisationTypeEnum.MINISTRY);
+    expect(applyWording('Add Campus · 2 campuses', profile.wording)).toBe(
+      'Add Location · 2 locations',
+    );
+  });
+
   it('lets the dictionary and availability be changed', async () => {
     repo.findOne.mockResolvedValue({
       value: {

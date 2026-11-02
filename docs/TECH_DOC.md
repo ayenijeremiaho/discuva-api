@@ -23191,15 +23191,21 @@ profile), each reading the database at most once per 5 minutes.
 
 One church meeting in several places, inside one tenant. The Church Network (branch) feature stays for separate churches. Nothing campus-related shows until a church has 2+ active campuses.
 
-**Tables (tenant):** `campuses`, `venues.campus_id`, `members.home_campus_id`, `member_campus_moves` (one row per move, for joined and left views), `worker_campus_move_requests`.
+**Tables (tenant):** `campuses`, `venues.campus_id`, `members.home_campus_id`, `member_campus_moves` (one row per move, for joined and left views), `worker_campus_move_requests`, `campus_admins` (admin ↔ campus; an admin with no rows looks after the whole church).
 
-**Rules:** when a second active campus is added, every member and venue without a campus joins the first. Members move themselves (`PATCH /v1/campuses/me`). A worker's move creates a request (one pending per worker, partial unique index) unless they're choosing a first campus. Closing a campus with members needs `moveMembersTo`, and each move is recorded; pending requests into the closed campus, or already granted by the close, are dropped. Changing a campus's venues clears the venue list cache. Nobody can decide their own move.
+**Rules:** when a second active campus is added, every member and venue without a campus joins the first. Members move themselves (`PATCH /v1/campuses/me`). A worker's move creates a request (one pending per worker, partial unique index) unless they're choosing a first campus. Closing a campus with members needs `moveMembersTo`, and each move is recorded; pending requests into the closed campus, or already granted by the close, are dropped. Changing a campus's venues clears the venue list cache. Reopening a campus that brings the church back to two open runs the same adoption as adding the second. Once members can choose, sign-up (`POST /v1/auth/signup` and admin `POST /v1/members`) requires `homeCampusId` (400 `Choose your campus.`).
+
+**Campus admins and approvals:** a worker's move is decided by an owner, a church-wide admin, or an admin of the worker's current campus (others get 403); nobody decides their own move. `GET /move-requests` returns `canDecide` per row. An admin can move any member they look after with `POST /move-member` (recorded as a move; drops that member's pending request).
+
+**Notifications (category `CAMPUSES`, group People and care, env `EMAIL_CAMPUSES_ENABLED`):** on a worker's request, email `campus-move-requested` to the current campus's admins with `members:write` (church-wide ones if the campus has none) and push `CAMPUS_MOVE_REQUESTED` to the worker's department heads and deputies. On a decision, email `campus-move-decided` and push `CAMPUS_MOVE_APPROVED`/`CAMPUS_MOVE_DECLINED` to the worker; on approval also email `campus-worker-joining` to the new campus's own admins and push `CAMPUS_WORKER_MOVED` to the leads. Recipient lookups run in the request; sending never fails it.
+
+**Wording:** the account-type dictionary has a `campus` term (Campus/Campuses; NGO and group: Location/Locations).
 
 **Member routes:** `GET /v1/campuses/public` (sign-up; empty below 2 active), `GET /v1/campuses/me`, `PATCH /v1/campuses/me`. `POST /v1/auth/signup` accepts `homeCampusId`.
 
-**Admin routes (`/v1/admin/campuses`):** `GET /` (`members:read`), `POST /` and `PATCH /:id` (`admin:write`), `PUT /:id/venues` (`venues:write`), `GET /moves` (`members:read`, paginated, `campusId`, `direction`), `GET /move-requests` (`members:read`), `POST /move-requests/:id/approve|decline` (`members:write`).
+**Admin routes (`/v1/admin/campuses`):** `GET /` (`members:read`), `POST /` and `PATCH /:id` (`admin:write`), `PUT /:id/venues` (`venues:write`), `GET /moves` (`members:read`, paginated, `campusId`, `direction`), `GET /move-requests` (`members:read`), `POST /move-requests/:id/approve|decline` (`members:write`, plus the campus rule above), `POST /move-member` (`members:write`), `PUT /:id/admins` (`admin:write`, active admins only). `GET /` also returns each campus's `admins` and `withoutCampus` (active members with no campus, while choosing is on; members are counted only when active).
 
 **Database cost:** active campuses are cached for 5 minutes, so a church without campuses costs one cached lookup. Partial indexes on `home_campus_id` and `venues.campus_id` skip churches with none. Moves are indexed on destination, origin and date; requests on status and date.
 
-**Not in this slice:** content by campus, departments by campus, notifying the new campus and heads of department about worker moves, campus admin restrictions (Row Level Security). Approval currently sits with any admin holding `members:write`.
+**Not yet:** limiting what a campus admin can see (Row Level Security). Assigning campuses to an admin routes approvals and notices; it does not hide other campuses' data.
 

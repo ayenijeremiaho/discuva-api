@@ -1,0 +1,25 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<table class="attributes" width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td class="attributes_content">
+                          <table width="100%" cellpadding="0" cellspacing="0" role="presentation">
+                            <tr>
+                              <td class="attributes_item"><strong>Worker:</strong> {{ workerName }}</td>
+                            </tr>
+                            <tr>
+                              <td class="attributes_item"><strong>Move:</strong> {{ fromCampus }} &rarr; {{ toCampus }}</td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+<table width="100%" cellpadding="0" cellspacing="0" role="presentation"
+                           style="margin: 30px 0; text-align: center;">
+                      <tr>
+                        <td>
+                          <a href="{{admin_login_url}}" class="button" target="_blank">Open Admin Portal</a>
+                        </td>
+                      </tr>
+                    </table>
+{{{ closing_html }}}

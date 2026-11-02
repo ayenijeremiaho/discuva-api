@@ -147,6 +147,11 @@ export const ACCOUNT_TERMS: {
       term('Contribution'),
     ]),
   },
+  {
+    key: 'campus',
+    label: 'Place you meet',
+    words: same('Campus', 'Campuses', [term('Location'), term('Location')]),
+  },
 ];
 
 // Ordinary phrases that happen to contain a dictionary word.

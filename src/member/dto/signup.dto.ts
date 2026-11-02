@@ -21,7 +21,7 @@ import {
 } from '../../utility/decorators/normalize-phone.decorator';
 
 export class SignupDto {
-  // Offered only when the church has 2+ active campuses.
+  // Required once the church has 2+ active campuses.
   @IsOptional()
   @IsUUID()
   homeCampusId?: string;

@@ -1,4 +1,5 @@
 import { Campus } from '../../campus/campus.entity';
+import { CAMPUSES_NEEDED_TO_CHOOSE } from '../../campus/campus.constant';
 import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import {
   AudienceTarget,
@@ -97,20 +98,27 @@ export class MemberService {
     return saved;
   }
 
+  // Once members can choose (2+ open campuses), everyone belongs to one.
+  private async assertHomeCampus(homeCampusId?: string): Promise<void> {
+    const open = await this.memberRepository.manager.find(Campus, {
+      select: { id: true },
+      where: { isActive: true },
+    });
+    if (homeCampusId) {
+      if (!open.some((c) => c.id === homeCampusId)) {
+        throw new BadRequestException('Choose one of the active campuses.');
+      }
+    } else if (open.length >= CAMPUSES_NEEDED_TO_CHOOSE) {
+      throw new BadRequestException('Choose your campus.');
+    }
+  }
+
   private async createMemberRecord(dto: SignupDto): Promise<Member> {
     await this.verification.assertRoomForMembers(() =>
       this.memberRepository.count(),
     );
     await this.assertEmailUnique(dto.email);
-    if (
-      dto.homeCampusId &&
-      !(await this.memberRepository.manager.existsBy(Campus, {
-        id: dto.homeCampusId,
-        isActive: true,
-      }))
-    ) {
-      throw new BadRequestException('Choose one of the active campuses.');
-    }
+    await this.assertHomeCampus(dto.homeCampusId);
 
     const tempPassword = UtilityService.generateRandomPassword();
     const password = await UtilityService.hashValue(tempPassword);

@@ -1,9 +1,11 @@
+import { Admin } from '../admin/entity/admin.entity';
 import {
   Column,
   Entity,
   Index,
   JoinColumn,
   ManyToOne,
+  PrimaryColumn,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { BaseEntity } from '../utility/entity/base.entity';
@@ -98,4 +100,23 @@ export class WorkerCampusMoveRequest extends BaseEntity {
 
   @Column({ type: 'timestamptz', name: 'decided_at', nullable: true })
   decidedAt: Date | null;
+}
+
+// Admins who look after a campus. An admin with none looks after the whole church.
+@Entity({ name: 'campus_admins' })
+export class CampusAdmin extends BaseEntity {
+  @PrimaryColumn({ type: 'uuid', name: 'campus_id' })
+  campusId: string;
+
+  @ManyToOne(() => Campus, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'campus_id' })
+  campus: Campus;
+
+  @Index('IDX_campus_admins_admin')
+  @PrimaryColumn({ type: 'uuid', name: 'admin_id' })
+  adminId: string;
+
+  @ManyToOne(() => Admin, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'admin_id' })
+  admin: Admin;
 }

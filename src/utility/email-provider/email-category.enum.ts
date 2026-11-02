@@ -30,4 +30,5 @@ export enum EmailCategory {
   TEAM_PULSE = 'TEAM_PULSE',
   TEAM_SPACES = 'TEAM_SPACES',
   SERVING_ROTA = 'SERVING_ROTA',
+  CAMPUSES = 'CAMPUSES',
 }

@@ -68,6 +68,10 @@ export enum PushNotificationKey {
   ROTA_COVER_NEEDED = 'ROTA_COVER_NEEDED',
   ROTA_COVER_TAKEN = 'ROTA_COVER_TAKEN',
   ROTA_CHECKIN_NUDGE = 'ROTA_CHECKIN_NUDGE',
+  CAMPUS_MOVE_REQUESTED = 'CAMPUS_MOVE_REQUESTED',
+  CAMPUS_MOVE_APPROVED = 'CAMPUS_MOVE_APPROVED',
+  CAMPUS_MOVE_DECLINED = 'CAMPUS_MOVE_DECLINED',
+  CAMPUS_WORKER_MOVED = 'CAMPUS_WORKER_MOVED',
 }
 
 export interface PushTemplate {
@@ -860,6 +864,52 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       service_name: 'Sunday Service',
       department_name: 'Ushering',
       time: '8:00 AM',
+    },
+  },
+  [PushNotificationKey.CAMPUS_MOVE_REQUESTED]: {
+    category: EmailCategory.CAMPUSES,
+    label: 'Worker asked to move campus',
+    description:
+      "Sent to a worker's department leads when they ask to move campus.",
+    title: '{{worker_name}} asked to move campus',
+    body: 'From {{from_campus}} to {{to_campus}}. Their campus admins will decide.',
+    url: '/department-summary',
+    placeholders: {
+      worker_name: 'Fiona Adeyemi',
+      from_campus: 'North',
+      to_campus: 'City Centre',
+    },
+  },
+  [PushNotificationKey.CAMPUS_MOVE_APPROVED]: {
+    category: EmailCategory.CAMPUSES,
+    label: 'Campus move approved',
+    description: 'Sent to a worker when their campus move is approved.',
+    title: "You're now at {{to_campus}}",
+    body: 'Your move from {{from_campus}} was approved.',
+    url: '/account/campus',
+    placeholders: { from_campus: 'North', to_campus: 'City Centre' },
+  },
+  [PushNotificationKey.CAMPUS_MOVE_DECLINED]: {
+    category: EmailCategory.CAMPUSES,
+    label: 'Campus move declined',
+    description: 'Sent to a worker when their campus move is declined.',
+    title: 'Your campus move was declined',
+    body: 'You stay at {{from_campus}}. Speak to your campus admins if you have questions.',
+    url: '/account/campus',
+    placeholders: { from_campus: 'North' },
+  },
+  [PushNotificationKey.CAMPUS_WORKER_MOVED]: {
+    category: EmailCategory.CAMPUSES,
+    label: 'Worker moved campus',
+    description:
+      "Sent to a worker's department leads when their campus move is approved.",
+    title: '{{worker_name}} now serves at {{to_campus}}',
+    body: 'Their move from {{from_campus}} was approved.',
+    url: '/department-summary',
+    placeholders: {
+      worker_name: 'Fiona Adeyemi',
+      from_campus: 'North',
+      to_campus: 'City Centre',
     },
   },
   [PushNotificationKey.FELLOWSHIP_MEMBER_MISSING]: {

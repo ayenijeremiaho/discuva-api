@@ -160,4 +160,9 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         'App notifications to workers when they are put on (or taken off) the rota, reminders before they serve, and cover requests from teammates.',
     },
+    [EmailCategory.CAMPUSES]: {
+      label: 'Campuses',
+      description:
+        "Worker campus moves: the campus's admins are asked to approve, department leads are told, the worker hears the decision, and the new campus's admins are told who is joining.",
+    },
   };

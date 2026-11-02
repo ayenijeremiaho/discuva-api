@@ -271,6 +271,7 @@ export class EmailQueueService {
       [EmailCategory.TEAM_PULSE]: 'EMAIL_TEAM_PULSE_ENABLED',
       [EmailCategory.TEAM_SPACES]: 'EMAIL_TEAM_SPACES_ENABLED',
       [EmailCategory.SERVING_ROTA]: 'EMAIL_SERVING_ROTA_ENABLED',
+      [EmailCategory.CAMPUSES]: 'EMAIL_CAMPUSES_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;
     return this.emailCategorySettingsService.isEnabled(category);

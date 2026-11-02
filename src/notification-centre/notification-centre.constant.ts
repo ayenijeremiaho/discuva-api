@@ -14,6 +14,7 @@ export const NOTIFICATION_GROUPS: Record<EmailCategory, string> = {
   [EmailCategory.PRAYER_REQUESTS]: 'People and care',
   [EmailCategory.PASTOR_FEEDBACK]: 'People and care',
   [EmailCategory.EVANGELISM]: 'People and care',
+  [EmailCategory.CAMPUSES]: 'People and care',
   [EmailCategory.TEAM_SPACES]: 'Teams',
   [EmailCategory.TEAM_PULSE]: 'Teams',
   [EmailCategory.SERVING_ROTA]: 'Teams',
