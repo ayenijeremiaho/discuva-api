@@ -165,8 +165,8 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.CHURCH_PROFILE_WRITE]: 'Edit Church Profile',
   [AdminPermission.BILLING_READ]: 'View Plan & Billing',
   [AdminPermission.BILLING_WRITE]: 'Manage Plan & Billing',
-  [AdminPermission.BRANCH_READ]: 'View Branch Overview',
-  [AdminPermission.BRANCH_WRITE]: 'Manage Branches',
+  [AdminPermission.BRANCH_READ]: 'View Church Network',
+  [AdminPermission.BRANCH_WRITE]: 'Manage Church Network',
   [AdminPermission.FORMS_READ]: 'View Forms & Submissions',
   [AdminPermission.FORMS_WRITE]: 'Build & Manage Forms',
   [AdminPermission.PAGES_READ]: 'View Pages',
@@ -320,9 +320,9 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
   [AdminPermission.BILLING_WRITE]:
     'Initiate a plan upgrade checkout or cancel the current subscription',
   [AdminPermission.BRANCH_READ]:
-    "View this church's branch hierarchy and each branch's rollup stats (member count, attendance, giving)",
+    "View this church's network of separate branch churches and each branch's rollup stats (member count, attendance, giving)",
   [AdminPermission.BRANCH_WRITE]:
-    'Invite a new branch church and manage the branch hierarchy link',
+    'Invite a new branch church and manage links in the church network',
   [AdminPermission.FORMS_READ]:
     'View forms and their submissions, and export submissions as CSV',
   [AdminPermission.FORMS_WRITE]:

@@ -23189,7 +23189,7 @@ profile), each reading the database at most once per 5 minutes.
 
 ## Campuses (Phase 1 foundation)
 
-One church meeting in several places, inside one tenant. The Church Network (branch) feature stays for separate churches. Nothing campus-related shows until a church has 2+ active campuses.
+One church meeting in several places, inside one tenant. The Church Network (branch) feature stays for separate churches. The admin page and permission labels now say Church Network (route `/branch-hierarchy` and permissions `branch:read`/`branch:write` are unchanged), and each page points to the other. Nothing campus-related shows until a church has 2+ active campuses.
 
 **Tables (tenant):** `campuses`, `venues.campus_id`, `members.home_campus_id`, `member_campus_moves` (one row per move, for joined and left views), `worker_campus_move_requests`, `campus_admins` (admin ↔ campus; an admin with no rows looks after the whole church).
 
