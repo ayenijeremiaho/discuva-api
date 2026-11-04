@@ -1,3 +1,4 @@
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -102,6 +103,11 @@ const mockFormAttemptService = {
   consumeAttempt: jest.fn().mockResolvedValue(undefined),
 };
 
+const mockVerification = {
+  isPrivateGroup: jest.fn().mockResolvedValue(false),
+  assertNotPrivateGroup: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('FormSubmissionService', () => {
   let service: FormSubmissionService;
 
@@ -137,6 +143,7 @@ describe('FormSubmissionService', () => {
         },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: FormAttemptService, useValue: mockFormAttemptService },
+        { provide: TenantVerificationService, useValue: mockVerification },
       ],
     }).compile();
     service = module.get(FormSubmissionService);
@@ -286,6 +293,15 @@ describe('FormSubmissionService', () => {
   });
 
   describe('getForPublic', () => {
+    it('hides public forms of a group that is not verified yet', async () => {
+      mockVerification.isPrivateGroup.mockResolvedValueOnce(true);
+
+      await expect(service.getForPublic('form-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(mockFormRepo.findOne).not.toHaveBeenCalled();
+    });
+
     it('404s on a MEMBERS-only form even if active', async () => {
       mockFormRepo.findOne.mockResolvedValue(null);
       await expect(service.getForPublic('form-1')).rejects.toThrow(

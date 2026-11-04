@@ -38,6 +38,7 @@ import {
 } from '../dto/form-analytics.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { DateService } from '../../utility/service/date.service';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 
 const FIRST_TIMER_REQUIRED_AUTOFILL_KEYS = [
   FormFieldAutoFill.FIRST_NAME,
@@ -73,9 +74,11 @@ export class FormService {
     private readonly submissionRepo: Repository<FormSubmission>,
     private readonly cloudinaryService: CloudinaryService,
     private readonly dateService: DateService,
+    private readonly verification: TenantVerificationService,
   ) {}
 
   async create(dto: CreateFormDto): Promise<Form> {
+    await this.assertMayBePublic(dto.visibility);
     if (dto.createsFirstTimers) {
       this.assertValidFirstTimerConfig(dto.visibility, dto.fields);
     }
@@ -184,6 +187,7 @@ export class FormService {
   async cloneForm(sourceId: string, dto: CloneFormDto): Promise<Form> {
     const source = await this.getById(sourceId);
     const scalars = this.buildCloneScalars(source, dto);
+    await this.assertMayBePublic(scalars.visibility);
 
     this.assertValidAudienceGroup(scalars.visibility, scalars.audienceGroupId);
     this.assertValidGeneralAction(
@@ -960,7 +964,16 @@ export class FormService {
   // new field, and an existing row missing from the incoming array is
   // deleted. A deleted field's key just becomes a harmless orphan inside
   // past submissions' answers JSON — nothing reads/writes it again.
+  private async assertMayBePublic(
+    visibility: FormVisibility | undefined,
+  ): Promise<void> {
+    if (visibility === FormVisibility.PUBLIC) {
+      await this.verification.assertNotPrivateGroup('share a public form');
+    }
+  }
+
   async update(id: string, dto: UpdateFormDto): Promise<Form> {
+    await this.assertMayBePublic(dto.visibility);
     const form = await this.getById(id);
 
     if (dto.title !== undefined) form.title = dto.title;

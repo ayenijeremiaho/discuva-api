@@ -23,6 +23,7 @@ import {
   FormPurpose,
   FormVisibility,
 } from '../enum/form.enum';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { FormAttemptService } from './form-attempt.service';
 import {
   FormSubmitResponseDto,
@@ -78,6 +79,7 @@ export class FormSubmissionService {
     private readonly emailCategorySettingsService: EmailCategorySettingsService,
     private readonly cloudinaryService: CloudinaryService,
     private readonly formAttemptService: FormAttemptService,
+    private readonly verification: TenantVerificationService,
   ) {
     const locale = this.config.get<string>('CURRENCY_LOCALE', 'en-NG');
     this.defaultPhoneRegion = (locale.split('-')[1]?.toUpperCase() ??
@@ -165,7 +167,15 @@ export class FormSubmissionService {
     return 'OPEN';
   }
 
+  // Covers public forms a group shared before this rule existed.
+  private async assertPublicFormsAllowed(): Promise<void> {
+    if (await this.verification.isPrivateGroup()) {
+      throw new NotFoundException('Form not found');
+    }
+  }
+
   async getForPublic(id: string): Promise<PublicFormDto> {
+    await this.assertPublicFormsAllowed();
     const form = await this.formRepo.findOne({
       where: { id, isActive: true, visibility: FormVisibility.PUBLIC },
       order: { fields: { order: 'ASC' } },
@@ -222,6 +232,7 @@ export class FormSubmissionService {
     formId: string,
     answers: Record<string, unknown>,
   ): Promise<FormSubmitResponseDto> {
+    await this.assertPublicFormsAllowed();
     const form = await this.getVisibleFormOrThrow(formId, [
       FormVisibility.PUBLIC,
     ]);

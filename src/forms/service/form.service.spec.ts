@@ -1,3 +1,5 @@
+import { ForbiddenException } from '@nestjs/common';
+import { TenantVerificationService } from '../../utility/service/tenant-verification.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
@@ -69,6 +71,11 @@ const mockDateService = {
   toChurchInstant: jest.fn((value: string) => new Date(value)),
 };
 
+const mockVerification = {
+  isPrivateGroup: jest.fn().mockResolvedValue(false),
+  assertNotPrivateGroup: jest.fn().mockResolvedValue(undefined),
+};
+
 describe('FormService', () => {
   let service: FormService;
 
@@ -85,12 +92,38 @@ describe('FormService', () => {
         },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
         { provide: DateService, useValue: mockDateService },
+        { provide: TenantVerificationService, useValue: mockVerification },
       ],
     }).compile();
     service = module.get(FormService);
   });
 
   describe('create', () => {
+    it('stops a private group from sharing a public form', async () => {
+      mockVerification.assertNotPrivateGroup.mockRejectedValueOnce(
+        new ForbiddenException('Please verify your group first.'),
+      );
+
+      await expect(
+        service.create({
+          title: 'Open day',
+          visibility: FormVisibility.PUBLIC,
+          fields: [],
+        } as any),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockFormRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('never asks about verification for a members-only form', async () => {
+      await service.create({
+        title: 'Rota',
+        visibility: FormVisibility.MEMBERS,
+        fields: [],
+      } as any);
+
+      expect(mockVerification.assertNotPrivateGroup).not.toHaveBeenCalled();
+    });
+
     it('creates a form with its fields in one call', async () => {
       const result = await service.create({
         title: 'Volunteer Sign-up',
