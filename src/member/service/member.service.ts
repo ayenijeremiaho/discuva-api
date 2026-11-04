@@ -141,23 +141,28 @@ export class MemberService {
 
     const saved = await this.memberRepository.save(member);
     this.logger.log(`New member created: ${saved.id}`);
+    await this.sendSignInDetails(saved, tempPassword);
+    return saved;
+  }
 
-    const firstName = UtilityService.capitalizeFirstLetter(saved.firstname);
+  private async sendSignInDetails(
+    member: Member,
+    tempPassword: string,
+  ): Promise<void> {
+    const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
     const churchName = await this.utilityService.resolveChurchName();
     this.utilityService.sendEmailWithTemplate(
-      saved.email,
+      member.email,
       `${firstName}, Welcome to ${churchName}`,
       'welcome-member',
       {
         name: firstName,
-        email: saved.email,
+        email: member.email,
         password: tempPassword,
         churchName: this.churchName,
         churchAddress: this.churchAddress,
       },
     );
-
-    return saved;
   }
 
   // revokeWorker()/demoteTraineeToMember() never delete the WorkerProfile row
@@ -682,9 +687,16 @@ export class MemberService {
   ): Promise<Member> {
     const member = await this.getById(id);
 
+    let tempPassword: string | null = null;
     if (dto.email && dto.email !== member.email) {
       await this.assertEmailUnique(dto.email);
       member.email = dto.email;
+      // The old address never got the sign-in details, so the corrected one gets fresh ones.
+      if (member.status === MemberStatusEnum.PENDING) {
+        tempPassword = UtilityService.generateRandomPassword();
+        member.password = await UtilityService.hashValue(tempPassword);
+        member.changedPassword = false;
+      }
     }
 
     if (dto.firstname) member.firstname = dto.firstname;
@@ -711,6 +723,7 @@ export class MemberService {
       targetEmail: saved.email,
       metadata: { changes: Object.keys(dto) },
     });
+    if (tempPassword) await this.sendSignInDetails(saved, tempPassword);
     return saved;
   }
 

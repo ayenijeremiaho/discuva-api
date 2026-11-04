@@ -1787,7 +1787,7 @@
                 }
               ]
             },
-            "description": "All fields are optional. Only provided fields are updated. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged."
+            "description": "All fields are optional. Only provided fields are updated. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. Send phoneNumber as \"\" or null to remove it; omit it to leave unchanged. Changing the email of a member who hasn't signed in yet (PENDING) sends fresh sign-in details to the new address."
           },
           "response": [
             {

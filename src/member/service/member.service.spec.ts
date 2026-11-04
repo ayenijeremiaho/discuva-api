@@ -2226,4 +2226,64 @@ describe('MemberService', () => {
       expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
   });
+
+  describe('updateMember', () => {
+    const save = () =>
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+    it("sends fresh sign-in details when a pending member's email is corrected", async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'member-1',
+        firstname: 'ada',
+        email: 'ada@gmial.com',
+        status: MemberStatusEnum.PENDING,
+      });
+      mockMemberRepo.exists.mockResolvedValueOnce(false);
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed_new');
+      save();
+
+      await service.updateMember(
+        'member-1',
+        { email: 'ada@gmail.com' } as any,
+        'admin-1',
+      );
+
+      expect(mockMemberRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'ada@gmail.com',
+          password: 'hashed_new',
+          changedPassword: false,
+          status: MemberStatusEnum.PENDING,
+        }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'ada@gmail.com',
+        expect.any(String),
+        'welcome-member',
+        expect.objectContaining({ email: 'ada@gmail.com' }),
+      );
+    });
+
+    it("leaves an active member's password alone when their email changes", async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'member-1',
+        firstname: 'ada',
+        email: 'old@test.com',
+        status: MemberStatusEnum.ACTIVE,
+      });
+      mockMemberRepo.exists.mockResolvedValueOnce(false);
+      save();
+
+      await service.updateMember(
+        'member-1',
+        { email: 'new@test.com' } as any,
+        'admin-1',
+      );
+
+      expect(mockMemberRepo.save).toHaveBeenCalledWith(
+        expect.not.objectContaining({ password: expect.anything() }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+    });
+  });
 });
