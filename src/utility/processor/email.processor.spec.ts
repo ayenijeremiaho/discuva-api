@@ -61,7 +61,7 @@ const mockTxHost = {
 function buildJob(data: any, attemptsMade = 0) {
   const job: any = { id: 'job-1', data, attemptsMade, opts: { attempts: 3 } };
   // Real Bull mutates job.data in place (and persists to Redis) on update —
-  // mirrored here so a later onFailed/onCompleted read of job.data sees
+  // mirrored here so a later onFailed/logSent read of job.data sees
   // whatever handleSend resolved, same as production.
   job.update = jest.fn((newData: any) => {
     job.data = newData;
@@ -247,10 +247,26 @@ describe('EmailProcessor', () => {
     });
   });
 
-  describe('onCompleted', () => {
+  it('writes the sent row before the job finishes, so a shutdown waits for it', async () => {
+    mockResolver.resolveConfig.mockResolvedValue(undefined);
+    const job = buildJob({
+      to: 'member@example.com',
+      subject: 'Hi',
+      html: '<p>hi</p>',
+    });
+    await processor.handleSend(job);
+    expect(mockEmailLogRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'sent',
+        recipient: 'member@example.com',
+      }),
+    );
+  });
+
+  describe('logSent', () => {
     it('logs using the provider and source actually used for this send, not the platform default', async () => {
       const job = buildJob({ to: 'member@example.com', subject: 'Hi' });
-      await processor.onCompleted(job, {
+      await processor.logSent(job, {
         providerName: 'resend',
         source: 'tenant',
       });
@@ -271,7 +287,7 @@ describe('EmailProcessor', () => {
         resolvedProviderName: 'smtp',
         resolvedSource: 'tenant',
       });
-      await processor.onCompleted(job, undefined);
+      await processor.logSent(job, undefined);
 
       expect(mockEmailLogRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ provider: 'smtp', source: 'tenant' }),
@@ -280,7 +296,7 @@ describe('EmailProcessor', () => {
 
     it('falls back to the platform default when neither a return value nor job.data has resolution info', async () => {
       const job = buildJob({ to: 'member@example.com', subject: 'Hi' });
-      await processor.onCompleted(job, undefined);
+      await processor.logSent(job, undefined);
 
       expect(mockEmailLogRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -297,7 +313,7 @@ describe('EmailProcessor', () => {
       const job = buildJob({ to: 'member@example.com', subject: 'Hi' });
 
       await expect(
-        processor.onCompleted(job, {
+        processor.logSent(job, {
           providerName: 'resend',
           source: 'tenant',
         }),

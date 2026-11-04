@@ -7,8 +7,9 @@ import { EmailCategory } from '../email-provider/email-category.enum';
 import { PushNotificationKey } from '../../notification-catalogue/push-catalogue';
 
 const mockEmailQueueService = {
-  queueEmailWithTemplate: jest.fn(),
-  queueEmailWithTemplateAndAttachments: jest.fn(),
+  logFailure: jest.fn(),
+  queueEmailWithTemplate: jest.fn().mockResolvedValue('job-1'),
+  queueEmailWithTemplateAndAttachments: jest.fn().mockResolvedValue('job-1'),
 };
 
 const mockEmailCategorySettingsService = {
@@ -85,6 +86,31 @@ describe('NotificationDispatchService', () => {
       vars: { service_name: 'Sunday Service' },
       idempotencyKey: 'key-1',
     });
+  });
+
+  it('still pushes and logs, rather than rejecting, when the email cannot be queued', async () => {
+    const down = new Error('Connection is closed.');
+    mockEmailQueueService.queueEmailWithTemplate.mockRejectedValueOnce(down);
+    await expect(
+      service.notifyMember({
+        category: EmailCategory.SERVICE_PROGRAMME_ASSIGNMENT,
+        email: {
+          to: 'jane@example.com',
+          subject: 'Subject',
+          template: 'service-slot-assigned',
+          data: {},
+        },
+        push: {
+          memberIds: ['member-1'],
+          key: PushNotificationKey.SERVICE_SLOT_ASSIGNED,
+          vars: {},
+          idempotencyKey: 'key-2',
+        },
+      }),
+    ).resolves.toBeUndefined();
+    await new Promise(setImmediate);
+    expect(mockEmailQueueService.logFailure).toHaveBeenCalledWith(down);
+    expect(mockPushNotificationService.dispatchToMemberIds).toHaveBeenCalled();
   });
 
   it('email switch off stops the email only — push goes on to its own switch in PushNotificationService', async () => {

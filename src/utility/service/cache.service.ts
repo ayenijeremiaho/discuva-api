@@ -1,7 +1,7 @@
 import {
   Injectable,
   Logger,
-  OnModuleDestroy,
+  OnApplicationShutdown,
   OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -38,7 +38,7 @@ interface CacheStats {
 }
 
 @Injectable()
-export class CacheService implements OnModuleInit, OnModuleDestroy {
+export class CacheService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(CacheService.name);
   private readonly redis: Redis;
   // Locks this instance holds: scoped key → its token.
@@ -89,7 +89,8 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  // After the queues: Bull waits for running jobs on shutdown, and they still read the cache.
+  async onApplicationShutdown(): Promise<void> {
     await this.redis.quit();
   }
 
@@ -140,9 +141,25 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  // Writes are fire-and-forget across the codebase, so they log failures instead of rejecting.
   private async setByKey<T>(key: string, value: T, ttl: number): Promise<void> {
-    await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
-    this.logger.debug(`Cache SET: ${key} (TTL: ${ttl}s)`);
+    try {
+      await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
+      this.logger.debug(`Cache SET: ${key} (TTL: ${ttl}s)`);
+    } catch (err) {
+      this.logger.warn(`Cache SET failed: ${key}: ${(err as Error).message}`);
+    }
+  }
+
+  private async delByKey(key: string): Promise<number> {
+    try {
+      const count = await this.redis.del(key);
+      if (count > 0) this.logger.debug(`Cache DEL: ${key}`);
+      return count;
+    } catch (err) {
+      this.logger.warn(`Cache DEL failed: ${key}: ${(err as Error).message}`);
+      return 0;
+    }
   }
 
   async get<T>(rawKey: string): Promise<T | undefined> {
@@ -191,12 +208,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async delGlobal(rawKey: string): Promise<number> {
-    const key = this.globalKey(rawKey);
-    const count = await this.redis.del(key);
-    if (count > 0) {
-      this.logger.debug(`Cache DEL: ${key}`);
-    }
-    return count;
+    return this.delByKey(this.globalKey(rawKey));
   }
 
   async incr(rawKey: string, ttlSeconds: number, by = 1): Promise<number> {
@@ -238,12 +250,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   }
 
   async del(rawKey: string): Promise<number> {
-    const key = this.scopedKey(rawKey);
-    const count = await this.redis.del(key);
-    if (count > 0) {
-      this.logger.debug(`Cache DEL: ${key}`);
-    }
-    return count;
+    return this.delByKey(this.scopedKey(rawKey));
   }
 
   async has(rawKey: string): Promise<boolean> {

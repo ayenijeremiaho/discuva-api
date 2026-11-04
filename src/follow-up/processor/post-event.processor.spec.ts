@@ -23,7 +23,8 @@ import { PushNotificationKey } from '../../notification-catalogue/push-catalogue
 const mockEventRepo = { findOne: jest.fn(), update: jest.fn() };
 const mockAttendanceRepo = { find: jest.fn() };
 const mockEmailQueue = {
-  queueEmailWithTemplate: jest.fn(),
+  logFailure: jest.fn(),
+  queueEmailWithTemplate: jest.fn().mockResolvedValue('job-1'),
   resolveMemberUrl: jest.fn(),
 };
 const mockQueue = { add: jest.fn() };

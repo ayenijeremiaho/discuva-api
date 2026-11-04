@@ -36,7 +36,10 @@ const mockTenantRepo = {
 };
 const mockSubscriptionRepo = { findOneBy: jest.fn(), save: jest.fn() };
 const mockCls = { get: jest.fn().mockReturnValue('parent-tenant-1') };
-const mockEmailQueueService = { queueEmail: jest.fn() };
+const mockEmailQueueService = {
+  logFailure: jest.fn(),
+  queueEmail: jest.fn().mockResolvedValue('job-1'),
+};
 const mockCacheService = { del: jest.fn() };
 const mockManagerTx = { findOne: jest.fn() };
 const mockTxHost = { tx: mockManagerTx };

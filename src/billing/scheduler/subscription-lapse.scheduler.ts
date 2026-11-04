@@ -164,7 +164,9 @@ export class SubscriptionLapseScheduler {
     const email = await this.findAdminEmail(tenant);
     if (!email) return;
 
-    this.emailQueueService.queueEmail(email, subject, html);
+    this.emailQueueService
+      .queueEmail(email, subject, html)
+      .catch(this.emailQueueService.logFailure);
   }
 
   // Same manual tenant-context-entry pattern as

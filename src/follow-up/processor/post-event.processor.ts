@@ -135,22 +135,24 @@ export class PostEventProcessor {
     );
     for (const record of absentMembers) {
       if (!record.member?.email) continue;
-      this.emailQueueService.queueEmailWithTemplate(
-        record.member.email,
-        `Did you attend ${event.name} online?`,
-        'online-attendance-request',
-        {
-          name: record.member.firstname,
-          eventName: event.name,
-          churchName: this.churchName,
-          eventId,
-          confirmUrl,
-          windowHours: Math.round((windowMinutes / 60) * 100) / 100,
-          windowLabel: formatWindow(windowMinutes),
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          record.member.email,
+          `Did you attend ${event.name} online?`,
+          'online-attendance-request',
+          {
+            name: record.member.firstname,
+            eventName: event.name,
+            churchName: this.churchName,
+            eventId,
+            confirmUrl,
+            windowHours: Math.round((windowMinutes / 60) * 100) / 100,
+            windowLabel: formatWindow(windowMinutes),
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     this.logger.log(
@@ -227,18 +229,20 @@ export class PostEventProcessor {
     let emailed = 0;
     for (const member of members) {
       if (!member.email || pushOnly.has(member.id)) continue;
-      this.emailQueueService.queueEmailWithTemplate(
-        member.email,
-        `Thank you for attending — ${event.name}`,
-        'thank-you-attendance',
-        {
-          name: member.firstname,
-          eventName: event.name,
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          member.email,
+          `Thank you for attending — ${event.name}`,
+          'thank-you-attendance',
+          {
+            name: member.firstname,
+            eventName: event.name,
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
       emailed++;
     }
     this.logger.log(

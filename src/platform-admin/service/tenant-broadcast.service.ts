@@ -90,7 +90,9 @@ export class TenantBroadcastService {
               skipped++;
               return;
             }
-            this.emailQueueService.queueEmail(email, subject, html);
+            this.emailQueueService
+              .queueEmail(email, subject, html)
+              .catch(this.emailQueueService.logFailure);
             sent++;
           },
         );

@@ -120,20 +120,22 @@ export class FollowUpScheduler {
     }
 
     for (const [, data] of tasksByWorker) {
-      this.emailQueueService.queueEmailWithTemplate(
-        data.workerEmail,
-        `Action Required: ${data.tasks.length} Overdue Follow-Up Task(s)`,
-        'follow-up-overdue-worker',
-        {
-          workerName: data.workerName,
-          count: data.tasks.length,
-          multiple: data.tasks.length > 1,
-          tasks: data.tasks,
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          data.workerEmail,
+          `Action Required: ${data.tasks.length} Overdue Follow-Up Task(s)`,
+          'follow-up-overdue-worker',
+          {
+            workerName: data.workerName,
+            count: data.tasks.length,
+            multiple: data.tasks.length > 1,
+            tasks: data.tasks,
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     const followUpAdmins = await this.adminRepo
@@ -148,19 +150,21 @@ export class FollowUpScheduler {
 
     for (const admin of followUpAdmins) {
       if (!admin.member?.email) continue;
-      this.emailQueueService.queueEmailWithTemplate(
-        admin.member.email,
-        `Follow-Up Alert: ${overdueTasks.length} Overdue Task(s) Need Attention`,
-        'follow-up-overdue-admin',
-        {
-          adminName: admin.member.firstname,
-          count: overdueTasks.length,
-          multiple: overdueTasks.length > 1,
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          admin.member.email,
+          `Follow-Up Alert: ${overdueTasks.length} Overdue Task(s) Need Attention`,
+          'follow-up-overdue-admin',
+          {
+            adminName: admin.member.firstname,
+            count: overdueTasks.length,
+            multiple: overdueTasks.length > 1,
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     this.logger.log(
@@ -228,19 +232,21 @@ export class FollowUpScheduler {
 
     for (const admin of admins) {
       if (!admin.member?.email) continue;
-      this.emailQueueService.queueEmailWithTemplate(
-        admin.member.email,
-        `Follow-Up Alert: ${count} Task(s) With No Activity for ${staleDays}+ Day(s)`,
-        'follow-up-stale-admin',
-        {
-          adminName: admin.member.firstname,
-          count,
-          staleDays,
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          admin.member.email,
+          `Follow-Up Alert: ${count} Task(s) With No Activity for ${staleDays}+ Day(s)`,
+          'follow-up-stale-admin',
+          {
+            adminName: admin.member.firstname,
+            count,
+            staleDays,
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     this.logger.log(`Stale task alert sent to ${admins.length} admin(s)`);

@@ -59,7 +59,8 @@ const mockAdminRepo = {
 };
 
 const mockEmailQueueService = {
-  queueEmailWithTemplate: jest.fn(),
+  logFailure: jest.fn(),
+  queueEmailWithTemplate: jest.fn().mockResolvedValue('job-1'),
 };
 
 const mockConfigService = {

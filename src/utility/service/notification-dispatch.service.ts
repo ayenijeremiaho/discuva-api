@@ -44,24 +44,28 @@ export class NotificationDispatchService {
     if (email) {
       const { to, subject, template, data, attachments } = email;
       if (attachments) {
-        this.emailQueueService.queueEmailWithTemplateAndAttachments(
-          to,
-          subject,
-          template,
-          data,
-          attachments,
-          undefined,
-          opts.category,
-        );
+        this.emailQueueService
+          .queueEmailWithTemplateAndAttachments(
+            to,
+            subject,
+            template,
+            data,
+            attachments,
+            undefined,
+            opts.category,
+          )
+          .catch(this.emailQueueService.logFailure);
       } else {
-        this.emailQueueService.queueEmailWithTemplate(
-          to,
-          subject,
-          template,
-          data,
-          undefined,
-          opts.category,
-        );
+        this.emailQueueService
+          .queueEmailWithTemplate(
+            to,
+            subject,
+            template,
+            data,
+            undefined,
+            opts.category,
+          )
+          .catch(this.emailQueueService.logFailure);
       }
     }
 

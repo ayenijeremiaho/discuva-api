@@ -74,6 +74,11 @@ export class EmailQueueService {
     this.cacheTtl = this.config.get<number>('CACHE_TTL_REFERENCE_SECONDS', 300);
   }
 
+  // For callers that don't wait on the queue, so a Redis or database error is logged, not left unhandled.
+  readonly logFailure = (err: Error): void => {
+    this.logger.error(`Email not queued: ${err?.message ?? err}`);
+  };
+
   async queueEmail(
     to: string | string[],
     subject: string,

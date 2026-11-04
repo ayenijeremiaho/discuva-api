@@ -106,14 +106,9 @@ export class UtilityService {
     cc?: string | [string],
     category?: EmailCategory,
   ): void {
-    this.emailQueueService.queueEmail(
-      to,
-      subject,
-      body,
-      cc,
-      undefined,
-      category,
-    );
+    this.emailQueueService
+      .queueEmail(to, subject, body, cc, undefined, category)
+      .catch(this.emailQueueService.logFailure);
   }
 
   public sendEmailWithTemplate(
@@ -124,14 +119,16 @@ export class UtilityService {
     cc?: string | [string],
     category?: EmailCategory,
   ): void {
-    this.emailQueueService.queueEmailWithTemplate(
-      to,
-      subject,
-      templateName,
-      templateData,
-      cc,
-      category,
-    );
+    this.emailQueueService
+      .queueEmailWithTemplate(
+        to,
+        subject,
+        templateName,
+        templateData,
+        cc,
+        category,
+      )
+      .catch(this.emailQueueService.logFailure);
   }
 
   // Delegates to EmailQueueService.resolveTenantUrl — see its own doc
@@ -164,14 +161,16 @@ export class UtilityService {
     attachments: Array<{ filename: string; content: Buffer }>,
     category?: EmailCategory,
   ): void {
-    this.emailQueueService.queueEmailWithTemplateAndAttachments(
-      to,
-      subject,
-      templateName,
-      templateData,
-      attachments,
-      undefined,
-      category,
-    );
+    this.emailQueueService
+      .queueEmailWithTemplateAndAttachments(
+        to,
+        subject,
+        templateName,
+        templateData,
+        attachments,
+        undefined,
+        category,
+      )
+      .catch(this.emailQueueService.logFailure);
   }
 }

@@ -2676,20 +2676,22 @@ export class ServiceSessionService {
           month: 'long',
           year: 'numeric',
         });
-        this.emailQueueService.queueEmailWithTemplateAndAttachments(
-          emails,
-          `Session Report: ${serviceName}`,
-          'service-session-report',
-          { sessionCode, serviceName, date },
-          [
-            {
-              filename: `session-report-${sessionCode}.pdf`,
-              content: pdfBuffer,
-            },
-          ],
-          undefined,
-          EmailCategory.SESSION_REPORT,
-        );
+        this.emailQueueService
+          .queueEmailWithTemplateAndAttachments(
+            emails,
+            `Session Report: ${serviceName}`,
+            'service-session-report',
+            { sessionCode, serviceName, date },
+            [
+              {
+                filename: `session-report-${sessionCode}.pdf`,
+                content: pdfBuffer,
+              },
+            ],
+            undefined,
+            EmailCategory.SESSION_REPORT,
+          )
+          .catch(this.emailQueueService.logFailure);
       })
       .catch((err) =>
         this.logger.error(
