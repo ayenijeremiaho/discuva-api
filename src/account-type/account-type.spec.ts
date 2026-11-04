@@ -134,7 +134,8 @@ describe('AccountTypeService', () => {
   it('gives other types their words and defaults', async () => {
     const profile = await service.getProfile(OrganisationTypeEnum.GROUP);
     expect(profile.wording).toContainEqual({ from: 'Church', to: 'Group' });
-    expect(profile.modules.departments).toBe('off');
+    expect(profile.modules.departments).toBe('on');
+    expect(profile.switchable).toEqual(['departments']);
     expect(profile.modules.prayer).toBe('on');
   });
 

@@ -183,7 +183,6 @@ const OFF_FOR_NGO = [
 ];
 const OFF_FOR_GROUP = [
   ...OFF_FOR_NGO,
-  'departments',
   'service_programme',
   'serving_rota',
   'volunteering',
@@ -196,6 +195,13 @@ const OFF_FOR_GROUP = [
   'follow_up',
   'newcomer_journey',
 ];
+
+// Core modules a type may still switch off, e.g. a small group that doesn't use teams.
+export const SWITCHABLE_CORE_MODULES: Record<OrganisationTypeEnum, string[]> = {
+  [OrganisationTypeEnum.CHURCH]: [],
+  [OrganisationTypeEnum.MINISTRY]: [],
+  [OrganisationTypeEnum.GROUP]: ['departments'],
+};
 
 export function defaultAvailability(
   type: OrganisationTypeEnum,

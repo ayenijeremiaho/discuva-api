@@ -11,6 +11,7 @@ import {
   SIGNUP_OPEN_BY_DEFAULT,
   Term,
   defaultAvailability,
+  SWITCHABLE_CORE_MODULES,
 } from './account-type.constant';
 import { WordingRule } from './apply-wording';
 
@@ -25,6 +26,7 @@ export interface AccountTypeProfile {
   signupOpen: boolean;
   terms: Record<string, Term>;
   modules: Record<string, ModuleAvailability>;
+  switchable: string[];
   wording: WordingRule[];
 }
 
@@ -82,6 +84,7 @@ export class AccountTypeService {
       signupOpen: stored?.signupOpen ?? SIGNUP_OPEN_BY_DEFAULT[type],
       terms,
       modules: { ...defaultAvailability(type), ...stored?.modules },
+      switchable: SWITCHABLE_CORE_MODULES[type],
       wording: wordingRules(terms),
     };
   }

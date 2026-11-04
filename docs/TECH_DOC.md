@@ -23166,7 +23166,7 @@ transaction as the setting, because the tenant audit log needs a church schema a
 /v1/platform/account-types/:type/changes` (`billing:read`) returns the latest 20, using `IDX_account_type_changes_type_created`.
 
 **Features:** `ChurchSettingsService` resolves a module as: `hidden` is always off and can't be enabled (400); otherwise
-the account's own saved choice, otherwise the type's `on`/`off`. A module is only `required` when it is `on` for the type.
+the account's own saved choice, otherwise the type's `on`/`off`. A module is only `required` when it is `on` for the type and not in that type's `SWITCHABLE_CORE_MODULES` (groups: `departments`, so a group starts with Teams and team spaces on but can switch Teams off; the profile carries this as `switchable`).
 Responses add `available`; admin Module Settings leaves out unavailable modules. Plans still apply on top. Church
 defaults are all `on`, so existing church behaviour is unchanged. A saved choice, including one saved by renaming a
 module, stays pinned when the type's default later changes. Per-account module caches mean a change can take 5 minutes.

@@ -37,6 +37,17 @@ export class ChurchSettingsService {
     return this.accountTypes.getProfile(await this.verification.orgType());
   }
 
+  private isRequired(
+    module: (typeof KNOWN_MODULES)[number],
+    profile: AccountTypeProfile,
+  ): boolean {
+    return (
+      module.required &&
+      profile.modules[module.key] === 'on' &&
+      !profile.switchable?.includes(module.key)
+    );
+  }
+
   // The church's own choice wins unless its account type doesn't offer the module at all.
   private view(
     module: (typeof KNOWN_MODULES)[number],
@@ -47,7 +58,7 @@ export class ChurchSettingsService {
     return {
       key: module.key,
       moduleName: applyWording(module.moduleName, profile.wording),
-      required: module.required && availability === 'on',
+      required: this.isRequired(module, profile),
       available: availability !== 'hidden',
       enabled:
         availability !== 'hidden' && (value?.enabled ?? availability === 'on'),
@@ -104,7 +115,7 @@ export class ChurchSettingsService {
         `Module '${module.moduleName}' isn't available for this account.`,
       );
     }
-    if (module.required && availability === 'on' && !dto.enabled) {
+    if (this.isRequired(module, profile) && !dto.enabled) {
       throw new BadRequestException(
         `Module '${module.moduleName}' is required and cannot be disabled.`,
       );

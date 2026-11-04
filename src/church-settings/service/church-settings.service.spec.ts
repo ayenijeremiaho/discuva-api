@@ -29,10 +29,12 @@ const mockAuditLogService = {
 const profile = (
   modules: Record<string, string> = {},
   wording: object[] = [],
+  switchable: string[] = [],
 ) => ({
   terms: {},
   modules: new Proxy(modules, { get: (m, k: string) => m[k] ?? 'on' }),
   wording,
+  switchable,
 });
 const mockAccountTypes = { getProfile: jest.fn() };
 const mockVerification = {
@@ -347,6 +349,27 @@ describe('ChurchSettingsService', () => {
       mockSettingRepo.findOne.mockResolvedValue(null);
       const view = await service.findOne('departments');
       expect(view).toMatchObject({ required: false, enabled: false });
+    });
+
+    it('lets a type switch off a core module it may go without', async () => {
+      mockAccountTypes.getProfile.mockResolvedValue(
+        profile({}, [], ['departments']),
+      );
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      expect(await service.findOne('departments')).toMatchObject({
+        required: false,
+        enabled: true,
+      });
+      await expect(
+        service.upsert('departments', { enabled: false }),
+      ).resolves.toMatchObject({ enabled: false });
+    });
+
+    it('still keeps a core module on for a church', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.upsert('departments', { enabled: false }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('names modules in the type wording', async () => {
