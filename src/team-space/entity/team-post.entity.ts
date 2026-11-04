@@ -9,6 +9,7 @@ import {
 import { BaseEntity } from '../../utility/entity/base.entity';
 import { Member } from '../../member/entity/member.entity';
 import { TeamSpace } from './team-space.entity';
+import { CommunityCategory } from './community-category.entity';
 
 export enum TeamPostTypeEnum {
   POST = 'POST',
@@ -55,4 +56,18 @@ export class TeamPost extends BaseEntity {
   @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'removed_by_id' })
   removedBy: Member | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  title: string | null;
+
+  @ManyToOne(() => CommunityCategory, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'category_id' })
+  category: CommunityCategory | null;
+
+  @Column({ name: 'locked_at', type: 'timestamptz', nullable: true })
+  lockedAt: Date | null;
+
+  @ManyToOne(() => Member, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'locked_by_id' })
+  lockedBy: Member | null;
 }

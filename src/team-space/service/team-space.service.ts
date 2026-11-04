@@ -19,6 +19,7 @@ import { IsNull, Repository } from 'typeorm';
 import { TeamSpace, TeamSpaceKindEnum } from '../entity/team-space.entity';
 import { TeamPost } from '../entity/team-post.entity';
 import { TeamPostReply } from '../entity/team-post-reply.entity';
+import { CommunityCategory } from '../entity/community-category.entity';
 import { TeamSpaceRead } from '../entity/team-space-read.entity';
 import { Member } from '../../member/entity/member.entity';
 import {
@@ -57,6 +58,10 @@ interface PostRow {
   id: string;
   type: string;
   body: string;
+  title: string | null;
+  category_id: string | null;
+  category_name: string | null;
+  locked_at: Date | null;
   pinned: boolean;
   reply_count: number;
   last_activity_at: Date;
@@ -108,6 +113,37 @@ interface TaggedBody {
 }
 
 const AUTHOR_SQL = `a.id AS author_id, NULLIF(TRIM(COALESCE(a.firstname, '') || ' ' || COALESCE(a.lastname, '')), '') AS author_name, a.photo_url AS author_photo`;
+const POST_SQL = `p.id, p.type, p.body, p.title, p.category_id, c.name AS category_name, p.locked_at, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}`;
+const POST_FROM = `team_posts p LEFT JOIN members a ON a.id = p.author_id LEFT JOIN community_categories c ON c.id = p.category_id`;
+
+export interface PostExtras {
+  title?: string;
+  categoryId?: string | null;
+}
+
+const isCommunity = (acc: Pick<SpaceAccess, 'kind'>) =>
+  acc.kind === TeamSpaceKindEnum.COMMUNITY;
+
+// Community is its own notification type, so members can mute it apart from their teams.
+const PUSH_KEYS = {
+  team: {
+    category: EmailCategory.TEAM_SPACES,
+    leaderPost: PushNotificationKey.TEAM_SPACE_LEADER_POST,
+    reply: PushNotificationKey.TEAM_SPACE_REPLY,
+    mention: PushNotificationKey.TEAM_SPACE_MENTION,
+  },
+  community: {
+    category: EmailCategory.COMMUNITY,
+    leaderPost: PushNotificationKey.COMMUNITY_MODERATOR_POST,
+    reply: PushNotificationKey.COMMUNITY_REPLY,
+    mention: PushNotificationKey.COMMUNITY_MENTION,
+  },
+};
+const pushKeys = (acc: Pick<SpaceAccess, 'kind'>) =>
+  isCommunity(acc) ? PUSH_KEYS.community : PUSH_KEYS.team;
+
+const mutedMessage = (until: Date) =>
+  `A moderator has paused your posting in Community until ${new Date(until).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}. You can still read and react.`;
 
 @Injectable()
 export class TeamSpaceService {
@@ -168,6 +204,8 @@ export class TeamSpaceService {
       })
       .sort(
         (a, b) =>
+          Number(b.kind === TeamSpaceKindEnum.COMMUNITY) -
+            Number(a.kind === TeamSpaceKindEnum.COMMUNITY) ||
           (b.lastActivityAt ? new Date(b.lastActivityAt).getTime() : 0) -
             (a.lastActivityAt ? new Date(a.lastActivityAt).getTime() : 0) ||
           a.name.localeCompare(b.name),
@@ -180,6 +218,9 @@ export class TeamSpaceService {
       this.access.access(memberId, kind, refId),
       this.access.isMinor(memberId),
     ]);
+    const community = isCommunity(acc)
+      ? await this.communityState(memberId, acc.isLeader)
+      : null;
     const [pinned, upcomingMeetings] = await Promise.all([
       this.postRows(acc.space.id, { pinned: true }),
       this.extras.upcoming(acc.space.id),
@@ -202,11 +243,36 @@ export class TeamSpaceService {
       eventAt: acc.eventAt ?? null,
       closed: !!acc.closed,
       canPost:
-        !acc.closed && !minor && (!acc.space.leadersOnly || acc.isLeader),
+        !acc.closed &&
+        !minor &&
+        !community?.mutedUntil &&
+        (!acc.space.leadersOnly || acc.isLeader),
       pinned: pinned.map((p) =>
         this.toPost(p, memberId, acc, details, reactions),
       ),
       upcomingMeetings,
+      community,
+    };
+  }
+
+  // What a Community screen needs on top of a team space: categories, the member's mute, and open reports for moderators.
+  private async communityState(memberId: string, moderator: boolean) {
+    const [categories, mutedUntil, openReports] = await Promise.all([
+      this.spaceRepo.query(
+        `SELECT id, name FROM community_categories ORDER BY position, name`,
+      ) as Promise<{ id: string; name: string }[]>,
+      this.access.mutedUntil(memberId),
+      moderator
+        ? (this.spaceRepo.query(
+            `SELECT count(*)::int AS n FROM (SELECT 1 FROM post_reports WHERE resolved_at IS NULL LIMIT $1) x`,
+            [UNREAD_CAP],
+          ) as Promise<{ n: number }[]>)
+        : Promise.resolve(null),
+    ]);
+    return {
+      categories,
+      mutedUntil,
+      openReports: openReports ? openReports[0].n : null,
     };
   }
 
@@ -215,11 +281,13 @@ export class TeamSpaceService {
     kind: TeamSpaceKindEnum,
     refId: string,
     cursor?: string,
+    categoryId?: string,
   ) {
     const acc = await this.access.access(memberId, kind, refId);
     const rows = await this.postRows(acc.space.id, {
       pinned: false,
       after: decodeCursor(cursor),
+      categoryId: isCommunity(acc) ? categoryId : undefined,
     });
     const page = rows.slice(0, FEED_PAGE_SIZE);
     const last = page[page.length - 1];
@@ -244,6 +312,7 @@ export class TeamSpaceService {
     kind: TeamSpaceKindEnum,
     refId: string,
     body: string,
+    extras: PostExtras = {},
     now = new Date(),
   ) {
     const [acc, minor] = await Promise.all([
@@ -251,6 +320,7 @@ export class TeamSpaceService {
       this.access.isMinor(memberId),
     ]);
     this.access.assertOpen(acc);
+    await this.assertNotMuted(acc, memberId);
     if (minor)
       throw new ForbiddenException(
         'Members under 18 can read and reply to posts, but not start them.',
@@ -260,11 +330,19 @@ export class TeamSpaceService {
         'Only leaders can start posts in this space. You can reply to any post.',
       );
     const tagged = await this.prepareTags(acc, body, POST_MAX_LENGTH);
+    const community = isCommunity(acc);
+    if (community && extras.categoryId)
+      await this.assertCategory(extras.categoryId);
     const post = await this.postRepo.save(
       this.postRepo.create({
         space: { id: acc.space.id } as TeamSpace,
         author: { id: memberId } as Member,
         body: tagged.body,
+        title: (community && extras.title) || null,
+        category:
+          community && extras.categoryId
+            ? ({ id: extras.categoryId } as CommunityCategory)
+            : null,
         lastActivityAt: now,
       }),
     );
@@ -285,6 +363,7 @@ export class TeamSpaceService {
     memberId: string,
     postId: string,
     body: string,
+    extras: PostExtras = {},
     now = new Date(),
   ) {
     const post = await this.findPost(postId);
@@ -292,7 +371,23 @@ export class TeamSpaceService {
       throw new ForbiddenException('You can only edit your own posts.');
     const acc = await this.editAccess(memberId, post.space, body);
     const tagged = await this.prepareTags(acc, body, POST_MAX_LENGTH);
-    await this.postRepo.update(postId, { body: tagged.body, editedAt: now });
+    const community = post.space.kind === TeamSpaceKindEnum.COMMUNITY;
+    if (community && extras.categoryId)
+      await this.assertCategory(extras.categoryId);
+    await this.postRepo.update(postId, {
+      body: tagged.body,
+      editedAt: now,
+      ...(community && extras.title !== undefined
+        ? { title: extras.title || null }
+        : {}),
+      ...(community && extras.categoryId !== undefined
+        ? {
+            category: extras.categoryId
+              ? ({ id: extras.categoryId } as CommunityCategory)
+              : null,
+          }
+        : {}),
+    });
     await this.notifyNewTags(acc, tagged, post.body, memberId, {
       url: `/team-spaces/post/${postId}`,
       dedupe: `team-post-tag:${postId}:${now.getTime()}`,
@@ -300,7 +395,12 @@ export class TeamSpaceService {
     return { ok: true };
   }
 
-  async removePost(memberId: string, postId: string, now = new Date()) {
+  async removePost(
+    memberId: string,
+    postId: string,
+    reason?: string,
+    now = new Date(),
+  ) {
     const post = await this.findPost(postId);
     const acc = await this.access.accessBySpace(memberId, post.space);
     const own = post.author?.id === memberId;
@@ -313,13 +413,54 @@ export class TeamSpaceService {
       removedBy: { id: memberId } as Member,
       pinned: false,
     });
-    if (!own)
+    if (!own) {
       this.audit.log('TEAM_POST_REMOVED', {
         actorId: memberId,
         targetId: post.author?.id,
-        metadata: { postId, space: acc.name, kind: acc.kind },
+        metadata: { postId, space: acc.name, kind: acc.kind, reason },
       });
+      this.tellRemoved(acc, post.author?.id, postId, reason);
+    }
     return { ok: true };
+  }
+
+  // Community only: a moderator stops a conversation without removing it.
+  async lock(
+    memberId: string,
+    postId: string,
+    locked: boolean,
+    now = new Date(),
+  ) {
+    const post = await this.findPost(postId);
+    const acc = await this.access.accessBySpace(memberId, post.space);
+    if (!isCommunity(acc) || !acc.isLeader)
+      throw new ForbiddenException('Only Community moderators can lock posts.');
+    await this.postRepo.update(postId, {
+      lockedAt: locked ? now : null,
+      lockedBy: locked ? ({ id: memberId } as Member) : null,
+    });
+    return { locked };
+  }
+
+  // The author or a moderator can move a Community post to another category.
+  async setCategory(
+    memberId: string,
+    postId: string,
+    categoryId: string | null,
+  ) {
+    const post = await this.findPost(postId);
+    const acc = await this.access.accessBySpace(memberId, post.space);
+    if (!isCommunity(acc))
+      throw new BadRequestException('Only Community posts have categories.');
+    if (post.author?.id !== memberId && !acc.isLeader)
+      throw new ForbiddenException(
+        'Only the author or a moderator can change this.',
+      );
+    if (categoryId) await this.assertCategory(categoryId);
+    await this.postRepo.update(postId, {
+      category: categoryId ? ({ id: categoryId } as CommunityCategory) : null,
+    });
+    return { categoryId };
   }
 
   async pin(memberId: string, postId: string, pinned: boolean) {
@@ -350,8 +491,7 @@ export class TeamSpaceService {
     const after = decodeCursor(cursor);
     const [postRow, replies] = await Promise.all([
       this.spaceRepo.query(
-        `SELECT p.id, p.type, p.body, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}
-         FROM team_posts p LEFT JOIN members a ON a.id = p.author_id WHERE p.id = $1`,
+        `SELECT ${POST_SQL} FROM ${POST_FROM} WHERE p.id = $1`,
         [postId],
       ) as Promise<PostRow[]>,
       this.spaceRepo.query(
@@ -368,8 +508,11 @@ export class TeamSpaceService {
     ]);
     const page = replies.slice(0, REPLY_PAGE_SIZE);
     const last = page[page.length - 1];
-    const [minor, details, reactions] = await Promise.all([
+    const [minor, mutedUntil, details, reactions] = await Promise.all([
       this.access.isMinor(memberId),
+      isCommunity(acc)
+        ? this.access.mutedUntil(memberId)
+        : Promise.resolve(null),
       this.extras.details(postRow, memberId),
       this.reactions.summaries(
         memberId,
@@ -380,7 +523,9 @@ export class TeamSpaceService {
     return {
       space: { kind: acc.kind, refId: acc.refId, name: acc.name },
       post: this.toPost(postRow[0], memberId, acc, details, reactions),
-      canReply: !acc.closed,
+      canReply: !acc.closed && !post.lockedAt && !mutedUntil,
+      locked: !!post.lockedAt,
+      mutedUntil,
       isUnder18: minor,
       replies: page.map((r) => ({
         id: r.id,
@@ -390,6 +535,7 @@ export class TeamSpaceService {
         author: this.author(r),
         mine: r.author_id === memberId,
         canRemove: r.author_id === memberId || acc.isLeader,
+        canReport: isCommunity(acc) && r.author_id !== memberId,
         reactions: reactions.get(r.id) ?? [],
       })),
       nextCursor:
@@ -408,6 +554,11 @@ export class TeamSpaceService {
     const post = await this.findPost(postId);
     const acc = await this.access.accessBySpace(memberId, post.space);
     this.access.assertOpen(acc);
+    if (post.lockedAt)
+      throw new ForbiddenException(
+        'This conversation is locked. You can still read it.',
+      );
+    await this.assertNotMuted(acc, memberId);
     const tagged = await this.prepareTags(acc, body, REPLY_MAX_LENGTH);
     const reply = await this.replyRepo.save(
       this.replyRepo.create({
@@ -460,7 +611,12 @@ export class TeamSpaceService {
     return { ok: true };
   }
 
-  async removeReply(memberId: string, replyId: string, now = new Date()) {
+  async removeReply(
+    memberId: string,
+    replyId: string,
+    reason?: string,
+    now = new Date(),
+  ) {
     const reply = await this.replyRepo.findOne({
       where: { id: replyId },
       relations: { author: true, post: { space: true } },
@@ -483,7 +639,7 @@ export class TeamSpaceService {
       .set({ replyCount: () => 'GREATEST(reply_count - 1, 0)' })
       .where('id = :id', { id: reply.post.id })
       .execute();
-    if (!own)
+    if (!own) {
       this.audit.log('TEAM_POST_REMOVED', {
         actorId: memberId,
         targetId: reply.author?.id,
@@ -492,8 +648,11 @@ export class TeamSpaceService {
           postId: reply.post.id,
           space: acc.name,
           kind: acc.kind,
+          reason,
         },
       });
+      this.tellRemoved(acc, reply.author?.id, replyId, reason);
+    }
     return { ok: true };
   }
 
@@ -527,20 +686,73 @@ export class TeamSpaceService {
 
   private postRows(
     spaceId: string,
-    opts: { pinned: boolean; after?: { at: Date; id: string } | null },
+    opts: {
+      pinned: boolean;
+      after?: { at: Date; id: string } | null;
+      categoryId?: string;
+    },
   ): Promise<PostRow[]> {
-    const { after } = opts;
+    const params: unknown[] = [
+      spaceId,
+      opts.pinned,
+      opts.pinned ? MAX_PINNED : FEED_PAGE_SIZE + 1,
+    ];
+    const where: string[] = [];
+    if (opts.categoryId) {
+      params.push(opts.categoryId);
+      where.push(`AND p.category_id = $${params.length}`);
+    }
+    if (opts.after) {
+      params.push(opts.after.at, opts.after.id);
+      where.push(
+        `AND (p.last_activity_at, p.id) < ($${params.length - 1}, $${params.length})`,
+      );
+    }
     return this.spaceRepo.query(
-      `SELECT p.id, p.type, p.body, p.pinned, p.reply_count, p.last_activity_at, p.created_at, p.edited_at, ${AUTHOR_SQL}
-       FROM team_posts p LEFT JOIN members a ON a.id = p.author_id
-       WHERE p.space_id = $1 AND p.removed_at IS NULL AND p.pinned = $2
-         ${after ? 'AND (p.last_activity_at, p.id) < ($4, $5)' : ''}
+      `SELECT ${POST_SQL} FROM ${POST_FROM}
+       WHERE p.space_id = $1 AND p.removed_at IS NULL AND p.pinned = $2 ${where.join(' ')}
        ORDER BY p.last_activity_at DESC, p.id DESC
        LIMIT $3`,
-      after
-        ? [spaceId, opts.pinned, FEED_PAGE_SIZE + 1, after.at, after.id]
-        : [spaceId, opts.pinned, opts.pinned ? MAX_PINNED : FEED_PAGE_SIZE + 1],
+      params,
     ) as Promise<PostRow[]>;
+  }
+
+  private async assertCategory(categoryId: string): Promise<void> {
+    const rows = (await this.spaceRepo.query(
+      `SELECT 1 FROM community_categories WHERE id = $1`,
+      [categoryId],
+    )) as unknown[];
+    if (!rows.length) throw new BadRequestException('That category is gone.');
+  }
+
+  private async assertNotMuted(acc: SpaceAccess, memberId: string) {
+    if (!isCommunity(acc)) return;
+    const until = await this.access.mutedUntil(memberId);
+    if (until) throw new ForbiddenException(mutedMessage(until));
+  }
+
+  private tellRemoved(
+    acc: SpaceAccess,
+    authorId: string | undefined,
+    itemId: string,
+    reason?: string,
+  ) {
+    if (!isCommunity(acc) || !authorId) return;
+    this.notifications
+      .notifyMember({
+        category: EmailCategory.COMMUNITY,
+        push: {
+          memberIds: [authorId],
+          key: PushNotificationKey.COMMUNITY_POST_REMOVED,
+          vars: {
+            space_name: acc.name,
+            reason: reason || 'It broke the space guidelines.',
+          },
+          url: '/team-spaces',
+          idempotencyKey: `community-removed:${itemId}`,
+        },
+      })
+      .catch(() => undefined);
   }
 
   private toPost(
@@ -559,6 +771,11 @@ export class TeamSpaceService {
       meeting: details.meetings.get(p.id) ?? null,
       poll: details.polls.get(p.id) ?? null,
       body: p.body,
+      title: p.title,
+      category: p.category_id
+        ? { id: p.category_id, name: p.category_name }
+        : null,
+      locked: !!p.locked_at,
       pinned: p.pinned,
       replyCount: Number(p.reply_count),
       createdAt: p.created_at,
@@ -568,6 +785,8 @@ export class TeamSpaceService {
       mine: p.author_id === memberId,
       canRemove: p.author_id === memberId || acc.isLeader,
       canPin: acc.isLeader,
+      canLock: isCommunity(acc) && acc.isLeader,
+      canReport: isCommunity(acc) && p.author_id !== memberId,
       reactions: reactions.get(p.id) ?? [],
     };
   }
@@ -642,6 +861,8 @@ export class TeamSpaceService {
       throw new BadRequestException(
         `You can tag up to ${MAX_TAGGED_PEOPLE} people at a time.`,
       );
+    if (team && isCommunity(acc) && !acc.isLeader)
+      throw new BadRequestException('Only moderators can use @everyone.');
     if (!memberIds.length && !team) return { body, memberIds: [], team: false };
     const inSpace = new Set(await this.access.memberIds(acc.space));
     const allowed = memberIds.filter((id) => inSpace.has(id));
@@ -657,7 +878,11 @@ export class TeamSpaceService {
       rows.filter((r) => r.name).map((r) => [r.id, r.name as string]),
     );
     return {
-      body: rewriteMentions(body, names),
+      body: rewriteMentions(
+        body,
+        names,
+        isCommunity(acc) ? 'everyone' : undefined,
+      ),
       memberIds: [...names.keys()],
       team,
     };
@@ -681,8 +906,9 @@ export class TeamSpaceService {
     )) as { id: string; email: string; name: string | null }[];
     const authorName = rows.find((r) => r.id === authorId)?.name ?? 'Someone';
     const text = excerpt(tagged.body);
+    const keys = pushKeys(acc);
     const push = {
-      key: PushNotificationKey.TEAM_SPACE_MENTION,
+      key: keys.mention,
       vars: {
         author_name: authorName,
         space_name: acc.name,
@@ -695,7 +921,7 @@ export class TeamSpaceService {
       const heading = `${authorName} tagged you in ${acc.name}`;
       this.notifications
         .notifyMember({
-          category: EmailCategory.TEAM_SPACES,
+          category: keys.category,
           email: {
             to: row.email,
             subject: heading,
@@ -716,7 +942,7 @@ export class TeamSpaceService {
     if (rest.length) {
       this.notifications
         .notifyMember({
-          category: EmailCategory.TEAM_SPACES,
+          category: keys.category,
           push: {
             ...push,
             memberIds: rest,
@@ -770,10 +996,10 @@ export class TeamSpaceService {
     // Lookups above run in the request; only the send itself is left to finish on its own.
     this.notifications
       .notifyMember({
-        category: EmailCategory.TEAM_SPACES,
+        category: pushKeys(acc).category,
         push: {
           memberIds: recipients,
-          key: PushNotificationKey.TEAM_SPACE_LEADER_POST,
+          key: pushKeys(acc).leaderPost,
           vars: {
             space_name: acc.name,
             author_name: author[0]?.name ?? 'Your leader',
@@ -802,10 +1028,10 @@ export class TeamSpaceService {
     )) as { name: string | null }[];
     this.notifications
       .notifyMember({
-        category: EmailCategory.TEAM_SPACES,
+        category: pushKeys(acc).category,
         push: {
           memberIds: [authorId],
-          key: PushNotificationKey.TEAM_SPACE_REPLY,
+          key: pushKeys(acc).reply,
           vars: {
             author_name: replier[0]?.name ?? 'Someone',
             space_name: acc.name,

@@ -203,15 +203,17 @@ export const SWITCHABLE_CORE_MODULES: Record<OrganisationTypeEnum, string[]> = {
   [OrganisationTypeEnum.GROUP]: ['departments'],
 };
 
+// Community starts on only for groups; churches and NGOs switch it on once they're ready to moderate it.
+const OFF_BY_TYPE: Record<OrganisationTypeEnum, string[]> = {
+  [OrganisationTypeEnum.CHURCH]: ['community'],
+  [OrganisationTypeEnum.MINISTRY]: [...OFF_FOR_NGO, 'community'],
+  [OrganisationTypeEnum.GROUP]: OFF_FOR_GROUP,
+};
+
 export function defaultAvailability(
   type: OrganisationTypeEnum,
 ): Record<string, ModuleAvailability> {
-  const off =
-    type === OrganisationTypeEnum.GROUP
-      ? OFF_FOR_GROUP
-      : type === OrganisationTypeEnum.MINISTRY
-        ? OFF_FOR_NGO
-        : [];
+  const off = OFF_BY_TYPE[type];
   return Object.fromEntries(
     KNOWN_MODULES.map((m) => [m.key, off.includes(m.key) ? 'off' : 'on']),
   );

@@ -61,6 +61,11 @@ export enum PushNotificationKey {
   TEAM_SPACE_MEETING_CHANGED = 'TEAM_SPACE_MEETING_CHANGED',
   TEAM_SPACE_MEETING_REMINDER = 'TEAM_SPACE_MEETING_REMINDER',
   TEAM_SPACE_POLL = 'TEAM_SPACE_POLL',
+  COMMUNITY_MODERATOR_POST = 'COMMUNITY_MODERATOR_POST',
+  COMMUNITY_REPLY = 'COMMUNITY_REPLY',
+  COMMUNITY_MENTION = 'COMMUNITY_MENTION',
+  COMMUNITY_REPORT = 'COMMUNITY_REPORT',
+  COMMUNITY_POST_REMOVED = 'COMMUNITY_POST_REMOVED',
   ROTA_ASSIGNED = 'ROTA_ASSIGNED',
   ROTA_PUBLISHED = 'ROTA_PUBLISHED',
   ROTA_REMOVED = 'ROTA_REMOVED',
@@ -690,6 +695,74 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
       author_name: 'Ada',
       space_name: 'Choir',
       excerpt: "I'll be there, thanks!",
+    },
+  },
+  [PushNotificationKey.COMMUNITY_MODERATOR_POST]: {
+    category: EmailCategory.COMMUNITY,
+    label: 'Moderator posted in Community',
+    description:
+      'Sent to every member when a moderator posts in the Community space (other posts go in the evening summary).',
+    title: '{{space_name}}: {{author_name}} posted',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Community',
+      author_name: 'Ada',
+      excerpt: 'Picnic moved to Saturday at 4pm, same park.',
+    },
+  },
+  [PushNotificationKey.COMMUNITY_REPLY]: {
+    category: EmailCategory.COMMUNITY,
+    label: 'Reply to your Community post',
+    description:
+      'Sent to the author of a Community post when someone replies (at most once every 30 minutes per post).',
+    title: '{{author_name}} replied in {{space_name}}',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      author_name: 'Ada',
+      space_name: 'Community',
+      excerpt: 'Count me in!',
+    },
+  },
+  [PushNotificationKey.COMMUNITY_MENTION]: {
+    category: EmailCategory.COMMUNITY,
+    label: 'Tagged in Community',
+    description:
+      'Sent to someone tagged in a Community post or reply, and to everyone when a moderator uses @everyone.',
+    title: '{{author_name}} tagged you in {{space_name}}',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      author_name: 'Ada',
+      space_name: 'Community',
+      excerpt: '@Femi could you lead the prayer?',
+    },
+  },
+  [PushNotificationKey.COMMUNITY_REPORT]: {
+    category: EmailCategory.COMMUNITY,
+    label: 'New report for moderators',
+    description:
+      'Sent to Community moderators when a member reports a post or reply (at most once every 15 minutes).',
+    title: 'A post in {{space_name}} was reported',
+    body: '{{excerpt}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Community',
+      excerpt: 'Reported for: spam',
+    },
+  },
+  [PushNotificationKey.COMMUNITY_POST_REMOVED]: {
+    category: EmailCategory.COMMUNITY,
+    label: 'Your Community post was removed',
+    description:
+      'Sent to the author when a moderator removes their post or reply, with the reason.',
+    title: 'A moderator removed your post in {{space_name}}',
+    body: '{{reason}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Community',
+      reason: 'It was off topic for this space.',
     },
   },
   [PushNotificationKey.TEAM_SPACE_DIGEST]: {

@@ -65,6 +65,13 @@ export const MEMBER_NOTIFICATION_CHOICES: MemberNotificationChoice[] = [
     module: 'team_spaces',
   },
   {
+    category: EmailCategory.COMMUNITY,
+    label: 'Community',
+    description:
+      "A moderator's new post, replies to your posts and @tags in the Community space.",
+    module: 'community',
+  },
+  {
     category: EmailCategory.BIBLE_GAMES,
     label: 'Bible game challenges',
     description: 'When someone challenges you, or it’s your turn.',

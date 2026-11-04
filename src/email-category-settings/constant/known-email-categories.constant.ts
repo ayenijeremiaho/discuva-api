@@ -155,6 +155,11 @@ export const KNOWN_EMAIL_CATEGORIES: Record<EmailCategory, KnownEmailCategory> =
       description:
         "Messages from team spaces: a leader's new post, a reply, an @tag, one evening summary of anything unread, and meeting invitations, summaries and action reminders.",
     },
+    [EmailCategory.COMMUNITY]: {
+      label: 'Community',
+      description:
+        "App notifications from the Community space: a moderator's new post, replies to your posts, @tags, reports for moderators, and a note when a moderator removes your post.",
+    },
     [EmailCategory.SERVING_ROTA]: {
       label: 'Serving Rota',
       description:

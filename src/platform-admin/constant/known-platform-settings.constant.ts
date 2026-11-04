@@ -129,6 +129,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 8,
     max: 3650,
   },
+  [PlatformSettingKey.COMMUNITY_MAX_CATEGORIES]: {
+    label: 'Community Categories',
+    unit: "categories at most in an account's Community space",
+    defaultValue: 8,
+    min: 1,
+    max: 30,
+  },
   [PlatformSettingKey.UNVERIFIED_GROUP_MEMBER_LIMIT]: {
     label: 'Private Group Member Limit',
     unit: 'people, until a small group is verified',

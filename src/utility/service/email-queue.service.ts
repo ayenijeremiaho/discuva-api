@@ -270,6 +270,7 @@ export class EmailQueueService {
       [EmailCategory.FELLOWSHIPS]: 'EMAIL_FELLOWSHIPS_ENABLED',
       [EmailCategory.TEAM_PULSE]: 'EMAIL_TEAM_PULSE_ENABLED',
       [EmailCategory.TEAM_SPACES]: 'EMAIL_TEAM_SPACES_ENABLED',
+      [EmailCategory.COMMUNITY]: 'EMAIL_COMMUNITY_ENABLED',
       [EmailCategory.SERVING_ROTA]: 'EMAIL_SERVING_ROTA_ENABLED',
     };
     if (this.config.get<boolean>(flagMap[category]) === false) return false;

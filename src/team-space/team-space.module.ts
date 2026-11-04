@@ -1,3 +1,10 @@
+import { CommunityController } from './controller/community.controller';
+import { AdminCommunityController } from './controller/admin-community.controller';
+import { CommunityService } from './service/community.service';
+import { CommunityCategory } from './entity/community-category.entity';
+import { CommunityModerator } from './entity/community-moderator.entity';
+import { CommunityMute } from './entity/community-mute.entity';
+import { PostReport } from './entity/post-report.entity';
 import { TeamMeetingAction } from './entity/team-meeting-action.entity';
 import { TeamMeetingFollowUpService } from './service/team-meeting-follow-up.service';
 import { Module } from '@nestjs/common';
@@ -41,9 +48,14 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
       TeamPollVote,
       TeamMeetingSeries,
       TeamPostReaction,
+      CommunityCategory,
+      CommunityModerator,
+      CommunityMute,
+      PostReport,
     ]),
   ],
   providers: [
+    CommunityService,
     SharedSpaceService,
     TeamMeetingFollowUpService,
     TeamSpaceAccessService,
@@ -60,6 +72,8 @@ import { VolunteerChatSettingsController } from './controller/volunteer-chat-set
     SharedSpaceController,
     TeamSpaceController,
     VolunteerChatSettingsController,
+    CommunityController,
+    AdminCommunityController,
   ],
 })
 export class TeamSpaceModule {}

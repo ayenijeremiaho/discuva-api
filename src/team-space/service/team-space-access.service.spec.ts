@@ -15,15 +15,25 @@ describe('TeamSpaceAccessService (volunteering)', () => {
   };
   const churchSettings = {
     isEnabled: jest.fn((key: string) =>
-      Promise.resolve(key === 'volunteering' ? volunteeringOn : true),
+      Promise.resolve(
+        key === 'volunteering'
+          ? volunteeringOn
+          : key === 'community'
+            ? false
+            : true,
+      ),
     ),
   };
   let chat: { openDays: number; listedDays: number };
   const chatSettings = { get: jest.fn(() => Promise.resolve(chat)) };
+  const plans = { gateReason: jest.fn().mockResolvedValue(null) };
+  const cls = { get: jest.fn().mockReturnValue('t1') };
   const service = new TeamSpaceAccessService(
     spaceRepo as never,
     churchSettings as never,
     chatSettings as never,
+    plans as never,
+    cls as never,
   );
 
   beforeEach(() => {
@@ -209,5 +219,99 @@ describe('TeamSpaceAccessService (volunteering)', () => {
         isLeader: false,
       }),
     ).not.toThrow();
+  });
+});
+
+describe('TeamSpaceAccessService (community)', () => {
+  const spaceRepo = {
+    query: jest.fn(),
+    findOne: jest.fn().mockResolvedValue({ id: 'community-space' }),
+  };
+  const enabled: Record<string, boolean> = {};
+  const churchSettings = {
+    isEnabled: jest.fn((key: string) => Promise.resolve(enabled[key] ?? true)),
+  };
+  const plans = { gateReason: jest.fn().mockResolvedValue(null) };
+  const cls = { get: jest.fn().mockReturnValue('t1') };
+  const service = new TeamSpaceAccessService(
+    spaceRepo as never,
+    churchSettings as never,
+    { get: jest.fn() } as never,
+    plans as never,
+    cls as never,
+  );
+  const ref = '00000000-0000-0000-0000-000000000000';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    for (const key of Object.keys(enabled)) delete enabled[key];
+  });
+
+  it('lets every member in and marks moderators as its leaders', async () => {
+    spaceRepo.query.mockResolvedValueOnce([{ moderator: true }]);
+    const acc = await service.access('m1', TeamSpaceKindEnum.COMMUNITY, ref);
+    expect(acc).toMatchObject({
+      kind: TeamSpaceKindEnum.COMMUNITY,
+      name: 'Community',
+      isLeader: true,
+      space: { id: 'community-space' },
+    });
+  });
+
+  it('is closed when Community is switched off, even with team spaces on', async () => {
+    enabled.community = false;
+    await expect(
+      service.access('m1', TeamSpaceKindEnum.COMMUNITY, ref),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('keeps team spaces closed when only Community is on', async () => {
+    enabled.team_spaces = false;
+    await expect(
+      service.access('m1', TeamSpaceKindEnum.DEPARTMENT, 'd1'),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('refuses a plan without Community', async () => {
+    plans.gateReason.mockResolvedValueOnce('NOT_ON_PLAN');
+    await expect(
+      service.access('m1', TeamSpaceKindEnum.COMMUNITY, ref),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('only knows the one Community space', async () => {
+    await expect(
+      service.access('m1', TeamSpaceKindEnum.COMMUNITY, 'other-id'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('lists Community first, and no team spaces when they are off', async () => {
+    enabled.team_spaces = false;
+    spaceRepo.query.mockResolvedValueOnce([{ moderator: false }]);
+    expect(await service.memberships('m1')).toEqual([
+      {
+        kind: TeamSpaceKindEnum.COMMUNITY,
+        refId: ref,
+        name: 'Community',
+        isLeader: false,
+      },
+    ]);
+  });
+
+  it('reaches every active member', async () => {
+    spaceRepo.query.mockResolvedValueOnce([{ id: 'a' }, { id: 'b' }]);
+    expect(
+      await service.memberIds({
+        kind: TeamSpaceKindEnum.COMMUNITY,
+        refId: ref,
+      }),
+    ).toEqual(['a', 'b']);
+    expect(spaceRepo.query.mock.calls[0][0]).toContain("status = 'ACTIVE'");
+  });
+
+  it('only counts a mute that has not ended', async () => {
+    spaceRepo.query.mockResolvedValueOnce([]);
+    expect(await service.mutedUntil('m1')).toBeNull();
+    expect(spaceRepo.query.mock.calls[0][0]).toContain('until > $2');
   });
 });

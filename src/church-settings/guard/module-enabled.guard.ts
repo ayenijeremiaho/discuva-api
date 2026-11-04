@@ -21,26 +21,26 @@ export class ModuleEnabledGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const moduleKey = this.reflector.getAllAndOverride<string>(MODULE_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (!moduleKey) return true;
-    const enabled = await this.churchSettingsService.isEnabled(moduleKey);
-    if (!enabled)
-      throw new ForbiddenException('This module is currently disabled.');
-
-    // Whether this module's own key is included in the tenant's plan —
-    // makes every module a plan-assignable capability without needing a
-    // separate @RequiresPlan decorator: a platform admin moves a module
-    // between Free and Pro by editing Plan.features, no deploy required.
-    // Same defensive tenantId fallback as PlanGuard (routes excluded from
-    // TenantMiddleware never carry @RequiresModule anyway).
+    const required = this.reflector.getAllAndOverride<string | string[]>(
+      MODULE_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (!required) return true;
+    const keys = Array.isArray(required) ? required : [required];
     const tenantId = this.cls.get('tenantId');
-    if (!tenantId) return true;
-
-    // Platform overrides win over the plan either way (Tenant.moduleOverrides); the 403 says which reason applies.
-    await this.planFeatureResolver.assertEntitled(tenantId, moduleKey);
-    return true;
+    let refusal: unknown = new ForbiddenException(
+      'This module is currently disabled.',
+    );
+    for (const key of keys) {
+      if (!(await this.churchSettingsService.isEnabled(key))) continue;
+      if (!tenantId) return true;
+      try {
+        await this.planFeatureResolver.assertEntitled(tenantId, key);
+        return true;
+      } catch (err) {
+        refusal = err;
+      }
+    }
+    throw refusal;
   }
 }

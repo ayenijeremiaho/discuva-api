@@ -29054,7 +29054,7 @@
                 "posts"
               ]
             },
-            "description": "Not for members under 18. Leaders only when the space is set that way.",
+            "description": "Not for members under 18. Leaders only when the space is set that way. In Community, also takes optional `title` (up to 120) and `categoryId`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"body\": \"Rehearsal moves to 5pm on Saturday.\"\n}"
@@ -29171,7 +29171,7 @@
                 "{{postId}}"
               ]
             },
-            "description": ""
+            "description": " Optional body `{ \"reason\": \"...\" }`: in Community, a moderator's reason is pushed to the author."
           }
         },
         {
@@ -29409,7 +29409,7 @@
                 "{{replyId}}"
               ]
             },
-            "description": ""
+            "description": " Optional body `{ \"reason\": \"...\" }`: in Community, a moderator's reason is pushed to the author."
           }
         },
         {
@@ -29690,6 +29690,634 @@
             },
             "description": ""
           }
+        },
+        {
+          "name": "Community",
+          "item": [
+            {
+              "name": "Open Community",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/team-spaces/COMMUNITY/00000000-0000-0000-0000-000000000000",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "team-spaces",
+                    "COMMUNITY",
+                    "00000000-0000-0000-0000-000000000000"
+                  ]
+                },
+                "description": "Opens the account's Community space. Adds `community: { categories, mutedUntil, openReports }`; `openReports` is only filled for moderators."
+              }
+            },
+            {
+              "name": "Community feed by category",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/team-spaces/COMMUNITY/00000000-0000-0000-0000-000000000000/posts?categoryId={{categoryId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "team-spaces",
+                    "COMMUNITY",
+                    "00000000-0000-0000-0000-000000000000",
+                    "posts?categoryId={{categoryId}}"
+                  ]
+                },
+                "description": "Feed page of 20, filtered to one category."
+              }
+            },
+            {
+              "name": "Post in Community",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/team-spaces/COMMUNITY/00000000-0000-0000-0000-000000000000/posts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "team-spaces",
+                    "COMMUNITY",
+                    "00000000-0000-0000-0000-000000000000",
+                    "posts"
+                  ]
+                },
+                "description": "Optional title and category. Only moderators can tag `@[everyone](team)`; a moderator's post pushes every member.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"body\": \"Picnic on Saturday at 4pm\",\n  \"title\": \"Picnic\",\n  \"categoryId\": \"{{categoryId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Lock replies",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/lock",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "team-spaces",
+                    "posts",
+                    "{{postId}}",
+                    "lock"
+                  ]
+                },
+                "description": "Community moderators only.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"locked\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Change post category",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/team-spaces/posts/{{postId}}/category",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "team-spaces",
+                    "posts",
+                    "{{postId}}",
+                    "category"
+                  ]
+                },
+                "description": "Author or a moderator; `null` clears it.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"categoryId\": \"{{categoryId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Report a post",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/community/posts/{{postId}}/report",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "community",
+                    "posts",
+                    "{{postId}}",
+                    "report"
+                  ]
+                },
+                "description": "Any member, not on their own post. One open report per person per item.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"Spam\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Report a reply",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/community/replies/{{replyId}}/report",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "community",
+                    "replies",
+                    "{{replyId}}",
+                    "report"
+                  ]
+                },
+                "description": "Same as reporting a post.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"Rude\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Open reports",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/community/reports?page=1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "community",
+                    "reports?page=1"
+                  ]
+                },
+                "description": "Moderators only. 20 per page, newest first."
+              }
+            },
+            {
+              "name": "Resolve a report",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/community/reports/{{reportId}}/resolve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "community",
+                    "reports",
+                    "{{reportId}}",
+                    "resolve"
+                  ]
+                },
+                "description": "Moderators only. `REMOVED` removes the item and tells its author; every open report on the same item is settled.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"outcome\": \"REMOVED\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Pause a member's posting",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/community/mutes",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "community",
+                    "mutes"
+                  ]
+                },
+                "description": "Moderators only. `days` is 1, 7 or 30; moderators can't mute each other.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"memberId\": \"{{memberId}}\",\n  \"days\": 7,\n  \"reason\": \"Repeated spam\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Lift a pause",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/community/mutes/{{memberId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "community",
+                    "mutes",
+                    "{{memberId}}"
+                  ]
+                },
+                "description": "Moderators only."
+              }
+            },
+            {
+              "name": "Admin: list moderators",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/moderators",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "moderators"
+                  ]
+                },
+                "description": "`community:moderate`. Named moderators plus admins whose role has the permission."
+              }
+            },
+            {
+              "name": "Admin: add a moderator",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/moderators",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "moderators"
+                  ]
+                },
+                "description": "`community:moderate`. Active members aged 18 or over.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"memberId\": \"{{memberId}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Admin: remove a moderator",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/moderators/{{memberId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "moderators",
+                    "{{memberId}}"
+                  ]
+                },
+                "description": "`community:moderate`. Only named moderators; admins stay moderators through their role."
+              }
+            },
+            {
+              "name": "Admin: list categories",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "categories"
+                  ]
+                },
+                "description": "`community:moderate`."
+              }
+            },
+            {
+              "name": "Admin: add a category",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/categories",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "categories"
+                  ]
+                },
+                "description": "`community:moderate`. Up to the platform setting `community_max_categories` (default 8); 409 for a duplicate name.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Prayer\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Admin: rename a category",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/categories/{{categoryId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "categories",
+                    "{{categoryId}}"
+                  ]
+                },
+                "description": "`community:moderate`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Prayer requests\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Admin: reorder categories",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/categories/order",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "categories",
+                    "order"
+                  ]
+                },
+                "description": "`community:moderate`. Every category id once, in the new order.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"ids\": [\n    \"{{categoryId}}\",\n    \"{{otherCategoryId}}\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Admin: remove a category",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/categories/{{categoryId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "categories",
+                    "{{categoryId}}"
+                  ]
+                },
+                "description": "`community:moderate`. Its posts are left without a category."
+              }
+            },
+            {
+              "name": "Admin: open reports",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/reports?page=1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "reports?page=1"
+                  ]
+                },
+                "description": "`community:moderate`. Same as the member route."
+              }
+            },
+            {
+              "name": "Admin: resolve a report",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{memberToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/admin/community/reports/{{reportId}}/resolve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "admin",
+                    "community",
+                    "reports",
+                    "{{reportId}}",
+                    "resolve"
+                  ]
+                },
+                "description": "`community:moderate`.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"outcome\": \"KEPT\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
         }
       ]
     },

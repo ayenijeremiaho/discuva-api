@@ -87,6 +87,7 @@ export enum AdminPermission {
   CHURCH_CALENDAR_WRITE = 'church_calendar:write',
   DEPARTMENT_GOALS_READ = 'department_goals:read',
   DEPARTMENT_GOALS_WRITE = 'department_goals:write',
+  COMMUNITY_MODERATE = 'community:moderate',
 }
 
 export const AdminPermissionLabels: Record<AdminPermission, string> = {
@@ -178,6 +179,7 @@ export const AdminPermissionLabels: Record<AdminPermission, string> = {
   [AdminPermission.CHURCH_CALENDAR_WRITE]: 'Build & Manage Church Calendar',
   [AdminPermission.DEPARTMENT_GOALS_READ]: 'View Department Goals',
   [AdminPermission.DEPARTMENT_GOALS_WRITE]: 'Manage Department Goal Cycles',
+  [AdminPermission.COMMUNITY_MODERATE]: 'Moderate Community',
 };
 
 export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
@@ -344,6 +346,8 @@ export const AdminPermissionDescriptions: Record<AdminPermission, string> = {
     "View department goal cycles, every department's goals, and the cross-department rating report",
   [AdminPermission.DEPARTMENT_GOALS_WRITE]:
     "Open and manage goal cycles, correct a goal mid-cycle, and submit the church's rating",
+  [AdminPermission.COMMUNITY_MODERATE]:
+    'Name Community moderators, manage categories and reports, and remove posts or mute members',
 };
 
 export interface AdminPermissionGroupItem {
@@ -590,6 +594,7 @@ export const AdminPermissionGroups: AdminPermissionGroup[] = [
     ],
     'department_goals',
   ),
+  buildGroup('Community', [AdminPermission.COMMUNITY_MODERATE], 'community'),
   buildGroup('System', [
     AdminPermission.DASHBOARD_READ,
     AdminPermission.ADMIN_READ,

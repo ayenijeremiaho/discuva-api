@@ -33,4 +33,5 @@ export enum PlatformSettingKey {
   ACCOUNT_ARCHIVE_AFTER_DAYS = 'account_archive_after_days',
   ACCOUNT_DELETE_AFTER_DAYS = 'account_delete_after_days',
   ACCOUNT_AUTO_DELETE = 'account_auto_delete',
+  COMMUNITY_MAX_CATEGORIES = 'community_max_categories',
 }

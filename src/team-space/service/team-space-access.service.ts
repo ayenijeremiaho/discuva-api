@@ -5,7 +5,14 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { TeamSpace, TeamSpaceKindEnum } from '../entity/team-space.entity';
+import {
+  COMMUNITY_REF_ID,
+  TeamSpace,
+  TeamSpaceKindEnum,
+} from '../entity/team-space.entity';
+import { ClsService } from 'nestjs-cls';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
 import { ADULT_AGE } from '../constant/team-space.constant';
 import { VolunteerChatSettingsService } from './volunteer-chat-settings.service';
 import { ChurchSettingsService } from '../../church-settings/service/church-settings.service';
@@ -21,6 +28,10 @@ export interface SpaceMembership {
 }
 
 const DAY_MS = 24 * 3600 * 1000;
+export const COMMUNITY_NAME = 'Community';
+
+const moduleFor = (kind: TeamSpaceKindEnum) =>
+  kind === TeamSpaceKindEnum.COMMUNITY ? 'community' : 'team_spaces';
 const LEADER_LOOKAHEAD_DAYS = 30;
 
 // Leads a volunteering space: the admin who created the opportunity, or a lead of its department.
@@ -93,11 +104,70 @@ export class TeamSpaceAccessService {
     private readonly spaceRepo: Repository<TeamSpace>,
     private readonly churchSettings: ChurchSettingsService,
     private readonly chatSettings: VolunteerChatSettingsService,
+    private readonly plans: PlanFeatureResolverService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
+
+  // Team spaces and Community are separate features, so each space checks its own.
+  private async moduleOn(key: string): Promise<boolean> {
+    if (!(await this.churchSettings.isEnabled(key))) return false;
+    const tenantId = this.cls.get('tenantId');
+    return !tenantId || !(await this.plans.gateReason(tenantId, key));
+  }
+
+  private async assertModule(kind: TeamSpaceKindEnum): Promise<void> {
+    if (!(await this.moduleOn(moduleFor(kind))))
+      throw new ForbiddenException('This module is currently disabled.');
+  }
+
+  // Muted members can read and react, but not post or reply, until this time.
+  async mutedUntil(memberId: string, now = new Date()): Promise<Date | null> {
+    const rows = (await this.spaceRepo.query(
+      `SELECT until FROM community_mutes WHERE member_id = $1 AND until > $2`,
+      [memberId, now],
+    )) as { until: Date }[];
+    return rows[0]?.until ?? null;
+  }
+
+  // Named moderators, plus admins whose role has the Community permission.
+  async isModerator(memberId: string): Promise<boolean> {
+    const rows = (await this.spaceRepo.query(
+      `SELECT EXISTS (SELECT 1 FROM community_moderators WHERE member_id = $1)
+         OR EXISTS (SELECT 1 FROM admins a JOIN admin_roles r ON r.id = a.admin_role_id
+                    WHERE a.member_id = $1 AND a.is_active AND 'community:moderate' = ANY(r.permissions)) AS moderator`,
+      [memberId],
+    )) as { moderator: boolean }[];
+    return !!rows[0]?.moderator;
+  }
 
   async memberships(
     memberId: string,
     now = new Date(),
+  ): Promise<SpaceMembership[]> {
+    const [teams, community] = await Promise.all([
+      this.moduleOn('team_spaces'),
+      this.moduleOn('community'),
+    ]);
+    return [
+      ...(community ? [await this.communityMembership(memberId)] : []),
+      ...(teams ? await this.teamMemberships(memberId, now) : []),
+    ];
+  }
+
+  private async communityMembership(
+    memberId: string,
+  ): Promise<SpaceMembership> {
+    return {
+      kind: TeamSpaceKindEnum.COMMUNITY,
+      refId: COMMUNITY_REF_ID,
+      name: COMMUNITY_NAME,
+      isLeader: await this.isModerator(memberId),
+    };
+  }
+
+  private async teamMemberships(
+    memberId: string,
+    now: Date,
   ): Promise<SpaceMembership[]> {
     const [departments, fellowships, volunteering, shared] = await Promise.all([
       this.spaceRepo.query(
@@ -199,6 +269,15 @@ export class TeamSpaceAccessService {
     kind: TeamSpaceKindEnum,
     refId: string,
   ): Promise<SpaceAccess> {
+    await this.assertModule(kind);
+    if (kind === TeamSpaceKindEnum.COMMUNITY) {
+      if (refId !== COMMUNITY_REF_ID)
+        throw new NotFoundException('Team not found');
+      return {
+        ...(await this.communityMembership(memberId)),
+        space: await this.ensureSpace(kind, refId),
+      };
+    }
     if (kind === TeamSpaceKindEnum.VOLUNTEERING)
       return this.volunteerAccess(memberId, refId);
     if (kind === TeamSpaceKindEnum.SHARED)
@@ -321,6 +400,12 @@ export class TeamSpaceAccessService {
 
   // Everyone a space reaches: the active roster plus its leaders.
   async memberIds(space: Pick<TeamSpace, 'kind' | 'refId'>): Promise<string[]> {
+    if (space.kind === TeamSpaceKindEnum.COMMUNITY) {
+      const rows = (await this.spaceRepo.query(
+        `SELECT id FROM members WHERE status = 'ACTIVE'`,
+      )) as { id: string }[];
+      return rows.map((r) => r.id);
+    }
     if (space.kind === TeamSpaceKindEnum.SHARED) {
       const rows = (await this.spaceRepo.query(
         `SELECT m.id FROM members m

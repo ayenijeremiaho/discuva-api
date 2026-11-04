@@ -6,7 +6,11 @@ export enum TeamSpaceKindEnum {
   FELLOWSHIP = 'FELLOWSHIP',
   VOLUNTEERING = 'VOLUNTEERING',
   SHARED = 'SHARED',
+  COMMUNITY = 'COMMUNITY',
 }
+
+// One Community space per account, so its ref is fixed.
+export const COMMUNITY_REF_ID = '00000000-0000-0000-0000-000000000000';
 
 // A department's, fellowship's or volunteering opportunity's shared space. Membership isn't stored: it follows the roster.
 @Entity({ name: 'team_spaces' })

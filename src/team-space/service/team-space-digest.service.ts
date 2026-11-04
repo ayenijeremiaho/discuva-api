@@ -1,3 +1,4 @@
+import { COMMUNITY_NAME } from './team-space-access.service';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { MoreThan, Repository } from 'typeorm';
@@ -156,7 +157,12 @@ export class TeamSpaceDigestService {
       ]),
     );
     return new Map(
-      spaces.map((s) => [s.id, byRef.get(s.refId) ?? 'your team']),
+      spaces.map((s) => [
+        s.id,
+        s.kind === TeamSpaceKindEnum.COMMUNITY
+          ? COMMUNITY_NAME
+          : (byRef.get(s.refId) ?? 'your team'),
+      ]),
     );
   }
 }

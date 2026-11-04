@@ -145,4 +145,31 @@ describe('ModuleEnabledGuard', () => {
       );
     });
   });
+
+  describe('when the route accepts any of several modules', () => {
+    beforeEach(() => {
+      jest
+        .spyOn(reflector, 'getAllAndOverride')
+        .mockReturnValue(['team_spaces', 'community']);
+      mockCls.get.mockReturnValue('tenant-1');
+      mockPlanFeatureResolver.resolve.mockResolvedValue({
+        features: ['team_spaces', 'community'],
+        overrides: {},
+      });
+    });
+
+    it('lets the request through when only the second module is on', async () => {
+      mockChurchSettingsService.isEnabled.mockImplementation((key: string) =>
+        Promise.resolve(key === 'community'),
+      );
+      await expect(guard.canActivate(mockContext())).resolves.toBe(true);
+    });
+
+    it('refuses when none of them is on', async () => {
+      mockChurchSettingsService.isEnabled.mockResolvedValue(false);
+      await expect(guard.canActivate(mockContext())).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+  });
 });

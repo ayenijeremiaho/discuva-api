@@ -1,5 +1,11 @@
 export const POST_MAX_LENGTH = 2000;
 export const REPLY_MAX_LENGTH = 1000;
+export const POST_TITLE_MAX_LENGTH = 120;
+export const REASON_MAX_LENGTH = 300;
+// One report push to moderators per space in this window.
+export const REPORT_PUSH_THROTTLE_SECONDS = 15 * 60;
+export const MUTE_DAYS = [1, 7, 30];
+export const REPORTS_PAGE_SIZE = 20;
 // Room for stored tags; the visible text is checked against the limits above.
 export const TAG_ALLOWANCE = 800;
 export const FEED_PAGE_SIZE = 20;

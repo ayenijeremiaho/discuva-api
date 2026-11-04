@@ -27,4 +27,11 @@ describe('mentions', () => {
   it('keeps @team', () => {
     expect(rewriteMentions('@[team](team)', new Map())).toBe('@[team](team)');
   });
+
+  it('labels the whole-space tag as the space calls it', () => {
+    expect(rewriteMentions('@[team](team) hi', new Map(), 'everyone')).toBe(
+      '@[everyone](team) hi',
+    );
+    expect(parseMentions('@[everyone](team) hi').team).toBe(true);
+  });
 });

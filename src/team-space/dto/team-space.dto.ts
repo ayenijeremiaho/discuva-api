@@ -5,6 +5,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsOptional,
   IsString,
   IsUUID,
@@ -14,9 +15,13 @@ import {
 } from 'class-validator';
 import { RsvpResponseEnum } from '../entity/team-meeting-rsvp.entity';
 import { SharedSpaceAudienceEnum } from '../entity/shared-space.entity';
+import { ReportOutcomeEnum } from '../entity/post-report.entity';
 import { Transform } from 'class-transformer';
 import {
   POST_MAX_LENGTH,
+  MUTE_DAYS,
+  POST_TITLE_MAX_LENGTH,
+  REASON_MAX_LENGTH,
   REPLY_MAX_LENGTH,
   TAG_ALLOWANCE,
 } from '../constant/team-space.constant';
@@ -88,6 +93,43 @@ export class PostBodyDto {
   @IsString()
   @Length(1, POST_MAX_LENGTH + TAG_ALLOWANCE)
   body: string;
+
+  // Community only: an optional title and category.
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(POST_TITLE_MAX_LENGTH)
+  title?: string;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
+}
+
+export class RemoveDto {
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(REASON_MAX_LENGTH)
+  reason?: string;
+}
+
+export class ReportDto {
+  @Transform(trim)
+  @IsString()
+  @Length(1, REASON_MAX_LENGTH)
+  reason: string;
+}
+
+export class PostCategoryDto {
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
+}
+
+export class LockPostDto {
+  @IsBoolean()
+  locked: boolean;
 }
 
 export class ReplyBodyDto {
@@ -243,4 +285,42 @@ export class VoteDto {
   @ArrayMaxSize(10)
   @IsString({ each: true })
   optionIds: string[];
+}
+
+export class ResolveReportDto {
+  @IsEnum(ReportOutcomeEnum)
+  outcome: ReportOutcomeEnum;
+}
+
+export class MuteDto {
+  @IsUUID()
+  memberId: string;
+
+  @IsIn(MUTE_DAYS)
+  days: number;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(REASON_MAX_LENGTH)
+  reason?: string;
+}
+
+export class ModeratorDto {
+  @IsUUID()
+  memberId: string;
+}
+
+export class CategoryDto {
+  @Transform(trim)
+  @IsString()
+  @Length(1, 50)
+  name: string;
+}
+
+export class CategoryOrderDto {
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID('all', { each: true })
+  ids: string[];
 }

@@ -35,6 +35,9 @@ import {
   VoteDto,
   PinPostDto,
   PostBodyDto,
+  PostCategoryDto,
+  LockPostDto,
+  RemoveDto,
   ReactionDto,
   ReplyBodyDto,
   SpaceSettingsDto,
@@ -43,7 +46,7 @@ import {
 const Kind = () => Param('kind', new ParseEnumPipe(TeamSpaceKindEnum));
 const Uuid = (name: string) => Param(name, ParseUUIDPipe);
 
-@RequiresModule('team_spaces')
+@RequiresModule(['team_spaces', 'community'])
 @UseGuards(JwtAuthGuard, ModuleEnabledGuard)
 @Controller('team-spaces')
 export class TeamSpaceController {
@@ -208,12 +211,34 @@ export class TeamSpaceController {
     @Uuid('postId') postId: string,
     @Body() dto: PostBodyDto,
   ) {
-    return this.spaces.editPost(user.id, postId, dto.body);
+    return this.spaces.editPost(user.id, postId, dto.body, dto);
   }
 
   @Delete('posts/:postId')
-  removePost(@CurrentUser() user: MemberAuth, @Uuid('postId') postId: string) {
-    return this.spaces.removePost(user.id, postId);
+  removePost(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: RemoveDto,
+  ) {
+    return this.spaces.removePost(user.id, postId, dto?.reason);
+  }
+
+  @Post('posts/:postId/lock')
+  lock(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: LockPostDto,
+  ) {
+    return this.spaces.lock(user.id, postId, dto.locked);
+  }
+
+  @Patch('posts/:postId/category')
+  setCategory(
+    @CurrentUser() user: MemberAuth,
+    @Uuid('postId') postId: string,
+    @Body() dto: PostCategoryDto,
+  ) {
+    return this.spaces.setCategory(user.id, postId, dto.categoryId ?? null);
   }
 
   @Post('posts/:postId/pin')
@@ -247,8 +272,9 @@ export class TeamSpaceController {
   removeReply(
     @CurrentUser() user: MemberAuth,
     @Uuid('replyId') replyId: string,
+    @Body() dto: RemoveDto,
   ) {
-    return this.spaces.removeReply(user.id, replyId);
+    return this.spaces.removeReply(user.id, replyId, dto?.reason);
   }
 
   @Get(':kind/:refId')
@@ -275,8 +301,10 @@ export class TeamSpaceController {
     @Kind() kind: TeamSpaceKindEnum,
     @Uuid('refId') refId: string,
     @Query('cursor') cursor?: string,
+    @Query('categoryId', new ParseUUIDPipe({ optional: true }))
+    categoryId?: string,
   ) {
-    return this.spaces.feed(user.id, kind, refId, cursor);
+    return this.spaces.feed(user.id, kind, refId, cursor, categoryId);
   }
 
   @Post(':kind/:refId/posts')
@@ -286,7 +314,7 @@ export class TeamSpaceController {
     @Uuid('refId') refId: string,
     @Body() dto: PostBodyDto,
   ) {
-    return this.spaces.createPost(user.id, kind, refId, dto.body);
+    return this.spaces.createPost(user.id, kind, refId, dto.body, dto);
   }
 
   @Post(':kind/:refId/meetings')

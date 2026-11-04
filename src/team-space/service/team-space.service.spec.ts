@@ -64,6 +64,7 @@ describe('TeamSpaceService', () => {
     isMinor: jest.fn(() => Promise.resolve(minor)),
     memberIds: jest.fn().mockResolvedValue(['m1', 'm2', 'm3']),
     memberships: jest.fn(),
+    mutedUntil: jest.fn().mockResolvedValue(null),
   };
   const qb = () => {
     const q: Record<string, jest.Mock> = {};
@@ -327,6 +328,119 @@ describe('TeamSpaceService', () => {
       });
       await service.editPost(AUTHOR, 'p1', `Hi again @[Ada Obi](${IN})`);
       expect(notifications.notifyMember).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Community', () => {
+    const COMMUNITY = TeamSpaceKindEnum.COMMUNITY;
+    const ref = '00000000-0000-0000-0000-000000000000';
+    const communitySpace = {
+      id: 'c1',
+      kind: COMMUNITY,
+      refId: ref,
+      leadersOnly: false,
+    };
+
+    beforeEach(() => {
+      acc = {
+        kind: COMMUNITY,
+        refId: ref,
+        name: 'Community',
+        isLeader: false,
+        space: { ...communitySpace },
+      };
+      postRepo.findOne.mockResolvedValue({
+        id: 'p1',
+        body: 'Picnic on Saturday',
+        pinned: false,
+        removedAt: null,
+        lockedAt: null,
+        author: { id: 'm9' },
+        space: communitySpace,
+      });
+    });
+
+    it('keeps a muted member from posting or replying', async () => {
+      access.mutedUntil.mockResolvedValue(new Date('2026-11-12T00:00:00Z'));
+      await expect(
+        service.createPost('m1', COMMUNITY, ref, 'Hi'),
+      ).rejects.toThrow(/paused your posting in Community until 12 Nov/);
+      await expect(service.reply('m1', 'p1', 'Hi')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(postRepo.save).not.toHaveBeenCalled();
+      access.mutedUntil.mockResolvedValue(null);
+    });
+
+    it('refuses replies to a locked conversation', async () => {
+      postRepo.findOne.mockResolvedValue({
+        id: 'p1',
+        body: 'x',
+        removedAt: null,
+        lockedAt: new Date(),
+        author: { id: 'm9' },
+        space: communitySpace,
+      });
+      await expect(service.reply('m1', 'p1', 'Hi')).rejects.toThrow(
+        'This conversation is locked. You can still read it.',
+      );
+    });
+
+    it('leaves @everyone to moderators', async () => {
+      await expect(
+        service.createPost('m1', COMMUNITY, ref, '@[team](team) hello'),
+      ).rejects.toThrow('Only moderators can use @everyone.');
+    });
+
+    it('saves a title and category, and pushes a moderator post as Community', async () => {
+      acc.isLeader = true;
+      spaceRepo.query.mockResolvedValueOnce([{}]);
+      await service.createPost('m1', COMMUNITY, ref, 'Bring a dish', {
+        title: 'Picnic',
+        categoryId: 'cat-1',
+      });
+      expect(postRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Picnic', category: { id: 'cat-1' } }),
+      );
+      const call = notifications.notifyMember.mock.calls[0][0];
+      expect(call.category).toBe('COMMUNITY');
+      expect(call.push.key).toBe('COMMUNITY_MODERATOR_POST');
+    });
+
+    it('refuses a category that no longer exists', async () => {
+      spaceRepo.query.mockResolvedValueOnce([]);
+      await expect(
+        service.createPost('m1', COMMUNITY, ref, 'Hi', { categoryId: 'gone' }),
+      ).rejects.toThrow('That category is gone.');
+    });
+
+    it('tells the author why a moderator removed their post', async () => {
+      acc.isLeader = true;
+      await service.removePost('m1', 'p1', 'Off topic');
+      const call = notifications.notifyMember.mock.calls[0][0];
+      expect(call.push).toMatchObject({
+        memberIds: ['m9'],
+        key: 'COMMUNITY_POST_REMOVED',
+        vars: { space_name: 'Community', reason: 'Off topic' },
+      });
+    });
+
+    it('filters the feed by category', async () => {
+      spaceRepo.query.mockResolvedValueOnce([]);
+      await service.feed('m1', COMMUNITY, ref, undefined, 'cat-1');
+      const [sql, params] = spaceRepo.query.mock.calls[0];
+      expect(sql).toContain('p.category_id = $4');
+      expect(params).toEqual(['c1', false, 21, 'cat-1']);
+    });
+
+    it('lets only moderators lock, and only in Community', async () => {
+      await expect(service.lock('m1', 'p1', true)).rejects.toThrow(
+        ForbiddenException,
+      );
+      acc.isLeader = true;
+      await expect(service.lock('m1', 'p1', true)).resolves.toEqual({
+        locked: true,
+      });
     });
   });
 });

@@ -124,10 +124,12 @@ describe('AccountTypeService', () => {
     repo.findOne.mockResolvedValue(null);
   });
 
-  it('changes nothing for a church by default', async () => {
+  it('changes nothing for a church by default, except Community starting off', async () => {
     const profile = await service.getProfile(OrganisationTypeEnum.CHURCH);
     expect(profile.wording).toEqual([]);
-    expect(Object.values(profile.modules).every((m) => m === 'on')).toBe(true);
+    const { community, ...rest } = profile.modules;
+    expect(community).toBe('off');
+    expect(Object.values(rest).every((m) => m === 'on')).toBe(true);
     expect(Object.keys(profile.modules)).toHaveLength(KNOWN_MODULES.length);
   });
 
@@ -137,6 +139,7 @@ describe('AccountTypeService', () => {
     expect(profile.modules.departments).toBe('on');
     expect(profile.switchable).toEqual(['departments']);
     expect(profile.modules.prayer).toBe('on');
+    expect(profile.modules.community).toBe('on');
   });
 
   it('calls the workforce the team outside churches', async () => {
