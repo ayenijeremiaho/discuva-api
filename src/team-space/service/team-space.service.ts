@@ -369,6 +369,7 @@ export class TeamSpaceService {
     const post = await this.findPost(postId);
     if (post.author?.id !== memberId)
       throw new ForbiddenException('You can only edit your own posts.');
+    await this.assertNotMuted(post.space, memberId);
     const acc = await this.editAccess(memberId, post.space, body);
     const tagged = await this.prepareTags(acc, body, POST_MAX_LENGTH);
     const community = post.space.kind === TeamSpaceKindEnum.COMMUNITY;
@@ -601,6 +602,7 @@ export class TeamSpaceService {
       throw new NotFoundException('Reply not found');
     if (reply.author?.id !== memberId)
       throw new ForbiddenException('You can only edit your own replies.');
+    await this.assertNotMuted(reply.post.space, memberId);
     const acc = await this.editAccess(memberId, reply.post.space, body);
     const tagged = await this.prepareTags(acc, body, REPLY_MAX_LENGTH);
     await this.replyRepo.update(replyId, { body: tagged.body, editedAt: now });
@@ -725,8 +727,11 @@ export class TeamSpaceService {
     if (!rows.length) throw new BadRequestException('That category is gone.');
   }
 
-  private async assertNotMuted(acc: SpaceAccess, memberId: string) {
-    if (!isCommunity(acc)) return;
+  private async assertNotMuted(
+    space: Pick<SpaceAccess, 'kind'>,
+    memberId: string,
+  ) {
+    if (!isCommunity(space)) return;
     const until = await this.access.mutedUntil(memberId);
     if (until) throw new ForbiddenException(mutedMessage(until));
   }

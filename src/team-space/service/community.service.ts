@@ -91,7 +91,7 @@ export class CommunityService {
     );
     if (item.authorId === memberId)
       throw new BadRequestException("You can't report your own post.");
-    await this.reportRepo
+    const inserted = await this.reportRepo
       .createQueryBuilder()
       .insert()
       .into(PostReport)
@@ -103,7 +103,8 @@ export class CommunityService {
       })
       .orIgnore()
       .execute();
-    await this.tellModerators(reason);
+    // A repeat report from the same person is ignored, and doesn't alert anyone again.
+    if ((inserted.raw as unknown[]).length) await this.tellModerators(reason);
     return { ok: true };
   }
 

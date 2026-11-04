@@ -372,6 +372,22 @@ describe('TeamSpaceService', () => {
       access.mutedUntil.mockResolvedValue(null);
     });
 
+    it('keeps a muted member from editing what they already posted', async () => {
+      postRepo.findOne.mockResolvedValue({
+        id: 'p1',
+        body: 'old',
+        removedAt: null,
+        author: { id: 'm1' },
+        space: communitySpace,
+      });
+      access.mutedUntil.mockResolvedValue(new Date('2026-11-12T00:00:00Z'));
+      await expect(service.editPost('m1', 'p1', 'new')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(postRepo.update).not.toHaveBeenCalled();
+      access.mutedUntil.mockResolvedValue(null);
+    });
+
     it('refuses replies to a locked conversation', async () => {
       postRepo.findOne.mockResolvedValue({
         id: 'p1',

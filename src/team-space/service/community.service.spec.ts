@@ -20,7 +20,7 @@ const qb = () => {
     'andWhere',
   ])
     q[m] = jest.fn().mockReturnValue(q);
-  q.execute = jest.fn().mockResolvedValue({});
+  q.execute = jest.fn().mockResolvedValue({ raw: [{ id: 'new' }] });
   return q;
 };
 
@@ -96,6 +96,17 @@ describe('CommunityService', () => {
       cache.get.mockResolvedValue(true);
       await service.report('m1', { postId: 'p1' }, 'Spam again');
       expect(notifications.notifyMember).toHaveBeenCalledTimes(1);
+    });
+
+    it("doesn't alert moderators again for a repeat report", async () => {
+      postRepo.findOne.mockResolvedValue(communityPost());
+      reportRepo.createQueryBuilder.mockImplementationOnce(() => {
+        const q = qb();
+        q.execute = jest.fn().mockResolvedValue({ raw: [] });
+        return q;
+      });
+      await service.report('m1', { postId: 'p1' }, 'Spam');
+      expect(notifications.notifyMember).not.toHaveBeenCalled();
     });
 
     it("can't be used on your own post or outside Community", async () => {

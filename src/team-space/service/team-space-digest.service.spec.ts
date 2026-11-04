@@ -70,4 +70,24 @@ describe('TeamSpaceDigestService', () => {
       ]),
     ).toBe('7 new in Ushering and Choir');
   });
+
+  it('leaves Community out for members who muted it', async () => {
+    spaceRepo.find.mockResolvedValue([
+      { id: 'c', kind: 'COMMUNITY', refId: 'ref', lastActivityAt: tonight },
+    ]);
+    access.memberIds.mockResolvedValue(['m1', 'm2']);
+    spaceRepo.query.mockImplementation((sql: string) =>
+      Promise.resolve(
+        sql.includes('FROM team_posts')
+          ? [{ space_id: 'c', author_id: 'm9', created_at: tonight }]
+          : sql.includes('muted_notifications')
+            ? [{ id: 'm2' }]
+            : [],
+      ),
+    );
+    await service.run(new Date('2026-10-19T17:00:05Z'));
+    const push = notifications.notifyMember.mock.calls[0][0].push;
+    expect(push.memberIds).toEqual(['m1']);
+    expect(push.vars.summary).toBe('1 new in Community');
+  });
 });

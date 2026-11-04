@@ -243,6 +243,10 @@ export class TeamSpaceExtrasService {
       throw new BadRequestException(
         "Volunteering spaces don't have meetings. Post the details instead.",
       );
+    if (kind === TeamSpaceKindEnum.COMMUNITY)
+      throw new BadRequestException(
+        "The Community space doesn't have meetings. Post the details instead.",
+      );
     const acc = await this.leaderAccess(memberId, kind, refId);
     const startsAt = new Date(dto.startsAt);
     const endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
@@ -580,7 +584,9 @@ export class TeamSpaceExtrasService {
     await this.notifyTeam(
       acc,
       memberId,
-      PushNotificationKey.TEAM_SPACE_POLL,
+      acc.kind === TeamSpaceKindEnum.COMMUNITY
+        ? PushNotificationKey.COMMUNITY_POLL
+        : PushNotificationKey.TEAM_SPACE_POLL,
       {
         space_name: acc.name,
         question: dto.question.trim(),
@@ -896,7 +902,10 @@ export class TeamSpaceExtrasService {
     if (!memberIds.length) return;
     this.notifications
       .notifyMember({
-        category: EmailCategory.TEAM_SPACES,
+        category:
+          acc.kind === TeamSpaceKindEnum.COMMUNITY
+            ? EmailCategory.COMMUNITY
+            : EmailCategory.TEAM_SPACES,
         push: {
           memberIds,
           key,

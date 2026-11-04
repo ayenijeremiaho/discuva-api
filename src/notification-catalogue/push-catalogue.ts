@@ -66,6 +66,7 @@ export enum PushNotificationKey {
   COMMUNITY_MENTION = 'COMMUNITY_MENTION',
   COMMUNITY_REPORT = 'COMMUNITY_REPORT',
   COMMUNITY_POST_REMOVED = 'COMMUNITY_POST_REMOVED',
+  COMMUNITY_POLL = 'COMMUNITY_POLL',
   ROTA_ASSIGNED = 'ROTA_ASSIGNED',
   ROTA_PUBLISHED = 'ROTA_PUBLISHED',
   ROTA_REMOVED = 'ROTA_REMOVED',
@@ -750,6 +751,19 @@ export const PUSH_CATALOGUE: Record<PushNotificationKey, PushTemplate> = {
     placeholders: {
       space_name: 'Community',
       excerpt: 'Reported for: spam',
+    },
+  },
+  [PushNotificationKey.COMMUNITY_POLL]: {
+    category: EmailCategory.COMMUNITY,
+    label: 'New Community poll',
+    description:
+      'Sent to every member when a moderator asks a quick question in the Community space.',
+    title: '{{space_name}} asks',
+    body: '{{question}}',
+    url: '/team-spaces',
+    placeholders: {
+      space_name: 'Community',
+      question: 'Which Saturday works for the picnic?',
     },
   },
   [PushNotificationKey.COMMUNITY_POST_REMOVED]: {

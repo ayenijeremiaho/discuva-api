@@ -89,11 +89,14 @@ export class TeamSpaceDigestService {
         new Date(r.last_read_at),
       ]),
     );
+    const mutedCommunity = await this.mutedCommunity(spaces);
     const perMember = new Map<string, { name: string; n: number }[]>();
     for (const space of spaces) {
       const spaceItems = items.filter((i) => i.space_id === space.id);
       if (!spaceItems.length) continue;
+      const community = space.kind === TeamSpaceKindEnum.COMMUNITY;
       for (const memberId of await this.access.memberIds(space)) {
+        if (community && mutedCommunity.has(memberId)) continue;
         const seenUntil = lastRead.get(`${memberId}:${space.id}`);
         const n = spaceItems.filter(
           (i) =>
@@ -127,6 +130,16 @@ export class TeamSpaceDigestService {
         })
         .catch(() => undefined);
     return tomorrow;
+  }
+
+  // Members who turned Community notifications off don't hear about it in the summary either.
+  private async mutedCommunity(spaces: TeamSpace[]): Promise<Set<string>> {
+    if (!spaces.some((s) => s.kind === TeamSpaceKindEnum.COMMUNITY))
+      return new Set();
+    const rows = (await this.spaceRepo.query(
+      `SELECT id FROM members WHERE cardinality(muted_notifications) > 0 AND status = 'ACTIVE' AND 'COMMUNITY' = ANY(muted_notifications)`,
+    )) as { id: string }[];
+    return new Set(rows.map((r) => r.id));
   }
 
   private async spaceNames(spaces: TeamSpace[]): Promise<Map<string, string>> {

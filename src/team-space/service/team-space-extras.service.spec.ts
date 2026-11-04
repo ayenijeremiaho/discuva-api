@@ -529,4 +529,34 @@ describe('TeamSpaceExtrasService', () => {
     ]);
     expect(polls.get('p9')?.myVote).toEqual(['b']);
   });
+
+  describe('in Community', () => {
+    const COMMUNITY = 'COMMUNITY' as never;
+
+    it('has no meetings', async () => {
+      await expect(
+        service.createMeeting(
+          'm1',
+          COMMUNITY,
+          'ref',
+          { title: 'Picnic', startsAt: '2026-10-24T16:00:00Z' } as never,
+          now,
+        ),
+      ).rejects.toThrow("The Community space doesn't have meetings.");
+    });
+
+    it('notifies a poll as Community, so muting Community stops it', async () => {
+      acc = { ...acc, kind: COMMUNITY, name: 'Community' };
+      await service.createPoll(
+        'm1',
+        COMMUNITY,
+        'ref',
+        { question: 'Which Saturday?', options: ['Sat 7', 'Sat 14'] },
+        now,
+      );
+      const call = notifications.notifyMember.mock.calls[0][0];
+      expect(call.category).toBe('COMMUNITY');
+      expect(call.push.key).toBe('COMMUNITY_POLL');
+    });
+  });
 });
