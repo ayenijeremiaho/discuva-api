@@ -8,6 +8,8 @@ import {
   Post,
   Query,
   UseGuards,
+  ParseIntPipe,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AdminGuard } from '../../admin/guard/admin.guard';
 import { RequiresPermission } from '../../admin/decorator/requires-permission.decorator';
@@ -85,7 +87,7 @@ export class PrayerAdminController {
   @Post('day-configs')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   createDayConfig(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: CreatePrayerDayConfigDto,
   ) {
     return this.configService.createDayConfig(programId, dto);
@@ -111,7 +113,7 @@ export class PrayerAdminController {
   @Post('rules')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   createRule(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: CreatePrayerScheduleRuleDto,
   ) {
     return this.configService.createRule(programId, dto);
@@ -137,7 +139,7 @@ export class PrayerAdminController {
   @Post('fixed-assignments')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   createFixedAssignment(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: CreatePrayerFixedAssignmentDto,
   ) {
     return this.configService.createFixedAssignment(programId, dto);
@@ -154,7 +156,7 @@ export class PrayerAdminController {
   @Post('meetings/generate')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   generateMeetings(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: GenerateMonthlyMeetingsDto,
   ) {
     return this.meetingService.generateMonthlyMeetings(programId, dto);
@@ -163,7 +165,7 @@ export class PrayerAdminController {
   @Post('meetings/open-selection')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   openSelection(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: OpenSelectionWindowDto,
   ) {
     return this.meetingService.openSelectionWindow(programId, dto);
@@ -172,7 +174,7 @@ export class PrayerAdminController {
   @Post('meetings/close-selection')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   closeSelection(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: OpenSelectionWindowDto,
   ) {
     return this.meetingService.closeSelectionWindow(programId, dto);
@@ -183,9 +185,9 @@ export class PrayerAdminController {
   @Post('roster/auto-assign')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   autoAssign(
-    @Query('programId') programId: string,
-    @Query('month') month: string,
-    @Query('year') year: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('year', ParseIntPipe) year: number,
   ) {
     return this.rosterService.autoAssign(
       programId,
@@ -197,7 +199,7 @@ export class PrayerAdminController {
   @Post('roster/manual-assign')
   @RequiresPermission(AdminPermission.PRAYER_WRITE)
   manualAssign(
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: ManualAssignDto,
   ) {
     return this.rosterService.manualAssign(programId, dto);
@@ -206,9 +208,9 @@ export class PrayerAdminController {
   @Get('roster/validate')
   @RequiresPermission(AdminPermission.PRAYER_READ)
   validateRoster(
-    @Query('programId') programId: string,
-    @Query('month') month: string,
-    @Query('year') year: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('year', ParseIntPipe) year: number,
   ) {
     return this.rosterService.validateRoster(
       programId,
@@ -222,7 +224,7 @@ export class PrayerAdminController {
   getMonthlyRoster(
     @Param('month') month: string,
     @Param('year') year: string,
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
   ) {
     return this.meetingService.getMonthlyRoster(
       programId,

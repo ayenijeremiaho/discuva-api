@@ -6,6 +6,8 @@ import {
   Query,
   Req,
   UseGuards,
+  ParseIntPipe,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guard/jwt-auth.guard';
 import { RolesGuard } from '../../auth/guard/roles.guard';
@@ -38,9 +40,9 @@ export class PrayerWorkerController {
 
   @Get('available')
   getAvailableMeetings(
-    @Query('programId') programId: string,
-    @Query('month') month: string,
-    @Query('year') year: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('year', ParseIntPipe) year: number,
   ) {
     return this.meetingService.getAvailableMeetings(
       programId,
@@ -52,9 +54,9 @@ export class PrayerWorkerController {
   @Get('my-roster')
   getMyRoster(
     @Req() req: any,
-    @Query('programId') programId: string,
-    @Query('month') month: string,
-    @Query('year') year: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('year', ParseIntPipe) year: number,
   ) {
     return this.meetingService.getMyRoster(
       req.user.workerProfileId,
@@ -67,9 +69,9 @@ export class PrayerWorkerController {
   @Get('my-status')
   getMyStatus(
     @Req() req: any,
-    @Query('programId') programId: string,
-    @Query('month') month: string,
-    @Query('year') year: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
+    @Query('month', ParseIntPipe) month: number,
+    @Query('year', ParseIntPipe) year: number,
   ) {
     return this.meetingService.getSelectionStatus(
       programId,
@@ -82,7 +84,7 @@ export class PrayerWorkerController {
   @Post('select')
   selfSelect(
     @Req() req: any,
-    @Query('programId') programId: string,
+    @Query('programId', ParseUUIDPipe) programId: string,
     @Body() dto: SelfSelectPrayerSlotDto,
   ) {
     return this.meetingService.selfSelect(
