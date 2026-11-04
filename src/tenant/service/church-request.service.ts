@@ -39,7 +39,6 @@ export interface ChurchRequestDetails {
   city?: string;
   size?: string;
   locationCount?: number;
-  locationStructure?: string;
   adminEmail: string;
   adminEmailConfirmedAt?: string;
   website?: string;
@@ -148,7 +147,6 @@ export class ChurchRequestService {
       city: dto.city,
       size: dto.size,
       locationCount: dto.locationCount,
-      locationStructure: dto.locationStructure,
       adminEmail: dto.adminEmail,
       website: dto.website,
       contactEmail: dto.contactEmail,

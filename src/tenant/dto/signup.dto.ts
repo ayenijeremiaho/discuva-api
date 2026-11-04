@@ -1,7 +1,6 @@
 import {
   IsBoolean,
   IsEmail,
-  IsIn,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -90,10 +89,6 @@ export class SignupDto {
   @Min(1)
   @Max(1000)
   locationCount?: number;
-
-  @IsOptional()
-  @IsIn(['ONE_CHURCH', 'NETWORK', 'NOT_SURE'])
-  locationStructure?: string;
 
   // Churches and NGOs give these at sign-up, because they're reviewed before the account exists.
   @IsOptional()
