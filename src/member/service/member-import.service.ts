@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -455,7 +455,10 @@ export class MemberImportService {
     });
     const validRows = rows.filter((r) => r.errors.length === 0);
     await this.verification.assertRoomForMembers(
-      () => this.memberRepository.count(),
+      () =>
+        this.memberRepository.count({
+          where: { status: Not(MemberStatusEnum.PENDING) },
+        }),
       validRows.length,
     );
 

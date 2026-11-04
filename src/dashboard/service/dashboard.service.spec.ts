@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { Not } from 'typeorm';
 import { DashboardService } from './dashboard.service';
 import { MemberService } from '../../member/service/member.service';
 import { AttendanceService } from '../../attendance/service/attendance.service';
@@ -160,10 +161,16 @@ describe('DashboardService', () => {
 
       expect(mockMemberService.count).toHaveBeenCalledTimes(2);
       expect(mockMemberService.count).toHaveBeenCalledWith({
-        where: { role: MemberRoleEnum.MEMBER },
+        where: {
+          role: MemberRoleEnum.MEMBER,
+          status: Not(MemberStatusEnum.PENDING),
+        },
       });
       expect(mockMemberService.count).toHaveBeenCalledWith({
-        where: { role: MemberRoleEnum.WORKER },
+        where: {
+          role: MemberRoleEnum.WORKER,
+          status: Not(MemberStatusEnum.PENDING),
+        },
       });
       expect(mockAdminService.countActive).toHaveBeenCalledTimes(1);
     });

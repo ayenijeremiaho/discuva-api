@@ -413,7 +413,7 @@
                 "signup"
               ]
             },
-            "description": "Register a new member account. The member app sends only firstname, lastname, email and optionally phoneNumber, gender and birthday; the church journey is added later via PATCH /members/me. joinWorkforce: true records a serve request (serveInterestAt). Do NOT include a password — the server generates a secure temporary password and emails it to the provided address. The account will have changedPassword=false, requiring a password change on first login. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400."
+            "description": "Register a new member account. The member app sends only firstname, lastname, email and optionally phoneNumber, gender and birthday; the church journey is added later via PATCH /members/me. joinWorkforce: true records a serve request (serveInterestAt). Do NOT include a password — the server generates a secure temporary password and emails it to the provided address. The account will have changedPassword=false, requiring a password change on first login. Phone accepts local format (e.g. 08012345678) or with country code; stored as E.164 (+2348012345678). Invalid numbers return 400. The member is saved as PENDING and becomes ACTIVE on its first sign-in with the emailed password. Signing up with an email held by a PENDING member replaces that record and emails a new password instead of returning 409."
           },
           "response": [
             {
@@ -2184,7 +2184,7 @@
                 }
               ]
             },
-            "description": "Activate or deactivate a member. status: ACTIVE | INACTIVE. Returns 204."
+            "description": "Activate or deactivate a member. status: ACTIVE | INACTIVE (PENDING is refused with 400). Activating a pending sign-up sends no reactivation email. Returns 204."
           },
           "response": [
             {

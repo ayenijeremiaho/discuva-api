@@ -11,7 +11,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, FindManyOptions, In, Repository } from 'typeorm';
+import { EntityManager, FindManyOptions, In, Not, Repository } from 'typeorm';
 import { Member } from '../entity/member.entity';
 import { WorkerProfile } from '../entity/worker-profile.entity';
 import { Clergy } from '../entity/clergy.entity';
@@ -72,7 +72,7 @@ export class MemberService {
   }
 
   async signup(dto: SignupDto): Promise<Member> {
-    const saved = await this.createMemberRecord(dto);
+    const saved = await this.createMemberRecord(dto, MemberStatusEnum.PENDING);
     this.auditLogService.log('MEMBER_SIGNED_UP', {
       targetId: saved.id,
       targetEmail: saved.email,
@@ -86,7 +86,7 @@ export class MemberService {
   // separate, already-existing action (POST members/:id/promote), not
   // folded into this endpoint.
   async createByAdmin(dto: SignupDto, actorId: string): Promise<Member> {
-    const saved = await this.createMemberRecord(dto);
+    const saved = await this.createMemberRecord(dto, MemberStatusEnum.ACTIVE);
     this.auditLogService.log('MEMBER_CREATED_BY_ADMIN', {
       actorId,
       targetId: saved.id,
@@ -96,16 +96,23 @@ export class MemberService {
     return saved;
   }
 
-  private async createMemberRecord(dto: SignupDto): Promise<Member> {
-    await this.verification.assertRoomForMembers(() =>
-      this.memberRepository.count(),
-    );
-    await this.assertEmailUnique(dto.email);
+  // A pending sign-up is replaced, not refused: the new password goes to that inbox, so its owner wins.
+  private async createMemberRecord(
+    dto: SignupDto,
+    status: MemberStatusEnum,
+  ): Promise<Member> {
+    const pending = await this.pendingSignupFor(dto.email);
+    if (!pending) {
+      await this.verification.assertRoomForMembers(() =>
+        this.countProvenMembers(),
+      );
+    }
 
     const tempPassword = UtilityService.generateRandomPassword();
     const password = await UtilityService.hashValue(tempPassword);
 
     const member = this.memberRepository.create({
+      id: pending?.id,
       firstname: dto.firstname,
       lastname: dto.lastname,
       email: dto.email,
@@ -127,7 +134,7 @@ export class MemberService {
         ? new Date(dto.dateJoinedChurch)
         : null,
       role: MemberRoleEnum.MEMBER,
-      status: MemberStatusEnum.ACTIVE,
+      status,
       changedPassword: false,
       serveInterestAt: dto.joinWorkforce ? new Date() : null,
     });
@@ -1021,12 +1028,19 @@ export class MemberService {
     status: MemberStatusEnum,
     actorId: string,
   ): Promise<void> {
+    if (
+      status !== MemberStatusEnum.ACTIVE &&
+      status !== MemberStatusEnum.INACTIVE
+    ) {
+      throw new BadRequestException('Status must be ACTIVE or INACTIVE.');
+    }
     const member = await this.getById(memberId);
     if (member.status === status) {
       throw new BadRequestException(
         `This member's account is already ${status.toLowerCase()}.`,
       );
     }
+    const wasPending = member.status === MemberStatusEnum.PENDING;
     member.status = status;
     if (status === MemberStatusEnum.INACTIVE) member.serveInterestAt = null;
     await this.memberRepository.save(member);
@@ -1057,7 +1071,7 @@ export class MemberService {
           churchAddress: this.churchAddress,
         },
       );
-    } else if (status === MemberStatusEnum.ACTIVE) {
+    } else if (!wasPending) {
       this.utilityService.sendEmailWithTemplate(
         member.email,
         `${firstName}, Your ${churchName} Account Has Been Reactivated`,
@@ -1513,6 +1527,37 @@ export class MemberService {
       );
     }
     return current; // unchanged
+  }
+
+  private async pendingSignupFor(email: string): Promise<Member | null> {
+    const existing = await this.memberRepository.findOne({
+      where: { email },
+      select: { id: true, status: true },
+    });
+    if (existing && existing.status !== MemberStatusEnum.PENDING)
+      throw new ConflictException('Email address is already registered');
+    return existing;
+  }
+
+  countProvenMembers(): Promise<number> {
+    return this.memberRepository.count({
+      where: { status: Not(MemberStatusEnum.PENDING) },
+    });
+  }
+
+  async activatePending(memberId: string): Promise<void> {
+    await this.verification.assertRoomForMembers(() =>
+      this.countProvenMembers(),
+    );
+    const { affected } = await this.memberRepository.update(
+      { id: memberId, status: MemberStatusEnum.PENDING },
+      { status: MemberStatusEnum.ACTIVE },
+    );
+    if (affected) {
+      this.auditLogService.log('MEMBER_EMAIL_CONFIRMED', {
+        targetId: memberId,
+      });
+    }
   }
 
   private async assertEmailUnique(email: string): Promise<void> {

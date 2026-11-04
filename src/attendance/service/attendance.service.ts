@@ -1024,6 +1024,7 @@ export class AttendanceService {
       )
       .from('members', 'm')
       .where('m.created_at >= :since', { since })
+      .andWhere('m.status <> :pending', { pending: MemberStatusEnum.PENDING })
       .groupBy("DATE_TRUNC('week', m.created_at)")
       .orderBy("DATE_TRUNC('week', m.created_at)", 'ASC')
       .getRawMany<{ week: string; newMembers: string; newWorkers: string }>();

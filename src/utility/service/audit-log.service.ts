@@ -18,6 +18,7 @@ export type AuditAction =
   // Auth & identity
   | 'ADMIN_CREATED'
   | 'MEMBER_SIGNED_UP'
+  | 'MEMBER_EMAIL_CONFIRMED'
   | 'MEMBER_LOGIN'
   | 'MEMBER_LOGIN_WEBAUTHN'
   | 'MEMBER_LOGOUT'

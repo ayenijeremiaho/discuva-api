@@ -42,7 +42,7 @@ const PEOPLE_SQL = (classParam: string) => `
     UNION ALL
     SELECT NULL, m.id, m.created_at, m.firstname, m.lastname, m.phone_number, m.email
     FROM members m
-    WHERE m.created_at >= $1 AND m.created_at < $2
+    WHERE m.created_at >= $1 AND m.created_at < $2 AND m.status <> 'PENDING'
       AND NOT EXISTS (SELECT 1 FROM first_timers f WHERE f.converted_member_id = m.id)
   ),
   flags AS (

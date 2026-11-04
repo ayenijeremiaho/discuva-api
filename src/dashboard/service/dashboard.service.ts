@@ -10,6 +10,8 @@ import { DepartmentService } from '../../department/service/department.service';
 import { RequestLeaveService } from '../../request-leave/service/request-leave.service';
 import { ClassesService } from '../../classes/service/classes.service';
 import { MemberRoleEnum } from '../../member/enums/member-role.enum';
+import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { Not } from 'typeorm';
 import { AdminService } from '../../admin/service/admin.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { AdminDashboardDataDto } from '../dto/admin-dashboard-data.dto';
@@ -192,8 +194,18 @@ export class DashboardService {
       classEnrollmentBreakdown,
       classCompletionsTrend,
     ] = await Promise.all([
-      this.memberService.count({ where: { role: MemberRoleEnum.MEMBER } }),
-      this.memberService.count({ where: { role: MemberRoleEnum.WORKER } }),
+      this.memberService.count({
+        where: {
+          role: MemberRoleEnum.MEMBER,
+          status: Not(MemberStatusEnum.PENDING),
+        },
+      }),
+      this.memberService.count({
+        where: {
+          role: MemberRoleEnum.WORKER,
+          status: Not(MemberStatusEnum.PENDING),
+        },
+      }),
       this.adminService.countActive(),
       this.attendanceService.getTotalCheckInsToday(),
       this.attendanceService.getWorkerAttendancePercentage(daysAgo),

@@ -170,6 +170,9 @@ export class AuthService {
         'Your account is inactive. Contact admin.',
       );
     }
+    if (member.status === MemberStatusEnum.PENDING) {
+      await this.memberService.activatePending(member.id);
+    }
 
     // Scoped to role === WORKER: a MEMBER-role account may still carry a
     // leftover INACTIVE WorkerProfile from a prior revoke/demotion (kept

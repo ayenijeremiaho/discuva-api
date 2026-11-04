@@ -304,7 +304,7 @@ export class ProgrammePlanningService {
     const qb = this.memberRepo
       .createQueryBuilder('m')
       .select(['m.id', 'm.firstname', 'm.lastname', 'm.photoUrl'])
-      .where('m.status != :inactive', { inactive: MemberStatusEnum.INACTIVE });
+      .where('m.status = :active', { active: MemberStatusEnum.ACTIVE });
     words.forEach((word, i) => {
       const like = `%${word.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
       qb.andWhere(

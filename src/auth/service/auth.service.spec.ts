@@ -133,6 +133,7 @@ const mockMemberService = {
   signup: jest.fn(),
   changePassword: jest.fn(),
   setDeviceId: jest.fn().mockResolvedValue(undefined),
+  activatePending: jest.fn().mockResolvedValue(undefined),
   updateEmail: jest.fn().mockResolvedValue(undefined),
 };
 
@@ -279,6 +280,40 @@ describe('AuthService', () => {
         requiresPasswordChange: false,
         surface: SessionSurface.MEMBER,
       });
+    });
+
+    it('activates a pending sign-up on its first sign-in', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'new@test.com',
+        password: 'hashed_pass',
+        status: MemberStatusEnum.PENDING,
+        role: MemberRoleEnum.MEMBER,
+        changedPassword: false,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+
+      await service.validateMember('new@test.com', 'temp_pass');
+
+      expect(mockMemberService.activatePending).toHaveBeenCalledWith(
+        'member-1',
+      );
+    });
+
+    it('leaves an active member alone', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'active@test.com',
+        password: 'hashed_pass',
+        status: MemberStatusEnum.ACTIVE,
+        role: MemberRoleEnum.MEMBER,
+        changedPassword: true,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+
+      await service.validateMember('active@test.com', 'pass');
+
+      expect(mockMemberService.activatePending).not.toHaveBeenCalled();
     });
 
     it('should throw UnauthorizedException if role is WORKER but workerProfile is INACTIVE', async () => {

@@ -165,7 +165,7 @@ export class FellowshipReminderScheduler {
     const recipients = [
       ...new Map(
         people
-          .filter((m) => m && m.status !== MemberStatusEnum.INACTIVE)
+          .filter((m) => m && m.status === MemberStatusEnum.ACTIVE)
           .map((m) => [m.id, m]),
       ).values(),
     ];

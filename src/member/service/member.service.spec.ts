@@ -146,7 +146,10 @@ describe('MemberService', () => {
 
   describe('signup', () => {
     it('should throw ConflictException when email already exists', async () => {
-      mockMemberRepo.exists.mockResolvedValue(true);
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'm-1',
+        status: MemberStatusEnum.ACTIVE,
+      });
 
       await expect(
         service.signup({
@@ -178,7 +181,7 @@ describe('MemberService', () => {
       );
     });
 
-    it('should save member with MEMBER role and ACTIVE status on success', async () => {
+    it('should save a self sign-up as PENDING with MEMBER role', async () => {
       mockMemberRepo.exists.mockResolvedValue(false);
       jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed_pass');
       jest
@@ -190,7 +193,7 @@ describe('MemberService', () => {
         email: 'new@test.com',
         firstname: 'john',
         role: MemberRoleEnum.MEMBER,
-        status: MemberStatusEnum.ACTIVE,
+        status: MemberStatusEnum.PENDING,
       };
       mockMemberRepo.create.mockReturnValue(createdMember);
       mockMemberRepo.save.mockResolvedValue(createdMember);
@@ -205,13 +208,43 @@ describe('MemberService', () => {
       expect(mockMemberRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           role: MemberRoleEnum.MEMBER,
-          status: MemberStatusEnum.ACTIVE,
+          status: MemberStatusEnum.PENDING,
           password: 'hashed_pass',
         }),
       );
       expect(mockMemberRepo.save).toHaveBeenCalledWith(createdMember);
       expect(result.role).toBe(MemberRoleEnum.MEMBER);
-      expect(result.status).toBe(MemberStatusEnum.ACTIVE);
+      expect(result.status).toBe(MemberStatusEnum.PENDING);
+    });
+
+    it('replaces a pending sign-up for the same email instead of refusing', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'pending-1',
+        status: MemberStatusEnum.PENDING,
+      });
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('hashed_pass');
+      mockMemberRepo.create.mockImplementation((m) => m);
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const result = await service.signup({
+        email: 'owner@test.com',
+        firstname: 'ada',
+        lastname: 'obi',
+      } as any);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'pending-1',
+          firstname: 'ada',
+          status: MemberStatusEnum.PENDING,
+        }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledWith(
+        'owner@test.com',
+        expect.any(String),
+        'welcome-member',
+        expect.any(Object),
+      );
     });
 
     it('should send welcome email after successful signup', async () => {
@@ -314,7 +347,10 @@ describe('MemberService', () => {
     });
 
     it('throws ConflictException when the email already exists', async () => {
-      mockMemberRepo.exists.mockResolvedValue(true);
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'm-1',
+        status: MemberStatusEnum.ACTIVE,
+      });
 
       await expect(
         service.createByAdmin(
@@ -1263,6 +1299,33 @@ describe('MemberService', () => {
   });
 
   describe('changeStatus', () => {
+    it('refuses to set a member back to pending', async () => {
+      await expect(
+        service.changeStatus('member-1', MemberStatusEnum.PENDING, 'actor-1'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockMemberRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('activates a pending sign-up without the reactivated email', async () => {
+      mockMemberRepo.findOne.mockResolvedValueOnce({
+        id: 'member-1',
+        status: MemberStatusEnum.PENDING,
+        email: 'a@test.com',
+        firstname: 'ada',
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      await service.changeStatus(
+        'member-1',
+        MemberStatusEnum.ACTIVE,
+        'actor-1',
+      );
+
+      expect(mockMemberRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: MemberStatusEnum.ACTIVE }),
+      );
+      expect(mockUtilityService.sendEmailWithTemplate).not.toHaveBeenCalled();
+    });
     it('should throw BadRequestException if status is unchanged', async () => {
       const member = { id: 'member-1', status: MemberStatusEnum.ACTIVE };
       mockMemberRepo.findOne.mockResolvedValue(member);
@@ -2136,6 +2199,31 @@ describe('MemberService', () => {
           metadata: { spouseId: 'member-2' },
         }),
       );
+    });
+  });
+
+  describe('activatePending', () => {
+    it('makes a pending sign-up active and records it', async () => {
+      mockMemberRepo.update.mockResolvedValueOnce({ affected: 1 });
+
+      await service.activatePending('member-1');
+
+      expect(mockMemberRepo.update).toHaveBeenCalledWith(
+        { id: 'member-1', status: MemberStatusEnum.PENDING },
+        { status: MemberStatusEnum.ACTIVE },
+      );
+      expect(mockAuditLogService.log).toHaveBeenCalledWith(
+        'MEMBER_EMAIL_CONFIRMED',
+        { targetId: 'member-1' },
+      );
+    });
+
+    it('records nothing when the member was no longer pending', async () => {
+      mockMemberRepo.update.mockResolvedValueOnce({ affected: 0 });
+
+      await service.activatePending('member-1');
+
+      expect(mockAuditLogService.log).not.toHaveBeenCalled();
     });
   });
 });
