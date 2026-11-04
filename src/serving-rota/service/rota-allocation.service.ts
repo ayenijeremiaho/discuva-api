@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { MoreThanOrEqual, Repository } from 'typeorm';
 import { RotaAssignment } from '../entity/rota-assignment.entity';
 import { RotaUnavailability } from '../entity/rota-unavailability.entity';
 import {
@@ -280,12 +280,10 @@ export class RotaAllocationService {
 
   async mine(memberId: string, now = new Date()) {
     const today = localDate(now, await this.churchTimezone.get());
-    return this.unavailability
-      .find({
-        where: { member: { id: memberId } },
-        order: { date: 'ASC' },
-      })
-      .then((rows) => rows.filter((row) => row.date >= today));
+    return this.unavailability.find({
+      where: { member: { id: memberId }, date: MoreThanOrEqual(today) },
+      order: { date: 'ASC' },
+    });
   }
 
   async saveUnavailable(
