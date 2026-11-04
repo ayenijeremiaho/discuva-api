@@ -1,3 +1,4 @@
+import { ProtectedNameModule } from './protected-name/protected-name.module';
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
@@ -229,6 +230,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     }),
     AuthModule,
     UtilityModule,
+    ProtectedNameModule,
     MemberModule,
     DepartmentModule,
     ClergyTitleModule,

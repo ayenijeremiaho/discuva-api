@@ -1,3 +1,4 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { AccountTypeAdminService } from '../../account-type/account-type-admin.service';
 import { TenantReportService } from '../../tenant/service/tenant-report.service';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -61,6 +62,15 @@ const mockConfigService = {
   ),
 };
 
+const mockProtectedNames = {
+  findNameMatch: jest.fn().mockResolvedValue(null),
+  isReservedAddress: jest.fn().mockResolvedValue(false),
+  list: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  remove: jest.fn(),
+};
+
 describe('PlatformAdminController (billing support routes)', () => {
   let controller: PlatformAdminController;
 
@@ -69,6 +79,10 @@ describe('PlatformAdminController (billing support routes)', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PlatformAdminController],
       providers: [
+        {
+          provide: ProtectedNameService,
+          useValue: mockProtectedNames,
+        },
         {
           provide: TenantReportService,
           useValue: {

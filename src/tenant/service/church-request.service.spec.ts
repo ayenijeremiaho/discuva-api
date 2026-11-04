@@ -1,3 +1,4 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -102,6 +103,15 @@ const verificationDto = {
   requesterRole: 'Administrator',
 };
 
+const mockProtectedNames = {
+  findNameMatch: jest.fn().mockResolvedValue(null),
+  isReservedAddress: jest.fn().mockResolvedValue(false),
+  list: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  remove: jest.fn(),
+};
+
 describe('ChurchRequestService', () => {
   let service: ChurchRequestService;
 
@@ -112,6 +122,10 @@ describe('ChurchRequestService', () => {
     mockSettings.getSelfServeRequiresApproval.mockResolvedValue(false);
     const module = await Test.createTestingModule({
       providers: [
+        {
+          provide: ProtectedNameService,
+          useValue: mockProtectedNames,
+        },
         ChurchRequestService,
         { provide: getRepositoryToken(Tenant), useValue: mockRepo },
         { provide: TenantProvisioningService, useValue: mockProvisioning },
@@ -237,6 +251,23 @@ describe('ChurchRequestService', () => {
         tenantWith({
           orgType: OrganisationTypeEnum.GROUP,
           name: 'Grace Church',
+        }),
+      );
+
+      const result = await service.confirm(tokenFor('ada@example.com'));
+
+      expect(result.status).toBe(TenantOnboardingStatus.AWAITING_APPROVAL);
+      expect(mockProvisioning.enqueueProvisioning).not.toHaveBeenCalled();
+    });
+
+    it('holds a group named like a protected organisation', async () => {
+      mockProtectedNames.findNameMatch.mockResolvedValueOnce(
+        'Covenant Grace Church of Nations',
+      );
+      mockRepo.findOneBy.mockResolvedValue(
+        tenantWith({
+          orgType: OrganisationTypeEnum.GROUP,
+          name: 'Covenant Graces of Nations',
         }),
       );
 
@@ -407,6 +438,21 @@ describe('ChurchRequestService', () => {
     });
   });
 
+  it('names the protected organisation a request looks like', async () => {
+    mockProtectedNames.findNameMatch.mockResolvedValueOnce(
+      'Covenant Grace Church of Nations',
+    );
+    const review = await service.review({
+      id: 't1',
+      name: 'Covenant Graces of Nations',
+      orgType: OrganisationTypeEnum.GROUP,
+      requestDetails: null,
+    } as never);
+    expect(review.checks.looksLikeProtectedName).toBe(
+      'Covenant Grace Church of Nations',
+    );
+  });
+
   it('reports the review checks', async () => {
     selectBuilder.getMany.mockResolvedValue([
       { id: 't2', name: 'Hope Assembly', subdomain: 'hope2' },
@@ -428,6 +474,7 @@ describe('ChurchRequestService', () => {
       personalEmail: false,
       socialPageOnly: false,
       groupNamedLikeChurch: false,
+      looksLikeProtectedName: null,
       possibleDuplicates: [
         { id: 't2', name: 'Hope Assembly', subdomain: 'hope2' },
       ],

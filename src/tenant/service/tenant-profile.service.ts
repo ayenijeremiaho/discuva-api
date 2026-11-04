@@ -1,4 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
 import { Repository } from 'typeorm';
@@ -21,6 +26,7 @@ export class TenantProfileService {
     private readonly tenantRepository: Repository<Tenant>,
     private readonly cacheService: CacheService,
     private readonly auditLogService: AuditLogService,
+    private readonly protectedNames: ProtectedNameService,
   ) {}
 
   async getCurrentTenant(): Promise<Tenant> {
@@ -37,6 +43,7 @@ export class TenantProfileService {
     actor: TenantProfileActor,
   ): Promise<Tenant> {
     const tenant = await this.getCurrentTenant();
+    await this.assertNameAllowed(tenant, dto.name);
     const previousThemePreset = tenant.themePreset;
     const themeChanged = Boolean(
       dto.themePreset && dto.themePreset !== previousThemePreset,
@@ -58,5 +65,18 @@ export class TenantProfileService {
       });
     }
     return tenant;
+  }
+
+  // Verified accounts were checked by a person; others can't rename into a protected name.
+  private async assertNameAllowed(
+    tenant: Tenant,
+    name: string | undefined,
+  ): Promise<void> {
+    if (!name || name === tenant.name || tenant.verifiedAt) return;
+    if (await this.protectedNames.findNameMatch(name, tenant.id)) {
+      throw new BadRequestException(
+        'That name is protected. If it belongs to your church, contact us.',
+      );
+    }
   }
 }

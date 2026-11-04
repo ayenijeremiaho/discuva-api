@@ -1,3 +1,4 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { getQueueToken } from '@nestjs/bull';
@@ -60,6 +61,15 @@ const mockTx = {
 const mockCls = { runWith: jest.fn((_store, fn) => fn()) };
 const mockTxHost = { tx: mockTx, withTransaction: jest.fn((fn) => fn()) };
 
+const mockProtectedNames = {
+  findNameMatch: jest.fn().mockResolvedValue(null),
+  isReservedAddress: jest.fn().mockResolvedValue(false),
+  list: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  remove: jest.fn(),
+};
+
 describe('TenantProvisioningService', () => {
   let service: TenantProvisioningService;
 
@@ -84,6 +94,10 @@ describe('TenantProvisioningService', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ProtectedNameService,
+          useValue: mockProtectedNames,
+        },
         TenantProvisioningService,
         { provide: getDataSourceToken(), useValue: mockDataSource },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },

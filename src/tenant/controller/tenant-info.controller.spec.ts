@@ -1,3 +1,4 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { AccountTypeService } from '../../account-type/account-type.service';
 import { TenantReportService } from '../service/tenant-report.service';
 /// <reference types="jest" />
@@ -71,6 +72,15 @@ const baseTenant = {
   timezone: 'UTC',
 };
 
+const mockProtectedNames = {
+  findNameMatch: jest.fn().mockResolvedValue(null),
+  isReservedAddress: jest.fn().mockResolvedValue(false),
+  list: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  remove: jest.fn(),
+};
+
 describe('TenantInfoController', () => {
   let controller: TenantInfoController;
   let tenantProfileService: TenantProfileService;
@@ -89,6 +99,10 @@ describe('TenantInfoController', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TenantInfoController],
       providers: [
+        {
+          provide: ProtectedNameService,
+          useValue: mockProtectedNames,
+        },
         {
           provide: TenantReportService,
           useValue: {

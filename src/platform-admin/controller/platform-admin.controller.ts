@@ -1,3 +1,5 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
+import { SaveProtectedNameDto } from '../../protected-name/protected-name.dto';
 import { TenantReportService } from '../../tenant/service/tenant-report.service';
 import { VerificationDecisionDto } from '../../tenant/dto/signup.dto';
 import {
@@ -110,6 +112,7 @@ export class PlatformAdminController {
     private readonly tenantBroadcastService: TenantBroadcastService,
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly accountTypeAdmin: AccountTypeAdminService,
+    private readonly protectedNames: ProtectedNameService,
     private readonly configService: ConfigService,
   ) {}
 
@@ -704,6 +707,43 @@ export class PlatformAdminController {
     @CurrentPlatformAdmin() admin: PlatformAdminAuth,
   ) {
     return this.accountTypeAdmin.update(type, dto, admin.id);
+  }
+
+  // Reference data staff control, so the full list.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('protected-names')
+  listProtectedNames() {
+    return this.protectedNames.list();
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Post('protected-names')
+  createProtectedName(
+    @Body() dto: SaveProtectedNameDto,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+  ) {
+    return this.protectedNames.create(dto, admin.id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @Patch('protected-names/:id')
+  updateProtectedName(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SaveProtectedNameDto,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+  ) {
+    return this.protectedNames.update(id, dto, admin.id);
+  }
+
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_WRITE)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Delete('protected-names/:id')
+  removeProtectedName(@Param('id', ParseUUIDPipe) id: string) {
+    return this.protectedNames.remove(id);
   }
 
   // Plain text only, not raw HTML — see BroadcastDto's own comment and

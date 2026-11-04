@@ -43641,6 +43641,130 @@
               }
             }
           }
+        },
+        {
+          "name": "List Protected Names",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/platform/protected-names",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "protected-names"
+              ]
+            },
+            "description": "tenants:read. Full list, alphabetical.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Add Protected Name",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/platform/protected-names",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "protected-names"
+              ]
+            },
+            "description": "tenants:write. Groups whose names match are held for review, matching addresses are reserved, and unverified accounts can't rename into it. 409 if the name is already protected.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Covenant Grace Church of Nations\",\n  \"shortForms\": [\n    \"CGCN\"\n  ],\n  \"addresses\": [\n    \"cgcn\"\n  ],\n  \"note\": \"Reserved for the network\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Protected Name",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/platform/protected-names/{{protectedNameId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "protected-names",
+                "{{protectedNameId}}"
+              ]
+            },
+            "description": "tenants:write. Same body as Add; replaces short forms and addresses.",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Covenant Grace Church of Nations\",\n  \"shortForms\": [\n    \"CGCN\"\n  ],\n  \"addresses\": [\n    \"cgcn\"\n  ],\n  \"note\": \"Reserved for the network\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Remove Protected Name",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/platform/protected-names/{{protectedNameId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "platform",
+                "protected-names",
+                "{{protectedNameId}}"
+              ]
+            },
+            "description": "tenants:write. Returns 204.",
+            "auth": {
+              "type": "noauth"
+            }
+          }
         }
       ]
     },

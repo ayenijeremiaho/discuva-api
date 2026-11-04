@@ -1,3 +1,5 @@
+import { BadRequestException } from '@nestjs/common';
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 /// <reference types="jest" />
 
 import { Test, TestingModule } from '@nestjs/testing';
@@ -28,6 +30,15 @@ const baseTenant = {
   tagline: null,
 };
 
+const mockProtectedNames = {
+  findNameMatch: jest.fn().mockResolvedValue(null),
+  isReservedAddress: jest.fn().mockResolvedValue(false),
+  list: jest.fn(),
+  create: jest.fn(),
+  update: jest.fn(),
+  remove: jest.fn(),
+};
+
 describe('TenantProfileService', () => {
   let service: TenantProfileService;
 
@@ -38,6 +49,10 @@ describe('TenantProfileService', () => {
     mockTenantRepository.save.mockImplementation(async (tenant) => tenant);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
+        {
+          provide: ProtectedNameService,
+          useValue: mockProtectedNames,
+        },
         TenantProfileService,
         { provide: ClsService, useValue: mockCls },
         { provide: getRepositoryToken(Tenant), useValue: mockTenantRepository },
@@ -153,5 +168,24 @@ describe('TenantProfileService', () => {
     ).rejects.toThrow('Save failed');
     expect(mockCacheService.del).not.toHaveBeenCalled();
     expect(mockAuditLogService.log).not.toHaveBeenCalled();
+  });
+
+  it('stops an unverified account renaming itself to a protected name', async () => {
+    mockProtectedNames.findNameMatch.mockResolvedValueOnce(
+      'Covenant Grace Church of Nations',
+    );
+    await expect(
+      service.updateProfile({ name: 'CGCN Youth' }, actor),
+    ).rejects.toThrow(BadRequestException);
+    expect(mockTenantRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('lets a verified church rename itself without the check', async () => {
+    mockTenantRepository.findOneBy.mockResolvedValue({
+      ...baseTenant,
+      verifiedAt: new Date(),
+    });
+    await service.updateProfile({ name: 'CGCN Youth' }, actor);
+    expect(mockProtectedNames.findNameMatch).not.toHaveBeenCalled();
   });
 });

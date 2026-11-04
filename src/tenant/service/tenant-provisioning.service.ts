@@ -1,3 +1,4 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { STARTER_LEADERSHIP_TITLES } from '../../account-type/account-type.constant';
 import * as path from 'node:path';
 import { randomInt } from 'node:crypto';
@@ -115,6 +116,7 @@ export class TenantProvisioningService {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly protectedNames: ProtectedNameService,
   ) {}
 
   // Single place a provisioning job actually gets queued — SignupController
@@ -207,7 +209,8 @@ export class TenantProvisioningService {
     }
     if (
       RESERVED_SUBDOMAINS.has(normalized) ||
-      GENERIC_OR_ABUSE_PRONE_SUBDOMAINS.has(normalized)
+      GENERIC_OR_ABUSE_PRONE_SUBDOMAINS.has(normalized) ||
+      (await this.protectedNames.isReservedAddress(normalized))
     ) {
       return { available: false, reason: 'RESERVED' };
     }
@@ -253,6 +256,17 @@ export class TenantProvisioningService {
     ) {
       throw new ConflictException(
         `"${normalized}" isn't available as a subdomain — please choose something specific to your church.`,
+      );
+    }
+
+    // A parent adding its own branch, and platform staff, may use protected addresses.
+    if (
+      !allowGenericSubdomain &&
+      !parentTenantId &&
+      (await this.protectedNames.isReservedAddress(normalized))
+    ) {
+      throw new ConflictException(
+        `"${normalized}" is reserved. If it belongs to your church, contact us.`,
       );
     }
 

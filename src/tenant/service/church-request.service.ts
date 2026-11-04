@@ -1,3 +1,4 @@
+import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import {
   BadRequestException,
   ConflictException,
@@ -69,6 +70,7 @@ export interface ChurchRequestReview {
     personalEmail: boolean;
     socialPageOnly: boolean;
     groupNamedLikeChurch: boolean;
+    looksLikeProtectedName: string | null;
     possibleDuplicates: { id: string; name: string; subdomain: string }[];
   };
 }
@@ -110,6 +112,7 @@ export class ChurchRequestService {
     private readonly verification: TenantVerificationService,
     private readonly utilityService: UtilityService,
     private readonly configService: ConfigService,
+    private readonly protectedNames: ProtectedNameService,
   ) {}
 
   // A confirmed request can't be replaced by a fresh form.
@@ -385,6 +388,10 @@ export class ChurchRequestService {
         groupNamedLikeChurch:
           tenant.orgType === OrganisationTypeEnum.GROUP &&
           soundsLikeChurch(tenant.name),
+        looksLikeProtectedName: await this.protectedNames.findNameMatch(
+          tenant.name,
+          tenant.id,
+        ),
         possibleDuplicates: await this.findDuplicates(tenant, details),
       },
     };
@@ -434,7 +441,9 @@ export class ChurchRequestService {
       onboardingStatus: TenantOnboardingStatus.AWAITING_CONFIRMATION,
     };
     const review =
-      reviewedFirst(tenant.orgType) || soundsLikeChurch(tenant.name);
+      reviewedFirst(tenant.orgType) ||
+      soundsLikeChurch(tenant.name) ||
+      !!(await this.protectedNames.findNameMatch(tenant.name, tenant.id));
     if (review || (await this.settingsService.getSelfServeRequiresApproval())) {
       const moved = await this.tenantRepo.update(fromConfirmation, {
         onboardingStatus: TenantOnboardingStatus.AWAITING_APPROVAL,
