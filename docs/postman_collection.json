@@ -979,7 +979,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"otp\": \"{{deviceResetOtp}}\"\n}",
+              "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"otp\": \"{{deviceResetOtp}}\",\n  \"deviceId\": \"{{newDeviceId}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -997,7 +997,7 @@
                 "verify"
               ]
             },
-            "description": "Self-service device reset step 2. Verifies the OTP, updates member.deviceId to the newDeviceId submitted in the request step, invalidates all active sessions, and sends a confirmation email. Member must log in fresh from the new device."
+            "description": "Self-service device reset step 2. Send the same deviceId as the request step's newDeviceId (optional for older apps): it picks that device's own code and counts wrong guesses per device. Verifies the OTP, updates member.deviceId, drops other pending codes, invalidates all active sessions, and sends a confirmation email. Member must log in fresh from the new device."
           },
           "response": [
             {

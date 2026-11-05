@@ -5042,7 +5042,7 @@ rate-limit counter clears and increments are fire-and-forget.
 | Venue list        | `venues:all`                    | `CACHE_TTL_REFERENCE_SECONDS`    | On any CRUD  |
 | Event config list | `event-config:all`              | `CACHE_TTL_REFERENCE_SECONDS`    | On any CRUD  |
 | Leaderboard       | `leaderboard:{days}:{limit}`    | `CACHE_TTL_LEADERBOARD_SECONDS`  | TTL only     |
-| Rate limit keys   | `login_fail:{email}` etc.       | Per-window duration              | On success   |
+| Rate limit keys   | `login_fail:{email}:{device\|other}` etc. | Per-window duration              | On success   |
 
 ### Birthday Module
 
@@ -11370,14 +11370,18 @@ tenant it would have fired.
 A member who needs to log in from a new device (lost phone, factory reset, etc.) can reset their own device lock
 without admin involvement, subject to a rate limit.
 
-1. `POST /auth/device-reset/request` — accepts `{ email, newDeviceId }`. Rate-limited per email (default: 3 attempts
-   per 24-hour window, configurable via `DEVICE_RESET_MAX_ATTEMPTS` and `DEVICE_RESET_WINDOW_SECONDS`). Generates a
+1. `POST /auth/device-reset/request` — accepts `{ email, newDeviceId }`. Rate-limited per email **and requesting
+   device** (`device_reset:<email>:<newDeviceId>`; default: 3 attempts per 24-hour window, configurable via
+   `DEVICE_RESET_MAX_ATTEMPTS` and `DEVICE_RESET_WINDOW_SECONDS`), so requests from someone else's device can't use up
+   the member's own. A new request replaces only that device's unused code, never a code another device asked for. Generates a
    6-digit OTP, stores an Argon2 hash and the `newDeviceId` in `device_reset_otps`, and emails the code. Always
    returns the same success message to avoid leaking account existence.
    - **Security note:** `newDeviceId` is locked in at request time. An attacker who intercepts the OTP cannot redirect
      the reset to their own device — the device is bound to whoever initiated the request.
-2. `POST /auth/device-reset/verify` — accepts `{ email, otp }`. Verifies the OTP, checks expiry, marks the record
-   as used, updates `member.deviceId` to the `newDeviceId` stored on the OTP record, invalidates all active sessions,
+2. `POST /auth/device-reset/verify` — accepts `{ email, otp, deviceId? }`. `deviceId` (sent by the member app since
+   this change; optional so older app versions keep working) picks that device's own code and keys wrong guesses per
+   device (`otp_verify_fail:<email>:<deviceId>:device_reset`), so a stranger's wrong guesses can't lock the member out.
+   Verifies the OTP, checks expiry, marks the record as used, deletes every other unused code for the member, updates `member.deviceId` to the `newDeviceId` stored on the OTP record, invalidates all active sessions,
    unsubscribes push, **revokes every one of the member's WebAuthn credentials** (`WebauthnService.revokeAllCredentials`),
    and sends a confirmation email. On success the member must log in fresh from the new device, re-enrolling biometrics
    if they want one-tap login again.
@@ -11390,6 +11394,16 @@ without admin involvement, subject to a rate limit.
    - If the attempt count reaches the configured maximum, the email is rate-limited and the member must contact an
      admin for an out-of-band device purge (`DELETE /admin/members/:id/device`).
    - **Wrong-guess limiting:** see "OTP Verify Guess Limiting" below — this endpoint is one of the three protected.
+
+### Failed Sign-in Lockout
+
+`POST /auth/login` and `POST /auth/admin-login` lock an email out after `LOGIN_MAX_ATTEMPTS` wrong passwords within
+`LOGIN_WINDOW_SECONDS` (`429`, plus the `login-security-alert` email). The count is split in two
+(`login_fail:<email>:device` and `login_fail:<email>:other`): sign-ins from the member's own registered device
+(`deviceId` in the body matching `member.deviceId`, read in `LocalStrategy` via `passReqToCallback`) have their own
+count, and every other attempt (other device ids, no device id, the admin portal) shares the second. Someone who only
+knows a member's email can lock out other devices but never the member's own phone, and sending made-up device ids
+gets them no extra guesses.
 
 ### OTP Verify Guess Limiting
 
@@ -11408,7 +11422,7 @@ this counter, only reissuing the underlying code does something new to guess). A
 `scope`, to all three OTP-verify endpoints:
 
 - `POST /auth/reset-password` (`scope: 'password_reset'`, identifier: email)
-- `POST /auth/device-reset/verify` (`scope: 'device_reset'`, identifier: email)
+- `POST /auth/device-reset/verify` (`scope: 'device_reset'`, identifier: `email:deviceId` when the app sends `deviceId`, else email)
 - `POST /auth/email-change/confirm` (`scope: 'email_change'`, identifier: member id) — this route previously had no
   `@Throttle` at all; it now has the same `5/min` per-IP throttle as the other two, plus this per-account guard.
 
@@ -13866,14 +13880,18 @@ tenant it would have fired.
 A member who needs to log in from a new device (lost phone, factory reset, etc.) can reset their own device lock
 without admin involvement, subject to a rate limit.
 
-1. `POST /auth/device-reset/request` — accepts `{ email, newDeviceId }`. Rate-limited per email (default: 3 attempts
-   per 24-hour window, configurable via `DEVICE_RESET_MAX_ATTEMPTS` and `DEVICE_RESET_WINDOW_SECONDS`). Generates a
+1. `POST /auth/device-reset/request` — accepts `{ email, newDeviceId }`. Rate-limited per email **and requesting
+   device** (`device_reset:<email>:<newDeviceId>`; default: 3 attempts per 24-hour window, configurable via
+   `DEVICE_RESET_MAX_ATTEMPTS` and `DEVICE_RESET_WINDOW_SECONDS`), so requests from someone else's device can't use up
+   the member's own. A new request replaces only that device's unused code, never a code another device asked for. Generates a
    6-digit OTP, stores an Argon2 hash and the `newDeviceId` in `device_reset_otps`, and emails the code. Always
    returns the same success message to avoid leaking account existence.
    - **Security note:** `newDeviceId` is locked in at request time. An attacker who intercepts the OTP cannot redirect
      the reset to their own device — the device is bound to whoever initiated the request.
-2. `POST /auth/device-reset/verify` — accepts `{ email, otp }`. Verifies the OTP, checks expiry, marks the record
-   as used, updates `member.deviceId` to the `newDeviceId` stored on the OTP record, invalidates all active sessions,
+2. `POST /auth/device-reset/verify` — accepts `{ email, otp, deviceId? }`. `deviceId` (sent by the member app since
+   this change; optional so older app versions keep working) picks that device's own code and keys wrong guesses per
+   device (`otp_verify_fail:<email>:<deviceId>:device_reset`), so a stranger's wrong guesses can't lock the member out.
+   Verifies the OTP, checks expiry, marks the record as used, deletes every other unused code for the member, updates `member.deviceId` to the `newDeviceId` stored on the OTP record, invalidates all active sessions,
    unsubscribes push, **revokes every one of the member's WebAuthn credentials** (`WebauthnService.revokeAllCredentials`),
    and sends a confirmation email. On success the member must log in fresh from the new device, re-enrolling biometrics
    if they want one-tap login again.
@@ -13886,6 +13904,16 @@ without admin involvement, subject to a rate limit.
    - If the attempt count reaches the configured maximum, the email is rate-limited and the member must contact an
      admin for an out-of-band device purge (`DELETE /admin/members/:id/device`).
    - **Wrong-guess limiting:** see "OTP Verify Guess Limiting" below — this endpoint is one of the three protected.
+
+### Failed Sign-in Lockout
+
+`POST /auth/login` and `POST /auth/admin-login` lock an email out after `LOGIN_MAX_ATTEMPTS` wrong passwords within
+`LOGIN_WINDOW_SECONDS` (`429`, plus the `login-security-alert` email). The count is split in two
+(`login_fail:<email>:device` and `login_fail:<email>:other`): sign-ins from the member's own registered device
+(`deviceId` in the body matching `member.deviceId`, read in `LocalStrategy` via `passReqToCallback`) have their own
+count, and every other attempt (other device ids, no device id, the admin portal) shares the second. Someone who only
+knows a member's email can lock out other devices but never the member's own phone, and sending made-up device ids
+gets them no extra guesses.
 
 ### OTP Verify Guess Limiting
 
@@ -13904,7 +13932,7 @@ this counter, only reissuing the underlying code does something new to guess). A
 `scope`, to all three OTP-verify endpoints:
 
 - `POST /auth/reset-password` (`scope: 'password_reset'`, identifier: email)
-- `POST /auth/device-reset/verify` (`scope: 'device_reset'`, identifier: email)
+- `POST /auth/device-reset/verify` (`scope: 'device_reset'`, identifier: `email:deviceId` when the app sends `deviceId`, else email)
 - `POST /auth/email-change/confirm` (`scope: 'email_change'`, identifier: member id) — this route previously had no
   `@Throttle` at all; it now has the same `5/min` per-IP throttle as the other two, plus this per-account guard.
 
@@ -18996,7 +19024,7 @@ rate-limit counter clears and increments are fire-and-forget.
 | Venue list        | `venues:all`                    | `CACHE_TTL_REFERENCE_SECONDS`    | On any CRUD  |
 | Event config list | `event-config:all`              | `CACHE_TTL_REFERENCE_SECONDS`    | On any CRUD  |
 | Leaderboard       | `leaderboard:{days}:{limit}`    | `CACHE_TTL_LEADERBOARD_SECONDS`  | TTL only     |
-| Rate limit keys   | `login_fail:{email}` etc.       | Per-window duration              | On success   |
+| Rate limit keys   | `login_fail:{email}:{device\|other}` etc. | Per-window duration              | On success   |
 
 ### Birthday Module
 

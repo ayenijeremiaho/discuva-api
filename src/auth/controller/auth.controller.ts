@@ -343,7 +343,7 @@ export class AuthController {
   async verifyDeviceReset(
     @Body() dto: VerifyDeviceResetDto,
   ): Promise<{ message: string }> {
-    await this.authService.verifyDeviceReset(dto.email, dto.otp);
+    await this.authService.verifyDeviceReset(dto.email, dto.otp, dto.deviceId);
     return {
       message:
         'Device updated successfully. You can now log in from your new device.',

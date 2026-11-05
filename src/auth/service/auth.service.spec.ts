@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -55,7 +56,11 @@ const mockOtpQb = {
 };
 
 const mockCacheService = {
-  key: jest.fn().mockImplementation((ns: string, id: string) => `${ns}:${id}`),
+  key: jest
+    .fn()
+    .mockImplementation((ns: string, id: string, suffix?: string) =>
+      suffix ? `${ns}:${id}:${suffix}` : `${ns}:${id}`,
+    ),
   get: jest.fn().mockResolvedValue(0),
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(1),
@@ -1657,6 +1662,115 @@ describe('AuthService', () => {
         'email-changed-confirmation',
         expect.any(Object),
       );
+    });
+  });
+
+  describe("someone else can't block a member's sign-in", () => {
+    const member = {
+      id: 'member-1',
+      firstname: 'Test',
+      email: 'test@test.com',
+      password: 'hashed_pass',
+      deviceId: 'my-phone-123',
+      status: MemberStatusEnum.ACTIVE,
+      role: MemberRoleEnum.MEMBER,
+    };
+    const lockedKeys = new Set<string>();
+    beforeEach(() => {
+      Object.assign(service, {
+        loginMaxAttempts: 5,
+        deviceResetMaxAttempts: 3,
+      });
+      lockedKeys.clear();
+      mockCacheService.get.mockImplementation((key: string) =>
+        Promise.resolve(lockedKeys.has(key) ? 99 : 0),
+      );
+      mockMemberService.findByEmail.mockResolvedValue(member);
+    });
+    afterEach(() => mockCacheService.get.mockResolvedValue(0));
+
+    it('lets the registered device sign in while other devices are locked out', async () => {
+      lockedKeys.add('login_fail:test@test.com:other');
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+
+      await expect(
+        service.validateMember('test@test.com', 'pass', 'stranger-device'),
+      ).rejects.toThrow(HttpException);
+      await expect(
+        service.validateMember('test@test.com', 'pass', 'my-phone-123'),
+      ).resolves.toMatchObject({ id: 'member-1' });
+    });
+
+    it('counts wrong passwords from other devices together, whatever device id they send', async () => {
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+      await expect(
+        service.validateMember('test@test.com', 'x', 'fake-1'),
+      ).rejects.toThrow(UnauthorizedException);
+      await expect(
+        service.validateMember('test@test.com', 'x'),
+      ).rejects.toThrow(UnauthorizedException);
+      const keys = mockCacheService.incr.mock.calls.map((c) => c[0]);
+      expect(keys).toEqual([
+        'login_fail:test@test.com:other',
+        'login_fail:test@test.com:other',
+      ]);
+    });
+
+    it("counts reset requests per device, so a stranger's requests don't use up the member's", async () => {
+      lockedKeys.add('device_reset:test@test.com:stranger-device');
+      await expect(
+        service.requestDeviceReset('test@test.com', 'stranger-device'),
+      ).rejects.toThrow(HttpException);
+      await service.requestDeviceReset('test@test.com', 'new-phone-456');
+      expect(mockDeviceResetOtpRepository.save).toHaveBeenCalled();
+    });
+
+    it("doesn't cancel a code another device asked for", async () => {
+      await service.requestDeviceReset('test@test.com', 'new-phone-456');
+      expect(mockDeviceResetOtpRepository.delete).toHaveBeenCalledWith({
+        memberId: 'member-1',
+        newDeviceId: 'new-phone-456',
+        usedAt: expect.anything(),
+      });
+    });
+
+    it("checks the code against the asking device's own request and tries", async () => {
+      mockDeviceResetOtpRepository.findOne.mockResolvedValue(null);
+      await expect(
+        service.verifyDeviceReset('test@test.com', '123456', 'new-phone-456'),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockDeviceResetOtpRepository.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ newDeviceId: 'new-phone-456' }),
+        }),
+      );
+      expect(mockCacheService.incr.mock.calls[0][0]).toBe(
+        'otp_verify_fail:test@test.com:new-phone-456:device_reset',
+      );
+    });
+
+    it('drops every other pending code once a reset succeeds', async () => {
+      mockDeviceResetOtpRepository.findOne.mockResolvedValue({
+        memberId: 'member-1',
+        newDeviceId: 'new-phone-456',
+        otpHash: 'hashed-otp',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: null,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      await service.verifyDeviceReset(
+        'test@test.com',
+        '123456',
+        'new-phone-456',
+      );
+      expect(mockMemberService.setDeviceId).toHaveBeenCalledWith(
+        'member-1',
+        'new-phone-456',
+      );
+      expect(mockDeviceResetOtpRepository.delete).toHaveBeenCalledWith({
+        memberId: 'member-1',
+        usedAt: expect.anything(),
+      });
     });
   });
 });
