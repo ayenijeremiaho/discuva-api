@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
 import { NormalizeEmail } from '../../utility/decorators/normalize-email.decorator';
 
 export class RequestDeviceResetDto {
@@ -18,4 +18,10 @@ export class VerifyDeviceResetDto {
 
   @IsString()
   otp: string;
+
+  // The device that asked for the code. Optional so older app versions keep working.
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  deviceId?: string;
 }
