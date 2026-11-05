@@ -27,7 +27,10 @@ const mockTenantRepo = { findOneByOrFail: jest.fn() };
 const mockSubscriptionRepo = { findOneBy: jest.fn() };
 
 const mockCls = { get: jest.fn().mockReturnValue('parent-tenant-1') };
-const mockEmailQueueService = { queueEmail: jest.fn() };
+const mockEmailQueueService = {
+  logFailure: jest.fn(),
+  queueEmail: jest.fn().mockResolvedValue('job-1'),
+};
 
 describe('BranchInviteService', () => {
   let service: BranchInviteService;

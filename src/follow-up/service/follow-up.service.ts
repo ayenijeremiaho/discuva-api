@@ -519,23 +519,25 @@ export class FollowUpService {
         'See app for details';
       const contactEmail = task.firstTimer?.email ?? task.member?.email ?? null;
 
-      this.emailQueueService.queueEmailWithTemplate(
-        targetProfile.member.email,
-        `Follow-Up Task Reassigned to You — ${this.churchName}`,
-        'follow-up-task-assigned',
-        {
-          workerName: targetProfile.member.firstname,
-          firstTimerName: contactName,
-          phone: contactPhone,
-          email: contactEmail,
-          dueDate: task.dueDate
-            ? new Date(task.dueDate).toDateString()
-            : 'Not set',
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          targetProfile.member.email,
+          `Follow-Up Task Reassigned to You — ${this.churchName}`,
+          'follow-up-task-assigned',
+          {
+            workerName: targetProfile.member.firstname,
+            firstTimerName: contactName,
+            phone: contactPhone,
+            email: contactEmail,
+            dueDate: task.dueDate
+              ? new Date(task.dueDate).toDateString()
+              : 'Not set',
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     return saved;
@@ -587,21 +589,23 @@ export class FollowUpService {
     );
 
     if (assignee.member?.email) {
-      this.emailQueueService.queueEmailWithTemplate(
-        assignee.member.email,
-        `New Follow-Up Task Assigned — ${this.churchName}`,
-        'follow-up-task-assigned',
-        {
-          workerName: assignee.member.firstname,
-          firstTimerName: 'Online non-responder',
-          phone: 'See app for details',
-          email: null,
-          dueDate: dueDate.toDateString(),
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          assignee.member.email,
+          `New Follow-Up Task Assigned — ${this.churchName}`,
+          'follow-up-task-assigned',
+          {
+            workerName: assignee.member.firstname,
+            firstTimerName: 'Online non-responder',
+            phone: 'See app for details',
+            email: null,
+            dueDate: dueDate.toDateString(),
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     this.logger.debug(
@@ -958,21 +962,23 @@ export class FollowUpService {
     );
 
     if (assignee?.member?.email) {
-      this.emailQueueService.queueEmailWithTemplate(
-        assignee.member.email,
-        `New Follow-Up Task Assigned — ${this.churchName}`,
-        'follow-up-task-assigned',
-        {
-          workerName: assignee.member.firstname,
-          firstTimerName: `${dto.firstname} ${dto.lastname}`,
-          phone: dto.phone,
-          email: dto.email ?? null,
-          dueDate: dueDate.toDateString(),
-          churchName: this.churchName,
-        },
-        undefined,
-        EmailCategory.FOLLOW_UP,
-      );
+      this.emailQueueService
+        .queueEmailWithTemplate(
+          assignee.member.email,
+          `New Follow-Up Task Assigned — ${this.churchName}`,
+          'follow-up-task-assigned',
+          {
+            workerName: assignee.member.firstname,
+            firstTimerName: `${dto.firstname} ${dto.lastname}`,
+            phone: dto.phone,
+            email: dto.email ?? null,
+            dueDate: dueDate.toDateString(),
+            churchName: this.churchName,
+          },
+          undefined,
+          EmailCategory.FOLLOW_UP,
+        )
+        .catch(this.emailQueueService.logFailure);
     }
 
     this.cacheService.flushNamespace('follow-up:report');

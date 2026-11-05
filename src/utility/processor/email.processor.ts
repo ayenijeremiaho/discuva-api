@@ -1,12 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  OnQueueCompleted,
-  OnQueueFailed,
-  Process,
-  Processor,
-} from '@nestjs/bull';
+import { OnQueueFailed, Process, Processor } from '@nestjs/bull';
 import { Job } from 'bull';
 import { ConfigService } from '@nestjs/config';
 import { ClsService } from 'nestjs-cls';
@@ -53,7 +48,7 @@ export interface EmailJobData extends TenantJobEnvelope {
 }
 
 // Bull's return-value convention: handleSend's return becomes job.returnvalue,
-// readable in onCompleted — the only way to tell onCompleted/onFailed which
+// readable in logSent — the only way to tell logSent/onFailed which
 // concrete provider actually handled this specific send, since that can vary
 // per tenant now (BYOK) and isn't knowable from the processor's own fixed
 // EMAIL_PROVIDER_TOKEN default alone.
@@ -89,7 +84,7 @@ export class EmailProcessor {
       this.configService.get<string>('EMAIL_USER');
   }
 
-  // Tenant context has to be entered here (not just in onCompleted/onFailed,
+  // Tenant context has to be entered here (not just in logSent/onFailed,
   // the pre-BYOK behavior) because resolving a tenant's own BYOK config now
   // has to happen before the send itself, not just before logging it
   // afterward — the genuinely more involved wiring
@@ -97,6 +92,13 @@ export class EmailProcessor {
   // versus SMS which resolves synchronously within the original request.
   @Process('send')
   async handleSend(job: Job<EmailJobData>): Promise<SendResult> {
+    const result = await this.send(job);
+    // Inside the job, not a completed listener, so a deploy's shutdown waits for it.
+    await this.logSent(job, result);
+    return result;
+  }
+
+  private send(job: Job<EmailJobData>): Promise<SendResult> {
     return runInTenantContext(this.cls, this.txHost, job.data, async () => {
       const { to, cc, subject, html, attachments } = job.data;
       const config = await this.emailCredentialResolverService.resolveConfig();
@@ -156,8 +158,7 @@ export class EmailProcessor {
     );
   }
 
-  @OnQueueCompleted()
-  async onCompleted(
+  async logSent(
     job: Job<EmailJobData>,
     result: SendResult | undefined,
   ): Promise<void> {
@@ -202,7 +203,7 @@ export class EmailProcessor {
       `Email permanently failed after ${job.attemptsMade} attempts: "${job.data.subject}" to ${Array.isArray(job.data.to) ? job.data.to.join(', ') : job.data.to} — ${error.message}`,
     );
 
-    // Same reasoning as onCompleted — never let the act of logging a
+    // Same reasoning as logSent — never let the act of logging a
     // failure become a second, unrelated failure that crashes the process.
     try {
       await runInTenantContext(this.cls, this.txHost, job.data, async () => {

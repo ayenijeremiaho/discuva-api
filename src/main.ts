@@ -5,7 +5,11 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { RedisIoAdapter } from './utility/adapters/redis-io.adapter';
 import { Logger } from 'nestjs-pino';
-import { INestApplication, VersioningType } from '@nestjs/common';
+import {
+  INestApplication,
+  Logger as NestLogger,
+  VersioningType,
+} from '@nestjs/common';
 import { HttpExceptionFilter } from './utility/filters/http-exception.filter';
 import { TransformInterceptor } from './utility/interceptors/transform.interceptor';
 import { TrimValidationPipe } from './utility/pipes/trim-validation.pipe';
@@ -25,6 +29,7 @@ async function bootstrap() {
   // Lets req.ip be the visitor rather than the proxy in front of the API (see client-ip.ts).
   app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops());
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
+  logUnhandledRejections();
   mountBullBoard(app);
   app.use(
     helmet({
@@ -57,6 +62,16 @@ async function bootstrap() {
   registerGlobalFilters(app);
   registerGlobalInterceptors(app);
   await app.listen(process.env.PORT ?? 3000);
+}
+
+// Without a listener Node exits on the first one; Sentry adds its own only when it's configured.
+function logUnhandledRejections() {
+  const logger = new NestLogger('Process');
+  process.on('unhandledRejection', (reason) =>
+    logger.error(
+      `Unhandled rejection: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`,
+    ),
+  );
 }
 
 function registerNestLogger(app: INestApplication) {

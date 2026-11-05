@@ -17,7 +17,10 @@ const mockTxHost = {
   tx: mockTx,
   withTransaction: jest.fn((fn: () => unknown) => fn()),
 };
-const mockEmailQueueService = { queueEmail: jest.fn() };
+const mockEmailQueueService = {
+  logFailure: jest.fn(),
+  queueEmail: jest.fn().mockResolvedValue('job-1'),
+};
 
 function tenant(id: string, subdomain: string) {
   // schemaName must satisfy runInTenantContext's VALID_SCHEMA_NAME

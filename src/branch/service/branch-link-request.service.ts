@@ -290,13 +290,15 @@ export class BranchLinkRequestService {
       ? `<p>If you accept, this church's plan will be sponsored by ${parentTenant.name} — no independent payment required.</p>`
       : '';
 
-    this.emailQueueService.queueEmail(
-      email,
-      `${parentTenant.name} wants to link your church as a branch`,
-      `<p>${parentTenant.name} has sent a request to link your church as a branch on Discuva.</p>
+    this.emailQueueService
+      .queueEmail(
+        email,
+        `${parentTenant.name} wants to link your church as a branch`,
+        `<p>${parentTenant.name} has sent a request to link your church as a branch on Discuva.</p>
        <p>Review and respond to this request from your church's branch settings.</p>
        ${sponsorNote}`,
-    );
+      )
+      .catch(this.emailQueueService.logFailure);
   }
 
   private async notifyParent(
@@ -316,7 +318,9 @@ export class BranchLinkRequestService {
         ? `<p>${target.name} has accepted your request to join as a branch. It now appears in your branch overview.</p>`
         : `<p>${target.name} has declined your request to join as a branch.</p>`;
 
-    this.emailQueueService.queueEmail(email, subject, html);
+    this.emailQueueService
+      .queueEmail(email, subject, html)
+      .catch(this.emailQueueService.logFailure);
   }
 
   // Same manual tenant-context-entry pattern as

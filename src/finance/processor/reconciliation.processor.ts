@@ -164,10 +164,16 @@ export class ReconciliationProcessor implements OnApplicationBootstrap {
   @OnQueueStalled()
   async onStalled(job: Job<ReconciliationJobData>): Promise<void> {
     this.logger.warn(`Reconciliation job ${job.data.jobId} stalled`);
-    await this.jobRepo.update(job.data.jobId, {
-      status: BulkUploadJobStatus.FAILED,
-      errorMessage: 'Job stalled; will be retried automatically',
-    });
+    await runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.jobRepo.update(job.data.jobId, {
+        status: BulkUploadJobStatus.FAILED,
+        errorMessage: 'Job stalled; will be retried automatically',
+      }),
+    ).catch((err: Error) =>
+      this.logger.error(
+        `Couldn't mark reconciliation job ${job.data.jobId} stalled: ${err.message}`,
+      ),
+    );
   }
 
   @OnQueueFailed()

@@ -197,11 +197,17 @@ export class TitheProcessor implements OnApplicationBootstrap {
     this.logger.warn(
       `Tithe batch job ${job.data.batchId} stalled (attempt ${job.attemptsMade}) — Bull will re-queue`,
     );
-    await this.batchRepo.update(job.data.batchId, {
-      status: TitheBatchStatus.FAILED,
-      errorMessage:
-        'Job stalled (worker interrupted); will be retried automatically',
-    });
+    await runInTenantContext(this.cls, this.txHost, job.data, () =>
+      this.batchRepo.update(job.data.batchId, {
+        status: TitheBatchStatus.FAILED,
+        errorMessage:
+          'Job stalled (worker interrupted); will be retried automatically',
+      }),
+    ).catch((err: Error) =>
+      this.logger.error(
+        `Couldn't mark tithe batch ${job.data.batchId} stalled: ${err.message}`,
+      ),
+    );
   }
 
   @OnQueueFailed()
