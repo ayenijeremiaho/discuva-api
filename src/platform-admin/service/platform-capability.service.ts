@@ -1,20 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { KNOWN_MODULES } from '../../church-settings/constants/known-modules.constant';
-import { PlanFeature } from '../../billing/enum/plan-feature.enum';
+import { ORPHAN_PLAN_FEATURE_LABELS } from '../../billing/constant/plan-feature-labels.constant';
 
 export interface PlatformCapability {
   key: string;
   label: string;
 }
-
-// PlanFeature values with no KNOWN_MODULES counterpart — hand-labeled since they have no moduleName to borrow.
-const ORPHAN_PLAN_FEATURE_LABELS: Partial<Record<PlanFeature, string>> = {
-  [PlanFeature.FINANCE]: 'Finance',
-  [PlanFeature.SMS]: 'SMS',
-  [PlanFeature.AUDIT]: 'Audit Log',
-  [PlanFeature.BULK_EXPORT]: 'Bulk Export',
-  [PlanFeature.NOTIFICATION_CUSTOMIZATION]: 'Notification Customization',
-};
 
 @Injectable()
 export class PlatformCapabilityService {

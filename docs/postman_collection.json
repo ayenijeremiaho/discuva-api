@@ -42250,6 +42250,30 @@
       "description": "Church-admin plan billing. Admin JWT with billing:read/billing:write.",
       "item": [
         {
+          "name": "Get Plans",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/billing/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "billing",
+                "plans"
+              ]
+            },
+            "description": "Admin (billing:read). The plans offered to this account's type, cheapest first. Each plan has featureList [{ key, label }]: readable feature names, keeping only modules this account type has on by default."
+          },
+          "response": []
+        },
+        {
           "name": "List Available Payment Providers",
           "request": {
             "method": "GET",

@@ -24,6 +24,8 @@ import {
 import { PaymentProviderRegistryService } from './payment-provider-registry.service';
 import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
 import { isFreePlan, tenantFreePlanId } from '../util/free-plan.util';
+import { AccountTypeService } from '../../account-type/account-type.service';
+import { planFeatureLabel } from '../constant/plan-feature-labels.constant';
 
 export interface PublicPlanVariant {
   planId: string;
@@ -31,6 +33,14 @@ export interface PublicPlanVariant {
   priceCents: number;
   billingInterval: BillingInterval;
 }
+
+export interface PlanFeatureItem {
+  key: string;
+  label: string;
+}
+
+// A plan as an account sees it: its features named, keeping only modules this account type has on by default.
+export type AccountPlan = Plan & { featureList: PlanFeatureItem[] };
 
 export interface PublicPlanTier {
   tierKey: string;
@@ -77,6 +87,7 @@ export class CheckoutService {
     private readonly configService: ConfigService,
     private readonly cacheService: CacheService,
     private readonly paymentProviderRegistry: PaymentProviderRegistryService,
+    private readonly accountTypeService: AccountTypeService,
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Tenant) private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(Plan) private readonly planRepo: Repository<Plan>,
@@ -108,9 +119,20 @@ export class CheckoutService {
   // Tenant-facing plan catalog — no tenant scoping needed, plans are global
   // reference data (same "no pagination, return the full list" treatment as
   // every other admin-controlled reference list in this codebase).
-  async listPlans(): Promise<Plan[]> {
+  async listPlans(): Promise<AccountPlan[]> {
     const type = await this.currentOrgType();
-    return this.plansFor(type);
+    const [plans, profile] = await Promise.all([
+      this.plansFor(type),
+      this.accountTypeService.getProfile(type),
+    ]);
+    return plans.map((plan) => ({
+      ...plan,
+      featureList: plan.features.flatMap((key) => {
+        const label = planFeatureLabel(key);
+        const availability = profile.modules[key] ?? 'on';
+        return label && availability === 'on' ? [{ key, label }] : [];
+      }),
+    }));
   }
 
   private plansFor(type: OrganisationTypeEnum): Promise<Plan[]> {

@@ -11,6 +11,7 @@ import { SubscriptionStatus } from '../enum/subscription-status.enum';
 import { BillingCheckoutSession } from '../entity/billing-checkout-session.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { PaymentProviderRegistryService } from './payment-provider-registry.service';
+import { AccountTypeService } from '../../account-type/account-type.service';
 
 const mockTenantRepo = {
   findOneByOrFail: jest.fn(),
@@ -48,6 +49,9 @@ const mockDataSource = {
   transaction: jest.fn((cb) => cb(mockManager)),
 };
 
+const mockAccountTypeService = {
+  getProfile: jest.fn().mockResolvedValue({ modules: {} }),
+};
 const mockCls = { get: jest.fn().mockReturnValue('tenant-1') };
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -87,6 +91,7 @@ async function buildService(
       { provide: ConfigService, useValue: { get: jest.fn(configGet) } },
       { provide: CacheService, useValue: mockCacheService },
       { provide: PaymentProviderRegistryService, useValue: mockRegistry },
+      { provide: AccountTypeService, useValue: mockAccountTypeService },
       { provide: getDataSourceToken(), useValue: mockDataSource },
       { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
       { provide: getRepositoryToken(Plan), useValue: mockPlanRepo },
@@ -131,8 +136,8 @@ describe('CheckoutService', () => {
   describe('listPlans', () => {
     it("returns the account type's plans ordered by price ascending", async () => {
       const plans = [
-        { id: 'free', name: 'Free', priceCents: 0 },
-        { id: 'pro', name: 'Pro', priceCents: 500000 },
+        { id: 'free', name: 'Free', priceCents: 0, features: [] },
+        { id: 'pro', name: 'Pro', priceCents: 500000, features: [] },
       ];
       mockPlanQuery.getMany.mockResolvedValue(plans);
 
@@ -143,7 +148,32 @@ describe('CheckoutService', () => {
         { type: 'CHURCH' },
       );
       expect(mockPlanQuery.orderBy).toHaveBeenCalledWith('p.priceCents', 'ASC');
-      expect(result).toBe(plans);
+      expect(result.map((p) => p.id)).toEqual(['free', 'pro']);
+    });
+
+    it('names each feature, leaving out modules that are off or hidden for the account type', async () => {
+      mockAccountTypeService.getProfile.mockResolvedValueOnce({
+        modules: { children_church: 'hidden', sermons: 'off', prayer: 'on' },
+      });
+      mockPlanQuery.getMany.mockResolvedValue([
+        {
+          id: 'pro',
+          features: [
+            'prayer',
+            'children_church',
+            'sermons',
+            'sms',
+            'not_a_feature',
+          ],
+        },
+      ]);
+
+      const [plan] = await service.listPlans();
+
+      expect(plan.featureList).toEqual([
+        { key: 'prayer', label: 'Prayer' },
+        { key: 'sms', label: 'SMS' },
+      ]);
     });
 
     it('offers a small group only the group plans', async () => {
