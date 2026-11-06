@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { tenantFreePlanId } from '../../billing/util/free-plan.util';
 import { In, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
@@ -236,7 +237,7 @@ export class BranchRollupService {
     const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
     if (subscription?.sponsoredByTenantId !== sponsorTenantId) return;
 
-    subscription.planId = 'free';
+    subscription.planId = await tenantFreePlanId(this.tenantRepo, tenantId);
     subscription.status = SubscriptionStatus.CANCELED;
     subscription.canceledAt = new Date();
     subscription.sponsoredByTenantId = null;

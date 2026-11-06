@@ -1,3 +1,4 @@
+import { isFreePlan } from '../../billing/util/free-plan.util';
 import {
   BadRequestException,
   ForbiddenException,
@@ -264,7 +265,7 @@ export class BranchLinkRequestService {
     const parentSubscription = await this.subscriptionRepo.findOneBy({
       tenantId: parentTenantId,
     });
-    if (!parentSubscription || parentSubscription.planId === 'free') return;
+    if (!parentSubscription || isFreePlan(parentSubscription.planId)) return;
 
     const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
     if (!subscription) return;

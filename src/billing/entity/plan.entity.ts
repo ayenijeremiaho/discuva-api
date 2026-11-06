@@ -37,6 +37,10 @@ export class Plan {
   @Column('text', { array: true, default: '{}' })
   features: string[];
 
+  // Account types this plan is offered to (OrganisationTypeEnum values), so churches and groups get their own prices.
+  @Column('text', { array: true, default: () => "'{CHURCH,MINISTRY}'" })
+  organisationTypes: string[];
+
   // Optional numeric cap layered on top of `features` membership — a
   // feature can be boolean-gated only (absent here) or additionally capped
   // at N lifetime uses per tenant (present here, checked by PlanGuard

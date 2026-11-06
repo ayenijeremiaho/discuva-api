@@ -22,6 +22,8 @@ import {
   BillingCheckoutType,
 } from '../entity/billing-checkout-session.entity';
 import { PaymentProviderRegistryService } from './payment-provider-registry.service';
+import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
+import { isFreePlan, tenantFreePlanId } from '../util/free-plan.util';
 
 export interface PublicPlanVariant {
   planId: string;
@@ -41,6 +43,7 @@ export interface PublicPlanTier {
 export interface BillingSummary {
   planId: string;
   planName: string;
+  isFree: boolean;
   subscriptionStatus: SubscriptionStatus;
   currentPeriodEnd: Date | null;
   // True once cancelSubscription() has been called but the tenant is still
@@ -106,7 +109,24 @@ export class CheckoutService {
   // reference data (same "no pagination, return the full list" treatment as
   // every other admin-controlled reference list in this codebase).
   async listPlans(): Promise<Plan[]> {
-    return this.planRepo.find({ order: { priceCents: 'ASC' } });
+    const type = await this.currentOrgType();
+    return this.plansFor(type);
+  }
+
+  private plansFor(type: OrganisationTypeEnum): Promise<Plan[]> {
+    return this.planRepo
+      .createQueryBuilder('p')
+      .where(':type = ANY(p.organisationTypes)', { type })
+      .orderBy('p.priceCents', 'ASC')
+      .getMany();
+  }
+
+  private async currentOrgType(): Promise<OrganisationTypeEnum> {
+    const tenant = await this.tenantRepo.findOne({
+      where: { id: this.currentTenantId() },
+      select: { id: true, orgType: true },
+    });
+    return tenant?.orgType ?? OrganisationTypeEnum.CHURCH;
   }
 
   listPaymentProviders(): Promise<{ id: string; name: string }[]> {
@@ -117,8 +137,10 @@ export class CheckoutService {
   // site with no tenant/admin context at all) — groups currency variants of
   // the same conceptual tier together so the caller doesn't have to
   // re-derive tierKey grouping itself.
-  async listPublicPlans(): Promise<PublicPlanTier[]> {
-    const plans = await this.planRepo.find({ order: { priceCents: 'ASC' } });
+  async listPublicPlans(
+    type: OrganisationTypeEnum = OrganisationTypeEnum.CHURCH,
+  ): Promise<PublicPlanTier[]> {
+    const plans = await this.plansFor(type);
 
     const tiers = new Map<string, PublicPlanTier>();
     for (const plan of plans) {
@@ -150,12 +172,15 @@ export class CheckoutService {
     const tenantId = this.currentTenantId();
     const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
 
-    const planId = subscription?.planId ?? 'free';
+    const planId =
+      subscription?.planId ??
+      (await tenantFreePlanId(this.tenantRepo, tenantId));
     const plan = await this.planRepo.findOneBy({ id: planId });
 
     return {
       planId,
       planName: plan?.name ?? planId,
+      isFree: isFreePlan(planId),
       subscriptionStatus: subscription?.status ?? SubscriptionStatus.ACTIVE,
       currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
       cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
@@ -172,7 +197,7 @@ export class CheckoutService {
   async cancelSubscription(): Promise<BillingSummary> {
     const tenantId = this.currentTenantId();
     const subscription = await this.subscriptionRepo.findOneBy({ tenantId });
-    if (!subscription || subscription.planId === 'free') {
+    if (!subscription || isFreePlan(subscription.planId)) {
       throw new BadRequestException('No active paid subscription to cancel.');
     }
     if (subscription.sponsoredByTenantId) {
@@ -210,7 +235,7 @@ export class CheckoutService {
       subscription.cancelAtPeriodEnd = true;
       await this.subscriptionRepo.save(subscription);
     } else {
-      subscription.planId = 'free';
+      subscription.planId = await tenantFreePlanId(this.tenantRepo, tenantId);
       subscription.status = SubscriptionStatus.CANCELED;
       subscription.canceledAt = new Date();
       subscription.cancelAtPeriodEnd = false;
@@ -230,11 +255,11 @@ export class CheckoutService {
   ): Promise<{ checkoutUrl: string }> {
     const tenantId = this.currentTenantId();
     const plan = await this.planRepo.findOneBy({ id: planId });
-    if (!plan) {
+    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
+    if (!plan || !plan.organisationTypes.includes(tenant.orgType)) {
       throw new NotFoundException(`Unknown plan "${planId}".`);
     }
 
-    const tenant = await this.tenantRepo.findOneByOrFail({ id: tenantId });
     const provider =
       await this.paymentProviderRegistry.assertActive(providerName);
     const customer = await provider.createCustomer({
@@ -373,7 +398,10 @@ export class CheckoutService {
     });
     if (!subscription) return;
 
-    subscription.planId = 'free';
+    subscription.planId = await tenantFreePlanId(
+      this.tenantRepo,
+      subscription.tenantId,
+    );
     subscription.status = SubscriptionStatus.CANCELED;
     subscription.canceledAt = new Date();
     await this.subscriptionRepo.save(subscription);

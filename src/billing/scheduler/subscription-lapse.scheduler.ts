@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { tenantFreePlanId } from '../util/free-plan.util';
 import { LessThan, Repository } from 'typeorm';
 import { Cron } from '@nestjs/schedule';
 import { ClsService } from 'nestjs-cls';
@@ -131,7 +132,7 @@ export class SubscriptionLapseScheduler {
     sub: Subscription,
     reason: string,
   ): Promise<void> {
-    sub.planId = 'free';
+    sub.planId = await tenantFreePlanId(this.tenantRepo, sub.tenantId);
     sub.status = SubscriptionStatus.CANCELED;
     sub.canceledAt = new Date();
     sub.cancelAtPeriodEnd = false;

@@ -1,4 +1,5 @@
 import {
+  ArrayNotEmpty,
   IsArray,
   IsEnum,
   IsIn,
@@ -13,6 +14,7 @@ import {
 import { ALL_CAPABILITY_KEYS } from '../../billing/constant/capability-keys.constant';
 import { SUPPORTED_BILLING_CURRENCIES } from '../../billing/constant/supported-currencies.constant';
 import { BillingInterval } from '../../billing/enum/billing-interval.enum';
+import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
 
 export class CreatePlanDto {
   @IsString()
@@ -59,4 +61,11 @@ export class CreatePlanDto {
   @IsOptional()
   @IsObject()
   featureLimits?: Record<string, number>;
+
+  // Which account types are offered this plan; defaults to churches and ministries.
+  @IsOptional()
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsEnum(OrganisationTypeEnum, { each: true })
+  organisationTypes?: OrganisationTypeEnum[];
 }

@@ -19,6 +19,7 @@ import { CacheService } from '../../utility/service/cache.service';
 
 const mockTenantRepo = {
   find: jest.fn(),
+  findOne: jest.fn().mockResolvedValue({ orgType: 'CHURCH' }),
   findOneBy: jest.fn(),
   findOneByOrFail: jest.fn(),
   save: jest.fn(),

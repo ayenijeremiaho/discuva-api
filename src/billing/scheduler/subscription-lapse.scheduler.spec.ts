@@ -11,7 +11,10 @@ import { EmailQueueService } from '../../utility/service/email-queue.service';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 
 const mockSubscriptionRepo = { find: jest.fn(), save: jest.fn() };
-const mockTenantRepo = { findOneBy: jest.fn() };
+const mockTenantRepo = {
+  findOneBy: jest.fn(),
+  findOne: jest.fn().mockResolvedValue({ orgType: 'CHURCH' }),
+};
 const mockCacheService = { acquireLock: jest.fn(), del: jest.fn() };
 const mockEmailQueueService = { queueEmail: jest.fn() };
 const mockCls = { runWith: jest.fn((_store, fn) => fn()) };
@@ -133,6 +136,26 @@ describe('SubscriptionLapseScheduler', () => {
 
     await scheduler.processLapsedSubscriptions();
     expect(mockSubscriptionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it("drops a small group to the group's own free plan", async () => {
+    mockTenantRepo.findOne.mockResolvedValueOnce({ orgType: 'GROUP' });
+    mockSubscriptionRepo.find
+      .mockResolvedValueOnce([
+        {
+          tenantId: 'tenant-1',
+          cancelAtPeriodEnd: true,
+          currentPeriodEnd: new Date('2026-01-01'),
+        },
+      ])
+      .mockResolvedValueOnce([]);
+    mockSubscriptionRepo.save.mockResolvedValue({});
+
+    await scheduler.processLapsedSubscriptions();
+
+    expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
+      expect.objectContaining({ planId: 'group-free' }),
+    );
   });
 
   it('downgrades a past-due subscription once the grace period has expired', async () => {

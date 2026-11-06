@@ -42295,7 +42295,7 @@
               "type": "noauth"
             },
             "url": {
-              "raw": "{{baseUrl}}/billing/public/plans",
+              "raw": "{{baseUrl}}/billing/public/plans?type=CHURCH",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -42303,9 +42303,16 @@
                 "billing",
                 "public",
                 "plans"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "CHURCH",
+                  "description": "Optional. CHURCH (default), MINISTRY or GROUP: which account type's plans to return."
+                }
               ]
             },
-            "description": "Unauthenticated, no tenant context (excluded from TenantMiddleware) -- called by discuva-web, the public marketing site, to render real per-currency pricing. Groups every Plan row by tierKey so a tier like 'pro' returns all of its currency variants together."
+            "description": "Unauthenticated, no tenant context (excluded from TenantMiddleware) -- called by discuva-web, the public marketing site, to render real per-currency pricing. Groups every Plan row by tierKey so a tier like 'pro' returns all of its currency variants together. Pass ?type=GROUP for small groups' own plans (group-free, group-pro, ...); default CHURCH. Any other type is 400."
           },
           "response": [
             {
@@ -43085,7 +43092,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"billingInterval\": \"monthly\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
+              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"billingInterval\": \"monthly\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\n    \"finance\",\n    \"sms\"\n  ],\n  \"organisationTypes\": [\n    \"CHURCH\",\n    \"MINISTRY\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -43127,7 +43134,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"priceCents\": 75000\n}",
+              "raw": "{\n  \"priceCents\": 75000,\n  \"organisationTypes\": [\n    \"GROUP\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
