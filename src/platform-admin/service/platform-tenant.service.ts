@@ -294,6 +294,11 @@ export class PlatformTenantService {
     const tenant = await this.findTenantOrThrow(id);
     const plan = await this.planRepo.findOneBy({ id: dto.planId });
     if (!plan) throw new NotFoundException('Plan not found');
+    if (!plan.organisationTypes.includes(tenant.orgType)) {
+      throw new BadRequestException(
+        `Plan "${plan.id}" isn't offered to this account type.`,
+      );
+    }
 
     let subscription = await this.subscriptionRepo.findOneBy({
       tenantId: tenant.id,

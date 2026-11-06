@@ -1,6 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ParseEnumPipe, Query } from '@nestjs/common';
 import { Public } from '../../auth/decorator/public.decorator';
 import { CheckoutService } from '../service/checkout.service';
+import { OrganisationTypeEnum } from '../../tenant/enum/organisation-type.enum';
 
 // Unauthenticated, no tenant context — called directly by discuva-web (the
 // public marketing site) to render real pricing. @Public() is required to
@@ -13,7 +14,10 @@ export class PublicBillingController {
   constructor(private readonly checkoutService: CheckoutService) {}
 
   @Get('plans')
-  listPublicPlans() {
-    return this.checkoutService.listPublicPlans();
+  listPublicPlans(
+    @Query('type', new ParseEnumPipe(OrganisationTypeEnum, { optional: true }))
+    type?: OrganisationTypeEnum,
+  ) {
+    return this.checkoutService.listPublicPlans(type);
   }
 }

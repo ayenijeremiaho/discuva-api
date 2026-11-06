@@ -11,9 +11,22 @@ import { SubscriptionStatus } from '../enum/subscription-status.enum';
 import { BillingCheckoutSession } from '../entity/billing-checkout-session.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { PaymentProviderRegistryService } from './payment-provider-registry.service';
+import { AccountTypeService } from '../../account-type/account-type.service';
 
-const mockTenantRepo = { findOneByOrFail: jest.fn() };
-const mockPlanRepo = { findOneBy: jest.fn(), find: jest.fn() };
+const mockTenantRepo = {
+  findOneByOrFail: jest.fn(),
+  findOne: jest.fn().mockResolvedValue({ id: 'tenant-1', orgType: 'CHURCH' }),
+};
+const mockPlanQuery = {
+  where: jest.fn().mockReturnThis(),
+  orderBy: jest.fn().mockReturnThis(),
+  getMany: jest.fn(),
+};
+const mockPlanRepo = {
+  findOneBy: jest.fn(),
+  find: jest.fn(),
+  createQueryBuilder: jest.fn(() => mockPlanQuery),
+};
 const mockSubscriptionRepo = {
   findOneBy: jest.fn(),
   save: jest.fn(),
@@ -36,6 +49,9 @@ const mockDataSource = {
   transaction: jest.fn((cb) => cb(mockManager)),
 };
 
+const mockAccountTypeService = {
+  getProfile: jest.fn().mockResolvedValue({ modules: {} }),
+};
 const mockCls = { get: jest.fn().mockReturnValue('tenant-1') };
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
@@ -75,6 +91,7 @@ async function buildService(
       { provide: ConfigService, useValue: { get: jest.fn(configGet) } },
       { provide: CacheService, useValue: mockCacheService },
       { provide: PaymentProviderRegistryService, useValue: mockRegistry },
+      { provide: AccountTypeService, useValue: mockAccountTypeService },
       { provide: getDataSourceToken(), useValue: mockDataSource },
       { provide: getRepositoryToken(Tenant), useValue: mockTenantRepo },
       { provide: getRepositoryToken(Plan), useValue: mockPlanRepo },
@@ -100,6 +117,10 @@ describe('CheckoutService', () => {
     mockRegistry.get.mockReturnValue(mockProvider);
     mockRegistry.assertActive.mockResolvedValue(mockProvider);
     mockManager.create.mockImplementation((_entity, v) => v);
+    mockTenantRepo.findOne.mockResolvedValue({
+      id: 'tenant-1',
+      orgType: 'CHURCH',
+    });
     service = await buildService();
   });
 
@@ -113,19 +134,61 @@ describe('CheckoutService', () => {
   });
 
   describe('listPlans', () => {
-    it('returns every plan ordered by price ascending', async () => {
+    it("returns the account type's plans ordered by price ascending", async () => {
       const plans = [
-        { id: 'free', name: 'Free', priceCents: 0 },
-        { id: 'pro', name: 'Pro', priceCents: 500000 },
+        { id: 'free', name: 'Free', priceCents: 0, features: [] },
+        { id: 'pro', name: 'Pro', priceCents: 500000, features: [] },
       ];
-      mockPlanRepo.find.mockResolvedValue(plans);
+      mockPlanQuery.getMany.mockResolvedValue(plans);
 
       const result = await service.listPlans();
 
-      expect(mockPlanRepo.find).toHaveBeenCalledWith({
-        order: { priceCents: 'ASC' },
+      expect(mockPlanQuery.where).toHaveBeenCalledWith(
+        ':type = ANY(p.organisationTypes)',
+        { type: 'CHURCH' },
+      );
+      expect(mockPlanQuery.orderBy).toHaveBeenCalledWith('p.priceCents', 'ASC');
+      expect(result.map((p) => p.id)).toEqual(['free', 'pro']);
+    });
+
+    it('names each feature, leaving out modules that are off or hidden for the account type', async () => {
+      mockAccountTypeService.getProfile.mockResolvedValueOnce({
+        modules: { children_church: 'hidden', sermons: 'off', prayer: 'on' },
       });
-      expect(result).toBe(plans);
+      mockPlanQuery.getMany.mockResolvedValue([
+        {
+          id: 'pro',
+          features: [
+            'prayer',
+            'children_church',
+            'sermons',
+            'sms',
+            'not_a_feature',
+          ],
+        },
+      ]);
+
+      const [plan] = await service.listPlans();
+
+      expect(plan.featureList).toEqual([
+        { key: 'prayer', label: 'Prayer' },
+        { key: 'sms', label: 'SMS' },
+      ]);
+    });
+
+    it('offers a small group only the group plans', async () => {
+      mockTenantRepo.findOne.mockResolvedValue({
+        id: 'tenant-1',
+        orgType: 'GROUP',
+      });
+      mockPlanQuery.getMany.mockResolvedValue([]);
+
+      await service.listPlans();
+
+      expect(mockPlanQuery.where).toHaveBeenCalledWith(
+        ':type = ANY(p.organisationTypes)',
+        { type: 'GROUP' },
+      );
     });
   });
 
@@ -134,7 +197,7 @@ describe('CheckoutService', () => {
       // Mocked in the same order the real query (priceCents ASC) would
       // return them — listPublicPlans relies on that ordering rather than
       // re-sorting variants itself.
-      mockPlanRepo.find.mockResolvedValue([
+      mockPlanQuery.getMany.mockResolvedValue([
         {
           id: 'free',
           name: 'Free',
@@ -168,6 +231,10 @@ describe('CheckoutService', () => {
       ]);
 
       const result = await service.listPublicPlans();
+      expect(mockPlanQuery.where).toHaveBeenCalledWith(
+        ':type = ANY(p.organisationTypes)',
+        { type: 'CHURCH' },
+      );
 
       expect(result).toEqual([
         {
@@ -215,7 +282,11 @@ describe('CheckoutService', () => {
 
       const result = await service.getBillingSummary();
       expect(result).toEqual(
-        expect.objectContaining({ planId: 'free', planName: 'Free' }),
+        expect.objectContaining({
+          planId: 'free',
+          planName: 'Free',
+          isFree: true,
+        }),
       );
     });
 
@@ -229,10 +300,32 @@ describe('CheckoutService', () => {
 
       const result = await service.getBillingSummary();
       expect(result.planId).toBe('pro');
+      expect(result.isFree).toBe(false);
     });
   });
 
   describe('initiateSubscriptionCheckout', () => {
+    it("refuses a plan that isn't offered to the account's type", async () => {
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'pro',
+        organisationTypes: ['CHURCH', 'MINISTRY'],
+      });
+      mockTenantRepo.findOneByOrFail.mockResolvedValue({
+        id: 'tenant-1',
+        orgType: 'GROUP',
+      });
+      await expect(
+        service.initiateSubscriptionCheckout(
+          'pro',
+          'admin@example.com',
+          undefined,
+          'https://a',
+          'https://b',
+        ),
+      ).rejects.toThrow(NotFoundException);
+      expect(mockProvider.createCustomer).not.toHaveBeenCalled();
+    });
+
     it('throws NotFoundException for an unknown plan', async () => {
       mockPlanRepo.findOneBy.mockResolvedValue(null);
       await expect(
@@ -251,10 +344,12 @@ describe('CheckoutService', () => {
         id: 'pro',
         priceCents: 500000,
         currency: 'NGN',
+        organisationTypes: ['CHURCH', 'MINISTRY'],
       });
       mockTenantRepo.findOneByOrFail.mockResolvedValue({
         id: 'tenant-1',
         name: 'Test Church',
+        orgType: 'CHURCH',
       });
       mockProvider.createSubscriptionCheckout.mockResolvedValue({
         checkoutUrl: 'https://pay',
@@ -286,10 +381,12 @@ describe('CheckoutService', () => {
         id: 'pro',
         priceCents: 500000,
         currency: 'NGN',
+        organisationTypes: ['CHURCH', 'MINISTRY'],
       });
       mockTenantRepo.findOneByOrFail.mockResolvedValue({
         id: 'tenant-1',
         name: 'Test Church',
+        orgType: 'CHURCH',
       });
       mockRegistry.assertActive.mockRejectedValue(
         new Error('Payment provider "paystack" is temporarily unavailable.'),
@@ -643,6 +740,38 @@ describe('CheckoutService', () => {
           canceledAt: expect.any(Date),
           cancelAtPeriodEnd: false,
         }),
+      );
+    });
+
+    it("drops a small group to the group's own free plan", async () => {
+      mockTenantRepo.findOne.mockResolvedValue({
+        id: 'tenant-1',
+        orgType: 'GROUP',
+      });
+      mockSubscriptionRepo.findOneBy.mockResolvedValue({
+        tenantId: 'tenant-1',
+        planId: 'group-pro',
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodEnd: null,
+        paymentProvider: null,
+        billingProviderSubscriptionId: null,
+      });
+      mockPlanRepo.findOneBy.mockResolvedValue({ id: 'group-free' });
+
+      await service.cancelSubscription();
+
+      expect(mockSubscriptionRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ planId: 'group-free' }),
+      );
+    });
+
+    it("won't cancel a group that's already on its free plan", async () => {
+      mockSubscriptionRepo.findOneBy.mockResolvedValue({
+        tenantId: 'tenant-1',
+        planId: 'group-free',
+      });
+      await expect(service.cancelSubscription()).rejects.toThrow(
+        'No active paid subscription to cancel.',
       );
     });
 

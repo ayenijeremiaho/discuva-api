@@ -66,6 +66,7 @@ const baseTenant = {
   isActive: true,
   onboardingStatus: TenantOnboardingStatus.ACTIVE,
   createdAt: new Date('2026-01-01'),
+  orgType: 'CHURCH',
 };
 
 describe('PlatformTenantService', () => {
@@ -533,9 +534,28 @@ describe('PlatformTenantService', () => {
   });
 
   describe('changeTenantPlan', () => {
+    it("refuses a plan that isn't offered to the account's type", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        orgType: 'GROUP',
+      });
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'plan-pro',
+        organisationTypes: ['CHURCH', 'MINISTRY'],
+      });
+
+      await expect(
+        service.changeTenantPlan('tenant-1', { planId: 'plan-pro' }),
+      ).rejects.toThrow("isn't offered to this account type");
+      expect(mockSubscriptionRepo.save).not.toHaveBeenCalled();
+    });
+
     it('creates a new ACTIVE subscription when the tenant has none yet', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
-      mockPlanRepo.findOneBy.mockResolvedValue({ id: 'plan-pro' });
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'plan-pro',
+        organisationTypes: ['CHURCH', 'MINISTRY'],
+      });
       mockSubscriptionRepo.findOneBy.mockResolvedValue(null);
       mockSubscriptionRepo.save.mockImplementation((s) => Promise.resolve(s));
 
@@ -554,7 +574,10 @@ describe('PlatformTenantService', () => {
 
     it('reactivates a CANCELED/PAST_DUE subscription onto the new plan', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
-      mockPlanRepo.findOneBy.mockResolvedValue({ id: 'plan-pro' });
+      mockPlanRepo.findOneBy.mockResolvedValue({
+        id: 'plan-pro',
+        organisationTypes: ['CHURCH', 'MINISTRY'],
+      });
       mockSubscriptionRepo.findOneBy.mockResolvedValue({
         tenantId: 'tenant-1',
         planId: 'plan-free',

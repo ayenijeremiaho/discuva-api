@@ -33,7 +33,9 @@ describe('PublicBillingController', () => {
       const result = await controller.listPublicPlans();
 
       expect(result).toBe(tiers);
-      expect(mockCheckoutService.listPublicPlans).toHaveBeenCalledWith();
+      expect(mockCheckoutService.listPublicPlans).toHaveBeenCalledWith(
+        undefined,
+      );
     });
   });
 });

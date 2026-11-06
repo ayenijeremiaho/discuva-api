@@ -1,3 +1,4 @@
+import { FREE_PLAN_IDS } from '../../billing/util/free-plan.util';
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectQueue } from '@nestjs/bull';
@@ -95,7 +96,7 @@ export class AccountLifecycleScheduler {
         `NOT EXISTS (SELECT 1 FROM tenants child WHERE child.parent_tenant_id = t.id)`,
       )
       .andWhere(
-        `NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.tenant_id = t.id AND s.plan_id <> 'free')`,
+        `NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.tenant_id = t.id AND s.plan_id NOT IN (${FREE_PLAN_IDS.map((id) => `'${id}'`).join(', ')}))`,
       )
       .take(BATCH);
   }

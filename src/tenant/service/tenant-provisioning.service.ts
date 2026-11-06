@@ -1,3 +1,4 @@
+import { startingPlanId } from '../../billing/util/free-plan.util';
 import { ProtectedNameService } from '../../protected-name/protected-name.service';
 import { STARTER_LEADERSHIP_TITLES } from '../../account-type/account-type.constant';
 import * as path from 'node:path';
@@ -328,7 +329,7 @@ export class TenantProvisioningService {
     const welcomeOtp = await this.seedTenantAdmin(tenant, params);
     await this.ensureSubscription(
       tenant.id,
-      params.sponsoredPlanId ?? params.planId ?? 'free',
+      startingPlanId(tenant.orgType, params.planId, params.sponsoredPlanId),
       params.sponsoredPlanId ? params.parentTenantId : undefined,
     );
 

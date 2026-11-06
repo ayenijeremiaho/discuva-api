@@ -96,7 +96,7 @@ describe('AccountLifecycleScheduler', () => {
     expect(all).toContain("t.onboardingStatus = 'ACTIVE'");
     expect(all).toContain('t.parentTenantId IS NULL');
     expect(all).toContain('child.parent_tenant_id = t.id');
-    expect(all).toContain("s.plan_id <> 'free'");
+    expect(all).toContain("s.plan_id NOT IN ('free', 'group-free')");
   });
 
   it('warns once, a week before archiving', async () => {

@@ -42250,6 +42250,30 @@
       "description": "Church-admin plan billing. Admin JWT with billing:read/billing:write.",
       "item": [
         {
+          "name": "Get Plans",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{admin_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/billing/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "billing",
+                "plans"
+              ]
+            },
+            "description": "Admin (billing:read). The plans offered to this account's type, cheapest first. Each plan has featureList [{ key, label }]: readable feature names, keeping only modules this account type has on by default."
+          },
+          "response": []
+        },
+        {
           "name": "List Available Payment Providers",
           "request": {
             "method": "GET",
@@ -42295,7 +42319,7 @@
               "type": "noauth"
             },
             "url": {
-              "raw": "{{baseUrl}}/billing/public/plans",
+              "raw": "{{baseUrl}}/billing/public/plans?type=CHURCH",
               "host": [
                 "{{baseUrl}}"
               ],
@@ -42303,9 +42327,16 @@
                 "billing",
                 "public",
                 "plans"
+              ],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "CHURCH",
+                  "description": "Optional. CHURCH (default), MINISTRY or GROUP: which account type's plans to return."
+                }
               ]
             },
-            "description": "Unauthenticated, no tenant context (excluded from TenantMiddleware) -- called by discuva-web, the public marketing site, to render real per-currency pricing. Groups every Plan row by tierKey so a tier like 'pro' returns all of its currency variants together."
+            "description": "Unauthenticated, no tenant context (excluded from TenantMiddleware) -- called by discuva-web, the public marketing site, to render real per-currency pricing. Groups every Plan row by tierKey so a tier like 'pro' returns all of its currency variants together. Pass ?type=GROUP for small groups' own plans (group-free, group-pro, ...); default CHURCH. Any other type is 400."
           },
           "response": [
             {
@@ -43085,7 +43116,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"billingInterval\": \"monthly\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\"finance\", \"sms\"]\n}",
+              "raw": "{\n  \"id\": \"enterprise\",\n  \"name\": \"Enterprise\",\n  \"tierKey\": \"enterprise\",\n  \"billingInterval\": \"monthly\",\n  \"priceCents\": 50000,\n  \"currency\": \"NGN\",\n  \"features\": [\n    \"finance\",\n    \"sms\"\n  ],\n  \"organisationTypes\": [\n    \"CHURCH\",\n    \"MINISTRY\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -43127,7 +43158,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"priceCents\": 75000\n}",
+              "raw": "{\n  \"priceCents\": 75000,\n  \"organisationTypes\": [\n    \"GROUP\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
