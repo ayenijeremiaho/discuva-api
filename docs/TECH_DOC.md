@@ -11447,7 +11447,29 @@ One email, password and device across every church a person belongs to. Off unti
   every linked church.
 - **Limits.** For an email with an account, wrong-password, reset-request and code-guess counters are global Redis keys
   (`global:login_fail:<email>:<device|other>` and so on) shared by all its churches, so more churches never means more tries.
-- **Email.** A moved member's email can't be changed by the member or an admin yet; that comes with account recovery.
+- **Changing the account email.** A moved member's own email change (`/auth/email-change/request` and `/confirm`, as
+  before) changes the account and the member record at every linked church; it's refused if another account, or someone
+  else at any of those churches, already uses the address. The old address gets `discuva-account-email-changed` with an
+  undo link. An admin can't edit a moved member's email; recovery is the admin path.
+- **"This wasn't me".** Device-changed and password-changed emails for a moved member carry a freeze link
+  (`freeze_url`). `POST /auth/account/freeze {accountId, token}` (`@Public()`) sets `frozen_at` and ends every session at
+  every church. A frozen account can't sign in (403, "frozen"), join, link or switch until a password reset, which clears
+  `frozen_at`. `POST /auth/account/undo-email {accountId, token}` (`@Public()`) puts the old email back everywhere and
+  freezes the account, so whoever changed it is signed out too. Both links are 64-character random tokens kept only as a
+  SHA-256 hash in `discuva_account_codes` (`account_id` set, purpose `FREEZE` or `EMAIL_UNDO`), valid for
+  `account_link_valid_days` (7, 1–30) and usable once. Lookup uses the partial index `(code_hash) WHERE used_at IS NULL AND
+  account_id IS NOT NULL`.
+- **Recover account (admin, in person),** for someone who has lost their email inbox:
+  `POST /members/:id/recover-account/start {newEmail}` emails a code to the new address, which the person reads out;
+  `POST /members/:id/recover-account/confirm {newEmail, code}` moves the account and every linked church record to the new
+  email, clears the device, sets an unknown password, clears any freeze, ends every session, removes passkeys and push at
+  every church, writes `ACCOUNT_RECOVERED` to each church's audit log (naming the admin only at their own church), emails
+  the old address (`discuva-account-recovered`) and sends the usual password reset code to the new one. Needs Manage
+  Members (`members:write`). Safeguards: not your own account; a target who is an admin here needs Manage Admin Users &
+  Roles (`admin:write`) and a role with every permission theirs has (an owner only by an owner); a target who is an admin
+  at another of their churches can only be recovered there; the new email must differ from the current one and be unused;
+  the same account waits `account_recovery_wait_days` (7, 1–30) between recoveries. Only for moved members; others keep
+  the existing Reset Password and Clear Device tools.
 - **Codes.** `discuva_account_codes` holds join and link codes (hash only), one open code per email, purpose and device;
   asking again from the same device replaces it, someone else's device never cancels it. Console settings:
   `account_code_ttl_minutes` (10, 5–30), `account_code_max_attempts` (5, 3–10; wrong tries counted per email, purpose and
@@ -14014,7 +14036,29 @@ One email, password and device across every church a person belongs to. Off unti
   every linked church.
 - **Limits.** For an email with an account, wrong-password, reset-request and code-guess counters are global Redis keys
   (`global:login_fail:<email>:<device|other>` and so on) shared by all its churches, so more churches never means more tries.
-- **Email.** A moved member's email can't be changed by the member or an admin yet; that comes with account recovery.
+- **Changing the account email.** A moved member's own email change (`/auth/email-change/request` and `/confirm`, as
+  before) changes the account and the member record at every linked church; it's refused if another account, or someone
+  else at any of those churches, already uses the address. The old address gets `discuva-account-email-changed` with an
+  undo link. An admin can't edit a moved member's email; recovery is the admin path.
+- **"This wasn't me".** Device-changed and password-changed emails for a moved member carry a freeze link
+  (`freeze_url`). `POST /auth/account/freeze {accountId, token}` (`@Public()`) sets `frozen_at` and ends every session at
+  every church. A frozen account can't sign in (403, "frozen"), join, link or switch until a password reset, which clears
+  `frozen_at`. `POST /auth/account/undo-email {accountId, token}` (`@Public()`) puts the old email back everywhere and
+  freezes the account, so whoever changed it is signed out too. Both links are 64-character random tokens kept only as a
+  SHA-256 hash in `discuva_account_codes` (`account_id` set, purpose `FREEZE` or `EMAIL_UNDO`), valid for
+  `account_link_valid_days` (7, 1–30) and usable once. Lookup uses the partial index `(code_hash) WHERE used_at IS NULL AND
+  account_id IS NOT NULL`.
+- **Recover account (admin, in person),** for someone who has lost their email inbox:
+  `POST /members/:id/recover-account/start {newEmail}` emails a code to the new address, which the person reads out;
+  `POST /members/:id/recover-account/confirm {newEmail, code}` moves the account and every linked church record to the new
+  email, clears the device, sets an unknown password, clears any freeze, ends every session, removes passkeys and push at
+  every church, writes `ACCOUNT_RECOVERED` to each church's audit log (naming the admin only at their own church), emails
+  the old address (`discuva-account-recovered`) and sends the usual password reset code to the new one. Needs Manage
+  Members (`members:write`). Safeguards: not your own account; a target who is an admin here needs Manage Admin Users &
+  Roles (`admin:write`) and a role with every permission theirs has (an owner only by an owner); a target who is an admin
+  at another of their churches can only be recovered there; the new email must differ from the current one and be unused;
+  the same account waits `account_recovery_wait_days` (7, 1–30) between recoveries. Only for moved members; others keep
+  the existing Reset Password and Clear Device tools.
 - **Codes.** `discuva_account_codes` holds join and link codes (hash only), one open code per email, purpose and device;
   asking again from the same device replaces it, someone else's device never cancels it. Console settings:
   `account_code_ttl_minutes` (10, 5–30), `account_code_max_attempts` (5, 3–10; wrong tries counted per email, purpose and

@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   HttpException,
   HttpStatus,
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, LessThan, Repository } from 'typeorm';
@@ -20,6 +21,7 @@ import {
 } from '../entity/discuva-account-code.entity';
 import { CacheService } from '../../utility/service/cache.service';
 import { Member } from '../../member/entity/member.entity';
+import { Admin } from '../../admin/entity/admin.entity';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
@@ -56,10 +58,13 @@ export class DiscuvaAccountService {
     @InjectRepository(DiscuvaAccountCode)
     private readonly codeRepo: Repository<DiscuvaAccountCode>,
     private readonly cacheService: CacheService,
+    private readonly utilityService: UtilityService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(Admin)
+    private readonly adminRepo: Repository<Admin>,
     private readonly sessionService: MemberSessionService,
     private readonly platformSettings: PlatformSettingsService,
     private readonly config: ConfigService,
@@ -213,6 +218,7 @@ export class DiscuvaAccountService {
       await this.accountRepo.update(account.id, {
         password: hash,
         passwordChangedAt: new Date(),
+        frozenAt: null,
       });
     }
     await this.forEachChurchOf(member, (memberId) =>
@@ -455,6 +461,204 @@ export class DiscuvaAccountService {
     deviceId: string,
   ): string {
     return `${ns}:${normaliseEmail(email)}:${purpose}:${deviceId}`;
+  }
+
+  async isFrozen(member: Pick<Member, 'discuvaAccountId'>): Promise<boolean> {
+    return !!(await this.accountFor(member))?.frozenAt;
+  }
+
+  // The "This wasn't me" link for a security email, when the member has an account.
+  async freezeUrl(
+    member: Pick<Member, 'discuvaAccountId'>,
+  ): Promise<string | undefined> {
+    const account = await this.accountFor(member);
+    if (!account) return undefined;
+    const token = await this.issueLinkToken(
+      account.id,
+      DiscuvaAccountCodePurpose.FREEZE,
+      account.email,
+    );
+    return this.utilityService.resolveMemberUrl(
+      `/account/freeze?a=${account.id}&t=${token}`,
+    );
+  }
+
+  async emailUndoUrl(accountId: string, oldEmail: string): Promise<string> {
+    const token = await this.issueLinkToken(
+      accountId,
+      DiscuvaAccountCodePurpose.EMAIL_UNDO,
+      oldEmail,
+    );
+    return this.utilityService.resolveMemberUrl(
+      `/account/undo-email?a=${accountId}&t=${token}`,
+    );
+  }
+
+  // Long random links in security emails; only a hash is kept, and each works once.
+  async issueLinkToken(
+    accountId: string,
+    purpose:
+      DiscuvaAccountCodePurpose.FREEZE | DiscuvaAccountCodePurpose.EMAIL_UNDO,
+    email: string,
+  ): Promise<string> {
+    const token = randomBytes(32).toString('hex');
+    const days = await this.platformSettings.getNumber(
+      PlatformSettingKey.ACCOUNT_LINK_VALID_DAYS,
+    );
+    await this.codeRepo.save(
+      this.codeRepo.create({
+        email: normaliseEmail(email),
+        purpose,
+        accountId,
+        deviceId: null,
+        tenantId: this.cls.get('tenantId') ?? null,
+        codeHash: this.tokenHash(token),
+        expiresAt: new Date(Date.now() + days * 86_400_000),
+        usedAt: null,
+      }),
+    );
+    return token;
+  }
+
+  async useLinkToken(
+    accountId: string,
+    purpose:
+      DiscuvaAccountCodePurpose.FREEZE | DiscuvaAccountCodePurpose.EMAIL_UNDO,
+    token: string,
+  ): Promise<DiscuvaAccountCode> {
+    const record = await this.codeRepo.findOne({
+      where: {
+        codeHash: this.tokenHash(token),
+        purpose,
+        accountId,
+        usedAt: IsNull(),
+      },
+    });
+    if (!record || record.expiresAt < new Date()) {
+      throw new BadRequestException(
+        'This link has expired or was already used. Contact your church if you need help.',
+      );
+    }
+    await this.codeRepo.update(record.id, { usedAt: new Date() });
+    return record;
+  }
+
+  // Blocks sign-in everywhere until the owner resets their password.
+  async freeze(accountId: string): Promise<void> {
+    await this.accountRepo.update(accountId, { frozenAt: new Date() });
+    await this.endAllSessions(accountId);
+    this.logger.warn(`Discuva account ${accountId} frozen by its owner`);
+  }
+
+  async endAllSessions(accountId: string): Promise<void> {
+    await this.forEachLinkOf(accountId, (memberId) =>
+      Promise.all([
+        this.sessionService.updateLogout(memberId, SessionSurface.MEMBER),
+        this.sessionService.updateLogout(memberId, SessionSurface.ADMIN),
+      ]).then(() => undefined),
+    );
+  }
+
+  // Taken by another account, or by someone else at one of this account's churches.
+  async emailInUse(email: string, accountId: string): Promise<boolean> {
+    const normalised = normaliseEmail(email);
+    const other = await this.accountRepo.findOne({
+      where: { email: normalised },
+      select: { id: true },
+    });
+    if (other && other.id !== accountId) return true;
+    let taken = false;
+    await this.forEachLinkOf(accountId, async (memberId) => {
+      const holder = await this.memberRepo.findOne({
+        where: { email: normalised },
+        select: { id: true },
+      });
+      if (holder && holder.id !== memberId) taken = true;
+    });
+    return taken;
+  }
+
+  // Moves the account and every linked church record to the new email; returns the old one.
+  async changeEmail(accountId: string, newEmail: string): Promise<string> {
+    const account = await this.findById(accountId);
+    if (!account) throw new BadRequestException('Account not found.');
+    if (await this.emailInUse(newEmail, accountId)) {
+      throw new ConflictException('This email address is already in use.');
+    }
+    const email = normaliseEmail(newEmail);
+    await this.accountRepo.update(accountId, { email });
+    await this.forEachLinkOf(accountId, (memberId) =>
+      this.memberRepo.update(memberId, { email }).then(() => undefined),
+    );
+    return account.email;
+  }
+
+  // Puts the old email back and freezes the account, so whoever changed it is signed out too.
+  async undoEmailChange(accountId: string, token: string): Promise<string> {
+    const record = await this.useLinkToken(
+      accountId,
+      DiscuvaAccountCodePurpose.EMAIL_UNDO,
+      token,
+    );
+    await this.changeEmail(accountId, record.email);
+    await this.freeze(accountId);
+    return record.email;
+  }
+
+  // An admin at another of the account's churches can only be recovered there.
+  async isAdminAtAnotherChurch(accountId: string): Promise<boolean> {
+    let admin = false;
+    await this.forEachLinkOf(
+      accountId,
+      async (memberId) => {
+        if (
+          await this.adminRepo.exists({
+            where: { member: { id: memberId }, isActive: true },
+          })
+        ) {
+          admin = true;
+        }
+      },
+      { skipCurrent: true },
+    );
+    return admin;
+  }
+
+  // In-person recovery: new email, no device, an unknown password, nobody signed in anywhere.
+  async recover(accountId: string, newEmail: string): Promise<string> {
+    const oldEmail = await this.changeEmail(accountId, newEmail);
+    const hash = await UtilityService.hashValue(
+      randomBytes(32).toString('hex'),
+    );
+    await this.accountRepo.update(accountId, {
+      deviceId: null,
+      password: hash,
+      frozenAt: null,
+      recoveredAt: new Date(),
+      passwordChangedAt: new Date(),
+    });
+    await this.forEachLinkOf(accountId, (memberId) =>
+      this.memberRepo
+        .update(memberId, {
+          deviceId: null,
+          password: hash,
+          changedPassword: true,
+        })
+        .then(() => undefined),
+    );
+    await this.endAllSessions(accountId);
+    return oldEmail;
+  }
+
+  async forEachLinkedMember(
+    accountId: string,
+    fn: (memberId: string) => Promise<void>,
+  ): Promise<void> {
+    await this.forEachLinkOf(accountId, fn);
+  }
+
+  private tokenHash(token: string): string {
+    return createHash('sha256').update(token).digest('hex');
   }
 
   // Basics from the person's member record at a church they already belong to.

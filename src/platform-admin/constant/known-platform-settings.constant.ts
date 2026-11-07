@@ -157,6 +157,20 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 1,
     max: 10,
   },
+  [PlatformSettingKey.ACCOUNT_LINK_VALID_DAYS]: {
+    label: 'Email-change Undo and Freeze Links',
+    unit: 'days the "undo" and "this wasn\'t me" links in security emails keep working',
+    defaultValue: 7,
+    min: 1,
+    max: 30,
+  },
+  [PlatformSettingKey.ACCOUNT_RECOVERY_WAIT_DAYS]: {
+    label: 'Wait Between Account Recoveries',
+    unit: 'days before an admin can recover the same Discuva account again',
+    defaultValue: 7,
+    min: 1,
+    max: 30,
+  },
   [PlatformSettingKey.COMMUNITY_MAX_CATEGORIES]: {
     label: 'Community Categories',
     unit: "categories at most in an account's Community space",

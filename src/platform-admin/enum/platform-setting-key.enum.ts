@@ -39,4 +39,6 @@ export enum PlatformSettingKey {
   ACCOUNT_CODE_TTL_MINUTES = 'account_code_ttl_minutes',
   ACCOUNT_CODE_MAX_ATTEMPTS = 'account_code_max_attempts',
   ACCOUNT_CODE_REQUESTS_PER_HOUR = 'account_code_requests_per_hour',
+  ACCOUNT_LINK_VALID_DAYS = 'account_link_valid_days',
+  ACCOUNT_RECOVERY_WAIT_DAYS = 'account_recovery_wait_days',
 }

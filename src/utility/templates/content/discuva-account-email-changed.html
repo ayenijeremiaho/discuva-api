@@ -1,0 +1,14 @@
+{{#if heading}}<h1>{{ heading }}</h1>{{/if}}
+{{{ message_html }}}
+<p style="text-align: center; font-size: 15px; margin: 16px 0;">New email: <strong>{{ newEmail }}</strong></p>
+<table class="alert-table" cellpadding="0" cellspacing="0" role="presentation">
+                      <tr>
+                        <td>
+                          <strong>This wasn't me.</strong> If you didn't change it,
+                          <a href="{{undo_url}}" style="color: {{ brand_color }};">put my email back</a>.
+                          Your account returns to this address and everyone is signed out at every church
+                          until you reset your password.
+                        </td>
+                      </tr>
+                    </table>
+{{{ closing_html }}}

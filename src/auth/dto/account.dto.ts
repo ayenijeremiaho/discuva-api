@@ -85,3 +85,24 @@ export class HandoffDto {
   @MinLength(8)
   deviceId: string;
 }
+
+export class AccountLinkTokenDto {
+  @IsUUID()
+  accountId: string;
+
+  @IsString()
+  @Length(64, 64)
+  token: string;
+}
+
+export class RecoverAccountStartDto {
+  @NormalizeEmail()
+  @IsEmail()
+  newEmail: string;
+}
+
+export class RecoverAccountConfirmDto extends RecoverAccountStartDto {
+  @IsString()
+  @Length(6, 6)
+  code: string;
+}

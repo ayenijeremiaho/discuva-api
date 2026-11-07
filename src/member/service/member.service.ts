@@ -1252,6 +1252,7 @@ export class MemberService {
         name: firstName,
         churchName: this.churchName,
         churchAddress: this.churchAddress,
+        freeze_url: await this.accounts.freezeUrl(member),
       },
     );
 

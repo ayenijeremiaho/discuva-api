@@ -15,6 +15,7 @@ import { SessionSurface } from '../enum/session-surface.enum';
 import { AccountSignInService } from '../service/account-sign-in.service';
 import {
   AccountCodeDto,
+  AccountLinkTokenDto,
   HandoffDto,
   JoinCompleteDto,
   JoinStartDto,
@@ -95,6 +96,33 @@ export class AccountController {
   @Post('account/handoff')
   redeemHandoff(@Body() dto: HandoffDto) {
     return this.accountSignIn.redeemHandoff(dto.token, dto.deviceId);
+  }
+
+  // "This wasn't me" in a security email: signs out everywhere until a password reset.
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/freeze')
+  async freeze(@Body() dto: AccountLinkTokenDto): Promise<{ message: string }> {
+    await this.accountSignIn.freeze(dto.accountId, dto.token);
+    return {
+      message:
+        'Your Discuva account is frozen and everyone is signed out. Use "Forgot password" to set a new password.',
+    };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/undo-email')
+  async undoEmail(
+    @Body() dto: AccountLinkTokenDto,
+  ): Promise<{ message: string }> {
+    await this.accountSignIn.undoEmail(dto.accountId, dto.token);
+    return {
+      message:
+        'Your email is back and everyone is signed out. Use "Forgot password" to set a new password.',
+    };
   }
 
   private assertMemberApp(req: { user?: { surface?: SessionSurface } }) {

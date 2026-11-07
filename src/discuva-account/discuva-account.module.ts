@@ -7,6 +7,7 @@ import { DiscuvaAccountCode } from './entity/discuva-account-code.entity';
 import { Tenant } from '../tenant/entity/tenant.entity';
 import { Member } from '../member/entity/member.entity';
 import { MemberSession } from '../member/entity/member-session.entity';
+import { Admin } from '../admin/entity/admin.entity';
 import { MemberSessionService } from '../member/service/member-session.service';
 import { DiscuvaAccountService } from './service/discuva-account.service';
 
@@ -20,7 +21,7 @@ import { DiscuvaAccountService } from './service/discuva-account.service';
       DiscuvaAccountCode,
       Tenant,
     ]),
-    TenantTypeOrmModule.forFeature([Member, MemberSession]),
+    TenantTypeOrmModule.forFeature([Member, MemberSession, Admin]),
   ],
   providers: [DiscuvaAccountService, MemberSessionService],
   exports: [DiscuvaAccountService],

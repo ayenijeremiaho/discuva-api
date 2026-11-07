@@ -182,6 +182,12 @@ export class AuthService {
 
     this.clearLoginRateLimit(email, from, counter);
 
+    if (await this.accounts.isFrozen(member)) {
+      throw new ForbiddenException(
+        'This Discuva account is frozen. Use "Forgot password" to reset your password and unfreeze it.',
+      );
+    }
+
     if (member.status === MemberStatusEnum.INACTIVE) {
       throw new UnauthorizedException(
         'Your account is inactive. Contact admin.',
@@ -764,7 +770,7 @@ export class AuthService {
       member.email,
       `${firstName}, Your ${churchName} Password Has Been Changed`,
       'password-changed',
-      { name: firstName },
+      { name: firstName, freeze_url: await this.accounts.freezeUrl(member) },
     );
   }
 
@@ -888,25 +894,21 @@ export class AuthService {
       member.email,
       `${firstName}, Your Device Has Been Changed`,
       'device-reset-confirmation',
-      { name: firstName },
+      { name: firstName, freeze_url: await this.accounts.freezeUrl(member) },
     );
   }
 
   async requestEmailChange(memberId: string, newEmail: string): Promise<void> {
-    const current = await this.memberService.getById(memberId);
-    if (current.discuvaAccountId && (await this.accounts.isOn())) {
-      throw new BadRequestException(
-        'Your email is your Discuva sign-in for every church. Changing it is coming soon.',
-      );
-    }
     await this.checkOtpRateLimit(memberId, this.tenantCounter());
 
-    const existing = await this.memberService.findByEmail(newEmail);
-    if (existing) {
+    const member = await this.memberService.getById(memberId);
+    const account = await this.accounts.accountFor(member);
+    const taken = account
+      ? await this.accounts.emailInUse(newEmail, account.id)
+      : !!(await this.memberService.findByEmail(newEmail));
+    if (taken) {
       throw new ConflictException('This email address is already in use.');
     }
-
-    const member = await this.memberService.getById(memberId);
 
     await this.emailChangeOtpRepository.delete({
       memberId,
@@ -968,18 +970,41 @@ export class AuthService {
       );
     }
 
-    const stillAvailable = await this.memberService.findByEmail(
-      record.newEmail,
-    );
-    if (stillAvailable) {
-      throw new ConflictException('This email address is already in use.');
+    const current = await this.memberService.getById(memberId);
+    const account = await this.accounts.accountFor(current);
+    if (!account) {
+      const stillAvailable = await this.memberService.findByEmail(
+        record.newEmail,
+      );
+      if (stillAvailable) {
+        throw new ConflictException('This email address is already in use.');
+      }
     }
 
     this.clearOtpVerifyRateLimit('email_change', memberId);
     record.usedAt = new Date();
     await this.emailChangeOtpRepository.save(record);
 
-    await this.memberService.updateEmail(memberId, record.newEmail);
+    if (account) {
+      // The old address gets an undo link, in case someone else made the change.
+      const oldEmail = await this.accounts.changeEmail(
+        account.id,
+        record.newEmail,
+      );
+      const name = UtilityService.capitalizeFirstLetter(current.firstname);
+      this.utilityService.sendEmailWithTemplate(
+        oldEmail,
+        `${name}, Your Discuva Email Was Changed`,
+        'discuva-account-email-changed',
+        {
+          name,
+          newEmail: record.newEmail,
+          undo_url: await this.accounts.emailUndoUrl(account.id, oldEmail),
+        },
+      );
+    } else {
+      await this.memberService.updateEmail(memberId, record.newEmail);
+    }
 
     this.logger.log(`Email changed for member ${memberId}`);
     this.auditLogService.log('EMAIL_CHANGE_COMPLETED', {

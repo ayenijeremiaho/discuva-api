@@ -308,6 +308,24 @@ export class AccountSignInService {
     return this.authService.startMemberSession(member, 'MEMBER_LOGIN');
   }
 
+  async freeze(accountId: string, token: string): Promise<void> {
+    await this.accounts.useLinkToken(
+      accountId,
+      DiscuvaAccountCodePurpose.FREEZE,
+      token,
+    );
+    await this.accounts.freeze(accountId);
+    this.auditLogService.log('ACCOUNT_FROZEN', { metadata: { accountId } });
+  }
+
+  async undoEmail(accountId: string, token: string): Promise<void> {
+    const restored = await this.accounts.undoEmailChange(accountId, token);
+    this.auditLogService.log('ACCOUNT_EMAIL_UNDONE', {
+      targetEmail: restored,
+      metadata: { accountId },
+    });
+  }
+
   private async linkCandidate(
     memberId: string,
   ): Promise<{ member: Member; account: DiscuvaAccount }> {

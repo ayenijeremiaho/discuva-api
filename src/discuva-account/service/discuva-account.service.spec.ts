@@ -17,6 +17,7 @@ import {
   DiscuvaAccountCodePurpose,
 } from '../entity/discuva-account-code.entity';
 import { CacheService } from '../../utility/service/cache.service';
+import { Admin } from '../../admin/entity/admin.entity';
 import { HttpException, BadRequestException } from '@nestjs/common';
 
 const qb = (result: unknown) => ({
@@ -41,6 +42,10 @@ const linkRepo = {
   create: jest.fn((v) => v),
 };
 const tenantRepo = { find: jest.fn() };
+const adminRepo = { exists: jest.fn() };
+const utilityService = {
+  resolveMemberUrl: jest.fn(async (p: string) => `https://church.example${p}`),
+};
 const codeRepo = {
   delete: jest.fn(),
   save: jest.fn(),
@@ -59,6 +64,7 @@ const cache = {
 };
 const memberRepo = {
   createQueryBuilder: jest.fn(),
+  findOne: jest.fn(),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
 };
 const sessionService = { updateLogout: jest.fn().mockResolvedValue(undefined) };
@@ -112,6 +118,8 @@ describe('DiscuvaAccountService', () => {
         { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
         { provide: getRepositoryToken(DiscuvaAccountCode), useValue: codeRepo },
         { provide: CacheService, useValue: cache },
+        { provide: getRepositoryToken(Admin), useValue: adminRepo },
+        { provide: UtilityService, useValue: utilityService },
         { provide: getRepositoryToken(Member), useValue: memberRepo },
         { provide: MemberSessionService, useValue: sessionService },
         { provide: PlatformSettingsService, useValue: settings },
@@ -403,6 +411,149 @@ describe('DiscuvaAccountService', () => {
         service.verifyCode('a@b.co', P, 'phone-123', '123456'),
       ).rejects.toThrow(BadRequestException);
       expect(codeRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('freezing, email changes and recovery', () => {
+    beforeEach(() => {
+      accountRepo.createQueryBuilder.mockReturnValue(
+        qb({
+          id: 'a1',
+          email: 'old@example.com',
+          password: 'h',
+          deviceId: 'phone-123',
+        }),
+      );
+      linkRepo.find.mockResolvedValue([
+        { tenantId: 't1', memberId: 'm1' },
+        { tenantId: 't2', memberId: 'm2' },
+      ]);
+      tenantRepo.find.mockResolvedValue([{ id: 't2', schemaName: 'church_b' }]);
+    });
+
+    it('freezes the account and signs out at every church', async () => {
+      await service.freeze('a1');
+      expect(accountRepo.update).toHaveBeenCalledWith('a1', {
+        frozenAt: expect.any(Date),
+      });
+      expect(sessionService.updateLogout).toHaveBeenCalledTimes(4);
+    });
+
+    it('a new password unfreezes the account', async () => {
+      await service.setPasswordHash(
+        { id: 'm1', discuvaAccountId: 'a1' },
+        'new',
+        true,
+      );
+      expect(accountRepo.update).toHaveBeenCalledWith(
+        'a1',
+        expect.objectContaining({ frozenAt: null }),
+      );
+    });
+
+    it('keeps link tokens as a hash and refuses a used or expired one', async () => {
+      const token = await service.issueLinkToken(
+        'a1',
+        DiscuvaAccountCodePurpose.FREEZE,
+        'Old@Example.com',
+      );
+      expect(token).toMatch(/^[0-9a-f]{64}$/);
+      const saved = codeRepo.save.mock.calls[0][0];
+      expect(saved.codeHash).not.toBe(token);
+      expect(saved).toMatchObject({
+        accountId: 'a1',
+        email: 'old@example.com',
+      });
+
+      codeRepo.findOne.mockResolvedValueOnce(null);
+      await expect(
+        service.useLinkToken('a1', DiscuvaAccountCodePurpose.FREEZE, token),
+      ).rejects.toThrow(BadRequestException);
+      codeRepo.findOne.mockResolvedValueOnce({
+        id: 'c1',
+        expiresAt: new Date(Date.now() - 1),
+      });
+      await expect(
+        service.useLinkToken('a1', DiscuvaAccountCodePurpose.FREEZE, token),
+      ).rejects.toThrow(BadRequestException);
+      expect(codeRepo.update).not.toHaveBeenCalled();
+    });
+
+    it("won't move the account to an email someone else uses at one of its churches", async () => {
+      accountRepo.findOne.mockResolvedValue(null);
+      memberRepo.findOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'someone-else' });
+      await expect(
+        service.changeEmail('a1', 'taken@example.com'),
+      ).rejects.toThrow('already in use');
+      expect(accountRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('changes the email on the account and every church copy', async () => {
+      accountRepo.findOne.mockResolvedValue(null);
+      memberRepo.findOne.mockResolvedValue(null);
+      await expect(service.changeEmail('a1', 'New@Example.com')).resolves.toBe(
+        'old@example.com',
+      );
+      expect(accountRepo.update).toHaveBeenCalledWith('a1', {
+        email: 'new@example.com',
+      });
+      expect(memberRepo.update).toHaveBeenCalledWith('m2', {
+        email: 'new@example.com',
+      });
+    });
+
+    it('undoing an email change puts the old one back and freezes the account', async () => {
+      codeRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        email: 'old@example.com',
+        expiresAt: new Date(Date.now() + 1000),
+      });
+      accountRepo.findOne.mockResolvedValue(null);
+      memberRepo.findOne.mockResolvedValue(null);
+      await expect(service.undoEmailChange('a1', 'f'.repeat(64))).resolves.toBe(
+        'old@example.com',
+      );
+      expect(accountRepo.update).toHaveBeenCalledWith('a1', {
+        email: 'old@example.com',
+      });
+      expect(accountRepo.update).toHaveBeenCalledWith('a1', {
+        frozenAt: expect.any(Date),
+      });
+    });
+
+    it('recovery clears the device, sets an unknown password and signs out everywhere', async () => {
+      accountRepo.findOne.mockResolvedValue(null);
+      memberRepo.findOne.mockResolvedValue(null);
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('random-hash');
+      await expect(service.recover('a1', 'new@example.com')).resolves.toBe(
+        'old@example.com',
+      );
+      expect(accountRepo.update).toHaveBeenCalledWith(
+        'a1',
+        expect.objectContaining({
+          deviceId: null,
+          password: 'random-hash',
+          frozenAt: null,
+          recoveredAt: expect.any(Date),
+        }),
+      );
+      expect(memberRepo.update).toHaveBeenCalledWith('m2', {
+        deviceId: null,
+        password: 'random-hash',
+        changedPassword: true,
+      });
+      expect(sessionService.updateLogout).toHaveBeenCalledTimes(4);
+    });
+
+    it('only looks for admin roles at the other churches', async () => {
+      adminRepo.exists.mockResolvedValue(true);
+      await expect(service.isAdminAtAnotherChurch('a1')).resolves.toBe(true);
+      expect(adminRepo.exists).toHaveBeenCalledTimes(1);
+      expect(adminRepo.exists).toHaveBeenCalledWith({
+        where: { member: { id: 'm2' }, isActive: true },
+      });
     });
   });
 });

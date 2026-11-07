@@ -1827,6 +1827,20 @@ describe('AuthService', () => {
       expect(mockCacheService.incr).not.toHaveBeenCalled();
     });
 
+    it('refuses a frozen account even with the right password', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        password: 'p',
+        status: MemberStatusEnum.ACTIVE,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      mockAccounts.isFrozen.mockResolvedValueOnce(true);
+      await expect(
+        service.validateMember('test@test.com', 'right', 'phone'),
+      ).rejects.toThrow('frozen');
+    });
+
     it("checks the device against the account's device, not this church's copy", async () => {
       mockMemberService.getByIdWithCredentials.mockResolvedValue({
         id: 'member-1',

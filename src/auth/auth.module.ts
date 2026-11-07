@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { AccountRecoveryController } from './controller/account-recovery.controller';
+import { AccountRecoveryService } from './service/account-recovery.service';
 import { AccountController } from './controller/account.controller';
 import { AccountSignInService } from './service/account-sign-in.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -43,10 +45,11 @@ import { UtilityModule } from '../utility/utility.module';
     ConfigModule.forFeature(jwtConfig),
     ConfigModule.forFeature(refreshJwtConfig),
   ],
-  controllers: [AuthController, AccountController],
+  controllers: [AuthController, AccountController, AccountRecoveryController],
   providers: [
     AuthService,
     AccountSignInService,
+    AccountRecoveryService,
     WebauthnService,
     LocalStrategy,
     JwtStrategy,

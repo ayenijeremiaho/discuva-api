@@ -53,5 +53,10 @@ export function accountsOffMock(
     ),
     forEachChurchOf,
     purgeCodes: jest.fn().mockResolvedValue(undefined),
+    isFrozen: jest.fn().mockResolvedValue(false),
+    freezeUrl: jest.fn().mockResolvedValue(undefined),
+    emailInUse: jest.fn().mockResolvedValue(false),
+    changeEmail: jest.fn(),
+    emailUndoUrl: jest.fn(),
   };
 }
