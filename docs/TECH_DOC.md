@@ -11448,6 +11448,30 @@ One email, password and device across every church a person belongs to. Off unti
 - **Limits.** For an email with an account, wrong-password, reset-request and code-guess counters are global Redis keys
   (`global:login_fail:<email>:<device|other>` and so on) shared by all its churches, so more churches never means more tries.
 - **Email.** A moved member's email can't be changed by the member or an admin yet; that comes with account recovery.
+- **Codes.** `discuva_account_codes` holds join and link codes (hash only), one open code per email, purpose and device;
+  asking again from the same device replaces it, someone else's device never cancels it. Console settings:
+  `account_code_ttl_minutes` (10, 5–30), `account_code_max_attempts` (5, 3–10; wrong tries counted per email, purpose and
+  device in `global:account_code_fail:*`), `account_code_requests_per_hour` (3, 1–10, per email, purpose and device).
+  Email template `discuva-account-code`. Used and expired codes are removed by the nightly OTP purge.
+- **Joining a church email-first** (all `@Public()`, at the joining church's address):
+  `POST /auth/join/start {email, deviceId}` always sends a code and always answers the same, so it never reveals whether
+  an account exists. `POST /auth/join/verify {email, code, deviceId}` returns `ALREADY_MEMBER` (sign in instead),
+  `EXISTING_ACCOUNT` with the person's first name, or `NEW`, plus a one-use `joinToken` (Redis, 15 minutes, bound to this
+  church and device). `POST /auth/join/complete {joinToken, deviceId, ...}` creates an ACTIVE member here and signs in.
+  An existing account brings its password, device and basics (name, phone, gender, birthday, marital status, copied from
+  one of its churches); it's refused from a phone other than the account's, or when frozen. Someone new gives first name,
+  last name and a password (same rules as a password change); under-18s are sent to their church. Uses the church's
+  member limit like any sign-up.
+- **Adding a church to an account** (signed in to the member app at that church, which wasn't linked because the email
+  already had an account): `POST /auth/account/link/request` emails a code to the account email;
+  `POST /auth/account/link/confirm {code}` links this church, and the member's password and device become the
+  account's (the church's old password stops working). Refused from a phone other than the account's.
+- **Church switcher:** `GET /auth/account/churches` lists the account's active churches (`tenantId, name, subdomain,
+  logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
+  address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
+  account's own device, once, within 60 seconds.
+- **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
+  church's members. Instead the offer appears when the person next signs in at that church (`account_link_available`).
 - **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
   member, one read of the account by id. No scheduled work.
 
@@ -13991,6 +14015,30 @@ One email, password and device across every church a person belongs to. Off unti
 - **Limits.** For an email with an account, wrong-password, reset-request and code-guess counters are global Redis keys
   (`global:login_fail:<email>:<device|other>` and so on) shared by all its churches, so more churches never means more tries.
 - **Email.** A moved member's email can't be changed by the member or an admin yet; that comes with account recovery.
+- **Codes.** `discuva_account_codes` holds join and link codes (hash only), one open code per email, purpose and device;
+  asking again from the same device replaces it, someone else's device never cancels it. Console settings:
+  `account_code_ttl_minutes` (10, 5–30), `account_code_max_attempts` (5, 3–10; wrong tries counted per email, purpose and
+  device in `global:account_code_fail:*`), `account_code_requests_per_hour` (3, 1–10, per email, purpose and device).
+  Email template `discuva-account-code`. Used and expired codes are removed by the nightly OTP purge.
+- **Joining a church email-first** (all `@Public()`, at the joining church's address):
+  `POST /auth/join/start {email, deviceId}` always sends a code and always answers the same, so it never reveals whether
+  an account exists. `POST /auth/join/verify {email, code, deviceId}` returns `ALREADY_MEMBER` (sign in instead),
+  `EXISTING_ACCOUNT` with the person's first name, or `NEW`, plus a one-use `joinToken` (Redis, 15 minutes, bound to this
+  church and device). `POST /auth/join/complete {joinToken, deviceId, ...}` creates an ACTIVE member here and signs in.
+  An existing account brings its password, device and basics (name, phone, gender, birthday, marital status, copied from
+  one of its churches); it's refused from a phone other than the account's, or when frozen. Someone new gives first name,
+  last name and a password (same rules as a password change); under-18s are sent to their church. Uses the church's
+  member limit like any sign-up.
+- **Adding a church to an account** (signed in to the member app at that church, which wasn't linked because the email
+  already had an account): `POST /auth/account/link/request` emails a code to the account email;
+  `POST /auth/account/link/confirm {code}` links this church, and the member's password and device become the
+  account's (the church's old password stops working). Refused from a phone other than the account's.
+- **Church switcher:** `GET /auth/account/churches` lists the account's active churches (`tenantId, name, subdomain,
+  logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
+  address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
+  account's own device, once, within 60 seconds.
+- **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
+  church's members. Instead the offer appears when the person next signs in at that church (`account_link_available`).
 - **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
   member, one read of the account by id. No scheduled work.
 

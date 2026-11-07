@@ -416,6 +416,46 @@ export class AuthService {
     return tokens;
   }
 
+  // Sign-in for a member whose Discuva account was already proven another way (join, church switch).
+  async startMemberSession(
+    member: Member,
+    action: 'MEMBER_LOGIN',
+  ): Promise<JwtResponse> {
+    this.assertCanSignIn(member);
+    const tokens = await this.generateTokens(
+      member.id,
+      member.role,
+      !member.changedPassword,
+      SessionSurface.MEMBER,
+    );
+    this.auditLogService.log(action, {
+      targetId: member.id,
+      targetEmail: member.email,
+      targetName: `${member.firstname} ${member.lastname}`,
+    });
+    return tokens;
+  }
+
+  private assertCanSignIn(member: Member): void {
+    if (member.status === MemberStatusEnum.INACTIVE) {
+      throw new UnauthorizedException(
+        'Your account is inactive. Contact admin.',
+      );
+    }
+    if (member.role === MemberRoleEnum.WORKER) {
+      if (!member.workerProfile) {
+        throw new UnauthorizedException(
+          'Worker access revoked. Please contact admin.',
+        );
+      }
+      if (member.workerProfile.status !== WorkerStatusEnum.ACTIVE) {
+        throw new UnauthorizedException(
+          'Worker account suspended. Please contact admin.',
+        );
+      }
+    }
+  }
+
   async refreshToken(user: MemberAuth): Promise<JwtResponse> {
     if (user.replayedTokens) return user.replayedTokens;
     return this.generateTokens(
@@ -969,6 +1009,11 @@ export class AuthService {
     }
     try {
       this.logger.log('Running scheduled purge of expired OTPs');
+      await this.accounts
+        .purgeCodes()
+        .catch((err: Error) =>
+          this.logger.warn(`Account code purge failed: ${err.message}`),
+        );
       const { succeeded, failed } = await forEachActiveTenant(
         this.tenantRepo,
         this.cls,

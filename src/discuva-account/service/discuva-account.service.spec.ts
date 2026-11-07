@@ -12,6 +12,12 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
+import {
+  DiscuvaAccountCode,
+  DiscuvaAccountCodePurpose,
+} from '../entity/discuva-account-code.entity';
+import { CacheService } from '../../utility/service/cache.service';
+import { HttpException, BadRequestException } from '@nestjs/common';
 
 const qb = (result: unknown) => ({
   addSelect: jest.fn().mockReturnThis(),
@@ -35,6 +41,22 @@ const linkRepo = {
   create: jest.fn((v) => v),
 };
 const tenantRepo = { find: jest.fn() };
+const codeRepo = {
+  delete: jest.fn(),
+  save: jest.fn(),
+  create: jest.fn((v) => v),
+  findOne: jest.fn(),
+  update: jest.fn(),
+};
+const counters = new Map<string, number>();
+const cache = {
+  incrGlobal: jest.fn(async (k: string) => {
+    counters.set(k, (counters.get(k) ?? 0) + 1);
+    return counters.get(k)!;
+  }),
+  getGlobal: jest.fn(async (k: string) => counters.get(k)),
+  delGlobal: jest.fn(async (k: string) => Number(counters.delete(k))),
+};
 const memberRepo = {
   createQueryBuilder: jest.fn(),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -71,7 +93,16 @@ describe('DiscuvaAccountService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     Object.assign(store, { tenantId: 't1', schemaName: 'church_a' });
-    settings.getNumber.mockResolvedValue(2);
+    settings.getNumber.mockImplementation(async (key: string) =>
+      key === 'discuva_account_mode'
+        ? 2
+        : key === 'account_code_requests_per_hour'
+          ? 3
+          : key === 'account_code_max_attempts'
+            ? 5
+            : 10,
+    );
+    counters.clear();
     config.get.mockReturnValue('');
     const module = await Test.createTestingModule({
       providers: [
@@ -79,6 +110,8 @@ describe('DiscuvaAccountService', () => {
         { provide: getRepositoryToken(DiscuvaAccount), useValue: accountRepo },
         { provide: getRepositoryToken(DiscuvaAccountLink), useValue: linkRepo },
         { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
+        { provide: getRepositoryToken(DiscuvaAccountCode), useValue: codeRepo },
+        { provide: CacheService, useValue: cache },
         { provide: getRepositoryToken(Member), useValue: memberRepo },
         { provide: MemberSessionService, useValue: sessionService },
         { provide: PlatformSettingsService, useValue: settings },
@@ -298,6 +331,78 @@ describe('DiscuvaAccountService', () => {
       expect(accountRepo.update).not.toHaveBeenCalled();
       expect(memberRepo.update).toHaveBeenCalledWith('m1', { deviceId: null });
       expect(cls.runWith).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('emailed codes', () => {
+    const P = DiscuvaAccountCodePurpose.JOIN;
+
+    it('replaces only this device’s earlier code and keeps just a hash', async () => {
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('code-hash');
+      const code = await service.issueCode('Ada@Example.com', P, 'phone-123');
+      expect(code).toMatch(/^\d{6}$/);
+      expect(codeRepo.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'ada@example.com',
+          purpose: P,
+          deviceId: 'phone-123',
+        }),
+      );
+      expect(codeRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ codeHash: 'code-hash', tenantId: 't1' }),
+      );
+      expect(JSON.stringify(codeRepo.save.mock.calls)).not.toContain(code);
+    });
+
+    it('limits how many codes one email and device can ask for', async () => {
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('h');
+      for (let i = 0; i < 3; i++)
+        await service.issueCode('a@b.co', P, 'phone-123');
+      await expect(service.issueCode('a@b.co', P, 'phone-123')).rejects.toThrow(
+        HttpException,
+      );
+      await expect(
+        service.issueCode('a@b.co', P, 'other-phone'),
+      ).resolves.toMatch(/^\d{6}$/);
+    });
+
+    it('uses a right code once and counts wrong ones per device', async () => {
+      codeRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        codeHash: 'h',
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      jest
+        .spyOn(UtilityService, 'verifyHashedValue')
+        .mockImplementation(async (code: string) => code === '123456');
+
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          service.verifyCode('a@b.co', P, 'stranger-1', '000000'),
+        ).rejects.toThrow(BadRequestException);
+      }
+      await expect(
+        service.verifyCode('a@b.co', P, 'stranger-1', '123456'),
+      ).rejects.toThrow(HttpException);
+      await expect(
+        service.verifyCode('a@b.co', P, 'owner-phone', '123456'),
+      ).resolves.toBeUndefined();
+      expect(codeRepo.update).toHaveBeenCalledWith('c1', {
+        usedAt: expect.any(Date),
+      });
+    });
+
+    it('refuses an expired code', async () => {
+      codeRepo.findOne.mockResolvedValue({
+        id: 'c1',
+        codeHash: 'h',
+        expiresAt: new Date(Date.now() - 1),
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      await expect(
+        service.verifyCode('a@b.co', P, 'phone-123', '123456'),
+      ).rejects.toThrow(BadRequestException);
+      expect(codeRepo.update).not.toHaveBeenCalled();
     });
   });
 });

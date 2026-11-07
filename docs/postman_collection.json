@@ -46277,6 +46277,320 @@
           }
         }
       ]
+    },
+    {
+      "name": "Discuva Account (One sign-in)",
+      "description": "Joining a church email-first, adding a church to a Discuva account, and switching churches. Off unless the discuva_account_mode setting is on for the church.",
+      "item": [
+        {
+          "name": "Join: start",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/join/start",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "join",
+                "start"
+              ]
+            },
+            "description": "Always sends a 6-digit code and answers the same, so it never reveals whether an account exists.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"delivered+join@resend.dev\",\n  \"deviceId\": \"{{deviceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Join: verify code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/join/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "join",
+                "verify"
+              ]
+            },
+            "description": "Returns ALREADY_MEMBER, EXISTING_ACCOUNT (with firstName) or NEW, plus a one-use joinToken for this church and device.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"delivered+join@resend.dev\",\n  \"code\": \"123456\",\n  \"deviceId\": \"{{deviceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Join: complete",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/join/complete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "join",
+                "complete"
+              ]
+            },
+            "description": "Creates the member here and signs in. Name and password are only read for someone new; an existing account brings its own and must be on this phone.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"joinToken\": \"{{joinToken}}\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"firstname\": \"Ada\",\n  \"lastname\": \"Obi\",\n  \"password\": \"Str0ng!pass\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Link this church: request code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/link/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "link",
+                "request"
+              ]
+            },
+            "description": "Member app only. Emails a code to the Discuva account that already uses this member's email.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Link this church: confirm",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/link/confirm",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "link",
+                "confirm"
+              ]
+            },
+            "description": "Links this church; the account's password and device apply here from now on.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My churches",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/churches",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "churches"
+              ]
+            },
+            "description": "The account's active churches, for the church switcher.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Switch church",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/switch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "switch"
+              ]
+            },
+            "description": "Returns {subdomain, token}; open that church's address and call Handoff there within 60 seconds.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": \"{{otherTenantId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Handoff (at the other church)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/handoff",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "handoff"
+              ]
+            },
+            "description": "Signs in at this church, once, on the account's own device only.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{handoffToken}}\",\n  \"deviceId\": \"{{deviceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ]
 }

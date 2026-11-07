@@ -1,12 +1,24 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import { randomInt } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, LessThan, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { DiscuvaAccount } from '../entity/discuva-account.entity';
 import { DiscuvaAccountLink } from '../entity/discuva-account-link.entity';
+import {
+  DiscuvaAccountCode,
+  DiscuvaAccountCodePurpose,
+} from '../entity/discuva-account-code.entity';
+import { CacheService } from '../../utility/service/cache.service';
 import { Member } from '../../member/entity/member.entity';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
@@ -41,6 +53,9 @@ export class DiscuvaAccountService {
     private readonly accountRepo: Repository<DiscuvaAccount>,
     @InjectRepository(DiscuvaAccountLink)
     private readonly linkRepo: Repository<DiscuvaAccountLink>,
+    @InjectRepository(DiscuvaAccountCode)
+    private readonly codeRepo: Repository<DiscuvaAccountCode>,
+    private readonly cacheService: CacheService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
     @InjectRepository(Member)
@@ -234,10 +249,24 @@ export class DiscuvaAccountService {
       if (!options.skipCurrent) await fn(member.id);
       return;
     }
+    await this.forEachLinkOf(account.id, fn, options);
+  }
+
+  // Sets the account's device and every linked church's copy.
+  async setDeviceOnAccount(accountId: string, deviceId: string): Promise<void> {
+    await this.accountRepo.update(accountId, { deviceId });
+    await this.forEachLinkOf(accountId, (memberId) =>
+      this.memberRepo.update(memberId, { deviceId }).then(() => undefined),
+    );
+  }
+
+  private async forEachLinkOf(
+    accountId: string,
+    fn: (memberId: string) => Promise<void>,
+    options: { skipCurrent?: boolean } = {},
+  ): Promise<void> {
     const currentTenantId = this.cls.get('tenantId');
-    const links = await this.linkRepo.find({
-      where: { accountId: account.id },
-    });
+    const links = await this.linkRepo.find({ where: { accountId } });
     const others = links.filter((l) => l.tenantId !== currentTenantId);
     const tenants = others.length
       ? await this.tenantRepo.find({
@@ -264,8 +293,203 @@ export class DiscuvaAccountService {
     }
   }
 
+  async findByEmail(email: string): Promise<DiscuvaAccount | null> {
+    return this.accountRepo
+      .createQueryBuilder('a')
+      .addSelect('a.password')
+      .addSelect('a.deviceId')
+      .where('a.email = :email', { email: normaliseEmail(email) })
+      .getOne();
+  }
+
+  async findById(id: string): Promise<DiscuvaAccount | null> {
+    return this.accountRepo
+      .createQueryBuilder('a')
+      .addSelect('a.password')
+      .addSelect('a.deviceId')
+      .where('a.id = :id', { id })
+      .getOne();
+  }
+
+  async create(
+    email: string,
+    passwordHash: string,
+    deviceId: string | null,
+  ): Promise<DiscuvaAccount> {
+    return this.accountRepo.save(
+      this.accountRepo.create({
+        email: normaliseEmail(email),
+        password: passwordHash,
+        deviceId,
+      }),
+    );
+  }
+
+  async link(accountId: string, memberId: string): Promise<void> {
+    const tenantId = this.cls.get('tenantId');
+    await this.linkRepo.upsert({ accountId, tenantId, memberId }, [
+      'tenantId',
+      'memberId',
+    ]);
+    await this.memberRepo.update(memberId, { discuvaAccountId: accountId });
+  }
+
+  async linksOf(accountId: string): Promise<DiscuvaAccountLink[]> {
+    return this.linkRepo.find({
+      where: { accountId },
+      order: { linkedAt: 'ASC' },
+    });
+  }
+
+  // Issues a 6-digit code for this email, purpose and device; only this device's earlier code is replaced.
+  async issueCode(
+    email: string,
+    purpose: DiscuvaAccountCodePurpose,
+    deviceId: string,
+  ): Promise<string> {
+    const key = this.codeKey('account_code_req', email, purpose, deviceId);
+    const limit = await this.platformSettings.getNumber(
+      PlatformSettingKey.ACCOUNT_CODE_REQUESTS_PER_HOUR,
+    );
+    const count = await this.cacheService.incrGlobal(key, 3600);
+    if (count > limit) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          error: 'TOO_MANY_REQUESTS',
+          message: 'Too many codes asked for. Please try again in an hour.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const normalised = normaliseEmail(email);
+    await this.codeRepo.delete({
+      email: normalised,
+      purpose,
+      deviceId,
+      usedAt: IsNull(),
+    });
+    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+    const minutes = await this.codeTtlMinutes();
+    await this.codeRepo.save(
+      this.codeRepo.create({
+        email: normalised,
+        purpose,
+        deviceId,
+        tenantId: this.cls.get('tenantId') ?? null,
+        codeHash: await UtilityService.hashValue(code),
+        expiresAt: new Date(Date.now() + minutes * 60_000),
+        usedAt: null,
+      }),
+    );
+    return code;
+  }
+
+  // Wrong guesses count per email, purpose and device, so someone else can't use up the owner's tries.
+  async verifyCode(
+    email: string,
+    purpose: DiscuvaAccountCodePurpose,
+    deviceId: string,
+    code: string,
+  ): Promise<void> {
+    const key = this.codeKey('account_code_fail', email, purpose, deviceId);
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.ACCOUNT_CODE_MAX_ATTEMPTS,
+    );
+    if (((await this.cacheService.getGlobal<number>(key)) ?? 0) >= max) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.TOO_MANY_REQUESTS,
+          error: 'TOO_MANY_REQUESTS',
+          message:
+            'Too many incorrect attempts. Please ask for a new code and try again.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const record = await this.codeRepo.findOne({
+      where: {
+        email: normaliseEmail(email),
+        purpose,
+        deviceId,
+        usedAt: IsNull(),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    const valid =
+      !!record &&
+      record.expiresAt > new Date() &&
+      (await UtilityService.verifyHashedValue(code, record.codeHash));
+    if (!valid) {
+      await this.cacheService.incrGlobal(
+        key,
+        (await this.codeTtlMinutes()) * 60,
+      );
+      throw new BadRequestException(
+        'This code is invalid or has expired. Please ask for a new one.',
+      );
+    }
+    await this.codeRepo.update(record.id, { usedAt: new Date() });
+    this.cacheService.delGlobal(key);
+  }
+
+  async purgeCodes(): Promise<void> {
+    await this.codeRepo.delete({ expiresAt: LessThan(new Date()) });
+    await this.codeRepo
+      .createQueryBuilder()
+      .delete()
+      .where('used_at IS NOT NULL')
+      .execute();
+  }
+
+  private codeTtlMinutes(): Promise<number> {
+    return this.platformSettings.getNumber(
+      PlatformSettingKey.ACCOUNT_CODE_TTL_MINUTES,
+    );
+  }
+
+  private codeKey(
+    ns: string,
+    email: string,
+    purpose: string,
+    deviceId: string,
+  ): string {
+    return `${ns}:${normaliseEmail(email)}:${purpose}:${deviceId}`;
+  }
+
+  // Basics from the person's member record at a church they already belong to.
+  async basicsFrom(accountId: string): Promise<Partial<Member> | null> {
+    const [first] = await this.linksOf(accountId);
+    if (!first) return null;
+    const tenant = await this.tenantRepo.findOne({
+      where: { id: first.tenantId },
+      select: { id: true, schemaName: true },
+    });
+    if (!tenant) return null;
+    return runInTenantContext(
+      this.cls,
+      this.txHost,
+      { tenantId: tenant.id, schemaName: tenant.schemaName },
+      () =>
+        this.memberRepo.findOne({
+          where: { id: first.memberId },
+          select: {
+            id: true,
+            firstname: true,
+            lastname: true,
+            phoneNumber: true,
+            gender: true,
+            birthDay: true,
+            birthMonth: true,
+            birthYear: true,
+            maritalStatus: true,
+          },
+        }),
+    );
+  }
+
   // Under-18s keep church-only sign-in.
-  private isEligible(
+  isEligible(
     member: Pick<Member, 'email' | 'birthYear' | 'birthMonth' | 'birthDay'>,
   ): boolean {
     if (!member.email) return false;

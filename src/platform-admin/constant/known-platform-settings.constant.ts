@@ -136,6 +136,27 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 0,
     max: 2,
   },
+  [PlatformSettingKey.ACCOUNT_CODE_TTL_MINUTES]: {
+    label: 'Discuva Account Code Life',
+    unit: 'minutes a join or link code stays valid',
+    defaultValue: 10,
+    min: 5,
+    max: 30,
+  },
+  [PlatformSettingKey.ACCOUNT_CODE_MAX_ATTEMPTS]: {
+    label: 'Discuva Account Code Attempts',
+    unit: 'wrong tries per code before a new one is needed',
+    defaultValue: 5,
+    min: 3,
+    max: 10,
+  },
+  [PlatformSettingKey.ACCOUNT_CODE_REQUESTS_PER_HOUR]: {
+    label: 'Discuva Account Code Requests',
+    unit: 'join or link codes per hour, per email and device',
+    defaultValue: 3,
+    min: 1,
+    max: 10,
+  },
   [PlatformSettingKey.COMMUNITY_MAX_CATEGORIES]: {
     label: 'Community Categories',
     unit: "categories at most in an account's Community space",

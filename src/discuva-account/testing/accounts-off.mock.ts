@@ -52,5 +52,6 @@ export function accountsOffMock(
       },
     ),
     forEachChurchOf,
+    purgeCodes: jest.fn().mockResolvedValue(undefined),
   };
 }

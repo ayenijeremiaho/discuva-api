@@ -112,8 +112,62 @@ export class MemberService {
     const tempPassword = UtilityService.generateRandomPassword();
     const password = await UtilityService.hashValue(tempPassword);
 
-    const member = this.memberRepository.create({
-      id: pending?.id,
+    const saved = await this.memberRepository.save(
+      this.buildMember(dto, status, password, pending?.id),
+    );
+    this.logger.log(`New member created: ${saved.id}`);
+    await this.sendSignInDetails(saved, tempPassword);
+    return saved;
+  }
+
+  // Joining with a Discuva account: the email is already proven, the account's password and device apply.
+  async createForAccount(
+    dto: SignupDto,
+    account: { id: string; password: string; deviceId: string | null },
+  ): Promise<Member> {
+    const pending = await this.pendingSignupFor(dto.email);
+    if (!pending) {
+      await this.verification.assertRoomForMembers(() =>
+        this.countProvenMembers(),
+      );
+    }
+    const member = this.buildMember(
+      dto,
+      MemberStatusEnum.ACTIVE,
+      account.password,
+      pending?.id,
+    );
+    member.changedPassword = true;
+    member.deviceId = account.deviceId;
+    member.discuvaAccountId = account.id;
+    const saved = await this.memberRepository.save(member);
+    this.auditLogService.log('MEMBER_JOINED_WITH_ACCOUNT', {
+      targetId: saved.id,
+      targetEmail: saved.email,
+    });
+    return saved;
+  }
+
+  // A member who adds this church to their account takes the account's password and device.
+  async applyAccountCredentials(
+    memberId: string,
+    account: { password: string; deviceId: string | null },
+  ): Promise<void> {
+    await this.memberRepository.update(memberId, {
+      password: account.password,
+      deviceId: account.deviceId,
+      changedPassword: true,
+    });
+  }
+
+  private buildMember(
+    dto: SignupDto,
+    status: MemberStatusEnum,
+    password: string,
+    id?: string,
+  ): Member {
+    return this.memberRepository.create({
+      id,
       firstname: dto.firstname,
       lastname: dto.lastname,
       email: dto.email,
@@ -139,11 +193,6 @@ export class MemberService {
       changedPassword: false,
       serveInterestAt: dto.joinWorkforce ? new Date() : null,
     });
-
-    const saved = await this.memberRepository.save(member);
-    this.logger.log(`New member created: ${saved.id}`);
-    await this.sendSignInDetails(saved, tempPassword);
-    return saved;
   }
 
   private async sendSignInDetails(

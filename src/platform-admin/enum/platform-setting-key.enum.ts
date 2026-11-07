@@ -36,4 +36,7 @@ export enum PlatformSettingKey {
   COMMUNITY_MAX_CATEGORIES = 'community_max_categories',
   // 0 off, 1 only churches in DISCUVA_ACCOUNT_TEST_TENANTS, 2 every church.
   DISCUVA_ACCOUNT_MODE = 'discuva_account_mode',
+  ACCOUNT_CODE_TTL_MINUTES = 'account_code_ttl_minutes',
+  ACCOUNT_CODE_MAX_ATTEMPTS = 'account_code_max_attempts',
+  ACCOUNT_CODE_REQUESTS_PER_HOUR = 'account_code_requests_per_hour',
 }

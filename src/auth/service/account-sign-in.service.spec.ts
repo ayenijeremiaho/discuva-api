@@ -1,0 +1,392 @@
+import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { ClsService } from 'nestjs-cls';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
+import { AccountSignInService } from './account-sign-in.service';
+import { AuthService } from './auth.service';
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { MemberService } from '../../member/service/member.service';
+import { CacheService } from '../../utility/service/cache.service';
+import { UtilityService } from '../../utility/service/utility.service';
+import { AuditLogService } from '../../utility/service/audit-log.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { Tenant } from '../../tenant/entity/tenant.entity';
+import { MemberStatusEnum } from '../../member/enums/member-status.enum';
+import { DiscuvaAccountCodePurpose } from '../../discuva-account/entity/discuva-account-code.entity';
+
+const store = new Map<string, unknown>();
+const cache = {
+  setGlobal: jest.fn(async (k: string, v: unknown) => void store.set(k, v)),
+  getGlobal: jest.fn(async (k: string) => store.get(k)),
+  delGlobal: jest.fn(async (k: string) => Number(store.delete(k))),
+};
+const accounts = {
+  isOn: jest.fn(),
+  findByEmail: jest.fn(),
+  findById: jest.fn(),
+  basicsFrom: jest.fn(),
+  issueCode: jest.fn().mockResolvedValue('123456'),
+  verifyCode: jest.fn().mockResolvedValue(undefined),
+  create: jest.fn(),
+  link: jest.fn(),
+  linksOf: jest.fn(),
+  setDeviceOnAccount: jest.fn(),
+  isEligible: jest.fn().mockReturnValue(true),
+};
+const memberService = {
+  findByEmail: jest.fn(),
+  createForAccount: jest.fn(),
+  getById: jest.fn(),
+  getByIdWithCredentials: jest.fn(),
+  applyAccountCredentials: jest.fn(),
+};
+const authService = {
+  startMemberSession: jest.fn().mockResolvedValue({ access_token: 'tok' }),
+};
+const utility = {
+  resolveChurchName: jest.fn().mockResolvedValue('the church'),
+  sendEmailWithTemplate: jest.fn(),
+};
+const audit = { log: jest.fn() };
+const settings = { getNumber: jest.fn().mockResolvedValue(10) };
+const ctx: Record<string, unknown> = {};
+const cls = { get: jest.fn((k: string) => ctx[k]) };
+const tenantRepo = { find: jest.fn(), findOne: jest.fn() };
+
+const account = {
+  id: 'a1',
+  email: 'ada@example.com',
+  password: 'acct-hash',
+  deviceId: 'phone-123',
+  frozenAt: null,
+};
+
+describe('AccountSignInService', () => {
+  let service: AccountSignInService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    store.clear();
+    ctx.tenantId = 't2';
+    accounts.isOn.mockResolvedValue(true);
+    const module = await Test.createTestingModule({
+      providers: [
+        AccountSignInService,
+        { provide: DiscuvaAccountService, useValue: accounts },
+        { provide: MemberService, useValue: memberService },
+        { provide: AuthService, useValue: authService },
+        { provide: CacheService, useValue: cache },
+        { provide: UtilityService, useValue: utility },
+        { provide: AuditLogService, useValue: audit },
+        { provide: PlatformSettingsService, useValue: settings },
+        { provide: ClsService, useValue: cls },
+        { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
+      ],
+    }).compile();
+    service = module.get(AccountSignInService);
+  });
+
+  it('is unavailable while the switch is off', async () => {
+    accounts.isOn.mockResolvedValue(false);
+    await expect(service.startJoin('a@b.co', 'phone-123')).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  describe('joining a church', () => {
+    it('sends the same code email whether or not an account exists', async () => {
+      accounts.findByEmail.mockResolvedValueOnce(null);
+      await service.startJoin('new@b.co', 'phone-123');
+      accounts.findByEmail.mockResolvedValueOnce(account);
+      accounts.basicsFrom.mockResolvedValueOnce({ firstname: 'ada' });
+      await service.startJoin('ada@example.com', 'phone-123');
+      expect(utility.sendEmailWithTemplate).toHaveBeenCalledTimes(2);
+      const [first, second] = utility.sendEmailWithTemplate.mock.calls;
+      expect(first[1]).toBe(second[1]);
+      expect(first[2]).toBe('discuva-account-code');
+      expect(accounts.issueCode).toHaveBeenCalledWith(
+        'new@b.co',
+        DiscuvaAccountCodePurpose.JOIN,
+        'phone-123',
+      );
+    });
+
+    it('tells someone already in this church to sign in instead', async () => {
+      memberService.findByEmail.mockResolvedValue({
+        status: MemberStatusEnum.ACTIVE,
+      });
+      await expect(
+        service.verifyJoin('ada@example.com', '123456', 'phone-123'),
+      ).resolves.toEqual({
+        status: 'ALREADY_MEMBER',
+      });
+      expect(cache.setGlobal).not.toHaveBeenCalled();
+    });
+
+    it('welcomes back an existing account by first name', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.basicsFrom.mockResolvedValue({ firstname: 'Ada' });
+      const result = await service.verifyJoin(
+        'ada@example.com',
+        '123456',
+        'phone-123',
+      );
+      expect(result).toMatchObject({
+        status: 'EXISTING_ACCOUNT',
+        firstName: 'Ada',
+      });
+    });
+
+    it('joins with an existing account: its basics, password and device, then signs in', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.findById.mockResolvedValue(account);
+      accounts.basicsFrom.mockResolvedValue({
+        firstname: 'Ada',
+        lastname: 'Obi',
+        phoneNumber: '+234800',
+      });
+      const { joinToken } = (await service.verifyJoin(
+        'ada@example.com',
+        '123456',
+        'phone-123',
+      )) as { joinToken: string };
+      memberService.createForAccount.mockResolvedValue({ id: 'm2' });
+      memberService.getById.mockResolvedValue({ id: 'm2' });
+
+      await service.completeJoin({
+        joinToken,
+        deviceId: 'phone-123',
+        firstname: 'Someone',
+        lastname: 'Else',
+      } as never);
+
+      expect(memberService.createForAccount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstname: 'Ada',
+          lastname: 'Obi',
+          phoneNumber: '+234800',
+          email: 'ada@example.com',
+        }),
+        account,
+      );
+      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2');
+      expect(authService.startMemberSession).toHaveBeenCalled();
+      expect(store.size).toBe(0);
+    });
+
+    it("refuses to join from a phone that isn't the account's", async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.findById.mockResolvedValue(account);
+      const { joinToken } = (await service.verifyJoin(
+        'ada@example.com',
+        '123456',
+        'other-phone',
+      )) as { joinToken: string };
+      await expect(
+        service.completeJoin({ joinToken, deviceId: 'other-phone' } as never),
+      ).rejects.toThrow(ForbiddenException);
+      expect(memberService.createForAccount).not.toHaveBeenCalled();
+    });
+
+    it('creates an account for someone new, with their own password', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(null);
+      const { joinToken } = (await service.verifyJoin(
+        'new@b.co',
+        '123456',
+        'phone-123',
+      )) as { joinToken: string };
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('new-hash');
+      accounts.create.mockResolvedValue({ id: 'a9' });
+      accounts.findById.mockResolvedValue({
+        id: 'a9',
+        password: 'new-hash',
+        deviceId: 'phone-123',
+      });
+      memberService.createForAccount.mockResolvedValue({ id: 'm9' });
+      memberService.getById.mockResolvedValue({ id: 'm9' });
+
+      await service.completeJoin({
+        joinToken,
+        deviceId: 'phone-123',
+        firstname: 'Bayo',
+        lastname: 'Ade',
+        password: 'Str0ng!pass',
+      } as never);
+
+      expect(accounts.create).toHaveBeenCalledWith(
+        'new@b.co',
+        'new-hash',
+        'phone-123',
+      );
+      expect(accounts.link).toHaveBeenCalledWith('a9', 'm9');
+    });
+
+    it('sends under-18s to their church instead', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(null);
+      accounts.isEligible.mockReturnValueOnce(false);
+      const { joinToken } = (await service.verifyJoin(
+        'kid@b.co',
+        '123456',
+        'phone-123',
+      )) as { joinToken: string };
+      await expect(
+        service.completeJoin({
+          joinToken,
+          deviceId: 'phone-123',
+          firstname: 'K',
+          lastname: 'D',
+          password: 'Str0ng!pass',
+          birthYear: 2015,
+        } as never),
+      ).rejects.toThrow(ForbiddenException);
+      expect(accounts.create).not.toHaveBeenCalled();
+    });
+
+    it("won't use a join step from another church or another phone", async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(null);
+      const { joinToken } = (await service.verifyJoin(
+        'new@b.co',
+        '123456',
+        'phone-123',
+      )) as { joinToken: string };
+      await expect(
+        service.completeJoin({ joinToken, deviceId: 'phone-999' } as never),
+      ).rejects.toThrow(BadRequestException);
+      ctx.tenantId = 't3';
+      await expect(
+        service.completeJoin({ joinToken, deviceId: 'phone-123' } as never),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('adding this church to an account', () => {
+    const member = {
+      id: 'm2',
+      email: 'ada@example.com',
+      firstname: 'ada',
+      deviceId: 'phone-123',
+      discuvaAccountId: null,
+    };
+
+    it('emails a code to the account email from the same phone', async () => {
+      memberService.getByIdWithCredentials.mockResolvedValue(member);
+      accounts.findByEmail.mockResolvedValue(account);
+      await service.requestLink('m2');
+      expect(accounts.issueCode).toHaveBeenCalledWith(
+        'ada@example.com',
+        DiscuvaAccountCodePurpose.LINK,
+        'phone-123',
+      );
+      expect(utility.sendEmailWithTemplate.mock.calls[0][0]).toBe(
+        'ada@example.com',
+      );
+    });
+
+    it("won't link from a phone that isn't the account's", async () => {
+      memberService.getByIdWithCredentials.mockResolvedValue({
+        ...member,
+        deviceId: 'church-only-phone',
+      });
+      accounts.findByEmail.mockResolvedValue(account);
+      await expect(service.requestLink('m2')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(accounts.issueCode).not.toHaveBeenCalled();
+    });
+
+    it("won't link twice", async () => {
+      memberService.getByIdWithCredentials.mockResolvedValue({
+        ...member,
+        discuvaAccountId: 'a1',
+      });
+      await expect(service.requestLink('m2')).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it("links after the code and takes the account's password and device", async () => {
+      memberService.getByIdWithCredentials.mockResolvedValue(member);
+      accounts.findByEmail.mockResolvedValue(account);
+      await service.confirmLink('m2', '123456');
+      expect(accounts.verifyCode).toHaveBeenCalled();
+      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2');
+      expect(memberService.applyAccountCredentials).toHaveBeenCalledWith(
+        'm2',
+        account,
+      );
+    });
+
+    it('does not link when the code is wrong', async () => {
+      memberService.getByIdWithCredentials.mockResolvedValue(member);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.verifyCode.mockRejectedValueOnce(new BadRequestException());
+      await expect(service.confirmLink('m2', '000000')).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(accounts.link).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('switching churches', () => {
+    beforeEach(() => {
+      memberService.getById.mockResolvedValue({
+        id: 'm1',
+        discuvaAccountId: 'a1',
+      });
+      accounts.findById.mockResolvedValue(account);
+      accounts.linksOf.mockResolvedValue([
+        { tenantId: 't2', memberId: 'm1' },
+        { tenantId: 't5', memberId: 'm5' },
+      ]);
+    });
+
+    it('refuses a church the account is not linked to', async () => {
+      await expect(service.switchChurch('m1', 't9')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('hands over to the other church once, on the same phone', async () => {
+      tenantRepo.findOne.mockResolvedValue({ id: 't5', subdomain: 'other' });
+      const { subdomain, token } = await service.switchChurch('m1', 't5');
+      expect(subdomain).toBe('other');
+
+      ctx.tenantId = 't5';
+      memberService.getById.mockResolvedValue({
+        id: 'm5',
+        discuvaAccountId: 'a1',
+      });
+      await expect(service.redeemHandoff(token, 'phone-123')).resolves.toEqual({
+        access_token: 'tok',
+      });
+      await expect(service.redeemHandoff(token, 'phone-123')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it("won't hand over to another phone or the wrong church", async () => {
+      tenantRepo.findOne.mockResolvedValue({ id: 't5', subdomain: 'other' });
+      const first = await service.switchChurch('m1', 't5');
+      ctx.tenantId = 't5';
+      await expect(
+        service.redeemHandoff(first.token, 'stranger-phone'),
+      ).rejects.toThrow(ForbiddenException);
+      ctx.tenantId = 't2';
+      const second = await service.switchChurch('m1', 't5');
+      await expect(
+        service.redeemHandoff(second.token, 'phone-123'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+});

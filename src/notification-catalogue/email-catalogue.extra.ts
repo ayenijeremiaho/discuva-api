@@ -451,6 +451,38 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ first_name: 'name' }),
     sampleData: { name: 'Ada' },
   },
+  'discuva-account-code': {
+    category: null,
+    label: 'Discuva account code',
+    description:
+      'Sent with the one-time code to join a church or add one to a Discuva account.',
+    lockedNote: 'The one-time code and security notice are always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your Discuva code',
+    message:
+      '<p>Hi {{first_name}},</p><p>{{action}} Use this code to carry on:</p>',
+    closing: '',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'Your one-time code for {{church_name}}.',
+    placeholders: {
+      default_subject: 'Your Discuva code',
+      expires_minutes: '10',
+      first_name: 'Ada',
+      action: 'You asked to join this church on Discuva.',
+    },
+    toVars: pick({
+      expires_minutes: 'expiresMinutes',
+      first_name: 'name',
+      action: 'action',
+    }),
+    sampleData: {
+      expiresMinutes: '10',
+      name: 'Ada',
+      otp: '482913',
+      action: 'You asked to join this church on Discuva.',
+    },
+  },
   'device-reset-otp': {
     category: null,
     label: 'Device reset code',
