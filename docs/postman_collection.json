@@ -486,7 +486,7 @@
                 "login"
               ]
             },
-            "description": "Mobile app login (members & workers). Requires deviceId — the first login from a device registers it; subsequent logins must match the registered device or receive 403. Returns requires_password_change: true when a forced password change is pending."
+            "description": "Mobile app login (members & workers). Requires deviceId — the first login from a device registers it; subsequent logins must match the registered device or receive 403. Returns requires_password_change: true when a forced password change is pending.\n\nWith One Discuva sign-in on, a good sign-in moves the member to their Discuva account. If another church already moved this email, the response adds \"account_link_available\": true and linking needs an emailed code."
           },
           "response": [
             {

@@ -129,6 +129,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 8,
     max: 3650,
   },
+  [PlatformSettingKey.DISCUVA_ACCOUNT_MODE]: {
+    label: 'One Discuva Sign-in',
+    unit: '0 = off, 1 = test churches only (DISCUVA_ACCOUNT_TEST_TENANTS), 2 = every church',
+    defaultValue: 0,
+    min: 0,
+    max: 2,
+  },
   [PlatformSettingKey.COMMUNITY_MAX_CATEGORIES]: {
     label: 'Community Categories',
     unit: "categories at most in an account's Community space",

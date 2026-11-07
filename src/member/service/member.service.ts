@@ -22,7 +22,6 @@ import { SundaySchoolClass } from '../../sunday-school/entity/sunday-school-clas
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { MemberSessionService } from './member-session.service';
-import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { ConfigService } from '@nestjs/config';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { MemberRoleEnum } from '../enums/member-role.enum';
@@ -41,6 +40,7 @@ import { SetClergyReviewAccessDto } from '../dto/set-clergy-review-access.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { PaginationResponseDto } from '../../utility/dto/pagination-response.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 
 @Injectable()
 export class MemberService {
@@ -66,6 +66,7 @@ export class MemberService {
     private readonly configService: ConfigService,
     private readonly pushService: PushNotificationService,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly accounts: DiscuvaAccountService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
@@ -689,6 +690,11 @@ export class MemberService {
 
     let tempPassword: string | null = null;
     if (dto.email && dto.email !== member.email) {
+      if (member.discuvaAccountId) {
+        throw new BadRequestException(
+          'This person signs in with their Discuva account, so its email can only be changed through account recovery.',
+        );
+      }
       await this.assertEmailUnique(dto.email);
       member.email = dto.email;
       // The old address never got the sign-in details, so the corrected one gets fresh ones.
@@ -1101,9 +1107,11 @@ export class MemberService {
   async resetPassword(memberId: string, actorId: string): Promise<string> {
     const member = await this.getByIdWithCredentials(memberId);
     const newPassword = UtilityService.generateRandomPassword();
-    member.password = await UtilityService.hashValue(newPassword);
-    member.changedPassword = false;
-    await this.memberRepository.save(member);
+    await this.accounts.setPasswordHash(
+      member,
+      await UtilityService.hashValue(newPassword),
+      false,
+    );
     this.logger.log(
       `Password reset by admin ${actorId} for member ${memberId}`,
     );
@@ -1165,10 +1173,7 @@ export class MemberService {
   ): Promise<string> {
     const member = await this.getByIdWithCredentials(memberId);
 
-    const isValid = await UtilityService.verifyHashedValue(
-      dto.oldPassword,
-      member.password,
-    );
+    const isValid = await this.accounts.verifyPassword(member, dto.oldPassword);
     if (!isValid)
       throw new BadRequestException(
         'The current password you entered is incorrect.',
@@ -1180,9 +1185,13 @@ export class MemberService {
       );
     }
 
-    member.password = await UtilityService.hashValue(dto.newPassword);
-    member.changedPassword = true;
-    await this.memberRepository.save(member);
+    await this.accounts.setPasswordHash(
+      member,
+      await UtilityService.hashValue(dto.newPassword),
+      true,
+    );
+    // Sessions at the person's other churches end; this one carries on.
+    await this.accounts.endSessionsEverywhere(member, { skipCurrent: true });
 
     const firstName = UtilityService.capitalizeFirstLetter(member.firstname);
     const churchName = await this.utilityService.resolveChurchName();
@@ -1205,24 +1214,21 @@ export class MemberService {
     newPassword: string,
     changedPassword: boolean,
   ): Promise<void> {
-    const member = await this.getByIdWithCredentials(memberId);
-    member.password = await UtilityService.hashValue(newPassword);
-    member.changedPassword = changedPassword;
-    await this.memberRepository.save(member);
-  }
-
-  async setDeviceId(memberId: string, deviceId: string): Promise<void> {
-    await this.memberRepository.update(memberId, { deviceId });
+    const member = await this.getById(memberId);
+    await this.accounts.setPasswordHash(
+      member,
+      await UtilityService.hashValue(newPassword),
+      changedPassword,
+    );
   }
 
   async purgeDevice(memberId: string, actorId: string): Promise<void> {
     const member = await this.getById(memberId);
-    await this.memberRepository.update(memberId, { deviceId: null });
-    await Promise.all([
-      this.sessionService.updateLogout(memberId, SessionSurface.MEMBER),
-      this.sessionService.updateLogout(memberId, SessionSurface.ADMIN),
-    ]);
-    this.pushService.unsubscribe(memberId);
+    await this.accounts.setDevice(member, null);
+    await this.accounts.endSessionsEverywhere(member);
+    await this.accounts.forEachChurchOf(member, (id) =>
+      this.pushService.unsubscribe(id),
+    );
     this.logger.log(
       `Device lock purged for member ${memberId} by actor ${actorId}`,
     );

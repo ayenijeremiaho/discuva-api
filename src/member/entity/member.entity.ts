@@ -51,6 +51,13 @@ export class Member extends BaseEntity {
   @Column({ nullable: true, type: 'varchar', select: false })
   deviceId: string | null;
 
+  // Set once this member has moved to a Discuva account; from then the account's password and device apply.
+  @Index('IDX_members_discuva_account_id', {
+    where: 'discuva_account_id IS NOT NULL',
+  })
+  @Column({ type: 'uuid', nullable: true })
+  discuvaAccountId: string | null;
+
   @Index()
   @Column({ default: MemberRoleEnum.MEMBER })
   role: MemberRoleEnum;

@@ -25,6 +25,8 @@ import { WorkerStatusEnum } from '../enums/worker-status.enum';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
 import { PushNotificationService } from '../../push-notification/service/push-notification.service';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { accountsOffMock } from '../../discuva-account/testing/accounts-off.mock';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
@@ -73,6 +75,14 @@ const mockUtilityService = {
 const mockAuditLogService = { log: jest.fn() };
 
 const mockSessionService = { updateLogout: jest.fn() };
+const mockAccounts = accountsOffMock({
+  updateMember: (id, patch) => mockMemberRepo.update(id, patch),
+  endSessions: (id) =>
+    Promise.all([
+      mockSessionService.updateLogout(id, SessionSurface.MEMBER),
+      mockSessionService.updateLogout(id, SessionSurface.ADMIN),
+    ]),
+});
 
 const mockConfigService = { get: jest.fn() };
 
@@ -135,6 +145,7 @@ describe('MemberService', () => {
         { provide: UtilityService, useValue: mockUtilityService },
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: MemberSessionService, useValue: mockSessionService },
+        { provide: DiscuvaAccountService, useValue: mockAccounts },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PushNotificationService, useValue: mockPushService },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
@@ -1438,12 +1449,13 @@ describe('MemberService', () => {
         confirmPassword: 'new_pass',
       });
 
-      expect(mockMemberRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({
-          password: 'hashed_new_pass',
-          changedPassword: true,
-        }),
-      );
+      expect(mockMemberRepo.update).toHaveBeenCalledWith('member-1', {
+        password: 'hashed_new_pass',
+        changedPassword: true,
+      });
+      expect(mockAccounts.endSessionsEverywhere).toHaveBeenCalledWith(member, {
+        skipCurrent: true,
+      });
       expect(result).toBe('Password changed successfully');
     });
   });

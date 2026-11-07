@@ -1,4 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { accountsOffMock } from '../../discuva-account/testing/accounts-off.mock';
 import {
   BadRequestException,
   ConflictException,
@@ -65,6 +67,9 @@ const mockCacheService = {
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(1),
   incr: jest.fn().mockResolvedValue(1),
+  getGlobal: jest.fn().mockResolvedValue(0),
+  incrGlobal: jest.fn().mockResolvedValue(1),
+  delGlobal: jest.fn().mockResolvedValue(1),
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
   blacklistJti: jest.fn().mockResolvedValue(undefined),
@@ -153,6 +158,18 @@ const mockJwtService = {
   signAsync: jest.fn(),
 };
 
+const mockAccounts = accountsOffMock({
+  updateMember: (id, patch) =>
+    'deviceId' in patch
+      ? mockMemberService.setDeviceId(id, patch.deviceId)
+      : undefined,
+  endSessions: (id) =>
+    Promise.all([
+      mockSessionService.updateLogout(id, SessionSurface.MEMBER),
+      mockSessionService.updateLogout(id, SessionSurface.ADMIN),
+    ]),
+});
+
 const mockConfigService = {
   get: jest.fn(),
 };
@@ -186,6 +203,7 @@ describe('AuthService', () => {
         AuthService,
         { provide: MemberService, useValue: mockMemberService },
         { provide: MemberSessionService, useValue: mockSessionService },
+        { provide: DiscuvaAccountService, useValue: mockAccounts },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: UtilityService, useValue: mockUtilityService },
@@ -1771,6 +1789,70 @@ describe('AuthService', () => {
         memberId: 'member-1',
         usedAt: expect.anything(),
       });
+    });
+  });
+
+  describe('with a Discuva account', () => {
+    const user = {
+      id: 'member-1',
+      role: MemberRoleEnum.MEMBER,
+      requiresPasswordChange: false,
+      surface: SessionSurface.MEMBER,
+    };
+
+    beforeEach(() => {
+      mockJwtService.signAsync.mockResolvedValue('t');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('h');
+    });
+
+    it('counts wrong passwords across all the churches the account belongs to', async () => {
+      mockAccounts.hasAccount.mockResolvedValueOnce(true);
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        password: 'p',
+        status: MemberStatusEnum.ACTIVE,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+
+      await expect(
+        service.validateMember('test@test.com', 'wrong', 'phone'),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockCacheService.getGlobal).toHaveBeenCalledWith(
+        'login_fail:test@test.com:other',
+      );
+      expect(mockCacheService.incrGlobal).toHaveBeenCalled();
+      expect(mockCacheService.incr).not.toHaveBeenCalled();
+    });
+
+    it("checks the device against the account's device, not this church's copy", async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        deviceId: null,
+      });
+      mockAccounts.deviceOf.mockResolvedValueOnce('their-phone');
+
+      await expect(service.login(user, 'another-phone')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockAccounts.setDevice).not.toHaveBeenCalled();
+    });
+
+    it('moves the member over after a good sign-in and says when another church can be linked', async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        deviceId: 'phone',
+      });
+      mockAccounts.moveOnSignIn.mockResolvedValueOnce('LINK_AVAILABLE');
+
+      const result = await service.login(user, 'phone');
+
+      expect(mockAccounts.moveOnSignIn).toHaveBeenCalled();
+      expect(result.account_link_available).toBe(true);
     });
   });
 });

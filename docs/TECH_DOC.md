@@ -9032,6 +9032,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `LOGIN_MAX_ATTEMPTS`             | `5`     | Max failed login attempts before lockout     |
 | `LOGIN_WINDOW_SECONDS`           | `900`   | Lockout window duration (15 min)             |
 | `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Max self-service device reset requests per window per email |
+| `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only) |
 | `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Rate-limit window for device resets (24 hr)  |
 | `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
@@ -11416,6 +11417,39 @@ without admin involvement, subject to a rate limit.
 count, and every other attempt (other device ids, no device id, the admin portal) shares the second. Someone who only
 knows a member's email can lock out other devices but never the member's own phone, and sending made-up device ids
 gets them no extra guesses.
+
+### One Discuva Sign-in (Phase 2, behind a switch)
+
+One email, password and device across every church a person belongs to. Off until the platform setting
+`discuva_account_mode` is raised: `0` off (default), `1` only churches listed in `DISCUVA_ACCOUNT_TEST_TENANTS`
+(comma-separated addresses), `2` every church.
+
+- **Tables.** Shared: `discuva_accounts` (lower-case `email` unique, `password`, `device_id`, `password_changed_at`,
+  `frozen_at`, `recovered_at`), `discuva_account_links` (`account_id`, `tenant_id`, `member_id`; unique
+  `(tenant_id, member_id)`, index on `account_id`), `discuva_account_codes` (emailed join/link/recover codes, hash only;
+  partial index `(email, purpose, device_id) WHERE used_at IS NULL`, index on `expires_at`). Per church:
+  `members.discuva_account_id` (partial index where set) marks a member who has moved.
+- **One password check.** `DiscuvaAccountService.verifyPassword()` is the only place a password is compared for member
+  sign-in and password change. With the switch on and `discuva_account_id` set it compares the account hash only, never
+  falling back to the church copy; otherwise the church copy. `deviceOf()` does the same for the one-device lock.
+- **Moving over.** After a good member-app sign-in (password and device both pass), `moveOnSignIn()` creates an account
+  from that church record (same hash and device), links it and sets the marker. If an account already uses that email,
+  nothing is linked on the password alone: the login response carries `account_link_available: true` and linking needs
+  an emailed code. Under-18s (from the birth year, an unknown month or day counting as late in the year) and members
+  without an email are never moved. A half-finished move (link written, marker not) is completed at the next sign-in.
+- **Both copies written.** While the trial runs, every password and device change for a moved member is written to the
+  account and to the member record at every linked church, so setting the switch back to `0` never locks anyone out.
+  Work at other churches runs in that church's own transaction (`forEachChurchOf()`), the current church inside the
+  request's.
+- **Signing out everywhere.** A password reset, device reset or admin device clear ends member-app and portal sessions at
+  every linked church (it clears each church's `member_sessions` row, which every request already checks). A password
+  change keeps the current church's session and ends the others. Device reset also stops push and removes passkeys at
+  every linked church.
+- **Limits.** For an email with an account, wrong-password, reset-request and code-guess counters are global Redis keys
+  (`global:login_fail:<email>:<device|other>` and so on) shared by all its churches, so more churches never means more tries.
+- **Email.** A moved member's email can't be changed by the member or an admin yet; that comes with account recovery.
+- **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
+  member, one read of the account by id. No scheduled work.
 
 ### OTP Verify Guess Limiting
 
@@ -13926,6 +13960,39 @@ without admin involvement, subject to a rate limit.
 count, and every other attempt (other device ids, no device id, the admin portal) shares the second. Someone who only
 knows a member's email can lock out other devices but never the member's own phone, and sending made-up device ids
 gets them no extra guesses.
+
+### One Discuva Sign-in (Phase 2, behind a switch)
+
+One email, password and device across every church a person belongs to. Off until the platform setting
+`discuva_account_mode` is raised: `0` off (default), `1` only churches listed in `DISCUVA_ACCOUNT_TEST_TENANTS`
+(comma-separated addresses), `2` every church.
+
+- **Tables.** Shared: `discuva_accounts` (lower-case `email` unique, `password`, `device_id`, `password_changed_at`,
+  `frozen_at`, `recovered_at`), `discuva_account_links` (`account_id`, `tenant_id`, `member_id`; unique
+  `(tenant_id, member_id)`, index on `account_id`), `discuva_account_codes` (emailed join/link/recover codes, hash only;
+  partial index `(email, purpose, device_id) WHERE used_at IS NULL`, index on `expires_at`). Per church:
+  `members.discuva_account_id` (partial index where set) marks a member who has moved.
+- **One password check.** `DiscuvaAccountService.verifyPassword()` is the only place a password is compared for member
+  sign-in and password change. With the switch on and `discuva_account_id` set it compares the account hash only, never
+  falling back to the church copy; otherwise the church copy. `deviceOf()` does the same for the one-device lock.
+- **Moving over.** After a good member-app sign-in (password and device both pass), `moveOnSignIn()` creates an account
+  from that church record (same hash and device), links it and sets the marker. If an account already uses that email,
+  nothing is linked on the password alone: the login response carries `account_link_available: true` and linking needs
+  an emailed code. Under-18s (from the birth year, an unknown month or day counting as late in the year) and members
+  without an email are never moved. A half-finished move (link written, marker not) is completed at the next sign-in.
+- **Both copies written.** While the trial runs, every password and device change for a moved member is written to the
+  account and to the member record at every linked church, so setting the switch back to `0` never locks anyone out.
+  Work at other churches runs in that church's own transaction (`forEachChurchOf()`), the current church inside the
+  request's.
+- **Signing out everywhere.** A password reset, device reset or admin device clear ends member-app and portal sessions at
+  every linked church (it clears each church's `member_sessions` row, which every request already checks). A password
+  change keeps the current church's session and ends the others. Device reset also stops push and removes passkeys at
+  every linked church.
+- **Limits.** For an email with an account, wrong-password, reset-request and code-guess counters are global Redis keys
+  (`global:login_fail:<email>:<device|other>` and so on) shared by all its churches, so more churches never means more tries.
+- **Email.** A moved member's email can't be changed by the member or an admin yet; that comes with account recovery.
+- **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
+  member, one read of the account by id. No scheduled work.
 
 ### OTP Verify Guess Limiting
 
@@ -22739,6 +22806,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `LOGIN_MAX_ATTEMPTS`             | `5`     | Max failed login attempts before lockout     |
 | `LOGIN_WINDOW_SECONDS`           | `900`   | Lockout window duration (15 min)             |
 | `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Max self-service device reset requests per window per email |
+| `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only) |
 | `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Rate-limit window for device resets (24 hr)  |
 | `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
