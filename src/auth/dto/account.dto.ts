@@ -1,5 +1,7 @@
 import {
+  IsBoolean,
   IsEmail,
+  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -16,6 +18,19 @@ export class AccountCodeDto {
   @IsString()
   @Length(6, 6)
   code: string;
+}
+
+// Global Profile: agreeing to share the person's Discuva profile with this church.
+export class LinkConfirmDto extends AccountCodeDto {
+  @IsOptional()
+  @IsBoolean()
+  consent?: boolean;
+}
+
+export class ConfirmDetailsDto {
+  // Field name to the value the person keeps: their profile's or this church's.
+  @IsObject()
+  choices: Record<string, 'YOURS' | 'HERE'>;
 }
 
 export class JoinStartDto {
@@ -43,6 +58,10 @@ export class JoinCompleteDto extends OmitType(SignupDto, [
   @IsString()
   @MaxLength(128)
   joinToken: string;
+
+  @IsOptional()
+  @IsBoolean()
+  consent?: boolean;
 
   @IsString()
   @MinLength(8)

@@ -164,4 +164,67 @@ describe('DiscuvaProfileService', () => {
       expect(memberRepo.update).not.toHaveBeenCalled();
     });
   });
+
+  describe('lining up a church copy with the profile', () => {
+    const profile = () => ({
+      accountId: 'acc-1',
+      firstname: 'Ada',
+      lastname: 'Okafor',
+      phoneNumber: '+2348012345678',
+      address: null,
+      maritalStatus: 'MARRIED',
+    });
+    const here = () =>
+      ({
+        id: 'm-here',
+        discuvaAccountId: 'acc-1',
+        firstname: 'Ada',
+        lastname: 'Okafor',
+        phoneNumber: '+2348099999999',
+        address: '12 Example Street',
+        maritalStatus: null,
+      }) as unknown as Member;
+
+    it('fills gaps on either side and leaves real differences to the person', async () => {
+      profileRepo.findOne.mockResolvedValue(profile());
+      const member = here();
+
+      const conflicts = await service.reconcile(member);
+
+      expect(conflicts).toEqual([
+        {
+          field: 'phoneNumber',
+          yours: '+2348012345678',
+          here: '+2348099999999',
+        },
+      ]);
+      expect(profileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ address: '12 Example Street' }),
+      );
+      expect(memberRepo.update).toHaveBeenCalledWith('m-here', {
+        maritalStatus: 'MARRIED',
+      });
+      expect(member.maritalStatus).toBe('MARRIED');
+    });
+
+    it('writes the chosen value everywhere', async () => {
+      profileRepo.findOne.mockResolvedValue(profile());
+
+      await service.resolve(here(), { phoneNumber: 'HERE' });
+
+      expect(profileRepo.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ phoneNumber: '+2348099999999' }),
+      );
+      expect(memberRepo.update).toHaveBeenCalledWith('m-other', {
+        phoneNumber: '+2348099999999',
+      });
+    });
+
+    it('needs a choice for every difference', async () => {
+      profileRepo.findOne.mockResolvedValue(profile());
+      await expect(service.resolve(here(), {})).rejects.toThrow(
+        'Please choose which details are right.',
+      );
+    });
+  });
 });

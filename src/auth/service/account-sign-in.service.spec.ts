@@ -11,6 +11,8 @@ import { AccountSignInService } from './account-sign-in.service';
 import { AuthService } from './auth.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
+import { DiscuvaProfileService } from '../../discuva-account/service/discuva-profile.service';
+import { profilesOffMock } from '../../discuva-account/testing/profiles-off.mock';
 import { MemberService } from '../../member/service/member.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -32,7 +34,9 @@ const codes = {
 };
 const accounts = {
   isOn: jest.fn(),
-  isProfileOn: jest.fn(),
+  isProfileOn: jest.fn().mockResolvedValue(false),
+  linkHere: jest.fn(),
+  recordConsent: jest.fn(),
   findByEmail: jest.fn(),
   findById: jest.fn(),
   basicsFrom: jest.fn(),
@@ -76,6 +80,8 @@ const account = {
   frozenAt: null,
 };
 
+const profiles = profilesOffMock();
+
 describe('AccountSignInService', () => {
   let service: AccountSignInService;
 
@@ -88,6 +94,7 @@ describe('AccountSignInService', () => {
       providers: [
         AccountSignInService,
         { provide: DiscuvaAccountService, useValue: accounts },
+        { provide: DiscuvaProfileService, useValue: profiles },
         { provide: DiscuvaAccountCodeService, useValue: codes },
         { provide: MemberService, useValue: memberService },
         { provide: AuthService, useValue: authService },
@@ -196,7 +203,7 @@ describe('AccountSignInService', () => {
         account,
         'phone-123',
       );
-      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2');
+      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2', false);
       expect(authService.startMemberSession).toHaveBeenCalled();
       expect(store.size).toBe(0);
     });
@@ -276,7 +283,7 @@ describe('AccountSignInService', () => {
         'new-hash',
         'phone-123',
       );
-      expect(accounts.link).toHaveBeenCalledWith('a9', 'm9');
+      expect(accounts.link).toHaveBeenCalledWith('a9', 'm9', false);
     });
 
     it('asks for a name when the account has no church left to bring it from', async () => {
@@ -453,7 +460,7 @@ describe('AccountSignInService', () => {
       accounts.findByEmail.mockResolvedValue(account);
       await service.confirmLink('m2', '123456');
       expect(codes.verifyCode).toHaveBeenCalled();
-      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2');
+      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2', false);
       expect(memberService.applyAccountCredentials).toHaveBeenCalledWith(
         'm2',
         account,
@@ -664,6 +671,9 @@ describe('AccountSignInService', () => {
         moved: false,
         linkAvailable: true,
         email: 'ada@example.com',
+        profile: false,
+        needsConsent: false,
+        detailsToConfirm: [],
       });
     });
 
@@ -686,6 +696,138 @@ describe('AccountSignInService', () => {
       memberService.getById.mockResolvedValue(member);
       await service.signOutEverywhere('m1');
       expect(accounts.endSessionsEverywhere).toHaveBeenCalledWith(member);
+    });
+  });
+
+  describe('with Global Profile on', () => {
+    const holder = {
+      id: 'm2',
+      email: 'ada@example.com',
+      discuvaAccountId: 'a1',
+    };
+    beforeEach(() => {
+      accounts.isOn.mockResolvedValue(true);
+      accounts.isProfileOn.mockResolvedValue(true);
+      profiles.ownerOf.mockResolvedValue('a1');
+    });
+    afterEach(() => {
+      accounts.isProfileOn.mockResolvedValue(false);
+      profiles.ownerOf.mockResolvedValue(null);
+      profiles.basicsFor.mockResolvedValue(null);
+      profiles.reconcile.mockResolvedValue([]);
+    });
+
+    const ticketFor = async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.findById.mockResolvedValue(account);
+      return (
+        (await service.verifyJoin(
+          'ada@example.com',
+          '123456',
+          'phone-123',
+        )) as { joinToken: string }
+      ).joinToken;
+    };
+
+    it('asks the person to agree before joining shares their profile', async () => {
+      const joinToken = await ticketFor();
+      await expect(
+        service.completeJoin({ joinToken, deviceId: 'phone-123' } as never),
+      ).rejects.toThrow('Please agree to share your Discuva profile');
+      expect(memberService.createForAccount).not.toHaveBeenCalled();
+    });
+
+    it('joins from the profile, records the agreement and lines the copies up', async () => {
+      profiles.basicsFor.mockResolvedValue({
+        firstname: 'Ada',
+        lastname: 'Obi',
+        address: '12 Example Street',
+      });
+      const joinToken = await ticketFor();
+      memberService.createForAccount.mockResolvedValue({ id: 'm2' });
+      memberService.getById.mockResolvedValue(holder);
+
+      await service.completeJoin({
+        joinToken,
+        deviceId: 'phone-123',
+        consent: true,
+      } as never);
+
+      expect(memberService.createForAccount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          firstname: 'Ada',
+          address: '12 Example Street',
+        }),
+        account,
+        'phone-123',
+      );
+      expect(accounts.basicsFrom).not.toHaveBeenCalled();
+      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2', true);
+      expect(profiles.reconcile).toHaveBeenCalledWith(holder);
+    });
+
+    it('asks for agreement before adding this church, then lines the copies up', async () => {
+      const member = {
+        id: 'm2',
+        email: 'ada@example.com',
+        deviceId: 'phone-123',
+        discuvaAccountId: null,
+      };
+      memberService.getByIdWithCredentials.mockResolvedValue(member);
+      accounts.findByEmail.mockResolvedValue(account);
+
+      await expect(service.confirmLink('m2', '123456')).rejects.toThrow(
+        'Please agree',
+      );
+      expect(accounts.link).not.toHaveBeenCalled();
+
+      await service.confirmLink('m2', '123456', true);
+      expect(accounts.link).toHaveBeenCalledWith('a1', 'm2', true);
+      expect(profiles.reconcile).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'm2', discuvaAccountId: 'a1' }),
+      );
+    });
+
+    it('shows the one-time agreement and any details to choose between', async () => {
+      const differs = [
+        { field: 'phoneNumber', yours: '+234801', here: '+234802' },
+      ];
+      memberService.getById.mockResolvedValue(holder);
+      accounts.linkHere.mockResolvedValue({ consentedAt: null });
+      profiles.reconcile.mockResolvedValue(differs);
+
+      await expect(service.status('m2')).resolves.toMatchObject({
+        moved: true,
+        profile: true,
+        needsConsent: true,
+        detailsToConfirm: differs,
+      });
+
+      accounts.linkHere.mockResolvedValue({ consentedAt: new Date() });
+      await expect(service.status('m2')).resolves.toMatchObject({
+        needsConsent: false,
+      });
+    });
+
+    it('records agreement and the chosen details for this church', async () => {
+      memberService.getById.mockResolvedValue(holder);
+      await service.consent('m2');
+      expect(accounts.recordConsent).toHaveBeenCalledWith('m2');
+
+      await service.confirmDetails('m2', { phoneNumber: 'HERE' });
+      expect(profiles.resolve).toHaveBeenCalledWith(holder, {
+        phoneNumber: 'HERE',
+      });
+    });
+
+    it('offers neither while Global Profile is off here', async () => {
+      memberService.getById.mockResolvedValue(holder);
+      profiles.ownerOf.mockResolvedValue(null);
+      await expect(service.consent('m2')).rejects.toThrow(NotFoundException);
+      await expect(
+        service.confirmDetails('m2', { phoneNumber: 'HERE' }),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

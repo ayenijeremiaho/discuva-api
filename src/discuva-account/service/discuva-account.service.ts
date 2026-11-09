@@ -406,13 +406,36 @@ export class DiscuvaAccountService {
     this.forgetMemo();
   }
 
-  async link(accountId: string, memberId: string): Promise<void> {
+  async link(
+    accountId: string,
+    memberId: string,
+    consented = false,
+  ): Promise<void> {
     const tenantId = this.cls.get('tenantId');
-    await this.linkRepo.upsert({ accountId, tenantId, memberId }, [
-      'tenantId',
-      'memberId',
-    ]);
+    await this.linkRepo.upsert(
+      {
+        accountId,
+        tenantId,
+        memberId,
+        ...(consented && { consentedAt: new Date() }),
+      },
+      ['tenantId', 'memberId'],
+    );
     await this.memberRepo.update(memberId, { discuvaAccountId: accountId });
+  }
+
+  async linkHere(memberId: string): Promise<DiscuvaAccountLink | null> {
+    return this.linkRepo.findOne({
+      where: { tenantId: this.cls.get('tenantId'), memberId },
+    });
+  }
+
+  // Agreement to share the Discuva profile with this church, for people linked before it was asked.
+  async recordConsent(memberId: string): Promise<void> {
+    await this.linkRepo.update(
+      { tenantId: this.cls.get('tenantId'), memberId },
+      { consentedAt: new Date() },
+    );
   }
 
   async linksOf(accountId: string): Promise<DiscuvaAccountLink[]> {

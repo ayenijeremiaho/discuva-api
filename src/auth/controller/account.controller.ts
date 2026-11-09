@@ -16,8 +16,9 @@ import { AccountSignInService } from '../service/account-sign-in.service';
 import {
   ConfirmDeviceDto,
   ConfirmDeviceRequestDto,
-  AccountCodeDto,
+  ConfirmDetailsDto,
   AccountLinkTokenDto,
+  LinkConfirmDto,
   HandoffDto,
   JoinCompleteDto,
   JoinStartDto,
@@ -41,6 +42,27 @@ export class AccountController {
   status(@Request() req: any) {
     this.assertMemberApp(req);
     return this.accountSignIn.status(req.user.id);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('account/consent')
+  async consent(@Request() req: any): Promise<{ message: string }> {
+    this.assertMemberApp(req);
+    await this.accountSignIn.consent(req.user.id);
+    return {
+      message: 'Thanks. Your Discuva profile is shared with this church.',
+    };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('account/details')
+  async confirmDetails(
+    @Request() req: any,
+    @Body() dto: ConfirmDetailsDto,
+  ): Promise<{ message: string }> {
+    this.assertMemberApp(req);
+    await this.accountSignIn.confirmDetails(req.user.id, dto.choices);
+    return { message: 'Your details are now the same at every church.' };
   }
 
   @HttpCode(HttpStatus.OK)
@@ -120,10 +142,10 @@ export class AccountController {
   @Post('account/link/confirm')
   async confirmLink(
     @Request() req: any,
-    @Body() dto: AccountCodeDto,
+    @Body() dto: LinkConfirmDto,
   ): Promise<{ message: string }> {
     this.assertMemberApp(req);
-    await this.accountSignIn.confirmLink(req.user.id, dto.code);
+    await this.accountSignIn.confirmLink(req.user.id, dto.code, dto.consent);
     return { message: 'This church is now on your Discuva account.' };
   }
 

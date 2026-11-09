@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { DiscuvaProfile } from '../entity/discuva-profile.entity';
@@ -30,6 +30,14 @@ export type ProfilePatch = Partial<
 >;
 
 type ProfileOwner = Pick<Member, 'id' | 'discuvaAccountId'>;
+
+export interface DetailToConfirm {
+  field: ProfileField;
+  yours: unknown;
+  here: unknown;
+}
+
+export type DetailChoice = 'YOURS' | 'HERE';
 
 @Injectable()
 export class DiscuvaProfileService {
@@ -88,6 +96,55 @@ export class DiscuvaProfileService {
 
   async get(member: ProfileOwner): Promise<DiscuvaProfile | null> {
     return (await this.ownerOf(member)) ? this.ensure(member) : null;
+  }
+
+  // What a new church starts with when someone joins with their account; null before they have a profile.
+  async basicsFor(accountId: string): Promise<Partial<Member> | null> {
+    const profile = await this.profileRepo.findOne({ where: { accountId } });
+    if (!profile) return null;
+    return Object.fromEntries(PROFILE_FIELDS.map((f) => [f, profile[f]]));
+  }
+
+  // Brings this church's copy and the profile together: a value missing on one side is filled from the other;
+  // two different values are left for the person to choose between.
+  async reconcile(member: Member): Promise<DetailToConfirm[]> {
+    const profile = await this.ensure(member);
+    const toProfile: Partial<Record<ProfileField, unknown>> = {};
+    const toChurch: Partial<Record<ProfileField, unknown>> = {};
+    const conflicts: DetailToConfirm[] = [];
+    for (const field of PROFILE_FIELDS) {
+      const yours = profile[field] ?? null;
+      const here = member[field] ?? null;
+      if (yours === here) continue;
+      if (yours === null) toProfile[field] = here;
+      else if (here === null) toChurch[field] = yours;
+      else conflicts.push({ field, yours, here });
+    }
+    if (Object.keys(toProfile).length) {
+      await this.update(member, toProfile as ProfilePatch);
+    }
+    if (Object.keys(toChurch).length) {
+      await this.memberRepo.update(member.id, toChurch as ProfilePatch);
+      Object.assign(member, toChurch);
+    }
+    return conflicts;
+  }
+
+  // The person's answer to "Which details are right?", written to the profile and every church.
+  async resolve(
+    member: Member,
+    choices: Record<string, DetailChoice>,
+  ): Promise<void> {
+    const conflicts = await this.reconcile(member);
+    const patch: Partial<Record<ProfileField, unknown>> = {};
+    for (const { field, yours, here } of conflicts) {
+      const choice = choices[field];
+      if (choice !== 'YOURS' && choice !== 'HERE') {
+        throw new BadRequestException('Please choose which details are right.');
+      }
+      patch[field] = choice === 'YOURS' ? yours : here;
+    }
+    await this.update(member, patch as ProfilePatch);
   }
 
   // Saves to the profile, then to every church's copy so existing screens and reports keep reading their own row.
