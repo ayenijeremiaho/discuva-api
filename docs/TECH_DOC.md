@@ -9032,7 +9032,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `LOGIN_MAX_ATTEMPTS`             | `5`     | Starting value for the console setting `login_max_attempts` until it's saved there |
 | `LOGIN_WINDOW_SECONDS`           | `900`   | Starting value (in seconds) for the console setting `login_lock_minutes` until it's saved there |
 | `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Starting value for the console setting `device_reset_max_requests` (requests per window per email and device) until it's saved there |
-| `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only) |
+| `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only), and Global Profile while `discuva_profile_mode` is `1` |
 | `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Starting value (in seconds) for the console setting `device_reset_window_hours` until it's saved there |
 | `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Starting value for the console setting `otp_verify_max_attempts`. Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
@@ -11522,9 +11522,10 @@ One email, password and device across every church a person belongs to. Off unti
   logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
   address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
   account's own device, once, within 60 seconds.
-- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available}`: whether One Discuva sign-in is on
-  for this church, so the app shows email-first joining instead of the old sign-up); `GET /auth/account` (member app,
-  `{enabled, moved, linkAvailable, email}`); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
+- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available, profile}`: whether One Discuva sign-in
+  and Global Profile are on for this church, so the app shows email-first joining instead of the old sign-up and gates
+  the Phase 3 screens); `GET /auth/account` (member app, `{enabled, moved, linkAvailable, email, profile, needsConsent,
+  detailsToConfirm, deletesOn}`; the last four are Phase 3, below); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
   portal sessions at every linked church, this one included). The admin member list and detail carry
   `hasDiscuvaAccount`, so the portal offers Recover account only for those members.
 - **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
@@ -11536,6 +11537,79 @@ One email, password and device across every church a person belongs to. Off unti
   change, freeze, recovery); `DiscuvaAccountCodeService` holds emailed codes (`sendCode`, `verifyCode`), the security-email
   link tokens (`issueLinkToken`, `findLinkToken`, `markUsed`; a link is used up only after its change has worked) and the
   nightly purge (one `DELETE ... WHERE used_at IS NOT NULL OR expires_at < now`).
+
+### Global Profile and milestones (Phase 3, behind a switch)
+
+Each person with a Discuva account owns one profile; each church keeps its own copy of the basics, kept in step, so every
+existing screen, report and query keeps reading the church's `members` row. Off until the platform setting
+`discuva_profile_mode` (console label "Global Profile") is raised: `0` off (default), `1` the churches in
+`DISCUVA_ACCOUNT_TEST_TENANTS`, `2` every church; it only applies where One Discuva sign-in is also on
+(`DiscuvaAccountService.isProfileOn()`). It covers members with `discuva_account_id` set; everyone else is unchanged.
+
+- **Tables (root).** `discuva_profiles` (PK `account_id`, cascades with the account): `firstname`, `lastname`,
+  `phone_number`, `gender`, `birth_day/month/year`, `marital_status`, `address`, `emergency_contact_name/phone/relationship`,
+  `photo_url`, `photo_public_id`, `appearance_mode`, `muted_notifications`. `discuva_milestones`: `type` (`SALVATION`,
+  `BAPTISM`, `MEMBERSHIP_CLASS`, `WORKERS_TRAINING`, `MARRIAGE`, `OTHER`), `title`, `month`, `year`, `place_tenant_id`,
+  `place_name`, `source` (`MEMBER` or `CHURCH`), `source_tenant_id`, `source_name`, `source_ref`, `visibility` (`PRIVATE` or
+  `CHURCHES`, default), `hidden`; unique `(account_id, source_tenant_id, source_ref) WHERE source_ref IS NOT NULL` so
+  re-recording is harmless, and `(account_id, year DESC, month DESC)` for the list. `discuva_photo_removals`
+  (`account_id, tenant_id, admin_id, reason, note, created_at`; indexes `(account_id, created_at DESC)` and `(created_at)`).
+  New columns: `discuva_account_links.consented_at`, `discuva_accounts.delete_requested_at`.
+- **Tables (tenant).** `members.address` (300), `emergency_contact_name` (120), `emergency_contact_phone` (32),
+  `emergency_contact_relationship` (60), all nullable and editable by admins for people without a profile;
+  `class_types.counts_as` (`MEMBERSHIP_CLASS`, `WORKERS_TRAINING` or null).
+- **Who edits the basics.** With Global Profile on, `PATCH /members/:id` refuses (`403`) any change to an account holder's
+  name, phone, birthday, gender, marital status, address or emergency contact; unchanged values sent by a full form are
+  ignored, and church fields (date joined, worker and clergy details, status) stay editable. `PATCH /members/me`,
+  `PATCH /members/me/appearance` and notification choices save to the profile and every linked church
+  (`DiscuvaProfileService.update`, fanning out through `forEachChurchOf`). The profile is created from the current
+  church's full record the first time it's needed (`ensure`), and the person's `year_born_again` and `year_baptized`
+  become their own milestones then.
+- **Joining and linking.** Joining with an account starts the new church from the profile. With Global Profile on,
+  `POST /auth/join/complete` and `POST /auth/account/link/confirm` need `consent: true` (`400` otherwise) and record
+  `consented_at`; people linked earlier see `needsConsent` once and answer with `POST /auth/account/consent`. Linking and
+  `GET /auth/account` reconcile the church copy with the profile: a value missing on one side is filled from the other;
+  two different values come back in `detailsToConfirm` (`[{field, yours, here}]`) until the person answers
+  `POST /auth/account/details {choices: {field: 'YOURS' | 'HERE'}}`, which writes the choice everywhere.
+- **Milestones.** `GET|POST /members/me/milestones`, `PATCH|DELETE /members/me/milestones/:milestoneId` (member).
+  Church-recorded milestones can be hidden or made private but not changed or deleted (`403`). Completing an enrolment
+  (`closeClass`, `updateEnrollmentStatus`) in a class whose type `counts_as` a milestone records one per enrolment
+  (`source_ref = enrollment:<id>`). Admins: `GET /members/:id/milestones` (`MEMBERS_READ`; only those shared with
+  churches and not hidden) and `POST /members/:id/milestones/baptism {month?, year}` (`MEMBERS_WRITE`; always sets the
+  church's `year_baptized`, and records the milestone for an account holder). Saving a salvation or baptism year writes
+  `year_born_again` / `year_baptized` to every church copy.
+- **Photos.** An account holder's photo is uploaded to `accounts/<accountId>/profile-pictures/` (never a church folder,
+  so deleting a church can't remove it); church copies hold only `photo_url` with `photo_public_id` null.
+  `DELETE /members/:id/photo` takes `{reason, note?}` (`NOT_A_PERSON`, `OFFENSIVE`, `SOMEONE_ELSE`, `OTHER`), required for
+  account holders: the photo is cleared everywhere, the removal logged, and the person emailed (`discuva-photo-removed`).
+  `GET /platform/photo-reports` (`TENANTS_READ`) lists people with at least `photo_report_removals` (3) removals in
+  `photo_report_window_days` (90).
+- **Two emails, one account.** `POST /auth/account/merge/start {email}` sends a `MERGE` code to both addresses;
+  `POST /auth/account/merge/confirm {email, codeHere, codeOther}` moves the other account's links, milestones and photo
+  history onto this one, gives those churches' records this email and password, and removes the other account. Refused
+  when both are at one church, the kept email belongs to someone else at one of those churches, or either is frozen or
+  being deleted.
+- **Your data.** `GET /auth/account/data.pdf` (A4, Discuva-branded: profile, milestones with who recorded them and who
+  sees them, churches) and `GET /auth/account/data.json` (same content). Never a church's own records, file ids or the
+  password.
+- **Deleting an account.** `POST /auth/account/delete {password}` sets `delete_requested_at`, queues a Bull job on
+  `discuva-account-deletion` delayed by `account_delete_grace_days` (14), and emails a keep link
+  (`discuva-account-deletion`, `DELETE_CANCEL` token valid for the grace period). `POST /auth/account/delete/cancel`
+  (signed in) or `POST /auth/account/keep {accountId, token}` (`@Public()`) cancels; a job whose request time no longer
+  matches does nothing. The job ends sessions, turns each church's record into "Former member"
+  (`former-<memberId>@deleted.invalid`, personal details and photo cleared, `INACTIVE`, unlinked), deletes the account
+  (cascading profile, milestones, removals, links, codes) and its files. Attendance, giving and other history stay, so
+  totals don't change. There is still no `DELETE /members/:id`.
+- **Settings.** `discuva_profile_mode` (0), `photo_report_removals` (3), `photo_report_window_days` (90),
+  `account_delete_grace_days` (14), all in `KNOWN_PLATFORM_SETTINGS`.
+- **Database cost.** An edit writes one profile row plus one row per linked church (usually one to three). Account status
+  adds the link and profile reads by primary key. Milestones are read by the indexed `account_id` on two screens. No
+  scheduler: deletion uses one delayed job per request.
+- **Code layout.** `DiscuvaProfileService` (ownership, `ensure`, `update`, `reconcile`, `resolve`, photos),
+  `MilestoneService`, `PhotoRemovalService`, `AccountDataService`, `AccountDeletionService` with
+  `AccountDeletionProcessor`, all in `src/discuva-account/`; `AccountMergeService` in `src/auth/service/`.
+- **Known gap.** A photo uploaded before Global Profile stays in that church's folder until the person uploads a new one;
+  if that church is deleted, the photo goes with it.
 
 ### OTP Verify Guess Limiting
 
@@ -14163,9 +14237,10 @@ One email, password and device across every church a person belongs to. Off unti
   logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
   address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
   account's own device, once, within 60 seconds.
-- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available}`: whether One Discuva sign-in is on
-  for this church, so the app shows email-first joining instead of the old sign-up); `GET /auth/account` (member app,
-  `{enabled, moved, linkAvailable, email}`); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
+- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available, profile}`: whether One Discuva sign-in
+  and Global Profile are on for this church, so the app shows email-first joining instead of the old sign-up and gates
+  the Phase 3 screens); `GET /auth/account` (member app, `{enabled, moved, linkAvailable, email, profile, needsConsent,
+  detailsToConfirm, deletesOn}`; the last four are Phase 3, below); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
   portal sessions at every linked church, this one included). The admin member list and detail carry
   `hasDiscuvaAccount`, so the portal offers Recover account only for those members.
 - **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
@@ -14177,6 +14252,79 @@ One email, password and device across every church a person belongs to. Off unti
   change, freeze, recovery); `DiscuvaAccountCodeService` holds emailed codes (`sendCode`, `verifyCode`), the security-email
   link tokens (`issueLinkToken`, `findLinkToken`, `markUsed`; a link is used up only after its change has worked) and the
   nightly purge (one `DELETE ... WHERE used_at IS NOT NULL OR expires_at < now`).
+
+### Global Profile and milestones (Phase 3, behind a switch)
+
+Each person with a Discuva account owns one profile; each church keeps its own copy of the basics, kept in step, so every
+existing screen, report and query keeps reading the church's `members` row. Off until the platform setting
+`discuva_profile_mode` (console label "Global Profile") is raised: `0` off (default), `1` the churches in
+`DISCUVA_ACCOUNT_TEST_TENANTS`, `2` every church; it only applies where One Discuva sign-in is also on
+(`DiscuvaAccountService.isProfileOn()`). It covers members with `discuva_account_id` set; everyone else is unchanged.
+
+- **Tables (root).** `discuva_profiles` (PK `account_id`, cascades with the account): `firstname`, `lastname`,
+  `phone_number`, `gender`, `birth_day/month/year`, `marital_status`, `address`, `emergency_contact_name/phone/relationship`,
+  `photo_url`, `photo_public_id`, `appearance_mode`, `muted_notifications`. `discuva_milestones`: `type` (`SALVATION`,
+  `BAPTISM`, `MEMBERSHIP_CLASS`, `WORKERS_TRAINING`, `MARRIAGE`, `OTHER`), `title`, `month`, `year`, `place_tenant_id`,
+  `place_name`, `source` (`MEMBER` or `CHURCH`), `source_tenant_id`, `source_name`, `source_ref`, `visibility` (`PRIVATE` or
+  `CHURCHES`, default), `hidden`; unique `(account_id, source_tenant_id, source_ref) WHERE source_ref IS NOT NULL` so
+  re-recording is harmless, and `(account_id, year DESC, month DESC)` for the list. `discuva_photo_removals`
+  (`account_id, tenant_id, admin_id, reason, note, created_at`; indexes `(account_id, created_at DESC)` and `(created_at)`).
+  New columns: `discuva_account_links.consented_at`, `discuva_accounts.delete_requested_at`.
+- **Tables (tenant).** `members.address` (300), `emergency_contact_name` (120), `emergency_contact_phone` (32),
+  `emergency_contact_relationship` (60), all nullable and editable by admins for people without a profile;
+  `class_types.counts_as` (`MEMBERSHIP_CLASS`, `WORKERS_TRAINING` or null).
+- **Who edits the basics.** With Global Profile on, `PATCH /members/:id` refuses (`403`) any change to an account holder's
+  name, phone, birthday, gender, marital status, address or emergency contact; unchanged values sent by a full form are
+  ignored, and church fields (date joined, worker and clergy details, status) stay editable. `PATCH /members/me`,
+  `PATCH /members/me/appearance` and notification choices save to the profile and every linked church
+  (`DiscuvaProfileService.update`, fanning out through `forEachChurchOf`). The profile is created from the current
+  church's full record the first time it's needed (`ensure`), and the person's `year_born_again` and `year_baptized`
+  become their own milestones then.
+- **Joining and linking.** Joining with an account starts the new church from the profile. With Global Profile on,
+  `POST /auth/join/complete` and `POST /auth/account/link/confirm` need `consent: true` (`400` otherwise) and record
+  `consented_at`; people linked earlier see `needsConsent` once and answer with `POST /auth/account/consent`. Linking and
+  `GET /auth/account` reconcile the church copy with the profile: a value missing on one side is filled from the other;
+  two different values come back in `detailsToConfirm` (`[{field, yours, here}]`) until the person answers
+  `POST /auth/account/details {choices: {field: 'YOURS' | 'HERE'}}`, which writes the choice everywhere.
+- **Milestones.** `GET|POST /members/me/milestones`, `PATCH|DELETE /members/me/milestones/:milestoneId` (member).
+  Church-recorded milestones can be hidden or made private but not changed or deleted (`403`). Completing an enrolment
+  (`closeClass`, `updateEnrollmentStatus`) in a class whose type `counts_as` a milestone records one per enrolment
+  (`source_ref = enrollment:<id>`). Admins: `GET /members/:id/milestones` (`MEMBERS_READ`; only those shared with
+  churches and not hidden) and `POST /members/:id/milestones/baptism {month?, year}` (`MEMBERS_WRITE`; always sets the
+  church's `year_baptized`, and records the milestone for an account holder). Saving a salvation or baptism year writes
+  `year_born_again` / `year_baptized` to every church copy.
+- **Photos.** An account holder's photo is uploaded to `accounts/<accountId>/profile-pictures/` (never a church folder,
+  so deleting a church can't remove it); church copies hold only `photo_url` with `photo_public_id` null.
+  `DELETE /members/:id/photo` takes `{reason, note?}` (`NOT_A_PERSON`, `OFFENSIVE`, `SOMEONE_ELSE`, `OTHER`), required for
+  account holders: the photo is cleared everywhere, the removal logged, and the person emailed (`discuva-photo-removed`).
+  `GET /platform/photo-reports` (`TENANTS_READ`) lists people with at least `photo_report_removals` (3) removals in
+  `photo_report_window_days` (90).
+- **Two emails, one account.** `POST /auth/account/merge/start {email}` sends a `MERGE` code to both addresses;
+  `POST /auth/account/merge/confirm {email, codeHere, codeOther}` moves the other account's links, milestones and photo
+  history onto this one, gives those churches' records this email and password, and removes the other account. Refused
+  when both are at one church, the kept email belongs to someone else at one of those churches, or either is frozen or
+  being deleted.
+- **Your data.** `GET /auth/account/data.pdf` (A4, Discuva-branded: profile, milestones with who recorded them and who
+  sees them, churches) and `GET /auth/account/data.json` (same content). Never a church's own records, file ids or the
+  password.
+- **Deleting an account.** `POST /auth/account/delete {password}` sets `delete_requested_at`, queues a Bull job on
+  `discuva-account-deletion` delayed by `account_delete_grace_days` (14), and emails a keep link
+  (`discuva-account-deletion`, `DELETE_CANCEL` token valid for the grace period). `POST /auth/account/delete/cancel`
+  (signed in) or `POST /auth/account/keep {accountId, token}` (`@Public()`) cancels; a job whose request time no longer
+  matches does nothing. The job ends sessions, turns each church's record into "Former member"
+  (`former-<memberId>@deleted.invalid`, personal details and photo cleared, `INACTIVE`, unlinked), deletes the account
+  (cascading profile, milestones, removals, links, codes) and its files. Attendance, giving and other history stay, so
+  totals don't change. There is still no `DELETE /members/:id`.
+- **Settings.** `discuva_profile_mode` (0), `photo_report_removals` (3), `photo_report_window_days` (90),
+  `account_delete_grace_days` (14), all in `KNOWN_PLATFORM_SETTINGS`.
+- **Database cost.** An edit writes one profile row plus one row per linked church (usually one to three). Account status
+  adds the link and profile reads by primary key. Milestones are read by the indexed `account_id` on two screens. No
+  scheduler: deletion uses one delayed job per request.
+- **Code layout.** `DiscuvaProfileService` (ownership, `ensure`, `update`, `reconcile`, `resolve`, photos),
+  `MilestoneService`, `PhotoRemovalService`, `AccountDataService`, `AccountDeletionService` with
+  `AccountDeletionProcessor`, all in `src/discuva-account/`; `AccountMergeService` in `src/auth/service/`.
+- **Known gap.** A photo uploaded before Global Profile stays in that church's folder until the person uploads a new one;
+  if that church is deleted, the photo goes with it.
 
 ### OTP Verify Guess Limiting
 
@@ -23002,7 +23150,7 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `LOGIN_MAX_ATTEMPTS`             | `5`     | Starting value for the console setting `login_max_attempts` until it's saved there |
 | `LOGIN_WINDOW_SECONDS`           | `900`   | Starting value (in seconds) for the console setting `login_lock_minutes` until it's saved there |
 | `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Starting value for the console setting `device_reset_max_requests` (requests per window per email and device) until it's saved there |
-| `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only) |
+| `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only), and Global Profile while `discuva_profile_mode` is `1` |
 | `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Starting value (in seconds) for the console setting `device_reset_window_hours` until it's saved there |
 | `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Starting value for the console setting `otp_verify_max_attempts`. Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
