@@ -1,4 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { accountsOffMock } from '../../discuva-account/testing/accounts-off.mock';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import {
   BadRequestException,
   ConflictException,
@@ -65,6 +69,9 @@ const mockCacheService = {
   set: jest.fn().mockResolvedValue(undefined),
   del: jest.fn().mockResolvedValue(1),
   incr: jest.fn().mockResolvedValue(1),
+  getGlobal: jest.fn().mockResolvedValue(0),
+  incrGlobal: jest.fn().mockResolvedValue(1),
+  delGlobal: jest.fn().mockResolvedValue(1),
   acquireLock: jest.fn().mockResolvedValue(true),
   releaseLock: jest.fn(),
   blacklistJti: jest.fn().mockResolvedValue(undefined),
@@ -153,6 +160,30 @@ const mockJwtService = {
   signAsync: jest.fn(),
 };
 
+const SETTING_VALUES: Record<string, number> = {
+  login_max_attempts: 5,
+  login_lock_minutes: 15,
+  portal_login_cap: 20,
+  device_reset_max_requests: 3,
+  device_reset_window_hours: 24,
+  otp_verify_max_attempts: 5,
+};
+const mockPlatformSettings = {
+  getNumber: jest.fn(async (key: string) => SETTING_VALUES[key]),
+};
+
+const mockAccounts = accountsOffMock({
+  updateMember: (id, patch) =>
+    'deviceId' in patch
+      ? mockMemberService.setDeviceId(id, patch.deviceId)
+      : undefined,
+  endSessions: (id) =>
+    Promise.all([
+      mockSessionService.updateLogout(id, SessionSurface.MEMBER),
+      mockSessionService.updateLogout(id, SessionSurface.ADMIN),
+    ]),
+});
+
 const mockConfigService = {
   get: jest.fn(),
 };
@@ -186,6 +217,12 @@ describe('AuthService', () => {
         AuthService,
         { provide: MemberService, useValue: mockMemberService },
         { provide: MemberSessionService, useValue: mockSessionService },
+        { provide: DiscuvaAccountService, useValue: mockAccounts },
+        { provide: PlatformSettingsService, useValue: mockPlatformSettings },
+        {
+          provide: DiscuvaAccountCodeService,
+          useValue: { purge: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: UtilityService, useValue: mockUtilityService },
@@ -1771,6 +1808,198 @@ describe('AuthService', () => {
         memberId: 'member-1',
         usedAt: expect.anything(),
       });
+    });
+  });
+
+  describe('with a Discuva account', () => {
+    const user = {
+      id: 'member-1',
+      role: MemberRoleEnum.MEMBER,
+      requiresPasswordChange: false,
+      surface: SessionSurface.MEMBER,
+    };
+
+    beforeEach(() => {
+      mockJwtService.signAsync.mockResolvedValue('t');
+      mockSessionService.updateLogin.mockResolvedValue(undefined);
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('h');
+    });
+
+    it('counts wrong passwords across all the churches the account belongs to', async () => {
+      mockAccounts.hasAccount.mockResolvedValueOnce(true);
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        password: 'p',
+        status: MemberStatusEnum.ACTIVE,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+
+      await expect(
+        service.validateMember('test@test.com', 'wrong', 'phone'),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(mockCacheService.getGlobal).toHaveBeenCalledWith(
+        'login_fail:test@test.com:other',
+      );
+      expect(mockCacheService.incrGlobal).toHaveBeenCalled();
+      expect(mockCacheService.incr).not.toHaveBeenCalled();
+    });
+
+    it('refuses a frozen account even with the right password', async () => {
+      mockMemberService.findByEmail.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        password: 'p',
+        status: MemberStatusEnum.ACTIVE,
+      });
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      mockAccounts.isFrozen.mockResolvedValueOnce(true);
+      await expect(
+        service.validateMember('test@test.com', 'right', 'phone'),
+      ).rejects.toThrow('frozen');
+    });
+
+    it('asks a new church app on an unknown phone to confirm by email, without registering it', async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        deviceId: null,
+        discuvaAccountId: 'a1',
+      });
+      mockAccounts.needsDeviceConfirmation.mockResolvedValueOnce(true);
+
+      await expect(service.login(user, 'church-b-app')).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'DEVICE_CONFIRMATION_REQUIRED',
+        }),
+      });
+      expect(mockAccounts.registerDevice).not.toHaveBeenCalled();
+      expect(mockSessionService.updateLogin).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a phone other than the one this church app is registered on', async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        deviceId: 'their-phone',
+        discuvaAccountId: 'a1',
+      });
+      await expect(service.login(user, 'another-phone')).rejects.toThrow(
+        'already registered on another device',
+      );
+    });
+
+    it('moves the member over after a good sign-in and says when another church can be linked', async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        deviceId: 'phone',
+      });
+      mockAccounts.moveOnSignIn.mockResolvedValueOnce('LINK_AVAILABLE');
+
+      const result = await service.login(user, 'phone');
+
+      expect(mockAccounts.moveOnSignIn).toHaveBeenCalled();
+      expect(result.account_link_available).toBe(true);
+    });
+  });
+
+  describe('admin portal sign-in limits', () => {
+    const member = {
+      id: 'member-1',
+      firstname: 'Ada',
+      email: 'admin@test.com',
+      password: 'p',
+      status: MemberStatusEnum.ACTIVE,
+      role: MemberRoleEnum.MEMBER,
+    };
+    const counts = new Map<string, number>();
+
+    beforeEach(() => {
+      counts.clear();
+      mockMemberService.findByEmail.mockResolvedValue(member);
+      mockCacheService.get.mockImplementation(
+        async (k: string) => counts.get(k) ?? 0,
+      );
+      mockCacheService.incr.mockImplementation(async (k: string) => {
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+        return counts.get(k);
+      });
+    });
+    afterEach(() => {
+      mockCacheService.get.mockResolvedValue(0);
+      mockCacheService.incr.mockResolvedValue(1);
+    });
+
+    it("a stranger's wrong passwords lock out only their own address", async () => {
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+      for (let i = 0; i < 5; i++) {
+        await expect(
+          service.validateMember('admin@test.com', 'x', undefined, {
+            ip: '1.1.1.1',
+          }),
+        ).rejects.toThrow(UnauthorizedException);
+      }
+      await expect(
+        service.validateMember('admin@test.com', 'x', undefined, {
+          ip: '1.1.1.1',
+        }),
+      ).rejects.toThrow(HttpException);
+
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      await expect(
+        service.validateMember('admin@test.com', 'right', undefined, {
+          ip: '2.2.2.2',
+        }),
+      ).resolves.toMatchObject({ id: 'member-1' });
+    });
+
+    it('portal tries never touch the member app counts', async () => {
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+      await expect(
+        service.validateMember('admin@test.com', 'x', undefined, {
+          ip: '1.1.1.1',
+        }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect([...counts.keys()]).toEqual([
+        'login_fail:admin@test.com:ip:1.1.1.1',
+        'login_fail:admin@test.com:portal',
+      ]);
+    });
+
+    it('stops everyone once the cap across all addresses is reached, and tells the owner', async () => {
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+      for (let i = 0; i < 20; i++) {
+        await expect(
+          service.validateMember('admin@test.com', 'x', undefined, {
+            ip: `10.0.0.${i}`,
+          }),
+        ).rejects.toThrow(UnauthorizedException);
+      }
+      expect(mockUtilityService.sendEmailWithTemplate).toHaveBeenCalledTimes(1);
+      await expect(
+        service.validateMember('admin@test.com', 'x', undefined, {
+          ip: '9.9.9.9',
+        }),
+      ).rejects.toThrow(HttpException);
+    });
+
+    it('takes its limits from the console settings', async () => {
+      SETTING_VALUES.login_max_attempts = 3;
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(false);
+      try {
+        for (let i = 0; i < 3; i++) {
+          await expect(
+            service.validateMember('admin@test.com', 'x', 'phone-x'),
+          ).rejects.toThrow(UnauthorizedException);
+        }
+        await expect(
+          service.validateMember('admin@test.com', 'x', 'phone-x'),
+        ).rejects.toThrow(HttpException);
+      } finally {
+        SETTING_VALUES.login_max_attempts = 5;
+      }
     });
   });
 });

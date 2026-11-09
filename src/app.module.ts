@@ -74,6 +74,7 @@ import { GroupModule } from './group/group.module';
 import { SmsModule } from './sms/sms.module';
 import { EvangelismModule } from './evangelism/evangelism.module';
 import { BillingModule } from './billing/billing.module';
+import { DiscuvaAccountModule } from './discuva-account/discuva-account.module';
 import { TenantModule } from './tenant/tenant.module';
 import { SchedulerGateModule } from './tenant/scheduler-gate/scheduler-gate.module';
 import { PlatformAdminModule } from './platform-admin/platform-admin.module';
@@ -251,6 +252,7 @@ import { MemberDirectoryModule } from './member-directory/member-directory.modul
     SmallGroupModule,
     AdminModule,
     BillingModule,
+    DiscuvaAccountModule,
     TenantModule,
     SchedulerGateModule,
     PlatformAdminModule,

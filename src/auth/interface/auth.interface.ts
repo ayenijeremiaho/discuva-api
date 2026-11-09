@@ -28,6 +28,8 @@ export interface JwtResponse {
   expires_in: number;
   token_type: string;
   requires_password_change: boolean;
+  // A Discuva account already uses this email; the member can link this church with an emailed code.
+  account_link_available?: boolean;
 }
 
 export interface MemberAuth {

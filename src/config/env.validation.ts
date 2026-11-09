@@ -93,6 +93,8 @@ export const envValidationSchema = Joi.object({
   LOGIN_WINDOW_SECONDS: Joi.number().default(900),
 
   DEVICE_RESET_MAX_ATTEMPTS: Joi.number().default(3),
+  // Comma-separated church addresses that get One Discuva sign-in while its switch is on test-only.
+  DISCUVA_ACCOUNT_TEST_TENANTS: Joi.string().allow('').default(''),
   DEVICE_RESET_WINDOW_SECONDS: Joi.number().default(86400),
 
   CLOUDINARY_CLOUD_NAME: Joi.string().required(),

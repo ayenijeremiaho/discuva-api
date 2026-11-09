@@ -52,6 +52,26 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
+import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+
+export const DEVICE_CONFIRMATION_REQUIRED = 'DEVICE_CONFIRMATION_REQUIRED';
+
+// Wrong-password counts kept apart so tries from one place can't lock someone out everywhere.
+interface LoginBucket {
+  from: string;
+  max: number;
+  notifyOwner: boolean;
+}
+
+// Counters for an email that has a Discuva account are shared by all its churches.
+interface Counter {
+  get(key: string): Promise<number | undefined>;
+  incr(key: string, ttlSeconds: number): Promise<number>;
+  del(key: string): Promise<number>;
+}
 
 interface RotatedRefreshEntry {
   hash: string;
@@ -69,11 +89,6 @@ export class AuthService {
   private readonly otpTtlSeconds: number;
   private readonly otpMaxAttempts: number;
   private readonly otpWindowSeconds: number;
-  private readonly loginMaxAttempts: number;
-  private readonly loginWindowSeconds: number;
-  private readonly deviceResetMaxAttempts: number;
-  private readonly deviceResetWindowSeconds: number;
-  private readonly otpVerifyMaxAttempts: number;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -102,6 +117,9 @@ export class AuthService {
     private readonly cls: ClsService<AppClsStore>,
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly churchTimezone: ChurchTimezoneService,
+    private readonly accounts: DiscuvaAccountService,
+    private readonly accountCodes: DiscuvaAccountCodeService,
+    private readonly platformSettings: PlatformSettingsService,
   ) {
     this.otpTtlSeconds = this.configService.get<number>('OTP_TTL_SECONDS');
     this.otpMaxAttempts = this.configService.get<number>(
@@ -110,45 +128,31 @@ export class AuthService {
     this.otpWindowSeconds = this.configService.get<number>(
       'FORGOT_PASSWORD_WINDOW_SECONDS',
     );
-    this.loginMaxAttempts =
-      this.configService.get<number>('LOGIN_MAX_ATTEMPTS');
-    this.loginWindowSeconds = this.configService.get<number>(
-      'LOGIN_WINDOW_SECONDS',
-    );
-    this.deviceResetMaxAttempts = this.configService.get<number>(
-      'DEVICE_RESET_MAX_ATTEMPTS',
-    );
-    this.deviceResetWindowSeconds = this.configService.get<number>(
-      'DEVICE_RESET_WINDOW_SECONDS',
-    );
-    this.otpVerifyMaxAttempts = this.configService.get<number>(
-      'OTP_VERIFY_MAX_ATTEMPTS',
-    );
   }
 
   async validateMember(
     email: string,
     password: string,
     deviceId?: string,
+    portal?: { ip: string },
   ): Promise<MemberAuth> {
     const member = await this.memberService.findByEmail(email);
-    // The member's own registered device keeps its own count, so wrong guesses from anywhere else can't lock them out.
-    const from =
-      member?.deviceId && deviceId === member.deviceId ? 'device' : 'other';
-    await this.checkLoginRateLimit(email, from);
+    const counter = await this.counterFor(email);
+    const buckets = await this.loginBuckets(member, deviceId, portal);
+    await this.checkLoginRateLimit(email, buckets, counter);
 
     if (!member) {
-      await this.recordFailedLogin(email, from);
+      await this.recordFailedLogin(email, buckets, counter);
       this.logger.warn(`Failed login — email not registered: ${email}`);
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const passwordMatches = await UtilityService.verifyHashedValue(
+    const passwordMatches = await this.accounts.verifyPassword(
+      member,
       password,
-      member.password,
     );
     if (!passwordMatches) {
-      const isNowLocked = await this.recordFailedLogin(email, from);
+      const isNowLocked = await this.recordFailedLogin(email, buckets, counter);
       if (isNowLocked) {
         this.logger.warn(
           `Account locked after max failed login attempts: ${email}`,
@@ -156,9 +160,11 @@ export class AuthService {
         const firstName = UtilityService.capitalizeFirstLetter(
           member.firstname,
         );
-        const lockoutMinutes = Math.ceil(
-          this.loginWindowSeconds / 60,
-        ).toString();
+        const lockoutMinutes = String(
+          await this.platformSettings.getNumber(
+            PlatformSettingKey.LOGIN_LOCK_MINUTES,
+          ),
+        );
         const churchName = await this.utilityService.resolveChurchName();
         this.utilityService.sendEmailWithTemplate(
           member.email,
@@ -170,7 +176,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    this.clearLoginRateLimit(email, from);
+    this.clearLoginRateLimit(email, buckets, counter);
+
+    if (await this.accounts.isFrozen(member)) {
+      throw new ForbiddenException(
+        'This Discuva account is frozen. Use "Forgot password" to reset your password and unfreeze it.',
+      );
+    }
 
     if (member.status === MemberStatusEnum.INACTIVE) {
       throw new UnauthorizedException(
@@ -217,8 +229,9 @@ export class AuthService {
     // return undefined here, making this check a no-op. getByIdWithCredentials
     // explicitly selects it (as it does for password, for the same reason).
     const member = await this.memberService.getByIdWithCredentials(user.id);
+    const registered = await this.accounts.deviceOf(member);
 
-    if (member.deviceId && member.deviceId !== deviceId) {
+    if (registered && registered !== deviceId) {
       this.logger.warn(
         `Device mismatch for member ${user.id} — login rejected`,
       );
@@ -234,11 +247,19 @@ export class AuthService {
     // reset. Captured before setDeviceId() mutates it, so the login-alert
     // email below (which literally says "New ... Login Detected") only
     // fires for that real event instead of every single login.
-    const isNewDeviceRegistration = !member.deviceId;
+    const isNewDeviceRegistration = !registered;
     if (isNewDeviceRegistration) {
+      if (await this.accounts.needsDeviceConfirmation(member, deviceId)) {
+        throw new ForbiddenException({
+          message:
+            'Confirm this phone: your Discuva account is already used on a phone at another church. We can email you a code.',
+          code: DEVICE_CONFIRMATION_REQUIRED,
+        });
+      }
       this.logger.log(`First device registered for member ${user.id}`);
-      await this.memberService.setDeviceId(user.id, deviceId);
+      await this.accounts.registerDevice(member, deviceId);
     }
+    const moved = await this.accounts.moveOnSignIn(member);
 
     const tokens = await this.generateTokens(
       user.id,
@@ -268,7 +289,9 @@ export class AuthService {
       );
     }
 
-    return tokens;
+    return moved === 'LINK_AVAILABLE'
+      ? { ...tokens, account_link_available: true }
+      : tokens;
   }
 
   async adminLogin(
@@ -368,7 +391,44 @@ export class AuthService {
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
     ]);
+    this.assertCanSignIn(member);
 
+    const tokens = await this.generateTokens(
+      member.id,
+      member.role,
+      !member.changedPassword,
+      SessionSurface.MEMBER,
+    );
+    this.auditLogService.log('MEMBER_LOGIN_WEBAUTHN', {
+      targetId: member.id,
+      targetEmail: member.email,
+      targetName: `${member.firstname} ${member.lastname}`,
+    });
+
+    return tokens;
+  }
+
+  // Sign-in for a member whose Discuva account was already proven another way (join, church switch).
+  async startMemberSession(
+    member: Member,
+    action: 'MEMBER_LOGIN',
+  ): Promise<JwtResponse> {
+    this.assertCanSignIn(member);
+    const tokens = await this.generateTokens(
+      member.id,
+      member.role,
+      !member.changedPassword,
+      SessionSurface.MEMBER,
+    );
+    this.auditLogService.log(action, {
+      targetId: member.id,
+      targetEmail: member.email,
+      targetName: `${member.firstname} ${member.lastname}`,
+    });
+    return tokens;
+  }
+
+  private assertCanSignIn(member: Member): void {
     if (member.status === MemberStatusEnum.INACTIVE) {
       throw new UnauthorizedException(
         'Your account is inactive. Contact admin.',
@@ -386,20 +446,6 @@ export class AuthService {
         );
       }
     }
-
-    const tokens = await this.generateTokens(
-      member.id,
-      member.role,
-      !member.changedPassword,
-      SessionSurface.MEMBER,
-    );
-    this.auditLogService.log('MEMBER_LOGIN_WEBAUTHN', {
-      targetId: member.id,
-      targetEmail: member.email,
-      targetName: `${member.firstname} ${member.lastname}`,
-    });
-
-    return tokens;
   }
 
   async refreshToken(user: MemberAuth): Promise<JwtResponse> {
@@ -618,7 +664,7 @@ export class AuthService {
   }
 
   async forgotPassword(email: string): Promise<void> {
-    await this.checkOtpRateLimit(email);
+    await this.checkOtpRateLimit(email, await this.counterFor(email));
 
     const member = await this.memberService.findByEmail(email);
     if (!member) return; // Silent — do not leak account existence
@@ -657,11 +703,12 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
-    await this.checkOtpVerifyRateLimit('password_reset', dto.email);
+    const counter = await this.counterFor(dto.email);
+    await this.checkOtpVerifyRateLimit('password_reset', dto.email, counter);
 
     const member = await this.memberService.findByEmail(dto.email);
     if (!member) {
-      await this.recordFailedOtpVerify('password_reset', dto.email);
+      await this.recordFailedOtpVerify('password_reset', dto.email, counter);
       throw new BadRequestException('Invalid or expired reset code');
     }
 
@@ -671,7 +718,7 @@ export class AuthService {
     });
 
     if (!otpRecord || otpRecord.expiresAt < new Date()) {
-      await this.recordFailedOtpVerify('password_reset', dto.email);
+      await this.recordFailedOtpVerify('password_reset', dto.email, counter);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
@@ -682,21 +729,22 @@ export class AuthService {
       otpRecord.otpHash,
     );
     if (!isValid) {
-      await this.recordFailedOtpVerify('password_reset', dto.email);
+      await this.recordFailedOtpVerify('password_reset', dto.email, counter);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
     }
 
-    this.clearOtpVerifyRateLimit('password_reset', dto.email);
+    this.clearOtpVerifyRateLimit('password_reset', dto.email, counter);
     otpRecord.usedAt = new Date();
     await this.otpRepository.save(otpRecord);
 
-    await Promise.all([
-      this.memberService.setPassword(member.id, dto.newPassword, true),
-      this.sessionService.updateLogout(member.id, SessionSurface.MEMBER),
-      this.sessionService.updateLogout(member.id, SessionSurface.ADMIN),
-    ]);
+    await this.accounts.setPasswordHash(
+      member,
+      await UtilityService.hashValue(dto.newPassword),
+      true,
+    );
+    await this.accounts.endSessionsEverywhere(member);
     this.auditLogService.log('PASSWORD_RESET_COMPLETED', {
       targetId: member.id,
       targetEmail: member.email,
@@ -708,12 +756,13 @@ export class AuthService {
       member.email,
       `${firstName}, Your ${churchName} Password Has Been Changed`,
       'password-changed',
-      { name: firstName },
+      { name: firstName, freeze_url: await this.accounts.freezeUrl(member) },
     );
   }
 
   async requestDeviceReset(email: string, newDeviceId: string): Promise<void> {
-    await this.checkDeviceResetRateLimit(email, newDeviceId);
+    const counter = await this.counterFor(email);
+    await this.checkDeviceResetRateLimit(email, newDeviceId, counter);
 
     const member = await this.memberService.findByEmail(email);
     if (!member) return; // Silent — do not leak account existence
@@ -739,7 +788,7 @@ export class AuthService {
       }),
     );
 
-    await this.incrementDeviceResetAttempts(email, newDeviceId);
+    await this.incrementDeviceResetAttempts(email, newDeviceId, counter);
     this.logger.log(`Device reset OTP issued for member ${member.id}`);
     this.auditLogService.log('DEVICE_RESET_REQUESTED', {
       targetId: member.id,
@@ -766,11 +815,12 @@ export class AuthService {
   ): Promise<void> {
     // Wrong guesses count per device too, so someone else can't use up the member's tries.
     const attempts = deviceId ? `${email}:${deviceId}` : email;
-    await this.checkOtpVerifyRateLimit('device_reset', attempts);
+    const counter = await this.counterFor(email);
+    await this.checkOtpVerifyRateLimit('device_reset', attempts, counter);
 
     const member = await this.memberService.findByEmail(email);
     if (!member) {
-      await this.recordFailedOtpVerify('device_reset', attempts);
+      await this.recordFailedOtpVerify('device_reset', attempts, counter);
       throw new BadRequestException('Invalid or expired reset code');
     }
 
@@ -784,7 +834,7 @@ export class AuthService {
     });
 
     if (!record || record.expiresAt < new Date()) {
-      await this.recordFailedOtpVerify('device_reset', attempts);
+      await this.recordFailedOtpVerify('device_reset', attempts, counter);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
@@ -792,13 +842,13 @@ export class AuthService {
 
     const isValid = await UtilityService.verifyHashedValue(otp, record.otpHash);
     if (!isValid) {
-      await this.recordFailedOtpVerify('device_reset', attempts);
+      await this.recordFailedOtpVerify('device_reset', attempts, counter);
       throw new BadRequestException(
         'This verification code is invalid or has expired. Please request a new one.',
       );
     }
 
-    this.clearOtpVerifyRateLimit('device_reset', attempts);
+    this.clearOtpVerifyRateLimit('device_reset', attempts, counter);
     record.usedAt = new Date();
     await this.deviceResetOtpRepository.save(record);
     await this.deviceResetOtpRepository.delete({
@@ -806,20 +856,19 @@ export class AuthService {
       usedAt: IsNull(),
     });
 
-    await this.memberService.setDeviceId(member.id, record.newDeviceId);
-    await Promise.all([
-      this.sessionService.updateLogout(member.id, SessionSurface.MEMBER),
-      this.sessionService.updateLogout(member.id, SessionSurface.ADMIN),
-    ]);
-    this.pushService.unsubscribe(member.id);
+    await this.accounts.resetDevices(member, record.newDeviceId);
+    await this.accounts.endSessionsEverywhere(member);
     // A WebAuthn credential never checks deviceId (see loginWithWebauthn's
     // own comment) — without this, a lost/stolen device's fingerprint or
     // Face ID would keep working right through this reset. No way to tell
     // which single credential belongs to the lost device, so all of this
     // member's are revoked; they re-enroll fresh from a device they trust.
-    await this.webauthnService.revokeAllCredentials(member.id);
+    await this.accounts.forEachChurchOf(member, async (memberId) => {
+      await this.pushService.unsubscribe(memberId);
+      await this.webauthnService.revokeAllCredentials(memberId);
+    });
 
-    this.clearDeviceResetRateLimit(email, record.newDeviceId);
+    this.clearDeviceResetRateLimit(email, record.newDeviceId, counter);
     this.logger.log(`Device successfully reset for member ${member.id}`);
     this.auditLogService.log('DEVICE_RESET_COMPLETED', {
       targetId: member.id,
@@ -831,19 +880,21 @@ export class AuthService {
       member.email,
       `${firstName}, Your Device Has Been Changed`,
       'device-reset-confirmation',
-      { name: firstName },
+      { name: firstName, freeze_url: await this.accounts.freezeUrl(member) },
     );
   }
 
   async requestEmailChange(memberId: string, newEmail: string): Promise<void> {
-    await this.checkOtpRateLimit(memberId);
-
-    const existing = await this.memberService.findByEmail(newEmail);
-    if (existing) {
-      throw new ConflictException('This email address is already in use.');
-    }
+    await this.checkOtpRateLimit(memberId, this.tenantCounter());
 
     const member = await this.memberService.getById(memberId);
+    const account = await this.accounts.accountFor(member);
+    const taken = account
+      ? await this.accounts.emailInUse(newEmail, account.id)
+      : !!(await this.memberService.findByEmail(newEmail));
+    if (taken) {
+      throw new ConflictException('This email address is already in use.');
+    }
 
     await this.emailChangeOtpRepository.delete({
       memberId,
@@ -905,18 +956,41 @@ export class AuthService {
       );
     }
 
-    const stillAvailable = await this.memberService.findByEmail(
-      record.newEmail,
-    );
-    if (stillAvailable) {
-      throw new ConflictException('This email address is already in use.');
+    const current = await this.memberService.getById(memberId);
+    const account = await this.accounts.accountFor(current);
+    if (!account) {
+      const stillAvailable = await this.memberService.findByEmail(
+        record.newEmail,
+      );
+      if (stillAvailable) {
+        throw new ConflictException('This email address is already in use.');
+      }
     }
 
     this.clearOtpVerifyRateLimit('email_change', memberId);
     record.usedAt = new Date();
     await this.emailChangeOtpRepository.save(record);
 
-    await this.memberService.updateEmail(memberId, record.newEmail);
+    if (account) {
+      // The old address gets an undo link, in case someone else made the change.
+      const oldEmail = await this.accounts.changeEmail(
+        account.id,
+        record.newEmail,
+      );
+      const name = UtilityService.capitalizeFirstLetter(current.firstname);
+      this.utilityService.sendEmailWithTemplate(
+        oldEmail,
+        `${name}, Your Discuva Email Was Changed`,
+        'discuva-account-email-changed',
+        {
+          name,
+          newEmail: record.newEmail,
+          undo_url: await this.accounts.emailUndoUrl(account.id, oldEmail),
+        },
+      );
+    } else {
+      await this.memberService.updateEmail(memberId, record.newEmail);
+    }
 
     this.logger.log(`Email changed for member ${memberId}`);
     this.auditLogService.log('EMAIL_CHANGE_COMPLETED', {
@@ -946,6 +1020,11 @@ export class AuthService {
     }
     try {
       this.logger.log('Running scheduled purge of expired OTPs');
+      await this.accountCodes
+        .purge()
+        .catch((err: Error) =>
+          this.logger.warn(`Account code purge failed: ${err.message}`),
+        );
       const { succeeded, failed } = await forEachActiveTenant(
         this.tenantRepo,
         this.cls,
@@ -969,20 +1048,45 @@ export class AuthService {
     }
   }
 
+  private tenantCounter(): Counter {
+    const c = this.cacheService;
+    return {
+      get: (k) => c.get<number>(k),
+      incr: (k, t) => c.incr(k, t),
+      del: (k) => c.del(k),
+    };
+  }
+
+  private async counterFor(email: string): Promise<Counter> {
+    if (!(await this.accounts.hasAccount(email))) return this.tenantCounter();
+    const c = this.cacheService;
+    return {
+      get: (k) => c.getGlobal<number>(k),
+      incr: (k, t) => c.incrGlobal(k, t),
+      del: (k) => c.delGlobal(k),
+    };
+  }
+
   // Counted per requesting device, so someone else's requests can't use up the member's own.
   private async checkDeviceResetRateLimit(
     email: string,
     deviceId: string,
+    counter: Counter,
   ): Promise<void> {
     const key = this.cacheService.key('device_reset', email, deviceId);
-    const count = (await this.cacheService.get<number>(key)) ?? 0;
-    if (count >= this.deviceResetMaxAttempts) {
-      const windowHours = Math.ceil(this.deviceResetWindowSeconds / 3600);
+    const count = (await counter.get(key)) ?? 0;
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.DEVICE_RESET_MAX_REQUESTS,
+    );
+    if (count >= max) {
+      const windowHours = await this.platformSettings.getNumber(
+        PlatformSettingKey.DEVICE_RESET_WINDOW_HOURS,
+      );
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
           error: 'TOO_MANY_REQUESTS',
-          message: `Too many device reset requests. You may only request ${this.deviceResetMaxAttempts} times per ${windowHours}-hour window. Contact an admin if you need immediate access.`,
+          message: `Too many device reset requests. You may only request ${max} times per ${windowHours}-hour window. Contact an admin if you need immediate access.`,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
@@ -992,22 +1096,30 @@ export class AuthService {
   private async incrementDeviceResetAttempts(
     email: string,
     deviceId: string,
+    counter: Counter,
   ): Promise<void> {
-    await this.cacheService.incr(
+    await counter.incr(
       this.cacheService.key('device_reset', email, deviceId),
-      this.deviceResetWindowSeconds,
+      (await this.platformSettings.getNumber(
+        PlatformSettingKey.DEVICE_RESET_WINDOW_HOURS,
+      )) * 3600,
     );
   }
 
-  private clearDeviceResetRateLimit(email: string, deviceId: string): void {
-    this.cacheService.del(
-      this.cacheService.key('device_reset', email, deviceId),
-    );
+  private clearDeviceResetRateLimit(
+    email: string,
+    deviceId: string,
+    counter: Counter,
+  ): void {
+    counter.del(this.cacheService.key('device_reset', email, deviceId));
   }
 
-  private async checkOtpRateLimit(email: string): Promise<void> {
+  private async checkOtpRateLimit(
+    email: string,
+    counter: Counter,
+  ): Promise<void> {
     const key = this.cacheService.key('otp_rate', email);
-    const count = await this.cacheService.incr(key, this.otpWindowSeconds);
+    const count = await counter.incr(key, this.otpWindowSeconds);
     if (count > this.otpMaxAttempts) {
       const windowMinutes = Math.ceil(this.otpWindowSeconds / 60);
       throw new HttpException(
@@ -1021,15 +1133,44 @@ export class AuthService {
     }
   }
 
+  // Member app: the registered phone counts apart from every other phone. Portal (no phone): each network
+  // address counts apart, with a higher cap across all of them.
+  private async loginBuckets(
+    member: Member | null,
+    deviceId: string | undefined,
+    portal: { ip: string } | undefined,
+  ): Promise<LoginBucket[]> {
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.LOGIN_MAX_ATTEMPTS,
+    );
+    if (portal) {
+      return [
+        { from: `ip:${portal.ip}`, max, notifyOwner: false },
+        {
+          from: 'portal',
+          max: await this.platformSettings.getNumber(
+            PlatformSettingKey.PORTAL_LOGIN_CAP,
+          ),
+          notifyOwner: true,
+        },
+      ];
+    }
+    const registered = member ? await this.accounts.deviceOf(member) : null;
+    const from = registered && deviceId === registered ? 'device' : 'other';
+    return [{ from, max, notifyOwner: true }];
+  }
+
   private async checkLoginRateLimit(
     email: string,
-    from: string,
+    buckets: LoginBucket[],
+    counter: Counter,
   ): Promise<void> {
-    const key = this.cacheService.key('login_fail', email, from);
-    const count = (await this.cacheService.get<number>(key)) ?? 0;
-
-    if (count >= this.loginMaxAttempts) {
-      const lockoutMinutes = Math.ceil(this.loginWindowSeconds / 60);
+    for (const bucket of buckets) {
+      const key = this.cacheService.key('login_fail', email, bucket.from);
+      if (((await counter.get(key)) ?? 0) < bucket.max) continue;
+      const lockoutMinutes = await this.platformSettings.getNumber(
+        PlatformSettingKey.LOGIN_LOCK_MINUTES,
+      );
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
@@ -1041,17 +1182,33 @@ export class AuthService {
     }
   }
 
+  // True when a bucket that should alert the owner has just reached its limit.
   private async recordFailedLogin(
     email: string,
-    from: string,
+    buckets: LoginBucket[],
+    counter: Counter,
   ): Promise<boolean> {
-    const key = this.cacheService.key('login_fail', email, from);
-    const newCount = await this.cacheService.incr(key, this.loginWindowSeconds);
-    return newCount >= this.loginMaxAttempts;
+    const window =
+      (await this.platformSettings.getNumber(
+        PlatformSettingKey.LOGIN_LOCK_MINUTES,
+      )) * 60;
+    let notify = false;
+    for (const bucket of buckets) {
+      const key = this.cacheService.key('login_fail', email, bucket.from);
+      const count = await counter.incr(key, window);
+      if (bucket.notifyOwner && count === bucket.max) notify = true;
+    }
+    return notify;
   }
 
-  private clearLoginRateLimit(email: string, from: string): void {
-    this.cacheService.del(this.cacheService.key('login_fail', email, from));
+  private clearLoginRateLimit(
+    email: string,
+    buckets: LoginBucket[],
+    counter: Counter,
+  ): void {
+    for (const bucket of buckets) {
+      counter.del(this.cacheService.key('login_fail', email, bucket.from));
+    }
   }
 
   // Per-account guess cap on an already-issued OTP — distinct from
@@ -1062,10 +1219,14 @@ export class AuthService {
   private async checkOtpVerifyRateLimit(
     scope: string,
     identifier: string,
+    counter: Counter = this.tenantCounter(),
   ): Promise<void> {
     const key = this.cacheService.key('otp_verify_fail', identifier, scope);
-    const count = (await this.cacheService.get<number>(key)) ?? 0;
-    if (count >= this.otpVerifyMaxAttempts) {
+    const count = (await counter.get(key)) ?? 0;
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.OTP_VERIFY_MAX_ATTEMPTS,
+    );
+    if (count >= max) {
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
@@ -1081,17 +1242,20 @@ export class AuthService {
   private async recordFailedOtpVerify(
     scope: string,
     identifier: string,
+    counter: Counter = this.tenantCounter(),
   ): Promise<void> {
-    await this.cacheService.incr(
+    await counter.incr(
       this.cacheService.key('otp_verify_fail', identifier, scope),
       this.otpTtlSeconds,
     );
   }
 
-  private clearOtpVerifyRateLimit(scope: string, identifier: string): void {
-    this.cacheService.del(
-      this.cacheService.key('otp_verify_fail', identifier, scope),
-    );
+  private clearOtpVerifyRateLimit(
+    scope: string,
+    identifier: string,
+    counter: Counter = this.tenantCounter(),
+  ): void {
+    counter.del(this.cacheService.key('otp_verify_fail', identifier, scope));
   }
 
   private generateOtp(): string {

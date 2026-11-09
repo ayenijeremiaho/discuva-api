@@ -11,4 +11,6 @@ export interface AppClsStore extends ClsStore {
   afterCommit?: Array<() => unknown>;
   // Tasks to run in a fresh transaction after the request's transaction rolls back.
   afterRollback?: Array<() => unknown>;
+  // Per-request copy of Discuva account reads (see DiscuvaAccountService).
+  discuvaAccountMemo?: Map<string, Promise<unknown>>;
 }

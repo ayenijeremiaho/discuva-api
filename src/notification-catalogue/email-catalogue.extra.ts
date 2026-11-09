@@ -451,6 +451,84 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ first_name: 'name' }),
     sampleData: { name: 'Ada' },
   },
+  'discuva-account-email-changed': {
+    category: null,
+    label: 'Discuva account email changed',
+    description:
+      'Sent to the old address when a Discuva account moves to a new email, with a link to undo it.',
+    lockedNote: 'The new address and the undo link are always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your Discuva email was changed',
+    message:
+      '<p>Hi {{first_name}},</p><p>The email you use to sign in to Discuva, at every church, was just changed.</p>',
+    closing: '<p>If you made this change, you don’t need to do anything.</p>',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'Your Discuva sign-in email was changed.',
+    placeholders: {
+      default_subject: 'Your Discuva email was changed',
+      first_name: 'Ada',
+    },
+    toVars: pick({ first_name: 'name' }),
+    sampleData: {
+      name: 'Ada',
+      newEmail: 'ada.new@example.com',
+      undo_url: 'https://example.com/account/undo-email',
+    },
+  },
+  'discuva-account-recovered': {
+    category: null,
+    label: 'Discuva account recovered',
+    description:
+      'Sent to the old address when an admin recovers a Discuva account in person.',
+    lockedNote: 'The security notice is always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your Discuva account was recovered',
+    message:
+      '<p>Hi {{first_name}},</p><p>An admin at {{church_name}} moved your Discuva account to a new email after checking it was you, in person. This address no longer signs in.</p>',
+    closing: '',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'Your Discuva account was moved to a new email.',
+    placeholders: {
+      default_subject: 'Your Discuva account was recovered',
+      first_name: 'Ada',
+    },
+    toVars: pick({ first_name: 'name' }),
+    sampleData: { name: 'Ada' },
+  },
+  'discuva-account-code': {
+    category: null,
+    label: 'Discuva account code',
+    description:
+      'Sent with the one-time code to join a church or add one to a Discuva account.',
+    lockedNote: 'The one-time code and security notice are always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your Discuva code',
+    message:
+      '<p>Hi {{first_name}},</p><p>{{action}} Use this code to carry on:</p>',
+    closing: '',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'Your one-time code for {{church_name}}.',
+    placeholders: {
+      default_subject: 'Your Discuva code',
+      expires_minutes: '10',
+      first_name: 'Ada',
+      action: 'You asked to join this church on Discuva.',
+    },
+    toVars: pick({
+      expires_minutes: 'expiresMinutes',
+      first_name: 'name',
+      action: 'action',
+    }),
+    sampleData: {
+      expiresMinutes: '10',
+      name: 'Ada',
+      otp: '482913',
+      action: 'You asked to join this church on Discuva.',
+    },
+  },
   'device-reset-otp': {
     category: null,
     label: 'Device reset code',

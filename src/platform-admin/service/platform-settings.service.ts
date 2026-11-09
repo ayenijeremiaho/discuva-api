@@ -15,6 +15,32 @@ import { PlatformSettingKey } from '../enum/platform-setting-key.enum';
 import { KNOWN_PLATFORM_SETTINGS } from '../constant/known-platform-settings.constant';
 import { CacheService } from '../../utility/service/cache.service';
 
+// Settings that took over from an environment variable keep its value until changed in the console.
+const ENV_DEFAULTS: Partial<
+  Record<PlatformSettingKey, { name: string; per: number }>
+> = {
+  [PlatformSettingKey.LOGIN_MAX_ATTEMPTS]: {
+    name: 'LOGIN_MAX_ATTEMPTS',
+    per: 1,
+  },
+  [PlatformSettingKey.LOGIN_LOCK_MINUTES]: {
+    name: 'LOGIN_WINDOW_SECONDS',
+    per: 60,
+  },
+  [PlatformSettingKey.DEVICE_RESET_MAX_REQUESTS]: {
+    name: 'DEVICE_RESET_MAX_ATTEMPTS',
+    per: 1,
+  },
+  [PlatformSettingKey.DEVICE_RESET_WINDOW_HOURS]: {
+    name: 'DEVICE_RESET_WINDOW_SECONDS',
+    per: 3600,
+  },
+  [PlatformSettingKey.OTP_VERIFY_MAX_ATTEMPTS]: {
+    name: 'OTP_VERIFY_MAX_ATTEMPTS',
+    per: 1,
+  },
+};
+
 @Injectable()
 export class PlatformSettingsService {
   private readonly CACHE_TTL = 300;
@@ -41,6 +67,14 @@ export class PlatformSettingsService {
   private resolveDefault(key: PlatformSettingKey): number {
     if (key === PlatformSettingKey.ENFORCE_DISTANCE_CHECK_DEFAULT) {
       return this.configService.get<boolean>('ENFORCE_DISTANCE_CHECK') ? 1 : 0;
+    }
+    const fromEnv = ENV_DEFAULTS[key];
+    if (fromEnv) {
+      const raw = Number(this.configService.get(fromEnv.name));
+      if (Number.isFinite(raw) && raw > 0) {
+        const { min, max } = KNOWN_PLATFORM_SETTINGS[key];
+        return Math.min(max, Math.max(min, Math.ceil(raw / fromEnv.per)));
+      }
     }
     return KNOWN_PLATFORM_SETTINGS[key].defaultValue;
   }

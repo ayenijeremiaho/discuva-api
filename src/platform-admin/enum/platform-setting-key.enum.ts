@@ -34,4 +34,18 @@ export enum PlatformSettingKey {
   ACCOUNT_DELETE_AFTER_DAYS = 'account_delete_after_days',
   ACCOUNT_AUTO_DELETE = 'account_auto_delete',
   COMMUNITY_MAX_CATEGORIES = 'community_max_categories',
+  // 0 off, 1 only churches in DISCUVA_ACCOUNT_TEST_TENANTS, 2 every church.
+  DISCUVA_ACCOUNT_MODE = 'discuva_account_mode',
+  ACCOUNT_CODE_TTL_MINUTES = 'account_code_ttl_minutes',
+  ACCOUNT_CODE_MAX_ATTEMPTS = 'account_code_max_attempts',
+  ACCOUNT_CODE_REQUESTS_PER_HOUR = 'account_code_requests_per_hour',
+  ACCOUNT_LINK_VALID_DAYS = 'account_link_valid_days',
+  ACCOUNT_RECOVERY_WAIT_DAYS = 'account_recovery_wait_days',
+  // Sign-in limits; until set here they follow the matching environment variables.
+  LOGIN_MAX_ATTEMPTS = 'login_max_attempts',
+  LOGIN_LOCK_MINUTES = 'login_lock_minutes',
+  PORTAL_LOGIN_CAP = 'portal_login_cap',
+  DEVICE_RESET_MAX_REQUESTS = 'device_reset_max_requests',
+  DEVICE_RESET_WINDOW_HOURS = 'device_reset_window_hours',
+  OTP_VERIFY_MAX_ATTEMPTS = 'otp_verify_max_attempts',
 }

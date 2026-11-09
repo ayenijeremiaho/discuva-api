@@ -212,7 +212,22 @@ export class CacheService implements OnModuleInit, OnApplicationShutdown {
   }
 
   async incr(rawKey: string, ttlSeconds: number, by = 1): Promise<number> {
-    const key = this.scopedKey(rawKey);
+    return this.incrByKey(this.scopedKey(rawKey), ttlSeconds, by);
+  }
+
+  async incrGlobal(
+    rawKey: string,
+    ttlSeconds: number,
+    by = 1,
+  ): Promise<number> {
+    return this.incrByKey(this.globalKey(rawKey), ttlSeconds, by);
+  }
+
+  private async incrByKey(
+    key: string,
+    ttlSeconds: number,
+    by: number,
+  ): Promise<number> {
     // Lua script makes INCR + EXPIRE atomic — prevents a key with no TTL
     // if the process crashes between the two commands.
     const result = await this.redis.eval(
