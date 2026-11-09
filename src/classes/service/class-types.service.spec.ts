@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ClassTypesService } from './class-types.service';
+import { MilestoneType } from '../../discuva-account/enum/milestone.enum';
 import { ClassType } from '../entity/class-type.entity';
 import { ChurchClass } from '../entity/church-class.entity';
 import { CacheService } from '../../utility/service/cache.service';
@@ -47,6 +48,20 @@ describe('ClassTypesService', () => {
   });
 
   describe('createClassType', () => {
+    it("can count as a milestone on members' Discuva profiles", async () => {
+      mockClassTypeRepo.create.mockImplementation((v) => v);
+      mockClassTypeRepo.save.mockImplementation((v) => Promise.resolve(v));
+
+      await service.createClassType({
+        name: 'Membership Class',
+        countsAs: MilestoneType.MEMBERSHIP_CLASS,
+      });
+
+      expect(mockClassTypeRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ countsAs: MilestoneType.MEMBERSHIP_CLASS }),
+      );
+    });
+
     it('creates a standalone type when no nextClassTypeId is given', async () => {
       const created = { id: 'ct-1', name: 'Baptismal Class' };
       mockClassTypeRepo.create.mockReturnValue(created);

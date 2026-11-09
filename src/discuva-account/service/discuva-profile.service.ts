@@ -1,7 +1,11 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ClsService } from 'nestjs-cls';
 import { DiscuvaProfile } from '../entity/discuva-profile.entity';
+import { DiscuvaMilestone } from '../entity/discuva-milestone.entity';
+import { MilestoneSource, MilestoneType } from '../enum/milestone.enum';
+import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { DiscuvaAccountService } from './discuva-account.service';
 import { Member } from '../../member/entity/member.entity';
 
@@ -46,7 +50,10 @@ export class DiscuvaProfileService {
     private readonly profileRepo: Repository<DiscuvaProfile>,
     @InjectRepository(Member)
     private readonly memberRepo: Repository<Member>,
+    @InjectRepository(DiscuvaMilestone)
+    private readonly milestoneRepo: Repository<DiscuvaMilestone>,
     private readonly accounts: DiscuvaAccountService,
+    private readonly cls: ClsService<AppClsStore>,
   ) {}
 
   // The account that owns this member's basics, or null while the church still does.
@@ -91,7 +98,38 @@ export class DiscuvaProfileService {
       })
       .orIgnore()
       .execute();
+    await this.importFaithYears(accountId, source);
     return this.profileRepo.findOneOrFail({ where: { accountId } });
+  }
+
+  // Years the person gave their church become their own milestones; safe to repeat.
+  private async importFaithYears(
+    accountId: string,
+    source: Member,
+  ): Promise<void> {
+    const sourceTenantId = this.cls.get('tenantId') ?? null;
+    const rows = (
+      [
+        [MilestoneType.SALVATION, source.yearBornAgain],
+        [MilestoneType.BAPTISM, source.yearBaptized],
+      ] as const
+    )
+      .filter(([, date]) => date)
+      .map(([type, date]) => ({
+        accountId,
+        type,
+        year: new Date(date).getFullYear(),
+        source: MilestoneSource.MEMBER,
+        sourceTenantId,
+        sourceRef: `import:${type.toLowerCase()}`,
+      }));
+    if (!rows.length) return;
+    await this.milestoneRepo
+      .createQueryBuilder()
+      .insert()
+      .values(rows)
+      .orIgnore()
+      .execute();
   }
 
   async get(member: ProfileOwner): Promise<DiscuvaProfile | null> {
@@ -161,7 +199,7 @@ export class DiscuvaProfileService {
 
   async writeToChurches(
     member: ProfileOwner,
-    patch: ProfilePatch,
+    patch: Partial<Member>,
     options: { skipCurrent?: boolean } = {},
   ): Promise<void> {
     await this.accounts.forEachChurchOf(

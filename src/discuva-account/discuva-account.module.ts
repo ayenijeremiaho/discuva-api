@@ -11,10 +11,12 @@ import { Tenant } from '../tenant/entity/tenant.entity';
 import { Member } from '../member/entity/member.entity';
 import { MemberSession } from '../member/entity/member-session.entity';
 import { Admin } from '../admin/entity/admin.entity';
+import { ClassEnrollment } from '../classes/entity/class-enrollment.entity';
 import { MemberSessionService } from '../member/service/member-session.service';
 import { DiscuvaAccountService } from './service/discuva-account.service';
 import { DiscuvaAccountCodeService } from './service/discuva-account-code.service';
 import { DiscuvaProfileService } from './service/discuva-profile.service';
+import { MilestoneService } from './service/milestone.service';
 
 // Global so member and auth code can reach it without an import cycle through MemberModule.
 @Global()
@@ -29,18 +31,25 @@ import { DiscuvaProfileService } from './service/discuva-profile.service';
       DiscuvaPhotoRemoval,
       Tenant,
     ]),
-    TenantTypeOrmModule.forFeature([Member, MemberSession, Admin]),
+    TenantTypeOrmModule.forFeature([
+      Member,
+      MemberSession,
+      Admin,
+      ClassEnrollment,
+    ]),
   ],
   providers: [
     DiscuvaAccountService,
     DiscuvaAccountCodeService,
     DiscuvaProfileService,
+    MilestoneService,
     MemberSessionService,
   ],
   exports: [
     DiscuvaAccountService,
     DiscuvaAccountCodeService,
     DiscuvaProfileService,
+    MilestoneService,
   ],
 })
 export class DiscuvaAccountModule {}

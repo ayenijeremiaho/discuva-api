@@ -7,6 +7,8 @@ import {
 import { DiscuvaAccountService } from './discuva-account.service';
 import { DiscuvaProfile } from '../entity/discuva-profile.entity';
 import { Member } from '../../member/entity/member.entity';
+import { DiscuvaMilestone } from '../entity/discuva-milestone.entity';
+import { ClsService } from 'nestjs-cls';
 
 const insert = {
   insert: jest.fn().mockReturnThis(),
@@ -20,6 +22,14 @@ const profileRepo = {
   save: jest.fn(async (p) => p),
   createQueryBuilder: jest.fn(() => insert),
 };
+const milestoneInsert = {
+  insert: jest.fn().mockReturnThis(),
+  values: jest.fn().mockReturnThis(),
+  orIgnore: jest.fn().mockReturnThis(),
+  execute: jest.fn().mockResolvedValue(undefined),
+};
+const milestoneRepo = { createQueryBuilder: jest.fn(() => milestoneInsert) };
+const cls = { get: jest.fn(() => 't-here') };
 const memberRepo = {
   findOneOrFail: jest.fn(),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -69,7 +79,12 @@ describe('DiscuvaProfileService', () => {
         DiscuvaProfileService,
         { provide: getRepositoryToken(DiscuvaProfile), useValue: profileRepo },
         { provide: getRepositoryToken(Member), useValue: memberRepo },
+        {
+          provide: getRepositoryToken(DiscuvaMilestone),
+          useValue: milestoneRepo,
+        },
         { provide: DiscuvaAccountService, useValue: accounts },
+        { provide: ClsService, useValue: cls },
       ],
     }).compile();
     service = module.get(DiscuvaProfileService);
@@ -117,6 +132,30 @@ describe('DiscuvaProfileService', () => {
         mutedNotifications: ['birthday'],
       });
       expect(insert.orIgnore).toHaveBeenCalled();
+    });
+
+    it("turns the years given to the church into the person's own milestones", async () => {
+      profileRepo.findOne.mockResolvedValue(null);
+      memberRepo.findOneOrFail.mockResolvedValue({
+        ...churchRow,
+        yearBornAgain: '2008-01-01',
+        yearBaptized: null,
+      });
+      profileRepo.findOneOrFail.mockResolvedValue({ accountId: 'acc-1' });
+
+      await service.ensure({ id: 'm-here', discuvaAccountId: 'acc-1' });
+
+      expect(milestoneInsert.values).toHaveBeenCalledWith([
+        {
+          accountId: 'acc-1',
+          type: 'SALVATION',
+          year: 2008,
+          source: 'MEMBER',
+          sourceTenantId: 't-here',
+          sourceRef: 'import:salvation',
+        },
+      ]);
+      expect(milestoneInsert.orIgnore).toHaveBeenCalled();
     });
 
     it('reuses an existing profile', async () => {
