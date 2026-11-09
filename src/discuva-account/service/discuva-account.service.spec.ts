@@ -12,13 +12,9 @@ import { Tenant } from '../../tenant/entity/tenant.entity';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { SessionSurface } from '../../auth/enum/session-surface.enum';
-import {
-  DiscuvaAccountCode,
-  DiscuvaAccountCodePurpose,
-} from '../entity/discuva-account-code.entity';
-import { CacheService } from '../../utility/service/cache.service';
+import { DiscuvaAccountCodePurpose } from '../entity/discuva-account-code.entity';
+import { DiscuvaAccountCodeService } from './discuva-account-code.service';
 import { Admin } from '../../admin/entity/admin.entity';
-import { HttpException, BadRequestException } from '@nestjs/common';
 
 const qb = (result: unknown) => ({
   addSelect: jest.fn().mockReturnThis(),
@@ -36,6 +32,7 @@ const accountRepo = {
   update: jest.fn(),
 };
 const linkRepo = {
+  upsert: jest.fn(),
   findOne: jest.fn(),
   find: jest.fn(),
   save: jest.fn(),
@@ -46,21 +43,10 @@ const adminRepo = { exists: jest.fn() };
 const utilityService = {
   resolveMemberUrl: jest.fn(async (p: string) => `https://church.example${p}`),
 };
-const codeRepo = {
-  delete: jest.fn(),
-  save: jest.fn(),
-  create: jest.fn((v) => v),
-  findOne: jest.fn(),
-  update: jest.fn(),
-};
-const counters = new Map<string, number>();
-const cache = {
-  incrGlobal: jest.fn(async (k: string) => {
-    counters.set(k, (counters.get(k) ?? 0) + 1);
-    return counters.get(k)!;
-  }),
-  getGlobal: jest.fn(async (k: string) => counters.get(k)),
-  delGlobal: jest.fn(async (k: string) => Number(counters.delete(k))),
+const codes = {
+  issueLinkToken: jest.fn().mockResolvedValue('t'.repeat(64)),
+  findLinkToken: jest.fn(),
+  markUsed: jest.fn(),
 };
 const memberRepo = {
   createQueryBuilder: jest.fn(),
@@ -72,6 +58,8 @@ const settings = { getNumber: jest.fn() };
 const config = { get: jest.fn() };
 const store: Record<string, unknown> = {};
 const cls = {
+  isActive: jest.fn(() => false),
+  set: jest.fn((k: string, v: unknown) => void (store[k] = v)),
   get: jest.fn((k: string) => store[k]),
   runWith: jest.fn((ctx: Record<string, unknown>, fn: () => unknown) => {
     const saved = { ...store };
@@ -108,7 +96,6 @@ describe('DiscuvaAccountService', () => {
             ? 5
             : 10,
     );
-    counters.clear();
     config.get.mockReturnValue('');
     const module = await Test.createTestingModule({
       providers: [
@@ -116,8 +103,7 @@ describe('DiscuvaAccountService', () => {
         { provide: getRepositoryToken(DiscuvaAccount), useValue: accountRepo },
         { provide: getRepositoryToken(DiscuvaAccountLink), useValue: linkRepo },
         { provide: getRepositoryToken(Tenant), useValue: tenantRepo },
-        { provide: getRepositoryToken(DiscuvaAccountCode), useValue: codeRepo },
-        { provide: CacheService, useValue: cache },
+        { provide: DiscuvaAccountCodeService, useValue: codes },
         { provide: getRepositoryToken(Admin), useValue: adminRepo },
         { provide: UtilityService, useValue: utilityService },
         { provide: getRepositoryToken(Member), useValue: memberRepo },
@@ -209,11 +195,10 @@ describe('DiscuvaAccountService', () => {
         password: 'church-hash',
         deviceId: 'phone-1',
       });
-      expect(linkRepo.save).toHaveBeenCalledWith({
-        accountId: 'a1',
-        tenantId: 't1',
-        memberId: 'm1',
-      });
+      expect(linkRepo.upsert).toHaveBeenCalledWith(
+        { accountId: 'a1', tenantId: 't1', memberId: 'm1' },
+        ['tenantId', 'memberId'],
+      );
       expect(memberRepo.update).toHaveBeenCalledWith('m1', {
         discuvaAccountId: 'a1',
       });
@@ -223,7 +208,7 @@ describe('DiscuvaAccountService', () => {
       linkRepo.findOne.mockResolvedValue(null);
       accountRepo.findOne.mockResolvedValue({ id: 'a-other' });
       await expect(service.moveOnSignIn(adult)).resolves.toBe('LINK_AVAILABLE');
-      expect(linkRepo.save).not.toHaveBeenCalled();
+      expect(linkRepo.upsert).not.toHaveBeenCalled();
       expect(memberRepo.update).not.toHaveBeenCalled();
     });
 
@@ -233,7 +218,7 @@ describe('DiscuvaAccountService', () => {
       memberRepo.createQueryBuilder.mockReturnValue(qb({ password: 'h' }));
       accountRepo.save.mockRejectedValue(new Error('duplicate key'));
       await expect(service.moveOnSignIn(adult)).resolves.toBe('LINK_AVAILABLE');
-      expect(linkRepo.save).not.toHaveBeenCalled();
+      expect(linkRepo.upsert).not.toHaveBeenCalled();
     });
 
     it('finishes a move that stopped half way', async () => {
@@ -342,78 +327,6 @@ describe('DiscuvaAccountService', () => {
     });
   });
 
-  describe('emailed codes', () => {
-    const P = DiscuvaAccountCodePurpose.JOIN;
-
-    it('replaces only this device’s earlier code and keeps just a hash', async () => {
-      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('code-hash');
-      const code = await service.issueCode('Ada@Example.com', P, 'phone-123');
-      expect(code).toMatch(/^\d{6}$/);
-      expect(codeRepo.delete).toHaveBeenCalledWith(
-        expect.objectContaining({
-          email: 'ada@example.com',
-          purpose: P,
-          deviceId: 'phone-123',
-        }),
-      );
-      expect(codeRepo.save).toHaveBeenCalledWith(
-        expect.objectContaining({ codeHash: 'code-hash', tenantId: 't1' }),
-      );
-      expect(JSON.stringify(codeRepo.save.mock.calls)).not.toContain(code);
-    });
-
-    it('limits how many codes one email and device can ask for', async () => {
-      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('h');
-      for (let i = 0; i < 3; i++)
-        await service.issueCode('a@b.co', P, 'phone-123');
-      await expect(service.issueCode('a@b.co', P, 'phone-123')).rejects.toThrow(
-        HttpException,
-      );
-      await expect(
-        service.issueCode('a@b.co', P, 'other-phone'),
-      ).resolves.toMatch(/^\d{6}$/);
-    });
-
-    it('uses a right code once and counts wrong ones per device', async () => {
-      codeRepo.findOne.mockResolvedValue({
-        id: 'c1',
-        codeHash: 'h',
-        expiresAt: new Date(Date.now() + 60_000),
-      });
-      jest
-        .spyOn(UtilityService, 'verifyHashedValue')
-        .mockImplementation(async (code: string) => code === '123456');
-
-      for (let i = 0; i < 5; i++) {
-        await expect(
-          service.verifyCode('a@b.co', P, 'stranger-1', '000000'),
-        ).rejects.toThrow(BadRequestException);
-      }
-      await expect(
-        service.verifyCode('a@b.co', P, 'stranger-1', '123456'),
-      ).rejects.toThrow(HttpException);
-      await expect(
-        service.verifyCode('a@b.co', P, 'owner-phone', '123456'),
-      ).resolves.toBeUndefined();
-      expect(codeRepo.update).toHaveBeenCalledWith('c1', {
-        usedAt: expect.any(Date),
-      });
-    });
-
-    it('refuses an expired code', async () => {
-      codeRepo.findOne.mockResolvedValue({
-        id: 'c1',
-        codeHash: 'h',
-        expiresAt: new Date(Date.now() - 1),
-      });
-      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
-      await expect(
-        service.verifyCode('a@b.co', P, 'phone-123', '123456'),
-      ).rejects.toThrow(BadRequestException);
-      expect(codeRepo.update).not.toHaveBeenCalled();
-    });
-  });
-
   describe('freezing, email changes and recovery', () => {
     beforeEach(() => {
       accountRepo.createQueryBuilder.mockReturnValue(
@@ -451,34 +364,6 @@ describe('DiscuvaAccountService', () => {
       );
     });
 
-    it('keeps link tokens as a hash and refuses a used or expired one', async () => {
-      const token = await service.issueLinkToken(
-        'a1',
-        DiscuvaAccountCodePurpose.FREEZE,
-        'Old@Example.com',
-      );
-      expect(token).toMatch(/^[0-9a-f]{64}$/);
-      const saved = codeRepo.save.mock.calls[0][0];
-      expect(saved.codeHash).not.toBe(token);
-      expect(saved).toMatchObject({
-        accountId: 'a1',
-        email: 'old@example.com',
-      });
-
-      codeRepo.findOne.mockResolvedValueOnce(null);
-      await expect(
-        service.useLinkToken('a1', DiscuvaAccountCodePurpose.FREEZE, token),
-      ).rejects.toThrow(BadRequestException);
-      codeRepo.findOne.mockResolvedValueOnce({
-        id: 'c1',
-        expiresAt: new Date(Date.now() - 1),
-      });
-      await expect(
-        service.useLinkToken('a1', DiscuvaAccountCodePurpose.FREEZE, token),
-      ).rejects.toThrow(BadRequestException);
-      expect(codeRepo.update).not.toHaveBeenCalled();
-    });
-
     it("won't move the account to an email someone else uses at one of its churches", async () => {
       accountRepo.findOne.mockResolvedValue(null);
       memberRepo.findOne
@@ -504,11 +389,10 @@ describe('DiscuvaAccountService', () => {
       });
     });
 
-    it('undoing an email change puts the old one back and freezes the account', async () => {
-      codeRepo.findOne.mockResolvedValue({
+    it('undoing an email change puts the old one back, then uses up the link and freezes the account', async () => {
+      codes.findLinkToken.mockResolvedValue({
         id: 'c1',
         email: 'old@example.com',
-        expiresAt: new Date(Date.now() + 1000),
       });
       accountRepo.findOne.mockResolvedValue(null);
       memberRepo.findOne.mockResolvedValue(null);
@@ -521,6 +405,33 @@ describe('DiscuvaAccountService', () => {
       expect(accountRepo.update).toHaveBeenCalledWith('a1', {
         frozenAt: expect.any(Date),
       });
+      expect(codes.markUsed).toHaveBeenCalledWith('c1');
+    });
+
+    it('keeps the undo link when the old email has since been taken, so it can be tried again', async () => {
+      codes.findLinkToken.mockResolvedValue({
+        id: 'c1',
+        email: 'old@example.com',
+      });
+      accountRepo.findOne.mockResolvedValue({ id: 'someone-else' });
+      await expect(
+        service.undoEmailChange('a1', 'f'.repeat(64)),
+      ).rejects.toThrow('already in use');
+      expect(codes.markUsed).not.toHaveBeenCalled();
+    });
+
+    it('a freeze link freezes, then is used up', async () => {
+      codes.findLinkToken.mockResolvedValue({ id: 'c9' });
+      await service.freezeWithLink('a1', 'f'.repeat(64));
+      expect(codes.findLinkToken).toHaveBeenCalledWith(
+        'a1',
+        DiscuvaAccountCodePurpose.FREEZE,
+        'f'.repeat(64),
+      );
+      expect(accountRepo.update).toHaveBeenCalledWith('a1', {
+        frozenAt: expect.any(Date),
+      });
+      expect(codes.markUsed).toHaveBeenCalledWith('c9');
     });
 
     it('recovery clears the device, sets an unknown password and signs out everywhere', async () => {
@@ -554,6 +465,37 @@ describe('DiscuvaAccountService', () => {
       expect(adminRepo.exists).toHaveBeenCalledWith({
         where: { member: { id: 'm2' }, isActive: true },
       });
+    });
+  });
+
+  describe('one request reads an account once', () => {
+    beforeEach(() => {
+      cls.isActive.mockReturnValue(true);
+      delete store.discuvaAccountMemo;
+      accountRepo.createQueryBuilder.mockReturnValue(
+        qb({ id: 'a1', password: 'h', deviceId: 'phone-123' }),
+      );
+      linkRepo.find.mockResolvedValue([{ tenantId: 't1', memberId: 'm1' }]);
+    });
+    afterEach(() => cls.isActive.mockReturnValue(false));
+
+    it('reuses the first read for password, device and freeze checks', async () => {
+      jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
+      const moved = { discuvaAccountId: 'a1', password: 'x', deviceId: null };
+      await service.deviceOf(moved);
+      await service.verifyPassword(moved, 'pw');
+      await service.isFrozen(moved);
+      expect(accountRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
+      expect(settings.getNumber).toHaveBeenCalledTimes(1);
+    });
+
+    it('reads again after a change in the same request', async () => {
+      const moved = { id: 'm1', discuvaAccountId: 'a1', deviceId: null };
+      await service.deviceOf(moved);
+      await service.setDevice(moved, 'phone-2');
+      await service.deviceOf(moved);
+      // The second read happens inside setDevice, after its write, and is the one reused.
+      expect(accountRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
     });
   });
 });

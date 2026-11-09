@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AccountRecoveryService } from './account-recovery.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import { MemberService } from '../../member/service/member.service';
 import { AdminService } from '../../admin/service/admin.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -16,13 +17,12 @@ import { WebauthnService } from './webauthn.service';
 import { AuthService } from './auth.service';
 import { AdminPermission } from '../../admin/enum/admin-permission.enum';
 
+const codes = { sendCode: jest.fn(), verifyCode: jest.fn() };
 const accounts = {
   isOn: jest.fn(),
   accountFor: jest.fn(),
   isAdminAtAnotherChurch: jest.fn(),
   emailInUse: jest.fn(),
-  issueCode: jest.fn().mockResolvedValue('123456'),
-  verifyCode: jest.fn(),
   recover: jest.fn().mockResolvedValue('old@example.com'),
   forEachLinkedMember: jest.fn(
     async (_id: string, fn: (m: string) => Promise<void>) => {
@@ -70,6 +70,7 @@ describe('AccountRecoveryService', () => {
       providers: [
         AccountRecoveryService,
         { provide: DiscuvaAccountService, useValue: accounts },
+        { provide: DiscuvaAccountCodeService, useValue: codes },
         { provide: MemberService, useValue: memberService },
         { provide: AdminService, useValue: adminService },
         { provide: UtilityService, useValue: utility },
@@ -85,13 +86,11 @@ describe('AccountRecoveryService', () => {
 
   it('sends a code to the new email for the person to read out', async () => {
     await service.start('m-admin', 'm-target', 'new@example.com');
-    expect(accounts.issueCode).toHaveBeenCalledWith(
+    expect(codes.sendCode).toHaveBeenCalledWith(
       'new@example.com',
       'RECOVER',
       'admin:m-admin',
-    );
-    expect(utility.sendEmailWithTemplate.mock.calls[0][0]).toBe(
-      'new@example.com',
+      expect.objectContaining({ action: expect.stringContaining('in person') }),
     );
   });
 
@@ -194,7 +193,7 @@ describe('AccountRecoveryService', () => {
 
   it('after the code: recovers, clears phones and passkeys at every church, tells the old address', async () => {
     await service.confirm('m-admin', 'm-target', 'new@example.com', '123456');
-    expect(accounts.verifyCode).toHaveBeenCalledWith(
+    expect(codes.verifyCode).toHaveBeenCalledWith(
       'new@example.com',
       'RECOVER',
       'admin:m-admin',
@@ -222,7 +221,7 @@ describe('AccountRecoveryService', () => {
   });
 
   it('changes nothing when the code is wrong', async () => {
-    accounts.verifyCode.mockRejectedValueOnce(new BadRequestException());
+    codes.verifyCode.mockRejectedValueOnce(new BadRequestException());
     await expect(
       service.confirm('m-admin', 'm-target', 'new@example.com', '000000'),
     ).rejects.toThrow(BadRequestException);

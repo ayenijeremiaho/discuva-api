@@ -1,25 +1,21 @@
 import {
   BadRequestException,
   ConflictException,
-  HttpException,
-  HttpStatus,
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, LessThan, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { ClsService } from 'nestjs-cls';
 import { TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterTypeOrm } from '@nestjs-cls/transactional-adapter-typeorm';
 import { DiscuvaAccount } from '../entity/discuva-account.entity';
 import { DiscuvaAccountLink } from '../entity/discuva-account-link.entity';
-import {
-  DiscuvaAccountCode,
-  DiscuvaAccountCodePurpose,
-} from '../entity/discuva-account-code.entity';
-import { CacheService } from '../../utility/service/cache.service';
+import { DiscuvaAccountCodePurpose } from '../entity/discuva-account-code.entity';
+import { DiscuvaAccountCodeService } from './discuva-account-code.service';
+import { normaliseEmail } from '../util/normalise-email';
 import { Member } from '../../member/entity/member.entity';
 import { Admin } from '../../admin/entity/admin.entity';
 import { MemberSessionService } from '../../member/service/member-session.service';
@@ -42,7 +38,7 @@ export type MoveResult = 'MOVED' | 'LINK_AVAILABLE' | 'NONE';
 const ADULT_AGE = 18;
 const TEST_TENANTS_TTL_MS = 5 * 60_000;
 
-export const normaliseEmail = (email: string) => email.trim().toLowerCase();
+export { normaliseEmail };
 
 // Decides whether the church copy or the account holds the password and device; writes go to both so switching off never locks anyone out.
 @Injectable()
@@ -55,9 +51,7 @@ export class DiscuvaAccountService {
     private readonly accountRepo: Repository<DiscuvaAccount>,
     @InjectRepository(DiscuvaAccountLink)
     private readonly linkRepo: Repository<DiscuvaAccountLink>,
-    @InjectRepository(DiscuvaAccountCode)
-    private readonly codeRepo: Repository<DiscuvaAccountCode>,
-    private readonly cacheService: CacheService,
+    private readonly codes: DiscuvaAccountCodeService,
     private readonly utilityService: UtilityService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
@@ -72,7 +66,27 @@ export class DiscuvaAccountService {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
   ) {}
 
-  async isOn(): Promise<boolean> {
+  // One sign-in reads the same account several times; each request reads it once.
+  private memo<T>(key: string, load: () => Promise<T>): Promise<T> {
+    if (!this.cls.isActive()) return load();
+    let memo = this.cls.get('discuvaAccountMemo');
+    if (!memo) {
+      memo = new Map();
+      this.cls.set('discuvaAccountMemo', memo);
+    }
+    if (!memo.has(key)) memo.set(key, load());
+    return memo.get(key) as Promise<T>;
+  }
+
+  private forgetMemo(): void {
+    if (this.cls.isActive()) this.cls.get('discuvaAccountMemo')?.clear();
+  }
+
+  isOn(): Promise<boolean> {
+    return this.memo(`on:${this.cls.get('tenantId')}`, () => this.readIsOn());
+  }
+
+  private async readIsOn(): Promise<boolean> {
     const mode = await this.platformSettings.getNumber(
       PlatformSettingKey.DISCUVA_ACCOUNT_MODE,
     );
@@ -111,12 +125,8 @@ export class DiscuvaAccountService {
     member: Pick<Member, 'discuvaAccountId'>,
   ): Promise<DiscuvaAccount | null> {
     if (!member.discuvaAccountId || !(await this.isOn())) return null;
-    return this.accountRepo
-      .createQueryBuilder('a')
-      .addSelect('a.password')
-      .addSelect('a.deviceId')
-      .where('a.id = :id', { id: member.discuvaAccountId })
-      .getOne();
+    const id = member.discuvaAccountId;
+    return this.memo(`account:${id}`, () => this.findById(id));
   }
 
   async verifyPassword(
@@ -185,14 +195,7 @@ export class DiscuvaAccountService {
       );
       return 'LINK_AVAILABLE';
     }
-    await this.linkRepo.save(
-      this.linkRepo.create({
-        accountId: account.id,
-        tenantId,
-        memberId: member.id,
-      }),
-    );
-    await this.memberRepo.update(member.id, { discuvaAccountId: account.id });
+    await this.link(account.id, member.id);
     this.logger.log(`Member ${member.id} moved to a Discuva account`);
     return 'MOVED';
   }
@@ -203,6 +206,7 @@ export class DiscuvaAccountService {
   ): Promise<void> {
     const account = await this.accountFor(member);
     if (account) await this.accountRepo.update(account.id, { deviceId });
+    this.forgetMemo();
     await this.forEachChurchOf(member, (memberId) =>
       this.memberRepo.update(memberId, { deviceId }).then(() => undefined),
     );
@@ -220,6 +224,7 @@ export class DiscuvaAccountService {
         passwordChangedAt: new Date(),
         frozenAt: null,
       });
+      this.forgetMemo();
     }
     await this.forEachChurchOf(member, (memberId) =>
       this.memberRepo
@@ -261,6 +266,7 @@ export class DiscuvaAccountService {
   // Sets the account's device and every linked church's copy.
   async setDeviceOnAccount(accountId: string, deviceId: string): Promise<void> {
     await this.accountRepo.update(accountId, { deviceId });
+    this.forgetMemo();
     await this.forEachLinkOf(accountId, (memberId) =>
       this.memberRepo.update(memberId, { deviceId }).then(() => undefined),
     );
@@ -331,6 +337,12 @@ export class DiscuvaAccountService {
     );
   }
 
+  // Only for an account that never got a church, after joining failed.
+  async remove(accountId: string): Promise<void> {
+    await this.accountRepo.delete(accountId);
+    this.forgetMemo();
+  }
+
   async link(accountId: string, memberId: string): Promise<void> {
     const tenantId = this.cls.get('tenantId');
     await this.linkRepo.upsert({ accountId, tenantId, memberId }, [
@@ -347,122 +359,6 @@ export class DiscuvaAccountService {
     });
   }
 
-  // Issues a 6-digit code for this email, purpose and device; only this device's earlier code is replaced.
-  async issueCode(
-    email: string,
-    purpose: DiscuvaAccountCodePurpose,
-    deviceId: string,
-  ): Promise<string> {
-    const key = this.codeKey('account_code_req', email, purpose, deviceId);
-    const limit = await this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_CODE_REQUESTS_PER_HOUR,
-    );
-    const count = await this.cacheService.incrGlobal(key, 3600);
-    if (count > limit) {
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: 'TOO_MANY_REQUESTS',
-          message: 'Too many codes asked for. Please try again in an hour.',
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    const normalised = normaliseEmail(email);
-    await this.codeRepo.delete({
-      email: normalised,
-      purpose,
-      deviceId,
-      usedAt: IsNull(),
-    });
-    const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
-    const minutes = await this.codeTtlMinutes();
-    await this.codeRepo.save(
-      this.codeRepo.create({
-        email: normalised,
-        purpose,
-        deviceId,
-        tenantId: this.cls.get('tenantId') ?? null,
-        codeHash: await UtilityService.hashValue(code),
-        expiresAt: new Date(Date.now() + minutes * 60_000),
-        usedAt: null,
-      }),
-    );
-    return code;
-  }
-
-  // Wrong guesses count per email, purpose and device, so someone else can't use up the owner's tries.
-  async verifyCode(
-    email: string,
-    purpose: DiscuvaAccountCodePurpose,
-    deviceId: string,
-    code: string,
-  ): Promise<void> {
-    const key = this.codeKey('account_code_fail', email, purpose, deviceId);
-    const max = await this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_CODE_MAX_ATTEMPTS,
-    );
-    if (((await this.cacheService.getGlobal<number>(key)) ?? 0) >= max) {
-      throw new HttpException(
-        {
-          statusCode: HttpStatus.TOO_MANY_REQUESTS,
-          error: 'TOO_MANY_REQUESTS',
-          message:
-            'Too many incorrect attempts. Please ask for a new code and try again.',
-        },
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-    const record = await this.codeRepo.findOne({
-      where: {
-        email: normaliseEmail(email),
-        purpose,
-        deviceId,
-        usedAt: IsNull(),
-      },
-      order: { createdAt: 'DESC' },
-    });
-    const valid =
-      !!record &&
-      record.expiresAt > new Date() &&
-      (await UtilityService.verifyHashedValue(code, record.codeHash));
-    if (!valid) {
-      await this.cacheService.incrGlobal(
-        key,
-        (await this.codeTtlMinutes()) * 60,
-      );
-      throw new BadRequestException(
-        'This code is invalid or has expired. Please ask for a new one.',
-      );
-    }
-    await this.codeRepo.update(record.id, { usedAt: new Date() });
-    this.cacheService.delGlobal(key);
-  }
-
-  async purgeCodes(): Promise<void> {
-    await this.codeRepo.delete({ expiresAt: LessThan(new Date()) });
-    await this.codeRepo
-      .createQueryBuilder()
-      .delete()
-      .where('used_at IS NOT NULL')
-      .execute();
-  }
-
-  private codeTtlMinutes(): Promise<number> {
-    return this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_CODE_TTL_MINUTES,
-    );
-  }
-
-  private codeKey(
-    ns: string,
-    email: string,
-    purpose: string,
-    deviceId: string,
-  ): string {
-    return `${ns}:${normaliseEmail(email)}:${purpose}:${deviceId}`;
-  }
-
   async isFrozen(member: Pick<Member, 'discuvaAccountId'>): Promise<boolean> {
     return !!(await this.accountFor(member))?.frozenAt;
   }
@@ -473,7 +369,7 @@ export class DiscuvaAccountService {
   ): Promise<string | undefined> {
     const account = await this.accountFor(member);
     if (!account) return undefined;
-    const token = await this.issueLinkToken(
+    const token = await this.codes.issueLinkToken(
       account.id,
       DiscuvaAccountCodePurpose.FREEZE,
       account.email,
@@ -484,7 +380,7 @@ export class DiscuvaAccountService {
   }
 
   async emailUndoUrl(accountId: string, oldEmail: string): Promise<string> {
-    const token = await this.issueLinkToken(
+    const token = await this.codes.issueLinkToken(
       accountId,
       DiscuvaAccountCodePurpose.EMAIL_UNDO,
       oldEmail,
@@ -494,58 +390,10 @@ export class DiscuvaAccountService {
     );
   }
 
-  // Long random links in security emails; only a hash is kept, and each works once.
-  async issueLinkToken(
-    accountId: string,
-    purpose:
-      DiscuvaAccountCodePurpose.FREEZE | DiscuvaAccountCodePurpose.EMAIL_UNDO,
-    email: string,
-  ): Promise<string> {
-    const token = randomBytes(32).toString('hex');
-    const days = await this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_LINK_VALID_DAYS,
-    );
-    await this.codeRepo.save(
-      this.codeRepo.create({
-        email: normaliseEmail(email),
-        purpose,
-        accountId,
-        deviceId: null,
-        tenantId: this.cls.get('tenantId') ?? null,
-        codeHash: this.tokenHash(token),
-        expiresAt: new Date(Date.now() + days * 86_400_000),
-        usedAt: null,
-      }),
-    );
-    return token;
-  }
-
-  async useLinkToken(
-    accountId: string,
-    purpose:
-      DiscuvaAccountCodePurpose.FREEZE | DiscuvaAccountCodePurpose.EMAIL_UNDO,
-    token: string,
-  ): Promise<DiscuvaAccountCode> {
-    const record = await this.codeRepo.findOne({
-      where: {
-        codeHash: this.tokenHash(token),
-        purpose,
-        accountId,
-        usedAt: IsNull(),
-      },
-    });
-    if (!record || record.expiresAt < new Date()) {
-      throw new BadRequestException(
-        'This link has expired or was already used. Contact your church if you need help.',
-      );
-    }
-    await this.codeRepo.update(record.id, { usedAt: new Date() });
-    return record;
-  }
-
   // Blocks sign-in everywhere until the owner resets their password.
   async freeze(accountId: string): Promise<void> {
     await this.accountRepo.update(accountId, { frozenAt: new Date() });
+    this.forgetMemo();
     await this.endAllSessions(accountId);
     this.logger.warn(`Discuva account ${accountId} frozen by its owner`);
   }
@@ -587,6 +435,7 @@ export class DiscuvaAccountService {
     }
     const email = normaliseEmail(newEmail);
     await this.accountRepo.update(accountId, { email });
+    this.forgetMemo();
     await this.forEachLinkOf(accountId, (memberId) =>
       this.memberRepo.update(memberId, { email }).then(() => undefined),
     );
@@ -595,14 +444,25 @@ export class DiscuvaAccountService {
 
   // Puts the old email back and freezes the account, so whoever changed it is signed out too.
   async undoEmailChange(accountId: string, token: string): Promise<string> {
-    const record = await this.useLinkToken(
+    const record = await this.codes.findLinkToken(
       accountId,
       DiscuvaAccountCodePurpose.EMAIL_UNDO,
       token,
     );
     await this.changeEmail(accountId, record.email);
+    await this.codes.markUsed(record.id);
     await this.freeze(accountId);
     return record.email;
+  }
+
+  async freezeWithLink(accountId: string, token: string): Promise<void> {
+    const record = await this.codes.findLinkToken(
+      accountId,
+      DiscuvaAccountCodePurpose.FREEZE,
+      token,
+    );
+    await this.freeze(accountId);
+    await this.codes.markUsed(record.id);
   }
 
   // An admin at another of the account's churches can only be recovered there.
@@ -637,6 +497,7 @@ export class DiscuvaAccountService {
       recoveredAt: new Date(),
       passwordChangedAt: new Date(),
     });
+    this.forgetMemo();
     await this.forEachLinkOf(accountId, (memberId) =>
       this.memberRepo
         .update(memberId, {
@@ -655,10 +516,6 @@ export class DiscuvaAccountService {
     fn: (memberId: string) => Promise<void>,
   ): Promise<void> {
     await this.forEachLinkOf(accountId, fn);
-  }
-
-  private tokenHash(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
   }
 
   // Basics from the person's member record at a church they already belong to.

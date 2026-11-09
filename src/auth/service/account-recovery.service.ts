@@ -10,6 +10,7 @@ import {
   normaliseEmail,
 } from '../../discuva-account/service/discuva-account.service';
 import { DiscuvaAccount } from '../../discuva-account/entity/discuva-account.entity';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import { DiscuvaAccountCodePurpose } from '../../discuva-account/entity/discuva-account-code.entity';
 import { MemberService } from '../../member/service/member.service';
 import { Member } from '../../member/entity/member.entity';
@@ -28,6 +29,7 @@ import { AuthService } from './auth.service';
 export class AccountRecoveryService {
   constructor(
     private readonly accounts: DiscuvaAccountService,
+    private readonly codes: DiscuvaAccountCodeService,
     private readonly memberService: MemberService,
     private readonly adminService: AdminService,
     private readonly utilityService: UtilityService,
@@ -45,23 +47,13 @@ export class AccountRecoveryService {
     newEmail: string,
   ): Promise<void> {
     const { member } = await this.checkAllowed(actorId, memberId, newEmail);
-    const code = await this.accounts.issueCode(
+    const churchName = await this.utilityService.resolveChurchName();
+    await this.codes.sendCode(
       newEmail,
       DiscuvaAccountCodePurpose.RECOVER,
       this.adminDevice(actorId),
-    );
-    const churchName = await this.utilityService.resolveChurchName();
-    const minutes = await this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_CODE_TTL_MINUTES,
-    );
-    this.utilityService.sendEmailWithTemplate(
-      newEmail,
-      'Your Discuva code',
-      'discuva-account-code',
       {
-        name: UtilityService.capitalizeFirstLetter(member.firstname),
-        otp: code,
-        expiresMinutes: String(minutes),
+        firstName: member.firstname,
         action: `An admin at ${churchName} is helping you get your Discuva account back. Give them this code only in person.`,
       },
     );
@@ -78,7 +70,7 @@ export class AccountRecoveryService {
       memberId,
       newEmail,
     );
-    await this.accounts.verifyCode(
+    await this.codes.verifyCode(
       newEmail,
       DiscuvaAccountCodePurpose.RECOVER,
       this.adminDevice(actorId),

@@ -53,6 +53,7 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 
@@ -115,6 +116,7 @@ export class AuthService {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly churchTimezone: ChurchTimezoneService,
     private readonly accounts: DiscuvaAccountService,
+    private readonly accountCodes: DiscuvaAccountCodeService,
     private readonly platformSettings: PlatformSettingsService,
   ) {
     this.otpTtlSeconds = this.configService.get<number>('OTP_TTL_SECONDS');
@@ -380,24 +382,7 @@ export class AuthService {
     const member = await this.memberService.getById(memberId, [
       'workerProfile',
     ]);
-
-    if (member.status === MemberStatusEnum.INACTIVE) {
-      throw new UnauthorizedException(
-        'Your account is inactive. Contact admin.',
-      );
-    }
-    if (member.role === MemberRoleEnum.WORKER) {
-      if (!member.workerProfile) {
-        throw new UnauthorizedException(
-          'Worker access revoked. Please contact admin.',
-        );
-      }
-      if (member.workerProfile.status !== WorkerStatusEnum.ACTIVE) {
-        throw new UnauthorizedException(
-          'Worker account suspended. Please contact admin.',
-        );
-      }
-    }
+    this.assertCanSignIn(member);
 
     const tokens = await this.generateTokens(
       member.id,
@@ -1026,8 +1011,8 @@ export class AuthService {
     }
     try {
       this.logger.log('Running scheduled purge of expired OTPs');
-      await this.accounts
-        .purgeCodes()
+      await this.accountCodes
+        .purge()
         .catch((err: Error) =>
           this.logger.warn(`Account code purge failed: ${err.message}`),
         );

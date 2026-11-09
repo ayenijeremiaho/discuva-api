@@ -10,6 +10,7 @@ import {
 import { AccountSignInService } from './account-sign-in.service';
 import { AuthService } from './auth.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import { MemberService } from '../../member/service/member.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -25,19 +26,22 @@ const cache = {
   getGlobal: jest.fn(async (k: string) => store.get(k)),
   delGlobal: jest.fn(async (k: string) => Number(store.delete(k))),
 };
+const codes = {
+  sendCode: jest.fn().mockResolvedValue(undefined),
+  verifyCode: jest.fn().mockResolvedValue(undefined),
+};
 const accounts = {
   isOn: jest.fn(),
   findByEmail: jest.fn(),
   findById: jest.fn(),
   basicsFrom: jest.fn(),
-  issueCode: jest.fn().mockResolvedValue('123456'),
-  verifyCode: jest.fn().mockResolvedValue(undefined),
   create: jest.fn(),
   link: jest.fn(),
   linksOf: jest.fn(),
   endSessionsEverywhere: jest.fn(),
   setDeviceOnAccount: jest.fn(),
   isEligible: jest.fn().mockReturnValue(true),
+  remove: jest.fn(),
 };
 const memberService = {
   findByEmail: jest.fn(),
@@ -79,6 +83,7 @@ describe('AccountSignInService', () => {
       providers: [
         AccountSignInService,
         { provide: DiscuvaAccountService, useValue: accounts },
+        { provide: DiscuvaAccountCodeService, useValue: codes },
         { provide: MemberService, useValue: memberService },
         { provide: AuthService, useValue: authService },
         { provide: CacheService, useValue: cache },
@@ -106,15 +111,14 @@ describe('AccountSignInService', () => {
       accounts.findByEmail.mockResolvedValueOnce(account);
       accounts.basicsFrom.mockResolvedValueOnce({ firstname: 'ada' });
       await service.startJoin('ada@example.com', 'phone-123');
-      expect(utility.sendEmailWithTemplate).toHaveBeenCalledTimes(2);
-      const [first, second] = utility.sendEmailWithTemplate.mock.calls;
-      expect(first[1]).toBe(second[1]);
-      expect(first[2]).toBe('discuva-account-code');
-      expect(accounts.issueCode).toHaveBeenCalledWith(
-        'new@b.co',
+      expect(codes.sendCode).toHaveBeenCalledTimes(2);
+      const [first, second] = codes.sendCode.mock.calls;
+      expect(first.slice(1, 3)).toEqual([
         DiscuvaAccountCodePurpose.JOIN,
         'phone-123',
-      );
+      ]);
+      expect(first[3].action).toBe(second[3].action);
+      expect(first[0]).toBe('new@b.co');
     });
 
     it('tells someone already in this church to sign in instead', async () => {
@@ -231,6 +235,88 @@ describe('AccountSignInService', () => {
       expect(accounts.link).toHaveBeenCalledWith('a9', 'm9');
     });
 
+    it('asks for a name when the account has no church left to bring it from', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.findById.mockResolvedValue(account);
+      accounts.basicsFrom.mockResolvedValue(null);
+      const verified = (await service.verifyJoin(
+        'ada@example.com',
+        '123456',
+        'phone-123',
+      )) as {
+        joinToken: string;
+        needsName: boolean;
+      };
+      expect(verified.needsName).toBe(true);
+      await expect(
+        service.completeJoin({
+          joinToken: verified.joinToken,
+          deviceId: 'phone-123',
+        } as never),
+      ).rejects.toThrow('first and last name');
+      memberService.createForAccount.mockResolvedValue({ id: 'm3' });
+      memberService.getById.mockResolvedValue({ id: 'm3' });
+      await service.completeJoin({
+        joinToken: verified.joinToken,
+        deviceId: 'phone-123',
+        firstname: 'Ada',
+        lastname: 'Obi',
+      } as never);
+      expect(memberService.createForAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ firstname: 'Ada', lastname: 'Obi' }),
+        account,
+      );
+    });
+
+    it("removes a brand-new account if joining the church then fails, so the email isn't stuck", async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(null);
+      const { joinToken } = (await service.verifyJoin(
+        'new@b.co',
+        '123456',
+        'phone-123',
+      )) as { joinToken: string };
+      jest.spyOn(UtilityService, 'hashValue').mockResolvedValue('h');
+      accounts.create.mockResolvedValue({ id: 'a9' });
+      accounts.findById.mockResolvedValue({ id: 'a9' });
+      memberService.createForAccount.mockRejectedValueOnce(
+        new Error('member limit reached'),
+      );
+      await expect(
+        service.completeJoin({
+          joinToken,
+          deviceId: 'phone-123',
+          firstname: 'B',
+          lastname: 'A',
+          password: 'Str0ng!pass',
+        } as never),
+      ).rejects.toThrow('member limit reached');
+      expect(accounts.remove).toHaveBeenCalledWith('a9');
+    });
+
+    it('keeps an existing account when joining fails', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue(account);
+      accounts.findById.mockResolvedValue(account);
+      accounts.basicsFrom.mockResolvedValue({
+        firstname: 'Ada',
+        lastname: 'Obi',
+      });
+      const { joinToken } = (await service.verifyJoin(
+        'ada@example.com',
+        '123456',
+        'phone-123',
+      )) as { joinToken: string };
+      memberService.createForAccount.mockRejectedValueOnce(
+        new Error('member limit reached'),
+      );
+      await expect(
+        service.completeJoin({ joinToken, deviceId: 'phone-123' } as never),
+      ).rejects.toThrow();
+      expect(accounts.remove).not.toHaveBeenCalled();
+    });
+
     it('sends under-18s to their church instead', async () => {
       memberService.findByEmail.mockResolvedValue(null);
       accounts.findByEmail.mockResolvedValue(null);
@@ -284,13 +370,11 @@ describe('AccountSignInService', () => {
       memberService.getByIdWithCredentials.mockResolvedValue(member);
       accounts.findByEmail.mockResolvedValue(account);
       await service.requestLink('m2');
-      expect(accounts.issueCode).toHaveBeenCalledWith(
+      expect(codes.sendCode).toHaveBeenCalledWith(
         'ada@example.com',
         DiscuvaAccountCodePurpose.LINK,
         'phone-123',
-      );
-      expect(utility.sendEmailWithTemplate.mock.calls[0][0]).toBe(
-        'ada@example.com',
+        expect.objectContaining({ firstName: 'ada' }),
       );
     });
 
@@ -303,7 +387,7 @@ describe('AccountSignInService', () => {
       await expect(service.requestLink('m2')).rejects.toThrow(
         ForbiddenException,
       );
-      expect(accounts.issueCode).not.toHaveBeenCalled();
+      expect(codes.sendCode).not.toHaveBeenCalled();
     });
 
     it("won't link twice", async () => {
@@ -320,7 +404,7 @@ describe('AccountSignInService', () => {
       memberService.getByIdWithCredentials.mockResolvedValue(member);
       accounts.findByEmail.mockResolvedValue(account);
       await service.confirmLink('m2', '123456');
-      expect(accounts.verifyCode).toHaveBeenCalled();
+      expect(codes.verifyCode).toHaveBeenCalled();
       expect(accounts.link).toHaveBeenCalledWith('a1', 'm2');
       expect(memberService.applyAccountCredentials).toHaveBeenCalledWith(
         'm2',
@@ -331,7 +415,7 @@ describe('AccountSignInService', () => {
     it('does not link when the code is wrong', async () => {
       memberService.getByIdWithCredentials.mockResolvedValue(member);
       accounts.findByEmail.mockResolvedValue(account);
-      accounts.verifyCode.mockRejectedValueOnce(new BadRequestException());
+      codes.verifyCode.mockRejectedValueOnce(new BadRequestException());
       await expect(service.confirmLink('m2', '000000')).rejects.toThrow(
         BadRequestException,
       );

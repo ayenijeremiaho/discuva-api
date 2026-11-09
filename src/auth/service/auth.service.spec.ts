@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import { accountsOffMock } from '../../discuva-account/testing/accounts-off.mock';
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import {
   BadRequestException,
   ConflictException,
@@ -218,6 +219,10 @@ describe('AuthService', () => {
         { provide: MemberSessionService, useValue: mockSessionService },
         { provide: DiscuvaAccountService, useValue: mockAccounts },
         { provide: PlatformSettingsService, useValue: mockPlatformSettings },
+        {
+          provide: DiscuvaAccountCodeService,
+          useValue: { purge: jest.fn().mockResolvedValue(undefined) },
+        },
         { provide: JwtService, useValue: mockJwtService },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: UtilityService, useValue: mockUtilityService },

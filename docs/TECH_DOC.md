@@ -11440,7 +11440,8 @@ One email, password and device across every church a person belongs to. Off unti
   `frozen_at`, `recovered_at`), `discuva_account_links` (`account_id`, `tenant_id`, `member_id`; unique
   `(tenant_id, member_id)`, index on `account_id`), `discuva_account_codes` (emailed join/link/recover codes, hash only;
   partial index `(email, purpose, device_id) WHERE used_at IS NULL`, index on `expires_at`). Per church:
-  `members.discuva_account_id` (partial index where set) marks a member who has moved.
+  `members.discuva_account_id` marks a member who has moved (no index: members are never looked up by it; the links
+  table answers "which churches"; an early index was dropped by `DropMembersDiscuvaAccountIdIndex1805616000000`).
 - **One password check.** `DiscuvaAccountService.verifyPassword()` is the only place a password is compared for member
   sign-in and password change. With the switch on and `discuva_account_id` set it compares the account hash only, never
   falling back to the church copy; otherwise the church copy. `deviceOf()` does the same for the one-device lock.
@@ -11490,11 +11491,11 @@ One email, password and device across every church a person belongs to. Off unti
 - **Joining a church email-first** (all `@Public()`, at the joining church's address):
   `POST /auth/join/start {email, deviceId}` always sends a code and always answers the same, so it never reveals whether
   an account exists. `POST /auth/join/verify {email, code, deviceId}` returns `ALREADY_MEMBER` (sign in instead),
-  `EXISTING_ACCOUNT` with the person's first name, or `NEW`, plus a one-use `joinToken` (Redis, 15 minutes, bound to this
+  `EXISTING_ACCOUNT` with the person's first name and `needsName` (true when the account has no church left to copy a name from, so the app asks for one), or `NEW`, plus a one-use `joinToken` (Redis, 15 minutes, bound to this
   church and device). `POST /auth/join/complete {joinToken, deviceId, ...}` creates an ACTIVE member here and signs in.
   An existing account brings its password, device and basics (name, phone, gender, birthday, marital status, copied from
   one of its churches); it's refused from a phone other than the account's, or when frozen. Someone new gives first name,
-  last name and a password (same rules as a password change); under-18s are sent to their church. Uses the church's
+  last name and a password (same rules as a password change); under-18s are sent to their church. If creating the member fails after a new account was made, the account is removed again so the email isn't left stuck. Uses the church's
   member limit like any sign-up.
 - **Adding a church to an account** (signed in to the member app at that church, which wasn't linked because the email
   already had an account): `POST /auth/account/link/request` emails a code to the account email;
@@ -11512,7 +11513,12 @@ One email, password and device across every church a person belongs to. Off unti
 - **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
   church's members. Instead the offer appears when the person next signs in at that church (`account_link_available`).
 - **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
-  member, one read of the account by id. No scheduled work.
+  member, one read of the account by id; within a request the account and the switch are read once and reused
+  (`discuvaAccountMemo` in the request context, cleared after any account write). No scheduled work.
+- **Code layout.** `DiscuvaAccountService` holds the account itself (switch, password and device, moving, linking, email
+  change, freeze, recovery); `DiscuvaAccountCodeService` holds emailed codes (`sendCode`, `verifyCode`), the security-email
+  link tokens (`issueLinkToken`, `findLinkToken`, `markUsed`; a link is used up only after its change has worked) and the
+  nightly purge (one `DELETE ... WHERE used_at IS NOT NULL OR expires_at < now`).
 
 ### OTP Verify Guess Limiting
 
@@ -14046,7 +14052,8 @@ One email, password and device across every church a person belongs to. Off unti
   `frozen_at`, `recovered_at`), `discuva_account_links` (`account_id`, `tenant_id`, `member_id`; unique
   `(tenant_id, member_id)`, index on `account_id`), `discuva_account_codes` (emailed join/link/recover codes, hash only;
   partial index `(email, purpose, device_id) WHERE used_at IS NULL`, index on `expires_at`). Per church:
-  `members.discuva_account_id` (partial index where set) marks a member who has moved.
+  `members.discuva_account_id` marks a member who has moved (no index: members are never looked up by it; the links
+  table answers "which churches"; an early index was dropped by `DropMembersDiscuvaAccountIdIndex1805616000000`).
 - **One password check.** `DiscuvaAccountService.verifyPassword()` is the only place a password is compared for member
   sign-in and password change. With the switch on and `discuva_account_id` set it compares the account hash only, never
   falling back to the church copy; otherwise the church copy. `deviceOf()` does the same for the one-device lock.
@@ -14096,11 +14103,11 @@ One email, password and device across every church a person belongs to. Off unti
 - **Joining a church email-first** (all `@Public()`, at the joining church's address):
   `POST /auth/join/start {email, deviceId}` always sends a code and always answers the same, so it never reveals whether
   an account exists. `POST /auth/join/verify {email, code, deviceId}` returns `ALREADY_MEMBER` (sign in instead),
-  `EXISTING_ACCOUNT` with the person's first name, or `NEW`, plus a one-use `joinToken` (Redis, 15 minutes, bound to this
+  `EXISTING_ACCOUNT` with the person's first name and `needsName` (true when the account has no church left to copy a name from, so the app asks for one), or `NEW`, plus a one-use `joinToken` (Redis, 15 minutes, bound to this
   church and device). `POST /auth/join/complete {joinToken, deviceId, ...}` creates an ACTIVE member here and signs in.
   An existing account brings its password, device and basics (name, phone, gender, birthday, marital status, copied from
   one of its churches); it's refused from a phone other than the account's, or when frozen. Someone new gives first name,
-  last name and a password (same rules as a password change); under-18s are sent to their church. Uses the church's
+  last name and a password (same rules as a password change); under-18s are sent to their church. If creating the member fails after a new account was made, the account is removed again so the email isn't left stuck. Uses the church's
   member limit like any sign-up.
 - **Adding a church to an account** (signed in to the member app at that church, which wasn't linked because the email
   already had an account): `POST /auth/account/link/request` emails a code to the account email;
@@ -14118,7 +14125,12 @@ One email, password and device across every church a person belongs to. Off unti
 - **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
   church's members. Instead the offer appears when the person next signs in at that church (`account_link_available`).
 - **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
-  member, one read of the account by id. No scheduled work.
+  member, one read of the account by id; within a request the account and the switch are read once and reused
+  (`discuvaAccountMemo` in the request context, cleared after any account write). No scheduled work.
+- **Code layout.** `DiscuvaAccountService` holds the account itself (switch, password and device, moving, linking, email
+  change, freeze, recovery); `DiscuvaAccountCodeService` holds emailed codes (`sendCode`, `verifyCode`), the security-email
+  link tokens (`issueLinkToken`, `findLinkToken`, `markUsed`; a link is used up only after its change has worked) and the
+  nightly purge (one `DELETE ... WHERE used_at IS NOT NULL OR expires_at < now`).
 
 ### OTP Verify Guess Limiting
 

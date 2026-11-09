@@ -14,6 +14,7 @@ import {
   normaliseEmail,
 } from '../../discuva-account/service/discuva-account.service';
 import { DiscuvaAccount } from '../../discuva-account/entity/discuva-account.entity';
+import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import { DiscuvaAccountCodePurpose } from '../../discuva-account/entity/discuva-account-code.entity';
 import { MemberService } from '../../member/service/member.service';
 import { MemberStatusEnum } from '../../member/enums/member-status.enum';
@@ -24,8 +25,6 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
-import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
-import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 import { JoinCompleteDto } from '../dto/account.dto';
 import { JwtResponse } from '../interface/auth.interface';
 import { AuthService } from './auth.service';
@@ -50,20 +49,33 @@ interface HandoffTicket {
 
 export type JoinVerifyResult =
   | { status: 'ALREADY_MEMBER' }
-  | { status: 'EXISTING_ACCOUNT'; joinToken: string; firstName: string | null }
+  | {
+      status: 'EXISTING_ACCOUNT';
+      joinToken: string;
+      firstName: string | null;
+      needsName: boolean;
+    }
   | { status: 'NEW'; joinToken: string };
+
+type JoinDetails = Omit<JoinCompleteDto, 'joinToken' | 'deviceId' | 'password'>;
+
+interface JoinPlan {
+  account: DiscuvaAccount;
+  signup: SignupDto;
+  createdNow: boolean;
+}
 
 // Joining a church email-first, adding a church to an account, and moving between an account's churches.
 @Injectable()
 export class AccountSignInService {
   constructor(
     private readonly accounts: DiscuvaAccountService,
+    private readonly codes: DiscuvaAccountCodeService,
     private readonly memberService: MemberService,
     private readonly authService: AuthService,
     private readonly cacheService: CacheService,
     private readonly utilityService: UtilityService,
     private readonly auditLogService: AuditLogService,
-    private readonly platformSettings: PlatformSettingsService,
     private readonly cls: ClsService<AppClsStore>,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
@@ -74,18 +86,11 @@ export class AccountSignInService {
     await this.assertOn();
     const account = await this.accounts.findByEmail(email);
     const basics = account ? await this.accounts.basicsFrom(account.id) : null;
-    const code = await this.accounts.issueCode(
-      email,
-      DiscuvaAccountCodePurpose.JOIN,
-      deviceId,
-    );
     const churchName = await this.utilityService.resolveChurchName();
-    await this.sendCode(
-      email,
-      basics?.firstname ?? null,
-      code,
-      `You asked to join ${churchName} on Discuva.`,
-    );
+    await this.codes.sendCode(email, DiscuvaAccountCodePurpose.JOIN, deviceId, {
+      firstName: basics?.firstname ?? null,
+      action: `You asked to join ${churchName} on Discuva.`,
+    });
   }
 
   async verifyJoin(
@@ -94,7 +99,7 @@ export class AccountSignInService {
     deviceId: string,
   ): Promise<JoinVerifyResult> {
     await this.assertOn();
-    await this.accounts.verifyCode(
+    await this.codes.verifyCode(
       email,
       DiscuvaAccountCodePurpose.JOIN,
       deviceId,
@@ -123,6 +128,7 @@ export class AccountSignInService {
       status: 'EXISTING_ACCOUNT',
       joinToken,
       firstName: basics?.firstname ?? null,
+      needsName: !basics?.firstname,
     };
   }
 
@@ -142,82 +148,104 @@ export class AccountSignInService {
     }
     const { joinToken, deviceId, password, ...details } = dto;
 
-    let account: DiscuvaAccount | null;
-    let signup: SignupDto;
-    if (ticket.accountId) {
-      account = await this.accounts.findById(ticket.accountId);
-      if (!account) throw new BadRequestException('Please start again.');
-      this.assertUsable(account, deviceId);
-      const basics = await this.accounts.basicsFrom(account.id);
-      signup = {
-        ...details,
-        ...this.definedBasics(basics),
-        firstname: basics?.firstname ?? details.firstname ?? '',
-        lastname: basics?.lastname ?? details.lastname ?? '',
-        email: ticket.email,
-      } as SignupDto;
-      if (!account.deviceId) {
-        await this.accounts.setDeviceOnAccount(account.id, deviceId);
-        account.deviceId = deviceId;
-      }
-    } else {
-      if (
-        !details.firstname?.trim() ||
-        !details.lastname?.trim() ||
-        !password
-      ) {
-        throw new BadRequestException(
-          'Your first name, last name and a password are needed.',
-        );
-      }
-      signup = { ...details, email: ticket.email } as SignupDto;
-      const adult = this.accounts.isEligible({
-        email: signup.email,
-        birthYear: signup.birthYear ?? null,
-        birthMonth: signup.birthMonth ?? null,
-        birthDay: signup.birthDay ?? null,
-      });
-      if (!adult) {
-        throw new ForbiddenException(
-          'People under 18 join through their church. Please ask a leader to add you.',
-        );
-      }
-      account = await this.accounts.create(
-        ticket.email,
-        await UtilityService.hashValue(password),
-        deviceId,
-      );
-      account = await this.accounts.findById(account.id);
-    }
+    const { account, signup, createdNow } = ticket.accountId
+      ? await this.joinWithAccount(ticket, deviceId, details)
+      : await this.joinAsNew(ticket, deviceId, password, details);
 
-    const member = await this.memberService.createForAccount(signup, account!);
-    await this.accounts.link(account!.id, member.id);
+    let member: Member;
+    try {
+      member = await this.memberService.createForAccount(signup, account);
+      await this.accounts.link(account.id, member.id);
+    } catch (err) {
+      // A new account that never got its church would block this email later.
+      if (createdNow) await this.accounts.remove(account.id);
+      throw err;
+    }
     this.cacheService.delGlobal(this.joinKey(joinToken));
     const full = await this.memberService.getById(member.id, ['workerProfile']);
     return this.authService.startMemberSession(full, 'MEMBER_LOGIN');
   }
 
+  // Basics come from a church the person already belongs to; only an account with none left needs a name here.
+  private async joinWithAccount(
+    ticket: JoinTicket,
+    deviceId: string,
+    details: JoinDetails,
+  ): Promise<JoinPlan> {
+    const account = await this.accounts.findById(ticket.accountId!);
+    if (!account) throw new BadRequestException('Please start again.');
+    this.assertUsable(account, deviceId);
+    const basics = await this.accounts.basicsFrom(account.id);
+    const firstname = basics?.firstname ?? details.firstname?.trim();
+    const lastname = basics?.lastname ?? details.lastname?.trim();
+    if (!firstname || !lastname) {
+      throw new BadRequestException('Please give your first and last name.');
+    }
+    if (!account.deviceId) {
+      await this.accounts.setDeviceOnAccount(account.id, deviceId);
+      account.deviceId = deviceId;
+    }
+    const signup = {
+      ...details,
+      ...this.definedBasics(basics),
+      firstname,
+      lastname,
+      email: ticket.email,
+    } as SignupDto;
+    return { account, signup, createdNow: false };
+  }
+
+  private async joinAsNew(
+    ticket: JoinTicket,
+    deviceId: string,
+    password: string | undefined,
+    details: JoinDetails,
+  ): Promise<JoinPlan> {
+    if (!details.firstname?.trim() || !details.lastname?.trim() || !password) {
+      throw new BadRequestException(
+        'Your first name, last name and a password are needed.',
+      );
+    }
+    const signup = { ...details, email: ticket.email } as SignupDto;
+    const adult = this.accounts.isEligible({
+      email: signup.email,
+      birthYear: signup.birthYear ?? null,
+      birthMonth: signup.birthMonth ?? null,
+      birthDay: signup.birthDay ?? null,
+    });
+    if (!adult) {
+      throw new ForbiddenException(
+        'People under 18 join through their church. Please ask a leader to add you.',
+      );
+    }
+    const created = await this.accounts.create(
+      ticket.email,
+      await UtilityService.hashValue(password),
+      deviceId,
+    );
+    const account = await this.accounts.findById(created.id);
+    return { account: account!, signup, createdNow: true };
+  }
+
   async requestLink(memberId: string): Promise<void> {
     await this.assertOn();
     const { member, account } = await this.linkCandidate(memberId);
-    const code = await this.accounts.issueCode(
-      member.email,
+    const churchName = await this.utilityService.resolveChurchName();
+    await this.codes.sendCode(
+      account.email,
       DiscuvaAccountCodePurpose.LINK,
       this.linkDevice(member),
-    );
-    const churchName = await this.utilityService.resolveChurchName();
-    await this.sendCode(
-      account.email,
-      member.firstname,
-      code,
-      `You asked to add ${churchName} to your Discuva account. Once you do, your Discuva password works here and your old ${churchName} password stops working.`,
+      {
+        firstName: member.firstname,
+        action: `You asked to add ${churchName} to your Discuva account. Once you do, your Discuva password works here and your old ${churchName} password stops working.`,
+      },
     );
   }
 
   async confirmLink(memberId: string, code: string): Promise<void> {
     await this.assertOn();
     const { member, account } = await this.linkCandidate(memberId);
-    await this.accounts.verifyCode(
+    await this.codes.verifyCode(
       member.email,
       DiscuvaAccountCodePurpose.LINK,
       this.linkDevice(member),
@@ -333,12 +361,7 @@ export class AccountSignInService {
   }
 
   async freeze(accountId: string, token: string): Promise<void> {
-    await this.accounts.useLinkToken(
-      accountId,
-      DiscuvaAccountCodePurpose.FREEZE,
-      token,
-    );
-    await this.accounts.freeze(accountId);
+    await this.accounts.freezeWithLink(accountId, token);
     this.auditLogService.log('ACCOUNT_FROZEN', { metadata: { accountId } });
   }
 
@@ -412,26 +435,6 @@ export class AccountSignInService {
         out[key] = basics[key];
     }
     return out as Partial<SignupDto>;
-  }
-
-  private async sendCode(
-    email: string,
-    firstName: string | null,
-    code: string,
-    action: string,
-  ): Promise<void> {
-    const minutes = await this.platformSettings.getNumber(
-      PlatformSettingKey.ACCOUNT_CODE_TTL_MINUTES,
-    );
-    const name = firstName
-      ? UtilityService.capitalizeFirstLetter(firstName)
-      : 'there';
-    this.utilityService.sendEmailWithTemplate(
-      email,
-      'Your Discuva code',
-      'discuva-account-code',
-      { name, otp: code, expiresMinutes: String(minutes), action },
-    );
   }
 
   private async assertOn(): Promise<void> {
