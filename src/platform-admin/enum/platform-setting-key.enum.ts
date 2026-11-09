@@ -41,4 +41,11 @@ export enum PlatformSettingKey {
   ACCOUNT_CODE_REQUESTS_PER_HOUR = 'account_code_requests_per_hour',
   ACCOUNT_LINK_VALID_DAYS = 'account_link_valid_days',
   ACCOUNT_RECOVERY_WAIT_DAYS = 'account_recovery_wait_days',
+  // Sign-in limits; until set here they follow the matching environment variables.
+  LOGIN_MAX_ATTEMPTS = 'login_max_attempts',
+  LOGIN_LOCK_MINUTES = 'login_lock_minutes',
+  PORTAL_LOGIN_CAP = 'portal_login_cap',
+  DEVICE_RESET_MAX_REQUESTS = 'device_reset_max_requests',
+  DEVICE_RESET_WINDOW_HOURS = 'device_reset_window_hours',
+  OTP_VERIFY_MAX_ATTEMPTS = 'otp_verify_max_attempts',
 }

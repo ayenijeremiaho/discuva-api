@@ -53,6 +53,15 @@ import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { forEachActiveTenant } from '../../tenant/utility/for-each-active-tenant';
 import { ChurchTimezoneService } from '../../utility/service/church-timezone.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
+import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
+import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
+
+// Wrong-password counts kept apart so tries from one place can't lock someone out everywhere.
+interface LoginBucket {
+  from: string;
+  max: number;
+  notifyOwner: boolean;
+}
 
 // Counters for an email that has a Discuva account are shared by all its churches.
 interface Counter {
@@ -77,11 +86,6 @@ export class AuthService {
   private readonly otpTtlSeconds: number;
   private readonly otpMaxAttempts: number;
   private readonly otpWindowSeconds: number;
-  private readonly loginMaxAttempts: number;
-  private readonly loginWindowSeconds: number;
-  private readonly deviceResetMaxAttempts: number;
-  private readonly deviceResetWindowSeconds: number;
-  private readonly otpVerifyMaxAttempts: number;
 
   constructor(
     private readonly jwtService: JwtService,
@@ -111,6 +115,7 @@ export class AuthService {
     private readonly txHost: TransactionHost<TransactionalAdapterTypeOrm>,
     private readonly churchTimezone: ChurchTimezoneService,
     private readonly accounts: DiscuvaAccountService,
+    private readonly platformSettings: PlatformSettingsService,
   ) {
     this.otpTtlSeconds = this.configService.get<number>('OTP_TTL_SECONDS');
     this.otpMaxAttempts = this.configService.get<number>(
@@ -119,36 +124,21 @@ export class AuthService {
     this.otpWindowSeconds = this.configService.get<number>(
       'FORGOT_PASSWORD_WINDOW_SECONDS',
     );
-    this.loginMaxAttempts =
-      this.configService.get<number>('LOGIN_MAX_ATTEMPTS');
-    this.loginWindowSeconds = this.configService.get<number>(
-      'LOGIN_WINDOW_SECONDS',
-    );
-    this.deviceResetMaxAttempts = this.configService.get<number>(
-      'DEVICE_RESET_MAX_ATTEMPTS',
-    );
-    this.deviceResetWindowSeconds = this.configService.get<number>(
-      'DEVICE_RESET_WINDOW_SECONDS',
-    );
-    this.otpVerifyMaxAttempts = this.configService.get<number>(
-      'OTP_VERIFY_MAX_ATTEMPTS',
-    );
   }
 
   async validateMember(
     email: string,
     password: string,
     deviceId?: string,
+    portal?: { ip: string },
   ): Promise<MemberAuth> {
     const member = await this.memberService.findByEmail(email);
     const counter = await this.counterFor(email);
-    const registered = member ? await this.accounts.deviceOf(member) : null;
-    // The member's own registered device keeps its own count, so wrong guesses from anywhere else can't lock them out.
-    const from = registered && deviceId === registered ? 'device' : 'other';
-    await this.checkLoginRateLimit(email, from, counter);
+    const buckets = await this.loginBuckets(member, deviceId, portal);
+    await this.checkLoginRateLimit(email, buckets, counter);
 
     if (!member) {
-      await this.recordFailedLogin(email, from, counter);
+      await this.recordFailedLogin(email, buckets, counter);
       this.logger.warn(`Failed login — email not registered: ${email}`);
       throw new UnauthorizedException('Invalid email or password');
     }
@@ -158,7 +148,7 @@ export class AuthService {
       password,
     );
     if (!passwordMatches) {
-      const isNowLocked = await this.recordFailedLogin(email, from, counter);
+      const isNowLocked = await this.recordFailedLogin(email, buckets, counter);
       if (isNowLocked) {
         this.logger.warn(
           `Account locked after max failed login attempts: ${email}`,
@@ -166,9 +156,11 @@ export class AuthService {
         const firstName = UtilityService.capitalizeFirstLetter(
           member.firstname,
         );
-        const lockoutMinutes = Math.ceil(
-          this.loginWindowSeconds / 60,
-        ).toString();
+        const lockoutMinutes = String(
+          await this.platformSettings.getNumber(
+            PlatformSettingKey.LOGIN_LOCK_MINUTES,
+          ),
+        );
         const churchName = await this.utilityService.resolveChurchName();
         this.utilityService.sendEmailWithTemplate(
           member.email,
@@ -180,7 +172,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    this.clearLoginRateLimit(email, from, counter);
+    this.clearLoginRateLimit(email, buckets, counter);
 
     if (await this.accounts.isFrozen(member)) {
       throw new ForbiddenException(
@@ -1089,13 +1081,18 @@ export class AuthService {
   ): Promise<void> {
     const key = this.cacheService.key('device_reset', email, deviceId);
     const count = (await counter.get(key)) ?? 0;
-    if (count >= this.deviceResetMaxAttempts) {
-      const windowHours = Math.ceil(this.deviceResetWindowSeconds / 3600);
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.DEVICE_RESET_MAX_REQUESTS,
+    );
+    if (count >= max) {
+      const windowHours = await this.platformSettings.getNumber(
+        PlatformSettingKey.DEVICE_RESET_WINDOW_HOURS,
+      );
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
           error: 'TOO_MANY_REQUESTS',
-          message: `Too many device reset requests. You may only request ${this.deviceResetMaxAttempts} times per ${windowHours}-hour window. Contact an admin if you need immediate access.`,
+          message: `Too many device reset requests. You may only request ${max} times per ${windowHours}-hour window. Contact an admin if you need immediate access.`,
         },
         HttpStatus.TOO_MANY_REQUESTS,
       );
@@ -1109,7 +1106,9 @@ export class AuthService {
   ): Promise<void> {
     await counter.incr(
       this.cacheService.key('device_reset', email, deviceId),
-      this.deviceResetWindowSeconds,
+      (await this.platformSettings.getNumber(
+        PlatformSettingKey.DEVICE_RESET_WINDOW_HOURS,
+      )) * 3600,
     );
   }
 
@@ -1140,16 +1139,44 @@ export class AuthService {
     }
   }
 
+  // Member app: the registered phone counts apart from every other phone. Portal (no phone): each network
+  // address counts apart, with a higher cap across all of them.
+  private async loginBuckets(
+    member: Member | null,
+    deviceId: string | undefined,
+    portal: { ip: string } | undefined,
+  ): Promise<LoginBucket[]> {
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.LOGIN_MAX_ATTEMPTS,
+    );
+    if (portal) {
+      return [
+        { from: `ip:${portal.ip}`, max, notifyOwner: false },
+        {
+          from: 'portal',
+          max: await this.platformSettings.getNumber(
+            PlatformSettingKey.PORTAL_LOGIN_CAP,
+          ),
+          notifyOwner: true,
+        },
+      ];
+    }
+    const registered = member ? await this.accounts.deviceOf(member) : null;
+    const from = registered && deviceId === registered ? 'device' : 'other';
+    return [{ from, max, notifyOwner: true }];
+  }
+
   private async checkLoginRateLimit(
     email: string,
-    from: string,
+    buckets: LoginBucket[],
     counter: Counter,
   ): Promise<void> {
-    const key = this.cacheService.key('login_fail', email, from);
-    const count = (await counter.get(key)) ?? 0;
-
-    if (count >= this.loginMaxAttempts) {
-      const lockoutMinutes = Math.ceil(this.loginWindowSeconds / 60);
+    for (const bucket of buckets) {
+      const key = this.cacheService.key('login_fail', email, bucket.from);
+      if (((await counter.get(key)) ?? 0) < bucket.max) continue;
+      const lockoutMinutes = await this.platformSettings.getNumber(
+        PlatformSettingKey.LOGIN_LOCK_MINUTES,
+      );
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,
@@ -1161,22 +1188,33 @@ export class AuthService {
     }
   }
 
+  // True when a bucket that should alert the owner has just reached its limit.
   private async recordFailedLogin(
     email: string,
-    from: string,
+    buckets: LoginBucket[],
     counter: Counter,
   ): Promise<boolean> {
-    const key = this.cacheService.key('login_fail', email, from);
-    const newCount = await counter.incr(key, this.loginWindowSeconds);
-    return newCount >= this.loginMaxAttempts;
+    const window =
+      (await this.platformSettings.getNumber(
+        PlatformSettingKey.LOGIN_LOCK_MINUTES,
+      )) * 60;
+    let notify = false;
+    for (const bucket of buckets) {
+      const key = this.cacheService.key('login_fail', email, bucket.from);
+      const count = await counter.incr(key, window);
+      if (bucket.notifyOwner && count === bucket.max) notify = true;
+    }
+    return notify;
   }
 
   private clearLoginRateLimit(
     email: string,
-    from: string,
+    buckets: LoginBucket[],
     counter: Counter,
   ): void {
-    counter.del(this.cacheService.key('login_fail', email, from));
+    for (const bucket of buckets) {
+      counter.del(this.cacheService.key('login_fail', email, bucket.from));
+    }
   }
 
   // Per-account guess cap on an already-issued OTP — distinct from
@@ -1191,7 +1229,10 @@ export class AuthService {
   ): Promise<void> {
     const key = this.cacheService.key('otp_verify_fail', identifier, scope);
     const count = (await counter.get(key)) ?? 0;
-    if (count >= this.otpVerifyMaxAttempts) {
+    const max = await this.platformSettings.getNumber(
+      PlatformSettingKey.OTP_VERIFY_MAX_ATTEMPTS,
+    );
+    if (count >= max) {
       throw new HttpException(
         {
           statusCode: HttpStatus.TOO_MANY_REQUESTS,

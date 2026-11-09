@@ -305,4 +305,46 @@ describe('PlatformSettingsService', () => {
       expect(result.value).toBe(1);
     });
   });
+
+  describe('sign-in limits taken over from environment variables', () => {
+    const env = (values: Record<string, unknown>) =>
+      mockConfigService.get.mockImplementation((k: string) => values[k]);
+
+    it('keep the environment value until set in the console', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      env({
+        LOGIN_WINDOW_SECONDS: 900,
+        DEVICE_RESET_WINDOW_SECONDS: 86400,
+        LOGIN_MAX_ATTEMPTS: 6,
+      });
+      await expect(
+        service.getNumber(PlatformSettingKey.LOGIN_LOCK_MINUTES),
+      ).resolves.toBe(15);
+      await expect(
+        service.getNumber(PlatformSettingKey.DEVICE_RESET_WINDOW_HOURS),
+      ).resolves.toBe(24);
+      await expect(
+        service.getNumber(PlatformSettingKey.LOGIN_MAX_ATTEMPTS),
+      ).resolves.toBe(6);
+    });
+
+    it('fit an out-of-range environment value into the allowed range', async () => {
+      mockSettingRepo.findOne.mockResolvedValue(null);
+      env({ LOGIN_MAX_ATTEMPTS: 50, LOGIN_WINDOW_SECONDS: 60 });
+      await expect(
+        service.getNumber(PlatformSettingKey.LOGIN_MAX_ATTEMPTS),
+      ).resolves.toBe(10);
+      await expect(
+        service.getNumber(PlatformSettingKey.LOGIN_LOCK_MINUTES),
+      ).resolves.toBe(5);
+    });
+
+    it('use the console value once one is saved', async () => {
+      mockSettingRepo.findOne.mockResolvedValue({ value: { value: 4 } });
+      env({ LOGIN_MAX_ATTEMPTS: 6 });
+      await expect(
+        service.getNumber(PlatformSettingKey.LOGIN_MAX_ATTEMPTS),
+      ).resolves.toBe(4);
+    });
+  });
 });

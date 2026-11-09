@@ -9029,12 +9029,12 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `OTP_TTL_SECONDS`                | `900`   | How long a reset OTP stays valid (15 min)    |
 | `FORGOT_PASSWORD_MAX_ATTEMPTS`   | `3`     | Max OTP requests per rate-limit window       |
 | `FORGOT_PASSWORD_WINDOW_SECONDS` | `3600`  | Rate-limit window for forgot-password (1 hr) |
-| `LOGIN_MAX_ATTEMPTS`             | `5`     | Max failed login attempts before lockout     |
-| `LOGIN_WINDOW_SECONDS`           | `900`   | Lockout window duration (15 min)             |
-| `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Max self-service device reset requests per window per email |
+| `LOGIN_MAX_ATTEMPTS`             | `5`     | Starting value for the console setting `login_max_attempts` until it's saved there |
+| `LOGIN_WINDOW_SECONDS`           | `900`   | Starting value (in seconds) for the console setting `login_lock_minutes` until it's saved there |
+| `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Starting value for the console setting `device_reset_max_requests` (requests per window per email and device) until it's saved there |
 | `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only) |
-| `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Rate-limit window for device resets (24 hr)  |
-| `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
+| `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Starting value (in seconds) for the console setting `device_reset_window_hours` until it's saved there |
+| `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Starting value for the console setting `otp_verify_max_attempts`. Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
 ### Global Rate Limiting
 
@@ -11410,13 +11410,25 @@ without admin involvement, subject to a rate limit.
 
 ### Failed Sign-in Lockout
 
-`POST /auth/login` and `POST /auth/admin-login` lock an email out after `LOGIN_MAX_ATTEMPTS` wrong passwords within
-`LOGIN_WINDOW_SECONDS` (`429`, plus the `login-security-alert` email). The count is split in two
-(`login_fail:<email>:device` and `login_fail:<email>:other`): sign-ins from the member's own registered device
-(`deviceId` in the body matching `member.deviceId`, read in `LocalStrategy` via `passReqToCallback`) have their own
-count, and every other attempt (other device ids, no device id, the admin portal) shares the second. Someone who only
-knows a member's email can lock out other devices but never the member's own phone, and sending made-up device ids
-gets them no extra guesses.
+`POST /auth/login` and `POST /auth/admin-login` pause an email after too many wrong passwords (`429`, plus the
+`login-security-alert` email). The numbers are console settings: `login_max_attempts` (3–10) and `login_lock_minutes`
+(5–60), which until saved in the console follow `LOGIN_MAX_ATTEMPTS` and `LOGIN_WINDOW_SECONDS` (out-of-range values are
+fitted into the range). Counts are kept in separate buckets so tries from one place can't lock someone out everywhere:
+
+- **Member app** (`/auth/login`): `login_fail:<email>:device` for the member's own registered device (`deviceId` in the
+  body matching their device, read in `LocalStrategy` via `passReqToCallback`) and `login_fail:<email>:other` for every
+  other attempt. Someone who only knows a member's email can lock out other devices but never the member's own phone,
+  and made-up device ids get them no extra guesses.
+- **Admin portal** (`/auth/admin-login`, which has no phone): `login_fail:<email>:ip:<address>` per network address
+  (`clientIp()`), with `login_max_attempts` each, plus `login_fail:<email>:portal` across all addresses with the higher
+  `portal_login_cap` (20, 10–100). A stranger locks out only their own address; the owner is emailed only when the
+  cap across all addresses is reached. Portal tries never touch the member-app counts. 2FA still stands behind a
+  correct password.
+
+Other limits moved to the console the same way: `device_reset_max_requests` (1–5) and `device_reset_window_hours`
+(1–48), following `DEVICE_RESET_MAX_ATTEMPTS` / `DEVICE_RESET_WINDOW_SECONDS` until saved, and `otp_verify_max_attempts`
+(3–10), following `OTP_VERIFY_MAX_ATTEMPTS`. Settings are read through the 5-minute settings cache, so they cost no
+database reads on most requests.
 
 ### One Discuva Sign-in (Phase 2, behind a switch)
 
@@ -13999,13 +14011,25 @@ without admin involvement, subject to a rate limit.
 
 ### Failed Sign-in Lockout
 
-`POST /auth/login` and `POST /auth/admin-login` lock an email out after `LOGIN_MAX_ATTEMPTS` wrong passwords within
-`LOGIN_WINDOW_SECONDS` (`429`, plus the `login-security-alert` email). The count is split in two
-(`login_fail:<email>:device` and `login_fail:<email>:other`): sign-ins from the member's own registered device
-(`deviceId` in the body matching `member.deviceId`, read in `LocalStrategy` via `passReqToCallback`) have their own
-count, and every other attempt (other device ids, no device id, the admin portal) shares the second. Someone who only
-knows a member's email can lock out other devices but never the member's own phone, and sending made-up device ids
-gets them no extra guesses.
+`POST /auth/login` and `POST /auth/admin-login` pause an email after too many wrong passwords (`429`, plus the
+`login-security-alert` email). The numbers are console settings: `login_max_attempts` (3–10) and `login_lock_minutes`
+(5–60), which until saved in the console follow `LOGIN_MAX_ATTEMPTS` and `LOGIN_WINDOW_SECONDS` (out-of-range values are
+fitted into the range). Counts are kept in separate buckets so tries from one place can't lock someone out everywhere:
+
+- **Member app** (`/auth/login`): `login_fail:<email>:device` for the member's own registered device (`deviceId` in the
+  body matching their device, read in `LocalStrategy` via `passReqToCallback`) and `login_fail:<email>:other` for every
+  other attempt. Someone who only knows a member's email can lock out other devices but never the member's own phone,
+  and made-up device ids get them no extra guesses.
+- **Admin portal** (`/auth/admin-login`, which has no phone): `login_fail:<email>:ip:<address>` per network address
+  (`clientIp()`), with `login_max_attempts` each, plus `login_fail:<email>:portal` across all addresses with the higher
+  `portal_login_cap` (20, 10–100). A stranger locks out only their own address; the owner is emailed only when the
+  cap across all addresses is reached. Portal tries never touch the member-app counts. 2FA still stands behind a
+  correct password.
+
+Other limits moved to the console the same way: `device_reset_max_requests` (1–5) and `device_reset_window_hours`
+(1–48), following `DEVICE_RESET_MAX_ATTEMPTS` / `DEVICE_RESET_WINDOW_SECONDS` until saved, and `otp_verify_max_attempts`
+(3–10), following `OTP_VERIFY_MAX_ATTEMPTS`. Settings are read through the 5-minute settings cache, so they cost no
+database reads on most requests.
 
 ### One Discuva Sign-in (Phase 2, behind a switch)
 
@@ -22895,12 +22919,12 @@ Each flag defaults to `true`. Set to `false` to suppress that category of emails
 | `OTP_TTL_SECONDS`                | `900`   | How long a reset OTP stays valid (15 min)    |
 | `FORGOT_PASSWORD_MAX_ATTEMPTS`   | `3`     | Max OTP requests per rate-limit window       |
 | `FORGOT_PASSWORD_WINDOW_SECONDS` | `3600`  | Rate-limit window for forgot-password (1 hr) |
-| `LOGIN_MAX_ATTEMPTS`             | `5`     | Max failed login attempts before lockout     |
-| `LOGIN_WINDOW_SECONDS`           | `900`   | Lockout window duration (15 min)             |
-| `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Max self-service device reset requests per window per email |
+| `LOGIN_MAX_ATTEMPTS`             | `5`     | Starting value for the console setting `login_max_attempts` until it's saved there |
+| `LOGIN_WINDOW_SECONDS`           | `900`   | Starting value (in seconds) for the console setting `login_lock_minutes` until it's saved there |
+| `DEVICE_RESET_MAX_ATTEMPTS`      | `3`     | Starting value for the console setting `device_reset_max_requests` (requests per window per email and device) until it's saved there |
 | `DISCUVA_ACCOUNT_TEST_TENANTS`   | (empty) | Comma-separated church addresses that get One Discuva sign-in while the `discuva_account_mode` setting is `1` (test churches only) |
-| `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Rate-limit window for device resets (24 hr)  |
-| `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
+| `DEVICE_RESET_WINDOW_SECONDS`    | `86400` | Starting value (in seconds) for the console setting `device_reset_window_hours` until it's saved there |
+| `OTP_VERIFY_MAX_ATTEMPTS`        | `5`     | Starting value for the console setting `otp_verify_max_attempts`. Max wrong-code guesses per account against a live OTP (password reset, device reset, email change) before a `429` lockout for the rest of that OTP's `OTP_TTL_SECONDS` window — separate from `FORGOT_PASSWORD_MAX_ATTEMPTS`/`DEVICE_RESET_MAX_ATTEMPTS`, which only cap how often a *new* code can be requested |
 
 ### Global Rate Limiting
 
