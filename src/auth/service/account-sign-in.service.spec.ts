@@ -32,6 +32,7 @@ const codes = {
 };
 const accounts = {
   isOn: jest.fn(),
+  isProfileOn: jest.fn(),
   findByEmail: jest.fn(),
   findById: jest.fn(),
   basicsFrom: jest.fn(),
@@ -106,6 +107,15 @@ describe('AccountSignInService', () => {
     await expect(service.startJoin('a@b.co', 'phone-123')).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('tells the apps which of the two switches are on for this church', async () => {
+    accounts.isOn.mockResolvedValue(true);
+    accounts.isProfileOn.mockResolvedValue(false);
+    await expect(service.available()).resolves.toEqual({
+      available: true,
+      profile: false,
+    });
   });
 
   describe('joining a church', () => {

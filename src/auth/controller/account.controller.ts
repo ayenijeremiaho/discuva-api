@@ -32,8 +32,8 @@ export class AccountController {
 
   @Public()
   @Get('account/available')
-  async available(): Promise<{ available: boolean }> {
-    return { available: await this.accountSignIn.available() };
+  available(): Promise<{ available: boolean; profile: boolean }> {
+    return this.accountSignIn.available();
   }
 
   @SkipPasswordChangeCheck()

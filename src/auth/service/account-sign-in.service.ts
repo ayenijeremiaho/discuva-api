@@ -413,8 +413,12 @@ export class AccountSignInService {
     return this.memberService.getByIdWithCredentials(user.id);
   }
 
-  available(): Promise<boolean> {
-    return this.accounts.isOn();
+  async available(): Promise<{ available: boolean; profile: boolean }> {
+    const [available, profile] = await Promise.all([
+      this.accounts.isOn(),
+      this.accounts.isProfileOn(),
+    ]);
+    return { available, profile };
   }
 
   // What the member app shows on Account and after sign-in.

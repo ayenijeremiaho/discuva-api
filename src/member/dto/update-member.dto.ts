@@ -12,6 +12,7 @@ import {
   Min,
 } from 'class-validator';
 import { GenderEnum } from '../enums/gender.enum';
+import { ContactDetailsDto } from './contact-details.dto';
 import { MaritalStatusEnum } from '../enums/marital-status.enum';
 import { NormalizeEmail } from '../../utility/decorators/normalize-email.decorator';
 import {
@@ -19,7 +20,7 @@ import {
   NormalizePhone,
 } from '../../utility/decorators/normalize-phone.decorator';
 
-export class UpdateMemberDto {
+export class UpdateMemberDto extends ContactDetailsDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()

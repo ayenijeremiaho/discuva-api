@@ -27,6 +27,8 @@ import { PushNotificationService } from '../../push-notification/service/push-no
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { DiscuvaAccountService } from '../../discuva-account/service/discuva-account.service';
 import { accountsOffMock } from '../../discuva-account/testing/accounts-off.mock';
+import { DiscuvaProfileService } from '../../discuva-account/service/discuva-profile.service';
+import { profilesOffMock } from '../../discuva-account/testing/profiles-off.mock';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
@@ -75,6 +77,7 @@ const mockUtilityService = {
 const mockAuditLogService = { log: jest.fn() };
 
 const mockSessionService = { updateLogout: jest.fn() };
+const mockProfiles = profilesOffMock();
 const mockAccounts = accountsOffMock({
   updateMember: (id, patch) => mockMemberRepo.update(id, patch),
   endSessions: (id) =>
@@ -146,6 +149,7 @@ describe('MemberService', () => {
         { provide: AuditLogService, useValue: mockAuditLogService },
         { provide: MemberSessionService, useValue: mockSessionService },
         { provide: DiscuvaAccountService, useValue: mockAccounts },
+        { provide: DiscuvaProfileService, useValue: mockProfiles },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PushNotificationService, useValue: mockPushService },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
@@ -1461,6 +1465,38 @@ describe('MemberService', () => {
   });
 
   describe('updateMyProfile', () => {
+    it("shares an account holder's own basics with their other churches", async () => {
+      mockProfiles.ownerOf.mockResolvedValueOnce('acc-1');
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        firstname: 'Ada',
+        lastname: 'Okafor',
+        discuvaAccountId: 'acc-1',
+      });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      await service.updateMyProfile('member-1', {
+        lastname: 'Eze',
+        address: '12 Example Street',
+        dateJoinedChurch: '2026-01-10',
+      } as any);
+
+      expect(mockProfiles.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'member-1' }),
+        { lastname: 'Eze', address: '12 Example Street' },
+        { skipCurrent: true },
+      );
+    });
+
+    it('keeps edits at this church while Global Profile is off', async () => {
+      mockMemberRepo.findOne.mockResolvedValue({ id: 'member-1' });
+      mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      await service.updateMyProfile('member-1', { lastname: 'Eze' } as any);
+
+      expect(mockProfiles.update).not.toHaveBeenCalled();
+    });
+
     it('should apply only the provided fields and save', async () => {
       const member = {
         id: 'member-1',
@@ -1581,6 +1617,23 @@ describe('MemberService', () => {
   });
 
   describe('updateAppearanceMode', () => {
+    it('follows an account holder to their other churches', async () => {
+      mockProfiles.ownerOf.mockResolvedValueOnce('acc-1');
+      mockMemberRepo.findOne.mockResolvedValue({
+        id: 'member-1',
+        discuvaAccountId: 'acc-1',
+      });
+      mockMemberRepo.save.mockImplementation((value) => Promise.resolve(value));
+
+      await service.updateAppearanceMode('member-1', AppearanceMode.DARK);
+
+      expect(mockProfiles.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'member-1' }),
+        { appearanceMode: AppearanceMode.DARK },
+        { skipCurrent: true },
+      );
+    });
+
     it('persists the signed-in member appearance preference', async () => {
       const member = { id: 'member-1', appearanceMode: 'system' };
       mockMemberRepo.findOne.mockResolvedValue(member);
@@ -2242,6 +2295,51 @@ describe('MemberService', () => {
   describe('updateMember', () => {
     const save = () =>
       mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+    describe('with Global Profile on', () => {
+      const holder = () => ({
+        id: 'member-1',
+        firstname: 'Ada',
+        lastname: 'Okafor',
+        phoneNumber: '+2348012345678',
+        discuvaAccountId: 'acc-1',
+        email: 'ada@example.com',
+      });
+      beforeEach(() => mockProfiles.ownerOf.mockResolvedValue('acc-1'));
+      afterEach(() => mockProfiles.ownerOf.mockResolvedValue(null));
+
+      it("refuses to change an account holder's basics", async () => {
+        mockMemberRepo.findOne.mockResolvedValueOnce(holder());
+
+        await expect(
+          service.updateMember(
+            'member-1',
+            { phoneNumber: '+2348099999999' } as any,
+            'admin-1',
+          ),
+        ).rejects.toThrow('looks after their own name');
+        expect(mockMemberRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('still saves church details when the form sends the basics unchanged', async () => {
+        mockMemberRepo.findOne.mockResolvedValueOnce(holder());
+        save();
+
+        await service.updateMember(
+          'member-1',
+          {
+            firstname: 'Ada',
+            phoneNumber: '+2348012345678',
+            dateJoinedChurch: '2026-01-10',
+          } as any,
+          'admin-1',
+        );
+
+        expect(mockMemberRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ dateJoinedChurch: new Date('2026-01-10') }),
+        );
+      });
+    });
 
     it("sends fresh sign-in details when a pending member's email is corrected", async () => {
       mockMemberRepo.findOne.mockResolvedValueOnce({

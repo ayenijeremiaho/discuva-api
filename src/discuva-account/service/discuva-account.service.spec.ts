@@ -133,6 +133,23 @@ describe('DiscuvaAccountService', () => {
       await expect(service.isOn()).resolves.toBe(false);
       expect(tenantRepo.find).toHaveBeenCalledTimes(1);
     });
+
+    it('turns Global Profile on only where One Discuva sign-in is also on', async () => {
+      const modes = (account: number, profile: number) =>
+        settings.getNumber.mockImplementation(async (key: string) =>
+          key === 'discuva_account_mode'
+            ? account
+            : key === 'discuva_profile_mode'
+              ? profile
+              : 10,
+        );
+      modes(2, 0);
+      await expect(service.isProfileOn()).resolves.toBe(false);
+      modes(0, 2);
+      await expect(service.isProfileOn()).resolves.toBe(false);
+      modes(2, 2);
+      await expect(service.isProfileOn()).resolves.toBe(true);
+    });
   });
 
   describe('checking a password', () => {

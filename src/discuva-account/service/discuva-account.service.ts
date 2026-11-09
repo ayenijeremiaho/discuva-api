@@ -83,13 +83,23 @@ export class DiscuvaAccountService {
   }
 
   isOn(): Promise<boolean> {
-    return this.memo(`on:${this.cls.get('tenantId')}`, () => this.readIsOn());
+    return this.memo(`on:${this.cls.get('tenantId')}`, () =>
+      this.readModeOn(PlatformSettingKey.DISCUVA_ACCOUNT_MODE),
+    );
   }
 
-  private async readIsOn(): Promise<boolean> {
-    const mode = await this.platformSettings.getNumber(
-      PlatformSettingKey.DISCUVA_ACCOUNT_MODE,
+  // Global Profile builds on One Discuva sign-in, so it needs both switches on for this church.
+  isProfileOn(): Promise<boolean> {
+    return this.memo(
+      `profile:${this.cls.get('tenantId')}`,
+      async () =>
+        (await this.isOn()) &&
+        this.readModeOn(PlatformSettingKey.DISCUVA_PROFILE_MODE),
     );
+  }
+
+  private async readModeOn(key: PlatformSettingKey): Promise<boolean> {
+    const mode = await this.platformSettings.getNumber(key);
     if (mode === AccountMode.ON) return true;
     if (mode !== AccountMode.TEST) return false;
     const tenantId = this.cls.get('tenantId');

@@ -1,0 +1,167 @@
+import { Test } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import {
+  DiscuvaProfileService,
+  PROFILE_FIELDS,
+} from './discuva-profile.service';
+import { DiscuvaAccountService } from './discuva-account.service';
+import { DiscuvaProfile } from '../entity/discuva-profile.entity';
+import { Member } from '../../member/entity/member.entity';
+
+const insert = {
+  insert: jest.fn().mockReturnThis(),
+  values: jest.fn().mockReturnThis(),
+  orIgnore: jest.fn().mockReturnThis(),
+  execute: jest.fn().mockResolvedValue(undefined),
+};
+const profileRepo = {
+  findOne: jest.fn(),
+  findOneOrFail: jest.fn(),
+  save: jest.fn(async (p) => p),
+  createQueryBuilder: jest.fn(() => insert),
+};
+const memberRepo = {
+  findOneOrFail: jest.fn(),
+  update: jest.fn().mockResolvedValue({ affected: 1 }),
+};
+const accounts = {
+  isProfileOn: jest.fn(),
+  forEachChurchOf: jest.fn(
+    async (
+      _member: unknown,
+      fn: (id: string) => Promise<void>,
+      options: { skipCurrent?: boolean } = {},
+    ) => {
+      if (!options.skipCurrent) await fn('m-here');
+      await fn('m-other');
+    },
+  ),
+};
+
+const churchRow = {
+  id: 'm-here',
+  discuvaAccountId: 'acc-1',
+  firstname: 'Ada',
+  lastname: 'Okafor',
+  phoneNumber: '+2348012345678',
+  gender: 'FEMALE',
+  birthDay: 14,
+  birthMonth: 3,
+  birthYear: null,
+  maritalStatus: 'MARRIED',
+  address: null,
+  emergencyContactName: null,
+  emergencyContactPhone: null,
+  emergencyContactRelationship: null,
+  photoUrl: 'https://cdn.example/p.jpg',
+  appearanceMode: 'DARK',
+  mutedNotifications: ['birthday'],
+} as unknown as Member;
+
+describe('DiscuvaProfileService', () => {
+  let service: DiscuvaProfileService;
+
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    accounts.isProfileOn.mockResolvedValue(true);
+    const module = await Test.createTestingModule({
+      providers: [
+        DiscuvaProfileService,
+        { provide: getRepositoryToken(DiscuvaProfile), useValue: profileRepo },
+        { provide: getRepositoryToken(Member), useValue: memberRepo },
+        { provide: DiscuvaAccountService, useValue: accounts },
+      ],
+    }).compile();
+    service = module.get(DiscuvaProfileService);
+  });
+
+  describe('who owns the basics', () => {
+    it('is the account once Global Profile is on', async () => {
+      await expect(service.ownerOf(churchRow)).resolves.toBe('acc-1');
+    });
+
+    it('stays with the church for members without an account, or while it is off', async () => {
+      await expect(
+        service.ownerOf({ discuvaAccountId: null }),
+      ).resolves.toBeNull();
+      accounts.isProfileOn.mockResolvedValue(false);
+      await expect(service.ownerOf(churchRow)).resolves.toBeNull();
+    });
+  });
+
+  it('counts only basics that would really change', () => {
+    expect(
+      DiscuvaProfileService.changedBasics(churchRow, {
+        firstname: 'Ada',
+        phoneNumber: '+2348099999999',
+        address: null,
+        birthYear: undefined,
+      }),
+    ).toEqual(['phoneNumber']);
+  });
+
+  describe('creating the profile', () => {
+    it("copies this church's full record, even when the caller loaded only a few fields", async () => {
+      profileRepo.findOne.mockResolvedValue(null);
+      memberRepo.findOneOrFail.mockResolvedValue(churchRow);
+      profileRepo.findOneOrFail.mockResolvedValue({ accountId: 'acc-1' });
+
+      await service.ensure({ id: 'm-here', discuvaAccountId: 'acc-1' });
+
+      const values = insert.values.mock.calls[0][0];
+      for (const f of PROFILE_FIELDS) expect(values[f]).toEqual(churchRow[f]);
+      expect(values).toMatchObject({
+        accountId: 'acc-1',
+        photoUrl: churchRow.photoUrl,
+        appearanceMode: 'DARK',
+        mutedNotifications: ['birthday'],
+      });
+      expect(insert.orIgnore).toHaveBeenCalled();
+    });
+
+    it('reuses an existing profile', async () => {
+      profileRepo.findOne.mockResolvedValue({ accountId: 'acc-1' });
+      await service.ensure(churchRow);
+      expect(insert.execute).not.toHaveBeenCalled();
+      expect(memberRepo.findOneOrFail).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('saving a change', () => {
+    beforeEach(() =>
+      profileRepo.findOne.mockResolvedValue({
+        accountId: 'acc-1',
+        firstname: 'Ada',
+      }),
+    );
+
+    it("writes the profile and every church's copy", async () => {
+      await service.update(churchRow, { firstname: 'Adaeze' });
+
+      expect(profileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ firstname: 'Adaeze' }),
+      );
+      expect(memberRepo.update.mock.calls).toEqual([
+        ['m-here', { firstname: 'Adaeze' }],
+        ['m-other', { firstname: 'Adaeze' }],
+      ]);
+    });
+
+    it("can leave this church's copy to the caller, who has already saved it", async () => {
+      await service.update(
+        churchRow,
+        { address: '12 Example Street' },
+        { skipCurrent: true },
+      );
+      expect(memberRepo.update.mock.calls).toEqual([
+        ['m-other', { address: '12 Example Street' }],
+      ]);
+    });
+
+    it('does nothing for an empty change', async () => {
+      await service.update(churchRow, {});
+      expect(profileRepo.save).not.toHaveBeenCalled();
+      expect(memberRepo.update).not.toHaveBeenCalled();
+    });
+  });
+});
