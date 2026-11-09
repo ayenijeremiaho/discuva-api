@@ -59,7 +59,8 @@ export class MemberDto {
 
   // Signs in with a shared Discuva account; the admin portal offers Recover account for these.
   @Expose()
-  @Transform(({ obj }) => !!obj.discuvaAccountId)
+  // Only when building the DTO: serialising the response again would read the DTO, which has no discuvaAccountId.
+  @Transform(({ obj }) => !!obj.discuvaAccountId, { toClassOnly: true })
   hasDiscuvaAccount: boolean;
 
   @Expose()
