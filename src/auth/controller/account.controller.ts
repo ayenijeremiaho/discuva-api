@@ -13,10 +13,13 @@ import { Public } from '../decorator/public.decorator';
 import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check.decorator';
 import { SessionSurface } from '../enum/session-surface.enum';
 import { AccountSignInService } from '../service/account-sign-in.service';
+import { AccountMergeService } from '../service/account-merge.service';
 import {
   ConfirmDeviceDto,
   ConfirmDeviceRequestDto,
   ConfirmDetailsDto,
+  MergeConfirmDto,
+  MergeStartDto,
   AccountLinkTokenDto,
   LinkConfirmDto,
   HandoffDto,
@@ -29,7 +32,10 @@ import {
 // One Discuva sign-in: joining a church email-first, adding a church to an account, switching between churches.
 @Controller('auth')
 export class AccountController {
-  constructor(private readonly accountSignIn: AccountSignInService) {}
+  constructor(
+    private readonly accountSignIn: AccountSignInService,
+    private readonly accountMerge: AccountMergeService,
+  ) {}
 
   @Public()
   @Get('account/available')
@@ -63,6 +69,35 @@ export class AccountController {
     this.assertMemberApp(req);
     await this.accountSignIn.confirmDetails(req.user.id, dto.choices);
     return { message: 'Your details are now the same at every church.' };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/merge/start')
+  async startMerge(
+    @Request() req: any,
+    @Body() dto: MergeStartDto,
+  ): Promise<{ message: string }> {
+    this.assertMemberApp(req);
+    await this.accountMerge.start(req.user.id, dto.email);
+    return { message: 'We sent a 6-digit code to each email.' };
+  }
+
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/merge/confirm')
+  async confirmMerge(
+    @Request() req: any,
+    @Body() dto: MergeConfirmDto,
+  ): Promise<{ message: string }> {
+    this.assertMemberApp(req);
+    await this.accountMerge.confirm(
+      req.user.id,
+      dto.email,
+      dto.codeHere,
+      dto.codeOther,
+    );
+    return { message: 'Your two Discuva emails are now one account.' };
   }
 
   @HttpCode(HttpStatus.OK)

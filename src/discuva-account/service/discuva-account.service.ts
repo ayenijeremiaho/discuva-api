@@ -501,6 +501,15 @@ export class DiscuvaAccountService {
       select: { id: true },
     });
     if (other && other.id !== accountId) return true;
+    return this.emailTakenAtChurchesOf(normalised, accountId);
+  }
+
+  // Someone else at one of this account's churches already uses the email.
+  async emailTakenAtChurchesOf(
+    email: string,
+    accountId: string,
+  ): Promise<boolean> {
+    const normalised = normaliseEmail(email);
     let taken = false;
     await this.forEachLinkOf(accountId, async (memberId) => {
       const holder = await this.memberRepo.findOne({
@@ -510,6 +519,50 @@ export class DiscuvaAccountService {
       if (holder && holder.id !== memberId) taken = true;
     });
     return taken;
+  }
+
+  async sharesChurch(a: string, b: string): Promise<boolean> {
+    const [mine, theirs] = await Promise.all([
+      this.linksOf(a),
+      this.linksOf(b),
+    ]);
+    const tenants = new Set(mine.map((l) => l.tenantId));
+    return theirs.some((l) => tenants.has(l.tenantId));
+  }
+
+  // Moves everything from the second account onto the first: churches, milestones, photo history.
+  // Those churches' records take the kept account's email and password, so one sign-in works everywhere.
+  async mergeInto(keepId: string, goneId: string): Promise<void> {
+    const keep = await this.findById(keepId);
+    if (!keep) throw new BadRequestException('Account not found.');
+    await this.forEachLinkOf(goneId, (memberId) =>
+      this.memberRepo
+        .update(memberId, {
+          discuvaAccountId: keep.id,
+          email: keep.email,
+          password: keep.password,
+        })
+        .then(() => undefined),
+    );
+    await this.linkRepo.update({ accountId: goneId }, { accountId: keep.id });
+    const manager = this.accountRepo.manager;
+    // The same church record on both would clash with the one-per-source rule; the kept one stays.
+    await manager.query(
+      `DELETE FROM public.discuva_milestones g WHERE g.account_id = $2 AND g.source_ref IS NOT NULL
+         AND EXISTS (SELECT 1 FROM public.discuva_milestones k WHERE k.account_id = $1
+                       AND k.source_tenant_id = g.source_tenant_id AND k.source_ref = g.source_ref)`,
+      [keep.id, goneId],
+    );
+    await manager.query(
+      `UPDATE public.discuva_milestones SET account_id = $1 WHERE account_id = $2`,
+      [keep.id, goneId],
+    );
+    await manager.query(
+      `UPDATE public.discuva_photo_removals SET account_id = $1 WHERE account_id = $2`,
+      [keep.id, goneId],
+    );
+    await this.accountRepo.delete(goneId);
+    this.forgetMemo();
   }
 
   // Moves the account and every linked church record to the new email; returns the old one.

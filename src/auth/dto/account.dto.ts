@@ -27,6 +27,23 @@ export class LinkConfirmDto extends AccountCodeDto {
   consent?: boolean;
 }
 
+export class MergeStartDto {
+  // The person's other Discuva email, whose churches move onto this account.
+  @NormalizeEmail()
+  @IsEmail()
+  email: string;
+}
+
+export class MergeConfirmDto extends MergeStartDto {
+  @IsString()
+  @Length(6, 6)
+  codeHere: string;
+
+  @IsString()
+  @Length(6, 6)
+  codeOther: string;
+}
+
 export class ConfirmDetailsDto {
   // Field name to the value the person keeps: their profile's or this church's.
   @IsObject()
