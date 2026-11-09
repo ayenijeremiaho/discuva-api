@@ -29,11 +29,18 @@ export function accountsOffMock(
       async (member: { deviceId?: string | null }) => member.deviceId ?? null,
     ),
     moveOnSignIn: jest.fn().mockResolvedValue('NONE'),
-    setDevice: jest.fn(
-      async (member: { id: string }, deviceId: string | null) => {
+    needsDeviceConfirmation: jest.fn().mockResolvedValue(false),
+    registerDevice: jest.fn(
+      async (member: { id: string }, deviceId: string) => {
         await hooks.updateMember?.(member.id, { deviceId });
       },
     ),
+    resetDevices: jest.fn(async (member: { id: string }, deviceId: string) => {
+      await hooks.updateMember?.(member.id, { deviceId });
+    }),
+    clearDevices: jest.fn(async (member: { id: string }) => {
+      await hooks.updateMember?.(member.id, { deviceId: null });
+    }),
     setPasswordHash: jest.fn(
       async (
         member: { id: string },

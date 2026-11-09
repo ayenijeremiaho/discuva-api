@@ -12,6 +12,7 @@ export enum DiscuvaAccountCodePurpose {
   RECOVER = 'RECOVER',
   FREEZE = 'FREEZE',
   EMAIL_UNDO = 'EMAIL_UNDO',
+  CONFIRM_DEVICE = 'CONFIRM_DEVICE',
 }
 
 // Emailed 6-digit codes for joining, linking and recovery; only the hash is kept.

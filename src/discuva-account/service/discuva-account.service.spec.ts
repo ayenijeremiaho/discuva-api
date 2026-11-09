@@ -277,22 +277,66 @@ describe('DiscuvaAccountService', () => {
       tenantRepo.find.mockResolvedValue([{ id: 't2', schemaName: 'church_b' }]);
     });
 
-    it('moves the device on the account and on both church copies', async () => {
-      await service.setDevice(moved, 'phone-2');
+    it('Reset Device Access moves this church app to the new phone and clears the others', async () => {
+      await service.resetDevices(moved, 'phone-2');
       expect(accountRepo.update).toHaveBeenCalledWith('a1', {
         deviceId: 'phone-2',
       });
       expect(memberRepo.update).toHaveBeenCalledWith('m1', {
         deviceId: 'phone-2',
       });
-      expect(memberRepo.update).toHaveBeenCalledWith('m2', {
-        deviceId: 'phone-2',
-      });
+      expect(memberRepo.update).toHaveBeenCalledWith('m2', { deviceId: null });
       expect(cls.runWith).toHaveBeenCalledTimes(1);
       expect(cls.runWith).toHaveBeenCalledWith(
         expect.objectContaining({ tenantId: 't2', schemaName: 'church_b' }),
         expect.any(Function),
       );
+    });
+
+    it('an admin clearing the lock clears every church app', async () => {
+      await service.clearDevices(moved);
+      expect(memberRepo.update).toHaveBeenCalledWith('m1', { deviceId: null });
+      expect(memberRepo.update).toHaveBeenCalledWith('m2', { deviceId: null });
+    });
+
+    it("registering a phone touches only this church's record", async () => {
+      await service.registerDevice(moved, 'phone-3');
+      expect(memberRepo.update).toHaveBeenCalledTimes(1);
+      expect(memberRepo.update).toHaveBeenCalledWith('m1', {
+        deviceId: 'phone-3',
+      });
+      expect(cls.runWith).not.toHaveBeenCalled();
+    });
+
+    it('asks a church app on an unknown phone to confirm, but not one sharing a known phone id', async () => {
+      memberRepo.createQueryBuilder.mockReturnValue(
+        qb({ id: 'm2', deviceId: 'church-a-app' }),
+      );
+      const fresh = { ...moved, deviceId: null };
+      await expect(
+        service.needsDeviceConfirmation(fresh, 'church-b-app'),
+      ).resolves.toBe(true);
+      await expect(
+        service.needsDeviceConfirmation(fresh, 'church-a-app'),
+      ).resolves.toBe(false);
+      await expect(
+        service.needsDeviceConfirmation(
+          { ...fresh, deviceId: 'church-b-app' },
+          'church-b-app',
+        ),
+      ).resolves.toBe(false);
+    });
+
+    it('lets the first phone register freely when no church app has one yet', async () => {
+      memberRepo.createQueryBuilder.mockReturnValue(
+        qb({ id: 'm2', deviceId: null }),
+      );
+      await expect(
+        service.needsDeviceConfirmation(
+          { ...moved, deviceId: null },
+          'phone-1',
+        ),
+      ).resolves.toBe(false);
     });
 
     it('writes a new password to the account and every church copy', async () => {
@@ -320,7 +364,7 @@ describe('DiscuvaAccountService', () => {
     });
 
     it('acts on this church only for a member who has not moved', async () => {
-      await service.setDevice({ id: 'm1', discuvaAccountId: null }, null);
+      await service.clearDevices({ id: 'm1', discuvaAccountId: null });
       expect(accountRepo.update).not.toHaveBeenCalled();
       expect(memberRepo.update).toHaveBeenCalledWith('m1', { deviceId: null });
       expect(cls.runWith).not.toHaveBeenCalled();
@@ -482,7 +526,7 @@ describe('DiscuvaAccountService', () => {
     it('reuses the first read for password, device and freeze checks', async () => {
       jest.spyOn(UtilityService, 'verifyHashedValue').mockResolvedValue(true);
       const moved = { discuvaAccountId: 'a1', password: 'x', deviceId: null };
-      await service.deviceOf(moved);
+      await service.accountFor(moved);
       await service.verifyPassword(moved, 'pw');
       await service.isFrozen(moved);
       expect(accountRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
@@ -491,10 +535,10 @@ describe('DiscuvaAccountService', () => {
 
     it('reads again after a change in the same request', async () => {
       const moved = { id: 'm1', discuvaAccountId: 'a1', deviceId: null };
-      await service.deviceOf(moved);
-      await service.setDevice(moved, 'phone-2');
-      await service.deviceOf(moved);
-      // The second read happens inside setDevice, after its write, and is the one reused.
+      await service.isFrozen(moved);
+      await service.resetDevices(moved, 'phone-2');
+      await service.isFrozen(moved);
+      // The second read happens inside resetDevices, after its write, and is the one reused.
       expect(accountRepo.createQueryBuilder).toHaveBeenCalledTimes(2);
     });
   });

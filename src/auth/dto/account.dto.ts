@@ -106,3 +106,15 @@ export class RecoverAccountConfirmDto extends RecoverAccountStartDto {
   @Length(6, 6)
   code: string;
 }
+
+export class ConfirmDeviceRequestDto extends JoinStartDto {
+  @IsString()
+  @MaxLength(128)
+  password: string;
+}
+
+export class ConfirmDeviceDto extends ConfirmDeviceRequestDto {
+  @IsString()
+  @Length(6, 6)
+  code: string;
+}

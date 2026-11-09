@@ -57,6 +57,8 @@ import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva
 import { PlatformSettingsService } from '../../platform-admin/service/platform-settings.service';
 import { PlatformSettingKey } from '../../platform-admin/enum/platform-setting-key.enum';
 
+export const DEVICE_CONFIRMATION_REQUIRED = 'DEVICE_CONFIRMATION_REQUIRED';
+
 // Wrong-password counts kept apart so tries from one place can't lock someone out everywhere.
 interface LoginBucket {
   from: string;
@@ -247,8 +249,15 @@ export class AuthService {
     // fires for that real event instead of every single login.
     const isNewDeviceRegistration = !registered;
     if (isNewDeviceRegistration) {
+      if (await this.accounts.needsDeviceConfirmation(member, deviceId)) {
+        throw new ForbiddenException({
+          message:
+            'Confirm this phone: your Discuva account is already used on a phone at another church. We can email you a code.',
+          code: DEVICE_CONFIRMATION_REQUIRED,
+        });
+      }
       this.logger.log(`First device registered for member ${user.id}`);
-      await this.accounts.setDevice(member, deviceId);
+      await this.accounts.registerDevice(member, deviceId);
     }
     const moved = await this.accounts.moveOnSignIn(member);
 
@@ -847,7 +856,7 @@ export class AuthService {
       usedAt: IsNull(),
     });
 
-    await this.accounts.setDevice(member, record.newDeviceId);
+    await this.accounts.resetDevices(member, record.newDeviceId);
     await this.accounts.endSessionsEverywhere(member);
     // A WebAuthn credential never checks deviceId (see loginWithWebauthn's
     // own comment) — without this, a lost/stolen device's fingerprint or

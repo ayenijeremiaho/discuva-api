@@ -42,6 +42,8 @@ const accounts = {
   setDeviceOnAccount: jest.fn(),
   isEligible: jest.fn().mockReturnValue(true),
   remove: jest.fn(),
+  needsDeviceConfirmation: jest.fn().mockResolvedValue(false),
+  registerDevice: jest.fn(),
 };
 const memberService = {
   findByEmail: jest.fn(),
@@ -52,6 +54,8 @@ const memberService = {
 };
 const authService = {
   startMemberSession: jest.fn().mockResolvedValue({ access_token: 'tok' }),
+  validateMember: jest.fn().mockResolvedValue({ id: 'm2' }),
+  login: jest.fn().mockResolvedValue({ access_token: 'tok' }),
 };
 const utility = {
   resolveChurchName: jest.fn().mockResolvedValue('the church'),
@@ -180,24 +184,54 @@ describe('AccountSignInService', () => {
           email: 'ada@example.com',
         }),
         account,
+        'phone-123',
       );
       expect(accounts.link).toHaveBeenCalledWith('a1', 'm2');
       expect(authService.startMemberSession).toHaveBeenCalled();
       expect(store.size).toBe(0);
     });
 
-    it("refuses to join from a phone that isn't the account's", async () => {
+    it('joins from any phone, since the join code already proved the email, and registers it here', async () => {
       memberService.findByEmail.mockResolvedValue(null);
       accounts.findByEmail.mockResolvedValue(account);
       accounts.findById.mockResolvedValue(account);
+      accounts.basicsFrom.mockResolvedValue({
+        firstname: 'Ada',
+        lastname: 'Obi',
+      });
       const { joinToken } = (await service.verifyJoin(
         'ada@example.com',
         '123456',
-        'other-phone',
+        'church-c-app',
+      )) as { joinToken: string };
+      memberService.createForAccount.mockResolvedValue({ id: 'm3' });
+      memberService.getById.mockResolvedValue({ id: 'm3' });
+      await service.completeJoin({
+        joinToken,
+        deviceId: 'church-c-app',
+      } as never);
+      expect(memberService.createForAccount).toHaveBeenCalledWith(
+        expect.anything(),
+        account,
+        'church-c-app',
+      );
+    });
+
+    it('refuses to join with a frozen account', async () => {
+      memberService.findByEmail.mockResolvedValue(null);
+      accounts.findByEmail.mockResolvedValue({
+        ...account,
+        frozenAt: new Date(),
+      });
+      accounts.findById.mockResolvedValue({ ...account, frozenAt: new Date() });
+      const { joinToken } = (await service.verifyJoin(
+        'ada@example.com',
+        '123456',
+        'phone-123',
       )) as { joinToken: string };
       await expect(
-        service.completeJoin({ joinToken, deviceId: 'other-phone' } as never),
-      ).rejects.toThrow(ForbiddenException);
+        service.completeJoin({ joinToken, deviceId: 'phone-123' } as never),
+      ).rejects.toThrow('frozen');
       expect(memberService.createForAccount).not.toHaveBeenCalled();
     });
 
@@ -266,6 +300,7 @@ describe('AccountSignInService', () => {
       expect(memberService.createForAccount).toHaveBeenCalledWith(
         expect.objectContaining({ firstname: 'Ada', lastname: 'Obi' }),
         account,
+        'phone-123',
       );
     });
 
@@ -378,16 +413,19 @@ describe('AccountSignInService', () => {
       );
     });
 
-    it("won't link from a phone that isn't the account's", async () => {
+    it('links from this church app whatever phone the account uses elsewhere; the code proves the email', async () => {
       memberService.getByIdWithCredentials.mockResolvedValue({
         ...member,
-        deviceId: 'church-only-phone',
+        deviceId: 'church-b-app',
       });
       accounts.findByEmail.mockResolvedValue(account);
-      await expect(service.requestLink('m2')).rejects.toThrow(
-        ForbiddenException,
+      await service.requestLink('m2');
+      expect(codes.sendCode).toHaveBeenCalledWith(
+        'ada@example.com',
+        DiscuvaAccountCodePurpose.LINK,
+        'church-b-app',
+        expect.anything(),
       );
-      expect(codes.sendCode).not.toHaveBeenCalled();
     });
 
     it("won't link twice", async () => {
@@ -400,7 +438,7 @@ describe('AccountSignInService', () => {
       );
     });
 
-    it("links after the code and takes the account's password and device", async () => {
+    it("links after the code and takes the account's password, keeping this church app's phone", async () => {
       memberService.getByIdWithCredentials.mockResolvedValue(member);
       accounts.findByEmail.mockResolvedValue(account);
       await service.confirmLink('m2', '123456');
@@ -448,9 +486,10 @@ describe('AccountSignInService', () => {
       expect(subdomain).toBe('other');
 
       ctx.tenantId = 't5';
-      memberService.getById.mockResolvedValue({
+      memberService.getByIdWithCredentials.mockResolvedValue({
         id: 'm5',
         discuvaAccountId: 'a1',
+        deviceId: 'phone-123',
       });
       await expect(service.redeemHandoff(token, 'phone-123')).resolves.toEqual({
         access_token: 'tok',
@@ -462,6 +501,11 @@ describe('AccountSignInService', () => {
 
     it("won't hand over to another phone or the wrong church", async () => {
       tenantRepo.findOne.mockResolvedValue({ id: 't5', subdomain: 'other' });
+      memberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'm5',
+        discuvaAccountId: 'a1',
+        deviceId: 'phone-123',
+      });
       const first = await service.switchChurch('m1', 't5');
       ctx.tenantId = 't5';
       await expect(
@@ -472,6 +516,128 @@ describe('AccountSignInService', () => {
       await expect(
         service.redeemHandoff(second.token, 'phone-123'),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('a church app that has no phone yet asks to confirm by signing in, unless the phone is already known', async () => {
+      tenantRepo.findOne.mockResolvedValue({ id: 't5', subdomain: 'other' });
+      memberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'm5',
+        discuvaAccountId: 'a1',
+        deviceId: null,
+      });
+      accounts.needsDeviceConfirmation.mockResolvedValueOnce(true);
+      let { token } = await service.switchChurch('m1', 't5');
+      ctx.tenantId = 't5';
+      await expect(
+        service.redeemHandoff(token, 'church-b-app'),
+      ).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'DEVICE_CONFIRMATION_REQUIRED',
+        }),
+      });
+      expect(accounts.registerDevice).not.toHaveBeenCalled();
+
+      ctx.tenantId = 't2';
+      ({ token } = await service.switchChurch('m1', 't5'));
+      ctx.tenantId = 't5';
+      await service.redeemHandoff(token, 'shared-phone-id');
+      expect(accounts.registerDevice).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'm5' }),
+        'shared-phone-id',
+      );
+    });
+  });
+
+  describe('confirming a new phone for a church app', () => {
+    const member = {
+      id: 'm2',
+      email: 'ada@example.com',
+      firstname: 'ada',
+      role: 'MEMBER',
+      changedPassword: true,
+      discuvaAccountId: 'a1',
+      deviceId: null,
+    };
+
+    beforeEach(() =>
+      memberService.getByIdWithCredentials.mockResolvedValue(member),
+    );
+
+    it('needs the password before any code is sent', async () => {
+      authService.validateMember.mockRejectedValueOnce(
+        new Error('Invalid email or password'),
+      );
+      await expect(
+        service.requestDeviceConfirmation(
+          'ada@example.com',
+          'wrong',
+          'church-b-app',
+        ),
+      ).rejects.toThrow('Invalid');
+      expect(codes.sendCode).not.toHaveBeenCalled();
+    });
+
+    it('emails a code only when this phone needs confirming', async () => {
+      await expect(
+        service.requestDeviceConfirmation(
+          'ada@example.com',
+          'pw',
+          'church-b-app',
+        ),
+      ).rejects.toThrow('ready');
+      accounts.needsDeviceConfirmation.mockResolvedValueOnce(true);
+      await service.requestDeviceConfirmation(
+        'ada@example.com',
+        'pw',
+        'church-b-app',
+      );
+      expect(codes.sendCode).toHaveBeenCalledWith(
+        'ada@example.com',
+        DiscuvaAccountCodePurpose.CONFIRM_DEVICE,
+        'church-b-app',
+        expect.anything(),
+      );
+    });
+
+    it('registers the phone after the right code and signs in', async () => {
+      accounts.needsDeviceConfirmation.mockResolvedValueOnce(true);
+      await expect(
+        service.confirmDevice(
+          'ada@example.com',
+          'pw',
+          'church-b-app',
+          '123456',
+        ),
+      ).resolves.toEqual({ access_token: 'tok' });
+      expect(codes.verifyCode).toHaveBeenCalledWith(
+        'ada@example.com',
+        DiscuvaAccountCodePurpose.CONFIRM_DEVICE,
+        'church-b-app',
+        '123456',
+      );
+      expect(accounts.registerDevice).toHaveBeenCalledWith(
+        member,
+        'church-b-app',
+      );
+      expect(authService.login).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'm2' }),
+        'church-b-app',
+      );
+    });
+
+    it('registers nothing when the code is wrong', async () => {
+      accounts.needsDeviceConfirmation.mockResolvedValueOnce(true);
+      codes.verifyCode.mockRejectedValueOnce(new BadRequestException());
+      await expect(
+        service.confirmDevice(
+          'ada@example.com',
+          'pw',
+          'church-b-app',
+          '000000',
+        ),
+      ).rejects.toThrow(BadRequestException);
+      expect(accounts.registerDevice).not.toHaveBeenCalled();
+      expect(authService.login).not.toHaveBeenCalled();
     });
   });
 

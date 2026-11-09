@@ -27,12 +27,13 @@ import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { JoinCompleteDto } from '../dto/account.dto';
 import { JwtResponse } from '../interface/auth.interface';
-import { AuthService } from './auth.service';
+import { AuthService, DEVICE_CONFIRMATION_REQUIRED } from './auth.service';
+import { SessionSurface } from '../enum/session-surface.enum';
 
 const JOIN_TOKEN_TTL_SECONDS = 15 * 60;
 const HANDOFF_TTL_SECONDS = 60;
 const OTHER_PHONE =
-  'Your Discuva account is on another phone. Use it there, or use "Reset Device Access" to move it to this phone first.';
+  'This church app is registered on another phone. Use "Reset Device Access" on the sign-in screen if this is your phone now.';
 
 interface JoinTicket {
   email: string;
@@ -154,7 +155,11 @@ export class AccountSignInService {
 
     let member: Member;
     try {
-      member = await this.memberService.createForAccount(signup, account);
+      member = await this.memberService.createForAccount(
+        signup,
+        account,
+        deviceId,
+      );
       await this.accounts.link(account.id, member.id);
     } catch (err) {
       // A new account that never got its church would block this email later.
@@ -174,16 +179,12 @@ export class AccountSignInService {
   ): Promise<JoinPlan> {
     const account = await this.accounts.findById(ticket.accountId!);
     if (!account) throw new BadRequestException('Please start again.');
-    this.assertUsable(account, deviceId);
+    this.assertNotFrozen(account);
     const basics = await this.accounts.basicsFrom(account.id);
     const firstname = basics?.firstname ?? details.firstname?.trim();
     const lastname = basics?.lastname ?? details.lastname?.trim();
     if (!firstname || !lastname) {
       throw new BadRequestException('Please give your first and last name.');
-    }
-    if (!account.deviceId) {
-      await this.accounts.setDeviceOnAccount(account.id, deviceId);
-      account.deviceId = deviceId;
     }
     const signup = {
       ...details,
@@ -251,10 +252,6 @@ export class AccountSignInService {
       this.linkDevice(member),
       code,
     );
-    if (!account.deviceId && member.deviceId) {
-      await this.accounts.setDeviceOnAccount(account.id, member.deviceId);
-      account.deviceId = member.deviceId;
-    }
     await this.accounts.link(account.id, member.id);
     await this.memberService.applyAccountCredentials(member.id, account);
     this.auditLogService.log('ACCOUNT_LINKED', {
@@ -326,14 +323,94 @@ export class AccountSignInService {
     }
     const account = await this.accounts.findById(ticket.accountId);
     if (!account) throw new BadRequestException('Please try switching again.');
-    this.assertUsable(account, deviceId);
-    const member = await this.memberService.getById(ticket.memberId, [
-      'workerProfile',
-    ]);
+    this.assertNotFrozen(account);
+    const member = await this.memberService.getByIdWithCredentials(
+      ticket.memberId,
+    );
     if (member.discuvaAccountId !== account.id) {
       throw new BadRequestException('Please try switching again.');
     }
-    return this.authService.startMemberSession(member, 'MEMBER_LOGIN');
+    // This church app keeps its own phone: a different one is refused, and a new one confirms by signing in once.
+    if (member.deviceId && member.deviceId !== deviceId) {
+      throw new ForbiddenException(OTHER_PHONE);
+    }
+    if (!member.deviceId) {
+      if (await this.accounts.needsDeviceConfirmation(member, deviceId)) {
+        throw new ForbiddenException({
+          message:
+            'Sign in here once with your Discuva email and password to confirm this phone.',
+          code: DEVICE_CONFIRMATION_REQUIRED,
+        });
+      }
+      await this.accounts.registerDevice(member, deviceId);
+    }
+    const full = await this.memberService.getById(member.id, ['workerProfile']);
+    return this.authService.startMemberSession(full, 'MEMBER_LOGIN');
+  }
+
+  // Password first, so only the owner can make the code arrive; the code then proves the inbox.
+  async requestDeviceConfirmation(
+    email: string,
+    password: string,
+    deviceId: string,
+  ): Promise<void> {
+    await this.assertOn();
+    const member = await this.signedInMember(email, password, deviceId);
+    if (!(await this.accounts.needsDeviceConfirmation(member, deviceId))) {
+      throw new BadRequestException('This phone is ready. Sign in as usual.');
+    }
+    const churchName = await this.utilityService.resolveChurchName();
+    await this.codes.sendCode(
+      member.email,
+      DiscuvaAccountCodePurpose.CONFIRM_DEVICE,
+      deviceId,
+      {
+        firstName: member.firstname,
+        action: `Someone is signing in to ${churchName} on a phone your Discuva account hasn't used there before. If it's you, enter this code. If not, change your password.`,
+      },
+    );
+  }
+
+  async confirmDevice(
+    email: string,
+    password: string,
+    deviceId: string,
+    code: string,
+  ): Promise<JwtResponse> {
+    await this.assertOn();
+    const member = await this.signedInMember(email, password, deviceId);
+    if (await this.accounts.needsDeviceConfirmation(member, deviceId)) {
+      await this.codes.verifyCode(
+        member.email,
+        DiscuvaAccountCodePurpose.CONFIRM_DEVICE,
+        deviceId,
+        code,
+      );
+      await this.accounts.registerDevice(member, deviceId);
+    }
+    return this.authService.login(
+      {
+        id: member.id,
+        role: member.role,
+        requiresPasswordChange: !member.changedPassword,
+        surface: SessionSurface.MEMBER,
+      },
+      deviceId,
+    );
+  }
+
+  // The same password check and limits as a normal sign-in.
+  private async signedInMember(
+    email: string,
+    password: string,
+    deviceId: string,
+  ): Promise<Member> {
+    const user = await this.authService.validateMember(
+      email,
+      password,
+      deviceId,
+    );
+    return this.memberService.getByIdWithCredentials(user.id);
   }
 
   available(): Promise<boolean> {
@@ -388,7 +465,7 @@ export class AccountSignInService {
         'There is no Discuva account for your email yet.',
       );
     }
-    this.assertUsable(account, member.deviceId ?? undefined);
+    this.assertNotFrozen(account);
     return { member, account };
   }
 
@@ -404,15 +481,11 @@ export class AccountSignInService {
     return account;
   }
 
-  // A frozen account, or one held by another phone, can't be used from here.
-  private assertUsable(account: DiscuvaAccount, deviceId?: string): void {
+  private assertNotFrozen(account: DiscuvaAccount): void {
     if (account.frozenAt) {
       throw new ForbiddenException(
         'This Discuva account is frozen. Reset your password to use it again.',
       );
-    }
-    if (account.deviceId && account.deviceId !== deviceId) {
-      throw new ForbiddenException(OTHER_PHONE);
     }
   }
 

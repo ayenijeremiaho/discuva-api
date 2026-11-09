@@ -46850,6 +46850,81 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Confirm this phone: request code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/confirm-device/request",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "confirm-device",
+                "request"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"delivered+join@resend.dev\",\n  \"password\": \"{{password}}\",\n  \"deviceId\": \"{{deviceId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "After a 403 DEVICE_CONFIRMATION_REQUIRED from login. Checks the password like a sign-in, then emails a code to the account."
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm this phone",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "auth": {
+              "type": "noauth"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/confirm-device",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "confirm-device"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"delivered+join@resend.dev\",\n  \"password\": \"{{password}}\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Registers this church app's phone after the right code and signs in (same response as login)."
+          },
+          "response": []
         }
       ]
     }

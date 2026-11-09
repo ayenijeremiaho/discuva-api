@@ -140,11 +140,42 @@ export class DiscuvaAccountService {
     );
   }
 
+  // Each church app holds its own phone: separate web addresses keep separate storage, so one phone has an id per church.
   async deviceOf(
     member: Pick<Member, 'discuvaAccountId' | 'deviceId'>,
   ): Promise<string | null> {
-    const account = await this.accountFor(member);
-    return account ? account.deviceId : (member.deviceId ?? null);
+    return member.deviceId ?? null;
+  }
+
+  // A church app on a phone the account hasn't seen confirms once by email, so the password alone can't open it.
+  async needsDeviceConfirmation(
+    member: Pick<Member, 'id' | 'discuvaAccountId' | 'deviceId'>,
+    deviceId: string,
+  ): Promise<boolean> {
+    if (member.deviceId) return false;
+    if (!(await this.accountFor(member))) return false;
+    const elsewhere = await this.devicesElsewhere(member);
+    return elsewhere.length > 0 && !elsewhere.includes(deviceId);
+  }
+
+  // Phones registered at the person's other churches; the same id means a browser that shares storage.
+  async devicesElsewhere(
+    member: Pick<Member, 'id' | 'discuvaAccountId'>,
+  ): Promise<string[]> {
+    const ids: string[] = [];
+    await this.forEachChurchOf(
+      member,
+      async (memberId) => {
+        const row = await this.memberRepo
+          .createQueryBuilder('m')
+          .addSelect('m.deviceId')
+          .where('m.id = :id', { id: memberId })
+          .getOne();
+        if (row?.deviceId) ids.push(row.deviceId);
+      },
+      { skipCurrent: true },
+    );
+    return ids;
   }
 
   // Wrong-password and code limits for an account count across all its churches.
@@ -200,15 +231,46 @@ export class DiscuvaAccountService {
     return 'MOVED';
   }
 
-  async setDevice(
+  // This church only: a sign-in on a phone this church app hasn't had before.
+  async registerDevice(
+    member: Pick<Member, 'id'>,
+    deviceId: string,
+  ): Promise<void> {
+    await this.memberRepo.update(member.id, { deviceId });
+  }
+
+  // Reset Device Access: this church app moves to the new phone and every other church app has to confirm again.
+  async resetDevices(
     member: Pick<Member, 'id' | 'discuvaAccountId'>,
-    deviceId: string | null,
+    deviceId: string,
   ): Promise<void> {
     const account = await this.accountFor(member);
-    if (account) await this.accountRepo.update(account.id, { deviceId });
-    this.forgetMemo();
+    if (account) {
+      await this.accountRepo.update(account.id, { deviceId });
+      this.forgetMemo();
+    }
     await this.forEachChurchOf(member, (memberId) =>
-      this.memberRepo.update(memberId, { deviceId }).then(() => undefined),
+      this.memberRepo
+        .update(memberId, {
+          deviceId: memberId === member.id ? deviceId : null,
+        })
+        .then(() => undefined),
+    );
+  }
+
+  // An admin clearing the lock clears it at every church the person belongs to.
+  async clearDevices(
+    member: Pick<Member, 'id' | 'discuvaAccountId'>,
+  ): Promise<void> {
+    const account = await this.accountFor(member);
+    if (account) {
+      await this.accountRepo.update(account.id, { deviceId: null });
+      this.forgetMemo();
+    }
+    await this.forEachChurchOf(member, (memberId) =>
+      this.memberRepo
+        .update(memberId, { deviceId: null })
+        .then(() => undefined),
     );
   }
 
@@ -261,15 +323,6 @@ export class DiscuvaAccountService {
       return;
     }
     await this.forEachLinkOf(account.id, fn, options);
-  }
-
-  // Sets the account's device and every linked church's copy.
-  async setDeviceOnAccount(accountId: string, deviceId: string): Promise<void> {
-    await this.accountRepo.update(accountId, { deviceId });
-    this.forgetMemo();
-    await this.forEachLinkOf(accountId, (memberId) =>
-      this.memberRepo.update(memberId, { deviceId }).then(() => undefined),
-    );
   }
 
   private async forEachLinkOf(

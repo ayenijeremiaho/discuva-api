@@ -14,6 +14,8 @@ import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check
 import { SessionSurface } from '../enum/session-surface.enum';
 import { AccountSignInService } from '../service/account-sign-in.service';
 import {
+  ConfirmDeviceDto,
+  ConfirmDeviceRequestDto,
   AccountCodeDto,
   AccountLinkTokenDto,
   HandoffDto,
@@ -72,6 +74,34 @@ export class AccountController {
   @Post('join/complete')
   completeJoin(@Body() dto: JoinCompleteDto) {
     return this.accountSignIn.completeJoin(dto);
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/confirm-device/request')
+  async requestDeviceConfirmation(
+    @Body() dto: ConfirmDeviceRequestDto,
+  ): Promise<{ message: string }> {
+    await this.accountSignIn.requestDeviceConfirmation(
+      dto.email,
+      dto.password,
+      dto.deviceId,
+    );
+    return { message: 'We sent a 6-digit code to your email.' };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/confirm-device')
+  confirmDevice(@Body() dto: ConfirmDeviceDto) {
+    return this.accountSignIn.confirmDevice(
+      dto.email,
+      dto.password,
+      dto.deviceId,
+      dto.code,
+    );
   }
 
   @SkipPasswordChangeCheck()

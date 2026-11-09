@@ -11444,14 +11444,31 @@ One email, password and device across every church a person belongs to. Off unti
   table answers "which churches"; an early index was dropped by `DropMembersDiscuvaAccountIdIndex1805616000000`).
 - **One password check.** `DiscuvaAccountService.verifyPassword()` is the only place a password is compared for member
   sign-in and password change. With the switch on and `discuva_account_id` set it compares the account hash only, never
-  falling back to the church copy; otherwise the church copy. `deviceOf()` does the same for the one-device lock.
+  falling back to the church copy; otherwise the church copy.
+- **One phone per church app, confirmed by email (decided 9 Nov).** Each church's member app is its own web address, and
+  a browser keeps separate storage per address, so one phone has a different device id in every church app (on an
+  iPhone each installed church app is fully separate). The lock therefore stays on each church's member record
+  (`deviceOf()` returns the church copy), and the account adds a rule: when a moved member signs in at a church app with
+  no phone registered yet, and the account already has a phone at another church, `needsDeviceConfirmation()` is true
+  unless the presented id matches a phone registered at one of their other churches (browsers that share storage).
+  `POST /auth/login` then answers `403` with `code: "DEVICE_CONFIRMATION_REQUIRED"`; the app calls
+  `POST /auth/account/confirm-device/request {email, password, deviceId}` (password checked with the normal sign-in
+  limits before any code is sent; purpose `CONFIRM_DEVICE`) and `POST /auth/account/confirm-device {email, password,
+  deviceId, code}`, which registers the phone at this church and signs in. Someone with only the password never gets
+  the code, so can't open another church app. Joining a church or adding one with a code already proves the email, so
+  those register the phone directly. Reset Device Access moves this church's app to the new phone and clears the phone
+  at every other church (`resetDevices()`); an admin clear and recovery clear every church (`clearDevices()`). Switching
+  churches signs in only on the target church's registered phone, or registers it when it's a known shared id;
+  otherwise it answers `DEVICE_CONFIRMATION_REQUIRED` so the person signs in there once. `discuva_accounts.device_id`
+  now only records the phone of the last reset.
 - **Moving over.** After a good member-app sign-in (password and device both pass), `moveOnSignIn()` creates an account
   from that church record (same hash and device), links it and sets the marker. If an account already uses that email,
   nothing is linked on the password alone: the login response carries `account_link_available: true` and linking needs
   an emailed code. Under-18s (from the birth year, an unknown month or day counting as late in the year) and members
   without an email are never moved. A half-finished move (link written, marker not) is completed at the next sign-in.
-- **Both copies written.** While the trial runs, every password and device change for a moved member is written to the
-  account and to the member record at every linked church, so setting the switch back to `0` never locks anyone out.
+- **Both copies written.** While the trial runs, every password change for a moved member is written to the account and
+  to the member record at every linked church, and phones always live on the member records, so setting the switch back
+  to `0` never locks anyone out.
   Work at other churches runs in that church's own transaction (`forEachChurchOf()`), the current church inside the
   request's.
 - **Signing out everywhere.** A password reset, device reset or admin device clear ends member-app and portal sessions at
@@ -14056,14 +14073,31 @@ One email, password and device across every church a person belongs to. Off unti
   table answers "which churches"; an early index was dropped by `DropMembersDiscuvaAccountIdIndex1805616000000`).
 - **One password check.** `DiscuvaAccountService.verifyPassword()` is the only place a password is compared for member
   sign-in and password change. With the switch on and `discuva_account_id` set it compares the account hash only, never
-  falling back to the church copy; otherwise the church copy. `deviceOf()` does the same for the one-device lock.
+  falling back to the church copy; otherwise the church copy.
+- **One phone per church app, confirmed by email (decided 9 Nov).** Each church's member app is its own web address, and
+  a browser keeps separate storage per address, so one phone has a different device id in every church app (on an
+  iPhone each installed church app is fully separate). The lock therefore stays on each church's member record
+  (`deviceOf()` returns the church copy), and the account adds a rule: when a moved member signs in at a church app with
+  no phone registered yet, and the account already has a phone at another church, `needsDeviceConfirmation()` is true
+  unless the presented id matches a phone registered at one of their other churches (browsers that share storage).
+  `POST /auth/login` then answers `403` with `code: "DEVICE_CONFIRMATION_REQUIRED"`; the app calls
+  `POST /auth/account/confirm-device/request {email, password, deviceId}` (password checked with the normal sign-in
+  limits before any code is sent; purpose `CONFIRM_DEVICE`) and `POST /auth/account/confirm-device {email, password,
+  deviceId, code}`, which registers the phone at this church and signs in. Someone with only the password never gets
+  the code, so can't open another church app. Joining a church or adding one with a code already proves the email, so
+  those register the phone directly. Reset Device Access moves this church's app to the new phone and clears the phone
+  at every other church (`resetDevices()`); an admin clear and recovery clear every church (`clearDevices()`). Switching
+  churches signs in only on the target church's registered phone, or registers it when it's a known shared id;
+  otherwise it answers `DEVICE_CONFIRMATION_REQUIRED` so the person signs in there once. `discuva_accounts.device_id`
+  now only records the phone of the last reset.
 - **Moving over.** After a good member-app sign-in (password and device both pass), `moveOnSignIn()` creates an account
   from that church record (same hash and device), links it and sets the marker. If an account already uses that email,
   nothing is linked on the password alone: the login response carries `account_link_available: true` and linking needs
   an emailed code. Under-18s (from the birth year, an unknown month or day counting as late in the year) and members
   without an email are never moved. A half-finished move (link written, marker not) is completed at the next sign-in.
-- **Both copies written.** While the trial runs, every password and device change for a moved member is written to the
-  account and to the member record at every linked church, so setting the switch back to `0` never locks anyone out.
+- **Both copies written.** While the trial runs, every password change for a moved member is written to the account and
+  to the member record at every linked church, and phones always live on the member records, so setting the switch back
+  to `0` never locks anyone out.
   Work at other churches runs in that church's own transaction (`forEachChurchOf()`), the current church inside the
   request's.
 - **Signing out everywhere.** A password reset, device reset or admin device clear ends member-app and portal sessions at

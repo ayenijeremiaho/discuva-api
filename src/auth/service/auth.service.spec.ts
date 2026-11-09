@@ -1860,18 +1860,34 @@ describe('AuthService', () => {
       ).rejects.toThrow('frozen');
     });
 
-    it("checks the device against the account's device, not this church's copy", async () => {
+    it('asks a new church app on an unknown phone to confirm by email, without registering it', async () => {
       mockMemberService.getByIdWithCredentials.mockResolvedValue({
         id: 'member-1',
         email: 'test@test.com',
         deviceId: null,
+        discuvaAccountId: 'a1',
       });
-      mockAccounts.deviceOf.mockResolvedValueOnce('their-phone');
+      mockAccounts.needsDeviceConfirmation.mockResolvedValueOnce(true);
 
+      await expect(service.login(user, 'church-b-app')).rejects.toMatchObject({
+        response: expect.objectContaining({
+          code: 'DEVICE_CONFIRMATION_REQUIRED',
+        }),
+      });
+      expect(mockAccounts.registerDevice).not.toHaveBeenCalled();
+      expect(mockSessionService.updateLogin).not.toHaveBeenCalled();
+    });
+
+    it('still refuses a phone other than the one this church app is registered on', async () => {
+      mockMemberService.getByIdWithCredentials.mockResolvedValue({
+        id: 'member-1',
+        email: 'test@test.com',
+        deviceId: 'their-phone',
+        discuvaAccountId: 'a1',
+      });
       await expect(service.login(user, 'another-phone')).rejects.toThrow(
-        ForbiddenException,
+        'already registered on another device',
       );
-      expect(mockAccounts.setDevice).not.toHaveBeenCalled();
     });
 
     it('moves the member over after a good sign-in and says when another church can be linked', async () => {

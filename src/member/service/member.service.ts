@@ -123,7 +123,8 @@ export class MemberService {
   // Joining with a Discuva account: the email is already proven, the account's password and device apply.
   async createForAccount(
     dto: SignupDto,
-    account: { id: string; password: string; deviceId: string | null },
+    account: { id: string; password: string },
+    deviceId: string,
   ): Promise<Member> {
     const pending = await this.pendingSignupFor(dto.email);
     if (!pending) {
@@ -138,7 +139,7 @@ export class MemberService {
       pending?.id,
     );
     member.changedPassword = true;
-    member.deviceId = account.deviceId;
+    member.deviceId = deviceId;
     member.discuvaAccountId = account.id;
     const saved = await this.memberRepository.save(member);
     this.auditLogService.log('MEMBER_JOINED_WITH_ACCOUNT', {
@@ -148,14 +149,13 @@ export class MemberService {
     return saved;
   }
 
-  // A member who adds this church to their account takes the account's password and device.
+  // A member who adds this church to their account takes the account's password; their phone here stays.
   async applyAccountCredentials(
     memberId: string,
-    account: { password: string; deviceId: string | null },
+    account: { password: string },
   ): Promise<void> {
     await this.memberRepository.update(memberId, {
       password: account.password,
-      deviceId: account.deviceId,
       changedPassword: true,
     });
   }
@@ -1274,7 +1274,7 @@ export class MemberService {
 
   async purgeDevice(memberId: string, actorId: string): Promise<void> {
     const member = await this.getById(memberId);
-    await this.accounts.setDevice(member, null);
+    await this.accounts.clearDevices(member);
     await this.accounts.endSessionsEverywhere(member);
     await this.accounts.forEachChurchOf(member, (id) =>
       this.pushService.unsubscribe(id),
