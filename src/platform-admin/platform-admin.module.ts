@@ -50,6 +50,7 @@ import { BillingCheckoutSession } from '../billing/entity/billing-checkout-sessi
 import { PlatformPaymentProvider } from '../billing/entity/payment-provider.entity';
 import { TenantRollup } from '../branch/entity/tenant-rollup.entity';
 import { TenantModule } from '../tenant/tenant.module';
+import { ChurchDeletionService } from './service/church-deletion.service';
 import { TenantOnboardingEvent } from '../tenant/entity/tenant-onboarding-event.entity';
 import { UtilityModule } from '../utility/utility.module';
 
@@ -103,6 +104,7 @@ import { UtilityModule } from '../utility/utility.module';
     PlatformAdminRefreshJwtAuthGuard,
     PlatformAdminGuard,
     PlatformTenantService,
+    ChurchDeletionService,
     PlatformPlanService,
     PlatformCapabilityService,
     PlatformCommunicationProviderService,

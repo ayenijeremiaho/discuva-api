@@ -136,6 +136,13 @@ export const KNOWN_PLATFORM_SETTINGS: Record<
     min: 0,
     max: 2,
   },
+  [PlatformSettingKey.CHURCH_DELETE_MAX_MEMBERS]: {
+    label: 'Console Church Delete Limit',
+    unit: 'most members a live church can have and still be deleted from the console (suspend it first)',
+    defaultValue: 25,
+    min: 0,
+    max: 500,
+  },
   [PlatformSettingKey.ACCOUNT_CODE_TTL_MINUTES]: {
     label: 'Discuva Account Code Life',
     unit: 'minutes a join or link code stays valid',

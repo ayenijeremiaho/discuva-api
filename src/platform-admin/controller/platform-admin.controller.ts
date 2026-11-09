@@ -357,8 +357,11 @@ export class PlatformAdminController {
   @UseGuards(PlatformAdminGuard)
   @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_DELETE)
   @Delete('tenants/:id')
-  async deleteTenant(@Param('id') id: string) {
-    await this.tenantService.deleteTenant(id);
+  async deleteTenant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentPlatformAdmin() admin: PlatformAdminAuth,
+  ) {
+    await this.tenantService.deleteTenant(id, admin.id);
   }
 
   @UseGuards(PlatformAdminGuard)

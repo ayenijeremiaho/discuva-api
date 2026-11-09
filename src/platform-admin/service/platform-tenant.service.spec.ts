@@ -1,3 +1,4 @@
+import { ChurchDeletionService } from './church-deletion.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
 import { ClsService } from 'nestjs-cls';
@@ -69,6 +70,8 @@ const baseTenant = {
   orgType: 'CHURCH',
 };
 
+const mockChurchDeletion = { delete: jest.fn().mockResolvedValue(undefined) };
+
 describe('PlatformTenantService', () => {
   let service: PlatformTenantService;
 
@@ -91,6 +94,7 @@ describe('PlatformTenantService', () => {
           provide: getRepositoryToken(TenantOnboardingEvent),
           useValue: mockOnboardingEventRepo,
         },
+        { provide: ChurchDeletionService, useValue: mockChurchDeletion },
         {
           provide: ChurchRequestService,
           useValue: {
@@ -989,7 +993,7 @@ describe('PlatformTenantService', () => {
       mockTenantRepo.findOneBy.mockResolvedValue(tenant);
       mockDataSource.query.mockResolvedValue(undefined);
 
-      await service.deleteTenant('tenant-1');
+      await service.deleteTenant('tenant-1', 'admin-1');
 
       expect(mockDataSource.query).toHaveBeenCalledWith(
         'DROP SCHEMA IF EXISTS "church_test_church" CASCADE',
@@ -1005,7 +1009,7 @@ describe('PlatformTenantService', () => {
       mockTenantRepo.findOneBy.mockResolvedValue(tenant);
       mockDataSource.query.mockResolvedValue(undefined);
 
-      await service.deleteTenant('tenant-1');
+      await service.deleteTenant('tenant-1', 'admin-1');
 
       expect(mockTenantRepo.remove).toHaveBeenCalledWith(tenant);
     });
@@ -1018,20 +1022,21 @@ describe('PlatformTenantService', () => {
       mockTenantRepo.findOneBy.mockResolvedValue(tenant);
       mockDataSource.query.mockResolvedValue(undefined);
 
-      await service.deleteTenant('tenant-1');
+      await service.deleteTenant('tenant-1', 'admin-1');
 
       expect(mockTenantRepo.remove).toHaveBeenCalledWith(tenant);
     });
 
-    it('refuses to delete an ACTIVE tenant', async () => {
-      mockTenantRepo.findOneBy.mockResolvedValue({
+    it('hands a live church to the console church delete', async () => {
+      const tenant = {
         ...baseTenant,
         onboardingStatus: TenantOnboardingStatus.ACTIVE,
-      });
+      };
+      mockTenantRepo.findOneBy.mockResolvedValue(tenant);
 
-      await expect(service.deleteTenant('tenant-1')).rejects.toThrow(
-        ConflictException,
-      );
+      await service.deleteTenant('tenant-1', 'admin-1');
+
+      expect(mockChurchDeletion.delete).toHaveBeenCalledWith(tenant, 'admin-1');
       expect(mockTenantRepo.remove).not.toHaveBeenCalled();
       expect(mockDataSource.query).not.toHaveBeenCalled();
     });
@@ -1042,7 +1047,7 @@ describe('PlatformTenantService', () => {
         onboardingStatus: TenantOnboardingStatus.PROVISIONING,
       });
 
-      await expect(service.deleteTenant('tenant-1')).rejects.toThrow(
+      await expect(service.deleteTenant('tenant-1', 'admin-1')).rejects.toThrow(
         ConflictException,
       );
       expect(mockTenantRepo.remove).not.toHaveBeenCalled();
@@ -1051,7 +1056,7 @@ describe('PlatformTenantService', () => {
     it('throws NotFoundException for an unknown tenant', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(null);
 
-      await expect(service.deleteTenant('missing')).rejects.toThrow(
+      await expect(service.deleteTenant('missing', 'admin-1')).rejects.toThrow(
         NotFoundException,
       );
     });

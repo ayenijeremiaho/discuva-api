@@ -1,5 +1,6 @@
 import { AdminVerificationController } from '../admin/controller/admin-verification.controller';
 import { AccountLifecycleScheduler } from './scheduler/account-lifecycle.scheduler';
+import { TenantDeletionService } from './service/tenant-deletion.service';
 import { ChurchRequestService } from './service/church-request.service';
 import {
   MiddlewareConsumer,
@@ -150,6 +151,7 @@ import { BranchModule } from '../branch/branch.module';
     AccountFileCleanupProcessor,
     TenantReportService,
     AccountLifecycleScheduler,
+    TenantDeletionService,
     ChurchRequestService,
     TenantMiddleware,
     TenantProvisioningService,
@@ -159,6 +161,7 @@ import { BranchModule } from '../branch/branch.module';
     FounderWelcomeEmailScheduler,
   ],
   exports: [
+    TenantDeletionService,
     TenantMiddleware,
     TenantProvisioningService,
     ChurchRequestService,

@@ -7709,7 +7709,7 @@ being visible outside this service. All four routes now return the identical cur
 | PATCH | `/platform/tenants/:id/discount` | Apply an internal comp — `{ discountType: 'percentage' \| 'fixed_amount', discountValue, discountReason?, discountExpiresAt? }`. Requires an existing subscription. Never touches checkout/a payment provider — see Billing & Checkout above. |
 | DELETE | `/platform/tenants/:id/discount` | Clear a tenant's discount. |
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
-| DELETE | `/platform/tenants/:id` | `TENANTS_DELETE` permission (separate from `TENANTS_WRITE`). Permanently deletes a tenant — `409` unless `onboardingStatus` is `PENDING`, `AWAITING_APPROVAL`, or `FAILED` (an `ACTIVE` tenant must be suspended instead, never deleted here — this is also how a held signup gets rejected). Drops the tenant's Postgres schema (`DROP SCHEMA IF EXISTS ... CASCADE`, a no-op if none was created) before removing the `tenants` row, which cascades onboarding events/subscriptions/etc. via existing FKs. |
+| DELETE | `/platform/tenants/:id` | `TENANTS_DELETE` permission (separate from `TENANTS_WRITE`). Permanently deletes a tenant. A `PENDING`, `AWAITING_APPROVAL` or `FAILED` signup: drops the schema (a no-op if none was created) and removes the `tenants` row, which cascades onboarding events/subscriptions/etc. — this is also how a held signup gets rejected. An `ACTIVE` church: `409` unless it is suspended, free, outside any network and has at most `church_delete_max_members` (25) members; then `ChurchDeletionService` removes it like the inactive-account delete (schema, row, shared records, cache, stored files), removes Discuva accounts left with no church, and records `deleted church <address>` in `platform_admin_security_events` for the acting staff member. Any other status: `409`. |
 | PATCH | `/platform/tenants/:id/approve` | `TENANTS_WRITE`. Releases a self-serve signup held `AWAITING_APPROVAL` — `409` otherwise. Reconstructs the provisioning job from `pendingSignupParams` and enqueues it (still async, same as any self-serve signup). See "Manual Approval Gate for Self-Serve Signups" above. |
 | GET | `/platform/plans` | List plan rows (every currency/interval variant of every tier). |
 | POST | `/platform/plans` | Create a plan row — `tierKey` and `billingInterval` required, group it with sibling currency/interval variants. Optional `organisationTypes` (non-empty array of `CHURCH`/`MINISTRY`/`GROUP`, default churches and ministries) sets who is offered it. See "Multi-currency, multi-interval tiers" and "Plans per account type" under Billing & Checkout above. |
@@ -11642,6 +11642,18 @@ EXISTS "..." CASCADE`, safe as a no-op for a `PENDING` tenant that never reached
 abandoned signups exists yet — this is a manual action from the discuva-platform tenant detail panel, gated behind
 a "type the subdomain to confirm" step given it's the one irreversible tenant action.
 
+**Deleting a live church (2026-11-09):** for test churches and small mistakes, the same route deletes an `ACTIVE`
+church only when it is suspended first, free, outside any network, and has at most `church_delete_max_members`
+members (platform setting, default 25, 0–500). `ChurchDeletionService` checks these in one query, then calls
+`TenantDeletionService.delete()` — the shared removal also used by `AccountLifecycleScheduler` (file ids read, shared
+records removed, schema dropped and row deleted in one transaction, then the file cleanup job and cache flush).
+`discuva_account_links` rows go with the tenant row; Discuva accounts that were linked to the church and now have no
+link are deleted (their codes cascade), while anyone also at another church keeps their account. Each delete is
+recorded as `deleted church <address>` in `platform_admin_security_events` against the acting staff member, since
+the church's own onboarding events are removed with it. The console shows "Delete This Church" with the same typed
+confirmation once a live church is suspended, and shows a refusal in the delete box. No new indexes: every lookup uses
+`discuva_account_links (tenant_id, …)`, `(account_id)`, `idx_tenants_parent_tenant_id` and the subscriptions tenant key.
+
 **Subdomain validation** happens inside `ensurePendingTenant`, before touching the database, against two separate
 blocklists — `403`/`409 ConflictException` either way, but for different reasons: `RESERVED_SUBDOMAINS`
 (`src/tenant/utility/extract-subdomain.ts` — `www`/`api`/`admin`/`platform`/`app`) are words that would actually
@@ -14270,6 +14282,18 @@ EXISTS "..." CASCADE`, safe as a no-op for a `PENDING` tenant that never reached
 `tenants` row, which cascades onboarding events/subscription/etc. via existing FKs. No automated sweep for
 abandoned signups exists yet — this is a manual action from the discuva-platform tenant detail panel, gated behind
 a "type the subdomain to confirm" step given it's the one irreversible tenant action.
+
+**Deleting a live church (2026-11-09):** for test churches and small mistakes, the same route deletes an `ACTIVE`
+church only when it is suspended first, free, outside any network, and has at most `church_delete_max_members`
+members (platform setting, default 25, 0–500). `ChurchDeletionService` checks these in one query, then calls
+`TenantDeletionService.delete()` — the shared removal also used by `AccountLifecycleScheduler` (file ids read, shared
+records removed, schema dropped and row deleted in one transaction, then the file cleanup job and cache flush).
+`discuva_account_links` rows go with the tenant row; Discuva accounts that were linked to the church and now have no
+link are deleted (their codes cascade), while anyone also at another church keeps their account. Each delete is
+recorded as `deleted church <address>` in `platform_admin_security_events` against the acting staff member, since
+the church's own onboarding events are removed with it. The console shows "Delete This Church" with the same typed
+confirmation once a live church is suspended, and shows a refusal in the delete box. No new indexes: every lookup uses
+`discuva_account_links (tenant_id, …)`, `(account_id)`, `idx_tenants_parent_tenant_id` and the subscriptions tenant key.
 
 **Subdomain validation** happens inside `ensurePendingTenant`, before touching the database, against two separate
 blocklists — `403`/`409 ConflictException` either way, but for different reasons: `RESERVED_SUBDOMAINS`
@@ -21709,7 +21733,7 @@ being visible outside this service. All four routes now return the identical cur
 | PATCH | `/platform/tenants/:id/discount` | Apply an internal comp — `{ discountType: 'percentage' \| 'fixed_amount', discountValue, discountReason?, discountExpiresAt? }`. Requires an existing subscription. Never touches checkout/a payment provider — see Billing & Checkout above. |
 | DELETE | `/platform/tenants/:id/discount` | Clear a tenant's discount. |
 | POST | `/platform/tenants/:id/impersonate` | Issue a scoped support token for that tenant's admin. |
-| DELETE | `/platform/tenants/:id` | `TENANTS_DELETE` permission (separate from `TENANTS_WRITE`). Permanently deletes a tenant — `409` unless `onboardingStatus` is `PENDING`, `AWAITING_APPROVAL`, or `FAILED` (an `ACTIVE` tenant must be suspended instead, never deleted here — this is also how a held signup gets rejected). Drops the tenant's Postgres schema (`DROP SCHEMA IF EXISTS ... CASCADE`, a no-op if none was created) before removing the `tenants` row, which cascades onboarding events/subscriptions/etc. via existing FKs. |
+| DELETE | `/platform/tenants/:id` | `TENANTS_DELETE` permission (separate from `TENANTS_WRITE`). Permanently deletes a tenant. A `PENDING`, `AWAITING_APPROVAL` or `FAILED` signup: drops the schema (a no-op if none was created) and removes the `tenants` row, which cascades onboarding events/subscriptions/etc. — this is also how a held signup gets rejected. An `ACTIVE` church: `409` unless it is suspended, free, outside any network and has at most `church_delete_max_members` (25) members; then `ChurchDeletionService` removes it like the inactive-account delete (schema, row, shared records, cache, stored files), removes Discuva accounts left with no church, and records `deleted church <address>` in `platform_admin_security_events` for the acting staff member. Any other status: `409`. |
 | PATCH | `/platform/tenants/:id/approve` | `TENANTS_WRITE`. Releases a self-serve signup held `AWAITING_APPROVAL` — `409` otherwise. Reconstructs the provisioning job from `pendingSignupParams` and enqueues it (still async, same as any self-serve signup). See "Manual Approval Gate for Self-Serve Signups" above. |
 | GET | `/platform/plans` | List plan rows (every currency/interval variant of every tier). |
 | POST | `/platform/plans` | Create a plan row — `tierKey` and `billingInterval` required, group it with sibling currency/interval variants. Optional `organisationTypes` (non-empty array of `CHURCH`/`MINISTRY`/`GROUP`, default churches and ministries) sets who is offered it. See "Multi-currency, multi-interval tiers" and "Plans per account type" under Billing & Checkout above. |
