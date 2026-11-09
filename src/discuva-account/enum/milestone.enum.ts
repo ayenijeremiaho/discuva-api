@@ -23,3 +23,12 @@ export const CLASS_MILESTONE_TYPES = [
   MilestoneType.WORKERS_TRAINING,
 ] as const;
 export type ClassMilestoneType = (typeof CLASS_MILESTONE_TYPES)[number];
+
+export const MILESTONE_LABELS: Record<MilestoneType, string> = {
+  [MilestoneType.SALVATION]: 'Gave my life to Christ',
+  [MilestoneType.BAPTISM]: 'Baptism',
+  [MilestoneType.MEMBERSHIP_CLASS]: 'Membership class',
+  [MilestoneType.WORKERS_TRAINING]: "Workers' training",
+  [MilestoneType.MARRIAGE]: 'Marriage',
+  [MilestoneType.OTHER]: 'Other',
+};

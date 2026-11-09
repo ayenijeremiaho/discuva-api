@@ -18,6 +18,13 @@ import { DiscuvaAccountCodeService } from './service/discuva-account-code.servic
 import { DiscuvaProfileService } from './service/discuva-profile.service';
 import { MilestoneService } from './service/milestone.service';
 import { PhotoRemovalService } from './service/photo-removal.service';
+import { AccountDataService } from './service/account-data.service';
+import { AccountDeletionService } from './service/account-deletion.service';
+import {
+  ACCOUNT_DELETION_QUEUE,
+  AccountDeletionProcessor,
+} from './processor/account-deletion.processor';
+import { BullModule } from '@nestjs/bull';
 
 // Global so member and auth code can reach it without an import cycle through MemberModule.
 @Global()
@@ -32,6 +39,7 @@ import { PhotoRemovalService } from './service/photo-removal.service';
       DiscuvaPhotoRemoval,
       Tenant,
     ]),
+    BullModule.registerQueue({ name: ACCOUNT_DELETION_QUEUE }),
     TenantTypeOrmModule.forFeature([
       Member,
       MemberSession,
@@ -45,6 +53,9 @@ import { PhotoRemovalService } from './service/photo-removal.service';
     DiscuvaProfileService,
     MilestoneService,
     PhotoRemovalService,
+    AccountDataService,
+    AccountDeletionService,
+    AccountDeletionProcessor,
     MemberSessionService,
   ],
   exports: [
@@ -53,6 +64,8 @@ import { PhotoRemovalService } from './service/photo-removal.service';
     DiscuvaProfileService,
     MilestoneService,
     PhotoRemovalService,
+    AccountDataService,
+    AccountDeletionService,
   ],
 })
 export class DiscuvaAccountModule {}

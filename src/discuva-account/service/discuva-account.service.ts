@@ -17,6 +17,7 @@ import { DiscuvaAccountCodePurpose } from '../entity/discuva-account-code.entity
 import { DiscuvaAccountCodeService } from './discuva-account-code.service';
 import { normaliseEmail } from '../util/normalise-email';
 import { Member } from '../../member/entity/member.entity';
+import { MemberStatusEnum } from '../../member/enums/member-status.enum';
 import { Admin } from '../../admin/entity/admin.entity';
 import { MemberSessionService } from '../../member/service/member-session.service';
 import { Tenant } from '../../tenant/entity/tenant.entity';
@@ -482,6 +483,45 @@ export class DiscuvaAccountService {
     this.forgetMemo();
     await this.endAllSessions(accountId);
     this.logger.warn(`Discuva account ${accountId} frozen by its owner`);
+  }
+
+  // Ends the account. Each church keeps its history under "Former member", so totals don't change.
+  // Returns the church photo files to remove once this has committed.
+  async erase(accountId: string): Promise<string[]> {
+    await this.endAllSessions(accountId);
+    const files: string[] = [];
+    await this.forEachLinkOf(accountId, async (memberId) => {
+      const row = await this.memberRepo.findOne({
+        where: { id: memberId },
+        select: { id: true, photoPublicId: true },
+      });
+      if (row?.photoPublicId) files.push(row.photoPublicId);
+      await this.memberRepo.update(memberId, {
+        firstname: 'Former',
+        lastname: 'member',
+        email: `former-${memberId}@deleted.invalid`,
+        password: await UtilityService.hashValue(
+          randomBytes(32).toString('hex'),
+        ),
+        deviceId: null,
+        discuvaAccountId: null,
+        status: MemberStatusEnum.INACTIVE,
+        phoneNumber: null,
+        photoUrl: null,
+        photoPublicId: null,
+        birthDay: null,
+        birthMonth: null,
+        birthYear: null,
+        address: null,
+        emergencyContactName: null,
+        emergencyContactPhone: null,
+        emergencyContactRelationship: null,
+        mutedNotifications: [],
+      });
+    });
+    await this.accountRepo.delete(accountId);
+    this.forgetMemo();
+    return files;
   }
 
   async endAllSessions(accountId: string): Promise<void> {

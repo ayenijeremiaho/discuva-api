@@ -13,6 +13,7 @@ import { DiscuvaAccountService } from '../../discuva-account/service/discuva-acc
 import { DiscuvaAccountCodeService } from '../../discuva-account/service/discuva-account-code.service';
 import { DiscuvaProfileService } from '../../discuva-account/service/discuva-profile.service';
 import { profilesOffMock } from '../../discuva-account/testing/profiles-off.mock';
+import { AccountDeletionService } from '../../discuva-account/service/account-deletion.service';
 import { MemberService } from '../../member/service/member.service';
 import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
@@ -37,6 +38,7 @@ const accounts = {
   isProfileOn: jest.fn().mockResolvedValue(false),
   linkHere: jest.fn(),
   recordConsent: jest.fn(),
+  accountFor: jest.fn(),
   findByEmail: jest.fn(),
   findById: jest.fn(),
   basicsFrom: jest.fn(),
@@ -81,6 +83,7 @@ const account = {
 };
 
 const profiles = profilesOffMock();
+const deletion = { scheduledFor: jest.fn().mockResolvedValue(null) };
 
 describe('AccountSignInService', () => {
   let service: AccountSignInService;
@@ -95,6 +98,7 @@ describe('AccountSignInService', () => {
         AccountSignInService,
         { provide: DiscuvaAccountService, useValue: accounts },
         { provide: DiscuvaProfileService, useValue: profiles },
+        { provide: AccountDeletionService, useValue: deletion },
         { provide: DiscuvaAccountCodeService, useValue: codes },
         { provide: MemberService, useValue: memberService },
         { provide: AuthService, useValue: authService },
@@ -674,6 +678,7 @@ describe('AccountSignInService', () => {
         profile: false,
         needsConsent: false,
         detailsToConfirm: [],
+        deletesOn: null,
       });
     });
 

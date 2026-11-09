@@ -27,6 +27,12 @@ export class LinkConfirmDto extends AccountCodeDto {
   consent?: boolean;
 }
 
+export class DeleteAccountDto {
+  @IsString()
+  @MaxLength(128)
+  password: string;
+}
+
 export class MergeStartDto {
   // The person's other Discuva email, whose churches move onto this account.
   @NormalizeEmail()

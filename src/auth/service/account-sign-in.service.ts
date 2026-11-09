@@ -26,6 +26,7 @@ import { CacheService } from '../../utility/service/cache.service';
 import { UtilityService } from '../../utility/service/utility.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { JoinCompleteDto } from '../dto/account.dto';
+import { AccountDeletionService } from '../../discuva-account/service/account-deletion.service';
 import {
   DetailChoice,
   DetailToConfirm,
@@ -84,6 +85,7 @@ export class AccountSignInService {
     private readonly auditLogService: AuditLogService,
     private readonly cls: ClsService<AppClsStore>,
     private readonly profiles: DiscuvaProfileService,
+    private readonly deletion: AccountDeletionService,
     @InjectRepository(Tenant)
     private readonly tenantRepo: Repository<Tenant>,
   ) {}
@@ -448,6 +450,7 @@ export class AccountSignInService {
     profile: boolean;
     needsConsent: boolean;
     detailsToConfirm: DetailToConfirm[];
+    deletesOn: Date | null;
   }> {
     const member = await this.memberService.getById(memberId);
     const enabled = await this.accounts.isOn();
@@ -455,12 +458,13 @@ export class AccountSignInService {
     const linkAvailable =
       enabled && !moved && !!(await this.accounts.findByEmail(member.email));
     const profile = moved && !!(await this.profiles.ownerOf(member));
-    const [link, detailsToConfirm] = profile
+    const [link, detailsToConfirm, account] = profile
       ? await Promise.all([
           this.accounts.linkHere(member.id),
           this.profiles.reconcile(member),
+          this.accounts.accountFor(member),
         ])
-      : [null, []];
+      : [null, [], null];
     return {
       enabled,
       moved,
@@ -469,6 +473,7 @@ export class AccountSignInService {
       profile,
       needsConsent: profile && !link?.consentedAt,
       detailsToConfirm,
+      deletesOn: account ? await this.deletion.scheduledFor(account) : null,
     };
   }
 

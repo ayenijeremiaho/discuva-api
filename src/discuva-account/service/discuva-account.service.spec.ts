@@ -425,6 +425,37 @@ describe('DiscuvaAccountService', () => {
     });
   });
 
+  describe('deleting an account', () => {
+    it('leaves each church a "Former member" record without personal details, then removes the account', async () => {
+      linkRepo.find.mockResolvedValue([{ tenantId: 't2', memberId: 'm2' }]);
+      tenantRepo.find.mockResolvedValue([{ id: 't2', schemaName: 'church_b' }]);
+      memberRepo.findOne.mockResolvedValue({
+        id: 'm2',
+        photoPublicId: 'tenants/t2/profile-pictures/1',
+      });
+
+      const files = await service.erase('acc-1');
+
+      expect(memberRepo.update).toHaveBeenCalledWith(
+        'm2',
+        expect.objectContaining({
+          firstname: 'Former',
+          lastname: 'member',
+          email: 'former-m2@deleted.invalid',
+          discuvaAccountId: null,
+          status: 'INACTIVE',
+          phoneNumber: null,
+          address: null,
+          emergencyContactPhone: null,
+          photoUrl: null,
+        }),
+      );
+      expect(sessionService.updateLogout).toHaveBeenCalled();
+      expect(accountRepo.delete).toHaveBeenCalledWith('acc-1');
+      expect(files).toEqual(['tenants/t2/profile-pictures/1']);
+    });
+  });
+
   describe('freezing, email changes and recovery', () => {
     beforeEach(() => {
       accountRepo.createQueryBuilder.mockReturnValue(

@@ -519,6 +519,32 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ first_name: 'name', reason: 'reason' }),
     sampleData: { name: 'Ada', reason: "it isn't a photo of you", note: null },
   },
+  'discuva-account-deletion': {
+    category: null,
+    label: 'Discuva account deletion',
+    description:
+      'Sent when someone asks to delete their Discuva account, with the date and a link to keep it.',
+    lockedNote: 'The date and the keep-my-account link are always included.',
+    subject: '{{default_subject}}',
+    heading: 'Your Discuva account will be deleted',
+    message:
+      '<p>Hi {{first_name}},</p><p>You asked to delete your Discuva account. On the date below we remove your profile, milestones and photo. Each church keeps its own records under "Former member", without your name or contact details.</p>',
+    closing:
+      '<p>If you didn’t ask for this, keep your account and change your password.</p>',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'You can still keep your account.',
+    placeholders: {
+      default_subject: 'Your Discuva account will be deleted',
+      first_name: 'Ada',
+    },
+    toVars: pick({ first_name: 'name' }),
+    sampleData: {
+      name: 'Ada',
+      deletes_on: '24 November 2026',
+      cancel_url: 'https://example.com/account/keep',
+    },
+  },
   'discuva-account-code': {
     category: null,
     label: 'Discuva account code',

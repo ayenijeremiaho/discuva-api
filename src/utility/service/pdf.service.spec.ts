@@ -381,4 +381,49 @@ describe('PdfService', () => {
       expect(fetchSpy).not.toHaveBeenCalled();
     });
   });
+
+  describe('generateAccountData', () => {
+    const data = {
+      name: 'Ada Okafor',
+      timezone: 'Africa/Lagos',
+      exportedAt: new Date('2026-11-20T10:15:00Z'),
+      accountCreatedAt: new Date('2026-11-09T08:00:00Z'),
+      photoUrl: null,
+      profile: [
+        ['Name', 'Ada Okafor'],
+        ['Email', 'ada@example.com'],
+        ['Address', '12 Example Street'],
+      ] as [string, string][],
+      milestones: [
+        {
+          when: 'Jun 2010',
+          what: 'Baptism',
+          where: 'Sample Church',
+          recordedBy: 'Sample Church',
+          shownTo: 'Your churches',
+        },
+      ],
+      churches: [
+        { name: 'Sample Church', linkedAt: new Date('2026-01-10T00:00:00Z') },
+      ],
+    };
+
+    it("is the person's own copy, in Discuva's look rather than a church's", async () => {
+      const text = pdfText(await service.generateAccountData(data));
+      expect(text).toContain('Your Discuva Data');
+      expect(text).toContain('Discuva');
+      expect(text).toContain('Ada Okafor');
+      expect(text).toContain('12 Example Street');
+      expect(text).toContain('Baptism');
+      expect(text).toContain('Each church keeps its own records');
+      expect(mockTenantRepo.findOneBy).not.toHaveBeenCalled();
+    });
+
+    it('says when there are no milestones yet', async () => {
+      const text = pdfText(
+        await service.generateAccountData({ ...data, milestones: [] }),
+      );
+      expect(text).toContain('No milestones yet.');
+    });
+  });
 });

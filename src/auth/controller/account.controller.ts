@@ -7,17 +7,22 @@ import {
   HttpStatus,
   Post,
   Request,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../decorator/public.decorator';
 import { SkipPasswordChangeCheck } from '../decorator/skip-password-change-check.decorator';
 import { SessionSurface } from '../enum/session-surface.enum';
 import { AccountSignInService } from '../service/account-sign-in.service';
 import { AccountMergeService } from '../service/account-merge.service';
+import { AccountDataService } from '../../discuva-account/service/account-data.service';
+import { AccountDeletionService } from '../../discuva-account/service/account-deletion.service';
 import {
   ConfirmDeviceDto,
   ConfirmDeviceRequestDto,
   ConfirmDetailsDto,
+  DeleteAccountDto,
   MergeConfirmDto,
   MergeStartDto,
   AccountLinkTokenDto,
@@ -35,6 +40,8 @@ export class AccountController {
   constructor(
     private readonly accountSignIn: AccountSignInService,
     private readonly accountMerge: AccountMergeService,
+    private readonly accountData: AccountDataService,
+    private readonly accountDeletion: AccountDeletionService,
   ) {}
 
   @Public()
@@ -98,6 +105,70 @@ export class AccountController {
       dto.codeOther,
     );
     return { message: 'Your two Discuva emails are now one account.' };
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Get('account/data.json')
+  async dataJson(@Request() req: any, @Res() res: Response): Promise<void> {
+    this.assertMemberApp(req);
+    const data = await this.accountData.export(req.user.id);
+    const body = Buffer.from(JSON.stringify(data, null, 2));
+    res.set({
+      'Content-Type': 'application/json',
+      'Content-Disposition': 'attachment; filename="discuva-data.json"',
+      'Content-Length': body.length,
+    });
+    res.end(body);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Get('account/data.pdf')
+  async dataPdf(@Request() req: any, @Res() res: Response): Promise<void> {
+    this.assertMemberApp(req);
+    const pdf = await this.accountData.pdf(req.user.id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'attachment; filename="discuva-data.pdf"',
+      'Content-Length': pdf.length,
+    });
+    res.end(pdf);
+  }
+
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/delete')
+  async requestDeletion(
+    @Request() req: any,
+    @Body() dto: DeleteAccountDto,
+  ): Promise<{ message: string; deletesOn: Date }> {
+    this.assertMemberApp(req);
+    const deletesOn = await this.accountDeletion.request(
+      req.user.id,
+      dto.password,
+    );
+    return {
+      message: 'Your Discuva account will be deleted. You can still keep it.',
+      deletesOn,
+    };
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('account/delete/cancel')
+  async cancelDeletion(@Request() req: any): Promise<{ message: string }> {
+    this.assertMemberApp(req);
+    await this.accountDeletion.cancel(req.user.id);
+    return { message: 'Your Discuva account will not be deleted.' };
+  }
+
+  @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('account/keep')
+  async keepAccount(
+    @Body() dto: AccountLinkTokenDto,
+  ): Promise<{ message: string }> {
+    await this.accountDeletion.cancelWithLink(dto.accountId, dto.token);
+    return { message: 'Your Discuva account will not be deleted.' };
   }
 
   @HttpCode(HttpStatus.OK)
