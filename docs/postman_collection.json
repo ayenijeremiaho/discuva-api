@@ -42978,7 +42978,7 @@
           "response": []
         },
         {
-          "name": "Delete Tenant (Invalid Signup Only)",
+          "name": "Delete Tenant",
           "request": {
             "method": "DELETE",
             "header": [],
@@ -43003,7 +43003,7 @@
                 "{{platformTenantId}}"
               ]
             },
-            "description": "Permanently deletes a tenant. 409 unless onboardingStatus is PENDING, AWAITING_APPROVAL, or FAILED (this is also how a held signup gets rejected) - an ACTIVE tenant (even suspended) must not be deleted here, only suspended. Drops the tenant's Postgres schema (no-op if none was created) before removing the tenants row, which cascades onboarding events/subscription/etc. via existing FKs. Requires the TENANTS_DELETE permission, separate from TENANTS_WRITE."
+            "description": "Permanently deletes a tenant (TENANTS_DELETE). PENDING, AWAITING_APPROVAL or FAILED signups are always deletable (this is also how a held signup is rejected). An ACTIVE church is deleted only when suspended, free, outside any network and with at most church_delete_max_members (default 25) members; otherwise 409 with the reason. Also removes Discuva accounts left with no church and logs the delete against the acting platform admin."
           },
           "response": []
         },

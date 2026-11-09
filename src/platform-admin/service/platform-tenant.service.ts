@@ -34,6 +34,7 @@ import { JwtPayload } from '../../auth/interface/auth.interface';
 import { CreateTenantDto } from '../dto/create-tenant.dto';
 import { UpdateTenantDto } from '../dto/update-tenant.dto';
 import { SuspendTenantDto } from '../dto/suspend-tenant.dto';
+import { ChurchDeletionService } from './church-deletion.service';
 import { ChangeTenantPlanDto } from '../dto/change-tenant-plan.dto';
 import { ApplyDiscountDto } from '../dto/apply-discount.dto';
 import { SetTenantModuleOverrideDto } from '../dto/set-tenant-module-override.dto';
@@ -110,6 +111,7 @@ export class PlatformTenantService {
     private readonly onboardingEventRepo: Repository<TenantOnboardingEvent>,
     private readonly provisioningService: TenantProvisioningService,
     private readonly churchRequests: ChurchRequestService,
+    private readonly churchDeletion: ChurchDeletionService,
     private readonly cacheService: CacheService,
     private readonly configService: ConfigService,
     private readonly cls: ClsService<AppClsStore>,
@@ -604,8 +606,11 @@ export class PlatformTenantService {
       TenantOnboardingStatus.FAILED,
     ]);
 
-  async deleteTenant(id: string): Promise<void> {
+  async deleteTenant(id: string, actorId: string): Promise<void> {
     const tenant = await this.findTenantOrThrow(id);
+    if (tenant.onboardingStatus === TenantOnboardingStatus.ACTIVE) {
+      return this.churchDeletion.delete(tenant, actorId);
+    }
     if (
       !PlatformTenantService.DELETABLE_STATUSES.has(tenant.onboardingStatus)
     ) {

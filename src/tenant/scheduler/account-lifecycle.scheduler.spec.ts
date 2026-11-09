@@ -1,3 +1,4 @@
+import { TenantDeletionService } from '../service/tenant-deletion.service';
 import { getQueueToken } from '@nestjs/bull';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
@@ -75,6 +76,7 @@ describe('AccountLifecycleScheduler', () => {
     const module = await Test.createTestingModule({
       providers: [
         AccountLifecycleScheduler,
+        TenantDeletionService,
         { provide: getRepositoryToken(Tenant), useValue: mockRepo },
         { provide: getDataSourceToken(), useValue: mockDataSource },
         { provide: PlatformSettingsService, useValue: mockSettings },
