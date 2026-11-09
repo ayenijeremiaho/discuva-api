@@ -29,6 +29,8 @@ import { DiscuvaAccountService } from '../../discuva-account/service/discuva-acc
 import { accountsOffMock } from '../../discuva-account/testing/accounts-off.mock';
 import { DiscuvaProfileService } from '../../discuva-account/service/discuva-profile.service';
 import { profilesOffMock } from '../../discuva-account/testing/profiles-off.mock';
+import { PhotoRemovalService } from '../../discuva-account/service/photo-removal.service';
+import { PhotoRemovalReason } from '../../discuva-account/enum/photo-removal-reason.enum';
 
 const mockMemberRepo = {
   findOne: jest.fn(),
@@ -78,6 +80,7 @@ const mockAuditLogService = { log: jest.fn() };
 
 const mockSessionService = { updateLogout: jest.fn() };
 const mockProfiles = profilesOffMock();
+const mockPhotoRemovals = { remove: jest.fn().mockResolvedValue(undefined) };
 const mockAccounts = accountsOffMock({
   updateMember: (id, patch) => mockMemberRepo.update(id, patch),
   endSessions: (id) =>
@@ -150,6 +153,7 @@ describe('MemberService', () => {
         { provide: MemberSessionService, useValue: mockSessionService },
         { provide: DiscuvaAccountService, useValue: mockAccounts },
         { provide: DiscuvaProfileService, useValue: mockProfiles },
+        { provide: PhotoRemovalService, useValue: mockPhotoRemovals },
         { provide: ConfigService, useValue: mockConfigService },
         { provide: PushNotificationService, useValue: mockPushService },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
@@ -2295,6 +2299,44 @@ describe('MemberService', () => {
   describe('updateMember', () => {
     const save = () =>
       mockMemberRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+    describe("removing an account holder's photo", () => {
+      beforeEach(() => mockProfiles.ownerOf.mockResolvedValue('acc-1'));
+      afterEach(() => mockProfiles.ownerOf.mockResolvedValue(null));
+
+      it('needs a reason, since the person is told', async () => {
+        mockMemberRepo.findOne.mockResolvedValue({
+          id: 'member-1',
+          firstname: 'Ada',
+          discuvaAccountId: 'acc-1',
+        });
+        await expect(
+          service.removeMemberPhoto('member-1', 'admin-1'),
+        ).rejects.toThrow("Choose why you're removing Ada's photo");
+        expect(mockPhotoRemovals.remove).not.toHaveBeenCalled();
+      });
+
+      it('passes the reason on', async () => {
+        const holder = {
+          id: 'member-1',
+          firstname: 'Ada',
+          discuvaAccountId: 'acc-1',
+        };
+        mockMemberRepo.findOne.mockResolvedValue(holder);
+        await service.removeMemberPhoto(
+          'member-1',
+          'admin-1',
+          PhotoRemovalReason.OFFENSIVE,
+          'Not suitable',
+        );
+        expect(mockPhotoRemovals.remove).toHaveBeenCalledWith(
+          holder,
+          'admin-1',
+          PhotoRemovalReason.OFFENSIVE,
+          'Not suitable',
+        );
+      });
+    });
 
     describe('with Global Profile on', () => {
       const holder = () => ({

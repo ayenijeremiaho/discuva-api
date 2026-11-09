@@ -6,6 +6,7 @@ import { DiscuvaProfile } from '../entity/discuva-profile.entity';
 import { DiscuvaMilestone } from '../entity/discuva-milestone.entity';
 import { MilestoneSource, MilestoneType } from '../enum/milestone.enum';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { DiscuvaAccountService } from './discuva-account.service';
 import { Member } from '../../member/entity/member.entity';
 
@@ -54,6 +55,7 @@ export class DiscuvaProfileService {
     private readonly milestoneRepo: Repository<DiscuvaMilestone>,
     private readonly accounts: DiscuvaAccountService,
     private readonly cls: ClsService<AppClsStore>,
+    private readonly cloudinary: CloudinaryService,
   ) {}
 
   // The account that owns this member's basics, or null while the church still does.
@@ -195,6 +197,49 @@ export class DiscuvaProfileService {
     const profile = await this.ensure(member);
     await this.profileRepo.save(Object.assign(profile, patch));
     await this.writeToChurches(member, patch, options);
+  }
+
+  // One photo for every church, kept in the account's own folder.
+  async setPhoto(
+    member: ProfileOwner & Pick<Member, 'photoPublicId'>,
+    file: { buffer: Buffer; mimetype: string },
+  ): Promise<void> {
+    const profile = await this.ensure(member);
+    const uploaded = await this.cloudinary.uploadAccountFile(
+      file.buffer,
+      profile.accountId,
+      'profile-pictures',
+      file.mimetype,
+    );
+    await this.replacePhoto(member, profile, {
+      url: uploaded.secureUrl,
+      publicId: uploaded.publicId,
+    });
+  }
+
+  async clearPhoto(
+    member: ProfileOwner & Pick<Member, 'photoPublicId'>,
+  ): Promise<void> {
+    await this.replacePhoto(member, await this.ensure(member), null);
+  }
+
+  private async replacePhoto(
+    member: ProfileOwner & Pick<Member, 'photoPublicId'>,
+    profile: DiscuvaProfile,
+    photo: { url: string; publicId: string } | null,
+  ): Promise<void> {
+    const previous = [profile.photoPublicId, member.photoPublicId];
+    profile.photoUrl = photo?.url ?? null;
+    profile.photoPublicId = photo?.publicId ?? null;
+    await this.profileRepo.save(profile);
+    // Church copies hold only the address: the file belongs to the account, not to any one church.
+    await this.writeToChurches(member, {
+      photoUrl: profile.photoUrl,
+      photoPublicId: null,
+    });
+    for (const id of previous) {
+      if (id) this.cloudinary.deleteByPublicId(id, 'image');
+    }
   }
 
   async writeToChurches(

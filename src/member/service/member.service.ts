@@ -46,6 +46,15 @@ import {
   DiscuvaProfileService,
   PROFILE_FIELDS,
 } from '../../discuva-account/service/discuva-profile.service';
+import { PhotoRemovalService } from '../../discuva-account/service/photo-removal.service';
+import { PhotoRemovalReason } from '../../discuva-account/enum/photo-removal-reason.enum';
+
+const MY_PROFILE_RELATIONS = [
+  'workerProfile',
+  'workerProfile.department',
+  'clergy',
+  'clergy.title',
+];
 
 @Injectable()
 export class MemberService {
@@ -73,6 +82,7 @@ export class MemberService {
     private readonly cloudinaryService: CloudinaryService,
     private readonly accounts: DiscuvaAccountService,
     private readonly profiles: DiscuvaProfileService,
+    private readonly photoRemovals: PhotoRemovalService,
   ) {
     this.churchName = this.configService.get<string>('CHURCH_NAME');
     this.churchAddress = this.configService.get<string>('CHURCH_ADDRESS');
@@ -926,6 +936,12 @@ export class MemberService {
       'clergy.title',
     ]);
 
+    if (await this.profiles.ownerOf(member)) {
+      await this.profiles.setPhoto(member, file);
+      this.logPhotoChange('MEMBER_PHOTO_UPDATED', member, memberId, true);
+      return this.getById(memberId, MY_PROFILE_RELATIONS);
+    }
+
     const previousPublicId = member.photoPublicId;
     const uploaded = await this.cloudinaryService.uploadBuffer(
       file.buffer,
@@ -952,12 +968,12 @@ export class MemberService {
   }
 
   async removeMyPhoto(memberId: string): Promise<Member> {
-    const member = await this.getById(memberId, [
-      'workerProfile',
-      'workerProfile.department',
-      'clergy',
-      'clergy.title',
-    ]);
+    const member = await this.getById(memberId, MY_PROFILE_RELATIONS);
+    if (await this.profiles.ownerOf(member)) {
+      await this.profiles.clearPhoto(member);
+      this.logPhotoChange('MEMBER_PHOTO_REMOVED', member, memberId, true);
+      return this.getById(memberId, MY_PROFILE_RELATIONS);
+    }
     const saved = await this.clearPhoto(member);
     this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
       actorId: memberId,
@@ -968,13 +984,24 @@ export class MemberService {
     return saved;
   }
 
-  async removeMemberPhoto(memberId: string, actorId: string): Promise<Member> {
-    const member = await this.getById(memberId, [
-      'workerProfile',
-      'workerProfile.department',
-      'clergy',
-      'clergy.title',
-    ]);
+  // For an account holder the photo is theirs everywhere, so removing it needs a reason they are sent.
+  async removeMemberPhoto(
+    memberId: string,
+    actorId: string,
+    reason?: PhotoRemovalReason,
+    note?: string | null,
+  ): Promise<Member> {
+    const member = await this.getById(memberId, MY_PROFILE_RELATIONS);
+    if (await this.profiles.ownerOf(member)) {
+      if (!reason) {
+        throw new BadRequestException(
+          `Choose why you're removing ${member.firstname}'s photo. They'll be told.`,
+        );
+      }
+      await this.photoRemovals.remove(member, actorId, reason, note ?? null);
+      this.logPhotoChange('MEMBER_PHOTO_REMOVED', member, actorId, false);
+      return this.getById(memberId, MY_PROFILE_RELATIONS);
+    }
     const saved = await this.clearPhoto(member);
     this.auditLogService.log('MEMBER_PHOTO_REMOVED', {
       actorId,
@@ -983,6 +1010,20 @@ export class MemberService {
       metadata: { self: false },
     });
     return saved;
+  }
+
+  private logPhotoChange(
+    action: 'MEMBER_PHOTO_UPDATED' | 'MEMBER_PHOTO_REMOVED',
+    member: Member,
+    actorId: string,
+    self: boolean,
+  ): void {
+    this.auditLogService.log(action, {
+      actorId,
+      targetId: member.id,
+      targetEmail: member.email,
+      metadata: { self },
+    });
   }
 
   private async clearPhoto(member: Member): Promise<Member> {

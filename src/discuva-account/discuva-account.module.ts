@@ -17,6 +17,7 @@ import { DiscuvaAccountService } from './service/discuva-account.service';
 import { DiscuvaAccountCodeService } from './service/discuva-account-code.service';
 import { DiscuvaProfileService } from './service/discuva-profile.service';
 import { MilestoneService } from './service/milestone.service';
+import { PhotoRemovalService } from './service/photo-removal.service';
 
 // Global so member and auth code can reach it without an import cycle through MemberModule.
 @Global()
@@ -43,6 +44,7 @@ import { MilestoneService } from './service/milestone.service';
     DiscuvaAccountCodeService,
     DiscuvaProfileService,
     MilestoneService,
+    PhotoRemovalService,
     MemberSessionService,
   ],
   exports: [
@@ -50,6 +52,7 @@ import { MilestoneService } from './service/milestone.service';
     DiscuvaAccountCodeService,
     DiscuvaProfileService,
     MilestoneService,
+    PhotoRemovalService,
   ],
 })
 export class DiscuvaAccountModule {}

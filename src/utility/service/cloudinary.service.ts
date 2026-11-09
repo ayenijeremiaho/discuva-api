@@ -82,12 +82,53 @@ export class CloudinaryService implements OnModuleInit {
     filename?: string,
     mimeType?: string,
   ): Promise<CloudinaryUploadResult> {
+    // Each church's own folder is what lets deleting an account remove exactly its files.
+    const tenantId = this.cls.get('tenantId');
+    const path = tenantId ? `tenants/${tenantId}/${folder}` : folder;
+    return this.upload(buffer, `${path}/${filename ?? Date.now()}`, mimeType);
+  }
+
+  // A Discuva account's own files, outside every church folder, so deleting a church leaves them alone.
+  async uploadAccountFile(
+    buffer: Buffer,
+    accountId: string,
+    folder: CloudinaryFolder,
+    mimeType?: string,
+  ): Promise<CloudinaryUploadResult> {
+    if (!UUID.test(accountId)) {
+      throw new Error(`Refusing to upload for account "${accountId}"`);
+    }
+    return this.upload(
+      buffer,
+      `accounts/${accountId}/${folder}/${Date.now()}`,
+      mimeType,
+    );
+  }
+
+  // Throws on failure so the caller can retry.
+  async deleteAccountFiles(accountId: string): Promise<void> {
+    if (!UUID.test(accountId)) {
+      throw new Error(`Refusing to delete files for account "${accountId}"`);
+    }
+    for (const resource_type of FILE_TYPES) {
+      let next_cursor: string | undefined;
+      do {
+        const page = await cloudinary.api.delete_resources_by_prefix(
+          `accounts/${accountId}/`,
+          { resource_type, type: 'upload', next_cursor },
+        );
+        next_cursor = page.next_cursor;
+      } while (next_cursor);
+    }
+  }
+
+  private upload(
+    buffer: Buffer,
+    publicId: string,
+    mimeType?: string,
+  ): Promise<CloudinaryUploadResult> {
     const resourceType = this.resolveResourceType(mimeType);
     return new Promise((resolve, reject) => {
-      // Each church's own folder is what lets deleting an account remove exactly its files.
-      const tenantId = this.cls.get('tenantId');
-      const path = tenantId ? `tenants/${tenantId}/${folder}` : folder;
-      const publicId = `${path}/${filename ?? Date.now()}`;
       const stream = cloudinary.uploader.upload_stream(
         { public_id: publicId, resource_type: resourceType },
         (error, result: UploadApiResponse) => {

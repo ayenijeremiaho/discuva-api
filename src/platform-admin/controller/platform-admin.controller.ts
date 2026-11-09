@@ -1,4 +1,5 @@
 import { ProtectedNameService } from '../../protected-name/protected-name.service';
+import { PhotoRemovalService } from '../../discuva-account/service/photo-removal.service';
 import { SaveProtectedNameDto } from '../../protected-name/protected-name.dto';
 import { TenantReportService } from '../../tenant/service/tenant-report.service';
 import { VerificationDecisionDto } from '../../tenant/dto/signup.dto';
@@ -114,6 +115,7 @@ export class PlatformAdminController {
     private readonly accountTypeAdmin: AccountTypeAdminService,
     private readonly protectedNames: ProtectedNameService,
     private readonly configService: ConfigService,
+    private readonly photoRemovals: PhotoRemovalService,
   ) {}
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -271,6 +273,14 @@ export class PlatformAdminController {
   @Get('permissions/groups')
   getPermissionGroups() {
     return PlatformAdminPermissionGroups;
+  }
+
+  // People whose profile photo admins keep removing, past the console's threshold.
+  @UseGuards(PlatformAdminGuard)
+  @RequiresPlatformPermission(PlatformAdminPermission.TENANTS_READ)
+  @Get('photo-reports')
+  photoReports() {
+    return this.photoRemovals.reports();
   }
 
   @UseGuards(PlatformAdminGuard)

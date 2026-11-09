@@ -9,6 +9,7 @@ import { DiscuvaProfile } from '../entity/discuva-profile.entity';
 import { Member } from '../../member/entity/member.entity';
 import { DiscuvaMilestone } from '../entity/discuva-milestone.entity';
 import { ClsService } from 'nestjs-cls';
+import { CloudinaryService } from '../../utility/service/cloudinary.service';
 
 const insert = {
   insert: jest.fn().mockReturnThis(),
@@ -30,6 +31,13 @@ const milestoneInsert = {
 };
 const milestoneRepo = { createQueryBuilder: jest.fn(() => milestoneInsert) };
 const cls = { get: jest.fn(() => 't-here') };
+const cloudinary = {
+  uploadAccountFile: jest.fn().mockResolvedValue({
+    secureUrl: 'https://cdn.example/accounts/acc-1/p.jpg',
+    publicId: 'accounts/acc-1/profile-pictures/1',
+  }),
+  deleteByPublicId: jest.fn(),
+};
 const memberRepo = {
   findOneOrFail: jest.fn(),
   update: jest.fn().mockResolvedValue({ affected: 1 }),
@@ -85,6 +93,7 @@ describe('DiscuvaProfileService', () => {
         },
         { provide: DiscuvaAccountService, useValue: accounts },
         { provide: ClsService, useValue: cls },
+        { provide: CloudinaryService, useValue: cloudinary },
       ],
     }).compile();
     service = module.get(DiscuvaProfileService);
@@ -264,6 +273,62 @@ describe('DiscuvaProfileService', () => {
       await expect(service.resolve(here(), {})).rejects.toThrow(
         'Please choose which details are right.',
       );
+    });
+  });
+
+  describe('the profile photo', () => {
+    beforeEach(() =>
+      profileRepo.findOne.mockResolvedValue({
+        accountId: 'acc-1',
+        photoUrl: 'https://cdn.example/accounts/acc-1/old.jpg',
+        photoPublicId: 'accounts/acc-1/profile-pictures/old',
+      }),
+    );
+    const holder = {
+      id: 'm-here',
+      discuvaAccountId: 'acc-1',
+      photoPublicId: 'tenants/t-here/profile-pictures/older',
+    };
+
+    it("goes in the account's own folder and every church shows it", async () => {
+      await service.setPhoto(holder, {
+        buffer: Buffer.from('x'),
+        mimetype: 'image/jpeg',
+      });
+
+      expect(cloudinary.uploadAccountFile).toHaveBeenCalledWith(
+        expect.any(Buffer),
+        'acc-1',
+        'profile-pictures',
+        'image/jpeg',
+      );
+      expect(profileRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          photoUrl: 'https://cdn.example/accounts/acc-1/p.jpg',
+          photoPublicId: 'accounts/acc-1/profile-pictures/1',
+        }),
+      );
+      const churchCopy = {
+        photoUrl: 'https://cdn.example/accounts/acc-1/p.jpg',
+        photoPublicId: null,
+      };
+      expect(memberRepo.update.mock.calls).toEqual([
+        ['m-here', churchCopy],
+        ['m-other', churchCopy],
+      ]);
+      expect(cloudinary.deleteByPublicId.mock.calls).toEqual([
+        ['accounts/acc-1/profile-pictures/old', 'image'],
+        ['tenants/t-here/profile-pictures/older', 'image'],
+      ]);
+    });
+
+    it('is removed everywhere at once', async () => {
+      await service.clearPhoto(holder);
+      expect(memberRepo.update).toHaveBeenCalledWith('m-other', {
+        photoUrl: null,
+        photoPublicId: null,
+      });
+      expect(cloudinary.uploadAccountFile).not.toHaveBeenCalled();
     });
   });
 });

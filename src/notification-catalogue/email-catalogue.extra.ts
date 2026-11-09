@@ -497,6 +497,28 @@ export const EXTRA_EMAIL_CATALOGUE: Record<string, EmailTemplate> = {
     toVars: pick({ first_name: 'name' }),
     sampleData: { name: 'Ada' },
   },
+  'discuva-photo-removed': {
+    category: null,
+    label: 'Profile photo removed',
+    description:
+      "Sent when an admin removes the profile photo on someone's Discuva profile.",
+    lockedNote: "The admin's reason is always included.",
+    subject: '{{default_subject}}',
+    heading: 'Your profile photo was removed',
+    message:
+      '<p>Hi {{first_name}},</p><p>An admin at {{church_name}} removed your profile photo because {{reason}}. It was removed at every church you belong to.</p><p>You can add a new photo any time from Edit Profile in the app.</p>',
+    closing: '',
+    signoff: 'Sincerely,',
+    signature: '{{church_name}}',
+    preheader: 'You can add a new photo any time.',
+    placeholders: {
+      default_subject: 'Your profile photo was removed',
+      first_name: 'Ada',
+      reason: "it isn't a photo of you",
+    },
+    toVars: pick({ first_name: 'name', reason: 'reason' }),
+    sampleData: { name: 'Ada', reason: "it isn't a photo of you", note: null },
+  },
   'discuva-account-code': {
     category: null,
     label: 'Discuva account code',
