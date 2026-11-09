@@ -11504,6 +11504,11 @@ One email, password and device across every church a person belongs to. Off unti
   logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
   address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
   account's own device, once, within 60 seconds.
+- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available}`: whether One Discuva sign-in is on
+  for this church, so the app shows email-first joining instead of the old sign-up); `GET /auth/account` (member app,
+  `{enabled, moved, linkAvailable, email}`); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
+  portal sessions at every linked church, this one included). The admin member list and detail carry
+  `hasDiscuvaAccount`, so the portal offers Recover account only for those members.
 - **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
   church's members. Instead the offer appears when the person next signs in at that church (`account_link_available`).
 - **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved
@@ -14105,6 +14110,11 @@ One email, password and device across every church a person belongs to. Off unti
   logoUrl, current`). `POST /auth/account/switch {tenantId}` returns `{subdomain, token}`; the app opens that church's
   address and calls `POST /auth/account/handoff {token, deviceId}` there (`@Public()`), which signs in only on the
   account's own device, once, within 60 seconds.
+- **App support routes:** `GET /auth/account/available` (`@Public()`, `{available}`: whether One Discuva sign-in is on
+  for this church, so the app shows email-first joining instead of the old sign-up); `GET /auth/account` (member app,
+  `{enabled, moved, linkAvailable, email}`); `POST /auth/account/sign-out-everywhere` (member app; ends member-app and
+  portal sessions at every linked church, this one included). The admin member list and detail carry
+  `hasDiscuvaAccount`, so the portal offers Recover account only for those members.
 - **Not built, by choice:** offering other churches that hold the same email right after moving would mean searching every
   church's members. Instead the offer appears when the person next signs in at that church (`account_link_available`).
 - **Database cost.** Sign-in adds one indexed read of `discuva_accounts` by email (for the shared counters) and, for a moved

@@ -57,6 +57,11 @@ export class MemberDto {
   @Expose()
   changedPassword: boolean;
 
+  // Signs in with a shared Discuva account; the admin portal offers Recover account for these.
+  @Expose()
+  @Transform(({ obj }) => !!obj.discuvaAccountId)
+  hasDiscuvaAccount: boolean;
+
   @Expose()
   role: MemberRoleEnum;
 

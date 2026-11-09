@@ -29,6 +29,27 @@ export class AccountController {
   constructor(private readonly accountSignIn: AccountSignInService) {}
 
   @Public()
+  @Get('account/available')
+  async available(): Promise<{ available: boolean }> {
+    return { available: await this.accountSignIn.available() };
+  }
+
+  @SkipPasswordChangeCheck()
+  @Get('account')
+  status(@Request() req: any) {
+    this.assertMemberApp(req);
+    return this.accountSignIn.status(req.user.id);
+  }
+
+  @HttpCode(HttpStatus.OK)
+  @Post('account/sign-out-everywhere')
+  async signOutEverywhere(@Request() req: any): Promise<{ message: string }> {
+    this.assertMemberApp(req);
+    await this.accountSignIn.signOutEverywhere(req.user.id);
+    return { message: "You've been signed out at every church." };
+  }
+
+  @Public()
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('join/start')

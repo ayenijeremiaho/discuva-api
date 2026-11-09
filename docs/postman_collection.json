@@ -46283,6 +46283,68 @@
       "description": "Joining a church email-first, adding a church to a Discuva account, and switching churches. Off unless the discuva_account_mode setting is on for the church.",
       "item": [
         {
+          "name": "Is One sign-in on here?",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/available",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "available"
+              ]
+            },
+            "description": "Public. {available}: show email-first joining when true.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "My account status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account"
+              ]
+            },
+            "description": "Member app. {enabled, moved, linkAvailable, email}.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
           "name": "Join: start",
           "request": {
             "method": "POST",
@@ -46747,6 +46809,41 @@
                 {
                   "key": "token",
                   "value": "{{adminAccessToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Sign out everywhere",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-Subdomain",
+                "value": "{{subdomain}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/account/sign-out-everywhere",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "auth",
+                "account",
+                "sign-out-everywhere"
+              ]
+            },
+            "description": "Member app. Ends sessions at every linked church, this one included.",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{accessToken}}",
                   "type": "string"
                 }
               ]

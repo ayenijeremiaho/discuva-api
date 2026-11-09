@@ -308,6 +308,30 @@ export class AccountSignInService {
     return this.authService.startMemberSession(member, 'MEMBER_LOGIN');
   }
 
+  available(): Promise<boolean> {
+    return this.accounts.isOn();
+  }
+
+  // What the member app shows on Account and after sign-in.
+  async status(memberId: string): Promise<{
+    enabled: boolean;
+    moved: boolean;
+    linkAvailable: boolean;
+    email: string;
+  }> {
+    const member = await this.memberService.getById(memberId);
+    const enabled = await this.accounts.isOn();
+    const moved = enabled && !!member.discuvaAccountId;
+    const linkAvailable =
+      enabled && !moved && !!(await this.accounts.findByEmail(member.email));
+    return { enabled, moved, linkAvailable, email: member.email };
+  }
+
+  async signOutEverywhere(memberId: string): Promise<void> {
+    const member = await this.memberService.getById(memberId);
+    await this.accounts.endSessionsEverywhere(member);
+  }
+
   async freeze(accountId: string, token: string): Promise<void> {
     await this.accounts.useLinkToken(
       accountId,

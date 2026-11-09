@@ -35,6 +35,7 @@ const accounts = {
   create: jest.fn(),
   link: jest.fn(),
   linksOf: jest.fn(),
+  endSessionsEverywhere: jest.fn(),
   setDeviceOnAccount: jest.fn(),
   isEligible: jest.fn().mockReturnValue(true),
 };
@@ -387,6 +388,44 @@ describe('AccountSignInService', () => {
       await expect(
         service.redeemHandoff(second.token, 'phone-123'),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('account status', () => {
+    it('offers linking to someone not moved whose email has an account', async () => {
+      memberService.getById.mockResolvedValue({
+        id: 'm2',
+        email: 'ada@example.com',
+        discuvaAccountId: null,
+      });
+      accounts.findByEmail.mockResolvedValue(account);
+      await expect(service.status('m2')).resolves.toEqual({
+        enabled: true,
+        moved: false,
+        linkAvailable: true,
+        email: 'ada@example.com',
+      });
+    });
+
+    it('shows nothing while the switch is off', async () => {
+      accounts.isOn.mockResolvedValue(false);
+      memberService.getById.mockResolvedValue({
+        id: 'm2',
+        email: 'ada@example.com',
+        discuvaAccountId: 'a1',
+      });
+      await expect(service.status('m2')).resolves.toMatchObject({
+        enabled: false,
+        moved: false,
+        linkAvailable: false,
+      });
+    });
+
+    it('signs out at every church', async () => {
+      const member = { id: 'm1', discuvaAccountId: 'a1' };
+      memberService.getById.mockResolvedValue(member);
+      await service.signOutEverywhere('m1');
+      expect(accounts.endSessionsEverywhere).toHaveBeenCalledWith(member);
     });
   });
 });
