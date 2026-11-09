@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { instanceToPlain, plainToInstance } from 'class-transformer';
 import { MemberDto } from './member.dto';
 
