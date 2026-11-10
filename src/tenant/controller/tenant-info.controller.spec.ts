@@ -24,6 +24,8 @@ const mockAuditLogService = { log: jest.fn() };
 
 const mockTenantRepo = {
   findOneBy: jest.fn(),
+  findOne: jest.fn(),
+  find: jest.fn().mockResolvedValue([]),
   save: jest.fn(),
 };
 
@@ -48,6 +50,7 @@ const mockTenantAssetService = {
   getOverrides: jest.fn().mockResolvedValue({}),
   setOverride: jest.fn(),
   removeOverride: jest.fn(),
+  forDisplay: jest.fn(),
 };
 
 const mockConfigService = {
@@ -90,6 +93,10 @@ describe('TenantInfoController', () => {
     mockCls.get.mockReturnValue('tenant-1');
     mockTenantRepo.save.mockImplementation((t) => Promise.resolve(t));
     mockTenantAssetService.getOverrides.mockResolvedValue({});
+    mockTenantAssetService.forDisplay.mockResolvedValue({
+      assets: {},
+      fromNetwork: [],
+    });
     mockConfigService.get.mockImplementation((key: string) =>
       key === 'CURRENCY_LOCALE'
         ? 'en-GB'
@@ -137,8 +144,9 @@ describe('TenantInfoController', () => {
   describe('getInfo', () => {
     it('falls back to the LOGO_URL env default when the tenant has no logo of its own', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue(baseTenant);
-      mockTenantAssetService.getOverrides.mockResolvedValue({
-        'login-backdrop': 'https://cdn.example.com/login.jpg',
+      mockTenantAssetService.forDisplay.mockResolvedValue({
+        assets: { 'login-backdrop': 'https://cdn.example.com/login.jpg' },
+        fromNetwork: [],
       });
 
       const result = await controller.getInfo();
@@ -160,10 +168,51 @@ describe('TenantInfoController', () => {
         timezone: 'UTC',
         phoneRegion: 'GB',
         assets: { 'login-backdrop': 'https://cdn.example.com/login.jpg' },
+        network: null,
       });
-      expect(mockTenantAssetService.getOverrides).toHaveBeenCalledWith(
-        'tenant-1',
-      );
+    });
+
+    it("gives a branch its network's logo and theme, and says what comes from the network", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        networkRootId: 'root-1',
+        themeFromNetwork: true,
+      });
+      mockTenantRepo.findOne.mockResolvedValue({
+        id: 'root-1',
+        logoUrl: 'https://cdn.example.com/network.png',
+        themePreset: 'forest',
+      });
+      mockTenantAssetService.forDisplay.mockResolvedValue({
+        assets: { 'events-hero': 'net.jpg' },
+        fromNetwork: ['events-hero'],
+      });
+
+      const result = await controller.getInfo();
+
+      expect(result.logoUrl).toBe('https://cdn.example.com/network.png');
+      expect(result.themePreset).toBe('forest');
+      expect(result.network).toEqual({
+        logo: true,
+        theme: true,
+        assets: ['events-hero'],
+      });
+    });
+
+    it("keeps a branch's own logo and chosen theme", async () => {
+      mockTenantRepo.findOneBy.mockResolvedValue({
+        ...baseTenant,
+        networkRootId: 'root-1',
+        themeFromNetwork: false,
+        logoUrl: 'https://cdn.example.com/own.png',
+      });
+
+      const result = await controller.getInfo();
+
+      expect(result.logoUrl).toBe('https://cdn.example.com/own.png');
+      expect(result.themePreset).toBe('classic');
+      expect(result.network).toEqual({ logo: false, theme: false, assets: [] });
+      expect(mockTenantRepo.findOne).not.toHaveBeenCalled();
     });
 
     it("prefers the tenant's own uploaded logo over the LOGO_URL default", async () => {
@@ -456,8 +505,9 @@ describe('TenantInfoController', () => {
 
     it('resolves the current tenant and delegates to TenantAssetService', async () => {
       mockTenantRepo.findOneBy.mockResolvedValue({ ...baseTenant });
-      mockTenantAssetService.setOverride.mockResolvedValue({
-        'login-backdrop': 'https://cdn.example.com/new-login.jpg',
+      mockTenantAssetService.forDisplay.mockResolvedValue({
+        assets: { 'login-backdrop': 'https://cdn.example.com/new-login.jpg' },
+        fromNetwork: [],
       });
 
       const result = await controller.setAsset('login-backdrop', file);
@@ -469,6 +519,7 @@ describe('TenantInfoController', () => {
       );
       expect(result).toEqual({
         assets: { 'login-backdrop': 'https://cdn.example.com/new-login.jpg' },
+        fromNetwork: [],
       });
     });
   });
@@ -484,7 +535,7 @@ describe('TenantInfoController', () => {
         'tenant-1',
         'login-backdrop',
       );
-      expect(result).toEqual({ assets: {} });
+      expect(result).toEqual({ assets: {}, fromNetwork: [] });
     });
   });
 });

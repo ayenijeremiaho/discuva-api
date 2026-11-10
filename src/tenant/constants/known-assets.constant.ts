@@ -257,6 +257,13 @@ export const KNOWN_ASSETS = [
     description: 'Header on the help / support screen',
   },
   {
+    key: 'branch-picker',
+    label: 'Choose Your Branch',
+    description:
+      'Header on the first screen of your app when your church has branches, where people pick theirs',
+    defaultImage: 'security-key',
+  },
+  {
     key: 'security-key',
     label: 'Security Screens',
     description:

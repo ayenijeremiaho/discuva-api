@@ -12,8 +12,15 @@ import { ChurchThemePreset } from '../enum/church-theme-preset.enum';
 import { CacheService } from '../../utility/service/cache.service';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 
-const mockTenantRepository = { findOneBy: jest.fn(), save: jest.fn() };
-const mockCls = { get: jest.fn() };
+const mockTenantRepository = {
+  findOneBy: jest.fn(),
+  save: jest.fn(),
+  find: jest.fn().mockResolvedValue([]),
+};
+const mockCls = {
+  get: jest.fn(),
+  runWith: jest.fn((_store: unknown, fn: () => unknown) => fn()),
+};
 const mockCacheService = {
   get: jest.fn().mockResolvedValue(undefined),
   set: jest.fn().mockResolvedValue(undefined),
@@ -168,6 +175,49 @@ describe('TenantProfileService', () => {
     ).rejects.toThrow('Save failed');
     expect(mockCacheService.del).not.toHaveBeenCalled();
     expect(mockAuditLogService.log).not.toHaveBeenCalled();
+  });
+
+  it('a branch picking a theme stops following the network, and can go back', async () => {
+    mockTenantRepository.findOneBy.mockResolvedValue({
+      ...baseTenant,
+      networkRootId: 'root-1',
+      themeFromNetwork: true,
+    });
+    const picked = await service.updateProfile(
+      { themePreset: ChurchThemePreset.FOREST },
+      actor,
+    );
+    expect(picked.themeFromNetwork).toBe(false);
+
+    mockTenantRepository.findOneBy.mockResolvedValue({ ...picked });
+    const back = await service.updateProfile({ useNetworkTheme: true }, actor);
+    expect(back.themeFromNetwork).toBe(true);
+    expect(back).not.toHaveProperty('useNetworkTheme');
+  });
+
+  it('refuses to follow a network theme outside a network', async () => {
+    await expect(
+      service.updateProfile({ useNetworkTheme: true }, actor),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("clears every branch's cached look when the top church changes its own", async () => {
+    mockTenantRepository.find.mockResolvedValue([
+      { id: 'root-1' },
+      { id: 'b-1' },
+      { id: 'b-2' },
+    ]);
+    service.clearBranding({ id: 'root-1', networkRootId: 'root-1' });
+    await new Promise(process.nextTick);
+    expect(mockCacheService.del.mock.calls.map((c) => c[0])).toEqual([
+      'tenant-branding:root-1',
+      'tenant-branding:b-1',
+      'tenant-branding:b-2',
+    ]);
+    expect(mockCls.runWith).toHaveBeenCalledWith(
+      { tenantId: 'b-1' },
+      expect.any(Function),
+    );
   });
 
   it('stops an unverified account renaming itself to a protected name', async () => {

@@ -12,6 +12,7 @@ import { AppClsStore } from '../interface/tenant-cls-store.interface';
 import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { AuditLogService } from '../../utility/service/audit-log.service';
 import { CacheService } from '../../utility/service/cache.service';
+import { isBranch } from '../util/network-branding';
 
 export interface TenantProfileActor {
   adminId: string;
@@ -44,14 +45,22 @@ export class TenantProfileService {
   ): Promise<Tenant> {
     const tenant = await this.getCurrentTenant();
     await this.assertNameAllowed(tenant, dto.name);
+    const { useNetworkTheme, ...changes } = dto;
+    if (useNetworkTheme && !isBranch(tenant)) {
+      throw new BadRequestException(
+        'Only a branch can follow its network’s theme.',
+      );
+    }
     const previousThemePreset = tenant.themePreset;
     const themeChanged = Boolean(
-      dto.themePreset && dto.themePreset !== previousThemePreset,
+      changes.themePreset && changes.themePreset !== previousThemePreset,
     );
     if (themeChanged) tenant.previousThemePreset = previousThemePreset;
-    Object.assign(tenant, dto);
+    Object.assign(tenant, changes);
+    if (changes.themePreset) tenant.themeFromNetwork = false;
+    if (useNetworkTheme) tenant.themeFromNetwork = true;
     await this.tenantRepository.save(tenant);
-    this.cacheService.del(`tenant-branding:${tenant.id}`);
+    this.clearBranding(tenant);
     if (themeChanged) {
       this.auditLogService.log('CHURCH_THEME_CHANGED', {
         actorId: actor.memberId,
@@ -65,6 +74,24 @@ export class TenantProfileService {
       });
     }
     return tenant;
+  }
+
+  // A top church's logo and theme show in all its branches, so their cached branding goes too.
+  clearBranding(tenant: Pick<Tenant, 'id' | 'networkRootId'>): void {
+    this.cacheService.del(`tenant-branding:${tenant.id}`);
+    if (tenant.networkRootId !== tenant.id) return;
+    this.tenantRepository
+      .find({ where: { networkRootId: tenant.id }, select: { id: true } })
+      .then((rows) =>
+        rows
+          .filter((r) => r.id !== tenant.id)
+          .forEach((r) =>
+            this.cls.runWith({ tenantId: r.id } as AppClsStore, () =>
+              this.cacheService.del(`tenant-branding:${r.id}`),
+            ),
+          ),
+      )
+      .catch(() => undefined);
   }
 
   // Verified accounts were checked by a person; others can't rename into a protected name.

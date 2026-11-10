@@ -2671,6 +2671,14 @@ A network is a **tree of churches** under one top church. Each church is still i
 - **Home branch:** `GET /auth/account/network-home` (member app) returns `{ networkRootId, home: { tenantId, subdomain } | null }`. Root table `network_homes (account_id, network_root_id) → home_tenant_id` (index `home_tenant_id`, migration `1806691200000-AddNetworkHomes`). Until a home is set, `DiscuvaAccountService.homeIn` uses the first church the person joined in that network (by `linked_at`) and saves it. Transfers change it.
 - **Switching:** `GET /auth/account/churches` now includes each church's `networkRootId`, so the app can switch within its own network without leaving its address.
 
+**Branch look:** the network sets the look and a branch may change parts of it.
+- **Logo:** a branch with no logo of its own shows the top church's. Removing a branch's logo goes back to the network's.
+- **Theme:** `tenants.theme_from_network` (migration `1806777600000-AddThemeFromNetwork`, on for new branches) makes a branch show the top church's theme. Saving a theme turns it off; `PATCH /tenant/info { "useNetworkTheme": true }` turns it back on (400 outside a branch).
+- **Screen images:** a branch's own images sit on top of the top church's. The top church's are cached globally for 5 min under `network-assets:<rootId>`, cleared when it changes one. Deleting a branch's image goes back to the network's.
+- **One lookup everywhere:** `withNetworkBranding` (`src/tenant/util/network-branding.ts`) fills in the logo and theme for `GET /tenant/info`, emails, PDFs and public pages, under the existing `tenant-branding:<id>` cache. It adds one primary-key read of the top church only for branches. When the top church changes its logo or theme, every branch's cached entry is cleared (one indexed read of the network's church ids).
+- **What admins see:** `GET /tenant/info` returns `network: { logo, theme, assets } | null`, saying which parts of a branch's look come from the network (`assets` lists the inherited image keys). `POST`/`DELETE /tenant/assets/:key` now return `{ assets, fromNetwork }` with the same merged view.
+- **Picker image:** the `branch-picker` key (Choose Your Branch) is the header of the network app's first screen. It starts from the `security-key` picture.
+
 **Console:** `GET /platform/networks` (TENANTS_READ) lists every network `{ rootId, name, subdomain, churches, levels }`. `GET /platform/networks/:rootId` returns the whole tree with each church's `memberCount` from `tenant_rollups`, the level names and the last 20 moves. Structure and figures only, never members' details.
 
 **Removed in Phase 4:** branch invites, link requests, leaving a parent, unlinking a branch, and the data-sharing switch. Migration `1806604800000-AddChurchNetworkTree` drops `tenant_branch_invites` and `tenant_branch_link_requests` only if they're empty.

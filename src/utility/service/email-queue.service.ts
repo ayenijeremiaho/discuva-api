@@ -40,6 +40,7 @@ import { NotificationRecipientService } from '../../notification-catalogue/servi
 import { needsRecipient } from '../../notification-catalogue/recipient';
 import { queryTenant } from '../../tenant/utility/query-tenant';
 import { MUTABLE_CATEGORIES } from '../../notification-preferences/constant/member-notification-choices.constant';
+import { withNetworkBranding } from '../../tenant/util/network-branding';
 
 // The church's theme for the email layout: brand_color (header, buttons, links) and soft_color (highlight boxes).
 function themeVars(preset: string | null): Record<string, string> {
@@ -503,7 +504,10 @@ export class EmailQueueService {
     if (!tenantId) return null;
     const tenant = await this.cacheService.getOrSet(
       `tenant-branding:${tenantId}`,
-      () => this.tenantRepository.findOneBy({ id: tenantId }),
+      () =>
+        this.tenantRepository
+          .findOneBy({ id: tenantId })
+          .then((t) => withNetworkBranding(this.tenantRepository, t)),
       this.cacheTtl,
     );
     return tenant ?? null;

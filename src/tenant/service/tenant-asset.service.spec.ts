@@ -4,6 +4,7 @@ import { BadRequestException } from '@nestjs/common';
 import { TenantAssetService } from './tenant-asset.service';
 import { TenantAssetOverride } from '../entity/tenant-asset-override.entity';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { CacheService } from '../../utility/service/cache.service';
 import {
   KNOWN_ASSETS,
   defaultImageFor,
@@ -23,6 +24,12 @@ const mockCloudinaryService = {
   deleteByPublicId: jest.fn(),
 };
 
+const mockCache = {
+  getGlobal: jest.fn().mockResolvedValue(undefined),
+  setGlobal: jest.fn().mockResolvedValue(undefined),
+  delGlobal: jest.fn().mockResolvedValue(1),
+};
+
 describe('TenantAssetService', () => {
   let service: TenantAssetService;
 
@@ -37,9 +44,66 @@ describe('TenantAssetService', () => {
           useValue: mockOverrideRepo,
         },
         { provide: CloudinaryService, useValue: mockCloudinaryService },
+        { provide: CacheService, useValue: mockCache },
       ],
     }).compile();
     service = module.get(TenantAssetService);
+  });
+
+  describe('forDisplay', () => {
+    const rows = (o: Record<string, string>) =>
+      Object.entries(o).map(([assetKey, imageUrl]) => ({ assetKey, imageUrl }));
+
+    it("shows a branch its network's images, with its own on top", async () => {
+      mockOverrideRepo.find
+        .mockResolvedValueOnce(rows({ 'giving-backdrop': 'own.jpg' }))
+        .mockResolvedValueOnce(
+          rows({
+            'giving-backdrop': 'net-give.jpg',
+            'events-hero': 'net-ev.jpg',
+          }),
+        );
+
+      const result = await service.forDisplay({ id: 'b', networkRootId: 'r' });
+
+      expect(result).toEqual({
+        assets: { 'giving-backdrop': 'own.jpg', 'events-hero': 'net-ev.jpg' },
+        fromNetwork: ['events-hero'],
+      });
+      expect(mockCache.setGlobal).toHaveBeenCalledWith(
+        'network-assets:r',
+        { 'giving-backdrop': 'net-give.jpg', 'events-hero': 'net-ev.jpg' },
+        300,
+      );
+    });
+
+    it('reads the network images from the cache when it has them', async () => {
+      mockOverrideRepo.find.mockResolvedValueOnce([]);
+      mockCache.getGlobal.mockResolvedValueOnce({ 'events-hero': 'net.jpg' });
+
+      const result = await service.forDisplay({ id: 'b', networkRootId: 'r' });
+
+      expect(result.assets).toEqual({ 'events-hero': 'net.jpg' });
+      expect(mockOverrideRepo.find).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves a top church or a standalone church with its own images only', async () => {
+      mockOverrideRepo.find.mockResolvedValue(rows({ 'events-hero': 'x.jpg' }));
+
+      expect(await service.forDisplay({ id: 'r', networkRootId: 'r' })).toEqual(
+        {
+          assets: { 'events-hero': 'x.jpg' },
+          fromNetwork: [],
+        },
+      );
+      expect(
+        await service.forDisplay({ id: 's', networkRootId: null }),
+      ).toEqual({
+        assets: { 'events-hero': 'x.jpg' },
+        fromNetwork: [],
+      });
+      expect(mockCache.getGlobal).not.toHaveBeenCalled();
+    });
   });
 
   describe('getCatalog', () => {

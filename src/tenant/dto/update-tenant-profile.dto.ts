@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEmail,
   IsEnum,
   IsOptional,
@@ -45,6 +46,11 @@ export class UpdateTenantProfileDto {
   @IsOptional()
   @IsEnum(ChurchThemePreset)
   themePreset?: ChurchThemePreset;
+
+  // Branches only: go back to following the network's theme.
+  @IsOptional()
+  @IsBoolean()
+  useNetworkTheme?: boolean;
 
   @IsOptional()
   @IsString()

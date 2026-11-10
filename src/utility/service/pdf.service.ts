@@ -27,6 +27,7 @@ import {
 import { Tenant } from '../../tenant/entity/tenant.entity';
 import { AppClsStore } from '../../tenant/interface/tenant-cls-store.interface';
 import { CacheService } from './cache.service';
+import { withNetworkBranding } from '../../tenant/util/network-branding';
 
 // Threaded as an explicit parameter through every draw* method that needs
 // it, never read off `this` — PdfService is a singleton, and two concurrent
@@ -175,7 +176,10 @@ export class PdfService {
 
     const tenant = await this.cacheService.getOrSet(
       `tenant-branding:${tenantId}`,
-      () => this.tenantRepository.findOneBy({ id: tenantId }),
+      () =>
+        this.tenantRepository
+          .findOneBy({ id: tenantId })
+          .then((t) => withNetworkBranding(this.tenantRepository, t)),
       this.cacheTtl,
     );
     if (!tenant) return fallback;

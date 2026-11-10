@@ -28,8 +28,8 @@ import { Tenant } from '../entity/tenant.entity';
 import { UpdateTenantProfileDto } from '../dto/update-tenant-profile.dto';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
 import { AccountTypeService } from '../../account-type/account-type.service';
-import { CacheService } from '../../utility/service/cache.service';
 import { TenantAssetService } from '../service/tenant-asset.service';
+import { isBranch, withNetworkBranding } from '../util/network-branding';
 import { phoneRegionFromLocale } from '../../utility/decorators/normalize-phone.decorator';
 import { TenantProfileService } from '../service/tenant-profile.service';
 import { TenantReportService } from '../service/tenant-report.service';
@@ -57,7 +57,6 @@ function imageOnlyFilter(
 export class TenantInfoController {
   constructor(
     private readonly cloudinaryService: CloudinaryService,
-    private readonly cacheService: CacheService,
     private readonly accountTypes: AccountTypeService,
     private readonly config: ConfigService,
     @InjectRepository(Tenant)
@@ -131,7 +130,7 @@ export class TenantInfoController {
     tenant.logoUrl = uploaded.secureUrl;
     tenant.logoPublicId = uploaded.publicId;
     await this.tenantRepository.save(tenant);
-    this.cacheService.del(`tenant-branding:${tenant.id}`);
+    this.tenantProfileService.clearBranding(tenant);
 
     if (previousPublicId) {
       this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
@@ -149,7 +148,7 @@ export class TenantInfoController {
     tenant.logoUrl = null;
     tenant.logoPublicId = null;
     await this.tenantRepository.save(tenant);
-    this.cacheService.del(`tenant-branding:${tenant.id}`);
+    this.tenantProfileService.clearBranding(tenant);
 
     if (previousPublicId) {
       this.cloudinaryService.deleteByPublicId(previousPublicId, 'image');
@@ -185,9 +184,8 @@ export class TenantInfoController {
   ) {
     if (!image) throw new BadRequestException('No image file provided');
     const tenant = await this.currentTenantOrThrow();
-    return {
-      assets: await this.tenantAssetService.setOverride(tenant.id, key, image),
-    };
+    await this.tenantAssetService.setOverride(tenant.id, key, image);
+    return this.tenantAssetService.forDisplay(tenant);
   }
 
   @UseGuards(AdminGuard)
@@ -195,12 +193,14 @@ export class TenantInfoController {
   @Delete('assets/:key')
   async removeAsset(@Param('key') key: string) {
     const tenant = await this.currentTenantOrThrow();
-    return {
-      assets: await this.tenantAssetService.removeOverride(tenant.id, key),
-    };
+    await this.tenantAssetService.removeOverride(tenant.id, key);
+    return this.tenantAssetService.forDisplay(tenant);
   }
 
-  private async toProfile(tenant: Tenant) {
+  private async toProfile(own: Tenant) {
+    const tenant = (await withNetworkBranding(this.tenantRepository, own))!;
+    const { assets, fromNetwork } =
+      await this.tenantAssetService.forDisplay(own);
     return {
       name: tenant.name,
       // Not sensitive — it's already visible in every discuva-member URL,
@@ -235,7 +235,15 @@ export class TenantInfoController {
       phoneRegion: phoneRegionFromLocale(
         this.config.get<string>('CURRENCY_LOCALE', 'en-NG'),
       ),
-      assets: await this.tenantAssetService.getOverrides(tenant.id),
+      assets,
+      // A branch's admins see which parts of its look come from the network, and can go back to them.
+      network: isBranch(own)
+        ? {
+            logo: !own.logoUrl,
+            theme: own.themeFromNetwork,
+            assets: fromNetwork,
+          }
+        : null,
     };
   }
 

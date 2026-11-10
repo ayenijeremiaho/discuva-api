@@ -28070,6 +28070,7 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"themePreset\": \"ocean\"\n}",
+              "description": "A branch can send { \"useNetworkTheme\": true } to follow its network's theme again.",
               "options": {
                 "raw": {
                   "language": "json"

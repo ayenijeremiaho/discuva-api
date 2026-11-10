@@ -59,6 +59,10 @@ export class Tenant extends BaseEntity {
   @Column({ type: 'varchar', nullable: true })
   previousThemePreset: ChurchThemePreset | null;
 
+  // A branch shows its network's theme while this is on; picking its own turns it off.
+  @Column({ default: false })
+  themeFromNetwork: boolean;
+
   @Column({ default: 'NGN' })
   currency: string;
 

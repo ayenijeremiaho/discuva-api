@@ -278,6 +278,7 @@ export class NetworkService {
       verificationStatus: root.verificationStatus,
       verifiedAt: root.verifiedAt,
       themePreset: root.themePreset,
+      themeFromNetwork: true,
       onboardingStatus: TenantOnboardingStatus.ACTIVE,
       activatedAt: new Date(),
     });

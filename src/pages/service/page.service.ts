@@ -36,6 +36,7 @@ import { ServiceSessionService } from '../../service-programme/service/service-s
 import { PlanFeatureResolverService } from '../../billing/service/plan-feature-resolver.service';
 import { PlanFeature } from '../../billing/enum/plan-feature.enum';
 import { GalleryFolderSyncService } from './gallery-folder-sync.service';
+import { withNetworkBranding } from '../../tenant/util/network-branding';
 
 @Injectable()
 export class PageService {
@@ -291,7 +292,10 @@ export class PageService {
     const tenant = tenantId
       ? await this.cacheService.getOrSet(
           `tenant-branding:${tenantId}`,
-          () => this.tenantRepo.findOneBy({ id: tenantId }),
+          () =>
+            this.tenantRepo
+              .findOneBy({ id: tenantId })
+              .then((t) => withNetworkBranding(this.tenantRepo, t)),
           this.cacheTtl,
         )
       : null;

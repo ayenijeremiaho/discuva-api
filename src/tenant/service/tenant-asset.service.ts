@@ -8,6 +8,10 @@ import {
   KnownAssetKey,
 } from '../constants/known-assets.constant';
 import { CloudinaryService } from '../../utility/service/cloudinary.service';
+import { CacheService } from '../../utility/service/cache.service';
+import { isBranch } from '../util/network-branding';
+
+const networkKey = (rootId: string) => `network-assets:${rootId}`;
 
 @Injectable()
 export class TenantAssetService {
@@ -15,6 +19,7 @@ export class TenantAssetService {
     @InjectRepository(TenantAssetOverride)
     private readonly overrideRepo: Repository<TenantAssetOverride>,
     private readonly cloudinaryService: CloudinaryService,
+    private readonly cache: CacheService,
   ) {}
 
   getCatalog() {
@@ -30,6 +35,26 @@ export class TenantAssetService {
       where: { tenant: { id: tenantId } },
     });
     return Object.fromEntries(rows.map((r) => [r.assetKey, r.imageUrl]));
+  }
+
+  // What a church's screens show: a branch's own images over its network's. `fromNetwork` lists the keys it inherits.
+  async forDisplay(
+    tenant: Pick<Tenant, 'id' | 'networkRootId'>,
+  ): Promise<{ assets: Record<string, string>; fromNetwork: string[] }> {
+    const own = await this.getOverrides(tenant.id);
+    if (!isBranch(tenant)) return { assets: own, fromNetwork: [] };
+    const rootId = tenant.networkRootId!;
+    let network = await this.cache.getGlobal<Record<string, string>>(
+      networkKey(rootId),
+    );
+    if (!network) {
+      network = await this.getOverrides(rootId);
+      this.cache.setGlobal(networkKey(rootId), network, 300);
+    }
+    return {
+      assets: { ...network, ...own },
+      fromNetwork: Object.keys(network).filter((k) => !(k in own)),
+    };
   }
 
   async setOverride(
@@ -67,6 +92,7 @@ export class TenantAssetService {
     }
 
     if (previousPublicId) await this.deleteIfUnused(previousPublicId);
+    this.cache.delGlobal(networkKey(tenantId));
 
     return this.getOverrides(tenantId);
   }
@@ -83,6 +109,7 @@ export class TenantAssetService {
     if (existing) {
       await this.overrideRepo.remove(existing);
       await this.deleteIfUnused(existing.imagePublicId);
+      this.cache.delGlobal(networkKey(tenantId));
     }
 
     return this.getOverrides(tenantId);
